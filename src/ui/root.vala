@@ -36,6 +36,14 @@ namespace Zed {
 			setup_notebook ();
 		}
 
+		public void show_login () {
+			_notebook.set_current_page (0);
+		}
+
+		public void show_workspace () {
+			_notebook.set_current_page (1);
+		}
+
 		private void setup_window () {
 			window = new Gtk.Window (Gtk.WindowType.TOPLEVEL);
 			window.title = "Frida";
@@ -80,11 +88,11 @@ namespace Zed {
 
 		private void connect_signals () {
 			this.login.logged_in.connect (() => {
-				view.notebook.set_current_page (1);
+				view.show_workspace ();
 			});
 
 			this.login.logged_out.connect (() => {
-				view.notebook.set_current_page (0);
+				view.show_login ();
 			});
 		}
 	}
