@@ -39,9 +39,9 @@ namespace Zed {
 		public Login () {
 			try {
 				var builder = new Gtk.Builder ();
-				builder.add_from_string (Zed.Data.Login.UI_XML, -1);
+				builder.add_from_string (Zed.Data.Ui.LOGIN_XML, -1);
 
-				table = builder.get_object ("table") as Gtk.Table;
+				table = builder.get_object ("root_table") as Gtk.Table;
 
 				username_entry = builder.get_object ("username_entry") as Gtk.Entry;
 				password_entry = builder.get_object ("password_entry") as Gtk.Entry;

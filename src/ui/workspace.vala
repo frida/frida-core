@@ -2,15 +2,22 @@ namespace Zed {
 	public class View.Workspace : Object {
 		public Gtk.Widget widget {
 			get {
-				return label;
+				return vbox;
 			}
 		}
 
-		private Gtk.Label label;
+		private Gtk.UIManager ui_manager;
+		private Gtk.VBox vbox;
 
 		public Workspace () {
-			label = new Gtk.Label ("Work in progress");
-			label.show ();
+			try {
+				var builder = new Gtk.Builder ();
+				builder.add_from_string (Zed.Data.Ui.WORKSPACE_XML, -1);
+
+				ui_manager = builder.get_object ("uimanager1") as Gtk.UIManager;
+				vbox = builder.get_object ("root_vbox") as Gtk.VBox;
+			} catch (Error e) {
+			}
 		}
 	}
 

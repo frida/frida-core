@@ -33,11 +33,18 @@ int main (string[] args) {
 	Gtk.init (ref args);
 
 	// Access types needed in XML
+	typeof (Gtk.ActionGroup);
 	typeof (Gtk.Alignment);
 	typeof (Gtk.Button);
 	typeof (Gtk.Entry);
+	typeof (Gtk.Frame);
 	typeof (Gtk.Label);
+	typeof (Gtk.MenuBar);
+	typeof (Gtk.Statusbar);
 	typeof (Gtk.Table);
+	typeof (Gtk.UIManager);
+	typeof (Gtk.VBox);
+	typeof (Gtk.VPaned);
 	typeof (Gtk.Window);
 
 	var app = new Zed.Application ();

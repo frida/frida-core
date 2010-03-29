@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!DOCTYPE glade-interface SYSTEM "glade-2.0.dtd">
-<!--Generated with glade3 3.4.3 on Mon Mar 29 21:34:33 2010 -->
+<!--Generated with glade3 3.4.3 on Mon Mar 29 23:26:34 2010 -->
 <glade-interface>
-  <widget class="GtkWindow" id="login_window">
+  <widget class="GtkWindow" id="window">
     <child>
-      <widget class="GtkTable" id="table">
+      <widget class="GtkTable" id="root_table">
         <property name="visible">True</property>
         <property name="n_rows">4</property>
         <property name="n_columns">2</property>
