@@ -51,6 +51,11 @@ namespace Zed {
 			} catch (Error e) {
 			}
 		}
+
+		public void focus () {
+			username_entry.grab_focus ();
+			login_button.grab_default ();
+		}
 	}
 
 	public class Presenter.Login : Object {

@@ -34,10 +34,13 @@ namespace Zed {
 
 			setup_window ();
 			setup_notebook ();
+
+			login.focus ();
 		}
 
 		public void show_login () {
 			_notebook.set_current_page (0);
+			login.focus ();
 		}
 
 		public void show_workspace () {
