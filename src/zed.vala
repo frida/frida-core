@@ -1,7 +1,10 @@
 public class Zed.Application : Object {
+	private Service.XmppClient xmpp_client;
+
 	private Presenter.Root root;
 
 	public Application () {
+		setup_services ();
 		setup_presenters ();
 	}
 
@@ -10,8 +13,12 @@ public class Zed.Application : Object {
 		Gtk.main ();
 	}
 
+	private void setup_services () {
+		xmpp_client = new Service.XmppClient ();
+	}
+
 	private void setup_presenters () {
-		var login = new Zed.Presenter.Login (new Zed.View.Login ());
+		var login = new Zed.Presenter.Login (new Zed.View.Login (), xmpp_client);
 		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace ());
 
 		var root_view = new Zed.View.Root (login.view, workspace.view);
@@ -22,6 +29,7 @@ public class Zed.Application : Object {
 }
 
 int main (string[] args) {
+	Wocky.init ();
 	Gtk.init (ref args);
 
 	// Access types needed in XML

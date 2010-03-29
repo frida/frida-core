@@ -16,9 +16,15 @@ namespace Zed {
 			construct;
 		}
 
+		public Gtk.Notebook notebook {
+			get {
+				return _notebook;
+			}
+		}
+
 		private Gtk.Window window;
 
-		private Gtk.Notebook notebook;
+		private Gtk.Notebook _notebook;
 
 		private static const int DEFAULT_WIDTH = 640;
 		private static const int DEFAULT_HEIGHT = 480;
@@ -38,13 +44,15 @@ namespace Zed {
 		}
 
 		private void setup_notebook () {
-			notebook = new Gtk.Notebook ();
+			var notebook = new Gtk.Notebook ();
 			notebook.show_border = false;
 			notebook.show_tabs = false;
 			notebook.show ();
 			window.add (notebook);
+			this._notebook = notebook;
 
-			notebook.append_page(login.widget, null);
+			notebook.append_page (login.widget, null);
+			notebook.append_page (workspace.widget, null);
 		}
 	}
 
@@ -66,6 +74,18 @@ namespace Zed {
 
 		public Root (View.Root view, Presenter.Login login, Presenter.Workspace workspace) {
 			Object (view: view, login: login, workspace: workspace);
+
+			connect_signals ();
+		}
+
+		private void connect_signals () {
+			this.login.logged_in.connect (() => {
+				view.notebook.set_current_page (1);
+			});
+
+			this.login.logged_out.connect (() => {
+				view.notebook.set_current_page (0);
+			});
 		}
 	}
 }
