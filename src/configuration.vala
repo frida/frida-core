@@ -22,9 +22,7 @@ namespace Zed {
 			try {
 				accounts.load_from_file (accounts_filename, KeyFileFlags.NONE);
 			} catch (KeyFileError e) {
-				warning (e.message);
 			} catch (FileError e) {
-				warning (e.message);
 			}
 		}
 

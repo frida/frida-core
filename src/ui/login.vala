@@ -78,6 +78,8 @@ namespace Zed {
 		public signal void logged_in ();
 		public signal void logged_out ();
 
+		private static const string DEFAULT_DOMAIN = "gmail.com";
+
 		public Login (View.Login view, Service.XmppClient client, Configuration configuration) {
 			Object (view: view, client: client, configuration: configuration);
 
@@ -91,6 +93,15 @@ namespace Zed {
 		}
 
 		private void connect_signals () {
+			view.username_entry.focus_out_event.connect ((entry, event) => {
+				if (view.username_entry.text.str ("@") == null)
+					view.username_entry.text += "@" + DEFAULT_DOMAIN;
+				return false;
+			});
+			view.username_entry.notify["text"].connect (() => {
+				view.password_entry.text = "";
+			});
+
 			view.login_button.clicked.connect ((button) => {
 				var jid = view.username_entry.text;
 				var password = view.password_entry.text;
