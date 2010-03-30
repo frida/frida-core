@@ -44,7 +44,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include"
+				AdditionalIncludeDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gee-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include&quot;"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -64,9 +64,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
+				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gee-1.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
 				LinkIncremental="2"
-				AdditionalLibraryDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib"
+				AdditionalLibraryDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				ImportLibrary="$(IntDir)$(ProjectName).lib"
@@ -120,7 +120,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include"
+				AdditionalIncludeDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gee-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include&quot;"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -140,9 +140,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
+				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gee-1.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
 				LinkIncremental="2"
-				AdditionalLibraryDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib"
+				AdditionalLibraryDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				ImportLibrary="$(IntDir)$(ProjectName).lib"
@@ -198,7 +198,7 @@
 				Optimization="2"
 				FavorSizeOrSpeed="2"
 				OmitFramePointers="true"
-				AdditionalIncludeDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include"
+				AdditionalIncludeDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gee-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include&quot;"
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;G_DISABLE_ASSERT;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS"
 				StringPooling="true"
 				ExceptionHandling="0"
@@ -222,9 +222,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
+				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gee-1.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib"
+				AdditionalLibraryDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				OptimizeReferences="2"
@@ -287,7 +287,7 @@
 				Optimization="2"
 				FavorSizeOrSpeed="2"
 				OmitFramePointers="true"
-				AdditionalIncludeDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include"
+				AdditionalIncludeDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\gtk-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gtk-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\atk-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\pango-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\cairo&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\gee-1.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib\glib-2.0\include&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include\glib-2.0&quot;;&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\include&quot;"
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;G_DISABLE_ASSERT;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS"
 				StringPooling="true"
 				ExceptionHandling="0"
@@ -311,9 +311,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
+				AdditionalDependencies="atk-1.0.lib cairo.lib crypto.lib gdk-win32-2.0.lib gdk_pixbuf-2.0.lib gee-1.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib gobject-2.0.lib gthread-2.0.lib gtk-win32-2.0.lib intl.lib pango-1.0.lib pangocairo-1.0.lib pangowin32-1.0.lib pixman-1.lib ssl.lib wocky.lib xml2.lib z.lib dnsapi.lib imm32.lib msimg32.lib shlwapi.lib ws2_32.lib"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib"
+				AdditionalLibraryDirectories="&quot;$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				OptimizeReferences="2"
@@ -357,6 +357,10 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
+				RelativePath=".\src\configuration.vala"
+				>
+			</File>
+			<File
 				RelativePath=".\src\winmain.c"
 				>
 			</File>
@@ -369,8 +373,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -380,8 +384,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -391,8 +395,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -402,8 +406,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -411,6 +415,10 @@
 			<Filter
 				Name="generated"
 				>
+				<File
+					RelativePath="$(IntDir)src\configuration.c"
+					>
+				</File>
 				<File
 					RelativePath="$(IntDir)src\zed.c"
 					>

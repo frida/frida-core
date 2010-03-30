@@ -49,6 +49,7 @@ namespace Zed {
 
 				login_button = builder.get_object ("sign_in_button") as Gtk.Button;
 			} catch (Error e) {
+				warning (e.message);
 			}
 		}
 
@@ -69,11 +70,22 @@ namespace Zed {
 			construct;
 		}
 
+		public Configuration configuration {
+			private get;
+			construct;
+		}
+
 		public signal void logged_in ();
 		public signal void logged_out ();
 
-		public Login (View.Login view, Service.XmppClient client) {
-			Object (view: view, client: client);
+		public Login (View.Login view, Service.XmppClient client, Configuration configuration) {
+			Object (view: view, client: client, configuration: configuration);
+
+			Configuration.Account? default_account = configuration.get_default_account ();
+			if (default_account != null) {
+				view.username_entry.text = default_account.name;
+				view.password_entry.text = default_account.password;
+			}
 
 			connect_signals ();
 		}
@@ -103,7 +115,9 @@ namespace Zed {
 		private async void login (string jid, string password) {
 			var succeeded = yield client.login (jid, password);
 			if (succeeded) {
-				// TODO
+				var account = configuration.get_account (jid);
+				account.password = password;
+				configuration.set_default_account (account);
 			}
 		}
 	}

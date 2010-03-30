@@ -1,9 +1,13 @@
 public class Zed.Application : Object {
+	private Configuration configuration;
+
 	private Service.XmppClient xmpp_client;
 
 	private Presenter.Root root;
 
 	public Application () {
+		configuration = Configuration.get_default ();
+
 		setup_services ();
 		setup_presenters ();
 	}
@@ -18,7 +22,7 @@ public class Zed.Application : Object {
 	}
 
 	private void setup_presenters () {
-		var login = new Zed.Presenter.Login (new Zed.View.Login (), xmpp_client);
+		var login = new Zed.Presenter.Login (new Zed.View.Login (), xmpp_client, configuration);
 		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace ());
 
 		var root_view = new Zed.View.Root (login.view, workspace.view);

@@ -17,6 +17,7 @@ namespace Zed {
 				ui_manager = builder.get_object ("uimanager1") as Gtk.UIManager;
 				vbox = builder.get_object ("root_vbox") as Gtk.VBox;
 			} catch (Error e) {
+				warning (e.message);
 			}
 		}
 	}
