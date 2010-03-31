@@ -23,7 +23,7 @@ public class Zed.Application : Object {
 
 	private void setup_presenters () {
 		var login = new Zed.Presenter.Login (new Zed.View.Login (), xmpp_client, configuration);
-		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace ());
+		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace (), xmpp_client);
 
 		var root_view = new Zed.View.Root (login.view, workspace.view);
 		root = new Zed.Presenter.Root (root_view, login, workspace);
@@ -44,6 +44,7 @@ int main (string[] args) {
 	typeof (Gtk.Frame);
 	typeof (Gtk.Label);
 	typeof (Gtk.MenuBar);
+	typeof (Gtk.ScrolledWindow);
 	typeof (Gtk.Statusbar);
 	typeof (Gtk.Table);
 	typeof (Gtk.UIManager);

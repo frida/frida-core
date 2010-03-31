@@ -20,8 +20,15 @@ public class Zed.Service.XmppClient : Object {
 		});
 	}
 
-	public async bool login (string jid, string password) {
+	public async bool login (string jid, string password, string? host) {
 		var connector = new Connector (jid, password, "Frida");
+
+		if (host != null) {
+			connector.xmpp_server = host;
+			connector.xmpp_port = 5222;
+			connector.tls_required = false;
+			connector.plaintext_auth_allowed = true;
+		}
 
 		try {
 			string attributed_jid, sid;

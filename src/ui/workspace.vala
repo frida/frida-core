@@ -6,6 +6,16 @@ namespace Zed {
 			}
 		}
 
+		public Gtk.Frame bottom_frame {
+			get;
+			private set;
+		}
+
+		public View.Chat chat {
+			get;
+			private set;
+		}
+
 		private Gtk.UIManager ui_manager;
 		private Gtk.VBox vbox;
 
@@ -16,9 +26,13 @@ namespace Zed {
 
 				ui_manager = builder.get_object ("uimanager1") as Gtk.UIManager;
 				vbox = builder.get_object ("root_vbox") as Gtk.VBox;
+				bottom_frame = builder.get_object ("bottom_frame") as Gtk.Frame;
 			} catch (Error e) {
-				warning (e.message);
+				error (e.message);
 			}
+
+			chat = new View.Chat ();
+			bottom_frame.add (chat.widget);
 		}
 	}
 
@@ -28,8 +42,12 @@ namespace Zed {
 			construct;
 		}
 
-		public Workspace (View.Workspace view) {
+		private Presenter.Chat chat;
+
+		public Workspace (View.Workspace view, Service.XmppClient client) {
 			Object (view: view);
+
+			chat = new Presenter.Chat (view.chat, client);
 		}
 	}
 }

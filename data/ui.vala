@@ -1,5 +1,40 @@
 /* generated file, do not modify */
 namespace Zed.Data.Ui {
+	public static const string CHAT_XML = "<?xml version=\"1.0\" ?>" +
+		"<interface><object class=\"GtkHBox\" id=\"root_hbox\">" +
+			"<property name=\"visible\">True</property>" +
+			"<property name=\"spacing\">5</property>" +
+			"<child>" +
+				"<object class=\"GtkTreeView\" id=\"roster_treeview\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"can_focus\">True</property>" +
+					"<property name=\"headers_visible\">False</property>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"expand\">False</property>" +
+				"</packing>" +
+			"</child>" +
+			"<child>" +
+				"<object class=\"GtkScrolledWindow\" id=\"chat_scrolledwindow\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"can_focus\">True</property>" +
+					"<property name=\"hscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
+					"<property name=\"vscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
+					"<child>" +
+						"<object class=\"GtkTextView\" id=\"chat_textview\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+							"<property name=\"editable\">False</property>" +
+							"<property name=\"cursor_visible\">False</property>" +
+						"</object>" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"position\">1</property>" +
+				"</packing>" +
+			"</child>" +
+		"</object></interface>";
+
 	public static const string LOGIN_XML = "<?xml version=\"1.0\" ?>" +
 		"<interface><object class=\"GtkTable\" id=\"root_table\">" +
 			"<property name=\"visible\">True</property>" +
@@ -128,6 +163,7 @@ namespace Zed.Data.Ui {
 				"<object class=\"GtkVPaned\" id=\"vpaned\">" +
 					"<property name=\"visible\">True</property>" +
 					"<property name=\"can_focus\">True</property>" +
+					"<property name=\"position\">130</property>" +
 					"<child>" +
 						"<object class=\"GtkFrame\" id=\"top_frame\">" +
 							"<property name=\"visible\">True</property>" +

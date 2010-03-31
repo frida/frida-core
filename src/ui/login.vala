@@ -49,7 +49,7 @@ namespace Zed {
 
 				login_button = builder.get_object ("sign_in_button") as Gtk.Button;
 			} catch (Error e) {
-				warning (e.message);
+				error (e.message);
 			}
 		}
 
@@ -109,7 +109,9 @@ namespace Zed {
 				if (jid != "") {
 					view.login_in_progress = true;
 
-					login (jid, password);
+					var server = Environment.get_variable ("FRIDA_XMPP_SERVER");
+
+					login (jid, password, server);
 				}
 			});
 
@@ -123,8 +125,8 @@ namespace Zed {
 			});
 		}
 
-		private async void login (string jid, string password) {
-			var succeeded = yield client.login (jid, password);
+		private async void login (string jid, string password, string server) {
+			var succeeded = yield client.login (jid, password, server);
 			if (succeeded) {
 				var account = configuration.get_account (jid);
 				account.password = password;
