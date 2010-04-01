@@ -3,12 +3,20 @@ namespace Zed.Data.Ui {
 	public static const string CHAT_XML = "<?xml version=\"1.0\" ?>" +
 		"<interface><object class=\"GtkHBox\" id=\"root_hbox\">" +
 			"<property name=\"visible\">True</property>" +
+			"<property name=\"border_width\">3</property>" +
 			"<property name=\"spacing\">5</property>" +
 			"<child>" +
-				"<object class=\"GtkTreeView\" id=\"roster_treeview\">" +
+				"<object class=\"GtkFrame\" id=\"top_frame\">" +
 					"<property name=\"visible\">True</property>" +
-					"<property name=\"can_focus\">True</property>" +
-					"<property name=\"headers_visible\">False</property>" +
+					"<property name=\"label_xalign\">0</property>" +
+					"<child>" +
+						"<object class=\"GtkTreeView\" id=\"roster_treeview\">" +
+							"<property name=\"width_request\">100</property>" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+							"<property name=\"headers_visible\">False</property>" +
+						"</object>" +
+					"</child>" +
 				"</object>" +
 				"<packing>" +
 					"<property name=\"expand\">False</property>" +
@@ -20,6 +28,7 @@ namespace Zed.Data.Ui {
 					"<property name=\"can_focus\">True</property>" +
 					"<property name=\"hscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
 					"<property name=\"vscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
+					"<property name=\"shadow_type\">GTK_SHADOW_ETCHED_IN</property>" +
 					"<child>" +
 						"<object class=\"GtkTextView\" id=\"chat_textview\">" +
 							"<property name=\"visible\">True</property>" +

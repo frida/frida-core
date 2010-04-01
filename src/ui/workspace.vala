@@ -44,10 +44,10 @@ namespace Zed {
 
 		private Presenter.Chat chat;
 
-		public Workspace (View.Workspace view, Service.XmppClient client) {
+		public Workspace (View.Workspace view, Service.MucService muc_service) {
 			Object (view: view);
 
-			chat = new Presenter.Chat (view.chat, client);
+			chat = new Presenter.Chat (view.chat, muc_service);
 		}
 	}
 }

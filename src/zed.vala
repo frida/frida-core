@@ -2,6 +2,7 @@ public class Zed.Application : Object {
 	private Configuration configuration;
 
 	private Service.XmppClient xmpp_client;
+	private Service.MucService muc_service;
 
 	private Presenter.Root root;
 
@@ -19,11 +20,12 @@ public class Zed.Application : Object {
 
 	private void setup_services () {
 		xmpp_client = new Service.XmppClient ();
+		muc_service = new Service.MucService (xmpp_client);
 	}
 
 	private void setup_presenters () {
 		var login = new Zed.Presenter.Login (new Zed.View.Login (), xmpp_client, configuration);
-		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace (), xmpp_client);
+		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace (), muc_service);
 
 		var root_view = new Zed.View.Root (login.view, workspace.view);
 		root = new Zed.Presenter.Root (root_view, login, workspace);

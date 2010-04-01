@@ -1,17 +1,25 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!DOCTYPE glade-interface SYSTEM "glade-2.0.dtd">
-<!--Generated with glade3 3.4.3 on Wed Mar 31 14:24:40 2010 -->
+<!--Generated with glade3 3.4.3 on Thu Apr 01 01:57:40 2010 -->
 <glade-interface>
   <widget class="GtkWindow" id="window1">
     <child>
       <widget class="GtkHBox" id="root_hbox">
         <property name="visible">True</property>
+        <property name="border_width">3</property>
         <property name="spacing">5</property>
         <child>
-          <widget class="GtkTreeView" id="roster_treeview">
+          <widget class="GtkFrame" id="top_frame">
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="headers_visible">False</property>
+            <property name="label_xalign">0</property>
+            <child>
+              <widget class="GtkTreeView" id="roster_treeview">
+                <property name="width_request">100</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="headers_visible">False</property>
+              </widget>
+            </child>
           </widget>
           <packing>
             <property name="expand">False</property>
@@ -23,6 +31,7 @@
             <property name="can_focus">True</property>
             <property name="hscrollbar_policy">GTK_POLICY_AUTOMATIC</property>
             <property name="vscrollbar_policy">GTK_POLICY_AUTOMATIC</property>
+            <property name="shadow_type">GTK_SHADOW_ETCHED_IN</property>
             <child>
               <widget class="GtkTextView" id="chat_textview">
                 <property name="visible">True</property>

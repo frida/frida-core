@@ -51,7 +51,7 @@
 				RuntimeLibrary="1"
 				WarningLevel="4"
 				DebugInformationFormat="4"
-				DisableSpecificWarnings="4100;4127;4152;4702"
+				DisableSpecificWarnings="4055;4100;4127;4152;4702"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -127,7 +127,7 @@
 				RuntimeLibrary="1"
 				WarningLevel="4"
 				DebugInformationFormat="3"
-				DisableSpecificWarnings="4100;4127;4152;4702"
+				DisableSpecificWarnings="4055;4100;4127;4152;4702"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -209,7 +209,7 @@
 				WarningLevel="4"
 				DebugInformationFormat="3"
 				CompileAs="0"
-				DisableSpecificWarnings="4100;4127;4152;4702"
+				DisableSpecificWarnings="4055;4100;4127;4152;4702"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -298,7 +298,7 @@
 				WarningLevel="4"
 				DebugInformationFormat="3"
 				CompileAs="0"
-				DisableSpecificWarnings="4100;4127;4152;4702"
+				DisableSpecificWarnings="4055;4100;4127;4152;4702"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -373,8 +373,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -384,8 +384,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -395,8 +395,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -406,8 +406,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
+						CommandLine="mkdir &quot;$(IntDir)\data&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\protocol&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\service&quot; 2&gt;NUL&#x0D;&#x0A;mkdir &quot;$(IntDir)\src\ui&quot; 2&gt;NUL&#x0D;&#x0A;&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; data/ui.vala src/configuration.vala src/zed.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -434,6 +434,14 @@
 				<Filter
 					Name="service"
 					>
+					<File
+						RelativePath="$(IntDir)src\service\base-service.c"
+						>
+					</File>
+					<File
+						RelativePath="$(IntDir)src\service\muc-service.c"
+						>
+					</File>
 					<File
 						RelativePath="$(IntDir)src\service\xmpp-client.c"
 						>
