@@ -64,14 +64,13 @@ public class Zed.Service.XmppClient : Object {
 	}
 
 	private bool default_iq_handler (Porter porter, XmppStanza stanza) {
-		/*
 		var reply = stanza.build_iq_error (
 			BuildTag.NODE, "error", BuildTag.NODE_ATTRIBUTE, "type", "cancel",
 				BuildTag.NODE, "feature-not-implemented",
 					BuildTag.NODE_XMLNS, Namespaces.Xmpp.STANZAS,
 				BuildTag.NODE_END,
 			BuildTag.NODE_END);
-		porter.send (reply);*/
+		porter.send (reply);
 
 		return true;
 	}

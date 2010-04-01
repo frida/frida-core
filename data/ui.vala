@@ -11,7 +11,7 @@ namespace Zed.Data.Ui {
 					"<property name=\"label_xalign\">0</property>" +
 					"<child>" +
 						"<object class=\"GtkTreeView\" id=\"roster_treeview\">" +
-							"<property name=\"width_request\">100</property>" +
+							"<property name=\"width_request\">120</property>" +
 							"<property name=\"visible\">True</property>" +
 							"<property name=\"can_focus\">True</property>" +
 							"<property name=\"headers_visible\">False</property>" +
@@ -23,19 +23,35 @@ namespace Zed.Data.Ui {
 				"</packing>" +
 			"</child>" +
 			"<child>" +
-				"<object class=\"GtkScrolledWindow\" id=\"chat_scrolledwindow\">" +
+				"<object class=\"GtkVBox\" id=\"chat_vbox\">" +
 					"<property name=\"visible\">True</property>" +
-					"<property name=\"can_focus\">True</property>" +
-					"<property name=\"hscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
-					"<property name=\"vscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
-					"<property name=\"shadow_type\">GTK_SHADOW_ETCHED_IN</property>" +
+					"<property name=\"spacing\">5</property>" +
 					"<child>" +
-						"<object class=\"GtkTextView\" id=\"chat_textview\">" +
+						"<object class=\"GtkScrolledWindow\" id=\"chat_scrolledwindow\">" +
 							"<property name=\"visible\">True</property>" +
 							"<property name=\"can_focus\">True</property>" +
-							"<property name=\"editable\">False</property>" +
-							"<property name=\"cursor_visible\">False</property>" +
+							"<property name=\"hscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
+							"<property name=\"vscrollbar_policy\">GTK_POLICY_AUTOMATIC</property>" +
+							"<property name=\"shadow_type\">GTK_SHADOW_ETCHED_IN</property>" +
+							"<child>" +
+								"<object class=\"GtkTextView\" id=\"chat_textview\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"editable\">False</property>" +
+									"<property name=\"cursor_visible\">False</property>" +
+								"</object>" +
+							"</child>" +
 						"</object>" +
+					"</child>" +
+					"<child>" +
+						"<object class=\"GtkEntry\" id=\"chat_entry\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"expand\">False</property>" +
+							"<property name=\"position\">1</property>" +
+						"</packing>" +
 					"</child>" +
 				"</object>" +
 				"<packing>" +
