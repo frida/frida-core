@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioPropertySheet
+	ProjectType="Visual C++"
+	Version="8.00"
+	Name="zed-Release"
+	InheritedPropertySheets="$(SolutionDir)zed.vsprops"
+	>
+	<Tool
+		Name="VCCLCompilerTool"
+		Optimization="2"
+		FavorSizeOrSpeed="2"
+		OmitFramePointers="true"
+		PreprocessorDefinitions="NDEBUG;G_DISABLE_ASSERT;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS"
+		StringPooling="true"
+		ExceptionHandling="0"
+		RuntimeLibrary="0"
+		BufferSecurityCheck="false"
+		EnableFunctionLevelLinking="true"
+		FloatingPointModel="2"
+		DebugInformationFormat="3"
+		CompileAs="0"
+	/>
+	<Tool
+		Name="VCLinkerTool"
+		LinkIncremental="1"
+		GenerateDebugInformation="true"
+		SubSystem="2"
+		OptimizeReferences="2"
+		EnableCOMDATFolding="2"
+		RandomizedBaseAddress="1"
+		FixedBaseAddress="2"
+		ImportLibrary="$(IntDir)$(ProjectName).lib"
+	/>
+</VisualStudioPropertySheet>
