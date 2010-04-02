@@ -54,6 +54,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				SubSystem="2"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -113,6 +114,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				SubSystem="2"
 				TargetMachine="17"
 			/>
 			<Tool
@@ -173,6 +175,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				SubSystem="2"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -235,6 +238,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				SubSystem="2"
 				TargetMachine="17"
 			/>
 			<Tool

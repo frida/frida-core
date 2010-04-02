@@ -18,7 +18,6 @@
 		Name="VCLinkerTool"
 		LinkIncremental="2"
 		GenerateDebugInformation="true"
-		SubSystem="2"
 		ImportLibrary="$(IntDir)$(ProjectName).lib"
 	/>
 </VisualStudioPropertySheet>
