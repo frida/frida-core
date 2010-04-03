@@ -2,6 +2,7 @@ namespace Zed.Test {
 	private static void winjector_add_tests () {
 		GLib.Test.add_func ("/winjector/inject-x86", () => {
 			var rat = new LabRat ("winvictim32");
+			Thread.usleep (100000); /* give it 100 ms to settle */
 			rat.inject ("winattacker");
 			assert (rat.process.join () == 133742);
 		});

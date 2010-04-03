@@ -4,7 +4,9 @@ namespace Zed.Service {
 	}
 
 	public errordomain WinjectorError {
-		UNKNOWN
+		UNKNOWN,
+		OPEN_PROCESS_FAILED,
+		GRAB_THREAD_FAILED
 	}
 }
 
