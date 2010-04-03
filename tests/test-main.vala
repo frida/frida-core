@@ -1,7 +1,11 @@
-public static void main (string[] args) {
-	Test.init (ref args);
+namespace Zed.Test {
 
-	test_winjector_add_tests ();
+	public static void main (string[] args) {
+		GLib.Test.init (ref args);
 
-	Test.run ();
+		winjector_add_tests ();
+
+		GLib.Test.run ();
+	}
+
 }

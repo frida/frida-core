@@ -2,7 +2,7 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="9.00"
-	Name="tests"
+	Name="zed-tests"
 	ProjectGUID="{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}"
 	RootNamespace="zed"
 	Keyword="Win32Proj"
@@ -42,6 +42,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalIncludeDirectories="$(IntDir)..\zed-core"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -54,6 +55,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalDependencies="psapi.lib"
 				SubSystem="1"
 				TargetMachine="1"
 			/>
@@ -102,6 +104,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalIncludeDirectories="$(IntDir)..\zed-core"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -114,6 +117,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalDependencies="psapi.lib"
 				SubSystem="1"
 				TargetMachine="17"
 			/>
@@ -163,6 +167,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalIncludeDirectories="$(IntDir)..\zed-core"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -175,6 +180,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalDependencies="psapi.lib"
 				SubSystem="1"
 				TargetMachine="1"
 			/>
@@ -224,6 +230,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalIncludeDirectories="$(IntDir)..\zed-core"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -236,6 +243,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalDependencies="psapi.lib"
 				SubSystem="1"
 				TargetMachine="17"
 			/>
@@ -267,10 +275,8 @@
 			ReferencedProjectIdentifier="{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}"
 			CopyLocal="false"
 			CopyLocalDependencies="false"
-			UseInBuild="false"
-			UseDependenciesInBuild="false"
 			CopyLocalSatelliteAssemblies="false"
-			RelativePathToProject=".\zed.vcproj"
+			RelativePathToProject=".\zed-core.vcproj"
 		/>
 	</References>
 	<Files>
@@ -288,7 +294,7 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
 						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winjector.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
@@ -299,7 +305,7 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
 						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winjector.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
@@ -310,7 +316,7 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
 						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winjector.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
@@ -321,7 +327,7 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
 						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winjector.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>

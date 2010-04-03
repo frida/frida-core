@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 10.00
 # Visual Studio 2008
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed", "zed.vcproj", "{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-core", "zed-core.vcproj", "{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tests", "tests\tests.vcproj", "{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-tests", "tests\zed-tests.vcproj", "{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed", "zed.vcproj", "{59DAD744-083F-4ED4-885E-BA66531B85E5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,6 +31,14 @@ Global
 		{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}.Release|Win32.Build.0 = Release|Win32
 		{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}.Release|x64.ActiveCfg = Release|x64
 		{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}.Release|x64.Build.0 = Release|x64
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|Win32.ActiveCfg = Debug|Win32
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|Win32.Build.0 = Debug|Win32
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|x64.ActiveCfg = Debug|x64
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|x64.Build.0 = Debug|x64
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|Win32.ActiveCfg = Release|Win32
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|Win32.Build.0 = Release|Win32
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|x64.ActiveCfg = Release|x64
+		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
