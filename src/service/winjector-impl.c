@@ -111,8 +111,11 @@ injection_worker (ZedServiceWinjectorInjectAsyncData * data)
     goto beach;
   }
 
-  while (!g_cancellable_is_cancelled (data->cancellable))
+  while (TRUE)
   {
+    if (g_cancellable_is_cancelled (data->cancellable))
+      goto beach;
+
     thread_handle = try_to_grab_a_thread_in (data->target_pid, &err);
     if (err != NULL)
     {
