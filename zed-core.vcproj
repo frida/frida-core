@@ -177,8 +177,6 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				Description="UPX-compressing executable"
-				CommandLine="&quot;$(SolutionDir)ext\upx.exe&quot; -9 --ultra-brute --overlay=strip &quot;$(TargetPath)&quot;"
 			/>
 		</Configuration>
 		<Configuration
@@ -233,8 +231,6 @@
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
-				Description="UPX-compressing executable"
-				CommandLine="&quot;$(SolutionDir)ext\upx.exe&quot; -9 --ultra-brute --overlay=strip &quot;$(TargetPath)&quot;"
 			/>
 		</Configuration>
 	</Configurations>
