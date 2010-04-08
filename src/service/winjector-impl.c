@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <aclapi.h>
 #include <tchar.h>
 #include <strsafe.h>
 
@@ -380,30 +379,3 @@ clear_handle (HANDLE * handle)
     *handle = NULL;
   }
 }
-
-#if 0
-SECURITY_ATTRIBUTES sec_attrs;
-SECURITY_DESCRIPTOR sec_desc;
-SID_IDENTIFIER_AUTHORITY world_sid = SECURITY_WORLD_SID_AUTHORITY;
-PSID everyone_sid = NULL;
-EXPLICIT_ACCESS expl_access = { 0, };
-PACL acl = NULL;
-
-sec_attrs.nLength = sizeof (sec_attrs);
-sec_attrs.lpSecurityDescriptor = &sec_desc;
-sec_attrs.bInheritHandle = FALSE;
-
-InitializeSecurityDescriptor (&sec_desc, SECURITY_DESCRIPTOR_REVISION);
-
-AllocateAndInitializeSid (&world_sid, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0,
-                          0, 0, &everyone_sid);
-expl_access.grfAccessPermissions = FILE_ALL_ACCESS;
-expl_access.grfAccessMode = SET_ACCESS;
-expl_access.grfInheritance = NO_INHERITANCE;
-expl_access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-expl_access.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
-expl_access.Trustee.ptstrName = everyone_sid;
-SetEntriesInAcl (1, &expl_access, NULL, &acl);
-
-SetSecurityDescriptorDacl (&sec_desc, TRUE, acl, FALSE);
-#endif

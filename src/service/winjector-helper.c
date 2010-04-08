@@ -5,7 +5,6 @@
 #include <tlhelp32.h>
 #include <tchar.h>
 #include <strsafe.h>
-#include <conio.h>
 
 #define ZED_WINJECTOR_ERROR zed_winjector_error_quark ()
 
