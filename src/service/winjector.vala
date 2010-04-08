@@ -8,20 +8,25 @@ namespace Zed.Service {
 		private unowned Thread worker_thread;
 		private ArrayList<void *> requests = new ArrayList<void *> ();
 
+		private void * helper_tempdir;
+		private void * helper32;
+		private void * helper64;
+
 		~Winjector () {
 			if (worker_thread != null) {
 				mutex.lock ();
+				unowned Thread thread = worker_thread;
 				worker_thread = null;
 				cond.signal ();
 				mutex.unlock ();
 
-				worker_thread.join ();
+				thread.join ();
 			}
 
-			foreach (void * request in requests)
-				free_request (request);
-			requests.clear ();
+			assert (requests.size == 0);
 		}
+
+		public extern async void inject_async (string filename, long target_pid, Cancellable? cancellable = null) throws WinjectorError;
 
 		protected void ensure_worker_running () {
 			if (worker_thread == null) {
@@ -33,20 +38,10 @@ namespace Zed.Service {
 			}
 		}
 
-		protected void queue_request (void * request) {
-			mutex.lock ();
-			requests.add (request);
-			cond.signal ();
-			mutex.unlock ();
-		}
-
-		private extern void process_request (void * request);
-		private extern void free_request (void * request);
-
 		private void * worker () {
 			mutex.lock ();
-			while (worker_thread != null) {
-				while (requests.size == 0)
+			while (true) {
+				while (worker_thread != null && requests.size == 0)
 					cond.wait (mutex);
 
 				if (worker_thread == null)
@@ -57,15 +52,27 @@ namespace Zed.Service {
 				mutex.unlock ();
 				process_request (request);
 				mutex.lock ();
-
-				free_request (request);
 			}
 			mutex.unlock ();
+
+			ensure_helper_closed ();
+			assert (helper_tempdir == null);
+			assert (helper32 == null);
+			assert (helper64 == null);
 
 			return null;
 		}
 
-		public extern async void inject_async (string filename, long target_pid, Cancellable? cancellable = null) throws WinjectorError;
+		protected void queue_request (void * request) {
+			mutex.lock ();
+			requests.add (request);
+			cond.signal ();
+			mutex.unlock ();
+		}
+
+		private extern void ensure_helper_closed ();
+
+		private extern void process_request (void * request);
 	}
 
 	public errordomain WinjectorError {

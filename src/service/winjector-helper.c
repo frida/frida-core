@@ -3,12 +3,27 @@
 #include <glib.h>
 #include <windows.h>
 #include <tlhelp32.h>
+#include <tchar.h>
 #include <strsafe.h>
+#include <conio.h>
 
 #define ZED_WINJECTOR_ERROR zed_winjector_error_quark ()
 
+typedef struct _InputContext InputContext;
 typedef struct _WinjectorTarget WinjectorTarget;
 typedef struct _InjectContext InjectContext;
+
+struct _InputContext
+{
+  CRITICAL_SECTION lock;
+  HANDLE event;
+  GQueue * lines;
+
+  HANDLE thread;
+
+  gboolean is_closed;
+  gboolean is_eof;
+};
 
 struct _WinjectorTarget
 {
@@ -22,6 +37,12 @@ struct _InjectContext
   HANDLE cancel_event;
   GError * err;
 };
+
+static void input_context_setup (InputContext * input);
+static void input_context_teardown (InputContext * input);
+static DWORD WINAPI do_input (LPVOID parameter);
+static TCHAR * input_context_pop_line (InputContext * input);
+static void input_context_close (InputContext * input);
 
 static DWORD WINAPI do_injection (LPVOID parameter);
 static gboolean inject_into_target (WinjectorTarget * target, HANDLE cancel_event,
@@ -43,83 +64,202 @@ static GQuark zed_winjector_error_quark (void);
 gint
 wmain (gint argc, WCHAR * argv[])
 {
-  gint ret = 1;
-  const guint max_chars_per_line = 10 + 1 + MAX_PATH + 1;
-  WCHAR * line;
+  gint ret = 0;
+  InputContext input;
   HANDLE cancel_event;
+  TCHAR * line = NULL;
 
-  line = g_malloc0 (max_chars_per_line * sizeof (WCHAR));
+  input_context_setup (&input);
+
   cancel_event = CreateEvent (NULL, TRUE, FALSE, NULL);
 
-  while (StringCchGetsW (line, max_chars_per_line) == S_OK)
+  while (WaitForSingleObject (input.event, INFINITE) == WAIT_OBJECT_0)
   {
     WinjectorTarget target;
     InjectContext inject_ctx;
     HANDLE worker_thread;
     HANDLE wait_handles[2];
+    DWORD wait_ret;
     gboolean input_error = FALSE;
 
-    if (wcscmp (line, L"exit") == 0)
-      break;
-
-    if (!parse_target_line (line, &target))
-      goto beach;
-
-    inject_ctx.target = &target;
-    inject_ctx.cancel_event = cancel_event;
-    inject_ctx.err = NULL;
-
-    worker_thread = CreateThread (NULL, 0, do_injection, &inject_ctx, 0, NULL);
-
-    wait_handles[0] = worker_thread;
-    wait_handles[1] = GetStdHandle (STD_INPUT_HANDLE);
-
-    if (WaitForMultipleObjects (G_N_ELEMENTS (wait_handles), wait_handles,
-        FALSE, INFINITE) == WAIT_OBJECT_0)
+    g_free (line);
+    line = input_context_pop_line (&input);
+    if (line == NULL)
     {
-      if (inject_ctx.err == NULL)
+      /* EOF */
+      break;
+    }
+
+    if (wcscmp (line, L"exit") == 0)
+    {
+      input_context_close (&input);
+      continue;
+    }
+
+    if (parse_target_line (line, &target))
+    {
+      ResetEvent (cancel_event);
+
+      inject_ctx.target = &target;
+      inject_ctx.cancel_event = cancel_event;
+      inject_ctx.err = NULL;
+
+      worker_thread =
+          CreateThread (NULL, 0, do_injection, &inject_ctx, 0, NULL);
+
+      wait_handles[0] = worker_thread;
+      wait_handles[1] = input.event;
+      wait_ret = WaitForMultipleObjects (
+          G_N_ELEMENTS (wait_handles), wait_handles,
+          FALSE,
+          INFINITE);
+      if (wait_ret == WAIT_OBJECT_0)
       {
-        _putws (L"SUCCESS");
+        if (inject_ctx.err == NULL)
+        {
+          _putws (L"SUCCESS");
+        }
+        else
+        {
+          wprintf (L"ERROR %d %S\n", inject_ctx.err->code,
+              inject_ctx.err->message);
+          g_clear_error (&inject_ctx.err);
+        }
+
+        fflush (stdout);
       }
       else
       {
-        wprintf (L"ERROR %d %S\n", inject_ctx.err->code,
-            inject_ctx.err->message);
+        g_free (line);
+        line = input_context_pop_line (&input);
+        if (_tcscmp (line, _T ("cancel")) != 0)
+        {
+          input_error = TRUE;
+        }
+
+        SetEvent (cancel_event);
+        WaitForSingleObject (worker_thread, INFINITE);
+
         g_clear_error (&inject_ctx.err);
       }
-    }
-    else
-    {
+
+      CloseHandle (worker_thread);
+    } else {
       input_error = TRUE;
-
-      if (StringCchGetsW (line, max_chars_per_line) == S_OK)
-      {
-        if (wcscmp (line, L"cancel") == 0)
-        {
-          SetEvent (cancel_event);
-          input_error = FALSE;
-        }
-      }
-
-      if (input_error)
-        SetEvent (cancel_event);
-
-      WaitForSingleObject (worker_thread, INFINITE);
     }
-
-    CloseHandle (worker_thread);
 
     if (input_error)
-      goto beach;
+    {
+      ret = 1;
+      input_context_close (&input);
+    }
   }
 
-  ret = 0;
-
-beach:
-  CloseHandle (cancel_event);
   g_free (line);
 
+  CloseHandle (cancel_event);
+
+  input_context_teardown (&input);
+
   return ret;
+}
+
+static void
+input_context_setup (InputContext * input)
+{
+  InitializeCriticalSection (&input->lock);
+  input->event = CreateEvent (NULL, TRUE, FALSE, NULL);
+  input->lines = g_queue_new ();
+
+  input->thread = CreateThread (NULL, 0, do_input, input, 0, NULL);
+
+  input->is_closed = FALSE;
+  input->is_eof = FALSE;
+}
+
+static void
+input_context_teardown (InputContext * input)
+{
+  EnterCriticalSection (&input->lock);
+  g_assert (input->is_closed || input->is_eof);
+  LeaveCriticalSection (&input->lock);
+
+  WaitForSingleObject (input->thread, INFINITE);
+  CloseHandle (input->thread);
+
+  g_assert (g_queue_is_empty (input->lines));
+  g_queue_free (input->lines);
+  CloseHandle (input->event);
+  DeleteCriticalSection (&input->lock);
+}
+
+static TCHAR *
+input_context_pop_line (InputContext * input)
+{
+  TCHAR * result;
+
+  EnterCriticalSection (&input->lock);
+  result = g_queue_pop_head (input->lines);
+  if (g_queue_is_empty (input->lines))
+    ResetEvent (input->event);
+  LeaveCriticalSection (&input->lock);
+
+  return result;
+}
+
+static void
+input_context_close (InputContext * input)
+{
+  EnterCriticalSection (&input->lock);
+
+  if (!input->is_closed && !input->is_eof)
+  {
+    input->is_closed = TRUE;
+
+    /* Kind of dirty, is there a better way? */
+    CloseHandle (GetStdHandle (STD_INPUT_HANDLE));
+  }
+
+  LeaveCriticalSection (&input->lock);
+}
+
+static DWORD WINAPI
+do_input (LPVOID parameter)
+{
+  InputContext * input = parameter;
+  const guint max_chars_per_line = 10 + 1 + MAX_PATH + 1;
+
+  EnterCriticalSection (&input->lock);
+
+  do
+  {
+    TCHAR * line;
+    HRESULT hr;
+
+    line = g_new0 (TCHAR, max_chars_per_line);
+
+    LeaveCriticalSection (&input->lock);
+    hr = StringCchGets (line, max_chars_per_line);
+    EnterCriticalSection (&input->lock);
+
+    if (hr != S_OK)
+    {
+      g_assert (hr == STRSAFE_E_END_OF_FILE);
+
+      g_free (line);
+      line = NULL;
+
+      input->is_eof = TRUE;
+    }
+
+    g_queue_push_tail (input->lines, line);
+    SetEvent (input->event);
+  }
+  while (!input->is_eof);
+
+  LeaveCriticalSection (&input->lock);
+
+  return 0;
 }
 
 static DWORD WINAPI
@@ -341,8 +481,6 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
   TrickContext trick_ctx;
   const guint trick_size = sizeof (trick_code) + sizeof (trick_ctx);
   guint8 worker_code[] = {
-    0xCC,
-
     /*
      * Remove argument and return address, so VirtualFree will return directly
      * to our caller instead of freed memory.
@@ -366,7 +504,7 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x56,                         /* push esi           (fake return address) */
     0xFF, 0x63, G_STRUCT_OFFSET (WorkerContext, virtual_free_impl),    /* jmp */
 
-    0xCC, 0xCC                    /* pad to multiple of 4                     */
+    0xCC, 0xCC, 0xCC              /* pad to multiple of 4                     */
   };
   WorkerContext worker_ctx;
   const guint worker_size = sizeof (worker_code) + sizeof (worker_ctx);

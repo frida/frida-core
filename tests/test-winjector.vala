@@ -1,9 +1,9 @@
 namespace Zed.Test {
 	private static void winjector_add_tests () {
 		GLib.Test.add_func ("/winjector/inject-x86", () => {
-			var rat = new LabRat ("winvictim32");
-			Thread.usleep (100000); /* give it 100 ms to settle */
-			rat.inject ("winattacker");
+			var rat = new LabRat ("winvictim-busy32");
+			Thread.usleep (10000); /* give it 10 ms to settle */
+			rat.inject ("winattacker32");
 			long exitcode = rat.process.join ();
 			assert (exitcode == 133742);
 		});
@@ -39,7 +39,7 @@ namespace Zed.Test {
 			var injector = new Service.Winjector ();
 			var rat_file = Path.build_filename (rat_directory, name + ".dll");
 			try {
-				yield injector.inject_async (rat_file, 644 /*process.id*/);
+				yield injector.inject_async (rat_file, process.id);
 			} catch (Service.WinjectorError e) {
 				assert_not_reached ();
 			}

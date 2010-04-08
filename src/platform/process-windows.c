@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <psapi.h>
 
+/* TODO: move this code to the test harness, turned out to be a bad idea */
+
 char *
 zed_platform_process_backend_filename_of (void * handle)
 {
