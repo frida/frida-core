@@ -21,6 +21,7 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -73,6 +74,7 @@
 		</Configuration>
 		<Configuration
 			Name="Debug|x64"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -125,6 +127,7 @@
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -180,6 +183,7 @@
 		</Configuration>
 		<Configuration
 			Name="Release|x64"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -421,6 +425,14 @@
 					RelativePath=".\data\ui.vala"
 					>
 				</File>
+				<Filter
+					Name="generated"
+					>
+					<File
+						RelativePath="$(IntDir)..\zed-data\winjector-data.c"
+						>
+					</File>
+				</Filter>
 			</Filter>
 			<Filter
 				Name="service"
@@ -470,54 +482,6 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
-			<File
-				RelativePath=".\ext\sdkurl.txt"
-				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-					<Tool
-						Name="VCCustomBuildTool"
-						Description="Checking SDK"
-						CommandLine="if exist &quot;$(ProjectDir)ext\sdk\&quot; goto warn&#x0D;&#x0A;&#x0D;&#x0A;mkdir &quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\wget.exe&quot; --dot-style=mega --input-file=&quot;$(ProjectDir)ext\sdkurl.txt&quot; --output-document=&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; -o&quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;del &quot;$(ProjectDir)ext\sdk\sdk.exe&quot;&#x0D;&#x0A;goto done&#x0D;&#x0A;&#x0D;&#x0A;:warn&#x0D;&#x0A;echo Assuming that SDK is up to date - delete ext\sdk and rebuild if that&apos;s not the case&#x0D;&#x0A;&#x0D;&#x0A;:done&#x0D;&#x0A;echo &gt; &quot;$(IntDir)sdkurl.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(ProjectDir)ext\wget.exe"
-						Outputs="$(IntDir)sdkurl.stamp"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug|x64"
-					>
-					<Tool
-						Name="VCCustomBuildTool"
-						Description="Checking SDK"
-						CommandLine="if exist &quot;$(ProjectDir)ext\sdk\&quot; goto warn&#x0D;&#x0A;&#x0D;&#x0A;mkdir &quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\wget.exe&quot; --dot-style=mega --input-file=&quot;$(ProjectDir)ext\sdkurl.txt&quot; --output-document=&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; -o&quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;del &quot;$(ProjectDir)ext\sdk\sdk.exe&quot;&#x0D;&#x0A;goto done&#x0D;&#x0A;&#x0D;&#x0A;:warn&#x0D;&#x0A;echo Assuming that SDK is up to date - delete ext\sdk and rebuild if that&apos;s not the case&#x0D;&#x0A;&#x0D;&#x0A;:done&#x0D;&#x0A;echo &gt; &quot;$(IntDir)sdkurl.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(ProjectDir)ext\wget.exe"
-						Outputs="$(IntDir)sdkurl.stamp"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-					<Tool
-						Name="VCCustomBuildTool"
-						Description="Checking SDK"
-						CommandLine="if exist &quot;$(ProjectDir)ext\sdk\&quot; goto warn&#x0D;&#x0A;&#x0D;&#x0A;mkdir &quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\wget.exe&quot; --dot-style=mega --input-file=&quot;$(ProjectDir)ext\sdkurl.txt&quot; --output-document=&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; -o&quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;del &quot;$(ProjectDir)ext\sdk\sdk.exe&quot;&#x0D;&#x0A;goto done&#x0D;&#x0A;&#x0D;&#x0A;:warn&#x0D;&#x0A;echo Assuming that SDK is up to date - delete ext\sdk and rebuild if that&apos;s not the case&#x0D;&#x0A;&#x0D;&#x0A;:done&#x0D;&#x0A;echo &gt; &quot;$(IntDir)sdkurl.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(ProjectDir)ext\wget.exe"
-						Outputs="$(IntDir)sdkurl.stamp"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|x64"
-					>
-					<Tool
-						Name="VCCustomBuildTool"
-						Description="Checking SDK"
-						CommandLine="if exist &quot;$(ProjectDir)ext\sdk\&quot; goto warn&#x0D;&#x0A;&#x0D;&#x0A;mkdir &quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\wget.exe&quot; --dot-style=mega --input-file=&quot;$(ProjectDir)ext\sdkurl.txt&quot; --output-document=&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; || exit 1&#x0D;&#x0A;&quot;$(ProjectDir)ext\sdk\sdk.exe&quot; -o&quot;$(ProjectDir)ext\sdk\&quot; || exit 1&#x0D;&#x0A;del &quot;$(ProjectDir)ext\sdk\sdk.exe&quot;&#x0D;&#x0A;goto done&#x0D;&#x0A;&#x0D;&#x0A;:warn&#x0D;&#x0A;echo Assuming that SDK is up to date - delete ext\sdk and rebuild if that&apos;s not the case&#x0D;&#x0A;&#x0D;&#x0A;:done&#x0D;&#x0A;echo &gt; &quot;$(IntDir)sdkurl.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(ProjectDir)ext\wget.exe"
-						Outputs="$(IntDir)sdkurl.stamp"
-					/>
-				</FileConfiguration>
-			</File>
 		</Filter>
 	</Files>
 	<Globals>

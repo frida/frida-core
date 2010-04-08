@@ -4,7 +4,8 @@ namespace Zed.Test {
 			var rat = new LabRat ("winvictim32");
 			Thread.usleep (100000); /* give it 100 ms to settle */
 			rat.inject ("winattacker");
-			assert (rat.process.join () == 133742);
+			long exitcode = rat.process.join ();
+			assert (exitcode == 133742);
 		});
 	}
 
@@ -38,7 +39,7 @@ namespace Zed.Test {
 			var injector = new Service.Winjector ();
 			var rat_file = Path.build_filename (rat_directory, name + ".dll");
 			try {
-				yield injector.inject_async (rat_file, process.id);
+				yield injector.inject_async (rat_file, 644 /*process.id*/);
 			} catch (Service.WinjectorError e) {
 				assert_not_reached ();
 			}

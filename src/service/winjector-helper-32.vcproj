@@ -2,9 +2,9 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="9.00"
-	Name="winvictim"
-	ProjectGUID="{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}"
-	RootNamespace="winvictim"
+	Name="winjector-helper-32"
+	ProjectGUID="{E0AC03F2-F077-4BA7-88DD-BBE95B4E4EF0}"
+	RootNamespace="zed"
 	Keyword="Win32Proj"
 	TargetFrameworkVersion="196613"
 	>
@@ -12,19 +12,16 @@
 		<Platform
 			Name="Win32"
 		/>
-		<Platform
-			Name="x64"
-		/>
 	</Platforms>
 	<ToolFiles>
 	</ToolFiles>
 	<Configurations>
 		<Configuration
-			Name="LabRat|x64"
+			Name="Debug|Win32"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="1"
-			InheritedPropertySheets="$(SolutionDir)labrat.vsprops"
+			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
-			WholeProgramOptimization="1"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -55,9 +52,8 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				OutputFile="$(OutDir)\$(ProjectName)64.exe"
-				SubSystem="2"
-				TargetMachine="17"
+				SubSystem="1"
+				TargetMachine="1"
 			/>
 			<Tool
 				Name="VCALinkTool"
@@ -82,9 +78,10 @@
 			/>
 		</Configuration>
 		<Configuration
-			Name="LabRat|Win32"
+			Name="Release|Win32"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="1"
-			InheritedPropertySheets="$(SolutionDir)labrat.vsprops"
+			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
 			WholeProgramOptimization="1"
 			>
@@ -117,8 +114,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				OutputFile="$(OutDir)\$(ProjectName)32.exe"
-				SubSystem="2"
+				SubSystem="1"
 				TargetMachine="1"
 			/>
 			<Tool
@@ -153,7 +149,7 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath=".\winvictim.c"
+				RelativePath=".\winjector-helper.c"
 				>
 			</File>
 		</Filter>
@@ -162,6 +158,10 @@
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
+			<File
+				RelativePath=".\winjector-helper.h"
+				>
+			</File>
 		</Filter>
 		<Filter
 			Name="Resource Files"
