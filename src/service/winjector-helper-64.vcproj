@@ -53,6 +53,8 @@
 			<Tool
 				Name="VCLinkerTool"
 				SubSystem="1"
+				RandomizedBaseAddress="1"
+				FixedBaseAddress="2"
 				TargetMachine="17"
 			/>
 			<Tool
@@ -115,6 +117,8 @@
 			<Tool
 				Name="VCLinkerTool"
 				SubSystem="1"
+				RandomizedBaseAddress="1"
+				FixedBaseAddress="2"
 				TargetMachine="17"
 			/>
 			<Tool
