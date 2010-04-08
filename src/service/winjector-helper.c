@@ -8,11 +8,11 @@
 
 #define ZED_WINJECTOR_ERROR zed_winjector_error_quark ()
 
-typedef struct _InputContext InputContext;
+typedef struct _InputHandler InputHandler;
 typedef struct _WinjectorTarget WinjectorTarget;
 typedef struct _InjectContext InjectContext;
 
-struct _InputContext
+struct _InputHandler
 {
   CRITICAL_SECTION lock;
   HANDLE event;
@@ -37,11 +37,11 @@ struct _InjectContext
   GError * err;
 };
 
-static void input_context_setup (InputContext * input);
-static void input_context_teardown (InputContext * input);
+static void input_handler_setup (InputHandler * input);
+static void input_handler_teardown (InputHandler * input);
 static DWORD WINAPI do_input (LPVOID parameter);
-static TCHAR * input_context_pop_line (InputContext * input);
-static void input_context_close (InputContext * input);
+static TCHAR * input_handler_pop_line (InputHandler * input);
+static void input_handler_close (InputHandler * input);
 
 static DWORD WINAPI do_injection (LPVOID parameter);
 static gboolean inject_into_target (WinjectorTarget * target, HANDLE cancel_event,
@@ -64,11 +64,11 @@ gint
 wmain (gint argc, WCHAR * argv[])
 {
   gint ret = 0;
-  InputContext input;
+  InputHandler input;
   HANDLE cancel_event;
   TCHAR * line = NULL;
 
-  input_context_setup (&input);
+  input_handler_setup (&input);
 
   cancel_event = CreateEvent (NULL, TRUE, FALSE, NULL);
 
@@ -82,7 +82,7 @@ wmain (gint argc, WCHAR * argv[])
     gboolean input_error = FALSE;
 
     g_free (line);
-    line = input_context_pop_line (&input);
+    line = input_handler_pop_line (&input);
     if (line == NULL)
     {
       /* EOF */
@@ -91,7 +91,7 @@ wmain (gint argc, WCHAR * argv[])
 
     if (wcscmp (line, L"exit") == 0)
     {
-      input_context_close (&input);
+      input_handler_close (&input);
       continue;
     }
 
@@ -130,7 +130,7 @@ wmain (gint argc, WCHAR * argv[])
       else
       {
         g_free (line);
-        line = input_context_pop_line (&input);
+        line = input_handler_pop_line (&input);
         if (_tcscmp (line, _T ("cancel")) != 0)
         {
           input_error = TRUE;
@@ -150,7 +150,7 @@ wmain (gint argc, WCHAR * argv[])
     if (input_error)
     {
       ret = 1;
-      input_context_close (&input);
+      input_handler_close (&input);
     }
   }
 
@@ -158,13 +158,13 @@ wmain (gint argc, WCHAR * argv[])
 
   CloseHandle (cancel_event);
 
-  input_context_teardown (&input);
+  input_handler_teardown (&input);
 
   return ret;
 }
 
 static void
-input_context_setup (InputContext * input)
+input_handler_setup (InputHandler * input)
 {
   InitializeCriticalSection (&input->lock);
   input->event = CreateEvent (NULL, TRUE, FALSE, NULL);
@@ -177,7 +177,7 @@ input_context_setup (InputContext * input)
 }
 
 static void
-input_context_teardown (InputContext * input)
+input_handler_teardown (InputHandler * input)
 {
   EnterCriticalSection (&input->lock);
   g_assert (input->is_closed || input->is_eof);
@@ -193,7 +193,7 @@ input_context_teardown (InputContext * input)
 }
 
 static TCHAR *
-input_context_pop_line (InputContext * input)
+input_handler_pop_line (InputHandler * input)
 {
   TCHAR * result;
 
@@ -207,7 +207,7 @@ input_context_pop_line (InputContext * input)
 }
 
 static void
-input_context_close (InputContext * input)
+input_handler_close (InputHandler * input)
 {
   EnterCriticalSection (&input->lock);
 
@@ -225,7 +225,7 @@ input_context_close (InputContext * input)
 static DWORD WINAPI
 do_input (LPVOID parameter)
 {
-  InputContext * input = parameter;
+  InputHandler * input = parameter;
   const guint max_chars_per_line = 10 + 1 + MAX_PATH + 1;
 
   EnterCriticalSection (&input->lock);
