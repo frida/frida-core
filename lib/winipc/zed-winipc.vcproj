@@ -2,8 +2,8 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="9.00"
-	Name="zed-tests"
-	ProjectGUID="{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}"
+	Name="zed-winipc"
+	ProjectGUID="{AB1784E5-24CE-4CFC-A6C3-1E2C092B8CDC}"
 	RootNamespace="zed"
 	Keyword="Win32Proj"
 	TargetFrameworkVersion="196613"
@@ -21,7 +21,8 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
-			ConfigurationType="1"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
+			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
 			>
@@ -42,7 +43,6 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="&quot;$(IntDir)..\zed-core&quot;;&quot;$(IntDir)..\zed-winipc&quot;"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -54,15 +54,10 @@
 				Name="VCPreLinkEventTool"
 			/>
 			<Tool
-				Name="VCLinkerTool"
-				SubSystem="1"
-				TargetMachine="1"
+				Name="VCLibrarianTool"
 			/>
 			<Tool
 				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -72,9 +67,6 @@
 			/>
 			<Tool
 				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
@@ -82,7 +74,8 @@
 		</Configuration>
 		<Configuration
 			Name="Debug|x64"
-			ConfigurationType="1"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
+			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
 			>
@@ -103,7 +96,6 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="&quot;$(IntDir)..\zed-core&quot;;&quot;$(IntDir)..\zed-winipc&quot;"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -115,15 +107,10 @@
 				Name="VCPreLinkEventTool"
 			/>
 			<Tool
-				Name="VCLinkerTool"
-				SubSystem="1"
-				TargetMachine="17"
+				Name="VCLibrarianTool"
 			/>
 			<Tool
 				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -133,9 +120,6 @@
 			/>
 			<Tool
 				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
@@ -143,7 +127,8 @@
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
-			ConfigurationType="1"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
+			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
 			WholeProgramOptimization="1"
@@ -165,7 +150,6 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="&quot;$(IntDir)..\zed-core&quot;;&quot;$(IntDir)..\zed-winipc&quot;"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -177,15 +161,10 @@
 				Name="VCPreLinkEventTool"
 			/>
 			<Tool
-				Name="VCLinkerTool"
-				SubSystem="1"
-				TargetMachine="1"
+				Name="VCLibrarianTool"
 			/>
 			<Tool
 				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -195,9 +174,6 @@
 			/>
 			<Tool
 				Name="VCFxCopTool"
-			/>
-			<Tool
-				Name="VCAppVerifierTool"
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
@@ -205,7 +181,8 @@
 		</Configuration>
 		<Configuration
 			Name="Release|x64"
-			ConfigurationType="1"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
+			ConfigurationType="4"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
 			WholeProgramOptimization="1"
@@ -227,7 +204,6 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="&quot;$(IntDir)..\zed-core&quot;;&quot;$(IntDir)..\zed-winipc&quot;"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -239,15 +215,10 @@
 				Name="VCPreLinkEventTool"
 			/>
 			<Tool
-				Name="VCLinkerTool"
-				SubSystem="1"
-				TargetMachine="17"
+				Name="VCLibrarianTool"
 			/>
 			<Tool
 				Name="VCALinkTool"
-			/>
-			<Tool
-				Name="VCManifestTool"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -259,28 +230,11 @@
 				Name="VCFxCopTool"
 			/>
 			<Tool
-				Name="VCAppVerifierTool"
-			/>
-			<Tool
 				Name="VCPostBuildEventTool"
 			/>
 		</Configuration>
 	</Configurations>
 	<References>
-		<ProjectReference
-			ReferencedProjectIdentifier="{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}"
-			CopyLocal="false"
-			CopyLocalDependencies="false"
-			CopyLocalSatelliteAssemblies="false"
-			RelativePathToProject=".\zed-core.vcproj"
-		/>
-		<ProjectReference
-			ReferencedProjectIdentifier="{AB1784E5-24CE-4CFC-A6C3-1E2C092B8CDC}"
-			CopyLocal="false"
-			CopyLocalDependencies="false"
-			CopyLocalSatelliteAssemblies="false"
-			RelativePathToProject=".\lib\winipc\zed-winipc.vcproj"
-		/>
 	</References>
 	<Files>
 		<Filter
@@ -289,7 +243,11 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath=".\test-main.vala"
+				RelativePath=".\proxy-impl.c"
+				>
+			</File>
+			<File
+				RelativePath=".\proxy.vala"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
@@ -297,8 +255,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --vapidir=&quot;$(IntDir)..\zed-winipc&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; proxy.vala --ccode --directory=$(IntDir) --library=zed-winipc --header=$(IntDir)zed-winipc.h --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gio-2.0 --pkg=gee-1.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)proxy.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -308,8 +266,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --vapidir=&quot;$(IntDir)..\zed-winipc&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; proxy.vala --ccode --directory=$(IntDir) --library=zed-winipc --header=$(IntDir)zed-winipc.h --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gio-2.0 --pkg=gee-1.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)proxy.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -319,8 +277,8 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --vapidir=&quot;$(IntDir)..\zed-winipc&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; proxy.vala --ccode --directory=$(IntDir) --library=zed-winipc --header=$(IntDir)zed-winipc.h --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gio-2.0 --pkg=gee-1.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)proxy.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
@@ -330,26 +288,54 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Compiling vala code"
-						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --vapidir=&quot;$(IntDir)..\zed-core&quot; --vapidir=&quot;$(IntDir)..\zed-winipc&quot; --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
-						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala"
+						CommandLine="&quot;$(SolutionDir)ext\sdk\vala\valac.exe&quot; proxy.vala --ccode --directory=$(IntDir) --library=zed-winipc --header=$(IntDir)zed-winipc.h --vapidir=&quot;$(SolutionDir)ext\sdk\vala\vapi&quot; --pkg=gio-2.0 --pkg=gee-1.0 || exit 1&#x0D;&#x0A;echo &gt; &quot;$(IntDir)valacode.stamp&quot;&#x0D;&#x0A;"
+						AdditionalDependencies="$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)proxy.vala"
 						Outputs="$(IntDir)valacode.stamp"
 					/>
 				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\wait-handle-source.c"
+				>
 			</File>
 			<Filter
 				Name="generated"
 				>
 				<File
-					RelativePath="$(IntDir)test-main.c"
+					RelativePath="..\..\obj\Win32-Debug\zed-winipc\proxy.c"
 					>
-				</File>
-				<File
-					RelativePath="$(IntDir)test-winipc.c"
-					>
-				</File>
-				<File
-					RelativePath="$(IntDir)test-winjector.c"
-					>
+					<FileConfiguration
+						Name="Debug|Win32"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Debug|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Release|Win32"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Release|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
 				</File>
 			</Filter>
 		</Filter>
@@ -358,24 +344,16 @@
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
+			<File
+				RelativePath=".\wait-handle-source.h"
+				>
+			</File>
 		</Filter>
 		<Filter
 			Name="Resource Files"
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
-		</Filter>
-		<Filter
-			Name="Tests"
-			>
-			<File
-				RelativePath=".\test-winipc.vala"
-				>
-			</File>
-			<File
-				RelativePath=".\test-winjector.vala"
-				>
-			</File>
 		</Filter>
 	</Files>
 	<Globals>
