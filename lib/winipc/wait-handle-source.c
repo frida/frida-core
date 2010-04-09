@@ -83,7 +83,5 @@ win_ipc_wait_handle_source_dispatch (GSource * source, GSourceFunc callback,
 
   g_assert (WaitForSingleObject (self->handle, 0) == WAIT_OBJECT_0);
 
-  callback (user_data);
-
-  return TRUE;
+  return callback (user_data);
 }
