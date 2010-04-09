@@ -34,20 +34,27 @@ namespace Zed.Test {
 		public void run (TestSequenceFunc f) {
 			var timed_out = false;
 
-			var loop = new MainLoop ();
+			var ctx = new MainContext ();
+			var loop = new MainLoop (ctx);
 
-			Timeout.add (1000, () => {
+			var timeout = new TimeoutSource.seconds (1);
+			timeout.set_callback (() => {
 				timed_out = true;
 				loop.quit ();
 				return false;
 			});
+			timeout.attach (ctx);
 
-			Idle.add (() => {
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
 				f (loop);
 				return false;
 			});
+			idle.attach (ctx);
 
+			ctx.push_thread_default ();
 			loop.run ();
+			ctx.pop_thread_default ();
 
 			assert (!timed_out);
 		}
@@ -73,10 +80,13 @@ namespace Zed.Test {
 
 		private async void do_establish_delayed (MainLoop loop) {
 			try {
-				Timeout.add (100, () => {
+				var timeout = new TimeoutSource (100);
+				timeout.set_callback (() => {
 					establish_client ();
 					return false;
 				});
+				timeout.attach (loop.get_context ());
+
 				yield server.establish ();
 			} catch (WinIpc.EstablishError e) {
 				assert_not_reached ();
