@@ -29,36 +29,6 @@ namespace Zed.Test {
 			client = new ClientProxy (server.address);
 		}
 
-		public delegate void TestSequenceFunc (MainLoop loop);
-
-		public void run (TestSequenceFunc f) {
-			var timed_out = false;
-
-			var ctx = new MainContext ();
-			var loop = new MainLoop (ctx);
-
-			var timeout = new TimeoutSource.seconds (1);
-			timeout.set_callback (() => {
-				timed_out = true;
-				loop.quit ();
-				return false;
-			});
-			timeout.attach (ctx);
-
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				f (loop);
-				return false;
-			});
-			idle.attach (ctx);
-
-			ctx.push_thread_default ();
-			loop.run ();
-			ctx.pop_thread_default ();
-
-			assert (!timed_out);
-		}
-
 		public void establish_fast (MainLoop loop) {
 			do_establish_fast (loop);
 		}
@@ -101,6 +71,36 @@ namespace Zed.Test {
 			} catch (WinIpc.EstablishError e) {
 				assert_not_reached ();
 			}
+		}
+
+		public delegate void TestSequenceFunc (MainLoop loop);
+
+		public void run (TestSequenceFunc f) {
+			var timed_out = false;
+
+			var ctx = new MainContext ();
+			var loop = new MainLoop (ctx);
+
+			var timeout = new TimeoutSource.seconds (1);
+			timeout.set_callback (() => {
+				timed_out = true;
+				loop.quit ();
+				return false;
+			});
+			timeout.attach (ctx);
+
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				f (loop);
+				return false;
+			});
+			idle.attach (ctx);
+
+			ctx.push_thread_default ();
+			loop.run ();
+			ctx.pop_thread_default ();
+
+			assert (!timed_out);
 		}
 	}
 }
