@@ -8,8 +8,6 @@ namespace Zed.Service {
 		private unowned Thread worker_thread;
 		private ArrayList<void *> requests = new ArrayList<void *> ();
 
-		private ArrayList<void *> pipes;
-
 		private void * helper_tempdir;
 		private void * helper32;
 		private void * helper64;
@@ -40,7 +38,30 @@ namespace Zed.Service {
 			}
 		}
 
-		private extern void * worker ();
+		private void * worker () {
+			mutex.lock ();
+			while (true) {
+				while (worker_thread != null && requests.size == 0)
+					cond.wait (mutex);
+
+				if (worker_thread == null)
+					break;
+
+				void * request = requests.remove_at (0);
+
+				mutex.unlock ();
+				process_request (request);
+				mutex.lock ();
+			}
+			mutex.unlock ();
+
+			ensure_helper_closed ();
+			assert (helper_tempdir == null);
+			assert (helper32 == null);
+			assert (helper64 == null);
+
+			return null;
+		}
 
 		protected void queue_request (void * request) {
 			mutex.lock ();

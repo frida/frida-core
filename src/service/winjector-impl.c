@@ -2,9 +2,6 @@
 #include <tchar.h>
 #include <strsafe.h>
 
-#define PIPE_BUFSIZE 4096
-#define PIPE_TIMEOUT 5000
-
 typedef struct _ZedServiceWinjectorInjectAsyncData
     ZedServiceWinjectorInjectAsyncData;
 
@@ -13,14 +10,8 @@ static void zed_service_winjector_inject_async_co (
 
 #include "src/service/winjector.c"
 
-typedef struct _ZedWinjectorPipe ZedWinjectorPipe;
 typedef struct _ZedWinjectorHelper ZedWinjectorHelper;
 typedef struct _ZedHelperExecutable ZedHelperExecutable;
-
-struct _ZedWinjectorPipe
-{
-  HANDLE handle;
-};
 
 struct _ZedWinjectorHelper
 {
@@ -39,9 +30,6 @@ struct _ZedHelperExecutable
   const guint8 * data;
   guint size;
 };
-
-static gboolean create_pipe_and_connect (ZedServiceWinjector * self,
-    OVERLAPPED * overlapped);
 
 static ZedWinjectorHelper * create_helper (
     const ZedHelperExecutable * executable, const TCHAR * temp_dir);
@@ -63,26 +51,6 @@ static void clear_handle (HANDLE * handle);
 
 extern const unsigned int zed_data_winjector_helper_32_size;
 extern const unsigned char zed_data_winjector_helper_32_data[];
-
-static void
-zed_service_winjector_inject_async_co (
-                                       ZedServiceWinjectorInjectAsyncData * data)
-{
-  zed_service_winjector_ensure_worker_running (data->self);
-  zed_service_winjector_queue_request (data->self, data);
-}
-
-static void *
-zed_service_winjector_worker (ZedServiceWinjector * self)
-{
-  OVERLAPPED conn_overlapped;
-  gboolean pending_io;
-
-  pending_io = create_pipe_and_connect (self, &conn_overlapped);
-
-  return NULL;
-}
-
 
 static void
 zed_service_winjector_ensure_helper_started (ZedServiceWinjector * self)
@@ -157,28 +125,12 @@ zed_service_winjector_process_request (ZedServiceWinjector * self,
   g_object_unref (res);
 }
 
-static gboolean
-create_pipe_and_connect (ZedServiceWinjector * self, OVERLAPPED * overlapped)
+static void
+zed_service_winjector_inject_async_co (
+                                       ZedServiceWinjectorInjectAsyncData * data)
 {
-  TCHAR * pipe_name;
-
-  pipe_name = NULL;
-  //pipe_name = generate_pipe_name ();
-
-  /*
-  self->priv->cur_pipe = CreateNamedPipe (pipe_name,
-      PIPE_ACCESS_DUPLEX |
-      FILE_FLAG_OVERLAPPED |
-      PIPE_TYPE_MESSAGE |
-      PIPE_READMODE_MESSAGE,
-      PIPE_WAIT,
-      PIPE_UNLIMITED_INSTANCES,
-      PIPE_BUFSIZE * sizeof (TCHAR),
-      PIPE_BUFSIZE * sizeof (TCHAR),
-      PIPE_TIMEOUT,
-      NULL);*/
-
-  return FALSE;
+  zed_service_winjector_ensure_worker_running (data->self);
+  zed_service_winjector_queue_request (data->self, data);
 }
 
 static ZedWinjectorHelper *
@@ -327,27 +279,6 @@ receive_inject_response (ZedWinjectorHelper * helper, GError ** err)
   g_free (line_utf8);
 
   return result;
-}
-
-static TCHAR *
-generate_pipe_name (void)
-{
-  const guint max_chars = MAX_PATH;
-  TCHAR * name;
-  GUID id;
-  guint len;
-
-  name = g_new0 (TCHAR, max_chars);
-
-  StringCchCat (name, max_chars, _T ("\\\\.\\pipe\\zed"));
-
-  CoCreateGuid (&id);
-  len = _tcslen (name);
-  StringFromGUID2 (&id, name + len, max_chars - len - 1);
-  name[len] = _T ('-');
-  name[_tcslen (name) - 1] = _T ('\0');
-
-  return name;
 }
 
 static TCHAR *
