@@ -11,6 +11,11 @@ namespace Zed.Test {
 			var h = new IpcHarness ();
 			h.run (h.establish_delayed);
 		});
+
+		GLib.Test.add_func ("/winipc/proxy/establish-error", () => {
+			var h = new IpcHarness ();
+			h.run (h.establish_client_without_server);
+		});
 	}
 
 	private class IpcHarness : Object {
@@ -37,7 +42,7 @@ namespace Zed.Test {
 			try {
 				yield client.establish ();
 				yield server.establish ();
-			} catch (WinIpc.EstablishError e) {
+			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
 
@@ -58,17 +63,38 @@ namespace Zed.Test {
 				timeout.attach (loop.get_context ());
 
 				yield server.establish ();
-			} catch (WinIpc.EstablishError e) {
+			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
 
 			loop.quit ();
 		}
 
+		public void establish_client_without_server (MainLoop loop) {
+			do_establish_client_without_server (loop);
+		}
+
+		private async void do_establish_client_without_server (MainLoop loop) {
+			server = null;
+
+			try {
+				yield client.establish ();
+			} catch (ProxyError e) {
+				var expected = new ProxyError.SERVER_NOT_FOUND ("CreateFile failed: 2");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+
+				loop.quit ();
+				return;
+			}
+
+			assert_not_reached ();
+		}
+
 		private async void establish_client () {
 			try {
 				yield client.establish ();
-			} catch (WinIpc.EstablishError e) {
+			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
 		}

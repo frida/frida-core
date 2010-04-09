@@ -68,7 +68,7 @@ win_ipc_server_proxy_connect_named_pipe (void * pipe, WinIpcPipeOperation * op)
 }
 
 static void *
-win_ipc_client_proxy_open_pipe (const char * name)
+win_ipc_client_proxy_open_pipe (const char * name, GError ** error)
 {
   HANDLE handle;
   gunichar2 * name_utf16;
@@ -89,7 +89,25 @@ win_ipc_client_proxy_open_pipe (const char * name)
   }
   else
   {
+    DWORD os_error;
+    gint code;
+
     handle = NULL;
+
+    os_error = GetLastError ();
+
+    switch (os_error)
+    {
+      case ERROR_FILE_NOT_FOUND:
+        code = WIN_IPC_PROXY_ERROR_SERVER_NOT_FOUND;
+        break;
+      default:
+        code = WIN_IPC_PROXY_ERROR_FAILED;
+        break;
+    }
+
+    g_set_error (error, WIN_IPC_PROXY_ERROR, code,
+        "CreateFile failed: %d", os_error);
   }
 
   g_free (name_utf16);

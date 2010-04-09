@@ -14,7 +14,7 @@ namespace WinIpc {
 			destroy_named_pipe (pipe);
 		}
 
-		public async void establish () throws EstablishError {
+		public async void establish () throws ProxyError {
 			var operation = new PipeOperation (pipe);
 			var result = connect_named_pipe (pipe, operation);
 			assert (result != ConnectResult.ERROR);
@@ -54,13 +54,11 @@ namespace WinIpc {
 				close_pipe (pipe);
 		}
 
-		public async void establish () throws EstablishError {
+		public async void establish () throws ProxyError {
 			pipe = open_pipe (server_address);
-			if (pipe == null)
-				throw new EstablishError.OPEN_FAILED ("Failed to open pipe");
 		}
 
-		private extern static void * open_pipe (string name);
+		private extern static void * open_pipe (string name) throws ProxyError;
 		private extern static void close_pipe (void * pipe);
 	}
 
@@ -70,8 +68,9 @@ namespace WinIpc {
 		protected extern async uint wait_for_operation (PipeOperation op);
 	}
 
-	public errordomain EstablishError {
-		OPEN_FAILED
+	public errordomain ProxyError {
+		SERVER_NOT_FOUND,
+		FAILED
 	}
 
 	private enum ConnectResult {
