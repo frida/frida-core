@@ -1,5 +1,5 @@
-namespace Zed.Test {
-	private static void winjector_add_tests () {
+namespace Zed.Test.Winjector {
+	public static void add_tests () {
 		GLib.Test.add_func ("/winjector/inject-x86", () => {
 			var rat = new LabRat ("winvictim-busy32");
 			Thread.usleep (10000); /* give it 10 ms to settle */
