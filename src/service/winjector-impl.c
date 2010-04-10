@@ -79,7 +79,7 @@ error:
   clear_temp_directory ((TCHAR **) &priv->helper_tempdir);
 }
 
-static void
+void
 zed_service_winjector_ensure_helper_closed (ZedServiceWinjector* self)
 {
   ZedServiceWinjectorPrivate * priv = self->priv;
@@ -92,7 +92,7 @@ zed_service_winjector_ensure_helper_closed (ZedServiceWinjector* self)
   clear_temp_directory ((TCHAR **) &priv->helper_tempdir);
 }
 
-static void
+void
 zed_service_winjector_process_request (ZedServiceWinjector * self,
     void * request)
 {

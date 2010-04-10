@@ -31,7 +31,7 @@ static void complete_async_result_from_os_error (GSimpleAsyncResult * res,
     DWORD os_error, WinIpcPipeOperation * op);
 static GIOErrorEnum io_error_from_os_error (DWORD os_error);
 
-static void *
+void *
 win_ipc_server_proxy_create_named_pipe (const char * name)
 {
   HANDLE handle;
@@ -54,7 +54,7 @@ win_ipc_server_proxy_create_named_pipe (const char * name)
   return handle;
 }
 
-static void
+void
 win_ipc_server_proxy_destroy_named_pipe (void * pipe)
 {
   DisconnectNamedPipe (pipe);
@@ -62,7 +62,7 @@ win_ipc_server_proxy_destroy_named_pipe (void * pipe)
   CloseHandle (pipe);
 }
 
-static WinIpcIOResult
+WinIpcIOResult
 win_ipc_server_proxy_connect_named_pipe (void * pipe, WinIpcPipeOperation * op,
     GError ** error)
 {
@@ -93,7 +93,7 @@ win_ipc_server_proxy_connect_named_pipe (void * pipe, WinIpcPipeOperation * op,
   return WIN_IPC_IO_RESULT_SUCCESS;
 }
 
-static void *
+void *
 win_ipc_client_proxy_open_pipe (const char * name, GError ** error)
 {
   HANDLE handle;
@@ -129,7 +129,7 @@ win_ipc_client_proxy_open_pipe (const char * name, GError ** error)
   return handle;
 }
 
-static void
+void
 win_ipc_client_proxy_close_pipe (void * pipe)
 {
   CloseHandle (pipe);
@@ -342,7 +342,7 @@ win_ipc_pipe_operation_consume_result (WinIpcPipeOperation * self,
   return bytes_transferred;
 }
 
-static void
+void
 win_ipc_pipe_operation_create_resources (WinIpcPipeOperation * self)
 {
   HANDLE wait_handle;
@@ -358,7 +358,7 @@ win_ipc_pipe_operation_create_resources (WinIpcPipeOperation * self)
   win_ipc_pipe_operation_set_overlapped (self, overlapped);
 }
 
-static void
+void
 win_ipc_pipe_operation_destroy_resources (WinIpcPipeOperation * self)
 {
   g_free (win_ipc_pipe_operation_get_buffer (self));
