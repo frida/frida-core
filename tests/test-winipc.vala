@@ -16,6 +16,11 @@ namespace Zed.Test {
 			var h = new IpcHarness ();
 			h.run (h.establish_client_without_server);
 		});
+
+		GLib.Test.add_func ("/winipc/proxy/query", () => {
+			var h = new IpcHarness ();
+			h.run (h.query);
+		});
 	}
 
 	private class IpcHarness : Object {
@@ -89,6 +94,52 @@ namespace Zed.Test {
 			}
 
 			assert_not_reached ();
+		}
+
+		public void query (MainLoop loop) {
+			do_query (loop);
+		}
+
+		private async void do_query (MainLoop loop) {
+			try {
+				yield client.establish ();
+				yield server.establish ();
+			} catch (ProxyError unexpected1) {
+				assert_not_reached ();
+			}
+
+			try {
+				yield client.query ("TellMeAJoke");
+				assert_not_reached ();
+			} catch (ProxyError e) {
+				var expected = new ProxyError.INVALID_QUERY ("No handler for TellMeAJoke");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+			}
+
+			server.register_handler ("TellMeAJoke", () => {
+				return "Nah";
+			});
+
+			try {
+				var joke_response = yield client.query ("TellMeAJoke");
+				assert (joke_response == "Nah");
+			} catch (ProxyError unexpected2) {
+				assert_not_reached ();
+			}
+
+			server.register_handler ("MakeMeASandwich", () => {
+				return "Booya!";
+			});
+
+			try {
+				var sandwich_response = yield client.query ("MakeMeASandwich");
+				assert (sandwich_response == "Booya!");
+			} catch (ProxyError unexpected3) {
+				assert_not_reached ();
+			}
+
+			loop.quit ();
 		}
 
 		private async void establish_client () {
