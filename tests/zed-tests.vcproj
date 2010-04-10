@@ -21,6 +21,7 @@
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="1"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -82,6 +83,7 @@
 		</Configuration>
 		<Configuration
 			Name="Debug|x64"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="1"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -143,6 +145,7 @@
 		</Configuration>
 		<Configuration
 			Name="Release|Win32"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="1"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
@@ -205,6 +208,7 @@
 		</Configuration>
 		<Configuration
 			Name="Release|x64"
+			OutputDirectory="$(SolutionDir)obj\$(PlatformName)-$(ConfigurationName)\$(ProjectName)\"
 			ConfigurationType="1"
 			InheritedPropertySheets="$(SolutionDir)zed-$(ConfigurationName).vsprops"
 			CharacterSet="1"
