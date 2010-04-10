@@ -81,24 +81,20 @@ namespace WinIpc {
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
-		[CCode (has_target = false)]
-		private delegate bool MessageHandlerFunc (string message, void * user_data);
+		private delegate bool MessageHandlerFunc (string message);
 		private class MessageHandler {
 			private MessageHandlerFunc func;
-			private void * user_data;
 
-			public MessageHandler (MessageHandlerFunc func, void * user_data) {
+			public MessageHandler (MessageHandlerFunc func) {
 				this.func = func;
-				this.user_data = user_data;
 			}
 
 			public bool handle (string message) {
-				return func (message, user_data);
+				return func (message);
 			}
 		}
 		private ArrayList<MessageHandler> message_handlers = new ArrayList<MessageHandler> ();
 
-		[CCode (has_target = false)]
 		public delegate string QueryHandlerFunc ();
 		public class QueryHandler {
 			private QueryHandlerFunc func;
