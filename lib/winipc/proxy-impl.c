@@ -1,7 +1,9 @@
+typedef struct _WinIpcProxyPopMessageData WinIpcProxyPopMessageData;
 typedef struct _WinIpcProxyReadMessageData WinIpcProxyReadMessageData;
 typedef struct _WinIpcProxyWriteMessageData WinIpcProxyWriteMessageData;
 typedef struct _WinIpcProxyWaitForOperationData WinIpcProxyWaitForOperationData;
 
+static void win_ipc_proxy_pop_message_co (WinIpcProxyPopMessageData * data);
 static void win_ipc_proxy_read_message_co (WinIpcProxyReadMessageData * data);
 static void win_ipc_proxy_write_message_co (WinIpcProxyWriteMessageData * data);
 static void win_ipc_proxy_wait_for_operation_co (
@@ -15,6 +17,9 @@ static void win_ipc_proxy_wait_for_operation_co (
 
 #define PIPE_BUFSIZE 4096
 #define PIPE_TIMEOUT 5000
+
+static gboolean win_ipc_proxy_handle_message (const char * message,
+    void * user_data);
 
 static void CALLBACK win_ipc_proxy_read_completed (DWORD os_error,
     DWORD bytes_transferred, OVERLAPPED * overlapped);
@@ -128,6 +133,30 @@ static void
 win_ipc_client_proxy_close_pipe (void * pipe)
 {
   CloseHandle (pipe);
+}
+
+static void
+win_ipc_proxy_pop_message_co (WinIpcProxyPopMessageData * data)
+{
+  WinIpcProxyMessageHandler * handler;
+
+  handler =
+      win_ipc_proxy_message_handler_new (win_ipc_proxy_handle_message, data);
+  gee_abstract_list_insert (
+      GEE_ABSTRACT_LIST (data->self->priv->message_handlers), 0, handler);
+}
+
+static gboolean
+win_ipc_proxy_handle_message (const char * message, void * user_data)
+{
+  WinIpcProxyPopMessageData * data = user_data;
+  GSimpleAsyncResult * res = data->_async_result;
+
+  data->result = g_strdup (message);
+  g_simple_async_result_complete (res);
+  g_object_unref (res);
+
+  return TRUE;
 }
 
 static void

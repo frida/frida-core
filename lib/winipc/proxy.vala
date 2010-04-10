@@ -1,3 +1,5 @@
+using Gee;
+
 namespace WinIpc {
 	public class ServerProxy : Proxy {
 		public string address {
@@ -79,30 +81,87 @@ namespace WinIpc {
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
-		public delegate string Handler (string query);
+		[CCode (has_target = false)]
+		private delegate bool MessageHandlerFunc (string message, void * user_data);
+		private class MessageHandler {
+			private MessageHandlerFunc func;
+			private void * user_data;
+
+			public MessageHandler (MessageHandlerFunc func, void * user_data) {
+				this.func = func;
+				this.user_data = user_data;
+			}
+
+			public bool handle (string message) {
+				return func (message, user_data);
+			}
+		}
+		private ArrayList<MessageHandler> message_handlers = new ArrayList<MessageHandler> ();
+
+		[CCode (has_target = false)]
+		public delegate string QueryHandlerFunc ();
+		public class QueryHandler {
+			private QueryHandlerFunc func;
+
+			public QueryHandler (QueryHandlerFunc func) {
+				this.func = func;
+			}
+
+			public string handle () {
+				return func ();
+			}
+		}
+		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
+
+		public void register_query_handler (string id, Proxy.QueryHandlerFunc func) {
+			assert (!query_handlers.has_key (id));
+			query_handlers[id] = new QueryHandler (func);
+		}
 
 		public async string query (string id) throws ProxyError {
 			try {
 				yield write_message (id);
-				return yield read_message ();
+				var reply = yield pop_message ();
+				if (reply == "")
+					throw new ProxyError.INVALID_QUERY ("No handler for " + id);
+				return reply;
 			} catch (IOError send_error) {
 				throw new ProxyError.IO_ERROR (send_error.message);
 			}
-		}
-
-		public void register_handler (string query_id, Proxy.Handler handler) {
 		}
 
 		protected async void process_messages () {
 			try {
 				while (pipe != null) {
 					string message = yield read_message ();
-					stdout.printf ("proxy %p read: '%s'\n", this, message);
+
+					bool handled = false;
+
+					foreach (var handler in message_handlers) {
+						if (handler.handle (message)) {
+							handled = true;
+							break;
+						}
+					}
+
+					if (!handled) {
+						if (query_handlers.has_key (message)) {
+							string reply = query_handlers[message].handle ();
+							write_message (reply);
+
+							handled = true;
+						}
+					}
+
+					if (!handled)
+						write_message ("");
 				}
 			} catch (IOError e) {
 				stderr.printf ("proxy %p caught IO error: '%s'\n", this, e.message);
 			}
 		}
+
+		protected extern async string pop_message ();
 
 		protected async void complete_pipe_operation (IOResult result, PipeOperation operation) throws IOError {
 			if (result == IOResult.SUCCESS)
@@ -111,9 +170,9 @@ namespace WinIpc {
 			operation.consume_result ();
 		}
 
-		protected extern async string read_message () throws IOError;
-		protected extern async void write_message (string message) throws IOError;
-		protected extern async void wait_for_operation (PipeOperation op) throws IOError;
+		private extern async string read_message () throws IOError;
+		private extern async void write_message (string message) throws IOError;
+		private extern async void wait_for_operation (PipeOperation op) throws IOError;
 	}
 
 	public errordomain ProxyError {

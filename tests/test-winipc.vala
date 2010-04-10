@@ -117,7 +117,7 @@ namespace Zed.Test {
 				assert (e.message == expected.message);
 			}
 
-			server.register_handler ("TellMeAJoke", () => {
+			server.register_query_handler ("TellMeAJoke", () => {
 				return "Nah";
 			});
 
@@ -128,7 +128,7 @@ namespace Zed.Test {
 				assert_not_reached ();
 			}
 
-			server.register_handler ("MakeMeASandwich", () => {
+			server.register_query_handler ("MakeMeASandwich", () => {
 				return "Booya!";
 			});
 
