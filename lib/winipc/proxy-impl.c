@@ -1,11 +1,9 @@
-typedef struct _WinIpcProxyPopMessageData WinIpcProxyPopMessageData;
-typedef struct _WinIpcProxyReadMessageData WinIpcProxyReadMessageData;
-typedef struct _WinIpcProxyWriteMessageData WinIpcProxyWriteMessageData;
+typedef struct _WinIpcProxyReadBlobData WinIpcProxyReadBlobData;
+typedef struct _WinIpcProxyWriteBlobData WinIpcProxyWriteBlobData;
 typedef struct _WinIpcProxyWaitForOperationData WinIpcProxyWaitForOperationData;
 
-static void win_ipc_proxy_pop_message_co (WinIpcProxyPopMessageData * data);
-static void win_ipc_proxy_read_message_co (WinIpcProxyReadMessageData * data);
-static void win_ipc_proxy_write_message_co (WinIpcProxyWriteMessageData * data);
+static void win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data);
+static void win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data);
 static void win_ipc_proxy_wait_for_operation_co (
     WinIpcProxyWaitForOperationData * data);
 
@@ -136,31 +134,7 @@ win_ipc_client_proxy_close_pipe (void * pipe)
 }
 
 static void
-win_ipc_proxy_pop_message_co (WinIpcProxyPopMessageData * data)
-{
-  WinIpcProxyMessageHandler * handler;
-
-  handler =
-      win_ipc_proxy_message_handler_new (win_ipc_proxy_handle_message, data);
-  gee_abstract_list_insert (
-      GEE_ABSTRACT_LIST (data->self->priv->message_handlers), 0, handler);
-}
-
-static gboolean
-win_ipc_proxy_handle_message (const char * message, void * user_data)
-{
-  WinIpcProxyPopMessageData * data = user_data;
-  GSimpleAsyncResult * res = data->_async_result;
-
-  data->result = g_strdup (message);
-  g_simple_async_result_complete (res);
-  g_object_unref (res);
-
-  return TRUE;
-}
-
-static void
-win_ipc_proxy_read_message_co (WinIpcProxyReadMessageData * data)
+win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data)
 {
   WinIpcPipeOperation * op;
   guint8 * buf;
@@ -188,7 +162,7 @@ win_ipc_proxy_read_message_co (WinIpcProxyReadMessageData * data)
 }
 
 static void
-win_ipc_proxy_write_message_co (WinIpcProxyWriteMessageData * data)
+win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data)
 {
   WinIpcPipeOperation * op;
   BOOL success;
@@ -198,7 +172,7 @@ win_ipc_proxy_write_message_co (WinIpcProxyWriteMessageData * data)
   win_ipc_pipe_operation_set_user_data (op, data);
 
   success = WriteFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
-      data->message, strlen (data->message) + 1,
+      data->blob, data->blob_length1,
       win_ipc_pipe_operation_get_overlapped (op),
       win_ipc_proxy_write_completed);
   if (!success)
@@ -216,7 +190,7 @@ win_ipc_proxy_read_completed (DWORD os_error, DWORD bytes_transferred,
     OVERLAPPED * overlapped)
 {
   WinIpcPipeOperation * op;
-  WinIpcProxyReadMessageData * data;
+  WinIpcProxyReadBlobData * data;
   GSimpleAsyncResult * res;
   GError * err = NULL;
   guint length;
@@ -231,6 +205,7 @@ win_ipc_proxy_read_completed (DWORD os_error, DWORD bytes_transferred,
   if (err == NULL)
   {
     data->result = win_ipc_pipe_operation_steal_buffer (op);
+    data->result_length1 = bytes_transferred;
   }
   else
   {
@@ -249,7 +224,7 @@ win_ipc_proxy_write_completed (DWORD os_error, DWORD bytes_transferred,
     OVERLAPPED * overlapped)
 {
   WinIpcPipeOperation * op;
-  WinIpcProxyWriteMessageData * data;
+  WinIpcProxyWriteBlobData * data;
   GSimpleAsyncResult * res;
   GError * err = NULL;
 

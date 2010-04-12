@@ -81,21 +81,155 @@ namespace WinIpc {
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
-		private delegate bool MessageHandlerFunc (string message);
-		private class MessageHandler {
-			private MessageHandlerFunc func;
+		public delegate string QueryHandlerFunc ();
+		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
 
-			public MessageHandler (MessageHandlerFunc func) {
-				this.func = func;
-			}
+		private uint32 last_request_id = 1;
+		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
-			public bool handle (string message) {
-				return func (message);
+		public void register_query_handler (string id, Proxy.QueryHandlerFunc func) {
+			assert (!query_handlers.has_key (id));
+			query_handlers[id] = new QueryHandler (func);
+		}
+
+		public async string query (string verb) throws ProxyError {
+			try {
+				var request_id = yield send_request (verb);
+				var response_msg = yield receive_response (request_id);
+				if (response_msg == null)
+					throw new ProxyError.INVALID_QUERY ("No handler for " + verb);
+				return response_msg.get_string ();
+			} catch (IOError io_error) {
+				throw new ProxyError.IO_ERROR (io_error.message);
 			}
 		}
-		private ArrayList<MessageHandler> message_handlers = new ArrayList<MessageHandler> ();
 
-		public delegate string QueryHandlerFunc ();
+		protected async void process_messages () {
+			try {
+				while (pipe != null) {
+					Variant msg;
+					var msg_type = yield read_message (out msg);
+
+					switch (msg_type) {
+						case MessageType.REQUEST:
+							process_request (msg);
+							break;
+						case MessageType.RESPONSE:
+							process_response (msg);
+							break;
+						default:
+							break;
+					}
+				}
+			} catch (IOError e) {
+				/* FIXME */
+			}
+		}
+
+		private void process_request (Variant msg) {
+			uint32 id;
+			string verb;
+			msg.get (REQUEST_MESSAGE_TYPE_STRING, out id, out verb);
+
+			Variant val = null;
+			if (query_handlers.has_key (verb))
+				val = new Variant.string (query_handlers[verb].handle ());
+			send_response (id, val);
+		}
+
+		private void process_response (Variant msg) {
+			uint32 id;
+			Variant val;
+			msg.get (RESPONSE_MESSAGE_TYPE_STRING, out id, out val);
+
+			PendingResponse? match = null;
+			foreach (var p in pending_responses) {
+				if (p.id == id) {
+					p.complete (val);
+					match = p;
+					break;
+				}
+			}
+
+			if (match != null)
+				pending_responses.remove (match);
+		}
+
+		private async uint32 send_request (string verb) throws IOError {
+			var id = last_request_id++;
+			var msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, id, verb);
+			yield write_message (MessageType.REQUEST, msg);
+			return id;
+		}
+
+		private async uint32 send_response (uint id, Variant? val) throws IOError {
+			Variant val_wrapper = null;
+			if (val != null)
+				val_wrapper = new Variant.variant (val);
+			var msg = new Variant (RESPONSE_MESSAGE_TYPE_STRING, id, new Variant.maybe (VariantType.VARIANT, val_wrapper));
+			yield write_message (MessageType.RESPONSE, msg);
+			return id;
+		}
+
+		private async Variant? receive_response (uint32 request_id) throws IOError {
+			var response = new PendingResponse (request_id, () => receive_response.callback ());
+			pending_responses.add (response);
+			yield;
+
+			var wrapper = response.result.get_maybe ();
+			if (wrapper == null)
+				return null;
+			return wrapper.get_variant ();
+		}
+
+		private async MessageType read_message (out Variant? v) throws IOError {
+			v = null;
+
+			uint8[] blob = yield read_blob ();
+			if (blob.length < MESSAGE_FIELD_ALIGNMENT + 1)
+				return MessageType.INVALID;
+
+			MessageType t = (MessageType) blob[0];
+			unowned VariantType vt;
+			switch (t) {
+				case MessageType.REQUEST:
+					vt = REQUEST_MESSAGE_TYPE;
+					break;
+				case MessageType.RESPONSE:
+					vt = RESPONSE_MESSAGE_TYPE;
+					break;
+				default:
+					return MessageType.INVALID;
+			}
+
+			var body_blob = new MessageBodyBlob (blob, MESSAGE_FIELD_ALIGNMENT);
+			unowned uint8[] body_data = body_blob.data; /* FIXME: workaround for Vala compiler bug */
+			v = Variant.new_from_data (vt, body_data, false, body_blob);
+			if (!v.is_normal_form ())
+				return MessageType.INVALID;
+			return t;
+		}
+
+		private async void write_message (MessageType t, Variant v) throws IOError {
+			uint8[] blob = new uint8[MESSAGE_FIELD_ALIGNMENT + v.get_size ()];
+			blob[0] = t;
+			unowned uint8 * blob_start = blob;
+			v.store (blob_start + MESSAGE_FIELD_ALIGNMENT);
+			yield write_blob (blob);
+		}
+
+		private extern async uint8[] read_blob () throws IOError;
+		private extern async void write_blob (uint8[] blob) throws IOError;
+
+		protected async void complete_pipe_operation (IOResult result, PipeOperation operation) throws IOError {
+			if (result == IOResult.SUCCESS)
+				return;
+			yield wait_for_operation (operation);
+			operation.consume_result ();
+		}
+
+		private extern async void wait_for_operation (PipeOperation op) throws IOError;
+
 		public class QueryHandler {
 			private QueryHandlerFunc func;
 
@@ -107,68 +241,56 @@ namespace WinIpc {
 				return func ();
 			}
 		}
-		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
 
-		public void register_query_handler (string id, Proxy.QueryHandlerFunc func) {
-			assert (!query_handlers.has_key (id));
-			query_handlers[id] = new QueryHandler (func);
-		}
+		private class PendingResponse {
+			public uint32 id {
+				get;
+				private set;
+			}
 
-		public async string query (string id) throws ProxyError {
-			try {
-				yield write_message (id);
-				var reply = yield pop_message ();
-				if (reply == "")
-					throw new ProxyError.INVALID_QUERY ("No handler for " + id);
-				return reply;
-			} catch (IOError send_error) {
-				throw new ProxyError.IO_ERROR (send_error.message);
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
+
+			public Variant result {
+				get;
+				private set;
+			}
+
+			public PendingResponse (uint32 id, CompletionHandler handler) {
+				this.id = id;
+				this.handler = handler;
+			}
+
+			public void complete (Variant result) {
+				this.result = result;
+				handler ();
 			}
 		}
 
-		protected async void process_messages () {
-			try {
-				while (pipe != null) {
-					string message = yield read_message ();
+		private enum MessageType {
+			INVALID,
+			REQUEST,
+			RESPONSE
+		}
 
-					bool handled = false;
+		private const string REQUEST_MESSAGE_TYPE_STRING = "(us)";
+		private VariantType REQUEST_MESSAGE_TYPE = new VariantType (REQUEST_MESSAGE_TYPE_STRING);
 
-					foreach (var handler in message_handlers) {
-						if (handler.handle (message)) {
-							handled = true;
-							break;
-						}
-					}
+		private const string RESPONSE_MESSAGE_TYPE_STRING = "(umv)";
+		private VariantType RESPONSE_MESSAGE_TYPE = new VariantType (RESPONSE_MESSAGE_TYPE_STRING);
 
-					if (!handled) {
-						if (query_handlers.has_key (message)) {
-							string reply = query_handlers[message].handle ();
-							write_message (reply);
+		private const uint8 MESSAGE_FIELD_ALIGNMENT = 8;
 
-							handled = true;
-						}
-					}
+		private class MessageBodyBlob {
+			public uint8[] data {
+				get;
+				private set;
+			}
 
-					if (!handled)
-						write_message ("");
-				}
-			} catch (IOError e) {
-				stderr.printf ("proxy %p caught IO error: '%s'\n", this, e.message);
+			public MessageBodyBlob (uint8[] data, size_t offset) {
+				this.data = data[offset:data.length];
 			}
 		}
-
-		protected extern async string pop_message ();
-
-		protected async void complete_pipe_operation (IOResult result, PipeOperation operation) throws IOError {
-			if (result == IOResult.SUCCESS)
-				return;
-			yield wait_for_operation (operation);
-			operation.consume_result ();
-		}
-
-		private extern async string read_message () throws IOError;
-		private extern async void write_message (string message) throws IOError;
-		private extern async void wait_for_operation (PipeOperation op) throws IOError;
 	}
 
 	public errordomain ProxyError {
