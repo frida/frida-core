@@ -81,7 +81,7 @@ namespace WinIpc {
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
-		public delegate string QueryHandlerFunc ();
+		public delegate Variant QueryHandlerFunc (Variant? argument);
 		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
 
 		private uint32 last_request_id = 1;
@@ -92,13 +92,13 @@ namespace WinIpc {
 			query_handlers[id] = new QueryHandler (func);
 		}
 
-		public async string query (string verb) throws ProxyError {
+		public async Variant query (string verb, Variant? argument = null) throws ProxyError {
 			try {
-				var request_id = yield send_request (verb);
-				var response_msg = yield receive_response (request_id);
-				if (response_msg == null)
+				var request_id = yield send_request (verb, argument);
+				var response_value = yield receive_response (request_id);
+				if (response_value == null)
 					throw new ProxyError.INVALID_QUERY ("No handler for " + verb);
-				return response_msg.get_string ();
+				return response_value;
 			} catch (IOError io_error) {
 				throw new ProxyError.IO_ERROR (io_error.message);
 			}
@@ -129,11 +129,12 @@ namespace WinIpc {
 		private void process_request (Variant msg) {
 			uint32 id;
 			string verb;
-			msg.get (REQUEST_MESSAGE_TYPE_STRING, out id, out verb);
+			Variant argument_wrapper;
+			msg.get (REQUEST_MESSAGE_TYPE_STRING, out id, out verb, out argument_wrapper);
 
 			Variant val = null;
 			if (query_handlers.has_key (verb))
-				val = new Variant.string (query_handlers[verb].handle ());
+				val = query_handlers[verb].func (MaybeVariant.unwrap (argument_wrapper));
 			send_response (id, val);
 		}
 
@@ -155,18 +156,15 @@ namespace WinIpc {
 				pending_responses.remove (match);
 		}
 
-		private async uint32 send_request (string verb) throws IOError {
+		private async uint32 send_request (string verb, Variant? argument) throws IOError {
 			var id = last_request_id++;
-			var msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, id, verb);
+			var msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, id, verb, MaybeVariant.wrap (argument));
 			yield write_message (MessageType.REQUEST, msg);
 			return id;
 		}
 
 		private async uint32 send_response (uint id, Variant? val) throws IOError {
-			Variant val_wrapper = null;
-			if (val != null)
-				val_wrapper = new Variant.variant (val);
-			var msg = new Variant (RESPONSE_MESSAGE_TYPE_STRING, id, new Variant.maybe (VariantType.VARIANT, val_wrapper));
+			var msg = new Variant (RESPONSE_MESSAGE_TYPE_STRING, id, MaybeVariant.wrap (val));
 			yield write_message (MessageType.RESPONSE, msg);
 			return id;
 		}
@@ -176,10 +174,7 @@ namespace WinIpc {
 			pending_responses.add (response);
 			yield;
 
-			var wrapper = response.result.get_maybe ();
-			if (wrapper == null)
-				return null;
-			return wrapper.get_variant ();
+			return MaybeVariant.unwrap (response.result);
 		}
 
 		private async MessageType read_message (out Variant? v) throws IOError {
@@ -231,14 +226,13 @@ namespace WinIpc {
 		private extern async void wait_for_operation (PipeOperation op) throws IOError;
 
 		public class QueryHandler {
-			private QueryHandlerFunc func;
+			public QueryHandlerFunc func {
+				get;
+				private set;
+			}
 
 			public QueryHandler (QueryHandlerFunc func) {
 				this.func = func;
-			}
-
-			public string handle () {
-				return func ();
 			}
 		}
 
@@ -273,7 +267,7 @@ namespace WinIpc {
 			RESPONSE
 		}
 
-		private const string REQUEST_MESSAGE_TYPE_STRING = "(us)";
+		private const string REQUEST_MESSAGE_TYPE_STRING = "(usmv)";
 		private VariantType REQUEST_MESSAGE_TYPE = new VariantType (REQUEST_MESSAGE_TYPE_STRING);
 
 		private const string RESPONSE_MESSAGE_TYPE_STRING = "(umv)";
@@ -297,6 +291,22 @@ namespace WinIpc {
 		SERVER_NOT_FOUND,
 		INVALID_QUERY,
 		IO_ERROR
+	}
+	
+	namespace MaybeVariant {
+		private Variant wrap (Variant? val) {
+			Variant variant = null;
+			if (val != null)
+				variant = new Variant.variant (val);
+			return new Variant.maybe (VariantType.VARIANT, variant);
+		}
+
+		private Variant? unwrap (Variant wrapper) {
+			Variant variant = wrapper.get_maybe ();
+			if (variant == null)
+				return null;
+			return variant.get_variant ();
+		}
 	}
 
 	protected class PipeOperation {

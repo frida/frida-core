@@ -2,112 +2,139 @@ using WinIpc;
 
 namespace Zed.Test.WinIpc {
 	public static void add_tests () {
-		GLib.Test.add_func ("/WinIpc/Proxy/establish-already-connected", () => {
-			var h = new IpcHarness ((h) => establish_already_connected (h));
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/already-connected", () => {
+			var h = new IpcHarness ((h) => Establish.already_connected (h));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/establish-delayed", () => {
-			var h = new IpcHarness ((h) => establish_delayed (h));
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/delayed", () => {
+			var h = new IpcHarness ((h) => Establish.delayed (h));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/establish-error-no-server", () => {
-			var h = new IpcHarness ((h) => establish_error_no_server (h));
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/no-server", () => {
+			var h = new IpcHarness ((h) => Establish.no_server (h));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/query-sequence", () => {
-			var h = new IpcHarness ((h) => query_sequence (h));
+		GLib.Test.add_func ("/WinIpc/Proxy/query/invalid", () => {
+			var h = new IpcHarness ((h) => Query.invalid (h));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/query/simple", () => {
+			var h = new IpcHarness ((h) => Query.simple (h));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/query/with-value", () => {
+			var h = new IpcHarness ((h) => Query.with_argument (h));
 			h.run ();
 		});
 	}
 
-	private static async void establish_already_connected (IpcHarness h) {
-		try {
-			yield h.client.establish ();
-			yield h.server.establish ();
-		} catch (ProxyError e) {
-			assert_not_reached ();
-		}
+	namespace Establish {
 
-		h.done ();
-	}
-
-	private static async void establish_delayed (IpcHarness h) {
-		try {
-			var timeout = new TimeoutSource (100);
-			timeout.set_callback (() => {
-				h.client.establish ();
-				return false;
-			});
-			timeout.attach (MainContext.get_thread_default ());
-
-			yield h.server.establish ();
-		} catch (ProxyError e) {
-			assert_not_reached ();
-		}
-
-		h.done ();
-	}
-
-	private async void establish_error_no_server (IpcHarness h) {
-		h.remove_server ();
-
-		try {
-			yield h.client.establish ();
-		} catch (ProxyError e) {
-			var expected = new ProxyError.SERVER_NOT_FOUND ("CreateFile failed: 2");
-			assert (e.code == expected.code);
-			assert (e.message == expected.message);
+		private static async void already_connected (IpcHarness h) {
+			try {
+				yield h.client.establish ();
+				yield h.server.establish ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
 
 			h.done ();
-			return;
 		}
 
-		assert_not_reached ();
+		private static async void delayed (IpcHarness h) {
+			try {
+				var timeout = new TimeoutSource (100);
+				timeout.set_callback (() => {
+					h.client.establish ();
+					return false;
+				});
+				timeout.attach (MainContext.get_thread_default ());
+
+				yield h.server.establish ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private async void no_server (IpcHarness h) {
+			h.remove_server ();
+
+			try {
+				yield h.client.establish ();
+			} catch (ProxyError e) {
+				var expected = new ProxyError.SERVER_NOT_FOUND ("CreateFile failed: 2");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+
+				h.done ();
+				return;
+			}
+
+			assert_not_reached ();
+		}
+
 	}
 
-	private static async void query_sequence (IpcHarness h) {
-		try {
-			yield h.client.establish ();
-			yield h.server.establish ();
-		} catch (ProxyError unexpected1) {
-			assert_not_reached ();
+	namespace Query {
+
+		private static async void invalid (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			try {
+				yield h.client.query ("TellMeAJoke");
+				assert_not_reached ();
+			} catch (ProxyError e) {
+				var expected = new ProxyError.INVALID_QUERY ("No handler for TellMeAJoke");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+			}
+
+			h.done ();
 		}
 
-		try {
-			yield h.client.query ("TellMeAJoke");
-			assert_not_reached ();
-		} catch (ProxyError e) {
-			var expected = new ProxyError.INVALID_QUERY ("No handler for TellMeAJoke");
-			assert (e.code == expected.code);
-			assert (e.message == expected.message);
+		private static async void simple (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			h.server.register_query_handler ("TellMeAJoke", (arg) => {
+				return new Variant.string ("Nah");
+			});
+
+			try {
+				var joke_response = yield h.client.query ("TellMeAJoke");
+				assert (joke_response.get_string () == "Nah");
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
 		}
 
-		h.server.register_query_handler ("TellMeAJoke", () => {
-			return "Nah";
-		});
+		private static async void with_argument (IpcHarness h) {
+			yield h.establish_client_and_server ();
 
-		try {
-			var joke_response = yield h.client.query ("TellMeAJoke");
-			assert (joke_response == "Nah");
-		} catch (ProxyError unexpected2) {
-			assert_not_reached ();
+			h.client.register_query_handler ("AddTwoNumbers", (arg) => {
+				uint a, b;
+				arg.get ("(uu)", out a, out b);
+				return new Variant.uint32 (a + b);
+			});
+
+			try {
+				var sandwich_response = yield h.server.query ("AddTwoNumbers", new Variant ("(uu)", 42, 1337));
+				assert (sandwich_response.get_uint32 () == 1379);
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
 		}
 
-		h.server.register_query_handler ("MakeMeASandwich", () => {
-			return "Booya!";
-		});
-
-		try {
-			var sandwich_response = yield h.client.query ("MakeMeASandwich");
-			assert (sandwich_response == "Booya!");
-		} catch (ProxyError unexpected3) {
-			assert_not_reached ();
-		}
-
-		h.done ();
 	}
 
 	private class IpcHarness : Object {
@@ -162,6 +189,15 @@ namespace Zed.Test.WinIpc {
 			main_context.pop_thread_default ();
 
 			assert (!timed_out);
+		}
+
+		public async void establish_client_and_server () {
+			try {
+				yield client.establish ();
+				yield server.establish ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
 		}
 
 		public void remove_server () {
