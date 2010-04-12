@@ -87,9 +87,9 @@ namespace WinIpc {
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
-		public void register_query_handler (string id, Proxy.QueryHandlerFunc func) {
+		public void register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
 			assert (!query_handlers.has_key (id));
-			query_handlers[id] = new QueryHandler (func);
+			query_handlers[id] = new QueryHandler (func, new VariantTypeSpec (argument_type));
 		}
 
 		public async Variant query (string verb, Variant? argument = null) throws ProxyError {
@@ -97,7 +97,7 @@ namespace WinIpc {
 				var request_id = yield send_request (verb, argument);
 				var response_value = yield receive_response (request_id);
 				if (response_value == null)
-					throw new ProxyError.INVALID_QUERY ("No handler for " + verb);
+					throw new ProxyError.INVALID_QUERY ("No matching handler for " + verb);
 				return response_value;
 			} catch (IOError io_error) {
 				throw new ProxyError.IO_ERROR (io_error.message);
@@ -134,7 +134,7 @@ namespace WinIpc {
 
 			Variant val = null;
 			if (query_handlers.has_key (verb))
-				val = query_handlers[verb].func (MaybeVariant.unwrap (argument_wrapper));
+				val = query_handlers[verb].try_invoke (MaybeVariant.unwrap (argument_wrapper));
 			send_response (id, val);
 		}
 
@@ -225,14 +225,39 @@ namespace WinIpc {
 
 		private extern async void wait_for_operation (PipeOperation op) throws IOError;
 
-		public class QueryHandler {
-			public QueryHandlerFunc func {
-				get;
-				private set;
+		private class QueryHandler {
+			private QueryHandlerFunc func;
+			private VariantTypeSpec argument_spec;
+
+			public QueryHandler (QueryHandlerFunc func, VariantTypeSpec argument_spec) {
+				this.func = func;
+				this.argument_spec = argument_spec;
 			}
 
-			public QueryHandler (QueryHandlerFunc func) {
-				this.func = func;
+			public Variant? try_invoke (Variant? argument) {
+				if (argument_spec.has_same_type_as (argument))
+					return func (argument);
+				return null;
+			}
+		}
+
+		private class VariantTypeSpec {
+			private string? spec_string;
+			private VariantType? exact_type;
+
+			public VariantTypeSpec (string? spec_string) {
+				this.spec_string = spec_string;
+				if (spec_string != null && spec_string != "")
+					this.exact_type = new VariantType (spec_string);
+			}
+
+			public bool has_same_type_as (Variant? v) {
+				if (spec_string == null)
+					return true;
+				else if (spec_string == "")
+					return v == null;
+				else
+					return v.get_type ().equal (exact_type);
 			}
 		}
 

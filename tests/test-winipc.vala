@@ -31,6 +31,11 @@ namespace Zed.Test.WinIpc {
 			var h = new IpcHarness ((h) => Query.with_argument (h));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/query/handler-argument-validation", () => {
+			var h = new IpcHarness ((h) => Query.handler_argument_validation (h));
+			h.run ();
+		});
 	}
 
 	namespace Establish {
@@ -91,7 +96,7 @@ namespace Zed.Test.WinIpc {
 				yield h.client.query ("TellMeAJoke");
 				assert_not_reached ();
 			} catch (ProxyError e) {
-				var expected = new ProxyError.INVALID_QUERY ("No handler for TellMeAJoke");
+				var expected = new ProxyError.INVALID_QUERY ("No matching handler for TellMeAJoke");
 				assert (e.code == expected.code);
 				assert (e.message == expected.message);
 			}
@@ -102,13 +107,13 @@ namespace Zed.Test.WinIpc {
 		private static async void simple (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			h.server.register_query_handler ("TellMeAJoke", (arg) => {
+			h.server.register_query_handler ("TellMeAJoke", null, (arg) => {
 				return new Variant.string ("Nah");
 			});
 
 			try {
-				var joke_response = yield h.client.query ("TellMeAJoke");
-				assert (joke_response.get_string () == "Nah");
+				var result = yield h.client.query ("TellMeAJoke");
+				assert (result.get_string () == "Nah");
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
@@ -119,16 +124,64 @@ namespace Zed.Test.WinIpc {
 		private static async void with_argument (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			h.client.register_query_handler ("AddTwoNumbers", (arg) => {
+			h.client.register_query_handler ("AddTwoNumbers", null, (arg) => {
 				uint a, b;
 				arg.get ("(uu)", out a, out b);
 				return new Variant.uint32 (a + b);
 			});
 
 			try {
-				var sandwich_response = yield h.server.query ("AddTwoNumbers", new Variant ("(uu)", 42, 1337));
-				assert (sandwich_response.get_uint32 () == 1379);
+				var result = yield h.server.query ("AddTwoNumbers", new Variant ("(uu)", 42, 1337));
+				assert (result.get_uint32 () == 1379);
 			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void handler_argument_validation (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			h.client.register_query_handler ("AddTwoNumbers", "(uu)", (arg) => {
+				uint a, b;
+				arg.get ("(uu)", out a, out b);
+				return new Variant.uint32 (a + b);
+			});
+
+			try {
+				yield h.server.query ("AddTwoNumbers", new Variant ("(uuu)", 42, 43, 44));
+				assert_not_reached ();
+			} catch (ProxyError error_a) {
+				var expected_a = new ProxyError.INVALID_QUERY ("No matching handler for AddTwoNumbers");
+				assert (error_a.code == expected_a.code);
+				assert (error_a.message == expected_a.message);
+			}
+
+			try {
+				var add_result = yield h.server.query ("AddTwoNumbers", new Variant ("(uu)", 42, 1));
+				assert (add_result.get_uint32 () == 43);
+			} catch (ProxyError eb) {
+				assert_not_reached ();
+			}
+
+			h.client.register_query_handler ("DoSomething", "", (arg) => {
+				return new Variant.boolean (true);
+			});
+
+			try {
+				yield h.server.query ("DoSomething", new Variant ("u", 3));
+				assert_not_reached ();
+			} catch (ProxyError error_b) {
+				var expected_b = new ProxyError.INVALID_QUERY ("No matching handler for DoSomething");
+				assert (error_b.code == expected_b.code);
+				assert (error_b.message == expected_b.message);
+			}
+
+			try {
+				var do_something_result = yield h.server.query ("DoSomething");
+				assert (do_something_result.get_boolean () == true);
+			} catch (ProxyError error_c) {
 				assert_not_reached ();
 			}
 
