@@ -92,12 +92,15 @@ namespace WinIpc {
 			query_handlers[id] = new QueryHandler (func, new VariantTypeSpec (argument_type));
 		}
 
-		public async Variant query (string verb, Variant? argument = null) throws ProxyError {
+		public async Variant query (string verb, Variant? argument = null, string? response_type = null) throws ProxyError {
 			try {
 				var request_id = yield send_request (verb, argument);
 				var response_value = yield receive_response (request_id);
 				if (response_value == null)
 					throw new ProxyError.INVALID_QUERY ("No matching handler for " + verb);
+				var response_spec = new VariantTypeSpec (response_type);
+				if (!response_spec.has_same_type_as (response_value))
+					throw new ProxyError.INVALID_RESPONSE ("Invalid response for " + verb);
 				return response_value;
 			} catch (IOError io_error) {
 				throw new ProxyError.IO_ERROR (io_error.message);
@@ -315,9 +318,10 @@ namespace WinIpc {
 	public errordomain ProxyError {
 		SERVER_NOT_FOUND,
 		INVALID_QUERY,
+		INVALID_RESPONSE,
 		IO_ERROR
 	}
-	
+
 	namespace MaybeVariant {
 		private Variant wrap (Variant? val) {
 			Variant variant = null;

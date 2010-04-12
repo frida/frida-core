@@ -17,11 +17,6 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/query/invalid", () => {
-			var h = new IpcHarness ((h) => Query.invalid (h));
-			h.run ();
-		});
-
 		GLib.Test.add_func ("/WinIpc/Proxy/query/simple", () => {
 			var h = new IpcHarness ((h) => Query.simple (h));
 			h.run ();
@@ -29,6 +24,16 @@ namespace Zed.Test.WinIpc {
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/with-value", () => {
 			var h = new IpcHarness ((h) => Query.with_argument (h));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/query/no-handler", () => {
+			var h = new IpcHarness ((h) => Query.no_handler (h));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/query/handler-response-validation", () => {
+			var h = new IpcHarness ((h) => Query.handler_response_validation (h));
 			h.run ();
 		});
 
@@ -89,21 +94,6 @@ namespace Zed.Test.WinIpc {
 
 	namespace Query {
 
-		private static async void invalid (IpcHarness h) {
-			yield h.establish_client_and_server ();
-
-			try {
-				yield h.client.query ("TellMeAJoke");
-				assert_not_reached ();
-			} catch (ProxyError e) {
-				var expected = new ProxyError.INVALID_QUERY ("No matching handler for TellMeAJoke");
-				assert (e.code == expected.code);
-				assert (e.message == expected.message);
-			}
-
-			h.done ();
-		}
-
 		private static async void simple (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
@@ -133,6 +123,46 @@ namespace Zed.Test.WinIpc {
 			try {
 				var result = yield h.server.query ("AddTwoNumbers", new Variant ("(uu)", 42, 1337));
 				assert (result.get_uint32 () == 1379);
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void no_handler (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			try {
+				yield h.client.query ("TellMeAJoke");
+				assert_not_reached ();
+			} catch (ProxyError e) {
+				var expected = new ProxyError.INVALID_QUERY ("No matching handler for TellMeAJoke");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+			}
+
+			h.done ();
+		}
+
+		private static async void handler_response_validation (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			h.server.register_query_handler ("TellMeAJoke", null, (arg) => {
+				return new Variant.uint32 (1337);
+			});
+
+			try {
+				yield h.client.query ("TellMeAJoke", null, "s");
+				assert_not_reached ();
+			} catch (ProxyError error_a) {
+				var expected_a = new ProxyError.INVALID_RESPONSE ("Invalid response for TellMeAJoke");
+				assert (error_a.code == expected_a.code);
+				assert (error_a.message == expected_a.message);
+			}
+
+			try {
+				yield h.client.query ("TellMeAJoke", null, "u");
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
