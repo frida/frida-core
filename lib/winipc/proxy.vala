@@ -82,15 +82,21 @@ namespace WinIpc {
 		protected void * pipe;
 
 		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
+		private ArrayList<NotifyHandler> notify_handlers = new ArrayList<NotifyHandler> ();
 
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
 		public delegate Variant? QueryHandlerFunc (Variant? argument);
+		public delegate void NotifyHandlerFunc ();
 
 		public void register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
 			assert (!query_handlers.has_key (id));
 			query_handlers[id] = new QueryHandler (func, new VariantTypeSpec (argument_type));
+		}
+
+		public void add_notify_handler (string id, Proxy.NotifyHandlerFunc func) {
+			notify_handlers.add (new NotifyHandler (id, func));
 		}
 
 		public async Variant query (string verb, Variant? argument = null, string? response_type = null) throws ProxyError {
@@ -111,6 +117,14 @@ namespace WinIpc {
 			}
 		}
 
+		public async void emit (string id) throws ProxyError {
+			try {
+				yield send_notify (id);
+			} catch (IOError io_error) {
+				throw new ProxyError.IO_ERROR (io_error.message);
+			}
+		}
+
 		protected async void process_messages () {
 			try {
 				while (pipe != null) {
@@ -123,6 +137,9 @@ namespace WinIpc {
 							break;
 						case MessageType.RESPONSE:
 							process_response (msg);
+							break;
+						case MessageType.NOTIFY:
+							process_notify (msg);
 							break;
 						default:
 							break;
@@ -166,6 +183,16 @@ namespace WinIpc {
 				pending_responses.remove (match);
 		}
 
+		private void process_notify (Variant msg) {
+			string id;
+			msg.get (NOTIFY_MESSAGE_TYPE_STRING, out id);
+
+			foreach (var handler in notify_handlers) {
+				if (handler.id == id)
+					handler.try_invoke ();
+			}
+		}
+
 		private async uint32 send_request (string verb, Variant? argument) throws IOError {
 			var id = last_request_id++;
 			var msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, id, verb, MaybeVariant.wrap (argument));
@@ -188,6 +215,11 @@ namespace WinIpc {
 			return pending.success;
 		}
 
+		private async void send_notify (string id) throws IOError {
+			var msg = new Variant (NOTIFY_MESSAGE_TYPE_STRING, id);
+			yield write_message (MessageType.NOTIFY, msg);
+		}
+
 		private async MessageType read_message (out Variant? v) throws IOError {
 			v = null;
 
@@ -203,6 +235,9 @@ namespace WinIpc {
 					break;
 				case MessageType.RESPONSE:
 					vt = RESPONSE_MESSAGE_TYPE;
+					break;
+				case MessageType.NOTIFY:
+					vt = NOTIFY_MESSAGE_TYPE;
 					break;
 				default:
 					return MessageType.INVALID;
@@ -252,6 +287,25 @@ namespace WinIpc {
 				}
 
 				response_value = func (argument);
+				return true;
+			}
+		}
+
+		private class NotifyHandler {
+			public string id {
+				get;
+				private set;
+			}
+
+			private NotifyHandlerFunc func;
+
+			public NotifyHandler (string id, NotifyHandlerFunc func) {
+				this.id = id;
+				this.func = func;
+			}
+
+			public bool try_invoke () {
+				func ();
 				return true;
 			}
 		}
@@ -310,7 +364,8 @@ namespace WinIpc {
 		private enum MessageType {
 			INVALID,
 			REQUEST,
-			RESPONSE
+			RESPONSE,
+			NOTIFY
 		}
 
 		private const string REQUEST_MESSAGE_TYPE_STRING = "(usmv)";
@@ -318,6 +373,9 @@ namespace WinIpc {
 
 		private const string RESPONSE_MESSAGE_TYPE_STRING = "(ubmv)";
 		private VariantType RESPONSE_MESSAGE_TYPE = new VariantType (RESPONSE_MESSAGE_TYPE_STRING);
+
+		private const string NOTIFY_MESSAGE_TYPE_STRING = "s";
+		private VariantType NOTIFY_MESSAGE_TYPE = new VariantType (NOTIFY_MESSAGE_TYPE_STRING);
 
 		private const uint8 MESSAGE_FIELD_ALIGNMENT = 8;
 

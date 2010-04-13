@@ -41,6 +41,11 @@ namespace Zed.Test.WinIpc {
 			var h = new IpcHarness ((h) => Query.handler_argument_validation (h));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/notify/simple", () => {
+			var h = new IpcHarness ((h) => Notify.simple (h));
+			h.run ();
+		});
 	}
 
 	namespace Establish {
@@ -239,6 +244,37 @@ namespace Zed.Test.WinIpc {
 
 	}
 
+	namespace Notify {
+
+		private static async void simple (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			bool first_handler_got_notify = false;
+			bool second_handler_got_notify = false;
+
+			h.server.add_notify_handler ("ChickenCrossedTheRoad", () => {
+				first_handler_got_notify = true;
+			});
+			h.server.add_notify_handler ("ChickenCrossedTheRoad", () => {
+				second_handler_got_notify = true;
+			});
+
+			try {
+				yield h.client.emit ("ChickenCrossedTheRoad");
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			yield h.process_events ();
+
+			assert (first_handler_got_notify);
+			assert (second_handler_got_notify);
+
+			h.done ();
+		}
+
+	}
+
 	private class IpcHarness : Object {
 		public delegate void TestSequenceFunc (IpcHarness h);
 		private TestSequenceFunc test_sequence;
@@ -291,6 +327,18 @@ namespace Zed.Test.WinIpc {
 			main_context.pop_thread_default ();
 
 			assert (!timed_out);
+		}
+
+		public async void process_events () {
+			var timeout = new TimeoutSource (100);
+			timeout.set_callback (() => {
+				process_events.callback ();
+				return false;
+			});
+			timeout.attach (main_context);
+			yield;
+
+			return;
 		}
 
 		public async void establish_client_and_server () {
