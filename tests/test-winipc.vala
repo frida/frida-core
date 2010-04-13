@@ -163,7 +163,26 @@ namespace Zed.Test.WinIpc {
 
 			try {
 				yield h.client.query ("TellMeAJoke", null, "u");
-			} catch (ProxyError e) {
+			} catch (ProxyError error_b) {
+				assert_not_reached ();
+			}
+
+			h.server.register_query_handler ("NoReturn", null, (arg) => {
+				return null;
+			});
+
+			try {
+				yield h.client.query ("TellMeAJoke", null, "");
+				assert_not_reached ();
+			} catch (ProxyError error_c) {
+				var expected_c = new ProxyError.INVALID_RESPONSE ("Invalid response for TellMeAJoke");
+				assert (error_c.code == expected_c.code);
+				assert (error_c.message == expected_c.message);
+			}
+
+			try {
+				yield h.client.query ("NoReturn", null, "");
+			} catch (ProxyError error_d) {
 				assert_not_reached ();
 			}
 

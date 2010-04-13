@@ -81,11 +81,12 @@ namespace WinIpc {
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
-		public delegate Variant QueryHandlerFunc (Variant? argument);
 		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
 
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
+
+		public delegate Variant? QueryHandlerFunc (Variant? argument);
 
 		public void register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
 			assert (!query_handlers.has_key (id));
@@ -95,12 +96,15 @@ namespace WinIpc {
 		public async Variant query (string verb, Variant? argument = null, string? response_type = null) throws ProxyError {
 			try {
 				var request_id = yield send_request (verb, argument);
-				var response_value = yield receive_response (request_id);
-				if (response_value == null)
+
+				Variant? response_value;
+				if (!yield receive_response (request_id, out response_value))
 					throw new ProxyError.INVALID_QUERY ("No matching handler for " + verb);
+
 				var response_spec = new VariantTypeSpec (response_type);
 				if (!response_spec.has_same_type_as (response_value))
 					throw new ProxyError.INVALID_RESPONSE ("Invalid response for " + verb);
+
 				return response_value;
 			} catch (IOError io_error) {
 				throw new ProxyError.IO_ERROR (io_error.message);
@@ -135,21 +139,24 @@ namespace WinIpc {
 			Variant argument_wrapper;
 			msg.get (REQUEST_MESSAGE_TYPE_STRING, out id, out verb, out argument_wrapper);
 
-			Variant val = null;
-			if (query_handlers.has_key (verb))
-				val = query_handlers[verb].try_invoke (MaybeVariant.unwrap (argument_wrapper));
-			send_response (id, val);
+			bool success = false;
+			Variant response_value = null;
+			var handler = query_handlers[verb];
+			if (handler != null)
+				success = handler.try_invoke (MaybeVariant.unwrap (argument_wrapper), out response_value);
+			send_response (id, success, response_value);
 		}
 
 		private void process_response (Variant msg) {
 			uint32 id;
-			Variant val;
-			msg.get (RESPONSE_MESSAGE_TYPE_STRING, out id, out val);
+			bool success;
+			Variant response_value;
+			msg.get (RESPONSE_MESSAGE_TYPE_STRING, out id, out success, out response_value);
 
-			PendingResponse? match = null;
+			PendingResponse match = null;
 			foreach (var p in pending_responses) {
 				if (p.id == id) {
-					p.complete (val);
+					p.complete (success, response_value);
 					match = p;
 					break;
 				}
@@ -166,18 +173,19 @@ namespace WinIpc {
 			return id;
 		}
 
-		private async uint32 send_response (uint id, Variant? val) throws IOError {
-			var msg = new Variant (RESPONSE_MESSAGE_TYPE_STRING, id, MaybeVariant.wrap (val));
+		private async uint32 send_response (uint id, bool success, Variant? val) throws IOError {
+			var msg = new Variant (RESPONSE_MESSAGE_TYPE_STRING, id, success, MaybeVariant.wrap (val));
 			yield write_message (MessageType.RESPONSE, msg);
 			return id;
 		}
 
-		private async Variant? receive_response (uint32 request_id) throws IOError {
-			var response = new PendingResponse (request_id, () => receive_response.callback ());
-			pending_responses.add (response);
+		private async bool receive_response (uint32 request_id, out Variant? response_value) throws IOError {
+			var pending = new PendingResponse (request_id, () => receive_response.callback ());
+			pending_responses.add (pending);
 			yield;
 
-			return MaybeVariant.unwrap (response.result);
+			response_value = MaybeVariant.unwrap (pending.response_value);
+			return pending.success;
 		}
 
 		private async MessageType read_message (out Variant? v) throws IOError {
@@ -237,10 +245,14 @@ namespace WinIpc {
 				this.argument_spec = argument_spec;
 			}
 
-			public Variant? try_invoke (Variant? argument) {
-				if (argument_spec.has_same_type_as (argument))
-					return func (argument);
-				return null;
+			public bool try_invoke (Variant? argument, out Variant? response_value) {
+				if (!argument_spec.has_same_type_as (argument)) {
+					response_value = null;
+					return false;
+				}
+
+				response_value = func (argument);
+				return true;
 			}
 		}
 
@@ -273,7 +285,12 @@ namespace WinIpc {
 			public delegate void CompletionHandler ();
 			private CompletionHandler handler;
 
-			public Variant result {
+			public bool success {
+				get;
+				private set;
+			}
+
+			public Variant? response_value {
 				get;
 				private set;
 			}
@@ -283,8 +300,9 @@ namespace WinIpc {
 				this.handler = handler;
 			}
 
-			public void complete (Variant result) {
-				this.result = result;
+			public void complete (bool success, Variant? response_value) {
+				this.success = success;
+				this.response_value = response_value;
 				handler ();
 			}
 		}
@@ -298,7 +316,7 @@ namespace WinIpc {
 		private const string REQUEST_MESSAGE_TYPE_STRING = "(usmv)";
 		private VariantType REQUEST_MESSAGE_TYPE = new VariantType (REQUEST_MESSAGE_TYPE_STRING);
 
-		private const string RESPONSE_MESSAGE_TYPE_STRING = "(umv)";
+		private const string RESPONSE_MESSAGE_TYPE_STRING = "(ubmv)";
 		private VariantType RESPONSE_MESSAGE_TYPE = new VariantType (RESPONSE_MESSAGE_TYPE_STRING);
 
 		private const uint8 MESSAGE_FIELD_ALIGNMENT = 8;
