@@ -81,9 +81,9 @@ namespace WinIpc {
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
+		private uint last_handler_id = 1;
 		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
 		private ArrayList<NotifyHandler> notify_handlers = new ArrayList<NotifyHandler> ();
-		private uint last_notify_handler_id = 1;
 
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
@@ -91,14 +91,31 @@ namespace WinIpc {
 		public delegate Variant? QueryHandlerFunc (Variant? argument);
 		public delegate void NotifyHandlerFunc (Variant? argument);
 
-		public void register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
+		public uint register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
 			assert (!query_handlers.has_key (id));
-			query_handlers[id] = new QueryHandler (func, new VariantTypeSpec (argument_type));
+			var handler = new QueryHandler (func, new VariantTypeSpec (argument_type));
+			handler.tag = last_handler_id++;
+			query_handlers[id] = handler;
+			return handler.tag;
+		}
+
+		public void unregister_query_handler (uint handler_tag) {
+			string matching_id = null;
+
+			foreach (var entry in query_handlers.entries) {
+				if (entry.value.tag == handler_tag) {
+					matching_id = entry.key;
+					break;
+				}
+			}
+
+			if (matching_id != null)
+				query_handlers.remove (matching_id);
 		}
 
 		public uint add_notify_handler (string id, string? argument_type, Proxy.NotifyHandlerFunc func) {
 			var handler = new NotifyHandler (id, func, new VariantTypeSpec (argument_type));
-			handler.tag = last_notify_handler_id++;
+			handler.tag = last_handler_id++;
 			notify_handlers.add (handler);
 			return handler.tag;
 		}
@@ -297,6 +314,11 @@ namespace WinIpc {
 		private class QueryHandler {
 			private QueryHandlerFunc func;
 			private VariantTypeSpec argument_spec;
+
+			public uint tag {
+				get;
+				set;
+			}
 
 			public QueryHandler (QueryHandlerFunc func, VariantTypeSpec argument_spec) {
 				this.func = func;

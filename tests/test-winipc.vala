@@ -42,6 +42,11 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/WinIpc/Proxy/query/unregister-handler", () => {
+			var h = new IpcHarness ((h) => Query.unregister_handler (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/WinIpc/Proxy/notify/simple", () => {
 			var h = new IpcHarness ((h) => Notify.simple (h));
 			h.run ();
@@ -52,8 +57,8 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/notify/add-remove-handler", () => {
-			var h = new IpcHarness ((h) => Notify.add_remove_handler (h));
+		GLib.Test.add_func ("/WinIpc/Proxy/notify/remove-handler", () => {
+			var h = new IpcHarness ((h) => Notify.remove_handler (h));
 			h.run ();
 		});
 	}
@@ -252,6 +257,26 @@ namespace Zed.Test.WinIpc {
 			h.done ();
 		}
 
+		private static async void unregister_handler (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			var handler_tag = h.server.register_query_handler ("TellMeAJoke", null, (arg) => {
+				return new Variant.string ("Nah");
+			});
+			h.server.unregister_query_handler (handler_tag);
+
+			try {
+				yield h.client.query ("TellMeAJoke");
+				assert_not_reached ();
+			} catch (ProxyError e) {
+				var expected = new ProxyError.INVALID_QUERY ("No matching handler for TellMeAJoke");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+			}
+
+			h.done ();
+		}
+
 	}
 
 	namespace Notify {
@@ -322,7 +347,7 @@ namespace Zed.Test.WinIpc {
 			h.done ();
 		}
 
-		private static async void add_remove_handler (IpcHarness h) {
+		private static async void remove_handler (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
 			bool handler_got_notify = false;
