@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!DOCTYPE glade-interface SYSTEM "glade-2.0.dtd">
-<!--Generated with glade3 3.4.3 on Thu Apr 01 20:41:51 2010 -->
+<!--Generated with glade3 3.4.3 on Sun Apr 18 19:53:33 2010 -->
 <glade-interface>
   <widget class="GtkWindow" id="window">
     <child>
@@ -41,6 +41,7 @@
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                     <property name="editable">False</property>
+                    <property name="wrap_mode">GTK_WRAP_WORD</property>
                     <property name="cursor_visible">False</property>
                   </widget>
                 </child>

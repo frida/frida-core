@@ -38,6 +38,7 @@ namespace Zed.Data.Ui {
 									"<property name=\"visible\">True</property>" +
 									"<property name=\"can_focus\">True</property>" +
 									"<property name=\"editable\">False</property>" +
+									"<property name=\"wrap_mode\">GTK_WRAP_WORD</property>" +
 									"<property name=\"cursor_visible\">False</property>" +
 								"</object>" +
 							"</child>" +
