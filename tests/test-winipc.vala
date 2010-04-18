@@ -46,6 +46,11 @@ namespace Zed.Test.WinIpc {
 			var h = new IpcHarness ((h) => Notify.simple (h));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/notify/with-argument", () => {
+			var h = new IpcHarness ((h) => Notify.with_argument (h));
+			h.run ();
+		});
 	}
 
 	namespace Establish {
@@ -252,23 +257,62 @@ namespace Zed.Test.WinIpc {
 			bool first_handler_got_notify = false;
 			bool second_handler_got_notify = false;
 
-			h.server.add_notify_handler ("ChickenCrossedTheRoad", () => {
+			h.server.add_notify_handler ("ChickenCrossedTheRoad", null, (arg) => {
 				first_handler_got_notify = true;
 			});
-			h.server.add_notify_handler ("ChickenCrossedTheRoad", () => {
+			h.server.add_notify_handler ("ChickenCrossedTheRoad", null, (arg) => {
 				second_handler_got_notify = true;
 			});
 
 			try {
 				yield h.client.emit ("ChickenCrossedTheRoad");
+				yield h.process_events ();
+				assert (first_handler_got_notify);
+				assert (second_handler_got_notify);
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
 
-			yield h.process_events ();
+			h.done ();
+		}
 
-			assert (first_handler_got_notify);
-			assert (second_handler_got_notify);
+		private static async void with_argument (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			bool first_handler_got_notify = false;
+			bool second_handler_got_notify = false;
+
+			h.server.add_notify_handler ("VolcanoAlert", "u", (arg) => {
+				assert (arg.get_uint32 () == 3);
+				first_handler_got_notify = true;
+			});
+			h.server.add_notify_handler ("VolcanoAlert", "s", (arg) => {
+				assert (arg.get_string () == "yay");
+				second_handler_got_notify = true;
+			});
+
+			try {
+				yield h.client.emit ("VolcanoAlert", new Variant ("u", 3));
+				yield h.process_events ();
+				assert (first_handler_got_notify);
+				assert (!second_handler_got_notify);
+
+				first_handler_got_notify = false;
+
+				yield h.client.emit ("VolcanoAlert", new Variant ("s", "yay"));
+				yield h.process_events ();
+				assert (!first_handler_got_notify);
+				assert (second_handler_got_notify);
+
+				second_handler_got_notify = false;
+
+				yield h.client.emit ("VolcanoAlert", new Variant ("b", true));
+				yield h.process_events ();
+				assert (!first_handler_got_notify);
+				assert (!second_handler_got_notify);
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
 
 			h.done ();
 		}
@@ -330,7 +374,7 @@ namespace Zed.Test.WinIpc {
 		}
 
 		public async void process_events () {
-			var timeout = new TimeoutSource (100);
+			var timeout = new TimeoutSource (10);
 			timeout.set_callback (() => {
 				process_events.callback ();
 				return false;

@@ -88,15 +88,15 @@ namespace WinIpc {
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
 		public delegate Variant? QueryHandlerFunc (Variant? argument);
-		public delegate void NotifyHandlerFunc ();
+		public delegate void NotifyHandlerFunc (Variant? argument);
 
 		public void register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
 			assert (!query_handlers.has_key (id));
 			query_handlers[id] = new QueryHandler (func, new VariantTypeSpec (argument_type));
 		}
 
-		public void add_notify_handler (string id, Proxy.NotifyHandlerFunc func) {
-			notify_handlers.add (new NotifyHandler (id, func));
+		public void add_notify_handler (string id, string? argument_type, Proxy.NotifyHandlerFunc func) {
+			notify_handlers.add (new NotifyHandler (id, func, new VariantTypeSpec (argument_type)));
 		}
 
 		public async Variant query (string verb, Variant? argument = null, string? response_type = null) throws ProxyError {
@@ -117,9 +117,9 @@ namespace WinIpc {
 			}
 		}
 
-		public async void emit (string id) throws ProxyError {
+		public async void emit (string id, Variant? argument = null) throws ProxyError {
 			try {
-				yield send_notify (id);
+				yield send_notify (id, argument);
 			} catch (IOError io_error) {
 				throw new ProxyError.IO_ERROR (io_error.message);
 			}
@@ -185,11 +185,13 @@ namespace WinIpc {
 
 		private void process_notify (Variant msg) {
 			string id;
-			msg.get (NOTIFY_MESSAGE_TYPE_STRING, out id);
+			Variant argument_wrapper, argument;
+			msg.get (NOTIFY_MESSAGE_TYPE_STRING, out id, out argument_wrapper);
+			argument = MaybeVariant.unwrap (argument_wrapper);
 
 			foreach (var handler in notify_handlers) {
 				if (handler.id == id)
-					handler.try_invoke ();
+					handler.try_invoke (argument);
 			}
 		}
 
@@ -215,8 +217,8 @@ namespace WinIpc {
 			return pending.success;
 		}
 
-		private async void send_notify (string id) throws IOError {
-			var msg = new Variant (NOTIFY_MESSAGE_TYPE_STRING, id);
+		private async void send_notify (string id, Variant? argument) throws IOError {
+			var msg = new Variant (NOTIFY_MESSAGE_TYPE_STRING, id, MaybeVariant.wrap (argument));
 			yield write_message (MessageType.NOTIFY, msg);
 		}
 
@@ -298,14 +300,19 @@ namespace WinIpc {
 			}
 
 			private NotifyHandlerFunc func;
+			private VariantTypeSpec argument_spec;
 
-			public NotifyHandler (string id, NotifyHandlerFunc func) {
+			public NotifyHandler (string id, NotifyHandlerFunc func, VariantTypeSpec argument_spec) {
 				this.id = id;
 				this.func = func;
+				this.argument_spec = argument_spec;
 			}
 
-			public bool try_invoke () {
-				func ();
+			public bool try_invoke (Variant? argument) {
+				if (!argument_spec.has_same_type_as (argument))
+					return false;
+
+				func (argument);
 				return true;
 			}
 		}
@@ -374,7 +381,7 @@ namespace WinIpc {
 		private const string RESPONSE_MESSAGE_TYPE_STRING = "(ubmv)";
 		private VariantType RESPONSE_MESSAGE_TYPE = new VariantType (RESPONSE_MESSAGE_TYPE_STRING);
 
-		private const string NOTIFY_MESSAGE_TYPE_STRING = "s";
+		private const string NOTIFY_MESSAGE_TYPE_STRING = "(smv)";
 		private VariantType NOTIFY_MESSAGE_TYPE = new VariantType (NOTIFY_MESSAGE_TYPE_STRING);
 
 		private const uint8 MESSAGE_FIELD_ALIGNMENT = 8;
