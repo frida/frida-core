@@ -1,0 +1,187 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}</ProjectGuid>
+    <RootNamespace>zed</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AllRules.ruleset</CodeAnalysisRuleSet>
+    <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
+    <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
+    <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AllRules.ruleset</CodeAnalysisRuleSet>
+    <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
+    <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
+    <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AllRules.ruleset</CodeAnalysisRuleSet>
+    <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" />
+    <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" />
+    <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AllRules.ruleset</CodeAnalysisRuleSet>
+    <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
+    <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="src\configuration.vala" />
+    <CustomBuild Include="src\zed.vala">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+mkdir "$(IntDir)src\platform" 2&gt;NUL
+mkdir "$(IntDir)src\protocol" 2&gt;NUL
+mkdir "$(IntDir)src\service" 2&gt;NUL
+mkdir "$(IntDir)src\ui" 2&gt;NUL
+"$(SolutionDir)ext\sdk\vala\valac.exe" data/ui.vala src/configuration.vala src/zed.vala src/platform/process.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/winjector.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\platform\process.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+mkdir "$(IntDir)src\platform" 2&gt;NUL
+mkdir "$(IntDir)src\protocol" 2&gt;NUL
+mkdir "$(IntDir)src\service" 2&gt;NUL
+mkdir "$(IntDir)src\ui" 2&gt;NUL
+"$(SolutionDir)ext\sdk\vala\valac.exe" data/ui.vala src/configuration.vala src/zed.vala src/platform/process.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/winjector.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\platform\process.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+mkdir "$(IntDir)src\platform" 2&gt;NUL
+mkdir "$(IntDir)src\protocol" 2&gt;NUL
+mkdir "$(IntDir)src\service" 2&gt;NUL
+mkdir "$(IntDir)src\ui" 2&gt;NUL
+"$(SolutionDir)ext\sdk\vala\valac.exe" data/ui.vala src/configuration.vala src/zed.vala src/platform/process.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/winjector.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\platform\process.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+mkdir "$(IntDir)src\platform" 2&gt;NUL
+mkdir "$(IntDir)src\protocol" 2&gt;NUL
+mkdir "$(IntDir)src\service" 2&gt;NUL
+mkdir "$(IntDir)src\ui" 2&gt;NUL
+"$(SolutionDir)ext\sdk\vala\valac.exe" data/ui.vala src/configuration.vala src/zed.vala src/platform/process.vala src/protocol/jid.vala src/service/base-service.vala src/service/muc-service.vala src/service/winjector.vala src/service/xmpp-client.vala src/ui/chat.vala src/ui/root.vala src/ui/login.vala src/ui/workspace.vala --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\platform\process.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+    </CustomBuild>
+    <None Include="src\ui\chat.vala" />
+    <None Include="src\ui\login.vala" />
+    <None Include="src\ui\root.vala" />
+    <None Include="src\ui\workspace.vala" />
+    <None Include="data\ui.vala" />
+    <None Include="src\service\base-service.vala" />
+    <None Include="src\service\muc-service.vala" />
+    <None Include="src\service\winjector.vala" />
+    <None Include="src\service\xmpp-client.vala" />
+    <None Include="src\platform\process.vala" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(IntDir)src\configuration.c" />
+    <ClCompile Include="$(IntDir)src\zed.c" />
+    <ClCompile Include="$(IntDir)src\protocol\jid.c" />
+    <ClCompile Include="$(IntDir)src\service\base-service.c" />
+    <ClCompile Include="$(IntDir)src\service\muc-service.c" />
+    <ClCompile Include="$(IntDir)src\service\winjector.c">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\xmpp-client.c" />
+    <ClCompile Include="$(IntDir)src\ui\chat.c" />
+    <ClCompile Include="$(IntDir)src\ui\login.c" />
+    <ClCompile Include="$(IntDir)src\ui\root.c" />
+    <ClCompile Include="$(IntDir)src\ui\workspace.c" />
+    <ClCompile Include="$(IntDir)src\platform\process.c" />
+    <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.c" />
+    <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.c" />
+    <ClCompile Include="src\service\winjector-impl.c" />
+    <ClCompile Include="src\platform\process-windows.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="src\service\winjector-helper-32.vcxproj">
+      <Project>{e0ac03f2-f077-4ba7-88dd-bbe95b4e4ef0}</Project>
+      <Private>false</Private>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
+    <ProjectReference Include="src\service\winjector-helper-64.vcxproj">
+      <Project>{037e8466-f87b-486d-b6ad-fecb5740ce2c}</Project>
+      <Private>false</Private>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

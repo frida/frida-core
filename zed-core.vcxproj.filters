@@ -1,0 +1,137 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Source Files\generated">
+      <UniqueIdentifier>{5871a71e-92fa-44a7-847f-91d4ad19deb0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\protocol">
+      <UniqueIdentifier>{4415871d-d47f-4fa8-adba-891ff9d5fecf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\service">
+      <UniqueIdentifier>{eef66507-e4a8-4117-87d0-a5b24833ddba}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\ui">
+      <UniqueIdentifier>{394013f3-0361-4c2c-837e-410759bdbb71}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\platform">
+      <UniqueIdentifier>{4ece6e13-c0b5-4fe7-9708-721f1c697046}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ui">
+      <UniqueIdentifier>{02e977b4-f92d-4c38-b3eb-4862d982f3d7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\data">
+      <UniqueIdentifier>{8aa0b59d-9494-42bf-a489-380d7eb50852}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\data\generated">
+      <UniqueIdentifier>{224835d5-de61-4854-8f2a-7f0fff7b8151}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\service">
+      <UniqueIdentifier>{b6dfc63e-558b-4086-bdb4-0478fe64c3be}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\platform">
+      <UniqueIdentifier>{ea140c72-350e-4cd8-9c8b-d9dead77f92c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\configuration.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\ui\chat.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\login.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\root.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\workspace.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="data\ui.vala">
+      <Filter>Source Files\data</Filter>
+    </None>
+    <None Include="src\service\base-service.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
+    <None Include="src\service\muc-service.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
+    <None Include="src\service\winjector.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
+    <None Include="src\service\xmpp-client.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
+    <None Include="src\platform\process.vala">
+      <Filter>Source Files\platform</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(IntDir)src\configuration.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\zed.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\protocol\jid.c">
+      <Filter>Source Files\generated\protocol</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\base-service.c">
+      <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\muc-service.c">
+      <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\winjector.c">
+      <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
+      <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\chat.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\login.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\root.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\workspace.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\platform\process.c">
+      <Filter>Source Files\generated\platform</Filter>
+    </ClCompile>
+    <ClCompile Include="src\service\winjector-impl.c">
+      <Filter>Source Files\service</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform\process-windows.c">
+      <Filter>Source Files\platform</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.c">
+      <Filter>Source Files\data\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.c">
+      <Filter>Source Files\data\generated</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="src\zed.vala">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+  </ItemGroup>
+</Project>

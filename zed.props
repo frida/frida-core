@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
+    <OutDir>$(SolutionDir)bin\$(PlatformName)-$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)obj\$(PlatformName)-$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\atk-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\pango-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\cairo;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <WarningLevel>Level4</WarningLevel>
+      <DisableSpecificWarnings>4055;4100;4127;4152;4702;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>atk-1.0.lib;cairo.lib;crypto.lib;gdk-win32-2.0.lib;gdk_pixbuf-2.0.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;gtk-win32-2.0.lib;intl.lib;pango-1.0.lib;pangocairo-1.0.lib;pangowin32-1.0.lib;pixman-1.lib;ssl.lib;wocky.lib;xml2.lib;z.lib;dnsapi.lib;imm32.lib;msimg32.lib;psapi.lib;shlwapi.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <PropertyGroup Label="Configuration">
+    <BuildLogFile>$(IntDir)BuildLog.htm</BuildLogFile>
+  </PropertyGroup>
+</Project>
