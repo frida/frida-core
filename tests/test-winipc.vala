@@ -51,6 +51,11 @@ namespace Zed.Test.WinIpc {
 			var h = new IpcHarness ((h) => Notify.with_argument (h));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/notify/add-remove-handler", () => {
+			var h = new IpcHarness ((h) => Notify.add_remove_handler (h));
+			h.run ();
+		});
 	}
 
 	namespace Establish {
@@ -310,6 +315,33 @@ namespace Zed.Test.WinIpc {
 				yield h.process_events ();
 				assert (!first_handler_got_notify);
 				assert (!second_handler_got_notify);
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void add_remove_handler (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			bool handler_got_notify = false;
+
+			var handler_tag = h.server.add_notify_handler ("Yikes", null, (arg) => {
+				handler_got_notify = true;
+			});
+
+			try {
+				yield h.client.emit ("Yikes");
+				yield h.process_events ();
+				assert (handler_got_notify);
+
+				h.server.remove_notify_handler (handler_tag);
+				handler_got_notify = false;
+
+				yield h.client.emit ("Yikes");
+				yield h.process_events ();
+				assert (!handler_got_notify);
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}

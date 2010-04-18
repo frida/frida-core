@@ -83,6 +83,7 @@ namespace WinIpc {
 
 		private HashMap<string, QueryHandler> query_handlers = new HashMap<string, QueryHandler> ();
 		private ArrayList<NotifyHandler> notify_handlers = new ArrayList<NotifyHandler> ();
+		private uint last_notify_handler_id = 1;
 
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
@@ -95,8 +96,28 @@ namespace WinIpc {
 			query_handlers[id] = new QueryHandler (func, new VariantTypeSpec (argument_type));
 		}
 
-		public void add_notify_handler (string id, string? argument_type, Proxy.NotifyHandlerFunc func) {
-			notify_handlers.add (new NotifyHandler (id, func, new VariantTypeSpec (argument_type)));
+		public uint add_notify_handler (string id, string? argument_type, Proxy.NotifyHandlerFunc func) {
+			var handler = new NotifyHandler (id, func, new VariantTypeSpec (argument_type));
+			handler.tag = last_notify_handler_id++;
+			notify_handlers.add (handler);
+			return handler.tag;
+		}
+
+		public void remove_notify_handler (uint handler_tag) {
+			int matching_index = -1;
+
+			int i = 0;
+			foreach (var handler in notify_handlers) {
+				if (handler.tag == handler_tag) {
+					matching_index = i;
+					break;
+				}
+
+				i++;
+			}
+
+			if (matching_index != -1)
+				notify_handlers.remove_at (matching_index);
 		}
 
 		public async Variant query (string verb, Variant? argument = null, string? response_type = null) throws ProxyError {
@@ -301,6 +322,11 @@ namespace WinIpc {
 
 			private NotifyHandlerFunc func;
 			private VariantTypeSpec argument_spec;
+
+			public uint tag {
+				get;
+				set;
+			}
 
 			public NotifyHandler (string id, NotifyHandlerFunc func, VariantTypeSpec argument_spec) {
 				this.id = id;
