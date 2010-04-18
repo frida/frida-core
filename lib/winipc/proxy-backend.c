@@ -16,6 +16,15 @@ static void win_ipc_proxy_wait_for_operation_co (
 #define PIPE_BUFSIZE 4096
 #define PIPE_TIMEOUT 5000
 
+typedef struct _WinIpcPipeOverlapped WinIpcPipeOverlapped;
+
+struct _WinIpcPipeOverlapped
+{
+  OVERLAPPED parent;
+
+  WinIpcPipeOperation * operation;
+};
+
 static gboolean win_ipc_proxy_handle_message (const char * message,
     void * user_data);
 
@@ -273,15 +282,6 @@ win_ipc_proxy_wait_satisfied (gpointer data)
 
   return FALSE;
 }
-
-typedef struct _WinIpcPipeOverlapped WinIpcPipeOverlapped;
-
-struct _WinIpcPipeOverlapped
-{
-  OVERLAPPED parent;
-
-  WinIpcPipeOperation * operation;
-};
 
 WinIpcPipeOperation *
 win_ipc_pipe_operation_from_overlapped (void * overlapped)

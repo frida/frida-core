@@ -18,14 +18,14 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="proxy-impl.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="wait-handle-source.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\obj\Win32-Debug\zed-winipc\proxy.c">
       <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="proxy-backend.c">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

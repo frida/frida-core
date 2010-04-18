@@ -84,7 +84,7 @@
   <ItemDefinitionGroup>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="proxy-impl.c" />
+    <ClCompile Include="proxy-backend.c" />
     <ClCompile Include="wait-handle-source.c" />
     <ClCompile Include="..\..\obj\Win32-Debug\zed-winipc\proxy.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
