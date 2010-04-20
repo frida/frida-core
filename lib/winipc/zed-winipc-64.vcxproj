@@ -11,18 +11,19 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{037E8466-F87B-486D-B6AD-FECB5740CE2C}</ProjectGuid>
+    <ProjectGuid>{90B16D19-1102-4AED-8452-F8DFBF59EA52}</ProjectGuid>
     <RootNamespace>zed</RootNamespace>
     <Keyword>Win32Proj</Keyword>
+    <ProjectName>zed-winipc-64</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -48,55 +49,13 @@
     <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
     <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <PostBuildEvent>
-      <Command>set PATH=$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;%PATH%
-resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-64.c" "$(TargetPath)"</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>Serializing $(TargetFileName)</Message>
-    </PostBuildEvent>
-    <Link>
-      <TargetMachine>MachineX64</TargetMachine>
-    </Link>
-    <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-    </ClCompile>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <PostBuildEvent>
-      <Command>set PATH=$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;%PATH%
-resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-64.c" "$(TargetPath)"</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>Serializing $(TargetFileName)</Message>
-    </PostBuildEvent>
-    <Link>
-      <TargetMachine>MachineX64</TargetMachine>
-    </Link>
-    <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-    </ClCompile>
-  </ItemDefinitionGroup>
+  <Import Project="zed-winipc-common.props" />
   <ItemGroup>
-    <ProjectReference Include="..\..\lib\winipc\zed-winipc-64.vcxproj">
-      <Project>{90b16d19-1102-4aed-8452-f8dfbf59ea52}</Project>
-      <Private>false</Private>
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <LinkLibraryDependencies>true</LinkLibraryDependencies>
-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
-    </ProjectReference>
-    <ProjectReference Include="..\..\tools\resource-compiler.vcxproj">
-      <Project>{81b3e411-8676-41eb-84c6-1e5307f0c5ff}</Project>
-      <Private>false</Private>
+    <ProjectReference Include="..\..\ext\sdk.vcxproj">
+      <Project>{4afce7c4-6d9a-4663-b43c-d2e518486910}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <LinkLibraryDependencies>false</LinkLibraryDependencies>
-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
   </ItemGroup>
-  <Import Project="winjector-helper-common.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

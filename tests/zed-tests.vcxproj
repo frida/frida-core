@@ -83,38 +83,46 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-winipc-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-winipc-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-winipc-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-winipc-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -124,35 +132,29 @@
       <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="..\lib\winipc\zed-winipc.vcxproj">
-      <Project>{ab1784e5-24ce-4cfc-a6c3-1e2c092b8cdc}</Project>
-      <Private>false</Private>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="test-main.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe" test-main.vala test-winipc.vala test-winjector.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-core" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --pkg=gee-1.0 --pkg=gtk+-2.0 --pkg=wocky-0.0 --pkg=zed-core --pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;%(AdditionalInputs)</AdditionalInputs>

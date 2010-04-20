@@ -6,7 +6,7 @@
       <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
     <Filter Include="Source Files\generated">
-      <UniqueIdentifier>{52c7c2e6-4d9b-41d4-ad14-b5c2bc6f5da9}</UniqueIdentifier>
+      <UniqueIdentifier>{ad076be0-689d-4276-ab89-fac7f02174ec}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
@@ -21,7 +21,7 @@
     <ClCompile Include="wait-handle-source.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\obj\Win32-Debug\zed-winipc\proxy.c">
+    <ClCompile Include="$(IntDir)proxy.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="proxy-backend.c">
