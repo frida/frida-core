@@ -2,10 +2,8 @@
 #include <windows.h>
 #include <psapi.h>
 
-/* TODO: move this code to the test harness, turned out to be a bad idea */
-
 char *
-zed_platform_process_backend_filename_of (void * handle)
+zed_test_process_backend_filename_of (void * handle)
 {
   WCHAR filename_utf16[MAX_PATH + 1];
 
@@ -15,19 +13,19 @@ zed_platform_process_backend_filename_of (void * handle)
 }
 
 void *
-zed_platform_process_backend_self_handle (void)
+zed_test_process_backend_self_handle (void)
 {
   return GetCurrentProcess ();
 }
 
 glong
-zed_platform_process_backend_self_id (void)
+zed_test_process_backend_self_id (void)
 {
   return GetCurrentProcessId ();
 }
 
 gboolean
-zed_platform_process_backend_do_start (const char * filename,
+zed_test_process_backend_do_start (const char * filename,
     void ** handle, glong * id)
 {
   LPWSTR filename_utf16;
@@ -57,7 +55,7 @@ zed_platform_process_backend_do_start (const char * filename,
 }
 
 glong
-zed_platform_process_backend_do_join (void * handle)
+zed_test_process_backend_do_join (void * handle)
 {
   DWORD exit_code;
 

@@ -1,43 +1,108 @@
+using Zed.Service;
+
 namespace Winjector {
-	public class ServiceManager : Object {
-		private WinIpc.ClientProxy master;
-		private string helper32_address;
-		private string helper64_address;
+	public int main (string[] args) {
+		HelperMode mode = HelperMode.SERVICE;
 
-		public ServiceManager (string master_address, string helper32_address, string helper64_address) {
-			master = new WinIpc.ClientProxy (master_address);
-
-			this.helper32_address = helper32_address;
-			this.helper64_address = helper64_address;
+		if (args.length > 1) {
+			var mode_str = args[1].up ();
+			switch (mode_str) {
+				case "MANAGER":	    mode = HelperMode.MANAGER;	  break;
+				case "STANDALONE":  mode = HelperMode.STANDALONE; break;
+				case "SERVICE":	    mode = HelperMode.SERVICE;	  break;
+				default:					  return 1;
+			}
 		}
 
-		public void run () {
+		if (mode == HelperMode.MANAGER) {
+			if (args.length != 3)
+				return 1;
+			var parent_address = args[2];
+
+			var manager = new Winjector.Manager (parent_address);
+			var result = manager.run ();
+			if (result != 0)
+				Thread.usleep (60 * 1000000);
+			return result;
 		}
-	}
 
-	public class Service : Object {
-		public void run () {
-		}
-	}
-}
-
-int main (string[] args) {
-	if (args.length > 1) {
-		if (args.length != 4)
-			return 1;
-
-		var master_address = args[1];
-		var helper32_address = args[2];
-		var helper64_address = args[3];
-
-		var manager = new Winjector.ServiceManager (master_address, helper32_address, helper64_address);
-		manager.run ();
+		var service = new Winjector.Service ();
+		if (mode == HelperMode.STANDALONE)
+			service.run_standalone ();
+		else
+			service.run_service ();
+		Thread.usleep (60 * 1000000);
 
 		return 0;
 	}
 
-	var service = new Winjector.Service ();
-	service.run ();
+	public enum HelperMode {
+		MANAGER,
+		STANDALONE,
+		SERVICE
+	}
 
-	return 0;
+	public class Manager : Object {
+		private MainLoop loop = new MainLoop ();
+		private int run_result = 0;
+
+		private WinIpc.ClientProxy proxy;
+
+		private const string INJECT_SIGNATURE = "(us)";
+
+		public Manager (string parent_address) {
+			proxy = new WinIpc.ClientProxy (parent_address);
+			proxy.register_query_handler ("Inject", INJECT_SIGNATURE, (arg) => {
+				uint32 process_id;
+				string dll_path;
+				arg.get (INJECT_SIGNATURE, out process_id, out dll_path);
+
+				bool success = true;
+				uint32 error_code = 0;
+				string error_message = "";
+
+				try {
+					inject (process_id, dll_path);
+				} catch (WinjectorError e) {
+					success = false;
+					error_code = e.code;
+					error_message = e.message;
+				}
+
+				return new Variant ("(bus)", success, error_code, error_message);
+			});
+		}
+
+		public int run () {
+			Idle.add (() => {
+				establish ();
+				return false;
+			});
+			loop.run ();
+			return run_result;
+		}
+
+		private async void establish () {
+			try {
+				yield proxy.establish ();
+			} catch (WinIpc.ProxyError e) {
+				stderr.printf ("establish failed: %s\n", e.message);
+				run_result = 1;
+				loop.quit ();
+			}
+		}
+
+		private void inject (uint32 process_id, string dll_path) throws WinjectorError {
+			stdout.printf ("inject(process_id=%u, dll_path='%s')\n", process_id, dll_path);
+			throw new WinjectorError.PERMISSION_DENIED ("yo mama");
+		}
+	}
+
+	public class Service : Object {
+		public void run_standalone () {
+		}
+
+		public void run_service () {
+		}
+	}
 }

@@ -17,9 +17,6 @@
     <Filter Include="Source Files\generated\ui">
       <UniqueIdentifier>{394013f3-0361-4c2c-837e-410759bdbb71}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\platform">
-      <UniqueIdentifier>{4ece6e13-c0b5-4fe7-9708-721f1c697046}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\ui">
       <UniqueIdentifier>{02e977b4-f92d-4c38-b3eb-4862d982f3d7}</UniqueIdentifier>
     </Filter>
@@ -31,9 +28,6 @@
     </Filter>
     <Filter Include="Source Files\service">
       <UniqueIdentifier>{b6dfc63e-558b-4086-bdb4-0478fe64c3be}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\platform">
-      <UniqueIdentifier>{ea140c72-350e-4cd8-9c8b-d9dead77f92c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
@@ -75,9 +69,6 @@
     <None Include="src\service\xmpp-client.vala">
       <Filter>Source Files\service</Filter>
     </None>
-    <None Include="src\platform\process.vala">
-      <Filter>Source Files\platform</Filter>
-    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -113,20 +104,17 @@
     <ClCompile Include="$(IntDir)src\ui\workspace.c">
       <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\platform\process.c">
-      <Filter>Source Files\generated\platform</Filter>
-    </ClCompile>
     <ClCompile Include="src\service\winjector-impl.c">
       <Filter>Source Files\service</Filter>
-    </ClCompile>
-    <ClCompile Include="src\platform\process-windows.c">
-      <Filter>Source Files\platform</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.c">
       <Filter>Source Files\data\generated</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.c">
       <Filter>Source Files\data\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\winjector-error.c">
+      <Filter>Source Files\generated\service</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

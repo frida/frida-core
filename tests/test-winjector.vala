@@ -1,6 +1,6 @@
 namespace Zed.Test.Winjector {
 	public static void add_tests () {
-		GLib.Test.add_func ("/winjector/inject-x86", () => {
+		GLib.Test.add_func ("/Winjector/inject-x86", () => {
 			var rat = new LabRat ("winvictim-busy32");
 			Thread.usleep (10000); /* give it 10 ms to settle */
 			rat.inject ("winattacker32");
@@ -10,7 +10,7 @@ namespace Zed.Test.Winjector {
 	}
 
 	private class LabRat {
-		public Platform.Process process {
+		public Process process {
 			get;
 			private set;
 		}
@@ -18,12 +18,13 @@ namespace Zed.Test.Winjector {
 		private string rat_directory;
 
 		public LabRat (string name) {
-			var self_filename = Platform.Process.current.filename;
-			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename))),
+			var self_filename = Process.current.filename;
+			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename)))),
 				"tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			process = Platform.Process.start (rat_file);
+			print ("starting %s\n", rat_file);
+			process = Process.start (rat_file);
 		}
 
 		public void inject (string name) {
@@ -39,7 +40,7 @@ namespace Zed.Test.Winjector {
 			var injector = new Service.Winjector ();
 			var rat_file = Path.build_filename (rat_directory, name + ".dll");
 			try {
-				yield injector.inject_async (rat_file, process.id);
+				yield injector.inject ((uint32) process.id, rat_file);
 			} catch (Service.WinjectorError e) {
 				assert_not_reached ();
 			}

@@ -27,6 +27,9 @@
     <None Include="test-winjector.vala">
       <Filter>Tests</Filter>
     </None>
+    <None Include="process.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)test-main.c">
@@ -36,6 +39,12 @@
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)test-winjector.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="process-windows.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)process.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
