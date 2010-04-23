@@ -26,6 +26,9 @@
     <ClCompile Include="$(IntDir)winjector-helper.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)winjector-error.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">

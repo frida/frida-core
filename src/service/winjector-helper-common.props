@@ -27,6 +27,8 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
   <ItemGroup>
     <ClCompile Include="$(IntDir)winjector-helper.c" />
     <ClCompile Include="$(IntDir)winjector-error.c" />
+
+    <ClCompile Include="winjector-helper-services.c" />
   </ItemGroup>
 
 </Project>

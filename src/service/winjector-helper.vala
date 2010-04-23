@@ -74,11 +74,16 @@ namespace Winjector {
 		}
 
 		public int run () {
+			var ctx = start_services (Service.derive_basename ());
+
 			Idle.add (() => {
 				establish ();
 				return false;
 			});
 			loop.run ();
+
+			stop_services (ctx);
+
 			return run_result;
 		}
 
@@ -96,6 +101,9 @@ namespace Winjector {
 			stdout.printf ("inject(process_id=%u, dll_path='%s')\n", process_id, dll_path);
 			throw new WinjectorError.PERMISSION_DENIED ("yo mama");
 		}
+
+		private static extern void * start_services (string service_basename);
+		private static extern void stop_services (void * context);
 	}
 
 	public class Service : Object {
@@ -104,5 +112,8 @@ namespace Winjector {
 
 		public void run_service () {
 		}
+
+		public static extern string derive_basename ();
+		public static extern string derive_filename (string suffix);
 	}
 }
