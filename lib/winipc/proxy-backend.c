@@ -33,6 +33,7 @@ static void CALLBACK win_ipc_proxy_read_completed (DWORD os_error,
 static void CALLBACK win_ipc_proxy_write_completed (DWORD os_error,
     DWORD bytes_transferred, OVERLAPPED * overlapped);
 static gboolean win_ipc_proxy_wait_satisfied (gpointer data);
+static gboolean win_ipc_proxy_wait_timed_out (gpointer data);
 
 static void complete_async_result_from_os_error (GSimpleAsyncResult * res,
     DWORD os_error, WinIpcPipeOperation * op);
@@ -256,29 +257,81 @@ win_ipc_proxy_write_completed (DWORD os_error, DWORD bytes_transferred,
   win_ipc_pipe_operation_unref (op);
 }
 
+typedef struct _WinIpcProxyWaitContext WinIpcProxyWaitContext;
+
+struct _WinIpcProxyWaitContext
+{
+  WinIpcProxyWaitForOperationData * data;
+  GSource * wait_source;
+  GSource * timeout_source;
+};
+
 static void
 win_ipc_proxy_wait_for_operation_co (WinIpcProxyWaitForOperationData * data)
 {
+  WinIpcProxyWaitContext * ctx;
   HANDLE wait_handle;
   GSource * source;
 
+  ctx = g_new0 (WinIpcProxyWaitContext, 1);
+  ctx->data = data;
+
   wait_handle = win_ipc_pipe_operation_get_wait_handle (data->op);
-  source = win_ipc_wait_handle_source_new (wait_handle);
-  g_source_set_callback (source,
-      (GSourceFunc) win_ipc_proxy_wait_satisfied, data, NULL);
+  ctx->wait_source = source = win_ipc_wait_handle_source_new (wait_handle);
+  g_source_set_callback (source, win_ipc_proxy_wait_satisfied, ctx, NULL);
   g_source_attach (source, g_main_context_get_thread_default ());
-  g_source_unref (source);
+
+  if (data->timeout_msec != 0)
+  {
+    ctx->timeout_source = source = g_timeout_source_new (data->timeout_msec);
+    g_source_set_callback (source, win_ipc_proxy_wait_timed_out, ctx, NULL);
+    g_source_attach (source, g_main_context_get_thread_default ());
+  }
+}
+
+static void
+win_ipc_proxy_wait_context_free (WinIpcProxyWaitContext * ctx)
+{
+  g_source_unref (ctx->wait_source);
+  if (ctx->timeout_source != NULL)
+    g_source_unref (ctx->timeout_source);
+  g_free (ctx);
 }
 
 static gboolean
 win_ipc_proxy_wait_satisfied (gpointer data)
 {
-  WinIpcProxyWaitForOperationData * operation_data = data;
+  WinIpcProxyWaitContext * ctx = data;
   GSimpleAsyncResult * res;
 
-  res = operation_data->_async_result;
+  if (ctx->timeout_source != NULL)
+    g_source_destroy (ctx->timeout_source);
+
+  res = ctx->data->_async_result;
   g_simple_async_result_complete (res);
   g_object_unref (res);
+
+  win_ipc_proxy_wait_context_free (ctx);
+
+  return FALSE;
+}
+
+static gboolean
+win_ipc_proxy_wait_timed_out (gpointer data)
+{
+  WinIpcProxyWaitContext * ctx = data;
+  GSimpleAsyncResult * res;
+
+  g_source_destroy (ctx->wait_source);
+
+  res = ctx->data->_async_result;
+  g_simple_async_result_set_error (res,
+      G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+      "Operation timed out");
+  g_simple_async_result_complete (res);
+  g_object_unref (res);
+
+  win_ipc_proxy_wait_context_free (ctx);
 
   return FALSE;
 }

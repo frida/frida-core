@@ -16,11 +16,11 @@ namespace WinIpc {
 			destroy_named_pipe (pipe);
 		}
 
-		public async void establish () throws ProxyError {
+		public async void establish (uint timeout_msec=0) throws ProxyError {
 			try {
 				var operation = new PipeOperation (pipe);
 				var result = connect_named_pipe (pipe, operation);
-				yield complete_pipe_operation (result, operation);
+				yield complete_pipe_operation (result, operation, timeout_msec);
 			} catch (IOError connect_error) {
 				throw new ProxyError.IO_ERROR (connect_error.message);
 			}
@@ -302,14 +302,14 @@ namespace WinIpc {
 		private extern async uint8[] read_blob () throws IOError;
 		private extern async void write_blob (uint8[] blob) throws IOError;
 
-		protected async void complete_pipe_operation (IOResult result, PipeOperation operation) throws IOError {
+		protected async void complete_pipe_operation (IOResult result, PipeOperation operation, uint timeout_msec) throws IOError {
 			if (result == IOResult.SUCCESS)
 				return;
-			yield wait_for_operation (operation);
+			yield wait_for_operation (operation, timeout_msec);
 			operation.consume_result ();
 		}
 
-		private extern async void wait_for_operation (PipeOperation op) throws IOError;
+		private extern async void wait_for_operation (PipeOperation op, uint timeout_msec) throws IOError;
 
 		private class QueryHandler {
 			private QueryHandlerFunc func;

@@ -17,6 +17,11 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/server-with-timeout", () => {
+			var h = new IpcHarness ((h) => Establish.server_with_timeout (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/WinIpc/Proxy/query/simple", () => {
 			var h = new IpcHarness ((h) => Query.simple (h));
 			h.run ();
@@ -100,6 +105,21 @@ namespace Zed.Test.WinIpc {
 				yield h.client.establish ();
 			} catch (ProxyError e) {
 				var expected = new ProxyError.SERVER_NOT_FOUND ("CreateFile failed: 2");
+				assert (e.code == expected.code);
+				assert (e.message == expected.message);
+
+				h.done ();
+				return;
+			}
+
+			assert_not_reached ();
+		}
+
+		private async void server_with_timeout (IpcHarness h) {
+			try {
+				yield h.server.establish (100);
+			} catch (ProxyError e) {
+				var expected = new ProxyError.IO_ERROR ("Operation timed out");
 				assert (e.code == expected.code);
 				assert (e.message == expected.message);
 
