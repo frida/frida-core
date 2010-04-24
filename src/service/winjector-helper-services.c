@@ -1,6 +1,12 @@
 #include <glib.h>
 #include <windows.h>
 
+#ifdef _M_X64
+#define WINJECTOR_SERVICE_ARCH "64"
+#else
+#define WINJECTOR_SERVICE_ARCH "32"
+#endif
+
 typedef struct _WinjectorServiceContext WinjectorServiceContext;
 
 struct _WinjectorServiceContext
@@ -12,6 +18,13 @@ struct _WinjectorServiceContext
   SC_HANDLE service32;
   SC_HANDLE service64;
 };
+
+char * winjector_service_derive_basename (void);
+char * winjector_service_derive_filename (const char * suffix);
+
+static void WINAPI winjector_managed_service_main (DWORD argc, WCHAR ** argv);
+static DWORD WINAPI winjector_managed_service_handle_control_code (
+    DWORD control, DWORD event_type, void * event_data, void * context);
 
 static gboolean register_and_start_services (WinjectorServiceContext * self);
 static void stop_and_unregister_services (WinjectorServiceContext * self);
@@ -35,6 +48,8 @@ static gboolean stop_service (WinjectorServiceContext * self,
 static WinjectorServiceContext * winjector_service_context_new (
     const gchar * service_basename);
 static void winjector_service_context_free (WinjectorServiceContext * self);
+
+static WCHAR * winjector_managed_service_name = NULL;
 
 void *
 winjector_manager_start_services (const char * service_basename)
@@ -126,6 +141,73 @@ winjector_service_derive_filename (const char * suffix)
   }
 
   return name;
+}
+
+void
+winjector_managed_service_enter_dispatcher (void)
+{
+  SERVICE_TABLE_ENTRYW dispatch_table[2] = { 0, };
+  gchar * basename, * name;
+
+  basename = winjector_service_derive_basename ();
+  name = g_strconcat (basename, WINJECTOR_SERVICE_ARCH, NULL);
+  g_free (basename);
+  winjector_managed_service_name = g_utf8_to_utf16 (name, -1, NULL, NULL,
+      NULL);
+  g_free (name);
+
+  dispatch_table[0].lpServiceName = winjector_managed_service_name;
+  dispatch_table[0].lpServiceProc = winjector_managed_service_main;
+
+  StartServiceCtrlDispatcherW (dispatch_table);
+
+  g_free (winjector_managed_service_name);
+  winjector_managed_service_name = NULL;
+}
+
+static void WINAPI
+winjector_managed_service_main (DWORD argc, WCHAR ** argv)
+{
+  GMainLoop * loop;
+
+  loop = g_main_loop_new (NULL, FALSE);
+
+  RegisterServiceCtrlHandlerExW (winjector_managed_service_name,
+      winjector_managed_service_handle_control_code, loop);
+
+  g_main_loop_run (loop);
+
+  g_main_loop_unref (loop);
+}
+
+static gboolean
+winjector_managed_service_stop (gpointer data)
+{
+  GMainLoop * loop = data;
+
+  g_main_loop_quit (loop);
+
+  return FALSE;
+}
+
+static DWORD WINAPI
+winjector_managed_service_handle_control_code (DWORD control, DWORD event_type,
+    void * event_data, void * context)
+{
+  GMainLoop * loop = context;
+
+  switch (control)
+  {
+    case SERVICE_CONTROL_STOP:
+      g_idle_add (winjector_managed_service_stop, loop);
+      return NO_ERROR;
+
+    case SERVICE_CONTROL_INTERROGATE:
+      return NO_ERROR;
+
+    default:
+      return ERROR_CALL_NOT_IMPLEMENTED;
+  }
 }
 
 static gboolean

@@ -23,15 +23,16 @@ namespace Winjector {
 			var result = manager.run ();
 			if (result != 0)
 				Thread.usleep (60 * 1000000);
+
 			return result;
 		}
 
-		var service = new Winjector.Service ();
+		Service service;
 		if (mode == HelperMode.STANDALONE)
-			service.run_standalone ();
+			service = new StandaloneService ();
 		else
-			service.run_service ();
-		Thread.usleep (60 * 1000000);
+			service = new ManagedService ();
+		service.run ();
 
 		return 0;
 	}
@@ -106,14 +107,23 @@ namespace Winjector {
 		private static extern void stop_services (void * context);
 	}
 
-	public class Service : Object {
-		public void run_standalone () {
-		}
-
-		public void run_service () {
-		}
+	public abstract class Service : Object {
+		public abstract void run ();
 
 		public static extern string derive_basename ();
 		public static extern string derive_filename (string suffix);
+	}
+
+	public class StandaloneService : Service {
+		public override void run () {
+		}
+	}
+
+	public class ManagedService : Service {
+		public override void run () {
+			enter_dispatcher ();
+		}
+
+		private static extern void enter_dispatcher ();
 	}
 }
