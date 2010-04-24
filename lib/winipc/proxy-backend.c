@@ -35,6 +35,7 @@ static void CALLBACK win_ipc_proxy_write_completed (DWORD os_error,
 static gboolean win_ipc_proxy_wait_satisfied (gpointer data);
 static gboolean win_ipc_proxy_wait_timed_out (gpointer data);
 
+static WCHAR * pipe_path_from_name (const gchar * name);
 static void complete_async_result_from_os_error (GSimpleAsyncResult * res,
     DWORD os_error, WinIpcPipeOperation * op);
 static GIOErrorEnum io_error_from_os_error (DWORD os_error);
@@ -43,10 +44,11 @@ void *
 win_ipc_server_proxy_create_named_pipe (const char * name)
 {
   HANDLE handle;
-  gunichar2 * name_utf16;
+  WCHAR * path;
 
-  name_utf16 = g_utf8_to_utf16 (name, -1, NULL, NULL, NULL);
-  handle = CreateNamedPipeW (name_utf16,
+  path = pipe_path_from_name (name);
+
+  handle = CreateNamedPipeW (path,
       PIPE_ACCESS_DUPLEX |
       FILE_FLAG_OVERLAPPED,
       PIPE_TYPE_MESSAGE |
@@ -57,7 +59,8 @@ win_ipc_server_proxy_create_named_pipe (const char * name)
       PIPE_BUFSIZE,
       PIPE_TIMEOUT,
       NULL);
-  g_free (name_utf16);
+
+  g_free (path);
 
   return handle;
 }
@@ -105,11 +108,11 @@ void *
 win_ipc_client_proxy_open_pipe (const char * name, GError ** error)
 {
   HANDLE handle;
-  gunichar2 * name_utf16;
+  WCHAR * path;
 
-  name_utf16 = g_utf8_to_utf16 (name, -1, NULL, NULL, NULL);
+  path = pipe_path_from_name (name);
 
-  handle = CreateFileW (name_utf16,
+  handle = CreateFileW (path,
       GENERIC_READ | GENERIC_WRITE,
       0,
       NULL,
@@ -132,7 +135,7 @@ win_ipc_client_proxy_open_pipe (const char * name, GError ** error)
         "CreateFile failed: %d", os_error);
   }
 
-  g_free (name_utf16);
+  g_free (path);
 
   return handle;
 }
@@ -397,6 +400,19 @@ win_ipc_pipe_operation_destroy_resources (WinIpcPipeOperation * self)
 
   g_free (win_ipc_pipe_operation_get_overlapped (self));
   win_ipc_pipe_operation_set_overlapped (self, NULL);
+}
+
+static WCHAR *
+pipe_path_from_name (const gchar * name)
+{
+  gchar * path_utf8;
+  WCHAR * path;
+
+  path_utf8 = g_strconcat ("\\\\.\\pipe\\", name, NULL);
+  path = g_utf8_to_utf16 (path_utf8, -1, NULL, NULL, NULL);
+  g_free (path_utf8);
+
+  return path;
 }
 
 static void

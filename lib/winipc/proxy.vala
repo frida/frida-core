@@ -4,16 +4,21 @@ namespace WinIpc {
 	public class ServerProxy : Proxy {
 		public string address {
 			get;
-			private set;
+			construct;
 		}
 
-		construct {
-			address = generate_address ();
-			pipe = create_named_pipe (address);
+		public ServerProxy (string? address = null) {
+			Object (address: address);
 		}
 
 		~ServerProxy () {
 			destroy_named_pipe (pipe);
+		}
+
+		construct {
+			if (address == null)
+				address = generate_address ();
+			pipe = create_named_pipe (address);
 		}
 
 		public async void establish (uint timeout_msec=0) throws ProxyError {
@@ -31,7 +36,7 @@ namespace WinIpc {
 		private string generate_address () {
 			var builder = new StringBuilder ();
 
-			builder.append ("\\\\.\\pipe\\zed-");
+			builder.append ("zed-");
 			for (uint i = 0; i != 16; i++) {
 				builder.append_printf ("%02x", Random.int_range (0, 255));
 			}

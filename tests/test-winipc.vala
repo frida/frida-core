@@ -22,6 +22,11 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/custom-server-address", () => {
+			var h = new IpcHarness ((h) => Establish.custom_server_address (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/WinIpc/Proxy/query/simple", () => {
 			var h = new IpcHarness ((h) => Query.simple (h));
 			h.run ();
@@ -128,6 +133,19 @@ namespace Zed.Test.WinIpc {
 			}
 
 			assert_not_reached ();
+		}
+
+		private async void custom_server_address (IpcHarness h) {
+			try {
+				var server = new ServerProxy ("my-custom-address-1234");
+				var client = new ClientProxy ("my-custom-address-1234");
+				yield client.establish ();
+				yield server.establish ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
 		}
 
 	}
