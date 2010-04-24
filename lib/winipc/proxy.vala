@@ -83,6 +83,14 @@ namespace WinIpc {
 		private extern static void close_pipe (void * pipe);
 	}
 
+	public delegate Variant? QuerySyncHandler (Variant? argument);
+
+	public interface QueryAsyncHandler : Object {
+		public abstract async Variant? handle_query (string id, Variant? argument);
+	}
+
+	public delegate void NotifySyncHandler (Variant? argument);
+
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
@@ -93,12 +101,19 @@ namespace WinIpc {
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
-		public delegate Variant? QueryHandlerFunc (Variant? argument);
-		public delegate void NotifyHandlerFunc (Variant? argument);
-
-		public uint register_query_handler (string id, string? argument_type, Proxy.QueryHandlerFunc func) {
+		public uint register_query_sync_handler (string id, string? argument_type, QuerySyncHandler sync_handler) {
 			assert (!query_handlers.has_key (id));
-			var handler = new QueryHandler (func, new VariantTypeSpec (argument_type));
+			var handler = new QueryHandler (id, new VariantTypeSpec (argument_type));
+			handler.sync_handler = sync_handler;
+			handler.tag = last_handler_id++;
+			query_handlers[id] = handler;
+			return handler.tag;
+		}
+
+		public uint register_query_async_handler (string id, string? argument_type, QueryAsyncHandler async_handler) {
+			assert (!query_handlers.has_key (id));
+			var handler = new QueryHandler (id, new VariantTypeSpec (argument_type));
+			handler.async_handler = async_handler;
 			handler.tag = last_handler_id++;
 			query_handlers[id] = handler;
 			return handler.tag;
@@ -118,8 +133,8 @@ namespace WinIpc {
 				query_handlers.remove (matching_id);
 		}
 
-		public uint add_notify_handler (string id, string? argument_type, Proxy.NotifyHandlerFunc func) {
-			var handler = new NotifyHandler (id, func, new VariantTypeSpec (argument_type));
+		public uint add_notify_handler (string id, string? argument_type, NotifySyncHandler sync_handler) {
+			var handler = new NotifyHandler (id, sync_handler, new VariantTypeSpec (argument_type));
 			handler.tag = last_handler_id++;
 			notify_handlers.add (handler);
 			return handler.tag;
@@ -176,7 +191,7 @@ namespace WinIpc {
 
 					switch (msg_type) {
 						case MessageType.REQUEST:
-							process_request (msg);
+							yield process_request (msg);
 							break;
 						case MessageType.RESPONSE:
 							process_response (msg);
@@ -193,7 +208,7 @@ namespace WinIpc {
 			}
 		}
 
-		private void process_request (Variant msg) {
+		private async void process_request (Variant msg) throws IOError {
 			uint32 id;
 			string verb;
 			Variant argument_wrapper;
@@ -203,8 +218,8 @@ namespace WinIpc {
 			Variant response_value = null;
 			var handler = query_handlers[verb];
 			if (handler != null)
-				success = handler.try_invoke (MaybeVariant.unwrap (argument_wrapper), out response_value);
-			send_response (id, success, response_value);
+				success = yield handler.try_invoke (MaybeVariant.unwrap (argument_wrapper), out response_value);
+			yield send_response (id, success, response_value);
 		}
 
 		private void process_response (Variant msg) {
@@ -317,26 +332,40 @@ namespace WinIpc {
 		private extern async void wait_for_operation (PipeOperation op, uint timeout_msec) throws IOError;
 
 		private class QueryHandler {
-			private QueryHandlerFunc func;
+			private string id;
 			private VariantTypeSpec argument_spec;
+
+			public QuerySyncHandler sync_handler {
+				get;
+				set;
+			}
+
+			public QueryAsyncHandler async_handler {
+				get;
+				set;
+			}
 
 			public uint tag {
 				get;
 				set;
 			}
 
-			public QueryHandler (QueryHandlerFunc func, VariantTypeSpec argument_spec) {
-				this.func = func;
+			public QueryHandler (string id, VariantTypeSpec argument_spec) {
+				this.id = id;
 				this.argument_spec = argument_spec;
 			}
 
-			public bool try_invoke (Variant? argument, out Variant? response_value) {
+			public async bool try_invoke (Variant? argument, out Variant? response_value) {
 				if (!argument_spec.has_same_type_as (argument)) {
 					response_value = null;
 					return false;
 				}
 
-				response_value = func (argument);
+				if (sync_handler != null)
+					response_value = sync_handler (argument);
+				else
+					response_value = yield async_handler.handle_query (id, argument);
+
 				return true;
 			}
 		}
@@ -347,7 +376,7 @@ namespace WinIpc {
 				private set;
 			}
 
-			private NotifyHandlerFunc func;
+			private NotifySyncHandler sync_handler;
 			private VariantTypeSpec argument_spec;
 
 			public uint tag {
@@ -355,9 +384,9 @@ namespace WinIpc {
 				set;
 			}
 
-			public NotifyHandler (string id, NotifyHandlerFunc func, VariantTypeSpec argument_spec) {
+			public NotifyHandler (string id, NotifySyncHandler sync_handler, VariantTypeSpec argument_spec) {
 				this.id = id;
-				this.func = func;
+				this.sync_handler = sync_handler;
 				this.argument_spec = argument_spec;
 			}
 
@@ -365,7 +394,7 @@ namespace WinIpc {
 				if (!argument_spec.has_same_type_as (argument))
 					return false;
 
-				func (argument);
+				sync_handler (argument);
 				return true;
 			}
 		}

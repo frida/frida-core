@@ -32,8 +32,13 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/query/with-value", () => {
+		GLib.Test.add_func ("/WinIpc/Proxy/query/with-argument", () => {
 			var h = new IpcHarness ((h) => Query.with_argument (h));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/query/async-handler", () => {
+			var h = new IpcHarness ((h) => Query.async_handler (h));
 			h.run ();
 		});
 
@@ -155,7 +160,7 @@ namespace Zed.Test.WinIpc {
 		private static async void simple (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			h.server.register_query_handler ("TellMeAJoke", null, (arg) => {
+			h.server.register_query_sync_handler ("TellMeAJoke", null, (arg) => {
 				return new Variant.string ("Nah");
 			});
 
@@ -172,7 +177,7 @@ namespace Zed.Test.WinIpc {
 		private static async void with_argument (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			h.client.register_query_handler ("AddTwoNumbers", null, (arg) => {
+			h.client.register_query_sync_handler ("AddTwoNumbers", null, (arg) => {
 				uint a, b;
 				arg.get ("(uu)", out a, out b);
 				return new Variant.uint32 (a + b);
@@ -181,6 +186,37 @@ namespace Zed.Test.WinIpc {
 			try {
 				var result = yield h.server.query ("AddTwoNumbers", new Variant ("(uu)", 42, 1337));
 				assert (result.get_uint32 () == 1379);
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private class LongRunningTaskHandler : Object, QueryAsyncHandler {
+			public async Variant? handle_query (string id, Variant? argument) {
+				assert (id == "LongRunningTask");
+
+				var timeout = new TimeoutSource (100);
+				timeout.set_callback (() => {
+					handle_query.callback ();
+					return false;
+				});
+				timeout.attach (MainContext.get_thread_default ());
+				yield;
+
+				return new Variant.string ("took a while");
+			}
+		}
+
+		private static async void async_handler (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			h.client.register_query_async_handler ("LongRunningTask", null, new LongRunningTaskHandler ());
+
+			try {
+				var result = yield h.server.query ("LongRunningTask");
+				assert (result.get_string () == "took a while");
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
@@ -206,7 +242,7 @@ namespace Zed.Test.WinIpc {
 		private static async void handler_response_validation (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			h.server.register_query_handler ("TellMeAJoke", null, (arg) => {
+			h.server.register_query_sync_handler ("TellMeAJoke", null, (arg) => {
 				return new Variant.uint32 (1337);
 			});
 
@@ -225,7 +261,7 @@ namespace Zed.Test.WinIpc {
 				assert_not_reached ();
 			}
 
-			h.server.register_query_handler ("NoReturn", null, (arg) => {
+			h.server.register_query_sync_handler ("NoReturn", null, (arg) => {
 				return null;
 			});
 
@@ -250,7 +286,7 @@ namespace Zed.Test.WinIpc {
 		private static async void handler_argument_validation (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			h.client.register_query_handler ("AddTwoNumbers", "(uu)", (arg) => {
+			h.client.register_query_sync_handler ("AddTwoNumbers", "(uu)", (arg) => {
 				uint a, b;
 				arg.get ("(uu)", out a, out b);
 				return new Variant.uint32 (a + b);
@@ -272,7 +308,7 @@ namespace Zed.Test.WinIpc {
 				assert_not_reached ();
 			}
 
-			h.client.register_query_handler ("DoSomething", "", (arg) => {
+			h.client.register_query_sync_handler ("DoSomething", "", (arg) => {
 				return new Variant.boolean (true);
 			});
 
@@ -298,7 +334,7 @@ namespace Zed.Test.WinIpc {
 		private static async void unregister_handler (IpcHarness h) {
 			yield h.establish_client_and_server ();
 
-			var handler_tag = h.server.register_query_handler ("TellMeAJoke", null, (arg) => {
+			var handler_tag = h.server.register_query_sync_handler ("TellMeAJoke", null, (arg) => {
 				return new Variant.string ("Nah");
 			});
 			h.server.unregister_query_handler (handler_tag);
