@@ -42,6 +42,11 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/WinIpc/Proxy/query/overlapping-queries", () => {
+			var h = new IpcHarness ((h) => Query.overlapping_queries (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/WinIpc/Proxy/query/no-handler", () => {
 			var h = new IpcHarness ((h) => Query.no_handler (h));
 			h.run ();
@@ -222,6 +227,71 @@ namespace Zed.Test.WinIpc {
 			}
 
 			h.done ();
+		}
+
+		private class ForeverTaskHandler : Object, QueryAsyncHandler {
+			private Source completion_source;
+
+			public async Variant? handle_query (string id, Variant? argument) {
+				assert (id == "ForeverTask");
+
+				completion_source = new IdleSource ();
+				completion_source.set_callback (() => {
+					handle_query.callback ();
+					return false;
+				});
+				yield;
+
+				return new Variant.string ("that took forever");
+			}
+
+			public void schedule_completion () {
+				completion_source.attach (MainContext.get_thread_default ());
+				completion_source = null;
+			}
+		}
+
+		private class ForeverQuery {
+			public string result {
+				get;
+				set;
+			}
+		}
+
+		private static async void overlapping_queries (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			var forever_handler = new ForeverTaskHandler ();
+			h.client.register_query_async_handler ("ForeverTask", null, forever_handler);
+			h.client.register_query_sync_handler ("QuickTask", null, (arg) => {
+				return new Variant.string ("quick and easy");
+			});
+
+			var forever_query = new ForeverQuery ();
+			do_forever_query (h.server, forever_query);
+
+			try {
+				var quick_result = yield h.server.query ("QuickTask");
+				assert (quick_result.get_string () == "quick and easy");
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			assert (forever_query.result == null);
+			forever_handler.schedule_completion ();
+			yield h.process_events ();
+			assert (forever_query.result == "that took forever");
+
+			h.done ();
+		}
+
+		private async void do_forever_query (Proxy proxy, ForeverQuery query) {
+			try {
+				var val = yield proxy.query ("ForeverTask");
+				query.result = val.get_string ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
 		}
 
 		private static async void no_handler (IpcHarness h) {

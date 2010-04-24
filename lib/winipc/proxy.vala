@@ -191,7 +191,7 @@ namespace WinIpc {
 
 					switch (msg_type) {
 						case MessageType.REQUEST:
-							yield process_request (msg);
+							process_request (msg);
 							break;
 						case MessageType.RESPONSE:
 							process_response (msg);
