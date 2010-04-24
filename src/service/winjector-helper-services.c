@@ -11,7 +11,6 @@ typedef struct _WinjectorServiceContext WinjectorServiceContext;
 
 struct _WinjectorServiceContext
 {
-  gboolean system_is_x64;
   gchar * service_basename;
 
   SC_HANDLE scm;
@@ -19,12 +18,11 @@ struct _WinjectorServiceContext
   SC_HANDLE service64;
 };
 
-char * winjector_service_derive_basename (void);
-char * winjector_service_derive_filename (const char * suffix);
-
 static void WINAPI winjector_managed_service_main (DWORD argc, WCHAR ** argv);
 static DWORD WINAPI winjector_managed_service_handle_control_code (
     DWORD control, DWORD event_type, void * event_data, void * context);
+static void winjector_managed_service_report_status (DWORD current_state,
+    DWORD exit_code, DWORD wait_hint);
 
 static gboolean register_and_start_services (WinjectorServiceContext * self);
 static void stop_and_unregister_services (WinjectorServiceContext * self);
@@ -50,6 +48,25 @@ static WinjectorServiceContext * winjector_service_context_new (
 static void winjector_service_context_free (WinjectorServiceContext * self);
 
 static WCHAR * winjector_managed_service_name = NULL;
+static SERVICE_STATUS_HANDLE winjector_managed_service_status_handle = NULL;
+
+gboolean
+winjector_manager_system_is_x64 (void)
+{
+  static gboolean initialized = FALSE;
+  static gboolean system_is_x64;
+
+  if (!initialized) {
+    SYSTEM_INFO si;
+
+    GetNativeSystemInfo (&si);
+    system_is_x64 = si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
+
+    initialized = TRUE;
+  }
+
+  return system_is_x64;
+}
 
 void *
 winjector_manager_start_services (const char * service_basename)
@@ -119,7 +136,7 @@ winjector_service_derive_basename (void)
 }
 
 char *
-winjector_service_derive_filename (const char * suffix)
+winjector_service_derive_filename_for_suffix (const char * suffix)
 {
   WCHAR filename_utf16[MAX_PATH + 1] = { 0, };
   gchar * name, * tmp;
@@ -143,15 +160,37 @@ winjector_service_derive_filename (const char * suffix)
   return name;
 }
 
-void
-winjector_managed_service_enter_dispatcher (void)
+char *
+winjector_service_derive_svcname_for_self (void)
 {
-  SERVICE_TABLE_ENTRYW dispatch_table[2] = { 0, };
   gchar * basename, * name;
 
   basename = winjector_service_derive_basename ();
   name = g_strconcat (basename, WINJECTOR_SERVICE_ARCH, NULL);
   g_free (basename);
+
+  return name;
+}
+
+char *
+winjector_service_derive_svcname_for_suffix (const char * suffix)
+{
+  gchar * basename, * name;
+
+  basename = winjector_service_derive_basename ();
+  name = g_strconcat (basename, suffix, NULL);
+  g_free (basename);
+
+  return name;
+}
+
+void
+winjector_managed_service_enter_dispatcher_and_main_loop (void)
+{
+  SERVICE_TABLE_ENTRYW dispatch_table[2] = { 0, };
+  gchar * name;
+
+  name = winjector_service_derive_svcname_for_self ();
   winjector_managed_service_name = g_utf8_to_utf16 (name, -1, NULL, NULL,
       NULL);
   g_free (name);
@@ -160,6 +199,8 @@ winjector_managed_service_enter_dispatcher (void)
   dispatch_table[0].lpServiceProc = winjector_managed_service_main;
 
   StartServiceCtrlDispatcherW (dispatch_table);
+
+  winjector_managed_service_status_handle = NULL;
 
   g_free (winjector_managed_service_name);
   winjector_managed_service_name = NULL;
@@ -172,10 +213,16 @@ winjector_managed_service_main (DWORD argc, WCHAR ** argv)
 
   loop = g_main_loop_new (NULL, FALSE);
 
-  RegisterServiceCtrlHandlerExW (winjector_managed_service_name,
-      winjector_managed_service_handle_control_code, loop);
+  winjector_managed_service_status_handle = RegisterServiceCtrlHandlerExW (
+      winjector_managed_service_name,
+      winjector_managed_service_handle_control_code,
+      loop);
 
+  winjector_managed_service_report_status (SERVICE_START_PENDING, NO_ERROR, 0);
+
+  winjector_managed_service_report_status (SERVICE_RUNNING, NO_ERROR, 0);
   g_main_loop_run (loop);
+  winjector_managed_service_report_status (SERVICE_STOPPED, NO_ERROR, 0);
 
   g_main_loop_unref (loop);
 }
@@ -199,6 +246,8 @@ winjector_managed_service_handle_control_code (DWORD control, DWORD event_type,
   switch (control)
   {
     case SERVICE_CONTROL_STOP:
+      winjector_managed_service_report_status (SERVICE_STOP_PENDING, NO_ERROR,
+          0);
       g_idle_add (winjector_managed_service_stop, loop);
       return NO_ERROR;
 
@@ -208,6 +257,38 @@ winjector_managed_service_handle_control_code (DWORD control, DWORD event_type,
     default:
       return ERROR_CALL_NOT_IMPLEMENTED;
   }
+}
+
+static void
+winjector_managed_service_report_status (DWORD current_state, DWORD exit_code,
+    DWORD wait_hint)
+{
+  SERVICE_STATUS status;
+  static DWORD checkpoint = 1;
+
+  status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+  status.dwCurrentState = current_state;
+
+  if (current_state == SERVICE_START_PENDING)
+    status.dwControlsAccepted = 0;
+  else
+    status.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+
+  status.dwWin32ExitCode = exit_code;
+  status.dwServiceSpecificExitCode = 0;
+
+  if (current_state == SERVICE_RUNNING || current_state == SERVICE_STOPPED)
+  {
+    status.dwCheckPoint = 0;
+  }
+  else
+  {
+    status.dwCheckPoint = checkpoint++;
+  }
+
+  status.dwWaitHint = wait_hint;
+
+  SetServiceStatus (winjector_managed_service_status_handle, &status);
 }
 
 static gboolean
@@ -254,7 +335,7 @@ register_services (WinjectorServiceContext * self)
   if (service32 == NULL)
     return FALSE;
 
-  if (self->system_is_x64)
+  if (winjector_manager_system_is_x64 ())
   {
     service64 = register_service (self, "64");
     if (service64 == NULL)
@@ -280,7 +361,7 @@ unregister_services (WinjectorServiceContext * self)
 {
   gboolean success = TRUE;
 
-  if (self->system_is_x64)
+  if (winjector_manager_system_is_x64 ())
   {
     success &= unregister_service (self, self->service64);
     CloseServiceHandle (self->service64);
@@ -300,7 +381,7 @@ start_services (WinjectorServiceContext * self)
   if (!start_service (self, self->service32))
     return FALSE;
 
-  if (self->system_is_x64)
+  if (winjector_manager_system_is_x64 ())
   {
     if (!start_service (self, self->service64))
     {
@@ -317,7 +398,7 @@ stop_services (WinjectorServiceContext * self)
 {
   gboolean success = TRUE;
 
-  if (self->system_is_x64)
+  if (winjector_manager_system_is_x64 ())
     success &= stop_service (self, self->service64);
 
   success &= stop_service (self, self->service32);
@@ -343,7 +424,7 @@ register_service (WinjectorServiceContext * self, const gchar * suffix)
       suffix, servicename_utf8);
   displayname = g_utf8_to_utf16 (displayname_utf8, -1, NULL, NULL, NULL);
 
-  filename_utf8 = winjector_service_derive_filename (suffix);
+  filename_utf8 = winjector_service_derive_filename_for_suffix (suffix);
   filename = g_utf8_to_utf16 (filename_utf8, -1, NULL, NULL, NULL);
 
   handle = CreateServiceW (self->scm,
@@ -395,13 +476,8 @@ static WinjectorServiceContext *
 winjector_service_context_new (const gchar * service_basename)
 {
   WinjectorServiceContext * self;
-  SYSTEM_INFO si;
 
   self = g_new0 (WinjectorServiceContext, 1);
-
-  GetNativeSystemInfo (&si);
-  self->system_is_x64 = si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
-
   self->service_basename = g_strdup (service_basename);
 
   return self;
