@@ -104,7 +104,7 @@ zed_service_winjector_temporary_executable_execute (
   parameters_utf16 = g_utf8_to_utf16 (parameters, -1, NULL, NULL, NULL);
   ei.lpParameters = parameters_utf16;
 
-  ei.nShow = SW_SHOWNORMAL; //SW_HIDE;
+  ei.nShow = SW_HIDE;
 
   if (!ShellExecuteExW (&ei))
   {
