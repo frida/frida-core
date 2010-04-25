@@ -328,8 +328,7 @@ win_ipc_proxy_wait_timed_out (gpointer data)
   g_source_destroy (ctx->wait_source);
 
   res = ctx->data->_async_result;
-  g_simple_async_result_set_error (res,
-      G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+  g_simple_async_result_set_error (res, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
       "Operation timed out");
   g_simple_async_result_complete (res);
   g_object_unref (res);

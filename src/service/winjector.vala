@@ -11,16 +11,15 @@ namespace Zed.Service {
 		}
 
 		public async void inject (uint32 target_pid, string filename, Cancellable? cancellable = null) throws WinjectorError {
-			/*
 			var normal_helper = yield normal_helper_factory.obtain ();
 			try {
 				yield normal_helper.inject (target_pid, filename, cancellable);
+				return;
 			} catch (WinjectorError e) {
-				var permission_error = new WinjectorError.PERMISSION_DENIED ("");
+				var permission_error = new WinjectorError.ACCESS_DENIED ("");
 				if (e.code != permission_error.code)
 					throw e;
 			}
-			*/
 
 			var elevated_helper = yield elevated_helper_factory.obtain ();
 			yield elevated_helper.inject (target_pid, filename, cancellable);

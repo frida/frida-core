@@ -37,7 +37,7 @@ namespace Zed.Service.WinjectorIpc {
 		string error_message;
 		response.get (INJECT_RESPONSE, out success, out error_code, out error_message);
 		if (!success) {
-			var permission_error = new WinjectorError.PERMISSION_DENIED (error_message);
+			var permission_error = new WinjectorError.ACCESS_DENIED (error_message);
 			if (error_code == permission_error.code)
 				throw permission_error;
 			else

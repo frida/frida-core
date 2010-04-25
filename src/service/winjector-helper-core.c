@@ -84,11 +84,19 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
       process_id);
   if (process_handle == NULL)
   {
-    g_set_error (error,
-        ZED_SERVICE_WINJECTOR_ERROR,
-        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
-        "OpenProcess(pid=%ld) failed: %d",
-        process_id, GetLastError ());
+    DWORD os_error;
+    gint code;
+
+    os_error = GetLastError ();
+
+    if (os_error == ERROR_ACCESS_DENIED)
+      code = ZED_SERVICE_WINJECTOR_ERROR_ACCESS_DENIED;
+    else
+      code = ZED_SERVICE_WINJECTOR_ERROR_FAILED;
+
+    g_set_error (error, ZED_SERVICE_WINJECTOR_ERROR, code,
+        "OpenProcess(pid=%u) failed: %d",
+        process_id, os_error);
     goto beach;
   }
 

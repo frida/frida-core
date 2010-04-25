@@ -8,6 +8,8 @@
 #define WINJECTOR_SERVICE_ARCH "32"
 #endif
 
+#define STANDALONE_JOIN_TIMEOUT_MSEC (5 * 1000)
+
 typedef struct _WinjectorServiceContext WinjectorServiceContext;
 
 struct _WinjectorServiceContext
@@ -17,6 +19,9 @@ struct _WinjectorServiceContext
   SC_HANDLE scm;
   SC_HANDLE service32;
   SC_HANDLE service64;
+
+  HANDLE standalone32;
+  HANDLE standalone64;
 };
 
 static void WINAPI winjector_managed_service_main (DWORD argc, WCHAR ** argv);
@@ -28,7 +33,9 @@ static void winjector_managed_service_report_status (DWORD current_state,
 static gboolean register_and_start_services (WinjectorServiceContext * self);
 static void stop_and_unregister_services (WinjectorServiceContext * self);
 static gboolean spawn_standalone_services (WinjectorServiceContext * self);
-static void join_standalone_services (WinjectorServiceContext * self);
+static gboolean join_standalone_services (WinjectorServiceContext * self);
+static void kill_standalone_services (WinjectorServiceContext * self);
+static void release_standalone_services (WinjectorServiceContext * self);
 
 static gboolean register_services (WinjectorServiceContext * self);
 static gboolean unregister_services (WinjectorServiceContext * self);
@@ -43,6 +50,13 @@ static gboolean start_service (WinjectorServiceContext * self,
     SC_HANDLE handle);
 static gboolean stop_service (WinjectorServiceContext * self,
     SC_HANDLE handle);
+
+static HANDLE spawn_standalone_service (WinjectorServiceContext * self,
+    const gchar * suffix);
+static gboolean join_standalone_service (WinjectorServiceContext * self,
+    HANDLE handle);
+static void kill_standalone_service (WinjectorServiceContext * self,
+    HANDLE handle);
 
 static WinjectorServiceContext * winjector_service_context_new (
     const gchar * service_basename);
@@ -86,9 +100,14 @@ winjector_manager_stop_services (void * context)
   WinjectorServiceContext * self = context;
 
   if (self->scm != NULL)
+  {
     stop_and_unregister_services (self);
+  }
   else
-    join_standalone_services (self);
+  {
+    if (!join_standalone_services (self))
+      kill_standalone_services (self);
+  }
 
   winjector_service_context_free (self);
 }
@@ -299,14 +318,73 @@ stop_and_unregister_services (WinjectorServiceContext * self)
 static gboolean
 spawn_standalone_services (WinjectorServiceContext * self)
 {
-  g_assert_not_reached ();
-  return FALSE;
+  HANDLE standalone32, standalone64;
+
+  standalone32 = spawn_standalone_service (self, "32");
+  if (standalone32 == NULL)
+    return FALSE;
+
+  if (winjector_system_is_x64 ())
+  {
+    standalone64 = spawn_standalone_service (self, "64");
+    if (standalone64 == NULL)
+    {
+      kill_standalone_service (self, standalone32);
+      CloseHandle (standalone32);
+      return FALSE;
+    }
+  }
+  else
+  {
+    standalone64 = NULL;
+  }
+
+  self->standalone32 = standalone32;
+  self->standalone64 = standalone64;
+
+  return TRUE;
+}
+
+static gboolean
+join_standalone_services (WinjectorServiceContext * self)
+{
+  gboolean success = TRUE;
+
+  if (winjector_system_is_x64 ())
+    success &= join_standalone_service (self, self->standalone64);
+
+  success &= join_standalone_service (self, self->standalone32);
+
+  if (success)
+    release_standalone_services (self);
+
+  return success;
 }
 
 static void
-join_standalone_services (WinjectorServiceContext * self)
+kill_standalone_services (WinjectorServiceContext * self)
 {
-  g_assert_not_reached ();
+  if (winjector_system_is_x64 ())
+    kill_standalone_service (self, self->standalone64);
+
+  kill_standalone_service (self, self->standalone32);
+
+  release_standalone_services (self);
+}
+
+static void
+release_standalone_services (WinjectorServiceContext * self)
+{
+  if (winjector_system_is_x64 ())
+  {
+    g_assert (self->standalone64 != NULL);
+    CloseHandle (self->standalone64);
+    self->standalone64 = NULL;
+  }
+
+  g_assert (self->standalone32 != NULL);
+  CloseHandle (self->standalone32);
+  self->standalone32 = NULL;
 }
 
 static gboolean
@@ -455,6 +533,54 @@ stop_service (WinjectorServiceContext * self, SC_HANDLE handle)
   return ControlService (handle, SERVICE_CONTROL_STOP, &status);
 }
 
+static HANDLE
+spawn_standalone_service (WinjectorServiceContext * self, const gchar * suffix)
+{
+  HANDLE handle = NULL;
+  gchar * appname_utf8;
+  WCHAR * appname;
+  gchar * cmdline_utf8;
+  WCHAR * cmdline;
+  STARTUPINFOW si = { 0, };
+  PROCESS_INFORMATION pi = { 0, };
+
+  appname_utf8 = winjector_service_derive_filename_for_suffix (suffix);
+  appname = g_utf8_to_utf16 (appname_utf8, -1, NULL, NULL, NULL);
+
+  cmdline_utf8 = g_strconcat ("\"", appname_utf8, "\" STANDALONE", NULL);
+  cmdline = g_utf8_to_utf16 (cmdline_utf8, -1, NULL, NULL, NULL);
+
+  si.cb = sizeof (si);
+
+  if (CreateProcessW (appname, cmdline, NULL, NULL, FALSE, 0, NULL, NULL,
+      &si, &pi))
+  {
+    handle = pi.hProcess;
+    CloseHandle (pi.hThread);
+  }
+
+  g_free (cmdline);
+  g_free (cmdline_utf8);
+
+  g_free (appname);
+  g_free (appname_utf8);
+
+  return handle;
+}
+
+static gboolean
+join_standalone_service (WinjectorServiceContext * self, HANDLE handle)
+{
+  return WaitForSingleObject (handle,
+      STANDALONE_JOIN_TIMEOUT_MSEC) == WAIT_OBJECT_0;
+}
+
+static void
+kill_standalone_service (WinjectorServiceContext * self, HANDLE handle)
+{
+  TerminateProcess (handle, 1);
+}
+
 static WinjectorServiceContext *
 winjector_service_context_new (const gchar * service_basename)
 {
@@ -469,6 +595,9 @@ winjector_service_context_new (const gchar * service_basename)
 static void
 winjector_service_context_free (WinjectorServiceContext * self)
 {
+  g_assert (self->standalone64 == NULL);
+  g_assert (self->standalone32 == NULL);
+
   g_assert (self->service64 == NULL);
   g_assert (self->service32 == NULL);
 

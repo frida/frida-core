@@ -51,6 +51,9 @@ namespace Winjector {
 			parent = new WinIpc.ClientProxy (parent_address);
 			parent.add_notify_handler ("Stop", "", (arg) => {
 				Idle.add (() => {
+					if (System.is_x64 ())
+						helper64.emit ("Stop");
+					helper32.emit ("Stop");
 					loop.quit ();
 					return false;
 				});
@@ -149,8 +152,17 @@ namespace Winjector {
 	}
 
 	public class StandaloneService : Service {
+		private MainLoop loop;
+
 		public override void run () {
-			var loop = new MainLoop ();
+			manager.add_notify_handler ("Stop", "", (arg) => {
+				Idle.add (() => {
+					loop.quit ();
+					return false;
+				});
+			});
+
+			loop = new MainLoop ();
 			loop.run ();
 		}
 	}
