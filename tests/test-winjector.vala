@@ -23,7 +23,6 @@ namespace Zed.Test.Winjector {
 				"tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			print ("starting %s\n", rat_file);
 			process = Process.start (rat_file);
 		}
 
@@ -38,12 +37,19 @@ namespace Zed.Test.Winjector {
 
 		private async void do_injection (string name, MainLoop loop) {
 			var injector = new Service.Winjector ();
+
+			string inject_error = null;
+
 			var rat_file = Path.build_filename (rat_directory, name + ".dll");
 			try {
 				yield injector.inject ((uint32) process.id, rat_file);
 			} catch (Service.WinjectorError e) {
-				assert_not_reached ();
+				inject_error = e.message;
 			}
+
+			yield injector.close ();
+
+			assert (inject_error == null);
 
 			loop.quit ();
 		}

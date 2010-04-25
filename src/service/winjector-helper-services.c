@@ -1,4 +1,5 @@
-#include <glib.h>
+#include "winjector-helper.h"
+
 #include <windows.h>
 
 #ifdef _M_X64
@@ -49,24 +50,6 @@ static void winjector_service_context_free (WinjectorServiceContext * self);
 
 static WCHAR * winjector_managed_service_name = NULL;
 static SERVICE_STATUS_HANDLE winjector_managed_service_status_handle = NULL;
-
-gboolean
-winjector_manager_system_is_x64 (void)
-{
-  static gboolean initialized = FALSE;
-  static gboolean system_is_x64;
-
-  if (!initialized) {
-    SYSTEM_INFO si;
-
-    GetNativeSystemInfo (&si);
-    system_is_x64 = si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
-
-    initialized = TRUE;
-  }
-
-  return system_is_x64;
-}
 
 void *
 winjector_manager_start_services (const char * service_basename)
@@ -335,7 +318,7 @@ register_services (WinjectorServiceContext * self)
   if (service32 == NULL)
     return FALSE;
 
-  if (winjector_manager_system_is_x64 ())
+  if (winjector_system_is_x64 ())
   {
     service64 = register_service (self, "64");
     if (service64 == NULL)
@@ -361,7 +344,7 @@ unregister_services (WinjectorServiceContext * self)
 {
   gboolean success = TRUE;
 
-  if (winjector_manager_system_is_x64 ())
+  if (winjector_system_is_x64 ())
   {
     success &= unregister_service (self, self->service64);
     CloseServiceHandle (self->service64);
@@ -381,7 +364,7 @@ start_services (WinjectorServiceContext * self)
   if (!start_service (self, self->service32))
     return FALSE;
 
-  if (winjector_manager_system_is_x64 ())
+  if (winjector_system_is_x64 ())
   {
     if (!start_service (self, self->service64))
     {
@@ -398,7 +381,7 @@ stop_services (WinjectorServiceContext * self)
 {
   gboolean success = TRUE;
 
-  if (winjector_manager_system_is_x64 ())
+  if (winjector_system_is_x64 ())
     success &= stop_service (self, self->service64);
 
   success &= stop_service (self, self->service32);

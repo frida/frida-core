@@ -26,13 +26,23 @@
     <ClCompile Include="$(IntDir)winjector-helper.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)winjector-error.c">
+    <ClCompile Include="winjector-helper-services.c">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)winjector-error.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)winjector-ipc.c">
+      <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="winjector-error.vala" />
+    <None Include="winjector-ipc.vala" />
   </ItemGroup>
 </Project>

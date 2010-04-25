@@ -12,22 +12,26 @@
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">
       <FileType>Document</FileType>
-      <Command>"$(SolutionDir)ext\sdk\vala\valac.exe" winjector-helper.vala winjector-error.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --pkg=gio-2.0 --pkg=zed-winipc || exit 1
+      <Command>"$(SolutionDir)ext\sdk\vala\valac.exe" winjector-helper.vala winjector-error.vala winjector-ipc.vala --ccode --directory=$(IntDir) --header="$(IntDir)winjector-helper.h" --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --pkg=gio-2.0 --pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message>Compiling vala code</Message>
       <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <AdditionalInputs>$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)winjector-error.vala;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
+    <None Include="winjector-error.vala" />
+    <None Include="winjector-ipc.vala" />
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="winjector-helper.h" />
+    <ClInclude Include="$(IntDir)winjector-helper.h" />
   </ItemGroup>
 
   <ItemGroup>
     <ClCompile Include="$(IntDir)winjector-helper.c" />
     <ClCompile Include="$(IntDir)winjector-error.c" />
+    <ClCompile Include="$(IntDir)winjector-ipc.c" />
 
+    <ClCompile Include="winjector-helper-core.c" />
     <ClCompile Include="winjector-helper-services.c" />
   </ItemGroup>
 

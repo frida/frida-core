@@ -20,11 +20,7 @@ namespace Winjector {
 			var parent_address = args[2];
 
 			var manager = new Winjector.Manager (parent_address);
-			var result = manager.run ();
-			if (result != 0)
-				Thread.usleep (60 * 1000000);
-
-			return result;
+			return manager.run ();
 		}
 
 		Service service;
@@ -53,10 +49,16 @@ namespace Winjector {
 
 		public Manager (string parent_address) {
 			parent = new WinIpc.ClientProxy (parent_address);
-			parent.register_query_async_handler ("Inject", Ipc.INJECT_SIGNATURE, this);
+			parent.add_notify_handler ("Stop", "", (arg) => {
+				Idle.add (() => {
+					loop.quit ();
+					return false;
+				});
+			});
+			parent.register_query_async_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, this);
 
 			helper32 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("32"));
-			if (system_is_x64 ()) {
+			if (System.is_x64 ()) {
 				helper64 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("64"));
 			}
 		}
@@ -78,7 +80,7 @@ namespace Winjector {
 		private async void establish () {
 			try {
 				yield helper32.establish ();
-				if (system_is_x64 ())
+				if (System.is_x64 ())
 					yield helper64.establish ();
 				yield parent.establish ();
 			} catch (WinIpc.ProxyError e) {
@@ -89,23 +91,23 @@ namespace Winjector {
 		}
 
 		private async Variant? handle_query (string id, Variant? argument) {
-			/*
-			uint32 process_id;
-			string dll_path;
-			arg.get (Ipc.INJECT_SIGNATURE, out process_id, out dll_path);*/
+			uint32 target_pid;
+			string filename;
+			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename);
+
+			WinIpc.Proxy helper;
+			if (Process.is_x64 (target_pid))
+				helper = helper64;
+			else
+				helper = helper32;
 
 			try {
-				var result = yield helper32.query (id, argument);
-				print ("got result!\n");
-				return result;
+				return yield helper.query (id, argument);
 			} catch (WinIpc.ProxyError e) {
-				print ("caught exception\n");
 				var failed = new WinjectorError.FAILED (e.message);
-				return new Variant (Ipc.INJECT_RESPONSE, false, failed.code, failed.message);
+				return new Variant (WinjectorIpc.INJECT_RESPONSE, false, failed.code, failed.message);
 			}
 		}
-
-		private static extern bool system_is_x64 ();
 
 		private static extern void * start_services (string service_basename);
 		private static extern void stop_services (void * context);
@@ -116,8 +118,8 @@ namespace Winjector {
 
 		public Service () {
 			manager = new WinIpc.ClientProxy (derive_svcname_for_self ());
-			manager.register_query_sync_handler ("Inject", Ipc.INJECT_SIGNATURE, (arg) => {
-				return Ipc.marshal_inject (arg, inject);
+			manager.register_query_sync_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, (arg) => {
+				return WinjectorIpc.marshal_inject (arg, inject);
 			});
 
 			Idle.add (() => {
@@ -129,7 +131,7 @@ namespace Winjector {
 		public abstract void run ();
 
 		private void inject (uint32 target_pid, string filename) throws WinjectorError {
-			throw new WinjectorError.PERMISSION_DENIED ("yeah!");
+			Process.inject (target_pid, filename);
 		}
 
 		protected async void establish () {
@@ -161,51 +163,12 @@ namespace Winjector {
 		private static extern void enter_dispatcher_and_main_loop ();
 	}
 
-	namespace Ipc {
-		public const string INJECT_SIGNATURE = "(us)";
-		public const string INJECT_RESPONSE = "(bus)";
-		public delegate void InjectFunc (uint32 process_id, string dll_path) throws WinjectorError;
+	namespace System {
+		public static extern bool is_x64 ();
+	}
 
-		public Variant? marshal_inject (Variant? arg, InjectFunc func) {
-			uint32 process_id;
-			string dll_path;
-			arg.get (INJECT_SIGNATURE, out process_id, out dll_path);
-
-			bool success = true;
-			uint32 error_code = 0;
-			string error_message = "";
-
-			try {
-				func (process_id, dll_path);
-			} catch (WinjectorError e) {
-				success = false;
-				error_code = e.code;
-				error_message = e.message;
-			}
-
-			return new Variant (INJECT_RESPONSE, success, error_code, error_message);
-		}
-
-		public async void invoke_inject (uint32 target_pid, string filename, WinIpc.Proxy proxy) throws WinjectorError {
-			Variant response;
-
-			try {
-				response = yield proxy.query ("Inject", new Variant (INJECT_SIGNATURE, target_pid, filename), INJECT_RESPONSE);
-			} catch (WinIpc.ProxyError e) {
-				throw new WinjectorError.FAILED (e.message);
-			}
-
-			bool success;
-			uint error_code;
-			string error_message;
-			response.get (INJECT_RESPONSE, out success, out error_code, out error_message);
-			if (!success) {
-				var permission_error = new WinjectorError.PERMISSION_DENIED (error_message);
-				if (error_code == permission_error.code)
-					throw permission_error;
-				else
-					throw new WinjectorError.FAILED (error_message);
-			}
-		}
+	namespace Process {
+		public static extern bool is_x64 (uint32 process_id);
+		public static extern void inject (uint32 process_id, string dll_path) throws WinjectorError;
 	}
 }

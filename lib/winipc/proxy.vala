@@ -83,14 +83,6 @@ namespace WinIpc {
 		private extern static void close_pipe (void * pipe);
 	}
 
-	public delegate Variant? QuerySyncHandler (Variant? argument);
-
-	public interface QueryAsyncHandler : Object {
-		public abstract async Variant? handle_query (string id, Variant? argument);
-	}
-
-	public delegate void NotifySyncHandler (Variant? argument);
-
 	public abstract class Proxy : Object {
 		protected void * pipe;
 
@@ -361,8 +353,9 @@ namespace WinIpc {
 					return false;
 				}
 
-				if (sync_handler != null)
-					response_value = sync_handler (argument);
+				QuerySyncHandler handler = sync_handler; /* FIXME: workaround for Vala compiler bug */
+				if (handler != null)
+					response_value = handler (argument);
 				else
 					response_value = yield async_handler.handle_query (id, argument);
 
@@ -486,6 +479,14 @@ namespace WinIpc {
 		INVALID_RESPONSE,
 		IO_ERROR
 	}
+
+	public delegate Variant? QuerySyncHandler (Variant? argument);
+
+	public interface QueryAsyncHandler : Object {
+		public abstract async Variant? handle_query (string id, Variant? argument);
+	}
+
+	public delegate void NotifySyncHandler (Variant? argument);
 
 	namespace MaybeVariant {
 		private Variant wrap (Variant? val) {

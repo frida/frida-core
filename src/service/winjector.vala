@@ -5,6 +5,11 @@ namespace Zed.Service {
 		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
 		private HelperFactory elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
+		public async void close () {
+			yield normal_helper_factory.close ();
+			yield elevated_helper_factory.close ();
+		}
+
 		public async void inject (uint32 target_pid, string filename, Cancellable? cancellable = null) throws WinjectorError {
 			/*
 			var normal_helper = yield normal_helper_factory.obtain ();
@@ -24,11 +29,11 @@ namespace Zed.Service {
 		private class Helper {
 			private TemporaryExecutable helper32;
 			private TemporaryExecutable helper64;
-			private ManagerProxy manager_proxy;
+			private WinIpc.ServerProxy manager_proxy;
 
-			private const uint ESTABLISH_TIMEOUT_MSEC = 1000;
+			private const uint ESTABLISH_TIMEOUT_MSEC = 30 * 1000;
 
-			public Helper (TemporaryExecutable helper32, TemporaryExecutable helper64, ManagerProxy manager_proxy) {
+			public Helper (TemporaryExecutable helper32, TemporaryExecutable helper64, WinIpc.ServerProxy manager_proxy) {
 				this.helper32 = helper32;
 				this.helper64 = helper64;
 				this.manager_proxy = manager_proxy;
@@ -42,36 +47,15 @@ namespace Zed.Service {
 				}
 			}
 
-			public async void inject (uint32 target_pid, string filename, Cancellable? cancellable) throws WinjectorError {
-				print ("inject\n");
-				yield manager_proxy.inject (target_pid, filename);
-				print ("inject succeeded\n");
-			}
-		}
-
-		private class ManagerProxy : WinIpc.ServerProxy {
-			private const string INJECT_RESPONSE = "(bus)";
-
-			public async void inject (uint32 target_pid, string dll_path) throws WinjectorError {
-				Variant response;
-
+			public async void close () {
 				try {
-					response = yield query ("Inject", new Variant ("(us)", target_pid, dll_path), INJECT_RESPONSE);
+					yield manager_proxy.emit ("Stop");
 				} catch (WinIpc.ProxyError e) {
-					throw new WinjectorError.FAILED (e.message);
 				}
+			}
 
-				bool success;
-				uint error_code;
-				string error_message;
-				response.get (INJECT_RESPONSE, out success, out error_code, out error_message);
-				if (!success) {
-					var permission_error = new WinjectorError.PERMISSION_DENIED (error_message);
-					if (error_code == permission_error.code)
-						throw permission_error;
-					else
-						throw new WinjectorError.FAILED (error_message);
-				}
+			public async void inject (uint32 target_pid, string filename, Cancellable? cancellable) throws WinjectorError {
+				yield WinjectorIpc.invoke_inject (target_pid, filename, manager_proxy);
 			}
 		}
 
@@ -87,6 +71,13 @@ namespace Zed.Service {
 
 			public HelperFactory (PrivilegeLevel level) {
 				this.level = level;
+			}
+
+			public async void close () {
+				if (helper != null) {
+					yield helper.close ();
+					helper = null;
+				}
 			}
 
 			public async Helper obtain () throws WinjectorError {
@@ -117,7 +108,7 @@ namespace Zed.Service {
 					var helper32 = new TemporaryExecutable (tempdir, "zed-winjector-helper-32", get_helper_32_data (), get_helper_32_size ());
 					var helper64 = new TemporaryExecutable (tempdir, "zed-winjector-helper-64", get_helper_64_data (), get_helper_64_size ());
 
-					var manager_proxy = new ManagerProxy ();
+					var manager_proxy = new WinIpc.ServerProxy ();
 					helper32.execute ("MANAGER " + manager_proxy.address, level);
 
 					instance = new Helper (helper32, helper64, manager_proxy);
