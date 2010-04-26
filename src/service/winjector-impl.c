@@ -9,6 +9,24 @@ extern const unsigned char zed_data_winjector_helper_32_data[];
 extern const unsigned int zed_data_winjector_helper_64_size;
 extern const unsigned char zed_data_winjector_helper_64_data[];
 
+gboolean
+zed_service_winjector_helper_is_process_still_running (void * handle)
+{
+  DWORD exit_code;
+
+  if (!GetExitCodeProcess (handle, &exit_code))
+    return FALSE;
+
+  return exit_code == STILL_ACTIVE;
+}
+
+void
+zed_service_winjector_helper_close_process_handle (void * handle)
+{
+  g_assert (handle != NULL);
+  CloseHandle (handle);
+}
+
 void *
 zed_service_winjector_helper_factory_get_helper_32_data (void)
 {
@@ -75,11 +93,12 @@ zed_service_winjector_temporary_directory_destroy_tempdir (const char * path)
   g_free (path_utf16);
 }
 
-void
+void *
 zed_service_winjector_temporary_executable_execute (
     ZedServiceWinjectorTemporaryExecutable * self, const char * parameters,
     ZedServiceWinjectorPrivilegeLevel level, GError ** error)
 {
+  HANDLE process_handle;
   SHELLEXECUTEINFOW ei = { 0, };
   gchar * file;
   WCHAR * file_utf16;
@@ -89,8 +108,8 @@ zed_service_winjector_temporary_executable_execute (
 
   ei.cbSize = sizeof (ei);
 
-  ei.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | SEE_MASK_UNICODE
-      | SEE_MASK_WAITFORINPUTIDLE;
+  ei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI
+      | SEE_MASK_UNICODE | SEE_MASK_WAITFORINPUTIDLE;
   if (level == ZED_SERVICE_WINJECTOR_PRIVILEGE_LEVEL_ELEVATED)
     ei.lpVerb = L"runas";
   else
@@ -106,8 +125,14 @@ zed_service_winjector_temporary_executable_execute (
 
   ei.nShow = SW_HIDE;
 
-  if (!ShellExecuteExW (&ei))
+  if (ShellExecuteExW (&ei))
   {
+    process_handle = ei.hProcess;
+  }
+  else
+  {
+    process_handle = NULL;
+
     g_set_error (error,
         ZED_SERVICE_WINJECTOR_ERROR,
         ZED_SERVICE_WINJECTOR_ERROR_EXECUTE_FAILED,
@@ -118,4 +143,6 @@ zed_service_winjector_temporary_executable_execute (
   g_free (file_utf16);
 
   CoUninitialize ();
+
+  return process_handle;
 }

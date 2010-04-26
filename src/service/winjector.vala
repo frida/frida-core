@@ -29,13 +29,15 @@ namespace Zed.Service {
 			private TemporaryExecutable helper32;
 			private TemporaryExecutable helper64;
 			private WinIpc.ServerProxy manager_proxy;
+			private void * manager_process;
 
 			private const uint ESTABLISH_TIMEOUT_MSEC = 30 * 1000;
 
-			public Helper (TemporaryExecutable helper32, TemporaryExecutable helper64, WinIpc.ServerProxy manager_proxy) {
+			public Helper (TemporaryExecutable helper32, TemporaryExecutable helper64, WinIpc.ServerProxy manager_proxy, void * manager_process) {
 				this.helper32 = helper32;
 				this.helper64 = helper64;
 				this.manager_proxy = manager_proxy;
+				this.manager_process = manager_process;
 			}
 
 			public async void open () throws WinjectorError {
@@ -51,11 +53,27 @@ namespace Zed.Service {
 					yield manager_proxy.emit ("Stop");
 				} catch (WinIpc.ProxyError e) {
 				}
+
+				if (is_process_still_running (manager_process)) {
+					Timeout.add (10, () => {
+						if (is_process_still_running (manager_process))
+							return true; /* wait and try again */
+						close.callback ();
+						return false;
+					});
+					yield;
+				}
+
+				close_process_handle (manager_process);
+				manager_process = null;
 			}
 
 			public async void inject (uint32 target_pid, string filename, Cancellable? cancellable) throws WinjectorError {
 				yield WinjectorIpc.invoke_inject (target_pid, filename, manager_proxy);
 			}
+
+			private static extern bool is_process_still_running (void * handle);
+			private static extern void close_process_handle (void * handle);
 		}
 
 		private enum PrivilegeLevel {
@@ -108,9 +126,9 @@ namespace Zed.Service {
 					var helper64 = new TemporaryExecutable (tempdir, "zed-winjector-helper-64", get_helper_64_data (), get_helper_64_size ());
 
 					var manager_proxy = new WinIpc.ServerProxy ();
-					helper32.execute ("MANAGER " + manager_proxy.address, level);
+					void * manager_process = helper32.execute ("MANAGER " + manager_proxy.address, level);
 
-					instance = new Helper (helper32, helper64, manager_proxy);
+					instance = new Helper (helper32, helper64, manager_proxy, manager_process);
 				} catch (WinjectorError e) {
 					error = e;
 				}
@@ -217,7 +235,7 @@ namespace Zed.Service {
 				}
 			}
 
-			public extern void execute (string parameters, PrivilegeLevel level) throws WinjectorError;
+			public extern void * execute (string parameters, PrivilegeLevel level) throws WinjectorError;
 		}
 	}
 }
