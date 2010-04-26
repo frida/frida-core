@@ -40,6 +40,11 @@ namespace Zed.Service {
 				this.manager_process = manager_process;
 			}
 
+			~Helper () {
+				if (manager_process != null)
+					close_process_handle (manager_process);
+			}
+
 			public async void open () throws WinjectorError {
 				try {
 					yield manager_proxy.establish (ESTABLISH_TIMEOUT_MSEC);
