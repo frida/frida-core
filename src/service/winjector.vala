@@ -73,8 +73,8 @@ namespace Zed.Service {
 				manager_process = null;
 			}
 
-			public async void inject (uint32 target_pid, string filename, Cancellable? cancellable) throws WinjectorError {
-				yield WinjectorIpc.invoke_inject (target_pid, filename, manager_proxy);
+			public async void inject (uint32 target_pid, string filename_template, Cancellable? cancellable) throws WinjectorError {
+				yield WinjectorIpc.invoke_inject (target_pid, filename_template, manager_proxy);
 			}
 
 			private static extern bool is_process_still_running (void * handle);

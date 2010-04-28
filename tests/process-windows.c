@@ -1,4 +1,5 @@
-#include <glib.h>
+#include "zed-tests.h"
+
 #include <windows.h>
 #include <psapi.h>
 
@@ -55,11 +56,19 @@ zed_test_process_backend_do_start (const char * filename,
 }
 
 glong
-zed_test_process_backend_do_join (void * handle)
+zed_test_process_backend_do_join (void * handle, guint timeout_msec,
+    GError ** error)
 {
   DWORD exit_code;
 
-  WaitForSingleObject (handle, INFINITE);
+  if (WaitForSingleObject (handle,
+      (timeout_msec != 0) ? timeout_msec : INFINITE) == WAIT_TIMEOUT)
+  {
+    g_set_error (error,
+        ZED_TEST_PROCESS_ERROR, ZED_TEST_PROCESS_ERROR_TIMED_OUT,
+        "Timed out");
+    return -1;
+  }
 
   GetExitCodeProcess (handle, &exit_code);
   CloseHandle (handle);

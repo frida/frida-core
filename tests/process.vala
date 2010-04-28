@@ -45,9 +45,13 @@ namespace Zed.Test {
 				return null;
 		}
 
-		public long join () {
-			return ProcessBackend.do_join (handle);
+		public long join (uint timeout_msec = 0) throws ProcessError {
+			return ProcessBackend.do_join (handle, timeout_msec);
 		}
+	}
+
+	errordomain ProcessError {
+		TIMED_OUT
 	}
 
 	namespace ProcessBackend {
@@ -55,6 +59,6 @@ namespace Zed.Test {
 		private extern long self_id ();
 		private extern string filename_of (void * handle);
 		private extern bool do_start (string filename, out void * handle, out long id);
-		private extern long do_join (void * handle);
+		private extern long do_join (void * handle, uint timeout_msec) throws ProcessError;
 	}
 }

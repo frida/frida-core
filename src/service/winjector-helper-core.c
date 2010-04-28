@@ -195,16 +195,28 @@ struct _TrickContext
   gpointer create_thread_impl;
   gpointer close_handle_impl;
 
-  guint32 saved_xax;
-  guint32 saved_xbx;
-  guint32 saved_xcx;
-  guint32 saved_xdx;
-  guint32 saved_xbp;
-  guint32 saved_xsp;
-  guint32 saved_xsi;
-  guint32 saved_xdi;
-  guint32 saved_flags;
-  guint32 saved_xip;
+  gsize saved_xax;
+  gsize saved_xbx;
+  gsize saved_xcx;
+  gsize saved_xdx;
+  gsize saved_xdi;
+  gsize saved_xsi;
+  gsize saved_xbp;
+  gsize saved_xsp;
+
+#ifdef _M_X64
+  gsize saved_r8;
+  gsize saved_r9;
+  gsize saved_r10;
+  gsize saved_r11;
+  gsize saved_r12;
+  gsize saved_r13;
+  gsize saved_r14;
+  gsize saved_r15;
+#endif
+
+  gsize saved_flags;
+  gsize saved_xip;
 };
 
 struct _WorkerContext
@@ -219,7 +231,6 @@ static void
 trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     const WCHAR * dll_path, GError ** error)
 {
-#ifndef _M_X64 /* FIXME */
   HMODULE kmod;
   guint8 trick_code[] = {
     /*
@@ -231,7 +242,7 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x68,                   /* push 0xDDCCBBAA                       (dwSize) */
     /* offset 8: */ 0xAA, 0xBB, 0xCC, 0xDD,
     0x6A, 0x00,             /* push 0                             (lpAddress) */
-    0xFF, 0x53, G_STRUCT_OFFSET (TrickContext, virtual_alloc_impl),   /* call */
+    0xFF, 0x53, offsetof (TrickContext, virtual_alloc_impl),          /* call */
 
     /*
      * memcpy (worker_data, ctx->worker_data, sizeof (ctx->worker_data));
@@ -255,27 +266,27 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x50,                                 /* push eax        (lpStartAddress) */
     0x6A, 0x00,                           /* push 0             (dwStackSize) */
     0x6A, 0x00,                           /* push NULL   (lpThreadAttributes) */
-    0xFF, 0x53, G_STRUCT_OFFSET (TrickContext, create_thread_impl),   /* call */
+    0xFF, 0x53, offsetof (TrickContext, create_thread_impl),          /* call */
 
     /*
      * CloseHandle (worker_thread);
      */
     0x50,                                 /* push eax               (hObject) */
-    0xFF, 0x53, G_STRUCT_OFFSET (TrickContext, close_handle_impl),    /* call */
+    0xFF, 0x53, offsetof (TrickContext, close_handle_impl),           /* call */
 
     /*
      * Restore registers and continue execution from where we cut it off.
      */
-    0x8B, 0x43, G_STRUCT_OFFSET (TrickContext, saved_xax),      /* mov eax, S */
-    0x8B, 0x4B, G_STRUCT_OFFSET (TrickContext, saved_xcx),      /* mov ecx, S */
-    0x8B, 0x53, G_STRUCT_OFFSET (TrickContext, saved_xdx),      /* mov edx, S */
-    0x8B, 0x6B, G_STRUCT_OFFSET (TrickContext, saved_xbp),      /* mov ebp, S */
-    0x8B, 0x63, G_STRUCT_OFFSET (TrickContext, saved_xsp),      /* mov esp, S */
-    0x8B, 0x73, G_STRUCT_OFFSET (TrickContext, saved_xsi),      /* mov esi, S */
-    0x8B, 0x7B, G_STRUCT_OFFSET (TrickContext, saved_xdi),      /* mov edi, S */
-    0xFF, 0x73, G_STRUCT_OFFSET (TrickContext, saved_flags),    /* push ... S */
-    0xFF, 0x73, G_STRUCT_OFFSET (TrickContext, saved_xip),      /* push ... S */
-    0x8B, 0x5B, G_STRUCT_OFFSET (TrickContext, saved_xbx),      /* mov ebx, S */
+    0x8B, 0x43, offsetof (TrickContext, saved_xax),             /* mov eax, S */
+    0x8B, 0x4B, offsetof (TrickContext, saved_xcx),             /* mov ecx, S */
+    0x8B, 0x53, offsetof (TrickContext, saved_xdx),             /* mov edx, S */
+    0x8B, 0x7B, offsetof (TrickContext, saved_xdi),             /* mov edi, S */
+    0x8B, 0x73, offsetof (TrickContext, saved_xsi),             /* mov esi, S */
+    0x8B, 0x6B, offsetof (TrickContext, saved_xbp),             /* mov ebp, S */
+    0x8B, 0x63, offsetof (TrickContext, saved_xsp),             /* mov esp, S */
+    0xFF, 0x73, offsetof (TrickContext, saved_flags),           /* push ... S */
+    0xFF, 0x73, offsetof (TrickContext, saved_xip),             /* push ... S */
+    0x8B, 0x5B, offsetof (TrickContext, saved_xbx),             /* mov ebx, S */
     0x83, 0xC4, 0x04,                                           /* add esp, 4 */
     0x9D,                                                       /* popfd      */
     0xFF, 0x64, 0x24, 0xF8                                      /* jmp [esp-8]*/
@@ -293,9 +304,9 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     /*
      * LoadLibraryW (ctx->dll_path);
      */
-    0x8D, 0x43, G_STRUCT_OFFSET (WorkerContext, dll_path),  /* lea eax, ebx+X */
+    0x8D, 0x43, offsetof (WorkerContext, dll_path),         /* lea eax, ebx+X */
     0x50,                                                   /* push eax       */
-    0xFF, 0x53, G_STRUCT_OFFSET (WorkerContext, load_library_impl),   /* call */
+    0xFF, 0x53, offsetof (WorkerContext, load_library_impl),          /* call */
 
     /*
      * VirtualFree (worker_data, ...);
@@ -304,7 +315,7 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x6A, 0x00,                   /* push 0                    (arg2: dwSize) */
     0x53,                         /* push ebx   (VirtualFree arg1: lpAddress) */
     0x56,                         /* push esi           (fake return address) */
-    0xFF, 0x63, G_STRUCT_OFFSET (WorkerContext, virtual_free_impl),    /* jmp */
+    0xFF, 0x63, offsetof (WorkerContext, virtual_free_impl),           /* jmp */
 
     0xCC, 0xCC, 0xCC              /* pad to multiple of 4                     */
   };
@@ -332,6 +343,27 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     set_trick_thread_error_from_os_error ("GetThreadContext", error);
     goto beach;
   }
+#ifdef _M_X64
+  trick_ctx.saved_xax = ctx.Rax;
+  trick_ctx.saved_xbx = ctx.Rbx;
+  trick_ctx.saved_xcx = ctx.Rcx;
+  trick_ctx.saved_xdx = ctx.Rdx;
+  trick_ctx.saved_xdi = ctx.Rdi;
+  trick_ctx.saved_xsi = ctx.Rsi;
+  trick_ctx.saved_xbp = ctx.Rbp;
+  trick_ctx.saved_xsp = ctx.Rsp;
+  trick_ctx.saved_r8 = ctx.R8;
+  trick_ctx.saved_r9 = ctx.R9;
+  trick_ctx.saved_r10 = ctx.R10;
+  trick_ctx.saved_r11 = ctx.R11;
+  trick_ctx.saved_r12 = ctx.R12;
+  trick_ctx.saved_r13 = ctx.R13;
+  trick_ctx.saved_r14 = ctx.R14;
+  trick_ctx.saved_r15 = ctx.R15;
+
+  trick_ctx.saved_flags = ctx.EFlags;
+  trick_ctx.saved_xip = ctx.Rip;
+#else
   trick_ctx.saved_xax = ctx.Eax;
   trick_ctx.saved_xbx = ctx.Ebx;
   trick_ctx.saved_xcx = ctx.Ecx;
@@ -342,6 +374,7 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
   trick_ctx.saved_xdi = ctx.Edi;
   trick_ctx.saved_flags = ctx.EFlags;
   trick_ctx.saved_xip = ctx.Eip;
+#endif
 
   worker_ctx.load_library_impl = GetProcAddress (kmod, "LoadLibraryW");
   worker_ctx.virtual_free_impl = GetProcAddress (kmod, "VirtualFree");
@@ -379,8 +412,13 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     goto beach;
   }
 
+#ifdef _M_X64
+  ctx.Rbx = (DWORD64) remote_trick_ctx;
+  ctx.Rip = (DWORD64) (remote_trick_ctx + 1);
+#else
   ctx.Ebx = (DWORD) remote_trick_ctx;
   ctx.Eip = (DWORD) (remote_trick_ctx + 1);
+#endif
 
   if (!SetThreadContext (thread_handle, &ctx))
   {
@@ -390,7 +428,6 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
 
 beach:
   return;
-#endif
 }
 
 static gboolean

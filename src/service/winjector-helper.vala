@@ -95,17 +95,23 @@ namespace Winjector {
 
 		private async Variant? handle_query (string id, Variant? argument) {
 			uint32 target_pid;
-			string filename;
-			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename);
+			string filename_template;
+			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename_template);
 
 			WinIpc.Proxy helper;
-			if (Process.is_x64 (target_pid))
+			string filename;
+			if (Process.is_x64 (target_pid)) {
 				helper = helper64;
-			else
+				filename = filename_template.printf (64);
+			} else {
 				helper = helper32;
+				filename = filename_template.printf (32);
+			}
+
+			var helper_argument = new Variant (WinjectorIpc.INJECT_SIGNATURE, target_pid, filename);
 
 			try {
-				return yield helper.query (id, argument);
+				return yield helper.query (id, helper_argument);
 			} catch (WinIpc.ProxyError e) {
 				var failed = new WinjectorError.FAILED (e.message);
 				return new Variant (WinjectorIpc.INJECT_RESPONSE, false, failed.code, failed.message);

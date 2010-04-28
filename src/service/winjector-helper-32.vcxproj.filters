@@ -18,7 +18,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="winjector-helper.h">
+    <ClInclude Include="$(IntDir)winjector-helper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -35,6 +35,9 @@
     <ClCompile Include="$(IntDir)winjector-ipc.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="winjector-helper-core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">
@@ -42,7 +45,11 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <None Include="winjector-error.vala" />
-    <None Include="winjector-ipc.vala" />
+    <None Include="winjector-error.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="winjector-ipc.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

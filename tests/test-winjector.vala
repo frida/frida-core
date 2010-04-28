@@ -3,8 +3,16 @@ namespace Zed.Test.Winjector {
 		GLib.Test.add_func ("/Winjector/inject-x86", () => {
 			var rat = new LabRat ("winvictim-busy32");
 			Thread.usleep (10000); /* give it 10 ms to settle */
-			rat.inject ("winattacker32");
-			long exitcode = rat.process.join ();
+			rat.inject ("winattacker%u.dll");
+			long exitcode = rat.wait_for_process_to_exit ();
+			assert (exitcode == 133742);
+		});
+
+		GLib.Test.add_func ("/Winjector/inject-x64", () => {
+			var rat = new LabRat ("winvictim-busy64");
+			Thread.usleep (10000); /* give it 10 ms to settle */
+			rat.inject ("winattacker%u.dll");
+			long exitcode = rat.wait_for_process_to_exit ();
 			assert (exitcode == 133742);
 		});
 	}
@@ -35,12 +43,31 @@ namespace Zed.Test.Winjector {
 			loop.run ();
 		}
 
+		public long wait_for_process_to_exit () {
+			long exitcode = -1;
+			bool wait_for_exit_timed_out = false;
+
+			try {
+				exitcode = process.join (1000);
+			} catch (ProcessError e) {
+				var timed_out_error = new ProcessError.TIMED_OUT ("");
+				if (e.code == timed_out_error.code)
+					wait_for_exit_timed_out = true;
+				else
+					assert_not_reached ();
+			}
+
+			assert (!wait_for_exit_timed_out);
+
+			return exitcode;
+		}
+
 		private async void do_injection (string name, MainLoop loop) {
 			var injector = new Service.Winjector ();
 
 			string inject_error = null;
 
-			var rat_file = Path.build_filename (rat_directory, name + ".dll");
+			var rat_file = Path.build_filename (rat_directory, name);
 			try {
 				yield injector.inject ((uint32) process.id, rat_file);
 			} catch (Service.WinjectorError e) {
