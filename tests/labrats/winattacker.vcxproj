@@ -18,9 +18,13 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -34,8 +38,54 @@
     <Import Project="$(SolutionDir)labrat.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\gee-1.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\lib\glib-2.0\include;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\glib-2.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4100;4127;4152</DisableSpecificWarnings>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\obj\x64-Release\zed-winipc-64;$(SolutionDir)..\..\ext\sdk\$(PlatformName)-Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;zed-winipc-$(PlatformArchitecture).lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ModuleDefinitionFile>winattacker.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\gee-1.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\lib\glib-2.0\include;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\glib-2.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4100;4127;4152</DisableSpecificWarnings>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\obj\x64-Release\zed-winipc-64;$(SolutionDir)..\..\ext\sdk\$(PlatformName)-Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;zed-winipc-$(PlatformArchitecture).lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ModuleDefinitionFile>winattacker.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="winattacker-dllmain.c" />
+    <ClCompile Include="$(IntDir)winattacker.c" />
+    <ClCompile Include="winattacker-glue.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="winattacker.vala">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">"$(SolutionDir)..\..\ext\sdk\vala\valac.exe" winattacker.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)..\..\ext\sdk\vala\vapi" --vapidir="$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32" --pkg=gio-2.0 --pkg=zed-winipc || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">"$(SolutionDir)..\..\ext\sdk\vala\valac.exe" winattacker.vala --ccode --directory=$(IntDir) --vapidir="$(SolutionDir)..\..\ext\sdk\vala\vapi" --vapidir="$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32" --pkg=gio-2.0 --pkg=zed-winipc || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">Compiling vala code</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">Compiling vala code</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">$(SolutionDir)..\..\ext\sdk\vala\valac.exe;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">$(SolutionDir)..\..\ext\sdk\vala\valac.exe;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

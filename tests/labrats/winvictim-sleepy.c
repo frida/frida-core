@@ -5,6 +5,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     MSG msg;
     BOOL bRet;
 
+    (void)hInstance;
+    (void)hPrevInstance;
+    (void)pCmdLine;
+    (void)nCmdShow;
+
     while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0)
     {
         if (bRet == -1)
