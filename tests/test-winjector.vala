@@ -1,19 +1,23 @@
+using WinIpc;
+
 namespace Zed.Test.Winjector {
 	public static void add_tests () {
-		GLib.Test.add_func ("/Winjector/inject-x86", () => {
+		GLib.Test.add_func ("/Winjector/inject/x86", () => {
 			var rat = new LabRat ("winvictim-busy32");
 			Thread.usleep (10000); /* give it 10 ms to settle */
-			rat.inject ("winattacker%u.dll");
+			var proxy = rat.inject ("winattacker%u.dll");
+			proxy.emit ("ExitProcess", new Variant ("u", 12345));
 			long exitcode = rat.wait_for_process_to_exit ();
-			assert (exitcode == 133742);
+			assert (exitcode == 12345);
 		});
 
-		GLib.Test.add_func ("/Winjector/inject-x64", () => {
+		GLib.Test.add_func ("/Winjector/inject/x64", () => {
 			var rat = new LabRat ("winvictim-busy64");
 			Thread.usleep (10000); /* give it 10 ms to settle */
-			rat.inject ("winattacker%u.dll");
+			var proxy = rat.inject ("winattacker%u.dll");
+			proxy.emit ("ExitProcess", new Variant ("u", 54321));
 			long exitcode = rat.wait_for_process_to_exit ();
-			assert (exitcode == 133742);
+			assert (exitcode == 54321);
 		});
 	}
 
@@ -24,6 +28,7 @@ namespace Zed.Test.Winjector {
 		}
 
 		private string rat_directory;
+		private Proxy cur_proxy;
 
 		public LabRat (string name) {
 			var self_filename = Process.current.filename;
@@ -34,13 +39,17 @@ namespace Zed.Test.Winjector {
 			process = Process.start (rat_file);
 		}
 
-		public void inject (string name) {
+		public Proxy inject (string name) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
 				do_injection (name, loop);
 				return false;
 			});
 			loop.run ();
+
+			Proxy proxy = cur_proxy;
+			cur_proxy = null;
+			return proxy;
 		}
 
 		public long wait_for_process_to_exit () {
@@ -69,7 +78,7 @@ namespace Zed.Test.Winjector {
 
 			var rat_file = Path.build_filename (rat_directory, name);
 			try {
-				yield injector.inject ((uint32) process.id, rat_file);
+				cur_proxy = yield injector.inject ((uint32) process.id, rat_file);
 			} catch (Service.WinjectorError e) {
 				inject_error = e.message;
 			}

@@ -10,19 +10,33 @@ namespace Zed.Service {
 			yield elevated_helper_factory.close ();
 		}
 
-		public async void inject (uint32 target_pid, string filename, Cancellable? cancellable = null) throws WinjectorError {
+		public async WinIpc.Proxy inject (uint32 target_pid, string filename, Cancellable? cancellable = null) throws WinjectorError {
+			var proxy = new WinIpc.ServerProxy ();
+
+			bool injected = false;
+
 			var normal_helper = yield normal_helper_factory.obtain ();
 			try {
-				yield normal_helper.inject (target_pid, filename, cancellable);
-				return;
-			} catch (WinjectorError e) {
+				yield normal_helper.inject (target_pid, filename, proxy.address, cancellable);
+				injected = true;
+			} catch (WinjectorError inject_error) {
 				var permission_error = new WinjectorError.ACCESS_DENIED ("");
-				if (e.code != permission_error.code)
-					throw e;
+				if (inject_error.code != permission_error.code)
+					throw inject_error;
 			}
 
-			var elevated_helper = yield elevated_helper_factory.obtain ();
-			yield elevated_helper.inject (target_pid, filename, cancellable);
+			if (!injected) {
+				var elevated_helper = yield elevated_helper_factory.obtain ();
+				yield elevated_helper.inject (target_pid, filename, proxy.address, cancellable);
+			}
+
+			try {
+				yield proxy.establish ();
+			} catch (WinIpc.ProxyError proxy_error) {
+				throw new WinjectorError.FAILED (proxy_error.message);
+			}
+
+			return proxy;
 		}
 
 		private class Helper {
@@ -73,8 +87,8 @@ namespace Zed.Service {
 				manager_process = null;
 			}
 
-			public async void inject (uint32 target_pid, string filename_template, Cancellable? cancellable) throws WinjectorError {
-				yield WinjectorIpc.invoke_inject (target_pid, filename_template, manager_proxy);
+			public async void inject (uint32 target_pid, string filename_template, string ipc_server_address, Cancellable? cancellable) throws WinjectorError {
+				yield WinjectorIpc.invoke_inject (target_pid, filename_template, ipc_server_address, manager_proxy);
 			}
 
 			private static extern bool is_process_still_running (void * handle);

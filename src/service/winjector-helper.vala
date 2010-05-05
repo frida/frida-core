@@ -96,7 +96,8 @@ namespace Winjector {
 		private async Variant? handle_query (string id, Variant? argument) {
 			uint32 target_pid;
 			string filename_template;
-			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename_template);
+			string ipc_server_address;
+			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename_template, out ipc_server_address);
 
 			WinIpc.Proxy helper;
 			string filename;
@@ -108,7 +109,7 @@ namespace Winjector {
 				filename = filename_template.printf (32);
 			}
 
-			var helper_argument = new Variant (WinjectorIpc.INJECT_SIGNATURE, target_pid, filename);
+			var helper_argument = new Variant (WinjectorIpc.INJECT_SIGNATURE, target_pid, filename, ipc_server_address);
 
 			try {
 				return yield helper.query (id, helper_argument);
@@ -139,8 +140,8 @@ namespace Winjector {
 
 		public abstract void run ();
 
-		private void inject (uint32 target_pid, string filename) throws WinjectorError {
-			Process.inject (target_pid, filename);
+		private void inject (uint32 target_pid, string filename, string ipc_server_address) throws WinjectorError {
+			Process.inject (target_pid, filename, ipc_server_address);
 		}
 
 		protected async void establish () {
@@ -187,6 +188,6 @@ namespace Winjector {
 
 	namespace Process {
 		public static extern bool is_x64 (uint32 process_id);
-		public static extern void inject (uint32 process_id, string dll_path) throws WinjectorError;
+		public static extern void inject (uint32 process_id, string dll_path, string ipc_server_address) throws WinjectorError;
 	}
 }

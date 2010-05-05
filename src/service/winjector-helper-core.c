@@ -6,7 +6,8 @@
 
 static HANDLE try_to_grab_a_thread_in (DWORD process_id, GError ** error);
 static void trick_thread_into_loading_dll (HANDLE process_handle,
-    HANDLE thread_handle, const WCHAR * dll_path, GError ** error);
+    HANDLE thread_handle, const WCHAR * dll_path,
+    const gchar * ipc_server_address, GError ** error);
 
 static gboolean file_exists_and_is_readable (const WCHAR * filename);
 static void set_grab_thread_error_from_os_error (const gchar * func_name,
@@ -57,7 +58,7 @@ error:
 
 void
 winjector_process_inject (guint32 process_id, const char * dll_path,
-    GError ** error)
+    const gchar * ipc_server_address, GError ** error)
 {
   WCHAR * dll_path_utf16;
   HANDLE process_handle = NULL;
@@ -114,7 +115,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   }
 
   trick_thread_into_loading_dll (process_handle, thread_handle, dll_path_utf16,
-      error);
+      ipc_server_address, error);
 
   ResumeThread (thread_handle);
 
@@ -235,15 +236,20 @@ struct _TrickContext
 struct _WorkerContext
 {
   gpointer load_library_impl;
+  gpointer get_proc_address_impl;
+  gpointer free_library_impl;
   gpointer virtual_free_impl;
   gpointer exit_thread_impl;
 
+  gchar zed_agent_main_string[14 + 1];
+
   WCHAR dll_path[MAX_PATH + 1];
+  gchar ipc_server_address[MAX_PATH + 1];
 };
 
 static void
 trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
-    const WCHAR * dll_path, GError ** error)
+    const WCHAR * dll_path, const gchar * ipc_server_address, GError ** error)
 {
   HMODULE kmod;
   guint8 trick_code[] = {
@@ -384,19 +390,43 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
      * Remove return address, so VirtualFree will return directly to
      * ExitThread instead of freed memory.
      */
-    0x5E,                                             /* pop rsi              (return address) */
-    0x48, 0x89, 0xCB,                                 /* mov rbx, rcx (WorkerContext argument) */
+    0x5E,                                              /* pop rsi              (return address) */
+    0x48, 0x89, 0xCB,                                  /* mov rbx, rcx (WorkerContext argument) */
 
     /*
      * Reserve stack space for arguments (24), rounded up to next 16 byte boundary (32)
      */
-    0x48, 0x83, 0xEC, 32,                             /* sub rsp, 32                           */
+    0x48, 0x83, 0xEC, 32,                              /* sub rsp, 32                           */
 
     /*
-     * LoadLibraryW (ctx->dll_path);
+     * HANDLE mod = LoadLibraryW (ctx->dll_path);
      */
-    0x48, 0x8D, 0x4B, offsetof (WorkerContext, dll_path),           /* lea rcx, [rbx + 0xAA]   */
-    0xFF, 0x53,       offsetof (WorkerContext, load_library_impl),  /* call qword [rbx + 0xAA] */
+    0x48, 0x8D, 0x4B, offsetof (WorkerContext, dll_path),            /* lea rcx, [rbx + 0xAA]   */
+    0xFF, 0x53,       offsetof (WorkerContext, load_library_impl),   /* call qword [rbx + 0xAA] */
+    0x48, 0x89, 0xC7,                                                /* mov rdi, rax            */
+
+    /*
+     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
+     */
+    0x48, 0x8D, 0x53,                                                /* lea rdx, [rbx + 0xAA]   */
+                      offsetof (WorkerContext, zed_agent_main_string),
+    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
+    0xFF, 0x53, offsetof (WorkerContext, get_proc_address_impl),     /* call qword [rbx + 0xAA] */
+
+    /*
+     * func (ctx->ipc_server_address);
+     */
+    0x48, 0x8D, 0x8B, offsetof (WorkerContext, ipc_server_address) & 0xff,  /* lea rcx, rbx + X */
+                      (offsetof (WorkerContext, ipc_server_address) >> 8) & 0xff,
+                      0,
+                      0,
+    0xFF, 0xD0,                                                             /* call rax         */
+
+    /*
+     * FreeLibrary (mod);
+     */
+    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
+    0xFF, 0x53, offsetof (WorkerContext, free_library_impl),         /* call qword [rbx + 0xAA] */
 
     /*
      * VirtualFree (worker_data, ...); -> ExitThread ();
@@ -415,20 +445,46 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x5B,                                           /* pop ebx         (WorkerContext argument) */
 
     /*
-     * LoadLibraryW (ctx->dll_path);
+     * HANDLE mod = LoadLibraryW (ctx->dll_path);
      */
     0x8D, 0x43, offsetof (WorkerContext, dll_path),                           /* lea eax, ebx+X */
     0x50,                                                                     /* push eax       */
     0xFF, 0x53, offsetof (WorkerContext, load_library_impl),                  /* call           */
+    0x89, 0xC7,                                                               /* mov edi, eax   */
+
+    /*
+     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
+     */
+    0x8D, 0x43, offsetof (WorkerContext, zed_agent_main_string),              /* lea eax, ebx+X */
+    0x50,                                                                     /* push eax       */
+    0x57,                                                                     /* push edi       */
+    0xFF, 0x53, offsetof (WorkerContext, get_proc_address_impl),              /* call           */
+
+    /*
+     * func (ctx->ipc_server_address);
+     */
+    0x8D, 0xAB, offsetof (WorkerContext, ipc_server_address) & 0xff,      /* lea ebp, [ebx + X] */
+                (offsetof (WorkerContext, ipc_server_address) >> 8) & 0xff,
+                0,
+                0,
+    0x55,                                                                           /* push ebp */
+    0xFF, 0xD0,                                                                     /* call eax */
+    0x5D,                                                                           /* pop ebp  */
+
+    /*
+     * FreeLibrary (mod);
+     */
+    0x57,                                                                           /* push edi */
+    0xFF, 0x53, offsetof (WorkerContext, free_library_impl),                        /* call     */
 
     /*
      * VirtualFree (worker_data, ...);
      */
-    0x68, 0x00, 0x80, 0x00, 0x00,                   /* push MEM_RELEASE      (arg3: dwFreeType) */
-    0x6A, 0x00,                                     /* push 0                    (arg2: dwSize) */
-    0x53,                                           /* push ebx   (VirtualFree arg1: lpAddress) */
-    0x56,                                           /* push esi           (fake return address) */
-    0xFF, 0x63, offsetof (WorkerContext, virtual_free_impl),                             /* jmp */
+    0x68, 0x00, 0x80, 0x00, 0x00,                    /* push MEM_RELEASE      (arg3: dwFreeType) */
+    0x6A, 0x00,                                      /* push 0                    (arg2: dwSize) */
+    0x53,                                            /* push ebx   (VirtualFree arg1: lpAddress) */
+    0x56,                                            /* push esi           (fake return address) */
+    0xFF, 0x63, offsetof (WorkerContext, virtual_free_impl),                              /* jmp */
 #endif
   };
   WorkerContext worker_ctx;
@@ -494,10 +550,17 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
 #endif
 
   worker_ctx.load_library_impl = GetProcAddress (kmod, "LoadLibraryW");
+  worker_ctx.get_proc_address_impl = GetProcAddress (kmod, "GetProcAddress");
+  worker_ctx.free_library_impl = GetProcAddress (kmod, "FreeLibrary");
   worker_ctx.virtual_free_impl = GetProcAddress (kmod, "VirtualFree");
   worker_ctx.exit_thread_impl = GetProcAddress (kmod, "ExitThread");
 
+  StringCbCopyA (worker_ctx.zed_agent_main_string,
+      sizeof (worker_ctx.zed_agent_main_string), "zed_agent_main");
+
   StringCbCopyW (worker_ctx.dll_path, sizeof (worker_ctx.dll_path), dll_path);
+  StringCbCopyA (worker_ctx.ipc_server_address,
+      sizeof (worker_ctx.ipc_server_address), ipc_server_address);
 
   /* Allocate on stack so we don't have to clean up afterwards. */
   remote_trick_ctx = VirtualAllocEx (process_handle,
