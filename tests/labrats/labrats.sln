@@ -1,11 +1,11 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 10.00
-# Visual Studio 2008
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winvictim-sleepy", "winvictim-sleepy.vcproj", "{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}"
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winvictim-sleepy", "winvictim-sleepy.vcxproj", "{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winattacker", "winattacker.vcproj", "{2E50A230-74F6-4ECE-BC89-D316B6DCE403}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winvictim-busy", "winvictim-busy.vcxproj", "{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winvictim-busy", "winvictim-busy.vcproj", "{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winattacker", "winattacker.vcxproj", "{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -17,14 +17,14 @@ Global
 		{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}.LabRat|Win32.Build.0 = LabRat|Win32
 		{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}.LabRat|x64.ActiveCfg = LabRat|x64
 		{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}.LabRat|x64.Build.0 = LabRat|x64
-		{2E50A230-74F6-4ECE-BC89-D316B6DCE403}.LabRat|Win32.ActiveCfg = LabRat|Win32
-		{2E50A230-74F6-4ECE-BC89-D316B6DCE403}.LabRat|Win32.Build.0 = LabRat|Win32
-		{2E50A230-74F6-4ECE-BC89-D316B6DCE403}.LabRat|x64.ActiveCfg = LabRat|x64
-		{2E50A230-74F6-4ECE-BC89-D316B6DCE403}.LabRat|x64.Build.0 = LabRat|x64
 		{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}.LabRat|Win32.ActiveCfg = LabRat|Win32
 		{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}.LabRat|Win32.Build.0 = LabRat|Win32
 		{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}.LabRat|x64.ActiveCfg = LabRat|x64
 		{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}.LabRat|x64.Build.0 = LabRat|x64
+		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.LabRat|Win32.ActiveCfg = LabRat|Win32
+		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.LabRat|Win32.Build.0 = LabRat|Win32
+		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.LabRat|x64.ActiveCfg = LabRat|x64
+		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.LabRat|x64.Build.0 = LabRat|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
