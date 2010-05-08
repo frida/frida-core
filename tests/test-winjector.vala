@@ -8,6 +8,7 @@ namespace Zed.Test.Winjector {
 			var proxy = rat.inject ("winattacker%u.dll");
 			proxy.emit ("ExitProcess", new Variant ("u", 12345));
 			long exitcode = rat.wait_for_process_to_exit ();
+			rat.close ();
 			assert (exitcode == 12345);
 		});
 
@@ -17,6 +18,7 @@ namespace Zed.Test.Winjector {
 			var proxy = rat.inject ("winattacker%u.dll");
 			proxy.emit ("ExitProcess", new Variant ("u", 54321));
 			long exitcode = rat.wait_for_process_to_exit ();
+			rat.close ();
 			assert (exitcode == 54321);
 		});
 	}
@@ -29,6 +31,7 @@ namespace Zed.Test.Winjector {
 
 		private string rat_directory;
 		private Proxy cur_proxy;
+		private Service.Winjector injector;
 
 		public LabRat (string name) {
 			var self_filename = Process.current.filename;
@@ -71,21 +74,52 @@ namespace Zed.Test.Winjector {
 			return exitcode;
 		}
 
+		public void close () {
+			var loop = new MainLoop ();
+			Idle.add (() => {
+				do_close (loop);
+				return false;
+			});
+			loop.run ();
+		}
+
 		private async void do_injection (string name, MainLoop loop) {
-			var injector = new Service.Winjector ();
+			if (injector == null)
+				injector = new Service.Winjector ();
 
 			string inject_error = null;
 
-			var rat_file = Path.build_filename (rat_directory, name);
+			Service.AgentDescriptor desc;
+
 			try {
-				cur_proxy = yield injector.inject ((uint32) process.id, rat_file);
+				var dll32 = File.new_for_path (Path.build_filename (rat_directory, name.printf (32))).read (null);
+				var dll64 = File.new_for_path (Path.build_filename (rat_directory, name.printf (64))).read (null);
+				desc = new Service.AgentDescriptor (name, dll32, dll64);
+			} catch (Error io_error) {
+				assert_not_reached ();
+			}
+
+			try {
+				cur_proxy = yield injector.inject ((uint32) process.id, desc);
 			} catch (Service.WinjectorError e) {
 				inject_error = e.message;
 			}
 
-			yield injector.close ();
+			if (inject_error != null) {
+				yield injector.close ();
+				injector = null;
+			}
 
 			assert (inject_error == null);
+
+			loop.quit ();
+		}
+
+		private async void do_close (MainLoop loop) {
+			if (injector != null) {
+				yield injector.close ();
+				injector = null;
+			}
 
 			loop.quit ();
 		}

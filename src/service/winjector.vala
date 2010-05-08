@@ -2,6 +2,7 @@ using Gee;
 
 namespace Zed.Service {
 	public class Winjector : Object {
+		private ResourceStore resource_store;
 		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
 		private HelperFactory elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
@@ -10,7 +11,16 @@ namespace Zed.Service {
 			yield elevated_helper_factory.close ();
 		}
 
-		public async WinIpc.Proxy inject (uint32 target_pid, string filename, Cancellable? cancellable = null) throws WinjectorError {
+		public async WinIpc.Proxy inject (uint32 target_pid, AgentDescriptor desc, Cancellable? cancellable = null) throws WinjectorError {
+			if (resource_store == null) {
+				resource_store = new ResourceStore ();
+
+				normal_helper_factory.resource_store = resource_store;
+				elevated_helper_factory.resource_store = resource_store;
+			}
+
+			var filename = resource_store.ensure_copy_of (desc);
+
 			var proxy = new WinIpc.ServerProxy ();
 
 			bool injected = false;
@@ -40,14 +50,14 @@ namespace Zed.Service {
 		}
 
 		private class Helper {
-			private TemporaryExecutable helper32;
-			private TemporaryExecutable helper64;
+			private TemporaryFile helper32;
+			private TemporaryFile helper64;
 			private WinIpc.ServerProxy manager_proxy;
 			private void * manager_process;
 
 			private const uint ESTABLISH_TIMEOUT_MSEC = 30 * 1000;
 
-			public Helper (TemporaryExecutable helper32, TemporaryExecutable helper64, WinIpc.ServerProxy manager_proxy, void * manager_process) {
+			public Helper (TemporaryFile helper32, TemporaryFile helper64, WinIpc.ServerProxy manager_proxy, void * manager_process) {
 				this.helper32 = helper32;
 				this.helper64 = helper64;
 				this.manager_proxy = manager_proxy;
@@ -105,6 +115,11 @@ namespace Zed.Service {
 			private Helper helper;
 			private ArrayList<ObtainRequest> obtain_requests = new ArrayList<ObtainRequest> ();
 
+			public ResourceStore resource_store {
+				get;
+				set;
+			}
+
 			public HelperFactory (PrivilegeLevel level) {
 				this.level = level;
 			}
@@ -140,14 +155,10 @@ namespace Zed.Service {
 				WinjectorError error = null;
 
 				try {
-					var tempdir = new TemporaryDirectory ();
-					var helper32 = new TemporaryExecutable (tempdir, "zed-winjector-helper-32", get_helper_32_data (), get_helper_32_size ());
-					var helper64 = new TemporaryExecutable (tempdir, "zed-winjector-helper-64", get_helper_64_data (), get_helper_64_size ());
-
 					var manager_proxy = new WinIpc.ServerProxy ();
-					void * manager_process = helper32.execute ("MANAGER " + manager_proxy.address, level);
+					void * manager_process = resource_store.helper32.execute ("MANAGER " + manager_proxy.address, level);
 
-					instance = new Helper (helper32, helper64, manager_proxy, manager_process);
+					instance = new Helper (resource_store.helper32, resource_store.helper64, manager_proxy, manager_process);
 				} catch (WinjectorError e) {
 					error = e;
 				}
@@ -203,12 +214,64 @@ namespace Zed.Service {
 					return helper;
 				}
 			}
+		}
+
+		private class ResourceStore {
+			private TemporaryDirectory tempdir = new TemporaryDirectory ();
+
+			public TemporaryFile helper32 {
+				get;
+				private set;
+			}
+
+			public TemporaryFile helper64 {
+				get;
+				private set;
+			}
+
+			private HashMap<string, TemporaryAgent> agents = new HashMap<string, TemporaryAgent> ();
+
+			public ResourceStore () throws WinjectorError {
+				helper32 = new TemporaryFile.from_stream ("zed-winjector-helper-32.exe",
+					new MemoryInputStream.from_data (get_helper_32_data (), get_helper_32_size (), null),
+					tempdir);
+				helper64 = new TemporaryFile.from_stream ("zed-winjector-helper-64.exe",
+					new MemoryInputStream.from_data (get_helper_64_data (), get_helper_64_size (), null),
+					tempdir);
+			}
+
+			public string ensure_copy_of (AgentDescriptor desc) throws WinjectorError {
+				var temp_agent = agents[desc.name_template];
+				if (temp_agent == null) {
+					temp_agent = new TemporaryAgent (desc, tempdir);
+					agents[desc.name_template] = temp_agent;
+				}
+
+				return temp_agent.filename_template;
+			}
 
 			private static extern void * get_helper_32_data ();
 			private static extern uint get_helper_32_size ();
 
 			private static extern void * get_helper_64_data ();
 			private static extern uint get_helper_64_size ();
+		}
+
+		private class TemporaryAgent {
+			public string filename_template {
+				get;
+				private set;
+			}
+
+			private TemporaryFile dll32;
+			private TemporaryFile dll64;
+
+			public TemporaryAgent (AgentDescriptor desc, TemporaryDirectory tempdir) throws WinjectorError {
+				filename_template = Path.build_filename (tempdir.path, desc.name_template);
+
+				dll32 = new TemporaryFile.from_stream (desc.name_template.printf (32), desc.dll32, tempdir);
+				dll64 = new TemporaryFile.from_stream (desc.name_template.printf (64), desc.dll64, tempdir);
+			}
 		}
 
 		private class TemporaryDirectory {
@@ -229,25 +292,41 @@ namespace Zed.Service {
 			private static extern void destroy_tempdir (string path);
 		}
 
-		private class TemporaryExecutable {
-			private TemporaryDirectory directory;
+		private class TemporaryFile {
 			private File file;
+			private TemporaryDirectory directory;
 
-			public TemporaryExecutable (TemporaryDirectory directory, string name, void * data, uint size) throws WinjectorError {
+			public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory directory) throws WinjectorError {
+				this.file = File.new_for_path (Path.build_filename (directory.path, name));
 				this.directory = directory;
-				this.file = File.new_for_path (Path.build_filename (directory.path, name + ".exe"));
 
 				try {
 					var ostream = file.create (FileCreateFlags.NONE, null);
-					size_t bytes_written;
-					ostream.write_all (data, size, out bytes_written, null);
+
+					var buf_size = 128 * 1024;
+					var buf = new uint8[buf_size];
+
+					while (true) {
+						var bytes_read = istream.read (buf, buf_size, null);
+						if (bytes_read == 0)
+							break;
+
+						size_t bytes_written;
+						ostream.write_all (buf, bytes_read, out bytes_written, null);
+					}
+
 					ostream.close (null);
 				} catch (Error e) {
-					throw new WinjectorError.EXECUTE_FAILED (e.message);
+					throw new WinjectorError.FAILED (e.message);
 				}
 			}
 
-			~TemporaryExecutable () {
+			private TemporaryFile (File file, TemporaryDirectory directory) {
+				this.file = file;
+				this.directory = directory;
+			}
+
+			~TemporaryFile () {
 				try {
 					file.delete (null);
 				} catch (Error e) {
@@ -255,6 +334,27 @@ namespace Zed.Service {
 			}
 
 			public extern void * execute (string parameters, PrivilegeLevel level) throws WinjectorError;
+		}
+	}
+
+	public class AgentDescriptor : Object {
+		public string name_template {
+			get;
+			construct;
+		}
+
+		public InputStream dll32 {
+			get;
+			construct;
+		}
+
+		public InputStream dll64 {
+			get;
+			construct;
+		}
+
+		public AgentDescriptor (string name_template, InputStream dll32, InputStream dll64) {
+			Object (name_template: name_template, dll32: dll32, dll64: dll64);
 		}
 	}
 }

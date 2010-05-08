@@ -28,25 +28,25 @@ zed_service_winjector_helper_close_process_handle (void * handle)
 }
 
 void *
-zed_service_winjector_helper_factory_get_helper_32_data (void)
+zed_service_winjector_resource_store_get_helper_32_data (void)
 {
   return (void *) zed_data_winjector_helper_32_data;
 }
 
 guint
-zed_service_winjector_helper_factory_get_helper_32_size (void)
+zed_service_winjector_resource_store_get_helper_32_size (void)
 {
   return zed_data_winjector_helper_32_size;
 }
 
 void *
-zed_service_winjector_helper_factory_get_helper_64_data (void)
+zed_service_winjector_resource_store_get_helper_64_data (void)
 {
   return (void *) zed_data_winjector_helper_64_data;
 }
 
 guint
-zed_service_winjector_helper_factory_get_helper_64_size (void)
+zed_service_winjector_resource_store_get_helper_64_size (void)
 {
   return zed_data_winjector_helper_64_size;
 }
@@ -94,8 +94,8 @@ zed_service_winjector_temporary_directory_destroy_tempdir (const char * path)
 }
 
 void *
-zed_service_winjector_temporary_executable_execute (
-    ZedServiceWinjectorTemporaryExecutable * self, const char * parameters,
+zed_service_winjector_temporary_file_execute (
+    ZedServiceWinjectorTemporaryFile * self, const char * parameters,
     ZedServiceWinjectorPrivilegeLevel level, GError ** error)
 {
   HANDLE process_handle;
