@@ -51,7 +51,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <PostBuildEvent>
       <Message>Serializing $(TargetFileName)</Message>
-      <Command>set PATH=$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;%PATH%
+      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
 resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-32.c" "$(TargetPath)"</Command>
     </PostBuildEvent>
     <ClCompile>
@@ -64,7 +64,7 @@ resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-32.c"
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <PostBuildEvent>
       <Message>Serializing $(TargetFileName)</Message>
-      <Command>set PATH=$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;%PATH%
+      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
 resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-32.c" "$(TargetPath)"</Command>
     </PostBuildEvent>
     <ClCompile>

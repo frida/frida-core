@@ -50,7 +50,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <PostBuildEvent>
-      <Command>set PATH=$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;%PATH%
+      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
 resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-64.c" "$(TargetPath)"</Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -65,7 +65,7 @@ resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-64.c"
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <PostBuildEvent>
-      <Command>set PATH=$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;%PATH%
+      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
 resource-compiler.exe --namespace="zed_data" -o "$(IntDir)winjector-helper-64.c" "$(TargetPath)"</Command>
     </PostBuildEvent>
     <PostBuildEvent>
