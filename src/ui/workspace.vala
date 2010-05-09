@@ -56,14 +56,18 @@ namespace Zed {
 			construct;
 		}
 
-		private Presenter.Spy spy;
-		private Presenter.Chat chat;
+		public Presenter.Spy spy {
+			get;
+			construct;
+		}
+
+		public Presenter.Chat chat {
+			get;
+			construct;
+		}
 
 		public Workspace (View.Workspace view, Service.MucService muc_service) {
-			Object (view: view);
-
-			spy = new Presenter.Spy (view.spy);
-			chat = new Presenter.Chat (view.chat, muc_service);
+			Object (view: view, spy: new Presenter.Spy (view.spy), chat: new Presenter.Chat (view.chat, muc_service));
 		}
 	}
 }

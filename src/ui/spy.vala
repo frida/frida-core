@@ -57,7 +57,7 @@ namespace Zed {
 		public Spy (View.Spy view) {
 			Object (view: view, winjector: new Service.Winjector () /* here for now */);
 
-			process_store = new Gtk.ListStore (2, typeof (uint), typeof (string));
+			process_store = new Gtk.ListStore (3, typeof (uint), typeof (string), typeof (WinIpc.Proxy));
 			process_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
 			view.process_view.set_model (process_store);
 			view.process_view.insert_column_with_attributes (-1, "PID", new Gtk.CellRendererText (), "text", 0);
@@ -68,6 +68,22 @@ namespace Zed {
 				new MemoryInputStream.from_data (get_winagent_64_data (), get_winagent_64_size (), null));
 
 			connect_signals ();
+		}
+
+		public async void close () {
+			Gtk.TreeIter iter;
+			if (process_store.get_iter_first (out iter)) {
+				do {
+					var val = Value (typeof (WinIpc.Proxy));
+					process_store.get_value (iter, 2, out val);
+					WinIpc.Proxy proxy = (WinIpc.Proxy) val.get_object ();
+					proxy.emit ("Stop");
+				} while (process_store.iter_next (ref iter));
+			}
+
+			Thread.usleep (50000); /* HACK: give processes 50 ms to unload DLLs */
+
+			yield winjector.close ();
 		}
 
 		private void connect_signals () {
@@ -87,7 +103,7 @@ namespace Zed {
 			try {
 				process_store.set (iter, 0, pid, 1, "Injecting...");
 				var proxy = yield winjector.inject (pid, agent_desc, null);
-				process_store.set (iter, 1, "Injected!");
+				process_store.set (iter, 1, "Injected!", 2, proxy);
 			} catch (Service.WinjectorError e) {
 				process_store.set (iter, 1, "Error: %s".printf (e.message));
 			}

@@ -18,6 +18,12 @@ public class Zed.Application : Object {
 		Gtk.main ();
 	}
 
+	private async void stop () {
+		yield root.workspace.spy.close (); /* TODO: move relevant parts out into a service later */
+		yield xmpp_client.close ();
+		Gtk.main_quit ();
+	}
+
 	private void setup_services () {
 		xmpp_client = new Service.XmppClient ();
 		muc_service = new Service.MucService (xmpp_client);
@@ -30,7 +36,7 @@ public class Zed.Application : Object {
 		var root_view = new Zed.View.Root (login.view, workspace.view);
 		root = new Zed.Presenter.Root (root_view, login, workspace);
 
-		root_view.widget.destroy.connect (Gtk.main_quit);
+		root_view.widget.destroy.connect (() => stop ());
 	}
 }
 

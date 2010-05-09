@@ -54,6 +54,9 @@ namespace Zed {
 		}
 
 		public void focus () {
+			if (username_entry.parent == null) /* parent goes away during teardown */
+				return;
+
 			username_entry.grab_focus ();
 			login_button.grab_default ();
 		}

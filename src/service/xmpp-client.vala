@@ -20,6 +20,16 @@ public class Zed.Service.XmppClient : Object {
 		});
 	}
 
+	public async void close () {
+		/* TODO: fix wocky
+		try {
+			var porter = session.porter;
+			yield porter.close_async ();
+		} catch (PorterError porter_error) {
+		}
+		*/
+	}
+
 	public async bool login (string jid, string password, string? host) {
 		var connector = new Connector (jid, password, "Frida");
 
