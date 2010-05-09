@@ -21,6 +21,11 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.TreeView event_view {
+			get;
+			private set;
+		}
+
 		private Gtk.HPaned hpaned;
 
 		public Spy () {
@@ -33,6 +38,7 @@ namespace Zed {
 				pid_entry = builder.get_object ("pid_entry") as Gtk.Entry;
 				add_button = builder.get_object ("add_button") as Gtk.Button;
 				process_view = builder.get_object ("process_treeview") as Gtk.TreeView;
+				event_view = builder.get_object ("event_treeview") as Gtk.TreeView;
 			} catch (Error e) {
 				error (e.message);
 			}
@@ -51,6 +57,7 @@ namespace Zed {
 		}
 
 		private Gtk.ListStore process_store;
+		private Gtk.ListStore event_store;
 
 		private Service.AgentDescriptor agent_desc;
 
@@ -62,6 +69,10 @@ namespace Zed {
 			view.process_view.set_model (process_store);
 			view.process_view.insert_column_with_attributes (-1, "PID", new Gtk.CellRendererText (), "text", 0);
 			view.process_view.insert_column_with_attributes (-1, "Status", new Gtk.CellRendererText (), "text", 1);
+
+			event_store = new Gtk.ListStore (1, typeof (string));
+			view.event_view.set_model (event_store);
+			view.event_view.insert_column_with_attributes (-1, "Function Name", new Gtk.CellRendererText (), "text", 0);
 
 			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
 				new MemoryInputStream.from_data (get_winagent_32_data (), get_winagent_32_size (), null),
@@ -104,10 +115,20 @@ namespace Zed {
 			try {
 				process_store.set (iter, 0, pid, 1, "Injecting...");
 				var proxy = yield winjector.inject (pid, agent_desc, null);
+				proxy.add_notify_handler ("FunctionCall", "s", on_function_call);
 				process_store.set (iter, 1, "Injected!", 2, proxy);
 			} catch (Service.WinjectorError e) {
 				process_store.set (iter, 1, "Error: %s".printf (e.message));
 			}
+		}
+
+		private void on_function_call (Variant? arg) {
+			string name;
+			arg.get ("s", out name);
+
+			Gtk.TreeIter iter;
+			event_store.append (out iter);
+			event_store.set (iter, 0, name);
 		}
 
 		private static extern void * get_winagent_32_data ();
