@@ -77,7 +77,8 @@ namespace Zed {
 					var val = Value (typeof (WinIpc.Proxy));
 					process_store.get_value (iter, 2, out val);
 					WinIpc.Proxy proxy = (WinIpc.Proxy) val.get_object ();
-					proxy.emit ("Stop");
+					if (proxy != null)
+						proxy.emit ("Stop");
 				} while (process_store.iter_next (ref iter));
 			}
 
