@@ -3,12 +3,6 @@
 
 #include "src/service/winjector.c"
 
-extern const unsigned int zed_data_winjector_helper_32_size;
-extern const unsigned char zed_data_winjector_helper_32_data[];
-
-extern const unsigned int zed_data_winjector_helper_64_size;
-extern const unsigned char zed_data_winjector_helper_64_data[];
-
 gboolean
 zed_service_winjector_helper_is_process_still_running (void * handle)
 {
@@ -25,30 +19,6 @@ zed_service_winjector_helper_close_process_handle (void * handle)
 {
   g_assert (handle != NULL);
   CloseHandle (handle);
-}
-
-void *
-zed_service_winjector_resource_store_get_helper_32_data (void)
-{
-  return (void *) zed_data_winjector_helper_32_data;
-}
-
-guint
-zed_service_winjector_resource_store_get_helper_32_size (void)
-{
-  return zed_data_winjector_helper_32_size;
-}
-
-void *
-zed_service_winjector_resource_store_get_helper_64_data (void)
-{
-  return (void *) zed_data_winjector_helper_64_data;
-}
-
-guint
-zed_service_winjector_resource_store_get_helper_64_size (void)
-{
-  return zed_data_winjector_helper_64_size;
 }
 
 char *

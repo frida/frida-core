@@ -170,6 +170,91 @@ namespace Zed.Data.Ui {
 			"</child>" +
 		"</object></interface>";
 
+	public static const string SPY_XML = "<?xml version=\"1.0\" ?>" +
+		"<interface><!-- interface-naming-policy project-wide -->" +
+"" +
+"<object class=\"GtkHPaned\" id=\"root_hpaned\">" +
+			"<property name=\"visible\">True</property>" +
+			"<property name=\"can_focus\">True</property>" +
+			"<child>" +
+				"<object class=\"GtkVBox\" id=\"left_vbox\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"orientation\">vertical</property>" +
+					"<child>" +
+						"<object class=\"GtkHBox\" id=\"top_hbox\">" +
+							"<property name=\"visible\">True</property>" +
+							"<child>" +
+								"<object class=\"GtkEntry\" id=\"pid_entry\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"invisible_char\">●</property>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"position\">0</property>" +
+								"</packing>" +
+							"</child>" +
+							"<child>" +
+								"<object class=\"GtkButton\" id=\"add_button\">" +
+									"<property name=\"label\">gtk-add</property>" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"receives_default\">True</property>" +
+									"<property name=\"use_stock\">True</property>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"expand\">False</property>" +
+									"<property name=\"position\">1</property>" +
+								"</packing>" +
+							"</child>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"expand\">False</property>" +
+							"<property name=\"position\">0</property>" +
+						"</packing>" +
+					"</child>" +
+					"<child>" +
+						"<object class=\"GtkScrolledWindow\" id=\"process_scrolledwindow\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+							"<property name=\"hscrollbar_policy\">automatic</property>" +
+							"<property name=\"vscrollbar_policy\">automatic</property>" +
+							"<child>" +
+								"<object class=\"GtkTreeView\" id=\"process_treeview\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+								"</object>" +
+							"</child>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"position\">1</property>" +
+						"</packing>" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"resize\">False</property>" +
+					"<property name=\"shrink\">True</property>" +
+				"</packing>" +
+			"</child>" +
+			"<child>" +
+				"<object class=\"GtkScrolledWindow\" id=\"event_scrolledwindow\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"can_focus\">True</property>" +
+					"<property name=\"hscrollbar_policy\">automatic</property>" +
+					"<property name=\"vscrollbar_policy\">automatic</property>" +
+					"<child>" +
+						"<object class=\"GtkTreeView\" id=\"event_treeview\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+						"</object>" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"resize\">True</property>" +
+					"<property name=\"shrink\">True</property>" +
+				"</packing>" +
+			"</child>" +
+		"</object></interface>";
+
 	public static const string WORKSPACE_XML = "<?xml version=\"1.0\" ?>" +
 		"<interface><object class=\"GtkUIManager\" id=\"uimanager1\"><child><object class=\"GtkActionGroup\" id=\"actiongroup1\"><child><object class=\"GtkAction\" id=\"file_menuitem\"><property name=\"name\">file_menuitem</property><property name=\"label\" translatable=\"yes\">_File</property></object></child><child><object class=\"GtkAction\" id=\"new_menuitem\"><property name=\"stock_id\" translatable=\"yes\">gtk-new</property><property name=\"name\">new_menuitem</property></object></child><child><object class=\"GtkAction\" id=\"open_menuitem\"><property name=\"stock_id\" translatable=\"yes\">gtk-open</property><property name=\"name\">open_menuitem</property></object></child><child><object class=\"GtkAction\" id=\"quit_menuitem\"><property name=\"stock_id\" translatable=\"yes\">gtk-quit</property><property name=\"name\">quit_menuitem</property></object></child><child><object class=\"GtkAction\" id=\"help_menuitem\"><property name=\"name\">help_menuitem</property><property name=\"label\" translatable=\"yes\">_Help</property></object></child><child><object class=\"GtkAction\" id=\"about_menuitem\"><property name=\"stock_id\" translatable=\"yes\">gtk-about</property><property name=\"name\">about_menuitem</property></object></child></object></child><ui><menubar name=\"menubar\"><menu action=\"file_menuitem\"><menuitem action=\"new_menuitem\"/><menuitem action=\"open_menuitem\"/><separator/><menuitem action=\"quit_menuitem\"/></menu><menu action=\"help_menuitem\"><menuitem action=\"about_menuitem\"/></menu></menubar></ui></object>" +
 "" +

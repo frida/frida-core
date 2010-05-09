@@ -69,6 +69,9 @@
     <None Include="src\service\xmpp-client.vala">
       <Filter>Source Files\service</Filter>
     </None>
+    <None Include="src\ui\spy.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -101,6 +104,9 @@
     <ClCompile Include="$(IntDir)src\ui\root.c">
       <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\spy.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)src\ui\workspace.c">
       <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
@@ -118,6 +124,15 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\winjector-ipc.c">
       <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.c">
+      <Filter>Source Files\data\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.c">
+      <Filter>Source Files\data\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="data\windows.c">
+      <Filter>Source Files\data</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

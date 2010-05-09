@@ -49,8 +49,10 @@ int main (string[] args) {
 	typeof (Gtk.ScrolledWindow);
 	typeof (Gtk.Statusbar);
 	typeof (Gtk.Table);
+	typeof (Gtk.TreeView);
 	typeof (Gtk.UIManager);
 	typeof (Gtk.VBox);
+	typeof (Gtk.HPaned);
 	typeof (Gtk.VPaned);
 	typeof (Gtk.Window);
 

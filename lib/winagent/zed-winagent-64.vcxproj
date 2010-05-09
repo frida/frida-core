@@ -11,19 +11,19 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{90B16D19-1102-4AED-8452-F8DFBF59EA52}</ProjectGuid>
+    <ProjectGuid>{3194EC55-C1E5-423D-820F-13D38409B9D0}</ProjectGuid>
     <RootNamespace>zed</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>zed-winipc-64</ProjectName>
+    <ProjectName>zed-winagent-64</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -49,7 +49,33 @@
     <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
     <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   </PropertyGroup>
-  <Import Project="zed-winipc-common.props" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <ModuleDefinitionFile>zed-winagent.def</ModuleDefinitionFile>
+    </Link>
+    <PostBuildEvent>
+      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
+resource-compiler.exe --namespace="zed_data" -o "$(IntDir)zed-winagent-64.c" "$(TargetPath)"</Command>
+      <Message>Serializing $(TargetFileName)</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <ModuleDefinitionFile>zed-winagent.def</ModuleDefinitionFile>
+    </Link>
+    <PostBuildEvent>
+      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
+resource-compiler.exe --namespace="zed_data" -o "$(IntDir)zed-winagent-64.c" "$(TargetPath)"</Command>
+      <Message>Serializing $(TargetFileName)</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <Import Project="zed-winagent-common.props" />
   <ItemGroup>
     <ProjectReference Include="..\..\ext\sdk.vcxproj">
       <Project>{4afce7c4-6d9a-4663-b43c-d2e518486910}</Project>
@@ -57,6 +83,14 @@
       <Private>false</Private>
       <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
+    <ProjectReference Include="..\winipc\zed-winipc-64.vcxproj">
+      <Project>{90b16d19-1102-4aed-8452-f8dfbf59ea52}</Project>
+      <Private>false</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
   </ItemGroup>

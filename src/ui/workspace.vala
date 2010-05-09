@@ -6,7 +6,17 @@ namespace Zed {
 			}
 		}
 
+		public Gtk.Frame upper_frame {
+			get;
+			private set;
+		}
+
 		public Gtk.Frame bottom_frame {
+			get;
+			private set;
+		}
+
+		public View.Spy spy {
 			get;
 			private set;
 		}
@@ -26,10 +36,14 @@ namespace Zed {
 
 				ui_manager = builder.get_object ("uimanager1") as Gtk.UIManager;
 				vbox = builder.get_object ("root_vbox") as Gtk.VBox;
+				upper_frame = builder.get_object ("top_frame") as Gtk.Frame;
 				bottom_frame = builder.get_object ("bottom_frame") as Gtk.Frame;
 			} catch (Error e) {
 				error (e.message);
 			}
+
+			spy = new View.Spy ();
+			upper_frame.add (spy.widget);
 
 			chat = new View.Chat ();
 			bottom_frame.add (chat.widget);
@@ -42,11 +56,13 @@ namespace Zed {
 			construct;
 		}
 
+		private Presenter.Spy spy;
 		private Presenter.Chat chat;
 
 		public Workspace (View.Workspace view, Service.MucService muc_service) {
 			Object (view: view);
 
+			spy = new Presenter.Spy (view.spy);
 			chat = new Presenter.Chat (view.chat, muc_service);
 		}
 	}
