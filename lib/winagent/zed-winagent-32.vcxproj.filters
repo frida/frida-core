@@ -24,6 +24,9 @@
     <ClCompile Include="$(IntDir)agent.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="gst-tracer-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
