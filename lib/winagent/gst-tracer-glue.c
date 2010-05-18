@@ -11,17 +11,10 @@ typedef gchar * (* ZedGstObjectGetPathStringFunc) (gpointer object);
 typedef void (* ZedGstHeapFreeFunc) (gpointer mem);
 
 static GumInterceptor * interceptor = NULL;
-static gpointer pad_push_func, instance_free_func;
+static gpointer pad_push_impl, instance_free_impl;
 
-static ZedGstObjectGetPathStringFunc object_get_path_string_func;
-static ZedGstHeapFreeFunc heap_free_func;
-
-typedef struct _ZedGstPadPushArgs ZedGstPadPushArgs;
-
-struct _ZedGstPadPushArgs {
-  gpointer pad;
-  gpointer buffer;
-};
+static ZedGstObjectGetPathStringFunc object_get_path_string_impl;
+static ZedGstHeapFreeFunc heap_free_impl;
 
 void
 zed_gst_tracer_attach (ZedGstTracer * self)
@@ -35,22 +28,22 @@ zed_gst_tracer_attach (ZedGstTracer * self)
   if (glib_mod == NULL || gobj_mod == NULL || gst_mod == NULL)
     return;
 
-  instance_free_func = GetProcAddress (gobj_mod, "g_type_free_instance");
-  pad_push_func = GetProcAddress (gst_mod, "gst_pad_push");
-  if (instance_free_func == NULL || pad_push_func == NULL)
+  instance_free_impl = GetProcAddress (gobj_mod, "g_type_free_instance");
+  pad_push_impl = GetProcAddress (gst_mod, "gst_pad_push");
+  if (instance_free_impl == NULL || pad_push_impl == NULL)
     return;
 
-  object_get_path_string_func = (ZedGstObjectGetPathStringFunc)
+  object_get_path_string_impl = (ZedGstObjectGetPathStringFunc)
       GetProcAddress (gst_mod, "gst_object_get_path_string");
-  heap_free_func = (ZedGstHeapFreeFunc) GetProcAddress (glib_mod, "g_free");
-  if (object_get_path_string_func == NULL || heap_free_func == NULL)
+  heap_free_impl = (ZedGstHeapFreeFunc) GetProcAddress (glib_mod, "g_free");
+  if (object_get_path_string_impl == NULL || heap_free_impl == NULL)
     return;
 
 #ifndef _M_X64
 
   interceptor = gum_interceptor_obtain ();
 
-  attach_ret = gum_interceptor_attach_listener (interceptor, pad_push_func,
+  attach_ret = gum_interceptor_attach_listener (interceptor, pad_push_impl,
       GUM_INVOCATION_LISTENER (self),
       GSIZE_TO_POINTER (ZED_GST_FUNCTION_PAD_PUSH));
   switch (attach_ret)
@@ -71,7 +64,7 @@ zed_gst_tracer_attach (ZedGstTracer * self)
       ud_init (&ud_obj);
       ud_set_mode (&ud_obj, 32);
       ud_set_syntax (&ud_obj, UD_SYN_INTEL);
-      ud_set_input_buffer (&ud_obj, pad_push_func, 4096);
+      ud_set_input_buffer (&ud_obj, pad_push_impl, 4096);
 
       while (count < 5)
       {
@@ -88,7 +81,7 @@ zed_gst_tracer_attach (ZedGstTracer * self)
           if (i != 0)
             g_string_append_c (msg, ' ');
           g_string_append_printf (msg, "%02x",
-              ((guint8 *) pad_push_func)[count + i]);
+              ((guint8 *) pad_push_impl)[count + i]);
         }
 
         g_string_append_c (msg, '\t');
@@ -112,7 +105,7 @@ zed_gst_tracer_attach (ZedGstTracer * self)
   }
 
   /*
-  gum_interceptor_attach_listener (interceptor, instance_free_func,
+  gum_interceptor_attach_listener (interceptor, instance_free_impl,
       GUM_INVOCATION_LISTENER (self),
       GSIZE_TO_POINTER (ZED_GST_FUNCTION_OBJECT_FREE));
   */
@@ -141,18 +134,14 @@ zed_gst_tracer_detach (ZedGstTracer * self)
 #endif
 }
 
-void
-zed_gst_tracer_on_pad_push (ZedGstTracer * self, void * arguments)
+char *
+zed_gst_tracer_query_object_path (ZedGstTracer * self, void * instance)
 {
-  ZedGstPadPushArgs * push_args = arguments;
-  gchar * name;
+  gchar * result, * tmp;
 
-  name = object_get_path_string_func (push_args->pad);
-  zed_gst_tracer_submit_pad_push_event (self, name);
-  heap_free_func (name);
-}
+  tmp = object_get_path_string_impl (instance);
+  result = g_strdup (tmp);
+  heap_free_impl (tmp);
 
-void
-zed_gst_tracer_on_object_free (ZedGstTracer * self, void * arguments)
-{
+  return result;
 }

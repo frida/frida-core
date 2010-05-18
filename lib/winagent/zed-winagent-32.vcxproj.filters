@@ -27,10 +27,18 @@
     <ClCompile Include="gst-tracer-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)gst-tracer.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="gst-tracer.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

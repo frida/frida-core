@@ -116,6 +116,7 @@ namespace Zed {
 				process_store.set (iter, 0, pid, 1, "Injecting...");
 				var proxy = yield winjector.inject (pid, agent_desc, null);
 				proxy.add_notify_handler ("FunctionCall", "s", on_function_call);
+				proxy.add_notify_handler ("GstPadsDiscovered", "a(us)", on_gst_pads_discovered);
 				process_store.set (iter, 1, "Injected!", 2, proxy);
 			} catch (Service.WinjectorError e) {
 				process_store.set (iter, 1, "Error: %s".printf (e.message));
@@ -129,6 +130,12 @@ namespace Zed {
 			Gtk.TreeIter iter;
 			event_store.append (out iter);
 			event_store.set (iter, 0, name);
+		}
+
+		private void on_gst_pads_discovered (Variant? arg) {
+			Gtk.TreeIter iter;
+			event_store.append (out iter);
+			event_store.set (iter, 0, arg.print (true));
 		}
 
 		private static extern void * get_winagent_32_data ();
