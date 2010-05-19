@@ -81,6 +81,11 @@ namespace Zed.Test.WinIpc {
 			var h = new IpcHarness ((h) => Notify.remove_handler (h));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/notify/huge-payload", () => {
+			var h = new IpcHarness ((h) => Notify.huge_payload (h));
+			h.run ();
+		});
 	}
 
 	namespace Establish {
@@ -511,6 +516,37 @@ namespace Zed.Test.WinIpc {
 				yield h.client.emit ("Yikes");
 				yield h.process_events ();
 				assert (!handler_got_notify);
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private static async void huge_payload (IpcHarness h) {
+			yield h.establish_client_and_server ();
+
+			bool handler_got_notify = false;
+			string handler_string = null;
+
+			h.server.add_notify_handler ("HugePayload", "s", (arg) => {
+				handler_got_notify = true;
+				arg.get ("s", out handler_string);
+			});
+
+			var builder = new StringBuilder ("First line\n");
+			for (uint i = 0; i < 5000; i++) {
+				builder.append ("Another line\n");
+			}
+			builder.append ("Last line\n");
+
+			try {
+				print ("before\n");
+				yield h.client.emit ("HugePayload", new Variant ("s", builder.str));
+				print ("after\n");
+				yield h.process_events ();
+				assert (handler_got_notify);
+				assert (handler_string == builder.str);
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
