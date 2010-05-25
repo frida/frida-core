@@ -93,6 +93,9 @@ namespace WinIpc {
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
+		private uint32 last_blob_id = 1;
+		private const int BUFFER_SIZE = 600 * 1024;
+
 		public uint register_query_sync_handler (string id, string? argument_type, QuerySyncHandler sync_handler) {
 			assert (!query_handlers.has_key (id));
 			var handler = new QueryHandler (id, new VariantTypeSpec (argument_type));
@@ -295,9 +298,9 @@ namespace WinIpc {
 					return MessageType.INVALID;
 			}
 
-			var body_blob = new MessageBodyBlob (blob, MESSAGE_FIELD_ALIGNMENT);
-			unowned uint8[] body_data = body_blob.data; /* FIXME: workaround for Vala compiler bug */
-			v = Variant.new_from_data (vt, body_data, false, body_blob);
+			var body_buffer = new VariantBuffer (blob, MESSAGE_FIELD_ALIGNMENT);
+			unowned uint8[] body_data = body_buffer.data; /* FIXME: workaround for Vala compiler bug */
+			v = Variant.new_from_data (vt, body_data, false, body_buffer);
 			if (!v.is_normal_form ())
 				return MessageType.INVALID;
 			return t;
@@ -311,8 +314,49 @@ namespace WinIpc {
 			yield write_blob (blob);
 		}
 
-		private extern async uint8[] read_blob () throws IOError;
-		private extern async void write_blob (uint8[] blob) throws IOError;
+		private async uint8[] read_blob () throws IOError {
+			var chunk_value = yield read_blob_chunk ();
+			
+			uint blob_id;
+			uint remaining;
+			uint8[] chunk_data;
+			chunk_value.get (BLOB_CHUNK_TYPE_STRING, out blob_id, out remaining, out chunk_data);
+
+			return chunk_data;
+		}
+
+		private async Variant read_blob_chunk () throws IOError {
+			uint8[] chunk_value_raw = yield read_chunk ();
+			var chunk_value_buffer = new VariantBuffer (chunk_value_raw);
+			unowned uint8[] chunk_value_data = chunk_value_buffer.data; /* FIXME: workaround for Vala compiler bug */
+			var chunk_value = Variant.new_from_data (BLOB_CHUNK_TYPE, chunk_value_data, false, chunk_value_buffer);
+			if (!chunk_value.is_normal_form ())
+				throw new IOError.FAILED ("Malformed blob chunk");
+			return chunk_value;
+		}
+
+		private async void write_blob (uint8[] blob) throws IOError {
+			uint blob_id = last_blob_id++;
+			uint remaining = blob.length;
+
+			do {
+				uint blob_offset = blob.length - remaining;
+				uint chunk_length = uint32.min (remaining, BUFFER_SIZE);
+				uint8[] chunk_data = blob;
+				if (chunk_length != blob.length)
+					chunk_data = blob[blob_offset:blob_offset + chunk_length];
+
+				var chunk_value = new Variant (BLOB_CHUNK_TYPE_STRING, blob_id, remaining - chunk_length, chunk_data);
+				uint8[] chunk_value_raw = new uint8[chunk_value.get_size ()];
+				chunk_value.store (chunk_value_raw);
+				write_chunk (chunk_value_raw);
+
+				remaining -= chunk_length;
+			} while (remaining != 0);
+		}
+
+		private extern async uint8[] read_chunk () throws IOError;
+		private extern async void write_chunk (uint8[] blob) throws IOError;
 
 		protected async void complete_pipe_operation (IOResult result, PipeOperation operation, uint timeout_msec) throws IOError {
 			if (result == IOResult.SUCCESS)
@@ -459,15 +503,18 @@ namespace WinIpc {
 		private const string NOTIFY_MESSAGE_TYPE_STRING = "(smv)";
 		private VariantType NOTIFY_MESSAGE_TYPE = new VariantType (NOTIFY_MESSAGE_TYPE_STRING);
 
+		private const string BLOB_CHUNK_TYPE_STRING = "(uuay)";
+		private VariantType BLOB_CHUNK_TYPE = new VariantType (BLOB_CHUNK_TYPE_STRING);
+
 		private const uint8 MESSAGE_FIELD_ALIGNMENT = 8;
 
-		private class MessageBodyBlob {
+		private class VariantBuffer {
 			public uint8[] data {
 				get;
 				private set;
 			}
 
-			public MessageBodyBlob (uint8[] data, size_t offset) {
+			public VariantBuffer (uint8[] data, size_t offset = 0) {
 				this.data = data[offset:data.length];
 			}
 		}
