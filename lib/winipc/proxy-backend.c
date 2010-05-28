@@ -1,9 +1,9 @@
-typedef struct _WinIpcProxyReadChunkData WinIpcProxyReadChunkData;
-typedef struct _WinIpcProxyWriteChunkData WinIpcProxyWriteChunkData;
+typedef struct _WinIpcProxyReadBlobData WinIpcProxyReadBlobData;
+typedef struct _WinIpcProxyWriteBlobData WinIpcProxyWriteBlobData;
 typedef struct _WinIpcProxyWaitForOperationData WinIpcProxyWaitForOperationData;
 
-static void win_ipc_proxy_read_chunk_co (WinIpcProxyReadChunkData * data);
-static void win_ipc_proxy_write_chunk_co (WinIpcProxyWriteChunkData * data);
+static void win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data);
+static void win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data);
 static void win_ipc_proxy_wait_for_operation_co (
     WinIpcProxyWaitForOperationData * data);
 
@@ -13,6 +13,7 @@ static void win_ipc_proxy_wait_for_operation_co (
 
 #include <windows.h>
 
+#define PIPE_BUFSIZE 4096
 #define PIPE_TIMEOUT 5000
 
 typedef struct _WinIpcPipeOverlapped WinIpcPipeOverlapped;
@@ -54,8 +55,8 @@ win_ipc_server_proxy_create_named_pipe (const char * name)
       PIPE_READMODE_MESSAGE |
       PIPE_WAIT,
       1,
-      WIN_IPC_PROXY_BUFFER_SIZE,
-      WIN_IPC_PROXY_BUFFER_SIZE,
+      PIPE_BUFSIZE,
+      PIPE_BUFSIZE,
       PIPE_TIMEOUT,
       NULL);
 
@@ -146,13 +147,13 @@ win_ipc_client_proxy_close_pipe (void * pipe)
 }
 
 static void
-win_ipc_proxy_read_chunk_co (WinIpcProxyReadChunkData * data)
+win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data)
 {
   WinIpcPipeOperation * op;
   guint8 * buf;
   BOOL success;
 
-  buf = g_malloc (WIN_IPC_PROXY_BUFFER_SIZE);
+  buf = g_malloc (PIPE_BUFSIZE);
 
   op = win_ipc_pipe_operation_new (data->self->pipe);
   win_ipc_pipe_operation_set_function_name (op, "ReadFileEx");
@@ -160,7 +161,7 @@ win_ipc_proxy_read_chunk_co (WinIpcProxyReadChunkData * data)
   win_ipc_pipe_operation_set_user_data (op, data);
 
   success = ReadFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
-      buf, WIN_IPC_PROXY_BUFFER_SIZE,
+      buf, PIPE_BUFSIZE,
       win_ipc_pipe_operation_get_overlapped (op),
       win_ipc_proxy_read_completed);
   if (!success)
@@ -174,12 +175,10 @@ win_ipc_proxy_read_chunk_co (WinIpcProxyReadChunkData * data)
 }
 
 static void
-win_ipc_proxy_write_chunk_co (WinIpcProxyWriteChunkData * data)
+win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data)
 {
   WinIpcPipeOperation * op;
   BOOL success;
-
-  g_assert_cmpint (data->blob_length1, <=, WIN_IPC_PROXY_BUFFER_SIZE);
 
   op = win_ipc_pipe_operation_new (data->self->pipe);
   win_ipc_pipe_operation_set_function_name (op, "WriteFileEx");
@@ -204,7 +203,7 @@ win_ipc_proxy_read_completed (DWORD os_error, DWORD bytes_transferred,
     OVERLAPPED * overlapped)
 {
   WinIpcPipeOperation * op;
-  WinIpcProxyReadChunkData * data;
+  WinIpcProxyReadBlobData * data;
   GSimpleAsyncResult * res;
   GError * err = NULL;
   guint length;
@@ -238,7 +237,7 @@ win_ipc_proxy_write_completed (DWORD os_error, DWORD bytes_transferred,
     OVERLAPPED * overlapped)
 {
   WinIpcPipeOperation * op;
-  WinIpcProxyWriteChunkData * data;
+  WinIpcProxyWriteBlobData * data;
   GSimpleAsyncResult * res;
   GError * err = NULL;
 

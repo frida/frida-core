@@ -93,9 +93,6 @@ namespace WinIpc {
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
 
-		private uint32 last_blob_id = 1;
-		private const int BUFFER_SIZE = 600 * 1024;
-
 		public uint register_query_sync_handler (string id, string? argument_type, QuerySyncHandler sync_handler) {
 			assert (!query_handlers.has_key (id));
 			var handler = new QueryHandler (id, new VariantTypeSpec (argument_type));
@@ -298,9 +295,9 @@ namespace WinIpc {
 					return MessageType.INVALID;
 			}
 
-			var body_buffer = new VariantBuffer (blob, MESSAGE_FIELD_ALIGNMENT);
-			unowned uint8[] body_data = body_buffer.data; /* FIXME: workaround for Vala compiler bug */
-			v = Variant.new_from_data (vt, body_data, false, body_buffer);
+			var body_blob = new MessageBodyBlob (blob, MESSAGE_FIELD_ALIGNMENT);
+			unowned uint8[] body_data = body_blob.data; /* FIXME: workaround for Vala compiler bug */
+			v = Variant.new_from_data (vt, body_data, false, body_blob);
 			if (!v.is_normal_form ())
 				return MessageType.INVALID;
 			return t;
@@ -314,54 +311,8 @@ namespace WinIpc {
 			yield write_blob (blob);
 		}
 
-		private async uint8[] read_blob () throws IOError {
-			var chunk = yield read_blob_chunk ();
-
-			return new uint8[1];
-		}
-
-		private async BlobChunk read_blob_chunk () throws IOError {
-			uint8[] chunk_value_raw = yield read_chunk ();
-			if (chunk_value_raw.length <= 8)
-				throw new IOError.FAILED ("Blob too short");
-
-			var header_buffer = new VariantBuffer (chunk_value_raw[0:8]);
-			unowned uint8[] header_data = header_buffer.data; /* FIXME: workaround for Vala compiler bug */
-			var header = Variant.new_from_data (BLOB_CHUNK_HEADER_TYPE, header_data, false, header_buffer);
-			if (!header.is_normal_form ())
-				throw new IOError.FAILED ("Malformed blob chunk header");
-
-			uint blob_id;
-			uint remaining;
-			header.get (BLOB_CHUNK_HEADER_TYPE_STRING, out blob_id, out remaining);
-
-			return new BlobChunk (blob_id, remaining, chunk_value_raw[8:chunk_value_raw.length]);
-		}
-
-		private async void write_blob (uint8[] blob) throws IOError {
-			uint blob_id = last_blob_id++;
-			uint remaining = blob.length;
-
-			unowned uint8 * blob_data = blob;
-
-			do {
-				uint blob_offset = blob.length - remaining;
-				uint chunk_length = uint32.min (remaining, BUFFER_SIZE);
-
-				var header = new Variant (BLOB_CHUNK_HEADER_TYPE_STRING, blob_id, remaining - chunk_length);
-				uint8[] chunk = new uint8[header.get_size () + chunk_length];
-				header.store (chunk);
-				unowned uint8 * chunk_data = blob;
-				Memory.copy (chunk_data + header.get_size (), blob_data + blob_offset, chunk_length);
-
-				yield write_chunk (chunk);
-
-				remaining -= chunk_length;
-			} while (remaining != 0);
-		}
-
-		private extern async uint8[] read_chunk () throws IOError;
-		private extern async void write_chunk (uint8[] blob) throws IOError;
+		private extern async uint8[] read_blob () throws IOError;
+		private extern async void write_blob (uint8[] blob) throws IOError;
 
 		protected async void complete_pipe_operation (IOResult result, PipeOperation operation, uint timeout_msec) throws IOError {
 			if (result == IOResult.SUCCESS)
@@ -508,41 +459,15 @@ namespace WinIpc {
 		private const string NOTIFY_MESSAGE_TYPE_STRING = "(smv)";
 		private VariantType NOTIFY_MESSAGE_TYPE = new VariantType (NOTIFY_MESSAGE_TYPE_STRING);
 
-		private const string BLOB_CHUNK_HEADER_TYPE_STRING = "(uu)";
-		private VariantType BLOB_CHUNK_HEADER_TYPE = new VariantType (BLOB_CHUNK_HEADER_TYPE_STRING);
-
 		private const uint8 MESSAGE_FIELD_ALIGNMENT = 8;
 
-		private class BlobChunk {
-			public uint id {
-				get;
-				private set;
-			}
-
-			public uint remaining {
-				get;
-				private set;
-			}
-
+		private class MessageBodyBlob {
 			public uint8[] data {
 				get;
 				private set;
 			}
 
-			public BlobChunk (uint id, uint remaining, uint8[] data) {
-				this.id = id;
-				this.remaining = remaining;
-				this.data = data;
-			}
-		}
-
-		private class VariantBuffer {
-			public uint8[] data {
-				get;
-				private set;
-			}
-
-			public VariantBuffer (uint8[] data, size_t offset = 0) {
+			public MessageBodyBlob (uint8[] data, size_t offset) {
 				this.data = data[offset:data.length];
 			}
 		}
