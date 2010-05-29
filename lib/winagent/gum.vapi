@@ -11,4 +11,32 @@ namespace Gum {
 		public void * instance_data;
 		public void * thread_data;
 	}
+
+	public class Stalker : GLib.Object {
+		public Stalker ();
+
+		public void follow_me (Gum.EventSink sink);
+		public void unfollow_me ();
+	}
+
+	public interface EventSink : GLib.Object {
+		public abstract Gum.EventType query_mask ();
+		public abstract void process (void * opaque_event);
+	}
+
+	[CCode (cprefix = "GUM_")]
+	public enum EventType {
+		NOTHING = 0,
+		CALL    = 1 << 0,
+		RET     = 1 << 1,
+		EXEC    = 1 << 2,
+	}
+
+	[Compact]
+	public class CallEvent {
+		public EventType type;
+
+		public void * location;
+		public void * target;
+	}
 }

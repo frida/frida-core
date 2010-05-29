@@ -26,7 +26,7 @@ namespace Zed {
 
 				var builder = new VariantBuilder (VariantType.ARRAY);
 				uint count = 0;
-				foreach (PadEntry entry in pending_adds) {
+				foreach (var entry in pending_adds) {
 					builder.add ("(us)", entry.id, entry.path);
 					count++;
 					if (count == 10) /* FIXME: zed-winipc has a maximum message size of 4k */

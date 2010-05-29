@@ -30,6 +30,12 @@
     <ClCompile Include="$(IntDir)gst-tracer.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="func-tracer-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)func-tracer.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
@@ -38,6 +44,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="gst-tracer.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="func-tracer.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
