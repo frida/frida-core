@@ -15,7 +15,7 @@ namespace Zed {
 			FuncState state = (FuncState) context.thread_data;
 
 			if (state.is_stalking) {
-				state.stalker.unfollow_me ();
+				/*state.stalker.unfollow_me ();*/
 				state.has_been_stalked = true;
 				state.is_stalking = false;
 
