@@ -25,6 +25,7 @@ namespace Zed {
 
 				Idle.add (() => {
 					var builder = new VariantBuilder (VariantType.ARRAY);
+					builder.add ("u", state.seen_function_count);
 					for (uint i = 0; i != state.seen_function_count; i++) {
 						builder.add ("u", state.seen_functions[i]);
 						if (i == 20)
