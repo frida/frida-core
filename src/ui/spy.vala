@@ -117,7 +117,7 @@ namespace Zed {
 				var proxy = yield winjector.inject (pid, agent_desc, null);
 				proxy.add_notify_handler ("FunctionCall", "s", on_function_call);
 				proxy.add_notify_handler ("GstPadsDiscovered", "a(us)", on_gst_pads_discovered);
-				proxy.add_notify_handler ("FuncEvent", "a(u)", on_func_event);
+				proxy.add_notify_handler ("FuncEvent", "au", on_func_event);
 				process_store.set (iter, 1, "Injected!", 2, proxy);
 			} catch (Service.WinjectorError e) {
 				process_store.set (iter, 1, "Error: %s".printf (e.message));
