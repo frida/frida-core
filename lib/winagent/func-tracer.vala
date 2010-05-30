@@ -80,6 +80,7 @@ namespace Zed {
 
 			public void process (void * opaque_event) {
 				unowned Gum.CallEvent ev = (Gum.CallEvent) opaque_event;
+				assert (seen_function_count + 1 < seen_functions.length);
 				seen_functions[seen_function_count++] = (uint32) ev.target;
 			}
 		}
