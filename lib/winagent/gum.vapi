@@ -33,10 +33,30 @@ namespace Gum {
 	}
 
 	[Compact]
+	public class AnyEvent {
+		public EventType type;
+	}
+
+	[Compact]
 	public class CallEvent {
 		public EventType type;
 
 		public void * location;
 		public void * target;
+	}
+
+	[Compact]
+	public class RetEvent {
+		public EventType type;
+
+		public void * location;
+		public void * target;
+	}
+
+	[Compact]
+	public class ExecEvent {
+		public EventType type;
+
+		public void * location;
 	}
 }
