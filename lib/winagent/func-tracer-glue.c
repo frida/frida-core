@@ -138,13 +138,13 @@ zed_function_address_resolve (gsize address)
       result = zed_function_address_new (module_name,
           address - GPOINTER_TO_SIZE (mi.lpBaseOfDll));
 
-      g_free (module_name);
-
       resolve_ctx.address_to_resolve = address;
       resolve_ctx.function_address = result;
 
       gum_module_enumerate_exports (module_name, try_to_resolve_function_name,
           &resolve_ctx);
+
+      g_free (module_name);
 
       break;
     }
