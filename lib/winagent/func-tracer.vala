@@ -19,20 +19,8 @@ namespace Zed {
 				state.has_been_stalked = true;
 				state.is_stalking = false;
 
-				/*
-				unowned RecvArgs args = (RecvArgs) function_arguments;
-				int sock_handle = args.s;*/
-
 				Idle.add (() => {
-					var builder = new VariantBuilder (VariantType.ARRAY);
-					builder.add ("u", state.seen_function_count);
-					for (uint i = 0; i != state.seen_function_count; i++) {
-						builder.add ("u", state.seen_functions[i]);
-						if (i == 20)
-							break;
-					}
-					proxy.emit ("FuncEvent", builder.end ());
-
+					submit (state);
 					return false;
 				});
 			} else if (!state.has_been_stalked) {
@@ -46,6 +34,25 @@ namespace Zed {
 
 		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
 			return ref_object_hack (new FuncState ());
+		}
+
+		private async void submit (FuncState state) {
+			for (uint i = 0; i != state.seen_function_count; i++) {
+				Variant arg;
+
+				var addr = FunctionAddress.resolve (state.seen_functions[i]);
+				if (addr != null)
+					arg = new Variant ("(ssu)", addr.module_name, addr.function_name, addr.offset);
+				else
+					arg = new Variant ("(ssu)", "", "", state.seen_functions[i]);
+
+				try {
+					yield proxy.emit ("FuncEvent", arg);
+				} catch (WinIpc.ProxyError e) {
+					error (e.message);
+					return;
+				}
+			}
 		}
 
 		private extern void * ref_object_hack (Object obj);
@@ -66,7 +73,9 @@ namespace Zed {
 				private set;
 			}
 
-			public uint32[] seen_functions = new uint32[31337];
+			private const uint CAPACITY = 50000;
+
+			public size_t[] seen_functions = new size_t[CAPACITY];
 			public uint seen_function_count = 0;
 
 			public FuncState () {
@@ -81,17 +90,34 @@ namespace Zed {
 
 			public void process (void * opaque_event) {
 				unowned Gum.CallEvent ev = (Gum.CallEvent) opaque_event;
-				assert (seen_function_count + 1 < seen_functions.length);
+				assert (seen_function_count != seen_functions.length);
 				seen_functions[seen_function_count++] = (uint32) ev.target;
 			}
 		}
 	}
 
-	[Compact]
-	public class RecvArgs {
-		public int s;
-		public char * buf;
-		public int len;
-		public int flags;
+	public class FunctionAddress {
+		public string module_name {
+			get;
+			private set;
+		}
+
+		public size_t offset {
+			get;
+			private set;
+		}
+
+		public string function_name {
+			get;
+			set;
+		}
+
+		public FunctionAddress (string module_name, size_t offset) {
+			this.module_name = module_name;
+			this.offset = offset;
+			this.function_name = "";
+		}
+
+		public extern static FunctionAddress? resolve (size_t address);
 	}
 }
