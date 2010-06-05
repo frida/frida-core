@@ -48,10 +48,16 @@ namespace Zed {
 
 				try {
 					yield proxy.emit ("FuncEvent", arg);
-				} catch (WinIpc.ProxyError e) {
-					error (e.message);
+				} catch (WinIpc.ProxyError e1) {
+					error (e1.message);
 					return;
 				}
+			}
+
+			try {
+				yield proxy.emit ("FuncEvent", new Variant ("(ssu)", "The", "End", 42));
+			} catch (WinIpc.ProxyError e2) {
+				error (e2.message);
 			}
 		}
 
