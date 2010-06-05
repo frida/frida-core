@@ -4,16 +4,79 @@
 #include <tlhelp32.h>
 #include <strsafe.h>
 
+typedef struct _InjectionDetails InjectionDetails;
+typedef struct _RemoteWorkerContext RemoteWorkerContext;
+typedef struct _TrickContext TrickContext;
+
+struct _InjectionDetails
+{
+  HANDLE process_handle;
+  const WCHAR * dll_path;
+  const gchar * ipc_server_address;
+};
+
+struct _RemoteWorkerContext
+{
+  gpointer load_library_impl;
+  gpointer get_proc_address_impl;
+  gpointer free_library_impl;
+  gpointer virtual_free_impl;
+  gpointer exit_thread_impl;
+
+  gchar zed_agent_main_string[14 + 1];
+
+  WCHAR dll_path[MAX_PATH + 1];
+  gchar ipc_server_address[MAX_PATH + 1];
+
+  gpointer entrypoint;
+  gpointer argument;
+};
+
+struct _TrickContext
+{
+  /* These fields must be addressable with int8 --> */
+  gpointer entrypoint;
+  gpointer argument;
+
+  gpointer create_thread_impl;
+  gpointer close_handle_impl;
+
+  /* Remaining fields must be addressable with uint8 --> */
+  gsize saved_xax;
+  gsize saved_xbx;
+  gsize saved_xcx;
+  gsize saved_xdx;
+  gsize saved_xdi;
+  gsize saved_xsi;
+  gsize saved_xbp;
+  gsize saved_xsp;
+
+#ifdef _M_X64
+  gsize saved_r8;
+  gsize saved_r9;
+  gsize saved_r10;
+  gsize saved_r11;
+  gsize saved_r12;
+  gsize saved_r13;
+  gsize saved_r14;
+  gsize saved_r15;
+#endif
+
+  gsize saved_flags;
+  gsize saved_xip;
+};
+
 static HANDLE try_to_grab_a_thread_in (DWORD process_id, GError ** error);
-static void trick_thread_into_loading_dll (HANDLE process_handle,
-    HANDLE thread_handle, const WCHAR * dll_path,
-    const gchar * ipc_server_address, GError ** error);
+static void trick_thread_into_spawning_worker_thread (HANDLE process_handle, HANDLE thread_handle, RemoteWorkerContext * rwc, GError ** error);
+
+static gboolean initialize_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details, GError ** error);
+static void cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details);
 
 static gboolean file_exists_and_is_readable (const WCHAR * filename);
-static void set_grab_thread_error_from_os_error (const gchar * func_name,
-    GError ** error);
-static void set_trick_thread_error_from_os_error (const gchar * func_name,
-    GError ** error);
+static void set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error);
+static void set_trick_thread_error_from_os_error (const gchar * func_name, GError ** error);
+
+static const gboolean enable_stealth_mode = FALSE;
 
 gboolean
 winjector_system_is_x64 (void)
@@ -60,13 +123,18 @@ void
 winjector_process_inject (guint32 process_id, const char * dll_path,
     const gchar * ipc_server_address, GError ** error)
 {
-  WCHAR * dll_path_utf16;
-  HANDLE process_handle = NULL;
+  gboolean success = FALSE;
+  InjectionDetails details;
+  DWORD desired_access;
   HANDLE thread_handle = NULL;
+  gboolean rwc_initialized = FALSE;
+  RemoteWorkerContext rwc;
 
-  dll_path_utf16 = g_utf8_to_utf16 (dll_path, -1, NULL, NULL, NULL);
+  details.dll_path = g_utf8_to_utf16 (dll_path, -1, NULL, NULL, NULL);
+  details.ipc_server_address = ipc_server_address;
+  details.process_handle = NULL;
 
-  if (!file_exists_and_is_readable (dll_path_utf16))
+  if (!file_exists_and_is_readable (details.dll_path))
   {
     g_set_error (error,
         ZED_SERVICE_WINJECTOR_ERROR,
@@ -76,14 +144,16 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     goto beach;
   }
 
-  process_handle = OpenProcess (
+  desired_access = 
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
       PROCESS_VM_OPERATION  | /* for VirtualProtectEx and mem access  */
       PROCESS_VM_READ       | /*   ReadProcessMemory                  */
-      PROCESS_VM_WRITE,       /*   WriteProcessMemory                 */
-      FALSE,                  /* children should not inherit this     */
-      process_id);
-  if (process_handle == NULL)
+      PROCESS_VM_WRITE;       /*   WriteProcessMemory                 */
+  if (!enable_stealth_mode)
+    desired_access |= PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION;
+
+  details.process_handle = OpenProcess (desired_access, FALSE, process_id);
+  if (details.process_handle == NULL)
   {
     DWORD os_error;
     gint code;
@@ -101,32 +171,56 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     goto beach;
   }
 
-  thread_handle = try_to_grab_a_thread_in (process_id, error);
-  if (*error != NULL)
+  if (!initialize_remote_worker_context (&rwc, &details, error))
     goto beach;
+  rwc_initialized = TRUE;
 
-  if (thread_handle == NULL)
+  if (enable_stealth_mode)
   {
-    g_set_error (error,
-        ZED_SERVICE_WINJECTOR_ERROR,
-        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
-        "No usable thread found in pid=%ld", process_id);
-    goto beach;
+    thread_handle = try_to_grab_a_thread_in (process_id, error);
+    if (*error != NULL)
+      goto beach;
+
+    if (thread_handle == NULL)
+    {
+      g_set_error (error,
+          ZED_SERVICE_WINJECTOR_ERROR,
+          ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+          "No usable thread found in pid=%ld", process_id);
+      goto beach;
+    }
+
+    trick_thread_into_spawning_worker_thread (details.process_handle, thread_handle, &rwc, error);
+
+    ResumeThread (thread_handle);
+  }
+  else
+  {
+    thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, (LPTHREAD_START_ROUTINE) rwc.entrypoint, rwc.argument, 0, NULL);
+    if (thread_handle == NULL)
+    {
+      g_set_error (error,
+          ZED_SERVICE_WINJECTOR_ERROR,
+          ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+          "CreateRemoteThread(pid=%u) failed: %d",
+          process_id, (gint) GetLastError ());
+      goto beach;
+    }
   }
 
-  trick_thread_into_loading_dll (process_handle, thread_handle, dll_path_utf16,
-      ipc_server_address, error);
-
-  ResumeThread (thread_handle);
+  success = TRUE;
 
 beach:
+  if (!success && rwc_initialized)
+    cleanup_remote_worker_context (&rwc, &details);
+
   if (thread_handle != NULL)
     CloseHandle (thread_handle);
 
-  if (process_handle != NULL)
-    CloseHandle (process_handle);
+  if (details.process_handle != NULL)
+    CloseHandle (details.process_handle);
 
-  g_free (dll_path_utf16);
+  g_free ((gpointer) details.dll_path);
 }
 
 static HANDLE
@@ -187,72 +281,11 @@ beach:
   return thread_handle;
 }
 
-typedef struct _TrickContext TrickContext;
-typedef struct _WorkerContext WorkerContext;
-
-struct _TrickContext
-{
-  /* These fields must be addressable with int8 --> */
-  gpointer virtual_alloc_impl;
-  LPVOID virtual_alloc_arg_address;
-  SIZE_T virtual_alloc_arg_size;
-  DWORD virtual_alloc_arg_allocation_type;
-  DWORD virtual_alloc_arg_protect;
-
-  LPVOID memcpy_source;
-  SIZE_T memcpy_size;
-
-  SIZE_T worker_ctx_size;
-
-  gpointer create_thread_impl;
-
-  gpointer close_handle_impl;
-
-  /* Remaining fields must be addressable with uint8 --> */
-  gsize saved_xax;
-  gsize saved_xbx;
-  gsize saved_xcx;
-  gsize saved_xdx;
-  gsize saved_xdi;
-  gsize saved_xsi;
-  gsize saved_xbp;
-  gsize saved_xsp;
-
-#ifdef _M_X64
-  gsize saved_r8;
-  gsize saved_r9;
-  gsize saved_r10;
-  gsize saved_r11;
-  gsize saved_r12;
-  gsize saved_r13;
-  gsize saved_r14;
-  gsize saved_r15;
-#endif
-
-  gsize saved_flags;
-  gsize saved_xip;
-};
-
-struct _WorkerContext
-{
-  gpointer load_library_impl;
-  gpointer get_proc_address_impl;
-  gpointer free_library_impl;
-  gpointer virtual_free_impl;
-  gpointer exit_thread_impl;
-
-  gchar zed_agent_main_string[14 + 1];
-
-  WCHAR dll_path[MAX_PATH + 1];
-  gchar ipc_server_address[MAX_PATH + 1];
-};
-
 static void
-trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
-    const WCHAR * dll_path, const gchar * ipc_server_address, GError ** error)
+trick_thread_into_spawning_worker_thread (HANDLE process_handle, HANDLE thread_handle, RemoteWorkerContext * rwc, GError ** error)
 {
   HMODULE kmod;
-  guint8 trick_code[] = {
+  guint8 code[] = {
 #ifdef _M_X64
     /*
      * Align stack on a 16 byte boundary
@@ -268,31 +301,12 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x48, 0x83, 0xEC, 64,                                                         /* sub rsp, 64 */
 
     /*
-     * guint8 * worker_data = VirtualAlloc (...);
-     */
-    0x44, 0x8B, 0x4B, offsetof (TrickContext, virtual_alloc_arg_protect),         /* mov r9d, [rbx + 0xAA] */
-    0x44, 0x8B, 0x43, offsetof (TrickContext, virtual_alloc_arg_allocation_type), /* mov r8d, [rbx + 0xAA] */
-    0x48, 0x8B, 0x53, offsetof (TrickContext, virtual_alloc_arg_size),            /* mov rdx, [rbx + 0xAA] */
-    0x48, 0x8B, 0x4B, offsetof (TrickContext, virtual_alloc_arg_address),         /* mov rcx, [rbx + 0xAA] */
-    0xFF, 0x53,       offsetof (TrickContext, virtual_alloc_impl),                /* call     [rbx + 0xAA] */
-
-    /*
-     * memcpy (worker_data, ctx->worker_data, sizeof (ctx->worker_data));
-     */
-    0x48, 0x89, 0xC7,                                                             /* mov rdi, rax          */
-    0x48, 0x8B, 0x73, offsetof (TrickContext, memcpy_source),                     /* mov rsi, [rbx + 0xAA] */
-    0x48, 0x8B, 0x4B, offsetof (TrickContext, memcpy_size),                       /* mov rcx, [rbx + 0xAA] */
-    0xFC,                                                                         /* cld                   */
-    0xF3, 0xA4,                                                                   /* rep movsb             */
-
-    /*
      * HANDLE worker_thread = CreateThread (...);
      */
     0x48, 0xC7, 0x44, 0x24, 0x28, 0x00, 0x00, 0x00, 0x00,                         /* mov qword [rsp + 0x28], 0 */
     0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00,                               /* mov dword [rsp + 0x20], 0 */
-    0x49, 0x89, 0xC1,                                                             /* mov r9, rax               */
-    0x49, 0x89, 0xC0,                                                             /* mov r8, rax               */
-    0x4C, 0x03, 0x43, offsetof (TrickContext, worker_ctx_size),                   /* add r8, [rbx + 0xAA]      */
+    0x4c, 0x8b, 0x4b, offsetof (TrickContext, argument),                          /* mov r9, [rbx + X]         */
+    0x4c, 0x8b, 0x43, offsetof (TrickContext, entrypoint),                        /* mov r8, [rbx + X]         */
     0x31, 0xD2,                                                                   /* xor edx, edx              */
     0x48, 0x31, 0xC9,                                                             /* xor rcx, rcx              */
     0xFF, 0x53, offsetof (TrickContext, create_thread_impl),                      /* call qword [rbx + 0xAA]   */
@@ -329,31 +343,12 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     0x67, 0xFF, 0x64, 0x24, 0xF0,                                                 /* jmp [esp-16] */
 #else
     /*
-     * guint8 * worker_data = VirtualAlloc (...);
-     */
-    0xFF, 0x73, offsetof (TrickContext, virtual_alloc_arg_protect),               /* push [ebx + 0xAA] */
-    0xFF, 0x73, offsetof (TrickContext, virtual_alloc_arg_allocation_type),       /* push [ebx + 0xAA] */
-    0xFF, 0x73, offsetof (TrickContext, virtual_alloc_arg_size),                  /* push [ebx + 0xAA] */
-    0xFF, 0x73, offsetof (TrickContext, virtual_alloc_arg_address),               /* push [ebx + 0xAA] */
-    0xFF, 0x53, offsetof (TrickContext, virtual_alloc_impl),                      /* call [ebx + 0xAA] */
-
-    /*
-     * memcpy (worker_data, ctx->worker_data, sizeof (ctx->worker_data));
-     */
-    0x89, 0xC7,                                                                   /* mov edi, eax          */
-    0x8B, 0x73, offsetof (TrickContext, memcpy_source),                           /* mov esi, [ebx + 0xAA] */
-    0x8B, 0x4B, offsetof (TrickContext, memcpy_size),                             /* mov ecx, [ebx + 0xAA] */
-    0xFC,                                                                         /* cld                   */
-    0xF3, 0xA5,                                                                   /* rep movsd             */
-
-    /*
      * HANDLE worker_thread = CreateThread (...);
      */
     0x6A, 0x00,                                                                   /* push NULL           (lpThreadId) */
     0x6A, 0x00,                                                                   /* push 0         (dwCreationFlags) */
-    0x50,                                                                         /* push eax           (lpParameter) */
-    0x03, 0x43, offsetof (TrickContext, worker_ctx_size),                         /* add eax, [ebx + 0xAA]            */
-    0x50,                                                                         /* push eax        (lpStartAddress) */
+    0xff, 0x73, offsetof (TrickContext, argument),                                /* push [ebx + X]     (lpParameter) */
+    0xff, 0x73, offsetof (TrickContext, entrypoint),                              /* push [ebx + X]  (lpStartAddress) */
     0x6A, 0x00,                                                                   /* push 0             (dwStackSize) */
     0x6A, 0x00,                                                                   /* push NULL   (lpThreadAttributes) */
     0xFF, 0x53, offsetof (TrickContext, create_thread_impl),                      /* call                             */
@@ -383,130 +378,15 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
 #endif
   };
   TrickContext trick_ctx;
-  const guint trick_size = sizeof (trick_code) + sizeof (trick_ctx);
-  guint8 worker_code[] = {
-#ifdef _M_X64
-    /*
-     * Remove return address, so VirtualFree will return directly to
-     * ExitThread instead of freed memory.
-     */
-    0x5E,                                              /* pop rsi              (return address) */
-    0x48, 0x89, 0xCB,                                  /* mov rbx, rcx (WorkerContext argument) */
-
-    /*
-     * Reserve stack space for arguments (24), rounded up to next 16 byte boundary (32)
-     */
-    0x48, 0x83, 0xEC, 32,                              /* sub rsp, 32                           */
-
-    /*
-     * HANDLE mod = LoadLibraryW (ctx->dll_path);
-     */
-    0x48, 0x8D, 0x4B, offsetof (WorkerContext, dll_path),            /* lea rcx, [rbx + 0xAA]   */
-    0xFF, 0x53,       offsetof (WorkerContext, load_library_impl),   /* call qword [rbx + 0xAA] */
-    0x48, 0x89, 0xC7,                                                /* mov rdi, rax            */
-
-    /*
-     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
-     */
-    0x48, 0x8D, 0x53,                                                /* lea rdx, [rbx + 0xAA]   */
-                      offsetof (WorkerContext, zed_agent_main_string),
-    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
-    0xFF, 0x53, offsetof (WorkerContext, get_proc_address_impl),     /* call qword [rbx + 0xAA] */
-
-    /*
-     * func (ctx->ipc_server_address);
-     */
-    0x48, 0x8D, 0x8B, offsetof (WorkerContext, ipc_server_address) & 0xff,  /* lea rcx, rbx + X */
-                      (offsetof (WorkerContext, ipc_server_address) >> 8) & 0xff,
-                      0,
-                      0,
-    0xFF, 0xD0,                                                             /* call rax         */
-
-    /*
-     * FreeLibrary (mod);
-     */
-    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
-    0xFF, 0x53, offsetof (WorkerContext, free_library_impl),         /* call qword [rbx + 0xAA] */
-
-    /*
-     * VirtualFree (worker_data, ...); -> ExitThread ();
-     */
-    0x41, 0xB8, 0x00, 0x80, 0x00, 0x00,       /* mov r8d, MEM_RELEASE        (arg3: dwFreeType) */
-    0x48, 0x31, 0xD2,                         /* xor rdx, rdx                    (arg2: dwSize) */
-    0x48, 0x89, 0xD9,                         /* mov rcx, rbx     (VirtualFree arg1: lpAddress) */
-    0xFF, 0x73, offsetof (WorkerContext, exit_thread_impl),       /* push (fake return address) */
-    0xFF, 0x63, offsetof (WorkerContext, virtual_free_impl),                             /* jmp */
-#else
-    /*
-     * Remove argument and return address, so VirtualFree will return directly
-     * to our caller instead of freed memory.
-     */
-    0x5E,                                           /* pop esi                 (return address) */
-    0x5B,                                           /* pop ebx         (WorkerContext argument) */
-
-    /*
-     * HANDLE mod = LoadLibraryW (ctx->dll_path);
-     */
-    0x8D, 0x43, offsetof (WorkerContext, dll_path),                           /* lea eax, ebx+X */
-    0x50,                                                                     /* push eax       */
-    0xFF, 0x53, offsetof (WorkerContext, load_library_impl),                  /* call           */
-    0x89, 0xC7,                                                               /* mov edi, eax   */
-
-    /*
-     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
-     */
-    0x8D, 0x43, offsetof (WorkerContext, zed_agent_main_string),              /* lea eax, ebx+X */
-    0x50,                                                                     /* push eax       */
-    0x57,                                                                     /* push edi       */
-    0xFF, 0x53, offsetof (WorkerContext, get_proc_address_impl),              /* call           */
-
-    /*
-     * func (ctx->ipc_server_address);
-     */
-    0x8D, 0xAB, offsetof (WorkerContext, ipc_server_address) & 0xff,      /* lea ebp, [ebx + X] */
-                (offsetof (WorkerContext, ipc_server_address) >> 8) & 0xff,
-                0,
-                0,
-    0x55,                                                                           /* push ebp */
-    0xFF, 0xD0,                                                                     /* call eax */
-    0x5D,                                                                           /* pop ebp  */
-
-    /*
-     * FreeLibrary (mod);
-     */
-    0x57,                                                                           /* push edi */
-    0xFF, 0x53, offsetof (WorkerContext, free_library_impl),                        /* call     */
-
-    /*
-     * VirtualFree (worker_data, ...);
-     */
-    0x68, 0x00, 0x80, 0x00, 0x00,                    /* push MEM_RELEASE      (arg3: dwFreeType) */
-    0x6A, 0x00,                                      /* push 0                    (arg2: dwSize) */
-    0x53,                                            /* push ebx   (VirtualFree arg1: lpAddress) */
-    0x56,                                            /* push esi           (fake return address) */
-    0xFF, 0x63, offsetof (WorkerContext, virtual_free_impl),                              /* jmp */
-#endif
-  };
-  WorkerContext worker_ctx;
-  const guint worker_size = sizeof (worker_code) + sizeof (worker_ctx);
   TrickContext * remote_trick_ctx;
-  WorkerContext * remote_worker_ctx;
   CONTEXT ctx = { 0, };
 
   kmod = GetModuleHandleW (L"kernel32.dll");
 
-  trick_ctx.virtual_alloc_impl = GetProcAddress (kmod, "VirtualAlloc");
-  trick_ctx.virtual_alloc_arg_address = NULL;
-  trick_ctx.virtual_alloc_arg_size = worker_size;
-  trick_ctx.virtual_alloc_arg_allocation_type = MEM_COMMIT | MEM_RESERVE;
-  trick_ctx.virtual_alloc_arg_protect = PAGE_EXECUTE_READWRITE;
-
-  trick_ctx.memcpy_size = worker_size;
-
-  trick_ctx.worker_ctx_size = sizeof (worker_ctx);
+  trick_ctx.entrypoint = rwc->entrypoint;
+  trick_ctx.argument = rwc->argument;
 
   trick_ctx.create_thread_impl = GetProcAddress (kmod, "CreateThread");
-
   trick_ctx.close_handle_impl = GetProcAddress (kmod, "CloseHandle");
 
   ctx.ContextFlags = CONTEXT_INTEGER | CONTEXT_CONTROL;
@@ -549,22 +429,8 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
   trick_ctx.saved_xip = ctx.Eip;
 #endif
 
-  worker_ctx.load_library_impl = GetProcAddress (kmod, "LoadLibraryW");
-  worker_ctx.get_proc_address_impl = GetProcAddress (kmod, "GetProcAddress");
-  worker_ctx.free_library_impl = GetProcAddress (kmod, "FreeLibrary");
-  worker_ctx.virtual_free_impl = GetProcAddress (kmod, "VirtualFree");
-  worker_ctx.exit_thread_impl = GetProcAddress (kmod, "ExitThread");
-
-  StringCbCopyA (worker_ctx.zed_agent_main_string,
-      sizeof (worker_ctx.zed_agent_main_string), "zed_agent_main");
-
-  StringCbCopyW (worker_ctx.dll_path, sizeof (worker_ctx.dll_path), dll_path);
-  StringCbCopyA (worker_ctx.ipc_server_address,
-      sizeof (worker_ctx.ipc_server_address), ipc_server_address);
-
   /* Allocate on stack so we don't have to clean up afterwards. */
-  remote_trick_ctx = VirtualAllocEx (process_handle,
-      (gpointer) (trick_ctx.saved_xsp - (2 * 4096)), 4096,
+  remote_trick_ctx = VirtualAllocEx (process_handle, (gpointer) (trick_ctx.saved_xsp - (2 * 4096)), 4096,
       MEM_COMMIT, PAGE_EXECUTE_READWRITE);
   if (remote_trick_ctx == NULL)
   {
@@ -572,24 +438,8 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
     goto beach;
   }
 
-  remote_worker_ctx =
-      (WorkerContext *) (((guint8 *) remote_trick_ctx) + trick_size);
-
-  trick_ctx.memcpy_source = remote_worker_ctx;
-
-  if (!WriteProcessMemory (process_handle, remote_trick_ctx, &trick_ctx,
-      sizeof (trick_ctx), NULL) ||
-      !WriteProcessMemory (process_handle, remote_trick_ctx + 1, trick_code,
-      sizeof (trick_code), NULL))
-  {
-    set_trick_thread_error_from_os_error ("WriteProcessMemory", error);
-    goto beach;
-  }
-
-  if (!WriteProcessMemory (process_handle, remote_worker_ctx, &worker_ctx,
-      sizeof (worker_ctx), NULL) ||
-      !WriteProcessMemory (process_handle, remote_worker_ctx + 1, worker_code,
-      sizeof (worker_code), NULL))
+  if (!WriteProcessMemory (process_handle, remote_trick_ctx, &trick_ctx, sizeof (trick_ctx), NULL) ||
+      !WriteProcessMemory (process_handle, remote_trick_ctx + 1, code, sizeof (code), NULL))
   {
     set_trick_thread_error_from_os_error ("WriteProcessMemory", error);
     goto beach;
@@ -611,6 +461,183 @@ trick_thread_into_loading_dll (HANDLE process_handle, HANDLE thread_handle,
 
 beach:
   return;
+}
+
+static gboolean
+initialize_remote_worker_context (RemoteWorkerContext * rwc,
+    InjectionDetails * details, GError ** error)
+{
+  HMODULE kmod;
+  const guint data_alignment = 4;
+  guint8 code[] = {
+#ifdef _M_X64
+    /*
+     * Remove return address, so VirtualFree will return directly to
+     * ExitThread instead of freed memory.
+     */
+    0x5E,                                              /* pop rsi              (return address) */
+    0x48, 0x89, 0xCB,                                  /* mov rbx, rcx (WorkerContext argument) */
+
+    /*
+     * Reserve stack space for arguments (24), rounded up to next 16 byte boundary (32)
+     */
+    0x48, 0x83, 0xEC, 32,                              /* sub rsp, 32                           */
+
+    /*
+     * HANDLE mod = LoadLibraryW (ctx->dll_path);
+     */
+    0x48, 0x8D, 0x4B, offsetof (RemoteWorkerContext, dll_path),          /* lea rcx, [rbx+X]    */
+    0xFF, 0x53,       offsetof (RemoteWorkerContext, load_library_impl), /* call qword [rbx+X]  */
+    0x48, 0x89, 0xC7,                                                    /* mov rdi, rax        */
+
+    /*
+     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
+     */
+    0x48, 0x8D, 0x53,                                                /* lea rdx, [rbx + 0xAA]   */
+                      offsetof (RemoteWorkerContext, zed_agent_main_string),
+    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
+    0xFF, 0x53, offsetof (RemoteWorkerContext, get_proc_address_impl),/* call qword [rbx + X]   */
+
+    /*
+     * func (ctx->ipc_server_address);
+     */
+    0x48, 0x8D, 0x8B,
+        offsetof (RemoteWorkerContext, ipc_server_address) & 0xff,          /* lea rcx, rbx + X */
+        (offsetof (RemoteWorkerContext, ipc_server_address) >> 8) & 0xff,
+        0,
+        0,
+    0xFF, 0xD0,                                                             /* call rax         */
+
+    /*
+     * FreeLibrary (mod);
+     */
+    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
+    0xFF, 0x53, offsetof (RemoteWorkerContext, free_library_impl),   /* call qword [rbx + 0xAA] */
+
+    /*
+     * VirtualFree (worker_data, ...); -> ExitThread ();
+     */
+    0x41, 0xB8, 0x00, 0x80, 0x00, 0x00,       /* mov r8d, MEM_RELEASE        (arg3: dwFreeType) */
+    0x48, 0x31, 0xD2,                         /* xor rdx, rdx                    (arg2: dwSize) */
+    0x48, 0x89, 0xD9,                         /* mov rcx, rbx     (VirtualFree arg1: lpAddress) */
+    0xFF, 0x73, offsetof (RemoteWorkerContext, exit_thread_impl), /* push (fake return address) */
+    0xFF, 0x63, offsetof (RemoteWorkerContext, virtual_free_impl),                       /* jmp */
+#else
+    /*
+     * Remove argument and return address, so VirtualFree will return directly
+     * to our caller instead of freed memory.
+     */
+    0x5E,                                           /* pop esi                 (return address) */
+    0x5B,                                           /* pop ebx         (WorkerContext argument) */
+
+    /*
+     * HANDLE mod = LoadLibraryW (ctx->dll_path);
+     */
+    0x8D, 0x43, offsetof (RemoteWorkerContext, dll_path),                     /* lea eax, ebx+X */
+    0x50,                                                                     /* push eax       */
+    0xFF, 0x53, offsetof (RemoteWorkerContext, load_library_impl),            /* call           */
+    0x89, 0xC7,                                                               /* mov edi, eax   */
+
+    /*
+     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
+     */
+    0x8D, 0x43, offsetof (RemoteWorkerContext, zed_agent_main_string),        /* lea eax, ebx+X */
+    0x50,                                                                     /* push eax       */
+    0x57,                                                                     /* push edi       */
+    0xFF, 0x53, offsetof (RemoteWorkerContext, get_proc_address_impl),        /* call           */
+
+    /*
+     * func (ctx->ipc_server_address);
+     */
+    0x8D, 0xAB, offsetof (RemoteWorkerContext, ipc_server_address) & 0xff,    /* lea ebp, [ebx + X] */
+                (offsetof (RemoteWorkerContext, ipc_server_address) >> 8) & 0xff,
+                0,
+                0,
+    0x55,                                                                           /* push ebp */
+    0xFF, 0xD0,                                                                     /* call eax */
+    0x5D,                                                                           /* pop ebp  */
+
+    /*
+     * FreeLibrary (mod);
+     */
+    0x57,                                                                           /* push edi */
+    0xFF, 0x53, offsetof (RemoteWorkerContext, free_library_impl),                  /* call     */
+
+    /*
+     * VirtualFree (worker_data, ...);
+     */
+    0x68, 0x00, 0x80, 0x00, 0x00,                    /* push MEM_RELEASE      (arg3: dwFreeType) */
+    0x6A, 0x00,                                      /* push 0                    (arg2: dwSize) */
+    0x53,                                            /* push ebx   (VirtualFree arg1: lpAddress) */
+    0x56,                                            /* push esi           (fake return address) */
+    0xFF, 0x63, offsetof (RemoteWorkerContext, virtual_free_impl),                        /* jmp */
+#endif
+  };
+
+  memset (rwc, 0, sizeof (RemoteWorkerContext));
+
+  kmod = GetModuleHandleW (L"kernel32.dll");
+
+  rwc->load_library_impl = GetProcAddress (kmod, "LoadLibraryW");
+  rwc->get_proc_address_impl = GetProcAddress (kmod, "GetProcAddress");
+  rwc->free_library_impl = GetProcAddress (kmod, "FreeLibrary");
+  rwc->virtual_free_impl = GetProcAddress (kmod, "VirtualFree");
+  rwc->exit_thread_impl = GetProcAddress (kmod, "ExitThread");
+
+  StringCbCopyA (rwc->zed_agent_main_string, sizeof (rwc->zed_agent_main_string), "zed_agent_main");
+
+  StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
+  StringCbCopyA (rwc->ipc_server_address, sizeof (rwc->ipc_server_address), details->ipc_server_address);
+
+  rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL,
+      sizeof (code) + data_alignment + sizeof (RemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+  if (rwc->entrypoint == NULL)
+    goto virtual_alloc_failed;
+
+  if (!WriteProcessMemory (details->process_handle, rwc->entrypoint, code, sizeof (code), NULL))
+    goto write_process_memory_failed;
+
+  rwc->argument = GSIZE_TO_POINTER (
+      (GPOINTER_TO_SIZE (rwc->entrypoint) + sizeof (code) + data_alignment - 1) & ~(data_alignment - 1));
+  if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (RemoteWorkerContext), NULL))
+    goto write_process_memory_failed;
+
+  return TRUE;
+
+  /* ERRORS */
+virtual_alloc_failed:
+  {
+    g_set_error (error,
+        ZED_SERVICE_WINJECTOR_ERROR,
+        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+        "VirtualAlloc failed: %d",
+        (gint) GetLastError ());
+    goto error_common;
+  }
+write_process_memory_failed:
+  {
+    g_set_error (error,
+        ZED_SERVICE_WINJECTOR_ERROR,
+        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+        "WriteProcessMemory failed: %d",
+        (gint) GetLastError ());
+    goto error_common;
+  }
+error_common:
+  {
+    cleanup_remote_worker_context (rwc, details);
+    return FALSE;
+  }
+}
+
+static void
+cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details)
+{
+  if (rwc->entrypoint != NULL)
+  {
+    VirtualFreeEx (details->process_handle, rwc->entrypoint, 0, MEM_RELEASE);
+    rwc->entrypoint = NULL;
+  }
 }
 
 static gboolean
