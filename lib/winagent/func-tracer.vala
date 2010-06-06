@@ -94,7 +94,7 @@ namespace Zed {
 				private set;
 			}
 
-			private const uint CAPACITY = 50000;
+			private const uint CAPACITY = 500000;
 
 			public Gum.CallEvent[] seen_calls = new Gum.CallEvent[CAPACITY];
 			public uint seen_call_count = 0;
@@ -110,6 +110,7 @@ namespace Zed {
 			}
 
 			public void process (void * opaque_event) {
+				assert (seen_call_count != seen_calls.length);
 				Memory.copy (&seen_calls[seen_call_count], opaque_event, sizeof (Gum.CallEvent));
 				seen_call_count++;
 			}
