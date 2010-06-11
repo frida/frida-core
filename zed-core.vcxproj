@@ -202,6 +202,7 @@ echo &gt; "$(IntDir)valacode.stamp"
     <ClCompile Include="src\service\winjector-impl.c" />
     <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.c" />
     <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.c" />
+    <ClCompile Include="src\ui\spy-glue.c" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="lib\winagent\zed-winagent-32.vcxproj">
