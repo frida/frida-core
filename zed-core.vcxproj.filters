@@ -134,7 +134,13 @@
     <ClCompile Include="data\windows.c">
       <Filter>Source Files\data</Filter>
     </ClCompile>
-    <ClCompile Include="src\ui\spy-glue.c">
+    <ClCompile Include="$(IntDir)src\ui\agent-session.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\process.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\process-glue.c">
       <Filter>Source Files\ui</Filter>
     </ClCompile>
   </ItemGroup>

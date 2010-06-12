@@ -1,5 +1,123 @@
 /* generated file, do not modify */
 namespace Zed.Data.Ui {
+	public static const string AGENT_SESSION_XML = "<?xml version=\"1.0\" ?>" +
+		"<interface><!-- interface-naming-policy project-wide -->" +
+"" +
+"<object class=\"GtkVBox\" id=\"root_vbox\">" +
+			"<property name=\"visible\">True</property>" +
+			"<property name=\"orientation\">vertical</property>" +
+			"<child>" +
+				"<object class=\"GtkFrame\" id=\"control_frame\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"label_xalign\">0</property>" +
+					"<property name=\"shadow_type\">etched-out</property>" +
+					"<child>" +
+						"<object class=\"GtkTable\" id=\"control_table\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"n_columns\">3</property>" +
+							"<child>" +
+								"<object class=\"GtkButton\" id=\"go_button\">" +
+									"<property name=\"label\" translatable=\"yes\">_Go</property>" +
+									"<property name=\"width_request\">71</property>" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"receives_default\">True</property>" +
+									"<property name=\"use_underline\">True</property>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"left_attach\">2</property>" +
+									"<property name=\"right_attach\">3</property>" +
+									"<property name=\"x_padding\">5</property>" +
+									"<property name=\"y_padding\">5</property>" +
+								"</packing>" +
+							"</child>" +
+							"<child>" +
+								"<object class=\"GtkFrame\" id=\"start_frame\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"label_xalign\">0</property>" +
+									"<property name=\"shadow_type\">none</property>" +
+									"<child>" +
+										"<object class=\"GtkAlignment\" id=\"start_alignment\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"left_padding\">12</property>" +
+											"<child>" +
+												"<placeholder/>" +
+											"</child>" +
+										"</object>" +
+									"</child>" +
+									"<child type=\"label\">" +
+										"<object class=\"GtkLabel\" id=\"start_label\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"label\" translatable=\"yes\">Start execution trace from:</property>" +
+											"<property name=\"use_markup\">True</property>" +
+										"</object>" +
+										"" +
+									"</child>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"y_options\">GTK_FILL</property>" +
+								"</packing>" +
+							"</child>" +
+							"<child>" +
+								"<object class=\"GtkFrame\" id=\"stop_frame\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"label_xalign\">0</property>" +
+									"<property name=\"shadow_type\">none</property>" +
+									"<child>" +
+										"<object class=\"GtkAlignment\" id=\"stop_alignment\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"left_padding\">12</property>" +
+											"<child>" +
+												"<placeholder/>" +
+											"</child>" +
+										"</object>" +
+									"</child>" +
+									"<child type=\"label\">" +
+										"<object class=\"GtkLabel\" id=\"stop_label\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"label\" translatable=\"yes\">Stop trace at:</property>" +
+											"<property name=\"use_markup\">True</property>" +
+										"</object>" +
+										"" +
+									"</child>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"left_attach\">1</property>" +
+									"<property name=\"right_attach\">2</property>" +
+									"<property name=\"y_options\">GTK_FILL</property>" +
+								"</packing>" +
+							"</child>" +
+						"</object>" +
+					"</child>" +
+					"<child type=\"label\">" +
+						"<placeholder/>" +
+						"" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"expand\">False</property>" +
+					"<property name=\"position\">0</property>" +
+				"</packing>" +
+			"</child>" +
+			"<child>" +
+				"<object class=\"GtkScrolledWindow\" id=\"events_scrollwin\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"can_focus\">True</property>" +
+					"<property name=\"hscrollbar_policy\">automatic</property>" +
+					"<property name=\"vscrollbar_policy\">automatic</property>" +
+					"<child>" +
+						"<object class=\"GtkTreeView\" id=\"events_view\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+						"</object>" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"position\">1</property>" +
+				"</packing>" +
+			"</child>" +
+		"</object></interface>";
+
 	public static const string CHAT_XML = "<?xml version=\"1.0\" ?>" +
 		"<interface><object class=\"GtkHBox\" id=\"root_hbox\">" +
 			"<property name=\"visible\">True</property>" +

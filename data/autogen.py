@@ -45,7 +45,7 @@ code = """\
 namespace Zed.Data.Ui {"""
 names = map(lambda name: os.path.splitext(name)[0], glob.glob('*.glade'))
 for name in names:
-    code += '\n\tpublic static const string %s_XML = %s;\n' % (name.upper(), glade_to_inline_ui_string(name))
+    code += '\n\tpublic static const string %s_XML = %s;\n' % (name.upper().replace('-', '_'), glade_to_inline_ui_string(name))
 
 code += '}'
 
