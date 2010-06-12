@@ -1,3 +1,5 @@
+using Gee;
+
 namespace Zed {
 	public class View.Spy : Object {
 		public Gtk.Widget widget {
@@ -62,11 +64,16 @@ namespace Zed {
 		private Service.AgentDescriptor agent_desc;
 
 		private ProcessList process_list = new ProcessList ();
+		private const double PROCESS_LIST_MIN_UPDATE_INTERVAL = 5.0;
+
+		private const int KEYVAL_DELETE = 65535;
 
 		public Spy (View.Spy view) {
 			Object (view: view, winjector: new Service.Winjector () /* here for now */);
 
 			configure_pid_entry ();
+			configure_add_button ();
+			configure_session_view ();
 
 			session_store = new Gtk.ListStore (1, typeof (AgentSession));
 			view.session_view.set_model (session_store);
@@ -80,8 +87,6 @@ namespace Zed {
 			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
 				new MemoryInputStream.from_data (get_winagent_32_data (), get_winagent_32_size (), null),
 				new MemoryInputStream.from_data (get_winagent_64_data (), get_winagent_64_size (), null));
-
-			connect_signals ();
 		}
 
 		public async void close () {
@@ -99,27 +104,35 @@ namespace Zed {
 			yield winjector.close ();
 		}
 
-		private const int KEYVAL_DELETE = 65535;
-
 		private void configure_pid_entry () {
 			view.pid_entry.activate.connect (() => {
 				view.add_button.clicked ();
+			});
+			view.pid_entry.focus_in_event.connect ((event) => {
+				if (process_list.time_since_last_update () >= PROCESS_LIST_MIN_UPDATE_INTERVAL)
+					process_list.update ();
+				return false;
 			});
 
 			var completion = new Gtk.EntryCompletion ();
 
 			completion.set_model (process_list.model);
 			completion.set_popup_completion (true);
-			completion.set_text_column (1);
+
+			var icon_renderer = new Gtk.CellRendererPixbuf ();
+			completion.pack_start (icon_renderer, false);
+			completion.set_cell_data_func (icon_renderer, pid_entry_completion_data_callback);
+
+			completion.set_text_column (0);
 
 			var pid_renderer = new Gtk.CellRendererText ();
 			completion.pack_end (pid_renderer, false);
-			completion.add_attribute (pid_renderer, "text", 0);
+			completion.set_cell_data_func (pid_renderer, pid_entry_completion_data_callback);
 
 			completion.match_selected.connect ((model, iter) => {
-				uint pid;
-				model.get (iter, 0, out pid);
-				view.pid_entry.set_text (pid.to_string ());
+				ProcessInfo pi;
+				model.get (iter, 1, out pi);
+				view.pid_entry.set_text (pi.pid.to_string ());
 				view.pid_entry.move_cursor (Gtk.MovementStep.BUFFER_ENDS, 1, false);
 				return true;
 			});
@@ -127,7 +140,7 @@ namespace Zed {
 			view.pid_entry.set_completion (completion);
 		}
 
-		private void connect_signals () {
+		private void configure_add_button () {
 			view.add_button.clicked.connect (() => {
 				var pid = view.pid_entry.text.to_int ();
 				if (pid != 0) {
@@ -136,7 +149,9 @@ namespace Zed {
 					session.inject ();
 				}
 			});
+		}
 
+		private void configure_session_view () {
 			view.session_view.key_press_event.connect ((event) => {
 				if (event.keyval == KEYVAL_DELETE) {
 					var selection = view.session_view.get_selection ();
@@ -190,6 +205,16 @@ namespace Zed {
 					session_store.remove (iter);
 				return false;
 			});
+		}
+
+		private void pid_entry_completion_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
+			ProcessInfo pi;
+			model.get (iter, 1, out pi);
+
+			if (renderer is Gtk.CellRendererPixbuf)
+				(renderer as Gtk.CellRendererPixbuf).pixbuf = pi.icon;
+			else
+				(renderer as Gtk.CellRendererText).text = pi.pid.to_string ();
 		}
 
 		private void session_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
@@ -305,31 +330,92 @@ namespace Zed {
 		}
 	}
 
-	public class ProcessList {
+	public class ProcessList : Object {
 		public Gtk.TreeModel model {
 			get { return store; }
 		}
 		private Gtk.ListStore store;
 
+		private ArrayList<UpdateRequest> pending_requests = new ArrayList<UpdateRequest> ();
+		private Timer last_update_timer = new Timer ();
+
 		public ProcessList () {
-			store = new Gtk.ListStore (2, typeof (uint), typeof (string));
+			store = new Gtk.ListStore (2, typeof (string), typeof (ProcessInfo));
 			update ();
 		}
 
-		private void update () {
-			store.clear ();
+		public async void update () {
+			bool is_first_request = pending_requests.is_empty;
 
-			foreach (var process in enumerate_processes ()) {
-				Gtk.TreeIter iter;
-				store.append (out iter);
-				store.set (iter, 0, process.pid, 1, process.name);
+			var request = new UpdateRequest (() => update.callback ());
+			if (is_first_request) {
+				try {
+					Thread.create (do_enumerate_processes, false);
+				} catch (ThreadError e) {
+					error (e.message);
+				}
+			}
+			pending_requests.add (request);
+			yield;
+
+			if (is_first_request) {
+				store.clear ();
+
+				foreach (var process in request.result) {
+					Gtk.TreeIter iter;
+					store.append (out iter);
+					store.set (iter, 0, process.name, 1, process);
+				}
+			}
+
+			last_update_timer.start ();
+		}
+
+		public double time_since_last_update () {
+			return last_update_timer.elapsed ();
+		}
+
+		private void * do_enumerate_processes () {
+			var timer = new Timer ();
+			var processes = enumerate_processes ();
+			print ("update took %d ms\n", (int) (timer.elapsed () * 1000.0));
+
+			Idle.add (() => {
+				var requests = pending_requests;
+				pending_requests = new ArrayList<UpdateRequest> ();
+
+				foreach (var request in requests)
+					request.complete (processes);
+
+				return false;
+			});
+
+			return null;
+		}
+
+		private class UpdateRequest {
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
+
+			public ProcessInfo[] result {
+				get;
+				private set;
+			}
+
+			public UpdateRequest (CompletionHandler handler) {
+				this.handler = handler;
+			}
+
+			public void complete (ProcessInfo[] processes) {
+				this.result = processes;
+				handler ();
 			}
 		}
 
 		private static extern ProcessInfo[] enumerate_processes ();
 	}
 
-	public class ProcessInfo {
+	public class ProcessInfo : Object {
 		public uint pid {
 			get;
 			private set;
@@ -340,9 +426,15 @@ namespace Zed {
 			private set;
 		}
 
-		public ProcessInfo (uint pid, string name) {
+		public Gdk.Pixbuf? icon {
+			get;
+			private set;
+		}
+
+		public ProcessInfo (uint pid, string name, Gdk.Pixbuf? icon) {
 			this.pid = pid;
 			this.name = name;
+			this.icon = icon;
 		}
 	}
 }
