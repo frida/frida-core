@@ -213,13 +213,13 @@ namespace Zed.Data.Ui {
 						"</packing>" +
 					"</child>" +
 					"<child>" +
-						"<object class=\"GtkScrolledWindow\" id=\"process_scrolledwindow\">" +
+						"<object class=\"GtkScrolledWindow\" id=\"sessionlist_scrollwin\">" +
 							"<property name=\"visible\">True</property>" +
 							"<property name=\"can_focus\">True</property>" +
 							"<property name=\"hscrollbar_policy\">automatic</property>" +
 							"<property name=\"vscrollbar_policy\">automatic</property>" +
 							"<child>" +
-								"<object class=\"GtkTreeView\" id=\"process_treeview\">" +
+								"<object class=\"GtkTreeView\" id=\"session_treeview\">" +
 									"<property name=\"visible\">True</property>" +
 									"<property name=\"can_focus\">True</property>" +
 								"</object>" +
@@ -236,16 +236,12 @@ namespace Zed.Data.Ui {
 				"</packing>" +
 			"</child>" +
 			"<child>" +
-				"<object class=\"GtkScrolledWindow\" id=\"event_scrolledwindow\">" +
+				"<object class=\"GtkNotebook\" id=\"session_notebook\">" +
 					"<property name=\"visible\">True</property>" +
 					"<property name=\"can_focus\">True</property>" +
-					"<property name=\"hscrollbar_policy\">automatic</property>" +
-					"<property name=\"vscrollbar_policy\">automatic</property>" +
+					"<property name=\"tab_pos\">bottom</property>" +
 					"<child>" +
-						"<object class=\"GtkTreeView\" id=\"event_treeview\">" +
-							"<property name=\"visible\">True</property>" +
-							"<property name=\"can_focus\">True</property>" +
-						"</object>" +
+						"<placeholder/>" +
 					"</child>" +
 				"</object>" +
 				"<packing>" +

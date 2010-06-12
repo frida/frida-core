@@ -44,13 +44,13 @@
               </packing>
             </child>
             <child>
-              <widget class="GtkScrolledWindow" id="process_scrolledwindow">
+              <widget class="GtkScrolledWindow" id="sessionlist_scrollwin">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
                 <property name="hscrollbar_policy">automatic</property>
                 <property name="vscrollbar_policy">automatic</property>
                 <child>
-                  <widget class="GtkTreeView" id="process_treeview">
+                  <widget class="GtkTreeView" id="session_treeview">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                   </widget>
@@ -67,16 +67,12 @@
           </packing>
         </child>
         <child>
-          <widget class="GtkScrolledWindow" id="event_scrolledwindow">
+          <widget class="GtkNotebook" id="session_notebook">
             <property name="visible">True</property>
             <property name="can_focus">True</property>
-            <property name="hscrollbar_policy">automatic</property>
-            <property name="vscrollbar_policy">automatic</property>
+            <property name="tab_pos">bottom</property>
             <child>
-              <widget class="GtkTreeView" id="event_treeview">
-                <property name="visible">True</property>
-                <property name="can_focus">True</property>
-              </widget>
+              <placeholder/>
             </child>
           </widget>
           <packing>

@@ -18,12 +18,12 @@ namespace Zed {
 			private set;
 		}
 
-		public Gtk.TreeView session_view {
+		public Gtk.TreeView session_treeview {
 			get;
 			private set;
 		}
 
-		public Gtk.TreeView event_view {
+		public Gtk.Notebook session_notebook {
 			get;
 			private set;
 		}
@@ -39,8 +39,8 @@ namespace Zed {
 
 				pid_entry = builder.get_object ("pid_entry") as Gtk.Entry;
 				add_button = builder.get_object ("add_button") as Gtk.Button;
-				session_view = builder.get_object ("process_treeview") as Gtk.TreeView;
-				event_view = builder.get_object ("event_treeview") as Gtk.TreeView;
+				session_treeview = builder.get_object ("session_treeview") as Gtk.TreeView;
+				session_notebook = builder.get_object ("session_notebook") as Gtk.Notebook;
 			} catch (Error e) {
 				error (e.message);
 			}
@@ -59,7 +59,6 @@ namespace Zed {
 		}
 
 		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
-		private Gtk.ListStore event_store = new Gtk.ListStore (1, typeof (string));
 
 		private Service.AgentDescriptor agent_desc;
 
@@ -73,9 +72,9 @@ namespace Zed {
 
 			configure_pid_entry ();
 			configure_add_button ();
-			configure_session_view ();
+			configure_session_treeview ();
 
-			configure_event_view ();
+			configure_session_notebook ();
 
 			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
 				new MemoryInputStream.from_data (get_winagent_32_data (), get_winagent_32_size (), null),
@@ -145,8 +144,8 @@ namespace Zed {
 			});
 		}
 
-		private void configure_session_view () {
-			var sv = view.session_view;
+		private void configure_session_treeview () {
+			var sv = view.session_treeview;
 
 			sv.set_model (session_store);
 
@@ -169,7 +168,7 @@ namespace Zed {
 
 			sv.key_press_event.connect ((event) => {
 				if (event.keyval == KEYVAL_DELETE) {
-					var selection = view.session_view.get_selection ();
+					var selection = sv.get_selection ();
 
 					Gtk.TreeModel model;
 					Gtk.TreeIter iter;
@@ -184,9 +183,7 @@ namespace Zed {
 			});
 		}
 
-		private void configure_event_view () {
-			view.event_view.set_model (event_store);
-			view.event_view.insert_column_with_attributes (-1, "Function Name", new Gtk.CellRendererText (), "text", 0);
+		private void configure_session_notebook () {
 		}
 
 		private async void start_session (uint pid) {
