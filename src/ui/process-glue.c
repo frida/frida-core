@@ -23,13 +23,13 @@ static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
 ZedProcessInfo **
 zed_process_list_enumerate_processes (int * result_length1)
 {
-  GArray * processes;
+  GPtrArray * processes;
   DWORD * pids = NULL;
   DWORD size = 64 * sizeof (DWORD);
   DWORD bytes_returned;
   guint i;
 
-  processes = g_array_new (FALSE, FALSE, sizeof (ZedProcessInfo *));
+  processes = g_ptr_array_new ();
 
   do
   {
@@ -66,7 +66,7 @@ zed_process_list_enumerate_processes (int * result_length1)
           icon = extract_icon_from_file (name_utf16);
 
         process_info = zed_process_info_new (pids[i], name, icon);
-        g_array_append_val (processes, process_info);
+        g_ptr_array_add (processes, process_info);
 
         g_free (name);
       }
@@ -78,7 +78,7 @@ zed_process_list_enumerate_processes (int * result_length1)
   g_free (pids);
 
   *result_length1 = processes->len;
-  return (ZedProcessInfo **) g_array_free (processes, FALSE);
+  return (ZedProcessInfo **) g_ptr_array_free (processes, FALSE);
 }
 
 static GdkPixbuf *
