@@ -12,6 +12,12 @@ namespace Zed {
 			proxy.add_notify_handler ("Stop", "", (arg) => {
 				loop.quit ();
 			});
+			proxy.register_query_sync_handler ("QueryModules", null, (arg) => {
+				var builder = new VariantBuilder (new VariantType ("a(stt)"));
+				foreach (var module in query_modules ())
+					builder.add ("(stt)", module.name, module.base_address, module.size);
+				return builder.end ();
+			});
 
 			Idle.add (() => {
 				do_establish (proxy);
@@ -44,6 +50,31 @@ namespace Zed {
 
 			gst_tracer = new Zed.GstTracer (proxy);
 			gst_tracer.attach ();
+		}
+
+		public extern ModuleInfo[] query_modules ();
+
+		public class ModuleInfo {
+			public string name {
+				get;
+				private set;
+			}
+
+			public uint64 base_address {
+				get;
+				private set;
+			}
+
+			public uint64 size {
+				get;
+				private set;
+			}
+
+			public ModuleInfo (string name, uint64 base_address, uint64 size) {
+				this.name = name;
+				this.base_address = base_address;
+				this.size = size;
+			}
 		}
 	}
 }

@@ -102,6 +102,9 @@ namespace Zed {
 				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
 				proxy.add_notify_handler ("FuncEvent", "(i(ssu)(ssu))", on_func_event);
 				this.state = State.INJECTED;
+
+				start_selector.set_proxy (proxy);
+				stop_selector.set_proxy (proxy);
 			} catch (Service.WinjectorError e) {
 				this.error (e.message);
 			}
@@ -188,13 +191,42 @@ namespace Zed {
 			construct;
 		}
 
+		private WinIpc.Proxy proxy;
+
 		private Gtk.ListStore module_store = new Gtk.ListStore (1, typeof (string));
 		private Gtk.ListStore function_store = new Gtk.ListStore (1, typeof (string));
 
 		public FunctionSelector (View.FunctionSelector view) {
 			Object (view: view);
 
+			module_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
+			function_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
+
 			view.set_models (module_store, function_store);
+		}
+
+		public void set_proxy (WinIpc.Proxy proxy) {
+			assert (this.proxy == null);
+			this.proxy = proxy;
+
+			fetch_modules ();
+		}
+
+		private async void fetch_modules () {
+			try {
+				var modules = yield proxy.query ("QueryModules", null, "a(stt)");
+				foreach (var module in modules) {
+					string name;
+					uint64 base_address;
+					uint64 size;
+					module.get ("(stt)", out name, out base_address, out size);
+
+					Gtk.TreeIter iter;
+					module_store.append (out iter);
+					module_store.set (iter, 0, name);
+				}
+			} catch (WinIpc.ProxyError e) {
+			}
 		}
 	}
 }
