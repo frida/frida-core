@@ -92,8 +92,6 @@ namespace Zed {
 					roster_store.append (out iter);
 					roster_store.set (iter, 0, nick);
 				}
-
-				view.chat_entry.grab_focus ();
 			});
 			muc_service.you_parted.connect (() => {
 				view.can_chat = false;
