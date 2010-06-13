@@ -72,8 +72,6 @@ namespace Zed {
 			configure_add_button ();
 			configure_session_treeview ();
 
-			configure_session_notebook ();
-
 			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
 				new MemoryInputStream.from_data (get_winagent_32_data (), get_winagent_32_size (), null),
 				new MemoryInputStream.from_data (get_winagent_64_data (), get_winagent_64_size (), null));
@@ -103,11 +101,7 @@ namespace Zed {
 
 			switch (session.state) {
 				case AgentSession.State.INJECTED:
-					view.session_notebook.append_page (session.view.widget,
-						new Gtk.Label (session.process_info.pid.to_string ()));
-					break;
-				case AgentSession.State.TERMINATED:
-					schedule_removal_of (path);
+					view.session_notebook.append_page (session.view.widget, null);
 					break;
 				default:
 					break;
@@ -208,7 +202,11 @@ namespace Zed {
 					if (selection.get_selected (out model, out iter)) {
 						AgentSession session;
 						model.get (iter, 0, out session);
-						session.terminate ();
+
+						if (session.state != AgentSession.State.TERMINATED)
+							session.terminate ();
+						else
+							remove_session_at (model.get_path (iter));
 					}
 				}
 
@@ -216,16 +214,24 @@ namespace Zed {
 			});
 		}
 
-		private void configure_session_notebook () {
-		}
+		private void remove_session_at (Gtk.TreePath path) {
+			Gtk.TreeIter iter;
+			session_store.get_iter (out iter, path);
 
-		private void schedule_removal_of (Gtk.TreePath path) {
-			Timeout.add (1000, () => {
-				Gtk.TreeIter iter;
-				if (session_store.get_iter (out iter, path))
-					session_store.remove (iter);
-				return false;
-			});
+			AgentSession session;
+			session_store.get (iter, 0, out session);
+
+			var notebook = view.session_notebook;
+			var session_view = session.view;
+			for (int i = notebook.get_n_pages () - 1; i >= 0; i--) {
+				var current_view = notebook.get_nth_page (i);
+				if (current_view == session_view.widget) {
+					notebook.remove_page (i);
+					break;
+				}
+			}
+
+			session_store.remove (iter);
 		}
 
 		private Gtk.TreePath? find_session_store_path_of (AgentSession session) {

@@ -11,6 +11,11 @@ namespace Zed {
 			private set;
 		}
 
+		public ProcessInfoLabel process_info_label {
+			get;
+			private set;
+		}
+
 		public Gtk.Button go_button {
 			get;
 			private set;
@@ -27,8 +32,6 @@ namespace Zed {
 		}
 
 		private Gtk.VBox root_vbox;
-		private Gtk.Alignment start_alignment;
-		private Gtk.Alignment stop_alignment;
 
 		public AgentSession () {
 			try {
@@ -38,14 +41,18 @@ namespace Zed {
 				root_vbox = builder.get_object ("root_vbox") as Gtk.VBox;
 
 				control_frame = builder.get_object ("control_frame") as Gtk.Frame;
-				start_alignment = builder.get_object ("start_alignment") as Gtk.Alignment;
-				stop_alignment = builder.get_object ("stop_alignment") as Gtk.Alignment;
 				go_button = builder.get_object ("go_button") as Gtk.Button;
 
+				process_info_label = new ProcessInfoLabel ();
+				var process_info_alignment = builder.get_object ("process_info_alignment") as Gtk.Alignment;
+				process_info_alignment.add (process_info_label);
+
 				start_selector = new FunctionSelector ();
+				var start_alignment = builder.get_object ("start_alignment") as Gtk.Alignment;
 				start_alignment.add (start_selector);
 
 				stop_selector = new FunctionSelector ();
+				var stop_alignment = builder.get_object ("stop_alignment") as Gtk.Alignment;
 				stop_alignment.add (stop_selector);
 			} catch (Error e) {
 				error (e.message);
@@ -82,6 +89,7 @@ namespace Zed {
 		private Service.Winjector winjector;
 		private Service.AgentDescriptor agent_desc;
 
+		private ProcessInfoLabel process_info_label;
 		private FunctionSelector start_selector;
 		private FunctionSelector stop_selector;
 
@@ -100,6 +108,7 @@ namespace Zed {
 			this.winjector = winjector;
 			this.agent_desc = agent_desc;
 
+			process_info_label = new ProcessInfoLabel (view.process_info_label, process_info);
 			start_selector = new FunctionSelector (view.start_selector);
 			stop_selector = new FunctionSelector (view.stop_selector);
 

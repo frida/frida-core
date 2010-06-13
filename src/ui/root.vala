@@ -26,8 +26,8 @@ namespace Zed {
 
 		private Gtk.Notebook _notebook;
 
-		private static const int DEFAULT_WIDTH = 640;
-		private static const int DEFAULT_HEIGHT = 480;
+		private static const int DEFAULT_WIDTH = 800;
+		private static const int DEFAULT_HEIGHT = 600;
 
 		public Root (View.Login login, View.Workspace workspace) {
 			Object (login: login, workspace: workspace);

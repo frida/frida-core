@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!DOCTYPE glade-interface SYSTEM "glade-2.0.dtd">
-<!--Generated with glade3 3.4.3 on Thu Apr 01 01:55:36 2010 -->
+<?xml version="1.0"?>
 <glade-interface>
+  <!-- interface-requires gtk+ 2.6 -->
+  <!-- interface-naming-policy toplevel-contextual -->
   <widget class="GtkWindow" id="window">
     <child>
       <widget class="GtkVBox" id="root_vbox">
@@ -19,16 +19,16 @@
                     <property name="visible">True</property>
                     <child>
                       <widget class="GtkImageMenuItem" id="new_menuitem">
+                        <property name="label">gtk-new</property>
                         <property name="visible">True</property>
-                        <property name="label" translatable="yes">gtk-new</property>
                         <property name="use_underline">True</property>
                         <property name="use_stock">True</property>
                       </widget>
                     </child>
                     <child>
                       <widget class="GtkImageMenuItem" id="open_menuitem">
+                        <property name="label">gtk-open</property>
                         <property name="visible">True</property>
-                        <property name="label" translatable="yes">gtk-open</property>
                         <property name="use_underline">True</property>
                         <property name="use_stock">True</property>
                       </widget>
@@ -40,8 +40,8 @@
                     </child>
                     <child>
                       <widget class="GtkImageMenuItem" id="quit_menuitem">
+                        <property name="label">gtk-quit</property>
                         <property name="visible">True</property>
-                        <property name="label" translatable="yes">gtk-quit</property>
                         <property name="use_underline">True</property>
                         <property name="use_stock">True</property>
                       </widget>
@@ -60,8 +60,8 @@
                     <property name="visible">True</property>
                     <child>
                       <widget class="GtkImageMenuItem" id="about_menuitem">
+                        <property name="label">gtk-about</property>
                         <property name="visible">True</property>
-                        <property name="label" translatable="yes">gtk-about</property>
                         <property name="use_underline">True</property>
                         <property name="use_stock">True</property>
                       </widget>
@@ -73,18 +73,20 @@
           </widget>
           <packing>
             <property name="expand">False</property>
+            <property name="position">0</property>
           </packing>
         </child>
         <child>
           <widget class="GtkVPaned" id="vpaned">
             <property name="visible">True</property>
             <property name="can_focus">True</property>
-            <property name="position">130</property>
+            <property name="orientation">vertical</property>
+            <property name="position">430</property>
             <child>
               <widget class="GtkFrame" id="top_frame">
                 <property name="visible">True</property>
                 <property name="label_xalign">0</property>
-                <property name="shadow_type">GTK_SHADOW_IN</property>
+                <property name="shadow_type">in</property>
               </widget>
               <packing>
                 <property name="resize">False</property>
@@ -95,7 +97,7 @@
               <widget class="GtkFrame" id="bottom_frame">
                 <property name="visible">True</property>
                 <property name="label_xalign">0</property>
-                <property name="shadow_type">GTK_SHADOW_IN</property>
+                <property name="shadow_type">in</property>
               </widget>
               <packing>
                 <property name="resize">True</property>
