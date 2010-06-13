@@ -21,8 +21,8 @@ namespace Zed.Data.Ui {
 									"<property name=\"xalign\">0</property>" +
 									"<property name=\"xscale\">0</property>" +
 									"<property name=\"yscale\">0</property>" +
-									"<property name=\"left_padding\">35</property>" +
-									"<property name=\"right_padding\">35</property>" +
+									"<property name=\"left_padding\">50</property>" +
+									"<property name=\"right_padding\">50</property>" +
 									"<child>" +
 										"<placeholder/>" +
 									"</child>" +
@@ -438,7 +438,8 @@ namespace Zed.Data.Ui {
 					"<property name=\"visible\">True</property>" +
 					"<property name=\"can_focus\">True</property>" +
 					"<property name=\"orientation\">vertical</property>" +
-					"<property name=\"position\">430</property>" +
+					"<property name=\"position\">370</property>" +
+					"<property name=\"position_set\">True</property>" +
 					"<child>" +
 						"<object class=\"GtkFrame\" id=\"top_frame\">" +
 							"<property name=\"visible\">True</property>" +

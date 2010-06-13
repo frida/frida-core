@@ -81,7 +81,8 @@
             <property name="visible">True</property>
             <property name="can_focus">True</property>
             <property name="orientation">vertical</property>
-            <property name="position">430</property>
+            <property name="position">370</property>
+            <property name="position_set">True</property>
             <child>
               <widget class="GtkFrame" id="top_frame">
                 <property name="visible">True</property>

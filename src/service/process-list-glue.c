@@ -5,6 +5,7 @@
 #include <psapi.h>
 
 typedef struct _FindMainWindowCtx FindMainWindowCtx;
+typedef enum _IconSize IconSize;
 
 struct _FindMainWindowCtx
 {
@@ -12,10 +13,19 @@ struct _FindMainWindowCtx
   HWND main_window;
 };
 
-static GdkPixbuf * extract_icon_from_process (DWORD pid);
-static GdkPixbuf * extract_icon_from_file (WCHAR * filename);
+enum _IconSize
+{
+  ICON_SIZE_SMALL,
+  ICON_SIZE_LARGE
+};
 
-static GdkPixbuf * create_pixbuf_from_icon (HICON icon);
+static GdkPixbuf * extract_icon_from_process_or_file (DWORD pid,
+    WCHAR * filename, IconSize size);
+
+static GdkPixbuf * extract_icon_from_process (DWORD pid, IconSize size);
+static GdkPixbuf * extract_icon_from_file (WCHAR * filename, IconSize size);
+
+static GdkPixbuf * create_pixbuf_from_icon (HICON icon, IconSize size);
 static void destroy_bitmap (guchar * pixels, gpointer data);
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
@@ -54,18 +64,19 @@ zed_service_process_list_enumerate_processes (int * result_length1)
       {
         gchar * name, * tmp;
         ZedProcessInfo * process_info;
-        GdkPixbuf * icon;
+        GdkPixbuf * small_icon, * large_icon;
 
         name = g_utf16_to_utf8 ((gunichar2 *) name_utf16, -1, NULL, NULL, NULL);
         tmp = g_path_get_basename (name);
         g_free (name);
         name = tmp;
 
-        icon = extract_icon_from_process (pids[i]);
-        if (icon == NULL)
-          icon = extract_icon_from_file (name_utf16);
+        small_icon = extract_icon_from_process_or_file (pids[i], name_utf16,
+            ICON_SIZE_SMALL);
+        large_icon = extract_icon_from_process_or_file (pids[i], name_utf16,
+            ICON_SIZE_LARGE);
 
-        process_info = zed_process_info_new (pids[i], name, icon);
+        process_info = zed_process_info_new (pids[i], name, small_icon, large_icon);
         g_ptr_array_add (processes, process_info);
 
         g_free (name);
@@ -82,7 +93,19 @@ zed_service_process_list_enumerate_processes (int * result_length1)
 }
 
 static GdkPixbuf *
-extract_icon_from_process (DWORD pid)
+extract_icon_from_process_or_file (DWORD pid, WCHAR * filename, IconSize size)
+{
+  GdkPixbuf * icon;
+
+  icon = extract_icon_from_process (pid, size);
+  if (icon == NULL)
+    icon = extract_icon_from_file (filename, size);
+
+  return icon;
+}
+
+static GdkPixbuf *
+extract_icon_from_process (DWORD pid, IconSize size)
 {
   GdkPixbuf * pixbuf = NULL;
   HICON icon = NULL;
@@ -96,60 +119,74 @@ extract_icon_from_process (DWORD pid)
     flags = SMTO_ABORTIFHUNG | SMTO_BLOCK;
     timeout = 100;
 
-    SendMessageTimeout (main_window, WM_GETICON, ICON_SMALL2, 0,
-        flags, timeout, (PDWORD_PTR) &icon);
-
-    if (icon == NULL)
+    if (size == ICON_SIZE_SMALL)
     {
-      SendMessageTimeout (main_window, WM_GETICON, ICON_SMALL, 0,
+      SendMessageTimeout (main_window, WM_GETICON, ICON_SMALL2, 0,
           flags, timeout, (PDWORD_PTR) &icon);
+
+      if (icon == NULL)
+      {
+        SendMessageTimeout (main_window, WM_GETICON, ICON_SMALL, 0,
+            flags, timeout, (PDWORD_PTR) &icon);
+      }
+
+      if (icon == NULL)
+        icon = (HICON) GetClassLongPtr (main_window, GCL_HICONSM);
     }
-
-    if (icon == NULL)
-      icon = (HICON) GetClassLongPtr (main_window, GCL_HICONSM);
-
-    if (icon == NULL)
-    {
-      SendMessageTimeout (main_window, WM_QUERYDRAGICON, 0, 0,
-          flags, timeout, (PDWORD_PTR) &icon);
-    }
-
-    if (icon == NULL)
-      icon = (HICON) GetClassLongPtr (main_window, GCL_HICON);
-
-    if (icon == NULL)
+    else if (size == ICON_SIZE_LARGE)
     {
       SendMessageTimeout (main_window, WM_GETICON, ICON_BIG, 0,
           flags, timeout, (PDWORD_PTR) &icon);
+
+      if (icon == NULL)
+        icon = (HICON) GetClassLongPtr (main_window, GCL_HICON);
+
+      if (icon == NULL)
+      {
+        SendMessageTimeout (main_window, WM_QUERYDRAGICON, 0, 0,
+            flags, timeout, (PDWORD_PTR) &icon);
+      }
+    }
+    else
+    {
+      g_assert_not_reached ();
     }
   }
 
   if (icon != NULL)
-    pixbuf = create_pixbuf_from_icon (icon);
+    pixbuf = create_pixbuf_from_icon (icon, size);
 
   return pixbuf;
 }
 
 static GdkPixbuf *
-extract_icon_from_file (WCHAR * filename)
+extract_icon_from_file (WCHAR * filename, IconSize size)
 {
   GdkPixbuf * pixbuf = NULL;
   SHFILEINFO shfi = { 0, };
+  UINT flags;
 
-  SHGetFileInfoW (filename, 0, &shfi, sizeof (shfi),
-      SHGFI_ICON | SHGFI_SMALLICON);
+  flags = SHGFI_ICON;
+  if (size == ICON_SIZE_SMALL)
+    flags |= SHGFI_SMALLICON;
+  else if (size == ICON_SIZE_LARGE)
+    flags |= SHGFI_LARGEICON;
+  else
+    g_assert_not_reached ();
+
+  SHGetFileInfoW (filename, 0, &shfi, sizeof (shfi), flags);
   if (shfi.hIcon != NULL)
-    pixbuf = create_pixbuf_from_icon (shfi.hIcon);
+    pixbuf = create_pixbuf_from_icon (shfi.hIcon, size);
 
   return pixbuf;
 }
 
 static GdkPixbuf *
-create_pixbuf_from_icon (HICON icon)
+create_pixbuf_from_icon (HICON icon, IconSize size)
 {
   GdkPixbuf * pixbuf;
   HDC dc;
-  gint width, height;
+  gint width = -1, height = -1;
   BITMAPV5HEADER bi = { 0, };
   guint rowstride;
   guchar * data = NULL;
@@ -158,8 +195,20 @@ create_pixbuf_from_icon (HICON icon)
 
   dc = CreateCompatibleDC (NULL);
 
-  width = GetSystemMetrics (SM_CXSMICON);
-  height = GetSystemMetrics (SM_CYSMICON);
+  if (size == ICON_SIZE_SMALL)
+  {
+    width = GetSystemMetrics (SM_CXSMICON);
+    height = GetSystemMetrics (SM_CYSMICON);
+  }
+  else if (size == ICON_SIZE_LARGE)
+  {
+    width = GetSystemMetrics (SM_CXICON);
+    height = GetSystemMetrics (SM_CYICON);
+  }
+  else
+  {
+    g_assert_not_reached ();
+  }
 
   bi.bV5Size = sizeof (bi);
   bi.bV5Width = width;

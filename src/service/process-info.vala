@@ -9,15 +9,21 @@ public class Zed.ProcessInfo : Object {
 		private set;
 	}
 
-	public Gdk.Pixbuf? icon {
+	public Gdk.Pixbuf? small_icon {
 		get;
 		private set;
 	}
 
-	public ProcessInfo (uint pid, string name, Gdk.Pixbuf? icon = null) {
+	public Gdk.Pixbuf? large_icon {
+		get;
+		private set;
+	}
+
+	public ProcessInfo (uint pid, string name, Gdk.Pixbuf? small_icon = null, Gdk.Pixbuf? large_icon = null) {
 		this.pid = pid;
 		this.name = name;
-		this.icon = icon;
+		this.small_icon = small_icon;
+		this.large_icon = large_icon;
 	}
 }
 

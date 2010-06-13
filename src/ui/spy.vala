@@ -254,7 +254,7 @@ namespace Zed {
 			model.get (iter, 1, out pi);
 
 			if (renderer is Gtk.CellRendererPixbuf)
-				(renderer as Gtk.CellRendererPixbuf).pixbuf = pi.icon;
+				(renderer as Gtk.CellRendererPixbuf).pixbuf = pi.small_icon;
 			else
 				(renderer as Gtk.CellRendererText).text = pi.pid.to_string ();
 		}
@@ -263,7 +263,7 @@ namespace Zed {
 			AgentSession session;
 			model.get (iter, 0, out session);
 			if (renderer is Gtk.CellRendererPixbuf)
-				(renderer as Gtk.CellRendererPixbuf).pixbuf = session.process_info.icon;
+				(renderer as Gtk.CellRendererPixbuf).pixbuf = session.process_info.small_icon;
 			else
 				(renderer as Gtk.CellRendererText).text = session.process_info.name.to_string ();
 		}
