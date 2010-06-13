@@ -13,6 +13,10 @@ struct _ResolveFuncNameContext
   ZedFunctionAddress * function_address;
 };
 
+static gpointer resolve_trigger_function (ZedTriggerInfo * trigger);
+static gboolean attach_listener_to_trigger_function (ZedInvestigator * self,
+    gpointer func, ZedTriggerType type);
+
 static gboolean attach_listener_for_trigger (ZedInvestigator * self,
     ZedTriggerInfo * trigger, ZedTriggerType type);
 static gboolean try_to_resolve_function_name (const gchar * name,
@@ -24,20 +28,39 @@ gboolean
 zed_investigator_attach (ZedInvestigator * self,
     ZedTriggerInfo * start_trigger, ZedTriggerInfo * stop_trigger)
 {
+  static gpointer start_trigger_func, stop_trigger_func;
+
 #ifndef _M_X64
   g_assert (interceptor == NULL);
   interceptor = gum_interceptor_obtain ();
 #endif
 
-  if (!attach_listener_for_trigger (self, start_trigger,
-      ZED_TRIGGER_TYPE_START))
-  {
+  start_trigger_func = resolve_trigger_function (start_trigger);
+  stop_trigger_func = resolve_trigger_function (stop_trigger);
+  if (start_trigger_func == NULL || stop_trigger_func == NULL)
     goto error;
-  }
 
-  if (!attach_listener_for_trigger (self, stop_trigger, ZED_TRIGGER_TYPE_STOP))
+  if (stop_trigger_func == start_trigger_func)
   {
-    goto error;
+    if (!attach_listener_to_trigger_function (self, start_trigger_func,
+        (ZedTriggerType) (ZED_TRIGGER_TYPE_START | ZED_TRIGGER_TYPE_STOP)))
+    {
+      goto error;
+    }
+  }
+  else
+  {
+    if (!attach_listener_to_trigger_function (self, start_trigger_func,
+        ZED_TRIGGER_TYPE_START))
+    {
+      goto error;
+    }
+
+    if (!attach_listener_to_trigger_function (self, stop_trigger_func,
+        ZED_TRIGGER_TYPE_STOP))
+    {
+      goto error;
+    }
   }
 
   return TRUE;
@@ -62,39 +85,40 @@ zed_investigator_detach (ZedInvestigator * self)
 #endif
 }
 
-static gboolean
-attach_listener_for_trigger (ZedInvestigator * self, ZedTriggerInfo * trigger,
-    ZedTriggerType type)
+static gpointer
+resolve_trigger_function (ZedTriggerInfo * trigger)
 {
-#ifndef _M_X64
+  gpointer result = NULL;
   WCHAR * module_name_utf16;
   HMODULE module;
-  gpointer function_address;
-  GumAttachReturn attach_ret;
 
   module_name_utf16 = (WCHAR *) g_utf8_to_utf16 (
       zed_trigger_info_get_module_name (trigger), -1, NULL, NULL, NULL);
   module = GetModuleHandleW (module_name_utf16);
-  if (module == NULL)
-    goto error;
+  g_free (module_name_utf16);
+  if (module != NULL)
+  {
+    result = GetProcAddress (module,
+        zed_trigger_info_get_function_name (trigger));
+  }
 
-  function_address = GetProcAddress (module,
-      zed_trigger_info_get_function_name (trigger));
-  if (function_address == NULL)
-    goto error;
+  return result;
+}
 
-  attach_ret = gum_interceptor_attach_listener (interceptor, function_address,
+static gboolean
+attach_listener_to_trigger_function (ZedInvestigator * self, gpointer func,
+    ZedTriggerType type)
+{
+#ifndef _M_X64
+  GumAttachReturn attach_ret;
+
+  attach_ret = gum_interceptor_attach_listener (interceptor, func,
       GUM_INVOCATION_LISTENER (self), GSIZE_TO_POINTER (type));
-  if (attach_ret != GUM_ATTACH_OK && attach_ret != GUM_ATTACH_ALREADY_ATTACHED)
-    goto error;
 
-  g_free (module_name_utf16);
-  return TRUE;
-
-error:
-  g_free (module_name_utf16);
-#endif
+  return (attach_ret == GUM_ATTACH_OK);
+#else
   return FALSE;
+#endif
 }
 
 ZedFunctionAddress *

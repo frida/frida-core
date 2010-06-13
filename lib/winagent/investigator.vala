@@ -17,7 +17,7 @@ namespace Zed {
 			TriggerType type = (TriggerType) context.instance_data;
 			FuncState state = (FuncState) context.thread_data;
 
-			if (type == TriggerType.STOP && state.is_stalking) {
+			if ((type & TriggerType.STOP) != 0 && state.is_stalking) {
 				state.stalker.unfollow_me ();
 				state.has_been_stalked = true;
 				state.is_stalking = false;
@@ -33,7 +33,7 @@ namespace Zed {
 			TriggerType type = (TriggerType) context.instance_data;
 			FuncState state = (FuncState) context.thread_data;
 
-			if (type == TriggerType.START && !state.has_been_stalked) {
+			if ((type & TriggerType.START) != 0 && !state.has_been_stalked) {
 				state.is_stalking = true;
 				state.stalker.follow_me (state);
 			}
@@ -144,8 +144,8 @@ namespace Zed {
 	}
 
 	public enum TriggerType {
-		START,
-		STOP
+		START = 1 << 0,
+		STOP  = 1 << 1
 	}
 
 	public class FunctionAddress {
