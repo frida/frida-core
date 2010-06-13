@@ -277,8 +277,10 @@ echo &gt; "$(IntDir)valacode.stamp"
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\winjector-error.vala;$(ProjectDir)src\service\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
+    <None Include="src\ui\agent-session.vala" />
     <None Include="src\ui\chat.vala" />
     <None Include="src\ui\login.vala" />
+    <None Include="src\ui\process.vala" />
     <None Include="src\ui\root.vala" />
     <None Include="src\ui\spy.vala" />
     <None Include="src\ui\workspace.vala" />

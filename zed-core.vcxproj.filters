@@ -72,6 +72,12 @@
     <None Include="src\ui\spy.vala">
       <Filter>Source Files\ui</Filter>
     </None>
+    <None Include="src\ui\agent-session.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\process.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
