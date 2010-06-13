@@ -12,10 +12,17 @@ namespace Zed {
 			proxy.add_notify_handler ("Stop", "", (arg) => {
 				loop.quit ();
 			});
-			proxy.register_query_sync_handler ("QueryModules", null, (arg) => {
+			proxy.register_query_sync_handler ("QueryModules", "", (arg) => {
 				var builder = new VariantBuilder (new VariantType ("a(stt)"));
 				foreach (var module in query_modules ())
 					builder.add ("(stt)", module.name, module.base_address, module.size);
+				return builder.end ();
+			});
+			proxy.register_query_sync_handler ("QueryModuleFunctions", "s", (arg) => {
+				var module_name = arg.get_string ();
+				var builder = new VariantBuilder (new VariantType ("a(st)"));
+				foreach (var func in query_module_functions (module_name))
+					builder.add ("(st)", func.name, func.base_address);
 				return builder.end ();
 			});
 
@@ -53,6 +60,7 @@ namespace Zed {
 		}
 
 		public extern ModuleInfo[] query_modules ();
+		public extern FunctionInfo[] query_module_functions (string module_name);
 
 		public class ModuleInfo {
 			public string name {
@@ -74,6 +82,23 @@ namespace Zed {
 				this.name = name;
 				this.base_address = base_address;
 				this.size = size;
+			}
+		}
+
+		public class FunctionInfo {
+			public string name {
+				get;
+				private set;
+			}
+
+			public uint64 base_address {
+				get;
+				private set;
+			}
+
+			public FunctionInfo (string name, uint64 base_address) {
+				this.name = name;
+				this.base_address = base_address;
 			}
 		}
 	}

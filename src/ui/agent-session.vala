@@ -203,6 +203,8 @@ namespace Zed {
 			function_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
 
 			view.set_models (module_store, function_store);
+
+			configure_module_entry ();
 		}
 
 		public void set_proxy (WinIpc.Proxy proxy) {
@@ -212,7 +214,13 @@ namespace Zed {
 			fetch_modules ();
 		}
 
+		private void configure_module_entry () {
+			view.module_entry.changed.connect (() => fetch_functions_in_selected_module ());
+		}
+
 		private async void fetch_modules () {
+			module_store.clear ();
+
 			try {
 				var modules = yield proxy.query ("QueryModules", null, "a(stt)");
 				foreach (var module in modules) {
@@ -224,6 +232,26 @@ namespace Zed {
 					Gtk.TreeIter iter;
 					module_store.append (out iter);
 					module_store.set (iter, 0, name);
+				}
+			} catch (WinIpc.ProxyError e) {
+			}
+		}
+
+		private async void fetch_functions_in_selected_module () {
+			function_store.clear ();
+
+			var module_name = view.module_entry.get_active_text ();
+
+			try {
+				var functions = yield proxy.query ("QueryModuleFunctions", new Variant.string (module_name), "a(st)");
+				foreach (var function in functions) {
+					string name;
+					uint64 base_address;
+					function.get ("(st)", out name, out base_address);
+
+					Gtk.TreeIter iter;
+					function_store.append (out iter);
+					function_store.set (iter, 0, name);
 				}
 			} catch (WinIpc.ProxyError e) {
 			}
