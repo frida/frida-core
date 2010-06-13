@@ -100,6 +100,9 @@ namespace Zed {
 
 			start_selector = new FunctionSelector (view.start_selector);
 			stop_selector = new FunctionSelector (view.stop_selector);
+
+			configure_selectors ();
+			configure_go_button ();
 		}
 
 		public async void inject () {
@@ -132,6 +135,10 @@ namespace Zed {
 			update_state (State.TERMINATED);
 		}
 
+		private async void start_investigation () {
+
+		}
+
 		private void error (string message) {
 			this.error_message = message;
 			update_state (State.ERROR);
@@ -146,13 +153,30 @@ namespace Zed {
 			print ("on_func_event\n");
 		}
 
+		private void configure_selectors () {
+			start_selector.notify["selection-is-set"].connect (update_view);
+			stop_selector.notify["selection-is-set"].connect (update_view);
+		}
+
+		private void configure_go_button () {
+			view.go_button.clicked.connect (() => start_investigation ());
+		}
+
+		private void update_view () {
+			view.control_frame.sensitive = (state == State.INJECTED);
+
+			if (state == State.INJECTED) {
+				view.go_button.sensitive = (start_selector.selection_is_set && stop_selector.selection_is_set);
+			}
+		}
+
 		private void update_state (State new_state) {
 			if (new_state == this.state)
 				return;
 
 			this.state = new_state;
 
-			view.control_frame.sensitive = (new_state == State.INJECTED);
+			update_view ();
 		}
 
 		public string state_to_string () {
@@ -206,6 +230,11 @@ namespace Zed {
 			construct;
 		}
 
+		public bool selection_is_set {
+			get;
+			private set;
+		}
+
 		private WinIpc.Proxy proxy;
 
 		private Gtk.ListStore module_store = new Gtk.ListStore (1, typeof (string));
@@ -219,7 +248,7 @@ namespace Zed {
 
 			view.set_models (module_store, function_store);
 
-			configure_module_entry ();
+			configure_entries ();
 		}
 
 		public void set_proxy (WinIpc.Proxy proxy) {
@@ -229,8 +258,20 @@ namespace Zed {
 			fetch_modules ();
 		}
 
-		private void configure_module_entry () {
-			view.module_entry.changed.connect (() => fetch_functions_in_selected_module ());
+		private void configure_entries () {
+			view.module_entry.changed.connect (() => {
+				fetch_functions_in_selected_module ();
+				update_selection_is_set ();
+			});
+
+			view.function_entry.changed.connect (() => update_selection_is_set ());
+		}
+
+		private void update_selection_is_set () {
+			var module_text = view.module_entry.get_active_text ();
+			var function_text = view.function_entry.get_active_text ();
+			selection_is_set = (module_text != null && module_text.strip ().length != 0 &&
+				function_text != null && function_text.strip ().length != 0);
 		}
 
 		private async void fetch_modules () {
