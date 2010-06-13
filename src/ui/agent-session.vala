@@ -6,6 +6,11 @@ namespace Zed {
 			}
 		}
 
+		public Gtk.Frame control_frame {
+			get;
+			private set;
+		}
+
 		public Gtk.Button go_button {
 			get;
 			private set;
@@ -32,6 +37,7 @@ namespace Zed {
 
 				root_vbox = builder.get_object ("root_vbox") as Gtk.VBox;
 
+				control_frame = builder.get_object ("control_frame") as Gtk.Frame;
 				start_alignment = builder.get_object ("start_alignment") as Gtk.Alignment;
 				stop_alignment = builder.get_object ("stop_alignment") as Gtk.Alignment;
 				go_button = builder.get_object ("go_button") as Gtk.Button;
@@ -87,7 +93,7 @@ namespace Zed {
 		public AgentSession (View.AgentSession view, ProcessInfo process_info, Service.Winjector winjector, Service.AgentDescriptor agent_desc) {
 			Object (view: view);
 
-			this.state = State.UNINITIALIZED;
+			update_state (State.UNINITIALIZED);
 			this.process_info = process_info;
 			this.winjector = winjector;
 			this.agent_desc = agent_desc;
@@ -98,10 +104,10 @@ namespace Zed {
 
 		public async void inject () {
 			try {
-				this.state = State.INJECTING;
+				update_state (State.INJECTING);
 				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
 				proxy.add_notify_handler ("FuncEvent", "(i(ssu)(ssu))", on_func_event);
-				this.state = State.INJECTED;
+				update_state (State.INJECTED);
 
 				start_selector.set_proxy (proxy);
 				stop_selector.set_proxy (proxy);
@@ -123,12 +129,12 @@ namespace Zed {
 				}
 			}
 
-			state = State.TERMINATED;
+			update_state (State.TERMINATED);
 		}
 
 		private void error (string message) {
 			this.error_message = message;
-			this.state = State.ERROR;
+			update_state (State.ERROR);
 		}
 
 		private void on_func_event (Variant? arg) {
@@ -138,6 +144,15 @@ namespace Zed {
 			event_store.set (iter, 0, arg.print (false));
 			*/
 			print ("on_func_event\n");
+		}
+
+		private void update_state (State new_state) {
+			if (new_state == this.state)
+				return;
+
+			this.state = new_state;
+
+			view.control_frame.sensitive = (new_state == State.INJECTED);
 		}
 
 		public string state_to_string () {
