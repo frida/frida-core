@@ -60,7 +60,7 @@ namespace Zed {
 
 		private Service.AgentDescriptor agent_desc;
 
-		private ProcessList process_list = new ProcessList ();
+		private Service.ProcessList process_list = new Service.ProcessList ();
 		private const double PROCESS_LIST_MIN_UPDATE_INTERVAL = 5.0;
 
 		private const int KEYVAL_DELETE = 65535;

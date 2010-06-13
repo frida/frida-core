@@ -21,7 +21,7 @@ static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
 
 ZedProcessInfo **
-zed_process_list_enumerate_processes (int * result_length1)
+zed_service_process_list_enumerate_processes (int * result_length1)
 {
   GPtrArray * processes;
   DWORD * pids = NULL;
