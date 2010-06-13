@@ -149,7 +149,7 @@ namespace Zed {
 				do {
 					AgentSession session;
 					session_store.get (iter, 0, out session);
-					session.terminate ();
+					yield session.terminate ();
 				} while (session_store.iter_next (ref iter));
 			}
 
