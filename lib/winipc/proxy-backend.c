@@ -13,7 +13,7 @@ static void win_ipc_proxy_wait_for_operation_co (
 
 #include <windows.h>
 
-#define PIPE_BUFSIZE 4096
+#define PIPE_BUFSIZE (1024 * 1024)
 #define PIPE_TIMEOUT 5000
 
 typedef struct _WinIpcPipeOverlapped WinIpcPipeOverlapped;
