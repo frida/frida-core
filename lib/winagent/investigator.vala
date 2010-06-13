@@ -1,20 +1,23 @@
 using Gee;
 
 namespace Zed {
-	public class FuncTracer : Object, Gum.InvocationListener {
+	public class Investigator : Object, Gum.InvocationListener {
 		private WinIpc.Proxy proxy;
 
-		public FuncTracer (WinIpc.Proxy proxy) {
+		private FuncState state;
+
+		public Investigator (WinIpc.Proxy proxy) {
 			this.proxy = proxy;
 		}
 
-		public extern void attach ();
+		public extern bool attach (TriggerInfo start_trigger, TriggerInfo stop_trigger);
 		public extern void detach ();
 
 		public void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments) {
+			TriggerType type = (TriggerType) context.instance_data;
 			FuncState state = (FuncState) context.thread_data;
 
-			if (state.is_stalking) {
+			if (type == TriggerType.STOP && state.is_stalking) {
 				state.stalker.unfollow_me ();
 				state.has_been_stalked = true;
 				state.is_stalking = false;
@@ -27,16 +30,24 @@ namespace Zed {
 		}
 
 		public void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value) {
+			TriggerType type = (TriggerType) context.instance_data;
 			FuncState state = (FuncState) context.thread_data;
 
-			if (!state.has_been_stalked) {
+			if (type == TriggerType.START && !state.has_been_stalked) {
 				state.is_stalking = true;
 				state.stalker.follow_me (state);
 			}
 		}
 
 		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
-			return ref_object_hack (new FuncState ());
+			lock (state) {
+				if (state == null) {
+					state = new FuncState ();
+					return (void *) state;
+				}
+			}
+
+			return null;
 		}
 
 		private async void submit (FuncState state) {
@@ -59,7 +70,7 @@ namespace Zed {
 				}
 
 				try {
-					yield proxy.emit ("FuncEvent", arg);
+					yield proxy.emit ("Clue", arg);
 				} catch (WinIpc.ProxyError e1) {
 					error (e1.message);
 					return;
@@ -67,7 +78,7 @@ namespace Zed {
 			}
 
 			try {
-				yield proxy.emit ("FuncEvent", new Variant ("(i(ssu)(ssu))",
+				yield proxy.emit ("Clue", new Variant ("(i(ssu)(ssu))",
 					state.seen_call_count,
 					"This", "Is", 42,
 					"The", "End", 43));
@@ -75,8 +86,6 @@ namespace Zed {
 				error (e2.message);
 			}
 		}
-
-		private extern void * ref_object_hack (Object obj);
 
 		private class FuncState : Object, Gum.EventSink {
 			public bool has_been_stalked {
@@ -115,6 +124,28 @@ namespace Zed {
 				seen_call_count++;
 			}
 		}
+	}
+
+	public class TriggerInfo {
+		public string module_name {
+			get;
+			private set;
+		}
+
+		public string function_name {
+			get;
+			private set;
+		}
+
+		public TriggerInfo (string module_name, string function_name) {
+			this.module_name = module_name;
+			this.function_name = function_name;
+		}
+	}
+
+	public enum TriggerType {
+		START,
+		STOP
 	}
 
 	public class FunctionAddress {

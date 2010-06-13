@@ -2,7 +2,7 @@ namespace Zed {
 	namespace Agent {
 		private static WinIpc.ClientProxy proxy;
 
-		private static Zed.FuncTracer func_tracer;
+		private static Zed.Investigator investigator;
 		private static Zed.GstTracer gst_tracer;
 
 		public void main (string ipc_server_address) {
@@ -11,6 +11,23 @@ namespace Zed {
 			proxy = new WinIpc.ClientProxy (ipc_server_address);
 			proxy.add_notify_handler ("Stop", "", (arg) => {
 				loop.quit ();
+			});
+			proxy.register_query_sync_handler ("StartInvestigation", "(ssss)", (arg) => {
+				if (investigator != null)
+					return new Variant.boolean (false);
+
+				investigator = new Investigator (proxy);
+
+				string start_module_name, start_function_name;
+				string stop_module_name, stop_function_name;
+				arg.get ("(ssss)", out start_module_name, out start_function_name, out stop_module_name, out stop_function_name);
+				var start_trigger = new TriggerInfo (start_module_name, start_function_name);
+				var stop_trigger = new TriggerInfo (stop_module_name, stop_function_name);
+				bool is_attached = investigator.attach (start_trigger, stop_trigger);
+				if (!is_attached)
+					investigator = null;
+
+				return new Variant.boolean (is_attached);
 			});
 			proxy.register_query_sync_handler ("QueryModules", "", (arg) => {
 				var builder = new VariantBuilder (new VariantType ("a(stt)"));
@@ -38,9 +55,9 @@ namespace Zed {
 				gst_tracer = null;
 			}
 
-			if (func_tracer != null) {
-				func_tracer.detach ();
-				func_tracer = null;
+			if (investigator != null) {
+				investigator.detach ();
+				investigator = null;
 			}
 		}
 
@@ -52,11 +69,10 @@ namespace Zed {
 				return;
 			}
 
-			func_tracer = new Zed.FuncTracer (proxy);
-			func_tracer.attach ();
-
+			/*
 			gst_tracer = new Zed.GstTracer (proxy);
 			gst_tracer.attach ();
+			*/
 		}
 
 		public extern ModuleInfo[] query_modules ();

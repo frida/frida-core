@@ -85,6 +85,8 @@ namespace Zed {
 		private FunctionSelector start_selector;
 		private FunctionSelector stop_selector;
 
+		private Investigation investigation;
+
 		public WinIpc.Proxy proxy {
 			get;
 			private set;
@@ -136,7 +138,18 @@ namespace Zed {
 		}
 
 		private async void start_investigation () {
+			investigation = new Investigation (proxy);
 
+			update_view ();
+
+			var start_trigger = new TriggerInfo (start_selector.selected_module_name, start_selector.selected_function_name);
+			var stop_trigger = new TriggerInfo (stop_selector.selected_module_name, stop_selector.selected_function_name);
+			bool success = yield investigation.start (start_trigger, stop_trigger);
+			print ("i can haz success = %d\n", (int) success);
+			if (!success)
+				investigation = null;
+
+			update_view ();
 		}
 
 		private void error (string message) {
@@ -166,7 +179,9 @@ namespace Zed {
 			view.control_frame.sensitive = (state == State.INJECTED);
 
 			if (state == State.INJECTED) {
-				view.go_button.sensitive = (start_selector.selection_is_set && stop_selector.selection_is_set);
+				view.start_selector.sensitive = (investigation == null);
+				view.stop_selector.sensitive = (investigation == null);
+				view.go_button.sensitive = (start_selector.selection_is_set && stop_selector.selection_is_set && investigation == null);
 			}
 		}
 
@@ -197,120 +212,52 @@ namespace Zed {
 		}
 	}
 
-	public class View.FunctionSelector : Gtk.HBox {
-		public Gtk.ComboBoxEntry module_entry {
-			get;
-			private set;
+	public class Investigation : Object {
+		private WinIpc.Proxy proxy;
+		private uint handler_id;
+
+		public Investigation (WinIpc.Proxy proxy) {
+			this.proxy = proxy;
+
+			handler_id = proxy.add_notify_handler ("Clue", "(i(ssu)(ssu))", add_clue);
 		}
 
-		public Gtk.ComboBoxEntry function_entry {
-			get;
-			private set;
+		~Investigation () {
+			proxy.remove_notify_handler (handler_id);
 		}
 
-		public FunctionSelector () {
+		public async bool start (TriggerInfo start_trigger, TriggerInfo stop_trigger) {
+			try {
+				var arg = new Variant ("(ssss)",
+					start_trigger.module_name, start_trigger.function_name,
+					stop_trigger.module_name, stop_trigger.function_name);
+				var result = yield proxy.query ("StartInvestigation", arg, "b");
+				return result.get_boolean ();
+			} catch (WinIpc.ProxyError e) {
+				print ("err: %s\n", e.message);
+				return false;
+			}
 		}
 
-		public void set_models (Gtk.TreeModel module_model, Gtk.TreeModel function_model) {
-			assert (module_entry == null && function_entry == null);
-
-			module_entry = new Gtk.ComboBoxEntry.with_model (module_model, 0);
-			pack_start (module_entry, false, false, 0);
-
-			function_entry = new Gtk.ComboBoxEntry.with_model (function_model, 0);
-			pack_start (function_entry, false, true, 5);
-
-			show_all ();
+		private void add_clue (Variant? arg) {
+			print ("got a clue! %s\n", arg.print (false));
 		}
 	}
 
-	public class Presenter.FunctionSelector : Object {
-		public View.FunctionSelector view {
-			get;
-			construct;
-		}
-
-		public bool selection_is_set {
+	public class TriggerInfo {
+		public string module_name {
 			get;
 			private set;
 		}
 
-		private WinIpc.Proxy proxy;
-
-		private Gtk.ListStore module_store = new Gtk.ListStore (1, typeof (string));
-		private Gtk.ListStore function_store = new Gtk.ListStore (1, typeof (string));
-
-		public FunctionSelector (View.FunctionSelector view) {
-			Object (view: view);
-
-			module_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
-			function_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
-
-			view.set_models (module_store, function_store);
-
-			configure_entries ();
+		public string function_name {
+			get;
+			private set;
 		}
 
-		public void set_proxy (WinIpc.Proxy proxy) {
-			assert (this.proxy == null);
-			this.proxy = proxy;
-
-			fetch_modules ();
-		}
-
-		private void configure_entries () {
-			view.module_entry.changed.connect (() => {
-				fetch_functions_in_selected_module ();
-				update_selection_is_set ();
-			});
-
-			view.function_entry.changed.connect (() => update_selection_is_set ());
-		}
-
-		private void update_selection_is_set () {
-			var module_text = view.module_entry.get_active_text ();
-			var function_text = view.function_entry.get_active_text ();
-			selection_is_set = (module_text != null && module_text.strip ().length != 0 &&
-				function_text != null && function_text.strip ().length != 0);
-		}
-
-		private async void fetch_modules () {
-			module_store.clear ();
-
-			try {
-				var modules = yield proxy.query ("QueryModules", null, "a(stt)");
-				foreach (var module in modules) {
-					string name;
-					uint64 base_address;
-					uint64 size;
-					module.get ("(stt)", out name, out base_address, out size);
-
-					Gtk.TreeIter iter;
-					module_store.append (out iter);
-					module_store.set (iter, 0, name);
-				}
-			} catch (WinIpc.ProxyError e) {
-			}
-		}
-
-		private async void fetch_functions_in_selected_module () {
-			function_store.clear ();
-
-			var module_name = view.module_entry.get_active_text ();
-
-			try {
-				var functions = yield proxy.query ("QueryModuleFunctions", new Variant.string (module_name), "a(st)");
-				foreach (var function in functions) {
-					string name;
-					uint64 base_address;
-					function.get ("(st)", out name, out base_address);
-
-					Gtk.TreeIter iter;
-					function_store.append (out iter);
-					function_store.set (iter, 0, name);
-				}
-			} catch (WinIpc.ProxyError e) {
-			}
+		public TriggerInfo (string module_name, string function_name) {
+			this.module_name = module_name;
+			this.function_name = function_name;
 		}
 	}
 }

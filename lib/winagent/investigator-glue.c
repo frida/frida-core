@@ -13,67 +13,42 @@ struct _ResolveFuncNameContext
   ZedFunctionAddress * function_address;
 };
 
+static gboolean attach_listener_for_trigger (ZedInvestigator * self,
+    ZedTriggerInfo * trigger, ZedTriggerType type);
 static gboolean try_to_resolve_function_name (const gchar * name,
     gpointer address, gpointer user_data);
 
 static GumInterceptor * interceptor = NULL;
 
-void
-zed_func_tracer_attach (ZedFuncTracer * self)
+gboolean
+zed_investigator_attach (ZedInvestigator * self,
+    ZedTriggerInfo * start_trigger, ZedTriggerInfo * stop_trigger)
 {
-  HMODULE winsock_mod;
-  GumAttachReturn attach_ret;
-  const gchar * function_names[] = { "recv", "WSARecv" };
-  guint i, success_count = 0;
-
 #ifndef _M_X64
-
-  winsock_mod = GetModuleHandle (_T ("ws2_32.dll"));
-  if (winsock_mod == NULL)
-    return;
-
+  g_assert (interceptor == NULL);
   interceptor = gum_interceptor_obtain ();
-
-  for (i = 0; i != G_N_ELEMENTS (function_names); i++)
-  {
-    const gchar * function_name = function_names[i];
-    gpointer function_address;
-
-    function_address = GetProcAddress (winsock_mod, function_name);
-    if (function_address == NULL)
-      continue;
-
-    attach_ret = gum_interceptor_attach_listener (interceptor, function_address,
-        GUM_INVOCATION_LISTENER (self), (gpointer) function_name);
-    switch (attach_ret)
-    {
-      case GUM_ATTACH_OK:
-        success_count++;
-        break;
-      case GUM_ATTACH_WRONG_SIGNATURE:
-      {
-        MessageBoxA (NULL, "Function signature of recv not supported by Gum.", "Error", MB_ICONERROR | MB_OK);
-        break;
-      }
-      case GUM_ATTACH_ALREADY_ATTACHED:
-        MessageBoxA (NULL, "Already attached to gst_pad_push.", "Error",
-            MB_ICONERROR | MB_OK);
-        break;
-    }
-  }
-
 #endif
 
-  if (success_count == 0)
+  if (!attach_listener_for_trigger (self, start_trigger,
+      ZED_TRIGGER_TYPE_START))
   {
-    MessageBoxA (NULL, "Crap.", "Error", MB_ICONERROR | MB_OK);
-    g_object_unref (interceptor);
-    interceptor = NULL;
+    goto error;
   }
+
+  if (!attach_listener_for_trigger (self, stop_trigger, ZED_TRIGGER_TYPE_STOP))
+  {
+    goto error;
+  }
+
+  return TRUE;
+
+error:
+  zed_investigator_detach (self);
+  return FALSE;
 }
 
 void
-zed_func_tracer_detach (ZedFuncTracer * self)
+zed_investigator_detach (ZedInvestigator * self)
 {
   if (interceptor == NULL)
     return;
@@ -87,10 +62,39 @@ zed_func_tracer_detach (ZedFuncTracer * self)
 #endif
 }
 
-void *
-zed_func_tracer_ref_object_hack (ZedFuncTracer * self, GObject * obj)
+static gboolean
+attach_listener_for_trigger (ZedInvestigator * self, ZedTriggerInfo * trigger,
+    ZedTriggerType type)
 {
-  return g_object_ref (obj);
+#ifndef _M_X64
+  WCHAR * module_name_utf16;
+  HMODULE module;
+  gpointer function_address;
+  GumAttachReturn attach_ret;
+
+  module_name_utf16 = (WCHAR *) g_utf8_to_utf16 (
+      zed_trigger_info_get_module_name (trigger), -1, NULL, NULL, NULL);
+  module = GetModuleHandleW (module_name_utf16);
+  if (module == NULL)
+    goto error;
+
+  function_address = GetProcAddress (module,
+      zed_trigger_info_get_function_name (trigger));
+  if (function_address == NULL)
+    goto error;
+
+  attach_ret = gum_interceptor_attach_listener (interceptor, function_address,
+      GUM_INVOCATION_LISTENER (self), GSIZE_TO_POINTER (type));
+  if (attach_ret != GUM_ATTACH_OK && attach_ret != GUM_ATTACH_ALREADY_ATTACHED)
+    goto error;
+
+  g_free (module_name_utf16);
+  return TRUE;
+
+error:
+  g_free (module_name_utf16);
+#endif
+  return FALSE;
 }
 
 ZedFunctionAddress *
