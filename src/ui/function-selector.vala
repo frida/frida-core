@@ -101,6 +101,9 @@ namespace Zed {
 				}
 			} catch (WinIpc.ProxyError e) {
 			}
+
+			(view.module_entry.child as Gtk.Entry).set_text ("WS2_32.dll");
+			(view.function_entry.child as Gtk.Entry).set_text ("WSARecv");
 		}
 
 		private async void fetch_functions_in_selected_module () {
