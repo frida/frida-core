@@ -57,6 +57,7 @@ namespace Zed {
 		}
 
 		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
+		private AgentSession current_session;
 
 		private Service.AgentDescriptor agent_desc;
 
@@ -91,17 +92,51 @@ namespace Zed {
 			session.inject ();
 		}
 
-		private void on_session_state_changed (AgentSession session) {
-			var path = find_session_store_path_of (session);
-			assert (path != null);
+		private void switch_to_session (AgentSession session) {
+			var previous_session = current_session;
+			current_session = session;
+			if (previous_session != null)
+				refresh_row_for (previous_session);
+			refresh_row_for (current_session);
+
+			view.session_notebook.set_current_page (notebook_page_index_of (session));
+		}
+
+		private void remove_session_at (Gtk.TreePath path) {
+			var session = get_session_at (path);
+
+			view.session_notebook.remove_page (notebook_page_index_of (session));
+
+			Gtk.TreeIter iter;
+			session_store.get_iter (out iter, path);
+			session_store.remove (iter);
+
+			if (current_session == session) {
+				current_session = null;
+
+				if (session_store.get_iter_first (out iter)) {
+					AgentSession first_session;
+					session_store.get (iter, 0, out first_session);
+					switch_to_session (first_session);
+				}
+			}
+		}
+
+		private void refresh_row_for (AgentSession session) {
+			var path = session_store_path_of (session);
 
 			Gtk.TreeIter iter;
 			session_store.get_iter (out iter, path);
 			session_store.row_changed (path, iter);
+		}
+
+		private void on_session_state_changed (AgentSession session) {
+			refresh_row_for (session);
 
 			switch (session.state) {
 				case AgentSession.State.INJECTED:
 					view.session_notebook.append_page (session.view.widget, null);
+					switch_to_session (session);
 					break;
 				default:
 					break;
@@ -193,6 +228,10 @@ namespace Zed {
 
 			sv.insert_column_with_data_func (-1, "Status", new Gtk.CellRendererText (), session_status_column_data_callback);
 
+			sv.row_activated.connect ((path, col) => {
+				var session = get_session_at (path);
+				switch_to_session (session);
+			});
 			sv.key_press_event.connect ((event) => {
 				if (event.keyval == KEYVAL_DELETE) {
 					var selection = sv.get_selection ();
@@ -214,39 +253,38 @@ namespace Zed {
 			});
 		}
 
-		private void remove_session_at (Gtk.TreePath path) {
+		private AgentSession get_session_at (Gtk.TreePath path) {
 			Gtk.TreeIter iter;
 			session_store.get_iter (out iter, path);
-
 			AgentSession session;
 			session_store.get (iter, 0, out session);
+			return session;
+		}
 
+		private Gtk.TreePath session_store_path_of (AgentSession session) {
+			Gtk.TreeIter iter;
+			if (session_store.get_iter_first (out iter)) {
+				do {
+					AgentSession s;
+					session_store.get (iter, 0, out s);
+					if (s == session)
+						return session_store.get_path (iter);
+				} while (session_store.iter_next (ref iter));
+			}
+
+			assert_not_reached ();
+		}
+
+		private int notebook_page_index_of (AgentSession session) {
 			var notebook = view.session_notebook;
 			var session_view = session.view;
 			for (int i = notebook.get_n_pages () - 1; i >= 0; i--) {
 				var current_view = notebook.get_nth_page (i);
-				if (current_view == session_view.widget) {
-					notebook.remove_page (i);
-					break;
-				}
+				if (current_view == session_view.widget)
+					return i;
 			}
 
-			session_store.remove (iter);
-		}
-
-		private Gtk.TreePath? find_session_store_path_of (AgentSession session) {
-			Gtk.TreeIter iter;
-			if (!session_store.get_iter_first (out iter))
-				return null;
-
-			do {
-				AgentSession s;
-				session_store.get (iter, 0, out s);
-				if (s == session)
-					return session_store.get_path (iter);
-			} while (session_store.iter_next (ref iter));
-
-			return null;
+			assert_not_reached ();
 		}
 
 		private void pid_entry_completion_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
@@ -262,10 +300,15 @@ namespace Zed {
 		private void session_process_column_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
 			AgentSession session;
 			model.get (iter, 0, out session);
-			if (renderer is Gtk.CellRendererPixbuf)
+			if (renderer is Gtk.CellRendererPixbuf) {
 				(renderer as Gtk.CellRendererPixbuf).pixbuf = session.process_info.small_icon;
-			else
-				(renderer as Gtk.CellRendererText).text = session.process_info.name.to_string ();
+			} else {
+				var text_renderer = renderer as Gtk.CellRendererText;
+				if (session == current_session)
+					text_renderer.markup = "<b>%s</b>".printf (session.process_info.name.to_string ());
+				else
+					text_renderer.text = session.process_info.name.to_string ();
+			}
 		}
 
 		private void session_pid_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
