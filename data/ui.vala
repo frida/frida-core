@@ -336,6 +336,7 @@ namespace Zed.Data.Ui {
 "<object class=\"GtkHPaned\" id=\"root_hpaned\">" +
 			"<property name=\"visible\">True</property>" +
 			"<property name=\"can_focus\">True</property>" +
+			"<property name=\"position\">215</property>" +
 			"<child>" +
 				"<object class=\"GtkVBox\" id=\"left_vbox\">" +
 					"<property name=\"visible\">True</property>" +
