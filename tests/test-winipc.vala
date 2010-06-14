@@ -27,6 +27,11 @@ namespace Zed.Test.WinIpc {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/sudden-disconnect", () => {
+			var h = new IpcHarness ((h) => Establish.sudden_disconnect (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/WinIpc/Proxy/query/simple", () => {
 			var h = new IpcHarness ((h) => Query.simple (h));
 			h.run ();
@@ -154,6 +159,19 @@ namespace Zed.Test.WinIpc {
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
+
+			h.done ();
+		}
+
+		private async void sudden_disconnect (IpcHarness h) {
+			try {
+				yield h.client.establish ();
+				yield h.server.establish ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.remove_client ();
 
 			h.done ();
 		}
@@ -597,6 +615,10 @@ namespace Zed.Test.WinIpc {
 
 		public void remove_server () {
 			server = null;
+		}
+
+		public void remove_client () {
+			client = null;
 		}
 
 		public void done () {
