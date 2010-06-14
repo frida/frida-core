@@ -23,17 +23,20 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
   return TRUE;
 }
 
-ZedAgentModuleInfo **
-zed_agent_query_modules (int * result_length1)
+GVariant *
+zed_agent_query_modules (void)
 {
-  GPtrArray * result;
+  GVariantType * type;
+  GVariantBuilder builder;
   HANDLE this_process = GetCurrentProcess ();
   HMODULE first_module;
   DWORD modules_size = 0;
   HMODULE * modules = NULL;
   guint mod_idx;
 
-  result = g_ptr_array_new ();
+  type = g_variant_type_new ("a(stt)");
+  g_variant_builder_init (&builder, type);
+  g_variant_type_free (type);
 
   if (!EnumProcessModules (this_process, &first_module, sizeof (first_module),
       &modules_size))
@@ -53,7 +56,6 @@ zed_agent_query_modules (int * result_length1)
     MODULEINFO mi;
     WCHAR module_name_utf16[MAX_PATH];
     gchar * module_name;
-    ZedAgentModuleInfo * module_info;
 
     if (!GetModuleInformation (this_process, modules[mod_idx], &mi, sizeof (mi)))
       continue;
@@ -63,9 +65,8 @@ zed_agent_query_modules (int * result_length1)
     module_name = g_utf16_to_utf8 ((const gunichar2 *) module_name_utf16, -1,
         NULL, NULL, NULL);
 
-    module_info = zed_agent_module_info_new (module_name,
-        (guint64) mi.lpBaseOfDll, mi.SizeOfImage);
-    g_ptr_array_add (result, module_info);
+    g_variant_builder_add (&builder, "(stt)", module_name,
+        (guint64) mi.lpBaseOfDll, (guint64) mi.SizeOfImage);
 
     g_free (module_name);
   }
@@ -73,31 +74,30 @@ zed_agent_query_modules (int * result_length1)
 beach:
   g_free (modules);
 
-  *result_length1 = result->len;
-  return (ZedAgentModuleInfo **) g_ptr_array_free (result, FALSE);
+  return g_variant_builder_end (&builder);
 }
 
-ZedAgentFunctionInfo **
-zed_agent_query_module_functions (const char * module_name,
-    int * result_length1)
+GVariant *
+zed_agent_query_module_functions (const char * module_name)
 {
-  GPtrArray * result;
+  GVariantType * type;
+  GVariantBuilder builder;
 
-  result = g_ptr_array_new ();
-  gum_module_enumerate_exports (module_name, append_function_info, result);
-  *result_length1 = result->len;
+  type = g_variant_type_new ("a(st)");
+  g_variant_builder_init (&builder, type);
+  g_variant_type_free (type);
 
-  return (ZedAgentFunctionInfo **) g_ptr_array_free (result, FALSE);
+  gum_module_enumerate_exports (module_name, append_function_info, &builder);
+
+  return g_variant_builder_end (&builder);
 }
 
 static gboolean
 append_function_info (const gchar * name, gpointer address, gpointer user_data)
 {
-  GPtrArray * result = (GPtrArray *) user_data;
-  ZedAgentFunctionInfo * func_info;
+  GVariantBuilder * builder = (GVariantBuilder *) user_data;
 
-  func_info = zed_agent_function_info_new (name, (guint64) address);
-  g_ptr_array_add (result, func_info);
+  g_variant_builder_add (builder, "(st)", name, (guint64) address);
 
   return TRUE;
 }
