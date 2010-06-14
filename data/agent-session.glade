@@ -155,7 +155,7 @@
             <property name="hscrollbar_policy">automatic</property>
             <property name="vscrollbar_policy">automatic</property>
             <child>
-              <widget class="GtkTreeView" id="events_view">
+              <widget class="GtkTreeView" id="event_view">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
               </widget>

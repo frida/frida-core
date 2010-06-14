@@ -148,7 +148,7 @@ namespace Zed.Data.Ui {
 					"<property name=\"hscrollbar_policy\">automatic</property>" +
 					"<property name=\"vscrollbar_policy\">automatic</property>" +
 					"<child>" +
-						"<object class=\"GtkTreeView\" id=\"events_view\">" +
+						"<object class=\"GtkTreeView\" id=\"event_view\">" +
 							"<property name=\"visible\">True</property>" +
 							"<property name=\"can_focus\">True</property>" +
 						"</object>" +

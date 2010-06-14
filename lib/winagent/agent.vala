@@ -29,6 +29,17 @@ namespace Zed {
 
 				return new Variant.boolean (is_attached);
 			});
+			proxy.register_query_sync_handler ("StopInvestigation", "", (arg) => {
+				if (investigator != null) {
+					investigator.detach ();
+					investigator = null;
+				}
+
+				return null;
+			});
+			proxy.add_notify_handler ("Stop", "", (arg) => {
+				loop.quit ();
+			});
 			proxy.register_query_sync_handler ("QueryModules", "", (arg) => {
 				var builder = new VariantBuilder (new VariantType ("a(stt)"));
 				foreach (var module in query_modules ())

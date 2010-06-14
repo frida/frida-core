@@ -31,6 +31,11 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.TreeView event_view {
+			get;
+			private set;
+		}
+
 		private Gtk.VBox root_vbox;
 
 		public AgentSession () {
@@ -42,6 +47,7 @@ namespace Zed {
 
 				control_frame = builder.get_object ("control_frame") as Gtk.Frame;
 				go_button = builder.get_object ("go_button") as Gtk.Button;
+				event_view = builder.get_object ("event_view") as Gtk.TreeView;
 
 				process_info_label = new ProcessInfoLabel ();
 				var process_info_alignment = builder.get_object ("process_info_alignment") as Gtk.Alignment;
@@ -93,6 +99,8 @@ namespace Zed {
 		private FunctionSelector start_selector;
 		private FunctionSelector stop_selector;
 
+		private Gtk.ListStore event_store = new Gtk.ListStore (1, typeof (string));
+
 		private Investigation investigation;
 
 		public WinIpc.Proxy proxy {
@@ -114,13 +122,13 @@ namespace Zed {
 
 			configure_selectors ();
 			configure_go_button ();
+			configure_event_view ();
 		}
 
 		public async void inject () {
 			try {
 				update_state (State.INJECTING);
 				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
-				proxy.add_notify_handler ("FuncEvent", "(i(ssu)(ssu))", on_func_event);
 				update_state (State.INJECTED);
 
 				start_selector.set_proxy (proxy);
@@ -147,32 +155,39 @@ namespace Zed {
 		}
 
 		private async void start_investigation () {
+			event_store.clear ();
+
 			investigation = new Investigation (proxy);
+			investigation.clues_received.connect (on_clues_received);
+			investigation.finished.connect (end_investigation);
 
 			update_view ();
 
 			var start_trigger = new TriggerInfo (start_selector.selected_module_name, start_selector.selected_function_name);
 			var stop_trigger = new TriggerInfo (stop_selector.selected_module_name, stop_selector.selected_function_name);
 			bool success = yield investigation.start (start_trigger, stop_trigger);
-			print ("i can haz success = %d\n", (int) success);
 			if (!success)
 				investigation = null;
 
 			update_view ();
 		}
 
+		private void on_clues_received (Variant clues) {
+			foreach (var clue in clues) {
+				Gtk.TreeIter iter;
+				event_store.append (out iter);
+				event_store.set (iter, 0, clue.print (false));
+			}
+		}
+
+		private void end_investigation () {
+			investigation = null;
+			update_view ();
+		}
+
 		private void error (string message) {
 			this.error_message = message;
 			update_state (State.ERROR);
-		}
-
-		private void on_func_event (Variant? arg) {
-			/*
-			Gtk.TreeIter iter;
-			event_store.append (out iter);
-			event_store.set (iter, 0, arg.print (false));
-			*/
-			print ("on_func_event\n");
 		}
 
 		private void configure_selectors () {
@@ -182,6 +197,14 @@ namespace Zed {
 
 		private void configure_go_button () {
 			view.go_button.clicked.connect (() => start_investigation ());
+		}
+
+		private void configure_event_view () {
+			var ev = view.event_view;
+
+			ev.set_model (event_store);
+
+			ev.insert_column_with_attributes (-1, "Description", new Gtk.CellRendererText (), "text", 0);
 		}
 
 		private void update_view () {
@@ -222,6 +245,9 @@ namespace Zed {
 	}
 
 	public class Investigation : Object {
+		public signal void clues_received (Variant clues);
+		public signal void finished ();
+
 		private WinIpc.Proxy proxy;
 		private uint new_batch_handler_id;
 		private uint finish_handler_id;
@@ -230,7 +256,7 @@ namespace Zed {
 			this.proxy = proxy;
 
 			new_batch_handler_id = proxy.add_notify_handler ("NewBatchOfClues", "a(i(ssu)(ssu))", on_new_batch_of_clues);
-			finish_handler_id = proxy.add_notify_handler ("InvestigationFinished", "", on_finish);
+			finish_handler_id = proxy.add_notify_handler ("InvestigationFinished", "", (arg) => stop ());
 		}
 
 		~Investigation () {
@@ -251,12 +277,17 @@ namespace Zed {
 			}
 		}
 
-		private void on_new_batch_of_clues (Variant? arg) {
-			print ("got a batch with %u clues!\n", (uint) arg.n_children ());
+		private async void stop () {
+			try {
+				yield proxy.query ("StopInvestigation");
+			} catch (WinIpc.ProxyError e) {
+			}
+
+			finished ();
 		}
 
-		private void on_finish (Variant? arg) {
-			print ("investigation finished\n");
+		private void on_new_batch_of_clues (Variant? arg) {
+			clues_received (arg);
 		}
 	}
 
