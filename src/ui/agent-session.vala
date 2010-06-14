@@ -223,16 +223,19 @@ namespace Zed {
 
 	public class Investigation : Object {
 		private WinIpc.Proxy proxy;
-		private uint handler_id;
+		private uint new_batch_handler_id;
+		private uint finish_handler_id;
 
 		public Investigation (WinIpc.Proxy proxy) {
 			this.proxy = proxy;
 
-			handler_id = proxy.add_notify_handler ("Clue", "(i(ssu)(ssu))", add_clue);
+			new_batch_handler_id = proxy.add_notify_handler ("NewBatchOfClues", "a(i(ssu)(ssu))", on_new_batch_of_clues);
+			finish_handler_id = proxy.add_notify_handler ("InvestigationFinished", "", on_finish);
 		}
 
 		~Investigation () {
-			proxy.remove_notify_handler (handler_id);
+			proxy.remove_notify_handler (finish_handler_id);
+			proxy.remove_notify_handler (new_batch_handler_id);
 		}
 
 		public async bool start (TriggerInfo start_trigger, TriggerInfo stop_trigger) {
@@ -248,8 +251,12 @@ namespace Zed {
 			}
 		}
 
-		private void add_clue (Variant? arg) {
-			print ("got a clue! %s\n", arg.print (false));
+		private void on_new_batch_of_clues (Variant? arg) {
+			print ("got a batch with %u clues!\n", (uint) arg.n_children ());
+		}
+
+		private void on_finish (Variant? arg) {
+			print ("investigation finished\n");
 		}
 	}
 

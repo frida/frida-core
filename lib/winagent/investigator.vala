@@ -4,7 +4,13 @@ namespace Zed {
 	public class Investigator : Object, Gum.InvocationListener {
 		private WinIpc.Proxy proxy;
 
-		private FuncState state;
+		private Gum.Stalker stalker = new Gum.Stalker ();
+		private uint selected_thread_id;
+		private Journal journal;
+		private uint send_timeout_id;
+		private uint number_of_clues_sent;
+		private bool send_in_progress;
+		private bool finish_pending;
 
 		public Investigator (WinIpc.Proxy proxy) {
 			this.proxy = proxy;
@@ -14,93 +20,137 @@ namespace Zed {
 		public extern void detach ();
 
 		public void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments) {
-			TriggerType type = (TriggerType) context.instance_data;
-			FuncState state = (FuncState) context.thread_data;
+			if (context.thread_data == null)
+				return;
 
-			if ((type & TriggerType.STOP) != 0 && state.is_stalking) {
-				state.stalker.unfollow_me ();
-				state.has_been_stalked = true;
-				state.is_stalking = false;
+			TriggerType type = (TriggerType) context.instance_data;
+			weak Journal journal = (Journal) context.thread_data;
+
+			if ((type & TriggerType.STOP) != 0 && journal.state == Journal.State.OPENED) {
+				stalker.unfollow_me ();
+
+				journal.state = Journal.State.SEALED;
 
 				Idle.add (() => {
-					submit (state);
+					end_investigation ();
 					return false;
 				});
 			}
 		}
 
 		public void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value) {
-			TriggerType type = (TriggerType) context.instance_data;
-			FuncState state = (FuncState) context.thread_data;
+			if (context.thread_data == null)
+				return;
 
-			if ((type & TriggerType.START) != 0 && !state.has_been_stalked) {
-				state.is_stalking = true;
-				state.stalker.follow_me (state);
+			TriggerType type = (TriggerType) context.instance_data;
+			weak Journal journal = (Journal) context.thread_data;
+
+			if ((type & TriggerType.START) != 0 && journal.state == Journal.State.CREATED) {
+				journal.state = Journal.State.OPENED;
+
+				send_timeout_id = Timeout.add (500, () => {
+					send_next_batch_of_clues ();
+					return true;
+				});
+
+				stalker.follow_me (journal);
 			}
 		}
 
 		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
-			lock (state) {
-				if (state == null) {
-					state = new FuncState ();
-					return (void *) state;
+			lock (journal) {
+				if (selected_thread_id == 0 || thread_id == selected_thread_id) {
+					selected_thread_id = thread_id;
+
+					if (journal == null)
+						journal = new Journal ();
+
+					return (void *) journal;
 				}
 			}
 
 			return null;
 		}
 
-		private async void submit (FuncState state) {
-			for (uint i = 0; i != state.seen_call_count; i++) {
-				unowned Gum.CallEvent ev = state.seen_calls[i];
-				Variant arg;
+		private async void send_next_batch_of_clues () {
+			if (send_in_progress)
+				return;
+
+			send_in_progress = true;
+
+			uint count = journal.seen_call_count;
+
+			var builder = new VariantBuilder (new VariantType ("a(i(ssu)(ssu))"));
+			for (uint i = number_of_clues_sent; i != count; i++) {
+				unowned Gum.CallEvent ev = journal.seen_calls[i];
 
 				var site_addr = FunctionAddress.resolve ((size_t) ev.location);
 				var target_addr = FunctionAddress.resolve ((size_t) ev.target);
 				if (site_addr != null && target_addr != null) {
-					arg = new Variant ("(i(ssu)(ssu))",
+					builder.add ("(i(ssu)(ssu))",
 						ev.depth,
 						site_addr.module_name, site_addr.function_name, site_addr.offset,
 						target_addr.module_name, target_addr.function_name, target_addr.offset);
 				} else {
-					arg = new Variant ("(i(ssu)(ssu))",
+					builder.add ("(i(ssu)(ssu))",
 						ev.depth,
 						"", "", (uint32) ev.location,
 						"", "", (uint32) ev.target);
 				}
+			}
 
+			var result = builder.end ();
+
+			if (result.n_children () != 0) {
 				try {
-					yield proxy.emit ("Clue", arg);
-				} catch (WinIpc.ProxyError e1) {
-					error (e1.message);
-					return;
+					yield proxy.emit ("NewBatchOfClues", result);
+				} catch (WinIpc.ProxyError e) {
+					error (e.message);
 				}
 			}
 
-			try {
-				yield proxy.emit ("Clue", new Variant ("(i(ssu)(ssu))",
-					state.seen_call_count,
-					"This", "Is", 42,
-					"The", "End", 43));
-			} catch (WinIpc.ProxyError e2) {
-				error (e2.message);
+			number_of_clues_sent = count;
+
+			send_in_progress = false;
+
+			if (finish_pending) {
+				finish_pending = false;
+				yield send_next_batch_of_clues ();
+				yield send_finish_signal ();
 			}
 		}
 
-		private class FuncState : Object, Gum.EventSink {
-			public bool has_been_stalked {
-				get;
-				set;
+		private async void end_investigation () {
+			Source.remove (send_timeout_id);
+			send_timeout_id = 0;
+
+			if (send_in_progress) {
+				finish_pending = true;
+				return;
 			}
 
-			public bool is_stalking {
-				get;
-				set;
+			yield send_next_batch_of_clues ();
+			yield send_finish_signal ();
+		}
+
+		private async void send_finish_signal () {
+			try {
+				yield proxy.emit ("InvestigationFinished");
+			} catch (WinIpc.ProxyError e) {
+				error (e.message);
+			}
+		}
+
+		private class Journal : Object, Gum.EventSink {
+			public enum State {
+				CREATED,
+				OPENED,
+				SEALED
 			}
 
-			public Gum.Stalker stalker {
+			public State state {
 				get;
-				private set;
+				set;
 			}
 
 			private const uint CAPACITY = 500000;
@@ -108,10 +158,8 @@ namespace Zed {
 			public Gum.CallEvent[] seen_calls = new Gum.CallEvent[CAPACITY];
 			public uint seen_call_count = 0;
 
-			public FuncState () {
-				has_been_stalked = false;
-				is_stalking = false;
-				stalker = new Gum.Stalker ();
+			public Journal () {
+				state = State.CREATED;
 			}
 
 			public Gum.EventType query_mask () {
