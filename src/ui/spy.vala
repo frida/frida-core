@@ -81,13 +81,14 @@ namespace Zed {
 		private async void start_session (uint pid) {
 			var process_info = yield process_list.info_from_pid (pid);
 
-			var view = new View.AgentSession ();
-			var session = new AgentSession (view, process_info, winjector, agent_desc);
+			var session = new AgentSession (new View.AgentSession (), process_info, winjector, agent_desc);
 			session.notify["state"].connect (() => on_session_state_changed (session));
 
 			Gtk.TreeIter iter;
 			session_store.append (out iter);
 			session_store.set (iter, 0, session);
+
+			view.session_notebook.append_page (session.view.widget, null);
 
 			session.inject ();
 		}
@@ -135,7 +136,6 @@ namespace Zed {
 
 			switch (session.state) {
 				case AgentSession.State.INJECTED:
-					view.session_notebook.append_page (session.view.widget, null);
 					switch_to_session (session);
 					break;
 				default:
