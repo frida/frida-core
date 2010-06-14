@@ -20,7 +20,9 @@ void
 zed_gst_tracer_attach (ZedGstTracer * self)
 {
   HMODULE glib_mod, gobj_mod, gst_mod;
+#ifndef _M_X64
   GumAttachReturn attach_ret;
+#endif
 
   glib_mod = GetModuleHandle (_T ("libglib-2.0-0.dll"));
   gobj_mod = GetModuleHandle (_T ("libgobject-2.0-0.dll"));
