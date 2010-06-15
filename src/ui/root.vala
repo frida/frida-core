@@ -29,6 +29,9 @@ namespace Zed {
 		private static const int DEFAULT_WIDTH = 900;
 		private static const int DEFAULT_HEIGHT = 556;
 
+		private const uint KEYVAL_F11 = 65480;
+		private const uint KEYVAL_F12 = 65481;
+
 		public Root (View.Login login, View.Workspace workspace) {
 			Object (login: login, workspace: workspace);
 
@@ -52,6 +55,16 @@ namespace Zed {
 			window.title = "Frida";
 			window.set_default_size (DEFAULT_WIDTH, DEFAULT_HEIGHT);
 			window.position = Gtk.WindowPosition.CENTER;
+
+			window.key_press_event.connect ((event) => {
+				switch (event.keyval) {
+					case KEYVAL_F11: _notebook.set_current_page (0); break;
+					case KEYVAL_F12: _notebook.set_current_page (1); break;
+					default: break;
+				}
+
+				return false;
+			});
 		}
 
 		private void setup_notebook () {

@@ -7,6 +7,8 @@
 static gboolean append_function_info (const gchar * name, gpointer address,
     gpointer user_data);
 
+static gchar * compute_md5sum_for_file_at (const gchar * path);
+
 BOOL APIENTRY
 DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
@@ -34,7 +36,7 @@ zed_agent_query_modules (void)
   HMODULE * modules = NULL;
   guint mod_idx;
 
-  type = g_variant_type_new ("a(stt)");
+  type = g_variant_type_new ("a(sstt)");
   g_variant_builder_init (&builder, type);
   g_variant_type_free (type);
 
@@ -54,21 +56,27 @@ zed_agent_query_modules (void)
   for (mod_idx = 0; mod_idx != modules_size / sizeof (HMODULE); mod_idx++)
   {
     MODULEINFO mi;
-    WCHAR module_name_utf16[MAX_PATH];
-    gchar * module_name;
+    WCHAR module_path_utf16[MAX_PATH];
+    gchar * module_path, * module_name, * module_uid;
 
     if (!GetModuleInformation (this_process, modules[mod_idx], &mi, sizeof (mi)))
       continue;
 
-    GetModuleBaseNameW (this_process, modules[mod_idx],
-        module_name_utf16, MAX_PATH);
-    module_name = g_utf16_to_utf8 ((const gunichar2 *) module_name_utf16, -1,
+    GetModuleFileNameW (modules[mod_idx], module_path_utf16, MAX_PATH);
+    module_path_utf16[MAX_PATH - 1] = '\0';
+    module_path = g_utf16_to_utf8 ((const gunichar2 *) module_path_utf16, -1,
         NULL, NULL, NULL);
 
-    g_variant_builder_add (&builder, "(stt)", module_name,
-        (guint64) mi.lpBaseOfDll, (guint64) mi.SizeOfImage);
+    module_name = g_path_get_basename (module_path);
+    module_uid = compute_md5sum_for_file_at (module_path);
+    g_assert (module_uid != NULL);
 
+    g_variant_builder_add (&builder, "(sstt)", module_name, module_uid,
+        (guint64) mi.SizeOfImage, (guint64) mi.lpBaseOfDll);
+    g_free (module_uid);
     g_free (module_name);
+
+    g_free (module_path);
   }
 
 beach:
@@ -100,4 +108,21 @@ append_function_info (const gchar * name, gpointer address, gpointer user_data)
   g_variant_builder_add (builder, "(st)", name, (guint64) address);
 
   return TRUE;
+}
+
+static gchar *
+compute_md5sum_for_file_at (const gchar * path)
+{
+  gchar * result = NULL;
+  guchar * data;
+  gsize length;
+
+  if (g_file_get_contents (path, (gchar **) &data, &length, NULL))
+  {
+    result = g_compute_checksum_for_data (G_CHECKSUM_MD5, data, length);
+
+    g_free (data);
+  }
+
+  return result;
 }

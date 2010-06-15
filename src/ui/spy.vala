@@ -1,3 +1,5 @@
+using Gee;
+
 namespace Zed {
 	public class View.Spy : Object {
 		public Gtk.Widget widget {
@@ -56,6 +58,11 @@ namespace Zed {
 			construct;
 		}
 
+		private Service.StorageBackend storage_backend;
+		private ulong save_handler_id;
+
+		private HashMap<string, Service.ModuleSpec> module_spec_by_uid = new HashMap<string, Service.ModuleSpec> ();
+
 		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
 		private AgentSession current_session;
 
@@ -66,8 +73,10 @@ namespace Zed {
 
 		private const int KEYVAL_DELETE = 65535;
 
-		public Spy (View.Spy view) {
+		public Spy (View.Spy view, Service.StorageBackend storage_backend) {
 			Object (view: view, winjector: new Service.Winjector () /* here for now */);
+
+			this.storage_backend = storage_backend;
 
 			configure_pid_entry ();
 			configure_add_button ();
@@ -76,12 +85,16 @@ namespace Zed {
 			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
 				new MemoryInputStream.from_data (get_winagent_32_data (), get_winagent_32_size (), null),
 				new MemoryInputStream.from_data (get_winagent_64_data (), get_winagent_64_size (), null));
+
+			load_data_from_storage_backend ();
 		}
 
 		private async void start_session (uint pid) {
 			var process_info = yield process_list.info_from_pid (pid);
 
-			var session = new AgentSession (new View.AgentSession (), process_info, winjector, agent_desc);
+			var code_service = create_code_service ();
+
+			var session = new AgentSession (new View.AgentSession (), process_info, code_service, winjector, agent_desc);
 			session.notify["state"].connect (() => on_session_state_changed (session));
 
 			Gtk.TreeIter iter;
@@ -120,6 +133,47 @@ namespace Zed {
 					session_store.get (iter, 0, out first_session);
 					switch_to_session (first_session);
 				}
+			}
+		}
+
+		private Service.CodeService create_code_service () {
+			var service = new Service.CodeService ();
+
+			foreach (var entry in module_spec_by_uid)
+				service.add_module_spec (entry.@value);
+
+			service.module_spec_added.connect ((module_spec) => {
+				var uid = module_spec.uid;
+				if (!module_spec_by_uid.has_key (uid)) {
+					module_spec_by_uid[uid] = module_spec;
+					save_data_to_storage_backend ();
+				}
+			});
+
+			return service;
+		}
+
+		private void load_data_from_storage_backend () {
+			var values = storage_backend.read ("module-specs");
+			if (values != null) {
+				foreach (var val in values) {
+					var module_spec = Service.ModuleSpec.from_variant (val.get_variant ());
+					module_spec_by_uid[module_spec.uid] = module_spec;
+				}
+			}
+		}
+
+		private void save_data_to_storage_backend () {
+			if (save_handler_id == 0) {
+				save_handler_id = Idle.add (() => {
+					var builder = new VariantBuilder (new VariantType ("av"));
+					foreach (var entry in module_spec_by_uid)
+						builder.add ("v", entry.@value.to_variant ());
+					storage_backend.write ("module-specs", builder.end ());
+
+					save_handler_id = 0;
+					return false;
+				});
 			}
 		}
 

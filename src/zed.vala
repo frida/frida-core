@@ -34,7 +34,7 @@ public class Zed.Application : Object {
 
 	private void setup_presenters () {
 		var login = new Zed.Presenter.Login (new Zed.View.Login (), xmpp_client, configuration);
-		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace (), muc_service);
+		var workspace = new Zed.Presenter.Workspace (new Zed.View.Workspace (), storage_backend, muc_service);
 
 		var root_view = new Zed.View.Root (login.view, workspace.view);
 		root = new Zed.Presenter.Root (root_view, login, workspace);

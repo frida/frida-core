@@ -13,18 +13,19 @@ public class Zed.Service.StorageBackend : Object {
 		}
 	}
 
-	public Variant? read (string key, string type) {
+	public Variant? read (string key) {
 		try {
 			var blob = new BinaryBlob.from_base64 (keyfile.get_string (DEFAULT_GROUP_NAME, key));
-			return Variant.new_from_data (new VariantType (type), blob.data, true, blob);
+			return Variant.new_from_data (VariantType.VARIANT, blob.data, true, blob).get_variant ();
 		} catch (KeyFileError kfe) {
 			return null;
 		}
 	}
 
 	public void write (string key, Variant val) {
-		uchar[] bytes = new uchar[val.get_size ()];
-		val.store ((void *) bytes);
+		var box = new Variant.variant (val);
+		uchar[] bytes = new uchar[box.get_size ()];
+		box.store ((void *) bytes);
 		keyfile.set_string (DEFAULT_GROUP_NAME, key, Base64.encode (bytes));
 		sync ();
 	}

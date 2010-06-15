@@ -9,7 +9,7 @@ namespace Zed {
 		private ulong notify_handler_id;
 
 		construct {
-			var variant = backend.read ("account", "(ss)");
+			var variant = backend.read ("account");
 			if (variant != null) {
 				string name, password;
 				variant.@get ("(ss)", out name, out password);

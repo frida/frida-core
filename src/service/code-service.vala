@@ -5,8 +5,13 @@ namespace Zed.Service {
 		private ArrayList<ModuleSpec> module_specs = new ArrayList<ModuleSpec> ();
 		private ArrayList<Module> modules = new ArrayList<Module> ();
 
+		public signal void module_spec_added (ModuleSpec module_spec);
+		public signal void module_added (Module module);
+
 		public async void add_module_spec (ModuleSpec module_spec) {
 			module_specs.add (module_spec);
+
+			module_spec_added (module_spec);
 		}
 
 		public async void add_module (Module module) {
@@ -16,6 +21,8 @@ namespace Zed.Service {
 				var func = new Function (func_spec, module.address + func_spec.offset);
 				module.add_function (func);
 			}
+
+			module_added (module);
 		}
 
 		public async ModuleSpec? find_module_spec_by_uid (string uid) {

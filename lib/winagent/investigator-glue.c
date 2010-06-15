@@ -17,11 +17,6 @@ static gpointer resolve_trigger_function (ZedTriggerInfo * trigger);
 static gboolean attach_listener_to_trigger_function (ZedInvestigator * self,
     gpointer func, ZedTriggerType type);
 
-static gboolean attach_listener_for_trigger (ZedInvestigator * self,
-    ZedTriggerInfo * trigger, ZedTriggerType type);
-static gboolean try_to_resolve_function_name (const gchar * name,
-    gpointer address, gpointer user_data);
-
 static GumInterceptor * interceptor = NULL;
 
 gboolean
@@ -119,83 +114,4 @@ attach_listener_to_trigger_function (ZedInvestigator * self, gpointer func,
 #else
   return FALSE;
 #endif
-}
-
-ZedFunctionAddress *
-zed_function_address_resolve (gsize address)
-{
-  ZedFunctionAddress * result = NULL;
-  HANDLE this_process = GetCurrentProcess ();
-  HMODULE first_module;
-  DWORD modules_size = 0;
-  HMODULE * modules = NULL;
-  guint mod_idx;
-
-  if (!EnumProcessModules (this_process, &first_module, sizeof (first_module),
-      &modules_size))
-  {
-    goto beach;
-  }
-
-  modules = (HMODULE *) g_malloc (modules_size);
-
-  if (!EnumProcessModules (this_process, modules, modules_size, &modules_size))
-  {
-    goto beach;
-  }
-
-  for (mod_idx = 0; mod_idx != modules_size / sizeof (HMODULE); mod_idx++)
-  {
-    MODULEINFO mi;
-
-    if (!GetModuleInformation (this_process, modules[mod_idx], &mi, sizeof (mi)))
-      continue;
-
-    if (address >= GPOINTER_TO_SIZE (mi.lpBaseOfDll) &&
-        address < GPOINTER_TO_SIZE (mi.lpBaseOfDll) + mi.SizeOfImage)
-    {
-      ResolveFuncNameContext resolve_ctx;
-      WCHAR module_name_utf16[MAX_PATH];
-      gchar * module_name;
-
-      GetModuleBaseNameW (this_process, modules[mod_idx],
-          module_name_utf16, MAX_PATH);
-      module_name = g_utf16_to_utf8 ((const gunichar2 *) module_name_utf16, -1,
-          NULL, NULL, NULL);
-
-      result = zed_function_address_new (module_name,
-          address - GPOINTER_TO_SIZE (mi.lpBaseOfDll));
-
-      resolve_ctx.address_to_resolve = address;
-      resolve_ctx.function_address = result;
-
-      gum_module_enumerate_exports (module_name, try_to_resolve_function_name,
-          &resolve_ctx);
-
-      g_free (module_name);
-
-      break;
-    }
-  }
-
-beach:
-  g_free (modules);
-
-  return result;
-}
-
-static gboolean
-try_to_resolve_function_name (const gchar * name, gpointer address,
-    gpointer user_data)
-{
-  ResolveFuncNameContext * resolve_ctx = (ResolveFuncNameContext *) user_data;
-
-  if (GPOINTER_TO_SIZE (address) == resolve_ctx->address_to_resolve)
-  {
-    zed_function_address_set_function_name (resolve_ctx->function_address,
-        name);
-    return FALSE;
-  }
-
-  return TRUE;
 }

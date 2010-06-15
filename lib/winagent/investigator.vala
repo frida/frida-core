@@ -48,7 +48,7 @@ namespace Zed {
 			if ((type & TriggerType.START) != 0 && journal.state == Journal.State.CREATED) {
 				journal.state = Journal.State.OPENED;
 
-				send_timeout_id = Timeout.add (500, () => {
+				send_timeout_id = Timeout.add (200, () => {
 					send_next_batch_of_clues ();
 					return true;
 				});
@@ -80,25 +80,11 @@ namespace Zed {
 
 			uint count = journal.seen_call_count;
 
-			var builder = new VariantBuilder (new VariantType ("a(i(ssu)(ssu))"));
+			var builder = new VariantBuilder (new VariantType ("a(itt)"));
 			for (uint i = number_of_clues_sent; i != count; i++) {
 				unowned Gum.CallEvent ev = journal.seen_calls[i];
-
-				var site_addr = FunctionAddress.resolve ((size_t) ev.location);
-				var target_addr = FunctionAddress.resolve ((size_t) ev.target);
-				if (site_addr != null && target_addr != null) {
-					builder.add ("(i(ssu)(ssu))",
-						ev.depth,
-						site_addr.module_name, site_addr.function_name, site_addr.offset,
-						target_addr.module_name, target_addr.function_name, target_addr.offset);
-				} else {
-					builder.add ("(i(ssu)(ssu))",
-						ev.depth,
-						"", "", (uint32) ev.location,
-						"", "", (uint32) ev.target);
-				}
+				builder.add ("(itt)", ev.depth, (uint64) ev.location, (uint64) ev.target);
 			}
-
 			var result = builder.end ();
 
 			if (result.n_children () != 0) {
@@ -135,7 +121,7 @@ namespace Zed {
 
 		private async void send_finish_signal () {
 			try {
-				yield proxy.emit ("InvestigationFinished");
+				yield proxy.emit ("InvestigationComplete");
 			} catch (WinIpc.ProxyError e) {
 				error (e.message);
 			}

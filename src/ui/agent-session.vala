@@ -72,6 +72,16 @@ namespace Zed {
 			construct;
 		}
 
+		public ProcessInfo process_info {
+			get;
+			construct;
+		}
+
+		public Service.CodeService code_service {
+			get;
+			construct;
+		}
+
 		public enum State {
 			UNINITIALIZED,
 			INJECTING,
@@ -81,11 +91,6 @@ namespace Zed {
 		}
 
 		public State state {
-			get;
-			private set;
-		}
-
-		public ProcessInfo process_info {
 			get;
 			private set;
 		}
@@ -108,11 +113,10 @@ namespace Zed {
 			private set;
 		}
 
-		public AgentSession (View.AgentSession view, ProcessInfo process_info, Service.Winjector winjector, Service.AgentDescriptor agent_desc) {
-			Object (view: view);
+		public AgentSession (View.AgentSession view, ProcessInfo process_info, Service.CodeService code_service, Service.Winjector winjector, Service.AgentDescriptor agent_desc) {
+			Object (view: view, process_info: process_info, code_service: code_service);
 
 			update_state (State.UNINITIALIZED);
-			this.process_info = process_info;
 			this.winjector = winjector;
 			this.agent_desc = agent_desc;
 
@@ -157,7 +161,7 @@ namespace Zed {
 		private async void start_investigation () {
 			event_store.clear ();
 
-			investigation = new Investigation (proxy);
+			investigation = new Investigation (proxy, code_service);
 			investigation.clues_received.connect (on_clues_received);
 			investigation.finished.connect (end_investigation);
 
@@ -249,22 +253,29 @@ namespace Zed {
 		public signal void finished ();
 
 		private WinIpc.Proxy proxy;
+		private Service.CodeService code_service;
+
 		private uint new_batch_handler_id;
-		private uint finish_handler_id;
+		private uint complete_handler_id;
 
-		public Investigation (WinIpc.Proxy proxy) {
+		public Investigation (WinIpc.Proxy proxy, Service.CodeService code_service) {
 			this.proxy = proxy;
+			this.code_service = code_service;
 
-			new_batch_handler_id = proxy.add_notify_handler ("NewBatchOfClues", "a(i(ssu)(ssu))", on_new_batch_of_clues);
-			finish_handler_id = proxy.add_notify_handler ("InvestigationFinished", "", (arg) => stop ());
+			new_batch_handler_id = proxy.add_notify_handler ("NewBatchOfClues", "a(itt)", on_new_batch_of_clues);
+			complete_handler_id = proxy.add_notify_handler ("InvestigationComplete", "", (arg) => stop ());
 		}
 
 		~Investigation () {
-			proxy.remove_notify_handler (finish_handler_id);
+			proxy.remove_notify_handler (complete_handler_id);
 			proxy.remove_notify_handler (new_batch_handler_id);
 		}
 
 		public async bool start (TriggerInfo start_trigger, TriggerInfo stop_trigger) {
+			bool success = yield update_module_specs ();
+			if (!success)
+				return false;
+
 			try {
 				var arg = new Variant ("(ssss)",
 					start_trigger.module_name, start_trigger.function_name,
@@ -272,7 +283,6 @@ namespace Zed {
 				var result = yield proxy.query ("StartInvestigation", arg, "b");
 				return result.get_boolean ();
 			} catch (WinIpc.ProxyError e) {
-				print ("err: %s\n", e.message);
 				return false;
 			}
 		}
@@ -284,6 +294,46 @@ namespace Zed {
 			}
 
 			finished ();
+		}
+
+		private async bool update_module_specs () {
+			try {
+				var module_values = yield proxy.query ("QueryModules", null, "a(sstt)");
+				foreach (var module_value in module_values) {
+					string mod_name;
+					string mod_uid;
+					uint64 mod_size;
+					uint64 mod_base;
+					module_value.@get ("(sstt)", out mod_name, out mod_uid, out mod_size, out mod_base);
+
+					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mod_uid);
+					if (module_spec == null) {
+						module_spec = new Service.ModuleSpec (mod_name, mod_uid, mod_size);
+
+						var function_values = yield proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
+						foreach (var function_value in function_values) {
+							string func_name;
+							uint64 func_address;
+							function_value.@get ("(st)", out func_name, out func_address);
+
+							var func_spec = new Service.FunctionSpec (func_name, func_address - mod_base);
+							module_spec.add_function (func_spec);
+						}
+
+						code_service.add_module_spec (module_spec);
+					}
+
+					Service.Module module = yield code_service.find_module_by_address (mod_base);
+					if (module == null) {
+						module = new Service.Module (module_spec, mod_base);
+						code_service.add_module (module);
+					}
+				}
+			} catch (WinIpc.ProxyError e) {
+				return false;
+			}
+
+			return true;
 		}
 
 		private void on_new_batch_of_clues (Variant? arg) {

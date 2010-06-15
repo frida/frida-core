@@ -66,8 +66,8 @@ namespace Zed {
 			construct;
 		}
 
-		public Workspace (View.Workspace view, Service.MucService muc_service) {
-			Object (view: view, spy: new Presenter.Spy (view.spy), chat: new Presenter.Chat (view.chat, muc_service));
+		public Workspace (View.Workspace view, Service.StorageBackend storage_backend, Service.MucService muc_service) {
+			Object (view: view, spy: new Presenter.Spy (view.spy, storage_backend), chat: new Presenter.Chat (view.chat, muc_service));
 		}
 	}
 }

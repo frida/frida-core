@@ -88,12 +88,13 @@ namespace Zed {
 			module_store.clear ();
 
 			try {
-				var modules = yield proxy.query ("QueryModules", null, "a(stt)");
+				var modules = yield proxy.query ("QueryModules", null, "a(sstt)");
 				foreach (var module in modules) {
 					string name;
-					uint64 base_address;
+					string uid;
 					uint64 size;
-					module.get ("(stt)", out name, out base_address, out size);
+					uint64 base_address;
+					module.get ("(sstt)", out name, out uid, out size, out base_address);
 
 					Gtk.TreeIter iter;
 					module_store.append (out iter);
