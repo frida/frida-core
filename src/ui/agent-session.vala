@@ -256,7 +256,7 @@ namespace Zed {
 		private uint new_batch_handler_id;
 		private uint complete_handler_id;
 
-		private LinkedList<Variant> pending_clues = new LinkedList<Variant> ();
+		private LinkedList<Variant> pending_clue_batches = new LinkedList<Variant> ();
 		private bool is_processing_clues;
 
 		public Investigation (WinIpc.Proxy proxy, Service.CodeService code_service) {
@@ -310,6 +310,7 @@ namespace Zed {
 					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mod_uid);
 					if (module_spec == null) {
 						module_spec = new Service.ModuleSpec (mod_name, mod_uid, mod_size);
+						code_service.add_module_spec (module_spec);
 
 						var function_values = yield proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
 						foreach (var function_value in function_values) {
@@ -320,8 +321,6 @@ namespace Zed {
 							var func_spec = new Service.FunctionSpec (func_name, func_address - mod_base);
 							yield code_service.add_function_spec_to_module (func_spec, module_spec);
 						}
-
-						code_service.add_module_spec (module_spec);
 					}
 
 					Service.Module module = yield code_service.find_module_by_address (mod_base);
@@ -338,7 +337,7 @@ namespace Zed {
 		}
 
 		private void on_new_batch_of_clues (Variant? arg) {
-			pending_clues.add (arg);
+			pending_clue_batches.add (arg);
 
 			if (!is_processing_clues) {
 				is_processing_clues = true;
@@ -352,37 +351,39 @@ namespace Zed {
 
 		private async void process_clues () {
 			while (true) {
-				var clue = pending_clues.poll ();
-				if (clue == null)
+				var clue_batch = pending_clue_batches.poll ();
+				if (clue_batch == null)
 					break;
 
-				int depth;
-				uint64 location;
-				uint64 target;
-				clue.@get ("(itt)", out depth, out location, out target);
+				foreach (var clue in clue_batch) {
+					int depth;
+					uint64 location;
+					uint64 target;
+					clue.@get ("(itt)", out depth, out location, out target);
 
-				var location_module = yield code_service.find_module_by_address (location);
-				uint64 location_offset = (location_module != null) ? location_module.address - location : location;
+					var location_module = yield code_service.find_module_by_address (location);
+					uint64 location_offset = (location_module != null) ? location_module.address - location : location;
 
-				var target_func = yield code_service.find_function_by_address (target);
-				if (target_func == null) {
-					var target_func_module = yield code_service.find_module_by_address (target);
-					if (target_func_module != null) {
-						var target_func_offset = target - target_func_module.address;
-						var target_func_name = "%s_%08llx".printf (target_func_module.spec.name, target_func_offset);
-						var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
-						target_func = new Service.Function (target_func_spec, target);
-						yield code_service.add_function_to_module (target_func, target_func_module);
-					} else {
-						var dynamic_func_name = "dynamic_%08llx".printf (target);
-						var dynamic_func_spec = new Service.FunctionSpec (dynamic_func_name, target);
-						var dynamic_func = new Service.Function (dynamic_func_spec, target);
-						yield code_service.add_function (dynamic_func);
+					var target_func = yield code_service.find_function_by_address (target);
+					if (target_func == null) {
+						var target_func_module = yield code_service.find_module_by_address (target);
+						if (target_func_module != null) {
+							var target_func_offset = target - target_func_module.address;
+							var target_func_name = "%s_%08llx".printf (target_func_module.spec.name, target_func_offset);
+							var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
+							target_func = new Service.Function (target_func_spec, target);
+							yield code_service.add_function_to_module (target_func, target_func_module);
+						} else {
+							var dynamic_func_name = "dynamic_%08llx".printf (target);
+							var dynamic_func_spec = new Service.FunctionSpec (dynamic_func_name, target);
+							target_func = new Service.Function (dynamic_func_spec, target);
+							yield code_service.add_function (target_func);
+						}
 					}
-				}
 
-				var func_call = new FunctionCall (depth, location_module, location_offset, target_func);
-				new_function_call (func_call);
+					var func_call = new FunctionCall (depth, location_module, location_offset, target_func);
+					new_function_call (func_call);
+				}
 			}
 
 			is_processing_clues = false;
@@ -427,7 +428,7 @@ namespace Zed {
 			construct;
 		}
 
-		public FunctionCall (int depth, Service.Module module, uint64 offset, Service.Function target) {
+		public FunctionCall (int depth, Service.Module? module, uint64 offset, Service.Function target) {
 			Object (depth: depth, module: module, offset: offset, target: target);
 		}
 	}
