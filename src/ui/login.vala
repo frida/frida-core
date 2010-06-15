@@ -97,7 +97,8 @@ namespace Zed {
 
 		private void connect_signals () {
 			view.username_entry.focus_out_event.connect ((entry, event) => {
-				if (view.username_entry.text.str ("@") == null)
+				var text = view.username_entry.text.strip ();
+				if (text.length > 0 && text.str ("@") == null)
 					view.username_entry.text += "@" + DEFAULT_DOMAIN;
 				return false;
 			});
@@ -131,7 +132,7 @@ namespace Zed {
 		private async void login (string jid, string password, string server) {
 			var succeeded = yield client.login (jid, password, server);
 			if (succeeded) {
-				var account = configuration.get_account (jid);
+				var account = new Configuration.Account (jid);
 				account.password = password;
 				configuration.set_default_account (account);
 			}

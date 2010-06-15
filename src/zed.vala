@@ -1,15 +1,17 @@
 public class Zed.Application : Object {
 	private Configuration configuration;
 
+	private Service.StorageBackend storage_backend;
 	private Service.XmppClient xmpp_client;
 	private Service.MucService muc_service;
 
 	private Presenter.Root root;
 
 	public Application () {
-		configuration = Configuration.get_default ();
-
 		setup_services ();
+
+		configuration = new Configuration (storage_backend);
+
 		setup_presenters ();
 	}
 
@@ -25,6 +27,7 @@ public class Zed.Application : Object {
 	}
 
 	private void setup_services () {
+		storage_backend = new Service.StorageBackend ();
 		xmpp_client = new Service.XmppClient ();
 		muc_service = new Service.MucService (xmpp_client);
 	}

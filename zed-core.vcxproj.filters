@@ -87,6 +87,12 @@
     <None Include="src\ui\process-info-label.vala">
       <Filter>Source Files\ui</Filter>
     </None>
+    <None Include="src\service\storage-backend.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
+    <None Include="src\service\code-service.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -166,6 +172,15 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\ui\process-info-label.c">
       <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\code-service.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\storage-backend.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\service\storage-backend-glue.c">
+      <Filter>Source Files\service</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
