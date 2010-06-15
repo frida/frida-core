@@ -30,6 +30,9 @@
     <None Include="process.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="test-code-service.vala">
+      <Filter>Tests</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)test-main.c">
@@ -45,6 +48,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)process.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)test-code-service.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>

@@ -173,14 +173,14 @@
     <ClCompile Include="$(IntDir)src\ui\process-info-label.c">
       <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\code-service.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\storage-backend.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\service\storage-backend-glue.c">
       <Filter>Source Files\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\storage-backend.c">
+      <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\code-service.c">
+      <Filter>Source Files\generated\service</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
