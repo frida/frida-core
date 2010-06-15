@@ -91,6 +91,15 @@ namespace Zed.Service {
 			construct;
 		}
 
+		public string bare_name {
+			get {
+				if (_bare_name == null)
+					_bare_name = name[0:-4];
+				return _bare_name;
+			}
+		}
+		private string _bare_name;
+
 		public string uid {
 			get;
 			construct;

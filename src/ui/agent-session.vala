@@ -106,7 +106,7 @@ namespace Zed {
 		private FunctionSelector start_selector;
 		private FunctionSelector stop_selector;
 
-		private Gtk.ListStore event_store = new Gtk.ListStore (1, typeof (string));
+		private Gtk.ListStore function_calls = new Gtk.ListStore (1, typeof (FunctionCall));
 
 		private Investigation investigation;
 
@@ -161,7 +161,7 @@ namespace Zed {
 		}
 
 		private async void start_investigation () {
-			event_store.clear ();
+			function_calls.clear ();
 
 			investigation = new Investigation (proxy, code_service);
 			investigation.new_function_call.connect (on_new_function_call);
@@ -179,7 +179,9 @@ namespace Zed {
 		}
 
 		private void on_new_function_call (FunctionCall function_call) {
-			print ("something here\n");
+			Gtk.TreeIter iter;
+			function_calls.append (out iter);
+			function_calls.set (iter, 0, function_call);
 		}
 
 		private void end_investigation () {
@@ -204,9 +206,30 @@ namespace Zed {
 		private void configure_event_view () {
 			var ev = view.event_view;
 
-			ev.set_model (event_store);
+			ev.set_model (function_calls);
 
-			ev.insert_column_with_attributes (-1, "Description", new Gtk.CellRendererText (), "text", 0);
+			ev.insert_column_with_data_func (-1, "From", new Gtk.CellRendererText (), event_view_from_column_data_callback);
+			ev.insert_column_with_data_func (-1, "To", new Gtk.CellRendererText (), event_view_to_column_data_callback);
+		}
+
+		private void event_view_from_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
+			FunctionCall call;
+			model.get (iter, 0, out call);
+
+			var text_renderer = renderer as Gtk.CellRendererText;
+			var module = call.module;
+			if (module != null) {
+				text_renderer.text = "%s+0x%08llx".printf (module.spec.name, call.offset);
+			} else {
+				text_renderer.text = "0x%08llx".printf (call.offset);
+			}
+		}
+
+		private void event_view_to_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
+			FunctionCall call;
+			model.get (iter, 0, out call);
+
+			(renderer as Gtk.CellRendererText).text = call.target.spec.name;
 		}
 
 		private void update_view () {
@@ -362,14 +385,14 @@ namespace Zed {
 					clue.@get ("(itt)", out depth, out location, out target);
 
 					var location_module = yield code_service.find_module_by_address (location);
-					uint64 location_offset = (location_module != null) ? location_module.address - location : location;
+					uint64 location_offset = (location_module != null) ? location - location_module.address : location;
 
 					var target_func = yield code_service.find_function_by_address (target);
 					if (target_func == null) {
 						var target_func_module = yield code_service.find_module_by_address (target);
 						if (target_func_module != null) {
 							var target_func_offset = target - target_func_module.address;
-							var target_func_name = "%s_%08llx".printf (target_func_module.spec.name, target_func_offset);
+							var target_func_name = "%s_%08llx".printf (target_func_module.spec.bare_name, target_func_offset);
 							var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
 							target_func = new Service.Function (target_func_spec, target);
 							yield code_service.add_function_to_module (target_func, target_func_module);
