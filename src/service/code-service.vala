@@ -30,6 +30,9 @@ namespace Zed.Service {
 		}
 
 		public async void add_function_spec_to_module (FunctionSpec function_spec, ModuleSpec module_spec) {
+			var existing_module_spec = yield find_module_spec_by_uid (module_spec.uid);
+			assert (existing_module_spec != null);
+
 			module_spec.internal_add_function (function_spec);
 
 			module_spec_modified (module_spec);
