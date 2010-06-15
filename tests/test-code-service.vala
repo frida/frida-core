@@ -17,6 +17,11 @@ namespace Zed.Test.CodeService {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/CodeService/Lookup/function-with-no-module", () => {
+			var h = new CodeServiceHarness ((h) => Lookup.function_with_no_module (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/CodeService/Persist/function-spec", () => {
 			var h = new CodeServiceHarness ((h) => Persist.function_spec (h));
 			h.run ();
@@ -94,6 +99,26 @@ namespace Zed.Test.CodeService {
 
 			assert (yield h.service.find_function_by_address (address - 1) == null);
 			assert (yield h.service.find_function_by_address (address + 1) == null);
+
+			h.done ();
+		}
+
+		private static async void function_with_no_module (CodeServiceHarness h) {
+			yield h.add_module_specs ();
+			yield h.add_modules ();
+
+			uint64 address = 0x60000;
+
+			assert (yield h.service.find_function_by_address (address) == null);
+
+			var spec = new Service.FunctionSpec ("dynamic_0x60000", address);
+			var func = new Service.Function (spec, address);
+			yield h.service.add_function (func);
+
+			func = yield h.service.find_function_by_address (address);
+			assert (func != null);
+			assert (func.address == address);
+			assert (func.spec.name == "dynamic_0x60000");
 
 			h.done ();
 		}

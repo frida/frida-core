@@ -4,6 +4,7 @@ namespace Zed.Service {
 	public class CodeService : Object {
 		private ArrayList<ModuleSpec> module_specs = new ArrayList<ModuleSpec> ();
 		private ArrayList<Module> modules = new ArrayList<Module> ();
+		private ArrayList<Function> dynamic_functions = new ArrayList<Function> ();
 
 		public signal void module_spec_added (ModuleSpec module_spec);
 		public signal void module_added (Module module);
@@ -23,6 +24,13 @@ namespace Zed.Service {
 			}
 
 			module_added (module);
+		}
+
+		public async void add_function (Function func) {
+			var module = yield find_module_by_address (func.address);
+			assert (module == null);
+
+			dynamic_functions.add (func);
 		}
 
 		public async ModuleSpec? find_module_spec_by_uid (string uid) {
@@ -45,12 +53,16 @@ namespace Zed.Service {
 
 		public async Function? find_function_by_address (uint64 address) {
 			var mod = yield find_module_by_address (address);
-			if (mod == null)
-				return null;
-
-			foreach (var func in mod.functions) {
-				if (func.address == address)
-					return func;
+			if (mod != null) {
+				foreach (var mod_func in mod.functions) {
+					if (mod_func.address == address)
+						return mod_func;
+				}
+			} else {
+				foreach (var dyn_func in dynamic_functions) {
+					if (dyn_func.address == address)
+						return dyn_func;
+				}
 			}
 
 			return null;
