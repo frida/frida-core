@@ -7,7 +7,7 @@ namespace Zed.Service {
 		private ArrayList<Function> dynamic_functions = new ArrayList<Function> ();
 
 		public signal void module_spec_added (ModuleSpec module_spec);
-		public signal void module_added (Module module);
+		public signal void module_spec_modified (ModuleSpec module_spec);
 
 		public async void add_module_spec (ModuleSpec module_spec) {
 			module_specs.add (module_spec);
@@ -20,10 +20,19 @@ namespace Zed.Service {
 
 			foreach (var func_spec in module.spec.functions) {
 				var func = new Function (func_spec, module.address + func_spec.offset);
-				module.add_function (func);
+				module.internal_add_function (func);
 			}
+		}
 
-			module_added (module);
+		public async void add_function_to_module (Function function, Module module) {
+			yield add_function_spec_to_module (function.spec, module.spec);
+			module.internal_add_function (function);
+		}
+
+		public async void add_function_spec_to_module (FunctionSpec function_spec, ModuleSpec module_spec) {
+			module_spec.internal_add_function (function_spec);
+
+			module_spec_modified (module_spec);
 		}
 
 		public async void add_function (Function func) {
@@ -31,6 +40,10 @@ namespace Zed.Service {
 			assert (module == null);
 
 			dynamic_functions.add (func);
+		}
+
+		public async void rename_function (FunctionSpec function_spec, string new_name) {
+			function_spec.internal_rename (new_name);
 		}
 
 		public async ModuleSpec? find_module_spec_by_uid (string uid) {
@@ -85,19 +98,21 @@ namespace Zed.Service {
 			construct;
 		}
 
-		public ArrayList<FunctionSpec> functions {
-			get;
-			private set;
+		public Iterable<FunctionSpec> functions {
+			get { return _functions; }
 		}
+		private ArrayList<FunctionSpec> _functions = new ArrayList<FunctionSpec> ();
 
 		public ModuleSpec (string name, string uid, uint64 size) {
 			Object (name: name, uid: uid, size: size);
-
-			functions = new ArrayList<FunctionSpec> ();
 		}
 
-		public void add_function (FunctionSpec spec) {
-			functions.add (spec);
+		public int function_count () {
+			return _functions.size;
+		}
+
+		public void internal_add_function (FunctionSpec spec) {
+			_functions.add (spec);
 		}
 
 		public Variant to_variant () {
@@ -117,7 +132,7 @@ namespace Zed.Service {
 			var module_spec = new ModuleSpec (name, uid, size);
 			Variant function_wrapper;
 			while ((function_wrapper = functions.next_value ()) != null)
-				module_spec.add_function (FunctionSpec.from_variant (function_wrapper.get_variant ()));
+				module_spec.internal_add_function (FunctionSpec.from_variant (function_wrapper.get_variant ()));
 
 			return module_spec;
 		}
@@ -126,7 +141,7 @@ namespace Zed.Service {
 	public class FunctionSpec : Object {
 		public string name {
 			get;
-			set;
+			private set;
 		}
 
 		public uint64 offset {
@@ -135,7 +150,13 @@ namespace Zed.Service {
 		}
 
 		public FunctionSpec (string name, uint64 offset) {
-			Object (name: name, offset: offset);
+			Object (offset: offset);
+
+			this.name = name;
+		}
+
+		public void internal_rename (string name) {
+			this.name = name;
 		}
 
 		public Variant to_variant () {
@@ -162,19 +183,17 @@ namespace Zed.Service {
 			construct;
 		}
 
-		public ArrayList<Function> functions {
-			get;
-			private set;
+		public Iterable<Function> functions {
+			get { return _functions; }
 		}
+		private ArrayList<Function> _functions = new ArrayList<Function> ();
 
 		public Module (ModuleSpec spec, uint64 address) {
 			Object (spec: spec, address: address);
-
-			functions = new ArrayList<Function> ();
 		}
 
-		public void add_function (Function func) {
-			functions.add (func);
+		public void internal_add_function (Function func) {
+			_functions.add (func);
 		}
 	}
 

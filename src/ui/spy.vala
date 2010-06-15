@@ -149,6 +149,10 @@ namespace Zed {
 					save_data_to_storage_backend ();
 				}
 			});
+			service.module_spec_modified.connect ((module_spec) => {
+				assert (module_spec_by_uid.has_key (module_spec.uid));
+				save_data_to_storage_backend ();
+			});
 
 			return service;
 		}

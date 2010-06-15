@@ -1,3 +1,5 @@
+using Gee;
+
 namespace Zed {
 	public class View.AgentSession : Object {
 		public Gtk.Widget widget {
@@ -162,7 +164,7 @@ namespace Zed {
 			event_store.clear ();
 
 			investigation = new Investigation (proxy, code_service);
-			investigation.clues_received.connect (on_clues_received);
+			investigation.new_function_call.connect (on_new_function_call);
 			investigation.finished.connect (end_investigation);
 
 			update_view ();
@@ -176,12 +178,8 @@ namespace Zed {
 			update_view ();
 		}
 
-		private void on_clues_received (Variant clues) {
-			foreach (var clue in clues) {
-				Gtk.TreeIter iter;
-				event_store.append (out iter);
-				event_store.set (iter, 0, clue.print (false));
-			}
+		private void on_new_function_call (FunctionCall function_call) {
+			print ("something here\n");
 		}
 
 		private void end_investigation () {
@@ -249,7 +247,7 @@ namespace Zed {
 	}
 
 	public class Investigation : Object {
-		public signal void clues_received (Variant clues);
+		public signal void new_function_call (FunctionCall function_call);
 		public signal void finished ();
 
 		private WinIpc.Proxy proxy;
@@ -257,6 +255,9 @@ namespace Zed {
 
 		private uint new_batch_handler_id;
 		private uint complete_handler_id;
+
+		private LinkedList<Variant> pending_clues = new LinkedList<Variant> ();
+		private bool is_processing_clues;
 
 		public Investigation (WinIpc.Proxy proxy, Service.CodeService code_service) {
 			this.proxy = proxy;
@@ -317,7 +318,7 @@ namespace Zed {
 							function_value.@get ("(st)", out func_name, out func_address);
 
 							var func_spec = new Service.FunctionSpec (func_name, func_address - mod_base);
-							module_spec.add_function (func_spec);
+							yield code_service.add_function_spec_to_module (func_spec, module_spec);
 						}
 
 						code_service.add_module_spec (module_spec);
@@ -337,7 +338,54 @@ namespace Zed {
 		}
 
 		private void on_new_batch_of_clues (Variant? arg) {
-			clues_received (arg);
+			pending_clues.add (arg);
+
+			if (!is_processing_clues) {
+				is_processing_clues = true;
+
+				Idle.add (() => {
+					process_clues ();
+					return false;
+				});
+			}
+		}
+
+		private async void process_clues () {
+			while (true) {
+				var clue = pending_clues.poll ();
+				if (clue == null)
+					break;
+
+				int depth;
+				uint64 location;
+				uint64 target;
+				clue.@get ("(itt)", out depth, out location, out target);
+
+				var location_module = yield code_service.find_module_by_address (location);
+				uint64 location_offset = (location_module != null) ? location_module.address - location : location;
+
+				var target_func = yield code_service.find_function_by_address (target);
+				if (target_func == null) {
+					var target_func_module = yield code_service.find_module_by_address (target);
+					if (target_func_module != null) {
+						var target_func_offset = target - target_func_module.address;
+						var target_func_name = "%s_%08llx".printf (target_func_module.spec.name, target_func_offset);
+						var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
+						target_func = new Service.Function (target_func_spec, target);
+						yield code_service.add_function_to_module (target_func, target_func_module);
+					} else {
+						var dynamic_func_name = "dynamic_%08llx".printf (target);
+						var dynamic_func_spec = new Service.FunctionSpec (dynamic_func_name, target);
+						var dynamic_func = new Service.Function (dynamic_func_spec, target);
+						yield code_service.add_function (dynamic_func);
+					}
+				}
+
+				var func_call = new FunctionCall (depth, location_module, location_offset, target_func);
+				new_function_call (func_call);
+			}
+
+			is_processing_clues = false;
 		}
 	}
 
@@ -355,6 +403,32 @@ namespace Zed {
 		public TriggerInfo (string module_name, string function_name) {
 			this.module_name = module_name;
 			this.function_name = function_name;
+		}
+	}
+
+	public class FunctionCall : Object {
+		public int depth {
+			get;
+			construct;
+		}
+
+		public Service.Module? module {
+			get;
+			construct;
+		}
+
+		public uint64 offset {
+			get;
+			construct;
+		}
+
+		public Service.Function target {
+			get;
+			construct;
+		}
+
+		public FunctionCall (int depth, Service.Module module, uint64 offset, Service.Function target) {
+			Object (depth: depth, module: module, offset: offset, target: target);
 		}
 	}
 }

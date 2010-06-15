@@ -148,19 +148,23 @@ namespace Zed.Test.CodeService {
 			var spec_a = yield h.service.find_module_spec_by_uid (WS2_32_UID);
 			Variant variant = spec_a.to_variant ();
 
-			assert (spec_a.functions.size == 1);
+			assert (spec_a.function_count () == 1);
 
 			var spec_b = Service.ModuleSpec.from_variant (variant);
 
 			assert (spec_b.name == spec_a.name);
 			assert (spec_b.uid == spec_a.uid);
 			assert (spec_b.size == spec_a.size);
-			assert (spec_b.functions.size == 1);
+			assert (spec_b.function_count () == 1);
 
-			var fspec_a = spec_a.functions[0];
-			var fspec_b = spec_b.functions[0];
-			assert (fspec_b.name == fspec_a.name);
-			assert (fspec_b.offset == fspec_a.offset);
+			var iter_a = spec_a.functions.iterator ();
+			var iter_b = spec_b.functions.iterator ();
+			while (iter_a.next () && iter_b.next ()) {
+				var fspec_a = iter_a.@get ();
+				var fspec_b = iter_b.@get ();
+				assert (fspec_b.name == fspec_a.name);
+				assert (fspec_b.offset == fspec_a.offset);
+			}
 
 			h.done ();
 		}
@@ -197,7 +201,7 @@ namespace Zed.Test.CodeService {
 			ntdll_mspec = new Service.ModuleSpec ("ntdll.dll", NTDLL_UID, NTDLL_SIZE);
 			kernel32_mspec = new Service.ModuleSpec ("kernel32.dll", KERNEL32_UID, KERNEL32_SIZE);
 			ws2_32_mspec = new Service.ModuleSpec ("ws2_32.dll", WS2_32_UID, WS2_32_SIZE);
-			ws2_32_mspec.add_function (new Service.FunctionSpec ("WSARecv", WSARECV_OFFSET));
+			ws2_32_mspec.internal_add_function (new Service.FunctionSpec ("WSARecv", WSARECV_OFFSET));
 
 			ntdll_mod = new Service.Module (ntdll_mspec, NTDLL_BASE);
 			kernel32_mod = new Service.Module (kernel32_mspec, KERNEL32_BASE);
