@@ -182,6 +182,9 @@
     <ClCompile Include="$(IntDir)src\service\code-service.c">
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
+    <ClCompile Include="src\ui\agent-session-glue.c">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\zed.vala">

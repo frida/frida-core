@@ -416,6 +416,9 @@ namespace Zed {
 				case "dump":
 					yield handle_dump_command (args);
 					break;
+				case "dasm":
+					yield handle_dasm_command (args);
+					break;
 				default:
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
@@ -464,6 +467,61 @@ namespace Zed {
 						builder.append_c ('\n');
 						line_offset = 0;
 					}
+				}
+
+				print_to_console (builder.str);
+
+			} catch (IOError read_error) {
+				print_to_console ("ERROR: " + read_error.message);
+			}
+		}
+
+		private async void handle_dasm_command (string[] args) {
+			MemoryRegionSpec spec;
+
+			try {
+				spec = yield resolve_memory_region_spec_arguments (args);
+			} catch (IOError arg_error) {
+				print_to_console ("ERROR: " + arg_error.message);
+				print_to_console ("");
+				print_to_console ("Usage:");
+				print_to_console ("\tdasm <address> <length>");
+				print_to_console ("\tdasm <module name> <offset> <length>");
+				return;
+			}
+
+			try {
+				uint8[] bytes = yield read_remote_memory (spec.address, spec.size);
+
+				var builder = new StringBuilder ();
+
+				for (uint offset = 0; offset != bytes.length;) {
+					builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", spec.address + offset);
+
+					uint instruction_length;
+					var instruction_str = disassemble (bytes[offset:bytes.length], out instruction_length);
+					if (instruction_str == null) {
+						print_to_console ("<bad instruction>");
+						break;
+					}
+
+					foreach (uint8 byte in bytes[offset:offset + instruction_length])
+						builder.append_printf ("%02x ", byte);
+					builder.truncate (builder.len - 1);
+
+					if (instruction_length < 2)
+						builder.append_c ('\t');
+					if (instruction_length < 5)
+						builder.append_c ('\t');
+					if (instruction_length < 8)
+						builder.append_c ('\t');
+					builder.append_c ('\t');
+
+					builder.append (instruction_str);
+
+					offset += instruction_length;
+					if (offset != bytes.length)
+						builder.append_c ('\n');
 				}
 
 				print_to_console (builder.str);
@@ -563,6 +621,8 @@ namespace Zed {
 			buffer.insert (iter, line, -1);
 		}
 
+		/* TODO: move this to a Service later */
+		public extern string disassemble (uint8[] bytes, out uint instruction_length);
 	}
 
 	public class Investigation : Object {
