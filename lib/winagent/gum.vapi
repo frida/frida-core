@@ -1,5 +1,14 @@
 [CCode (cheader_filename = "gum/gum.h")]
 namespace Gum {
+	public class Interceptor : GLib.Object {
+		public static Interceptor obtain ();
+
+		public Gum.AttachReturn attach_listener (void * function_address, Gum.InvocationListener listener, void * function_instance_data);
+		public void detach_listener (Gum.InvocationListener listener);
+
+		/* TODO: bind the rest if needed */
+	}
+
 	public interface InvocationListener : GLib.Object {
 		public abstract void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments);
 		public abstract void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value);
@@ -12,6 +21,12 @@ namespace Gum {
 		public void * thread_data;
 	}
 
+	public class Script : GLib.Object {
+		public static Script from_string (string str) throws GLib.IOError;
+
+		public void execute (void * cpu_context, void * stack_arguments);
+	}
+
 	public class Stalker : GLib.Object {
 		public Stalker ();
 
@@ -22,6 +37,13 @@ namespace Gum {
 	public interface EventSink : GLib.Object {
 		public abstract Gum.EventType query_mask ();
 		public abstract void process (void * opaque_event);
+	}
+
+	[CCode (cprefix = "GUM_ATTACH_")]
+	public enum AttachReturn {
+		OK               =  0,
+		WRONG_SIGNATURE  = -1,
+		ALREADY_ATTACHED = -2
 	}
 
 	[CCode (cprefix = "GUM_")]

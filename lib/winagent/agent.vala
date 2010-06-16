@@ -2,6 +2,7 @@ namespace Zed {
 	namespace Agent {
 		private static WinIpc.ClientProxy proxy;
 
+		private static Zed.ScriptEngine script_engine;
 		private static Zed.Investigator investigator;
 		private static Zed.GstTracer gst_tracer;
 
@@ -69,6 +70,8 @@ namespace Zed {
 				investigator.detach ();
 				investigator = null;
 			}
+
+			script_engine = null;
 		}
 
 		private async void do_establish (WinIpc.ClientProxy proxy) {
@@ -78,6 +81,8 @@ namespace Zed {
 				error (e.message);
 				return;
 			}
+
+			script_engine = new Zed.ScriptEngine (proxy);
 
 			/*
 			gst_tracer = new Zed.GstTracer (proxy);

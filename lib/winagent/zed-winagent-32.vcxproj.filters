@@ -36,6 +36,12 @@
     <ClCompile Include="$(IntDir)investigator.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="script-engine-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)script-engine.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
@@ -47,6 +53,9 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="investigator.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="script-engine.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
