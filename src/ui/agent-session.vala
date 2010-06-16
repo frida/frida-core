@@ -33,6 +33,11 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.Notebook content_notebook {
+			get;
+			private set;
+		}
+
 		public Gtk.TreeView event_view {
 			get;
 			private set;
@@ -59,6 +64,8 @@ namespace Zed {
 
 				control_frame = builder.get_object ("control_frame") as Gtk.Frame;
 				go_button = builder.get_object ("go_button") as Gtk.Button;
+
+				content_notebook = builder.get_object ("content_notebook") as Gtk.Notebook;
 
 				event_view = builder.get_object ("event_view") as Gtk.TreeView;
 
@@ -165,13 +172,6 @@ namespace Zed {
 			configure_go_button ();
 			configure_event_view ();
 			configure_console ();
-
-			write_line_to_console ("Hello");
-			write_line_to_console ("1");
-			write_line_to_console ("2");
-			write_line_to_console ("3");
-			write_line_to_console ("...");
-			write_line_to_console ("Go!");
 		}
 
 		public async void inject () {
@@ -237,20 +237,6 @@ namespace Zed {
 			update_state (State.ERROR);
 		}
 
-		private void write_line_to_console (string line) {
-			var buffer = console_text_buffer;
-
-			Gtk.TextIter iter;
-			buffer.get_end_iter (out iter);
-
-			if (buffer.get_char_count () > 0)
-				buffer.insert (iter, "\n", -1);
-
-			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
-
-			buffer.insert (iter, line, -1);
-		}
-
 		private void configure_selectors () {
 			start_selector.notify["selection-is-set"].connect (update_view);
 			stop_selector.notify["selection-is-set"].connect (update_view);
@@ -279,15 +265,6 @@ namespace Zed {
 				code_service.rename_function (call.target, new_text);
 			});
 			ev.insert_column_with_data_func (-1, "To", target_renderer, event_view_to_column_data_callback);
-		}
-
-		private void configure_console () {
-			console_text_buffer = view.console_view.buffer;
-
-			console_scroll_mark = new Gtk.TextMark ("scrollmark", false);
-			Gtk.TextIter iter;
-			console_text_buffer.get_end_iter (out iter);
-			console_text_buffer.add_mark (console_scroll_mark, iter);
 		}
 
 		private void event_view_from_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
@@ -345,6 +322,104 @@ namespace Zed {
 					assert_not_reached ();
 			}
 		}
+
+		/* TODO: consider moving console out into a separate View/Presenter */
+
+		private void configure_console () {
+			console_text_buffer = view.console_view.buffer;
+
+			console_scroll_mark = new Gtk.TextMark ("scrollmark", false);
+			Gtk.TextIter iter;
+			console_text_buffer.get_end_iter (out iter);
+			console_text_buffer.add_mark (console_scroll_mark, iter);
+
+			view.console_entry.activate.connect (() => {
+				var input = view.console_entry.text.strip ();
+				if (input.length > 0)
+					handle_console_input (input);
+				view.console_entry.text = "";
+			});
+
+			view.content_notebook.switch_page.connect ((page, page_num) => {
+				if (page_num == 1) {
+					Idle.add (() => {
+						view.console_entry.grab_focus ();
+						return false;
+					});
+				}
+			});
+		}
+
+		private async void handle_console_input (string input) {
+			console_print ("> " + input);
+
+			var tokens = input.split (" ");
+
+			var verb = tokens[0];
+			string[] args;
+			if (tokens.length > 1)
+				args = tokens[1:tokens.length];
+			else
+				args = new string[0];
+
+			switch (verb) {
+				case "dump":
+					yield handle_dump_command (args);
+					break;
+				default:
+					console_print ("Unknown command '%s'".printf (verb));
+					break;
+			}
+		}
+
+		private async void handle_dump_command (string[] args) {
+			uint64 address = 0;
+			uint64 size = 0;
+
+			if (args.length == 2) {
+				address = uint64_from_string (args[0]);
+				size = uint64_from_string (args[1]);
+			}
+
+			if (args.length != 2 || address == 0 || size == 0) {
+				console_print ("Usage: dump <address> <length>");
+				return;
+			}
+
+			console_printf ("Dumping address=0x%08" + uint64.FORMAT_MODIFIER + "x, size=%" + uint64.FORMAT_MODIFIER + "u ...", address, size);
+		}
+
+		private uint64 uint64_from_string (string str) {
+			if (str.has_prefix ("0x"))
+				return str[2:str.length].to_uint64 (null, 16);
+			else
+				return str.to_uint64 (null, 10);
+		}
+
+		[PrintfFormat]
+		private void console_printf (string format, ...) {
+			var args = va_list ();
+			var line = strdup_vprintf (format, args);
+			console_print (line);
+		}
+
+		[CCode (cname = "g_strdup_vprintf", instance_pos = -1)]
+		private static extern string strdup_vprintf (string format, va_list args);
+
+		private void console_print (string line) {
+			var buffer = console_text_buffer;
+
+			Gtk.TextIter iter;
+			buffer.get_end_iter (out iter);
+
+			if (buffer.get_char_count () > 0)
+				buffer.insert (iter, "\n", -1);
+
+			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
+
+			buffer.insert (iter, line, -1);
+		}
+
 	}
 
 	public class Investigation : Object {
