@@ -355,7 +355,7 @@ namespace Zed {
 		}
 
 		private async void handle_console_input (string input) {
-			console_print ("> " + input);
+			print_to_console ("> " + input);
 
 			var tokens = input.split (" ");
 
@@ -371,92 +371,87 @@ namespace Zed {
 					yield handle_dump_command (args);
 					break;
 				default:
-					console_print ("Unknown command '%s'".printf (verb));
+					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
 			}
 		}
 
 		private async void handle_dump_command (string[] args) {
-			uint64 address = 0;
-			uint64 size = 0;
+			MemoryRegionSpec spec;
 
-			if (args.length == 2) {
-				address = uint64_from_string (args[0]);
-				size = uint64_from_string (args[1]);
-
-				if (address == 0 || size == 0) {
-					print_dump_usage ();
-					return;
-				}
-			} else if (args.length == 3) {
-				var module = yield code_service.find_module_by_name (args[0]);
-				if (module == null) {
-					console_printf ("ERROR: specified module '%s' not found", args[0]);
-					return;
-				}
-
-				address = module.address + uint64_from_string (args[1]);
-				size = uint64_from_string (args[2]);
-
-				if (size == 0) {
-					print_dump_usage ();
-					return;
-				}
-			} else {
-				print_dump_usage ();
+			try {
+				spec = yield resolve_memory_region_spec_arguments (args);
+			} catch (IOError arg_error) {
+				print_to_console ("ERROR: " + arg_error.message);
+				print_to_console ("");
+				print_to_console ("Usage:");
+				print_to_console ("\tdump <address> <length>");
+				print_to_console ("\tdump <module name> <offset> <length>");
 				return;
 			}
 
 			try {
-				var result = yield proxy.query ("DumpMemory", new Variant ("(tt)", address, size), "(bsay)");
+				uint8[] bytes = yield read_remote_memory (spec.address, spec.size);
 
-				bool succeeded;
-				string error_message;
-				VariantIter bytes;
-				result.@get ("(bsay)", out succeeded, out error_message, out bytes);
+				uint total_offset = 0;
+				uint line_offset = 0;
+				size_t remaining = bytes.length;
 
-				if (succeeded) {
-					var builder = new StringBuilder ();
+				var builder = new StringBuilder ();
 
-					Variant byte_wrapper;
-					uint total_offset = 0;
-					uint line_offset = 0;
-					size_t remaining = bytes.n_children ();
-
-					while ((byte_wrapper = bytes.next_value ()) != null) {
-						if (line_offset == 0) {
-							builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
-						} else {
+				foreach (uint8 byte in bytes) {
+					if (line_offset == 0) {
+						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", spec.address + total_offset);
+					} else {
+						builder.append_c (' ');
+						if (line_offset == 7)
 							builder.append_c (' ');
-							if (line_offset == 7)
-								builder.append_c (' ');
-						}
-
-						builder.append_printf ("%02x", byte_wrapper.get_byte ());
-
-						total_offset++;
-						line_offset++;
-						remaining--;
-
-						if (line_offset == 16 && remaining != 0) {
-							builder.append_c ('\n');
-							line_offset = 0;
-						}
 					}
 
-					console_print (builder.str);
-				} else {
-					console_print ("ERROR: " + error_message);
+					builder.append_printf ("%02x", byte);
+
+					total_offset++;
+					line_offset++;
+					remaining--;
+
+					if (line_offset == 16 && remaining != 0) {
+						builder.append_c ('\n');
+						line_offset = 0;
+					}
 				}
-			} catch (WinIpc.ProxyError e) {
-				console_print ("ERROR: " + e.message);
+
+				print_to_console (builder.str);
+
+			} catch (IOError read_error) {
+				print_to_console ("ERROR: " + read_error.message);
 			}
 		}
 
-		private void print_dump_usage () {
-			console_print ("Usage:");
-			console_print ("\tdump <address> <length>");
-			console_print ("\tdump <module name> <offset> <length>");
+		private async MemoryRegionSpec resolve_memory_region_spec_arguments (string[] args) throws IOError {
+			uint64 address, size;
+
+			if (args.length == 2) {
+				address = uint64_from_string (args[0]);
+				if (address == 0)
+					throw new IOError.FAILED ("specified address '" + args[0] + "' is invalid");
+
+				size = uint64_from_string (args[1]);
+				if (size == 0)
+					throw new IOError.FAILED ("specified size '" + args[1] + "' is invalid");
+			} else if (args.length == 3) {
+				var module = yield code_service.find_module_by_name (args[0]);
+				if (module == null)
+					throw new IOError.FAILED ("specified module '" + args[0] + "' could not be found");
+				address = module.address + uint64_from_string (args[1]);
+
+				size = uint64_from_string (args[2]);
+				if (size == 0)
+					throw new IOError.FAILED ("specified size '" + args[2] + "' is invalid");
+			} else {
+				throw new IOError.FAILED ("invalid argument count");
+			}
+
+			return new MemoryRegionSpec (address, size);
 		}
 
 		private uint64 uint64_from_string (string str) {
@@ -466,17 +461,49 @@ namespace Zed {
 				return str.to_uint64 (null, 10);
 		}
 
-		[PrintfFormat]
-		private void console_printf (string format, ...) {
-			var args = va_list ();
-			var line = strdup_vprintf (format, args);
-			console_print (line);
+		private class MemoryRegionSpec {
+			public uint64 address {
+				get;
+				private set;
+			}
+
+			public uint64 size {
+				get;
+				private set;
+			}
+
+			public MemoryRegionSpec (uint64 address, uint64 size) {
+				this.address = address;
+				this.size = size;
+			}
 		}
 
-		[CCode (cname = "g_strdup_vprintf", instance_pos = -1)]
-		private static extern string strdup_vprintf (string format, va_list args);
+		private async uint8[] read_remote_memory (uint64 address, uint64 size) throws IOError {
+			try {
+				var result_variant = yield proxy.query ("DumpMemory", new Variant ("(tt)", address, size), "(bsay)");
 
-		private void console_print (string line) {
+				bool succeeded;
+				string error_message;
+				VariantIter bytes;
+				result_variant.@get ("(bsay)", out succeeded, out error_message, out bytes);
+
+				if (succeeded) {
+					uint8[] result = new uint8[bytes.n_children ()];
+
+					Variant byte_wrapper;
+					for (uint i = 0; (byte_wrapper = bytes.next_value ()) != null; i++)
+						result[i] = byte_wrapper.get_byte ();
+
+					return result;
+				} else {
+					throw new IOError.FAILED (error_message);
+				}
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		private void print_to_console (string line) {
 			var buffer = console_text_buffer;
 
 			Gtk.TextIter iter;
