@@ -130,6 +130,7 @@ namespace Zed {
 		public enum State {
 			UNINITIALIZED,
 			INJECTING,
+			SYNCHRONIZING,
 			INJECTED,
 			ERROR,
 			TERMINATED
@@ -182,6 +183,8 @@ namespace Zed {
 			try {
 				update_state (State.INJECTING);
 				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
+				update_state (State.SYNCHRONIZING);
+				yield update_module_specs ();
 				update_state (State.INJECTED);
 
 				start_selector.set_proxy (proxy);
@@ -215,6 +218,8 @@ namespace Zed {
 			investigation.finished.connect (end_investigation);
 
 			update_view ();
+
+			yield update_module_specs ();
 
 			var start_trigger = new TriggerInfo (start_selector.selected_module_name, start_selector.selected_function_name);
 			var stop_trigger = new TriggerInfo (stop_selector.selected_module_name, stop_selector.selected_function_name);
@@ -310,12 +315,53 @@ namespace Zed {
 			update_view ();
 		}
 
+		private async bool update_module_specs () {
+			try {
+				var module_values = yield proxy.query ("QueryModules", null, "a(sstt)");
+				foreach (var module_value in module_values) {
+					string mod_name;
+					string mod_uid;
+					uint64 mod_size;
+					uint64 mod_base;
+					module_value.@get ("(sstt)", out mod_name, out mod_uid, out mod_size, out mod_base);
+
+					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mod_uid);
+					if (module_spec == null) {
+						module_spec = new Service.ModuleSpec (mod_name, mod_uid, mod_size);
+						code_service.add_module_spec (module_spec);
+
+						var function_values = yield proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
+						foreach (var function_value in function_values) {
+							string func_name;
+							uint64 func_address;
+							function_value.@get ("(st)", out func_name, out func_address);
+
+							var func_spec = new Service.FunctionSpec (func_name, func_address - mod_base);
+							yield code_service.add_function_spec_to_module (func_spec, module_spec);
+						}
+					}
+
+					Service.Module module = yield code_service.find_module_by_address (mod_base);
+					if (module == null) {
+						module = new Service.Module (module_spec, mod_base);
+						code_service.add_module (module);
+					}
+				}
+			} catch (WinIpc.ProxyError e) {
+				return false;
+			}
+
+			return true;
+		}
+
 		public string state_to_string () {
 			switch (state) {
 				case State.UNINITIALIZED:
 					return "Uninitialized";
 				case State.INJECTING:
 					return "Injecting";
+				case State.SYNCHRONIZING:
+					return "Synchronizing";
 				case State.INJECTED:
 					return "Injected";
 				case State.ERROR:
@@ -546,10 +592,6 @@ namespace Zed {
 		}
 
 		public async bool start (TriggerInfo start_trigger, TriggerInfo stop_trigger) {
-			bool success = yield update_module_specs ();
-			if (!success)
-				return false;
-
 			try {
 				var arg = new Variant ("(ssss)",
 					start_trigger.module_name, start_trigger.function_name,
@@ -568,45 +610,6 @@ namespace Zed {
 			}
 
 			finished ();
-		}
-
-		private async bool update_module_specs () {
-			try {
-				var module_values = yield proxy.query ("QueryModules", null, "a(sstt)");
-				foreach (var module_value in module_values) {
-					string mod_name;
-					string mod_uid;
-					uint64 mod_size;
-					uint64 mod_base;
-					module_value.@get ("(sstt)", out mod_name, out mod_uid, out mod_size, out mod_base);
-
-					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mod_uid);
-					if (module_spec == null) {
-						module_spec = new Service.ModuleSpec (mod_name, mod_uid, mod_size);
-						code_service.add_module_spec (module_spec);
-
-						var function_values = yield proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
-						foreach (var function_value in function_values) {
-							string func_name;
-							uint64 func_address;
-							function_value.@get ("(st)", out func_name, out func_address);
-
-							var func_spec = new Service.FunctionSpec (func_name, func_address - mod_base);
-							yield code_service.add_function_spec_to_module (func_spec, module_spec);
-						}
-					}
-
-					Service.Module module = yield code_service.find_module_by_address (mod_base);
-					if (module == null) {
-						module = new Service.Module (module_spec, mod_base);
-						code_service.add_module (module);
-					}
-				}
-			} catch (WinIpc.ProxyError e) {
-				return false;
-			}
-
-			return true;
 		}
 
 		private void on_new_batch_of_clues (Variant? arg) {

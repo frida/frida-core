@@ -59,7 +59,7 @@ namespace Zed {
 		}
 
 		private Service.StorageBackend storage_backend;
-		private ulong save_handler_id;
+		private uint sync_handler_id;
 
 		private HashMap<string, Service.ModuleSpec> module_spec_by_uid = new HashMap<string, Service.ModuleSpec> ();
 
@@ -70,6 +70,8 @@ namespace Zed {
 
 		private Service.ProcessList process_list = new Service.ProcessList ();
 		private const double PROCESS_LIST_MIN_UPDATE_INTERVAL = 5.0;
+
+		private const int STORAGE_BACKEND_SYNC_TIMEOUT_MSEC = 5000;
 
 		private const int KEYVAL_DELETE = 65535;
 
@@ -146,15 +148,25 @@ namespace Zed {
 				var uid = module_spec.uid;
 				if (!module_spec_by_uid.has_key (uid)) {
 					module_spec_by_uid[uid] = module_spec;
-					save_data_to_storage_backend ();
+					schedule_storage_backend_sync ();
 				}
 			});
 			service.module_spec_modified.connect ((module_spec) => {
 				assert (module_spec_by_uid.has_key (module_spec.uid));
-				save_data_to_storage_backend ();
+				schedule_storage_backend_sync ();
 			});
 
 			return service;
+		}
+
+		private void schedule_storage_backend_sync () {
+			if (sync_handler_id != 0)
+				Source.remove (sync_handler_id);
+			sync_handler_id = Timeout.add (STORAGE_BACKEND_SYNC_TIMEOUT_MSEC, () => {
+				save_data_to_storage_backend ();
+				sync_handler_id = 0;
+				return false;
+			});
 		}
 
 		private void load_data_from_storage_backend () {
@@ -168,17 +180,10 @@ namespace Zed {
 		}
 
 		private void save_data_to_storage_backend () {
-			if (save_handler_id == 0) {
-				save_handler_id = Idle.add (() => {
-					var builder = new VariantBuilder (new VariantType ("av"));
-					foreach (var entry in module_spec_by_uid)
-						builder.add ("v", entry.@value.to_variant ());
-					storage_backend.write ("module-specs", builder.end ());
-
-					save_handler_id = 0;
-					return false;
-				});
-			}
+			var builder = new VariantBuilder (new VariantType ("av"));
+			foreach (var entry in module_spec_by_uid)
+				builder.add ("v", entry.@value.to_variant ());
+			storage_backend.write ("module-specs", builder.end ());
 		}
 
 		private void refresh_row_for (AgentSession session) {
