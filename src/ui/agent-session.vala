@@ -48,6 +48,11 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.TextTag console_input_tag {
+			get;
+			private set;
+		}
+
 		public Gtk.Entry console_entry {
 			get;
 			private set;
@@ -70,6 +75,10 @@ namespace Zed {
 				event_view = builder.get_object ("event_view") as Gtk.TreeView;
 
 				console_view = builder.get_object ("console_view") as Gtk.TextView;
+
+				console_input_tag = console_view.buffer.create_tag ("console-input",
+					"foreground", "#ffffff");
+
 				console_entry = builder.get_object ("console_entry") as Gtk.Entry;
 
 				process_info_label = new ProcessInfoLabel ();
@@ -401,7 +410,7 @@ namespace Zed {
 		}
 
 		private async void handle_console_input (string input) {
-			print_to_console ("> " + input);
+			print_to_console ("> " + input, view.console_input_tag);
 
 			var tokens = input.split (" ");
 
@@ -607,7 +616,7 @@ namespace Zed {
 			}
 		}
 
-		private void print_to_console (string line) {
+		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
 			var buffer = console_text_buffer;
 
 			Gtk.TextIter iter;
@@ -618,7 +627,10 @@ namespace Zed {
 
 			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
 
-			buffer.insert (iter, line, -1);
+			if (with_tag != null)
+				buffer.insert_with_tags (iter, line, -1, with_tag);
+			else
+				buffer.insert (iter, line, -1);
 		}
 
 		/* TODO: move this to a Service later */
