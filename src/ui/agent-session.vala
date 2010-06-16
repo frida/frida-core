@@ -106,7 +106,7 @@ namespace Zed {
 		private FunctionSelector start_selector;
 		private FunctionSelector stop_selector;
 
-		private Gtk.ListStore function_calls = new Gtk.ListStore (1, typeof (FunctionCall));
+		private Gtk.ListStore function_call_store = new Gtk.ListStore (1, typeof (FunctionCall));
 
 		private Investigation investigation;
 
@@ -161,7 +161,7 @@ namespace Zed {
 		}
 
 		private async void start_investigation () {
-			function_calls.clear ();
+			function_call_store.clear ();
 
 			investigation = new Investigation (proxy, code_service);
 			investigation.new_function_call.connect (on_new_function_call);
@@ -180,8 +180,8 @@ namespace Zed {
 
 		private void on_new_function_call (FunctionCall function_call) {
 			Gtk.TreeIter iter;
-			function_calls.append (out iter);
-			function_calls.set (iter, 0, function_call);
+			function_call_store.append (out iter);
+			function_call_store.set (iter, 0, function_call);
 		}
 
 		private void end_investigation () {
@@ -206,10 +206,22 @@ namespace Zed {
 		private void configure_event_view () {
 			var ev = view.event_view;
 
-			ev.set_model (function_calls);
+			ev.set_model (function_call_store);
 
 			ev.insert_column_with_data_func (-1, "From", new Gtk.CellRendererText (), event_view_from_column_data_callback);
-			ev.insert_column_with_data_func (-1, "To", new Gtk.CellRendererText (), event_view_to_column_data_callback);
+
+			var target_renderer = new Gtk.CellRendererText ();
+			target_renderer.editable = true;
+			target_renderer.edited.connect ((path_str, new_text) => {
+				var path = new Gtk.TreePath.from_string (path_str);
+				Gtk.TreeIter iter;
+				function_call_store.get_iter (out iter, path);
+
+				FunctionCall call;
+				function_call_store.@get (iter, 0, out call);
+				code_service.rename_function (call.target, new_text);
+			});
+			ev.insert_column_with_data_func (-1, "To", target_renderer, event_view_to_column_data_callback);
 		}
 
 		private void event_view_from_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {

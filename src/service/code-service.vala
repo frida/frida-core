@@ -45,8 +45,11 @@ namespace Zed.Service {
 			dynamic_functions.add (func);
 		}
 
-		public async void rename_function (FunctionSpec function_spec, string new_name) {
-			function_spec.internal_rename (new_name);
+		public async void rename_function (Function function, string new_name) {
+			function.spec.internal_rename (new_name);
+
+			var mod = yield find_module_by_address (function.address);
+			module_spec_modified (mod.spec);
 		}
 
 		public async ModuleSpec? find_module_spec_by_uid (string uid) {
