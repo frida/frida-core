@@ -38,6 +38,16 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.TextView console_view {
+			get;
+			private set;
+		}
+
+		public Gtk.Entry console_entry {
+			get;
+			private set;
+		}
+
 		private Gtk.VBox root_vbox;
 
 		public AgentSession () {
@@ -49,7 +59,11 @@ namespace Zed {
 
 				control_frame = builder.get_object ("control_frame") as Gtk.Frame;
 				go_button = builder.get_object ("go_button") as Gtk.Button;
+
 				event_view = builder.get_object ("event_view") as Gtk.TreeView;
+
+				console_view = builder.get_object ("console_view") as Gtk.TextView;
+				console_entry = builder.get_object ("console_entry") as Gtk.Entry;
 
 				process_info_label = new ProcessInfoLabel ();
 				var process_info_alignment = builder.get_object ("process_info_alignment") as Gtk.Alignment;
@@ -65,6 +79,24 @@ namespace Zed {
 			} catch (Error e) {
 				error (e.message);
 			}
+
+			customize_widget_styles ();
+		}
+
+		private void customize_widget_styles () {
+			Gdk.Color view_bg;
+			Gdk.Color.parse ("#333333", out view_bg);
+			console_view.modify_base (Gtk.StateType.NORMAL, view_bg);
+			Gdk.Color view_fg;
+			Gdk.Color.parse ("#FFFF00", out view_fg);
+			console_view.modify_text (Gtk.StateType.NORMAL, view_fg);
+
+			Gdk.Color entry_bg;
+			Gdk.Color.parse ("#4d4d4d", out entry_bg);
+			console_entry.modify_base (Gtk.StateType.NORMAL, entry_bg);
+			Gdk.Color entry_fg;
+			Gdk.Color.parse ("#ffffff", out entry_fg);
+			console_entry.modify_text (Gtk.StateType.NORMAL, entry_fg);
 		}
 	}
 
@@ -108,6 +140,9 @@ namespace Zed {
 
 		private Gtk.ListStore function_call_store = new Gtk.ListStore (1, typeof (FunctionCall));
 
+		private Gtk.TextBuffer console_text_buffer;
+		private Gtk.TextMark console_scroll_mark;
+
 		private Investigation investigation;
 
 		public WinIpc.Proxy proxy {
@@ -129,6 +164,14 @@ namespace Zed {
 			configure_selectors ();
 			configure_go_button ();
 			configure_event_view ();
+			configure_console ();
+
+			write_line_to_console ("Hello");
+			write_line_to_console ("1");
+			write_line_to_console ("2");
+			write_line_to_console ("3");
+			write_line_to_console ("...");
+			write_line_to_console ("Go!");
 		}
 
 		public async void inject () {
@@ -194,6 +237,20 @@ namespace Zed {
 			update_state (State.ERROR);
 		}
 
+		private void write_line_to_console (string line) {
+			var buffer = console_text_buffer;
+
+			Gtk.TextIter iter;
+			buffer.get_end_iter (out iter);
+
+			if (buffer.get_char_count () > 0)
+				buffer.insert (iter, "\n", -1);
+
+			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
+
+			buffer.insert (iter, line, -1);
+		}
+
 		private void configure_selectors () {
 			start_selector.notify["selection-is-set"].connect (update_view);
 			stop_selector.notify["selection-is-set"].connect (update_view);
@@ -222,6 +279,15 @@ namespace Zed {
 				code_service.rename_function (call.target, new_text);
 			});
 			ev.insert_column_with_data_func (-1, "To", target_renderer, event_view_to_column_data_callback);
+		}
+
+		private void configure_console () {
+			console_text_buffer = view.console_view.buffer;
+
+			console_scroll_mark = new Gtk.TextMark ("scrollmark", false);
+			Gtk.TextIter iter;
+			console_text_buffer.get_end_iter (out iter);
+			console_text_buffer.add_mark (console_scroll_mark, iter);
 		}
 
 		private void event_view_from_column_data_callback (Gtk.TreeViewColumn col, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
