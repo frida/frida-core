@@ -505,10 +505,12 @@ namespace Zed {
 				var builder = new StringBuilder ();
 
 				for (uint offset = 0; offset != bytes.length;) {
-					builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", spec.address + offset);
+					uint64 pc = spec.address + offset;
+
+					builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", pc);
 
 					uint instruction_length;
-					var instruction_str = disassemble (bytes[offset:bytes.length], out instruction_length);
+					var instruction_str = disassemble (pc, bytes[offset:bytes.length], out instruction_length);
 					if (instruction_str == null) {
 						print_to_console ("<bad instruction>");
 						break;
@@ -634,7 +636,7 @@ namespace Zed {
 		}
 
 		/* TODO: move this to a Service later */
-		public extern string disassemble (uint8[] bytes, out uint instruction_length);
+		public extern string disassemble (uint64 pc, uint8[] bytes, out uint instruction_length);
 	}
 
 	public class Investigation : Object {
