@@ -141,7 +141,8 @@ zed_agent_dump_memory (guint64 address, guint64 size)
         goto address_not_readable;
     }
 
-    len = MIN (remaining, ((guint8 *) mbi.BaseAddress + mbi.RegionSize - cur));
+    len = MIN (remaining, (guint64)
+        ((guint8 *) mbi.BaseAddress + mbi.RegionSize - cur));
     for (i = 0; i != len; i++)
     {
       /* FIXME: This is clearly not efficient. Easily fixable by updating *

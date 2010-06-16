@@ -428,28 +428,42 @@ namespace Zed {
 				case "dasm":
 					yield handle_dasm_command (args);
 					break;
+				case "attach":
+					yield handle_attach_command (args);
+					break;
+				case "detach":
+					yield handle_detach_command (args);
+					break;
 				default:
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
 			}
 		}
 
-		private async void handle_dump_command (string[] args) {
-			MemoryRegionSpec spec;
+		private void print_dump_usage () {
+			print_to_console ("Usage: dump <address-specifier> <length>");
+		}
 
-			try {
-				spec = yield resolve_memory_region_spec_arguments (args);
-			} catch (IOError arg_error) {
-				print_to_console ("ERROR: " + arg_error.message);
-				print_to_console ("");
-				print_to_console ("Usage:");
-				print_to_console ("\tdump <address> <length>");
-				print_to_console ("\tdump <module name> <offset> <length>");
+		private async void handle_dump_command (string[] args) {
+			uint64 address, size;
+
+			if (args.length < 2) {
+				print_dump_usage ();
 				return;
 			}
 
 			try {
-				uint8[] bytes = yield read_remote_memory (spec.address, spec.size);
+				address = yield resolve_address_specifier_arguments (args[0:args.length - 1]);
+				size = uint64_from_string (args[args.length - 1]);
+			} catch (IOError arg_error) {
+				print_to_console ("ERROR: " + arg_error.message);
+				print_to_console ("");
+				print_dump_usage ();
+				return;
+			}
+
+			try {
+				uint8[] bytes = yield read_remote_memory (address, size);
 
 				uint total_offset = 0;
 				uint line_offset = 0;
@@ -459,7 +473,7 @@ namespace Zed {
 
 				foreach (uint8 byte in bytes) {
 					if (line_offset == 0) {
-						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", spec.address + total_offset);
+						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
 					} else {
 						builder.append_c (' ');
 						if (line_offset == 7)
@@ -485,27 +499,35 @@ namespace Zed {
 			}
 		}
 
-		private async void handle_dasm_command (string[] args) {
-			MemoryRegionSpec spec;
+		private void print_dasm_usage () {
+			print_to_console ("Usage: dasm <address-specifier> <length>");
+		}
 
-			try {
-				spec = yield resolve_memory_region_spec_arguments (args);
-			} catch (IOError arg_error) {
-				print_to_console ("ERROR: " + arg_error.message);
-				print_to_console ("");
-				print_to_console ("Usage:");
-				print_to_console ("\tdasm <address> <length>");
-				print_to_console ("\tdasm <module name> <offset> <length>");
+		private async void handle_dasm_command (string[] args) {
+			uint64 address, size;
+
+			if (args.length < 2) {
+				print_dasm_usage ();
 				return;
 			}
 
 			try {
-				uint8[] bytes = yield read_remote_memory (spec.address, spec.size);
+				address = yield resolve_address_specifier_arguments (args[0:args.length - 1]);
+				size = uint64_from_string (args[args.length - 1]);
+			} catch (IOError arg_error) {
+				print_to_console ("ERROR: " + arg_error.message);
+				print_to_console ("");
+				print_dasm_usage ();
+				return;
+			}
+
+			try {
+				uint8[] bytes = yield read_remote_memory (address, size);
 
 				var builder = new StringBuilder ();
 
 				for (uint offset = 0; offset != bytes.length;) {
-					uint64 pc = spec.address + offset;
+					uint64 pc = address + offset;
 
 					builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", pc);
 
@@ -542,55 +564,137 @@ namespace Zed {
 			}
 		}
 
-		private async MemoryRegionSpec resolve_memory_region_spec_arguments (string[] args) throws IOError {
-			uint64 address, size;
+		private void print_attach_usage () {
+			print_to_console ("Usage: attach script to <address-specifier>");
+		}
 
-			if (args.length == 2) {
+		private async void handle_attach_command (string[] args) {
+			if (args.length < 3 || args[0] != "script" || args[1] != "to") {
+				print_attach_usage ();
+				return;
+			}
+
+			uint64 address;
+
+			try {
+				address = yield resolve_address_specifier_arguments (args[2:args.length]);
+			} catch (IOError resolve_error) {
+				print_to_console ("ERROR: " + resolve_error.message);
+				print_to_console ("");
+				print_attach_usage ();
+				return;
+			}
+
+			var filename = FileOpenDialog.ask_for_filename ("Choose script to attach");
+			if (filename == null) {
+				print_to_console ("ERROR: no filename specified");
+				return;
+			}
+
+			string contents;
+			try {
+				FileUtils.get_contents (filename, out contents);
+			} catch (FileError file_error) {
+				print_to_console ("ERROR: " + file_error.message);
+				return;
+			}
+
+			try {
+				uint id = yield attach_script_to_remote_function (contents, address);
+				print_to_console ("script attached with id %u".printf (id));
+			} catch (IOError attach_error) {
+				print_to_console ("ERROR: " + attach_error.message);
+			}
+		}
+
+		private void print_detach_usage () {
+			print_to_console ("Usage: detach script <script-id>");
+		}
+
+		private async void handle_detach_command (string[] args) {
+			if (args.length != 2 || args[0] != "script") {
+				print_detach_usage ();
+				return;
+			}
+
+			int id = args[1].to_int ();
+			if (id <= 0) {
+				print_detach_usage ();
+				return;
+			}
+
+			try {
+				yield detach_script_from_remote_function (id);
+				print_to_console ("script detached");
+			} catch (IOError detach_error) {
+				print_to_console ("ERROR: " + detach_error.message);
+			}
+		}
+
+		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
+			var buffer = console_text_buffer;
+
+			Gtk.TextIter iter;
+			buffer.get_end_iter (out iter);
+
+			if (buffer.get_char_count () > 0)
+				buffer.insert (iter, "\n", -1);
+
+			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
+
+			if (with_tag != null)
+				buffer.insert_with_tags (iter, line, -1, with_tag);
+			else
+				buffer.insert (iter, line, -1);
+		}
+
+		private async uint64 resolve_address_specifier_arguments (string[] args) throws IOError {
+			uint64 address;
+
+			if (args.length == 1) {
 				address = uint64_from_string (args[0]);
 				if (address == 0)
 					throw new IOError.FAILED ("specified address '" + args[0] + "' is invalid");
-
-				size = uint64_from_string (args[1]);
-				if (size == 0)
-					throw new IOError.FAILED ("specified size '" + args[1] + "' is invalid");
-			} else if (args.length == 3) {
+			} else if (args.length == 2) {
 				var module = yield code_service.find_module_by_name (args[0]);
 				if (module == null)
 					throw new IOError.FAILED ("specified module '" + args[0] + "' could not be found");
-				address = module.address + uint64_from_string (args[1]);
 
-				size = uint64_from_string (args[2]);
-				if (size == 0)
-					throw new IOError.FAILED ("specified size '" + args[2] + "' is invalid");
+				var func_str = args[1];
+				if (func_str.has_prefix ("0x")) {
+					address = module.address + uint64_from_string (func_str);
+				} else {
+					var func = module.find_function_by_name (func_str);
+					if (func == null)
+						throw new IOError.FAILED ("specified function '" + func_str + "' could not be found");
+					address = func.address;
+				}
 			} else {
 				throw new IOError.FAILED ("invalid argument count");
 			}
 
-			return new MemoryRegionSpec (address, size);
+			return address;
 		}
 
-		private uint64 uint64_from_string (string str) {
-			if (str.has_prefix ("0x"))
-				return str[2:str.length].to_uint64 (null, 16);
-			else
-				return str.to_uint64 (null, 10);
-		}
+		private uint64 uint64_from_string (string str) throws IOError {
+			uint64 result;
 
-		private class MemoryRegionSpec {
-			public uint64 address {
-				get;
-				private set;
+			string input;
+			unowned string endptr;
+			if (str.has_prefix ("0x")) {
+				input = str[2:str.length];
+				result = input.to_uint64 (out endptr, 16);
+			} else if (str[0] == '-' || str[0] == '+') {
+				throw new IOError.INVALID_ARGUMENT ("specified number '%s' should not have a sign prefixed".printf (str));
+			} else {
+				input = str;
+				result = input.to_uint64 (out endptr, 10);
 			}
 
-			public uint64 size {
-				get;
-				private set;
-			}
+			if (endptr == input)
+				throw new IOError.INVALID_ARGUMENT ("specified number '%s' is invalid".printf (str));
 
-			public MemoryRegionSpec (uint64 address, uint64 size) {
-				this.address = address;
-				this.size = size;
-			}
+			return result;
 		}
 
 		private async uint8[] read_remote_memory (uint64 address, uint64 size) throws IOError {
@@ -618,21 +722,38 @@ namespace Zed {
 			}
 		}
 
-		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
-			var buffer = console_text_buffer;
+		private async uint attach_script_to_remote_function (string script, uint64 address) throws IOError {
+			try {
+				var argument_variant = new Variant ("(st)", script, address);
+				var result_variant = yield proxy.query ("AttachScriptTo", argument_variant, "(us)");
 
-			Gtk.TextIter iter;
-			buffer.get_end_iter (out iter);
+				uint script_id;
+				string error_message;
+				result_variant.@get ("(us)", out script_id, out error_message);
 
-			if (buffer.get_char_count () > 0)
-				buffer.insert (iter, "\n", -1);
+				if (script_id != 0)
+					return script_id;
+				else
+					throw new IOError.FAILED (error_message);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
 
-			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
+		private async void detach_script_from_remote_function (uint script_id) throws IOError {
+			try {
+				var argument_variant = new Variant ("u", script_id);
+				var result_variant = yield proxy.query ("DetachScript", argument_variant, "(bs)");
 
-			if (with_tag != null)
-				buffer.insert_with_tags (iter, line, -1, with_tag);
-			else
-				buffer.insert (iter, line, -1);
+				bool succeeded;
+				string error_message;
+				result_variant.@get ("(bs)", out succeeded, out error_message);
+
+				if (!succeeded)
+					throw new IOError.FAILED (error_message);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
 		}
 
 		/* TODO: move this to a Service later */
@@ -781,6 +902,10 @@ namespace Zed {
 		public FunctionCall (int depth, Service.Module? module, uint64 offset, Service.Function target) {
 			Object (depth: depth, module: module, offset: offset, target: target);
 		}
+	}
+
+	namespace FileOpenDialog {
+		public extern string? ask_for_filename (string title);
 	}
 }
 

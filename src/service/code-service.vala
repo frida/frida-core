@@ -217,6 +217,15 @@ namespace Zed.Service {
 			Object (spec: spec, address: address);
 		}
 
+		public Function? find_function_by_name (string name) {
+			foreach (var func in functions) {
+				if (func.spec.name == name)
+					return func;
+			}
+
+			return null;
+		}
+
 		public void internal_add_function (Function func) {
 			_functions.add (func);
 		}
