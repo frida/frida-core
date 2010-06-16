@@ -22,7 +22,7 @@ namespace Gum {
 	}
 
 	public class Script : GLib.Object {
-		public static Script from_string (string str) throws GLib.IOError;
+		public static Script from_string (string script_text) throws GLib.IOError;
 
 		public void execute (void * cpu_context, void * stack_arguments);
 	}

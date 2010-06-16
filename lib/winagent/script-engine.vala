@@ -27,8 +27,8 @@ namespace Zed {
 
 		/* FIXME: Gum.Script is piggy-backing on IOError for now */
 
-		private uint attach_script_to (string script_contents, uint64 address) throws IOError {
-			var script = Gum.Script.from_string (script_contents);
+		private uint attach_script_to (string script_text, uint64 address) throws IOError {
+			var script = Gum.Script.from_string (script_text);
 			var instance = new ScriptInstance (script);
 
 			var ret = interceptor.attach_listener ((void *) address, instance, null);
@@ -55,14 +55,14 @@ namespace Zed {
 
 		private void register_query_handlers () {
 			attach_handler_id = proxy.register_query_sync_handler ("AttachScriptTo", "(st)", (arg) => {
-				string script_contents;
+				string script_text;
 				uint64 address;
-				arg.@get ("(st)", out script_contents, out address);
+				arg.@get ("(st)", out script_text, out address);
 
 				uint script_id = 0;
 				string error_message = "";
 				try {
-					script_id = attach_script_to (script_contents, address);
+					script_id = attach_script_to (script_text, address);
 				} catch (IOError e) {
 					error_message = e.message;
 				}

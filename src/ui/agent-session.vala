@@ -591,16 +591,16 @@ namespace Zed {
 				return;
 			}
 
-			string contents;
+			string script_text;
 			try {
-				FileUtils.get_contents (filename, out contents);
+				FileUtils.get_contents (filename, out script_text);
 			} catch (FileError file_error) {
 				print_to_console ("ERROR: " + file_error.message);
 				return;
 			}
 
 			try {
-				uint id = yield attach_script_to_remote_function (contents, address);
+				uint id = yield attach_script_to_remote_function (script_text, address);
 				print_to_console ("script attached with id %u".printf (id));
 			} catch (IOError attach_error) {
 				print_to_console ("ERROR: " + attach_error.message);
@@ -722,9 +722,9 @@ namespace Zed {
 			}
 		}
 
-		private async uint attach_script_to_remote_function (string script, uint64 address) throws IOError {
+		private async uint attach_script_to_remote_function (string script_text, uint64 address) throws IOError {
 			try {
-				var argument_variant = new Variant ("(st)", script, address);
+				var argument_variant = new Variant ("(st)", script_text, address);
 				var result_variant = yield proxy.query ("AttachScriptTo", argument_variant, "(us)");
 
 				uint script_id;
