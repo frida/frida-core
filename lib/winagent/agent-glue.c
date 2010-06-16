@@ -4,6 +4,8 @@
 #include <windows.h>
 #include <psapi.h>
 
+#define ZED_MAX_DUMP_SIZE (0xffff)
+
 static gboolean append_function_info (const gchar * name, gpointer address,
     gpointer user_data);
 
@@ -98,6 +100,84 @@ zed_agent_query_module_functions (const char * module_name)
   gum_module_enumerate_exports (module_name, append_function_info, &builder);
 
   return g_variant_builder_end (&builder);
+}
+
+GVariant *
+zed_agent_dump_memory (guint64 address, guint64 size)
+{
+  GVariant * result;
+  gboolean success = FALSE;
+  gchar * error_message = NULL;
+  GVariantBuilder * builder;
+  guint8 * cur;
+  guint64 remaining;
+
+  builder = g_variant_builder_new (G_VARIANT_TYPE ("ay"));
+
+  if (size > ZED_MAX_DUMP_SIZE)
+    goto way_too_much;
+
+  for (remaining = size; remaining != 0;)
+  {
+    MEMORY_BASIC_INFORMATION mbi;
+    guint len, i;
+
+    cur = (guint8 *) (address + size - remaining);
+
+    if (VirtualQuery (cur, &mbi, sizeof (mbi)) == 0)
+      goto virtual_query_failed;
+
+    if (mbi.State != MEM_COMMIT)
+      goto address_not_readable;
+
+    switch (mbi.Protect & 0xff)
+    {
+      case PAGE_EXECUTE_READ:
+      case PAGE_EXECUTE_READWRITE:
+      case PAGE_READONLY:
+      case PAGE_READWRITE:
+        break;
+      default:
+        goto address_not_readable;
+    }
+
+    len = MIN (remaining, ((guint8 *) mbi.BaseAddress + mbi.RegionSize - cur));
+    for (i = 0; i != len; i++)
+    {
+      /* FIXME: This is clearly not efficient. Easily fixable by updating *
+       *        to the latest version of GLib/GVariant                    */
+      g_variant_builder_add (builder, "y", cur[i]);
+    }
+
+    remaining -= len;
+  }
+
+  success = TRUE;
+  error_message = g_strdup ("");
+
+beach:
+  result = g_variant_new ("(bsay)", success, error_message, builder);
+  g_free (error_message);
+
+  return result;
+
+  /* ERRORS */
+way_too_much:
+  {
+    error_message = g_strdup ("sorry, that's way too much");
+    goto beach;
+  }
+virtual_query_failed:
+  {
+    error_message =
+        g_strdup_printf ("VirtualQuery failed: 0x%08x", GetLastError ());
+    goto beach;
+  }
+address_not_readable:
+  {
+    error_message = g_strdup ("specified memory region is not readable");
+    goto beach;
+  }
 }
 
 static gboolean

@@ -91,12 +91,15 @@ namespace Zed {
 		}
 
 		private void customize_widget_styles () {
+			var monospace_font = Pango.FontDescription.from_string ("Lucida Console 8");
+
 			Gdk.Color view_bg;
 			Gdk.Color.parse ("#333333", out view_bg);
 			console_view.modify_base (Gtk.StateType.NORMAL, view_bg);
 			Gdk.Color view_fg;
 			Gdk.Color.parse ("#FFFF00", out view_fg);
 			console_view.modify_text (Gtk.StateType.NORMAL, view_fg);
+			console_view.modify_font (monospace_font);
 
 			Gdk.Color entry_bg;
 			Gdk.Color.parse ("#4d4d4d", out entry_bg);
@@ -104,6 +107,7 @@ namespace Zed {
 			Gdk.Color entry_fg;
 			Gdk.Color.parse ("#ffffff", out entry_fg);
 			console_entry.modify_text (Gtk.StateType.NORMAL, entry_fg);
+			console_entry.modify_font (monospace_font);
 		}
 	}
 
@@ -379,14 +383,80 @@ namespace Zed {
 			if (args.length == 2) {
 				address = uint64_from_string (args[0]);
 				size = uint64_from_string (args[1]);
-			}
 
-			if (args.length != 2 || address == 0 || size == 0) {
-				console_print ("Usage: dump <address> <length>");
+				if (address == 0 || size == 0) {
+					print_dump_usage ();
+					return;
+				}
+			} else if (args.length == 3) {
+				var module = yield code_service.find_module_by_name (args[0]);
+				if (module == null) {
+					console_printf ("ERROR: specified module '%s' not found", args[0]);
+					return;
+				}
+
+				address = module.address + uint64_from_string (args[1]);
+				size = uint64_from_string (args[2]);
+
+				if (size == 0) {
+					print_dump_usage ();
+					return;
+				}
+			} else {
+				print_dump_usage ();
 				return;
 			}
 
-			console_printf ("Dumping address=0x%08" + uint64.FORMAT_MODIFIER + "x, size=%" + uint64.FORMAT_MODIFIER + "u ...", address, size);
+			try {
+				var result = yield proxy.query ("DumpMemory", new Variant ("(tt)", address, size), "(bsay)");
+
+				bool succeeded;
+				string error_message;
+				VariantIter bytes;
+				result.@get ("(bsay)", out succeeded, out error_message, out bytes);
+
+				if (succeeded) {
+					var builder = new StringBuilder ();
+
+					Variant byte_wrapper;
+					uint total_offset = 0;
+					uint line_offset = 0;
+					size_t remaining = bytes.n_children ();
+
+					while ((byte_wrapper = bytes.next_value ()) != null) {
+						if (line_offset == 0) {
+							builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
+						} else {
+							builder.append_c (' ');
+							if (line_offset == 7)
+								builder.append_c (' ');
+						}
+
+						builder.append_printf ("%02x", byte_wrapper.get_byte ());
+
+						total_offset++;
+						line_offset++;
+						remaining--;
+
+						if (line_offset == 16 && remaining != 0) {
+							builder.append_c ('\n');
+							line_offset = 0;
+						}
+					}
+
+					console_print (builder.str);
+				} else {
+					console_print ("ERROR: " + error_message);
+				}
+			} catch (WinIpc.ProxyError e) {
+				console_print ("ERROR: " + e.message);
+			}
+		}
+
+		private void print_dump_usage () {
+			console_print ("Usage:");
+			console_print ("\tdump <address> <length>");
+			console_print ("\tdump <module name> <offset> <length>");
 		}
 
 		private uint64 uint64_from_string (string str) {

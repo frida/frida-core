@@ -70,6 +70,16 @@ namespace Zed.Service {
 			return null;
 		}
 
+		public async Module? find_module_by_name (string name) {
+			var name_lowercase = name.down ();
+			foreach (var mod in modules) {
+				if (mod.spec.name.down () == name_lowercase)
+					return mod;
+			}
+
+			return null;
+		}
+
 		public async Function? find_function_by_address (uint64 address) {
 			var mod = yield find_module_by_address (address);
 			if (mod != null) {
