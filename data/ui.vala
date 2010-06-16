@@ -142,16 +142,107 @@ namespace Zed.Data.Ui {
 				"</packing>" +
 			"</child>" +
 			"<child>" +
-				"<object class=\"GtkScrolledWindow\" id=\"events_scrollwin\">" +
+				"<object class=\"GtkNotebook\" id=\"content_notebook\">" +
 					"<property name=\"visible\">True</property>" +
 					"<property name=\"can_focus\">True</property>" +
-					"<property name=\"hscrollbar_policy\">automatic</property>" +
-					"<property name=\"vscrollbar_policy\">automatic</property>" +
+					"<property name=\"tab_pos\">bottom</property>" +
+					"<property name=\"show_border\">False</property>" +
+					"<property name=\"tab_border\">0</property>" +
+					"<property name=\"tab_hborder\">40</property>" +
+					"<property name=\"tab_vborder\">0</property>" +
 					"<child>" +
-						"<object class=\"GtkTreeView\" id=\"event_view\">" +
+						"<object class=\"GtkAlignment\" id=\"events_alignment\">" +
 							"<property name=\"visible\">True</property>" +
-							"<property name=\"can_focus\">True</property>" +
+							"<property name=\"left_padding\">1</property>" +
+							"<property name=\"right_padding\">1</property>" +
+							"<child>" +
+								"<object class=\"GtkScrolledWindow\" id=\"events_scrollwin\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"hscrollbar_policy\">automatic</property>" +
+									"<property name=\"vscrollbar_policy\">automatic</property>" +
+									"<child>" +
+										"<object class=\"GtkTreeView\" id=\"event_view\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"can_focus\">True</property>" +
+										"</object>" +
+									"</child>" +
+								"</object>" +
+							"</child>" +
 						"</object>" +
+					"</child>" +
+					"<child type=\"tab\">" +
+						"<object class=\"GtkLabel\" id=\"function_calls_tab_label\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"label\" translatable=\"yes\">Events </property>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"tab_fill\">False</property>" +
+							"" +
+						"</packing>" +
+					"</child>" +
+					"<child>" +
+						"<object class=\"GtkAlignment\" id=\"console_alignment\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"bottom_padding\">2</property>" +
+							"<property name=\"right_padding\">2</property>" +
+							"<child>" +
+								"<object class=\"GtkVBox\" id=\"console_vbox\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"orientation\">vertical</property>" +
+									"<child>" +
+										"<object class=\"GtkScrolledWindow\" id=\"console_scrollwin\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"can_focus\">True</property>" +
+											"<property name=\"hscrollbar_policy\">automatic</property>" +
+											"<property name=\"vscrollbar_policy\">automatic</property>" +
+											"<child>" +
+												"<object class=\"GtkTextView\" id=\"console_view\">" +
+													"<property name=\"visible\">True</property>" +
+													"<property name=\"can_focus\">True</property>" +
+													"<property name=\"editable\">False</property>" +
+													"<property name=\"cursor_visible\">False</property>" +
+												"</object>" +
+											"</child>" +
+										"</object>" +
+										"<packing>" +
+											"<property name=\"position\">0</property>" +
+										"</packing>" +
+									"</child>" +
+									"<child>" +
+										"<object class=\"GtkEntry\" id=\"console_entry\">" +
+											"<property name=\"visible\">True</property>" +
+											"<property name=\"can_focus\">True</property>" +
+											"<property name=\"has_frame\">False</property>" +
+											"<property name=\"invisible_char\">●</property>" +
+										"</object>" +
+										"<packing>" +
+											"<property name=\"expand\">False</property>" +
+											"<property name=\"position\">1</property>" +
+										"</packing>" +
+									"</child>" +
+								"</object>" +
+							"</child>" +
+						"</object>" +
+						"" +
+					"</child>" +
+					"<child type=\"tab\">" +
+						"<object class=\"GtkLabel\" id=\"debug_tab_label\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"label\" translatable=\"yes\">Console </property>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"position\">1</property>" +
+							"<property name=\"tab_fill\">False</property>" +
+							"" +
+						"</packing>" +
+					"</child>" +
+					"<child>" +
+						"<placeholder/>" +
+					"</child>" +
+					"<child type=\"tab\">" +
+						"<placeholder/>" +
+						"" +
 					"</child>" +
 				"</object>" +
 				"<packing>" +
