@@ -25,6 +25,9 @@ namespace Gum {
 		public static Script from_string (string script_text) throws GLib.IOError;
 
 		public void execute (void * cpu_context, void * stack_arguments);
+
+		public void * get_code_address ();
+		public uint get_code_size ();
 	}
 
 	public class Stalker : GLib.Object {

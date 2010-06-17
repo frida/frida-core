@@ -27,7 +27,7 @@ namespace Zed {
 
 		/* FIXME: Gum.Script is piggy-backing on IOError for now */
 
-		private uint attach_script_to (string script_text, uint64 address) throws IOError {
+		private ScriptInstance attach_script_to (string script_text, uint64 address) throws IOError {
 			var script = Gum.Script.from_string (script_text);
 			var instance = new ScriptInstance (script);
 
@@ -42,8 +42,11 @@ namespace Zed {
 			}
 
 			uint script_id = ++last_script_id;
+
+			instance.id = script_id;
 			instance_by_id[script_id] = instance;
-			return script_id;
+
+			return instance;
 		}
 
 		private void detach_script (uint script_id) throws IOError {
@@ -59,15 +62,20 @@ namespace Zed {
 				uint64 address;
 				arg.@get ("(st)", out script_text, out address);
 
-				uint script_id = 0;
+				uint id = 0;
 				string error_message = "";
+				uint64 code_address = 0;
+				uint32 code_size = 0;
 				try {
-					script_id = attach_script_to (script_text, address);
+					var instance = attach_script_to (script_text, address);
+					id = instance.id;
+					code_address = (uint64) instance.script.get_code_address ();
+					code_size = instance.script.get_code_size ();
 				} catch (IOError e) {
 					error_message = e.message;
 				}
 
-				return new Variant ("(us)", script_id, error_message);
+				return new Variant ("(ustu)", id, error_message, code_address, code_size);
 			});
 
 			detach_handler_id = proxy.register_query_sync_handler ("DetachScript", "u", (arg) => {
@@ -93,10 +101,18 @@ namespace Zed {
 		}
 
 		public class ScriptInstance : Object, Gum.InvocationListener {
-			private Gum.Script script;
+			public uint id {
+				get;
+				set;
+			}
+
+			public Gum.Script script {
+				get;
+				construct;
+			}
 
 			public ScriptInstance (Gum.Script script) {
-				this.script = script;
+				Object (script: script);
 			}
 
 			public void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments) {

@@ -600,8 +600,10 @@ namespace Zed {
 			}
 
 			try {
-				uint id = yield attach_script_to_remote_function (script_text, address);
-				print_to_console ("script attached with id %u".printf (id));
+				var script = yield attach_script_to_remote_function (script_text, address);
+				print_to_console (("script compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
+					"x").printf (script.code_size, script.code_address));
+				print_to_console ("attached with id %u".printf (script.id));
 			} catch (IOError attach_error) {
 				print_to_console ("ERROR: " + attach_error.message);
 			}
@@ -722,17 +724,19 @@ namespace Zed {
 			}
 		}
 
-		private async uint attach_script_to_remote_function (string script_text, uint64 address) throws IOError {
+		private async ScriptInfo attach_script_to_remote_function (string script_text, uint64 address) throws IOError {
 			try {
 				var argument_variant = new Variant ("(st)", script_text, address);
-				var result_variant = yield proxy.query ("AttachScriptTo", argument_variant, "(us)");
+				var result_variant = yield proxy.query ("AttachScriptTo", argument_variant, "(ustu)");
 
-				uint script_id;
+				uint id;
 				string error_message;
-				result_variant.@get ("(us)", out script_id, out error_message);
+				uint64 code_address;
+				uint32 code_size;
+				result_variant.@get ("(ustu)", out id, out error_message, out code_address, out code_size);
 
-				if (script_id != 0)
-					return script_id;
+				if (id != 0)
+					return new ScriptInfo (id, code_address, code_size);
 				else
 					throw new IOError.FAILED (error_message);
 			} catch (WinIpc.ProxyError e) {
@@ -753,6 +757,29 @@ namespace Zed {
 					throw new IOError.FAILED (error_message);
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		private class ScriptInfo {
+			public uint id {
+				get;
+				private set;
+			}
+
+			public uint64 code_address {
+				get;
+				private set;
+			}
+
+			public uint32 code_size {
+				get;
+				private set;
+			}
+
+			public ScriptInfo (uint id, uint64 code_address, uint32 code_size) {
+				this.id = id;
+				this.code_address = code_address;
+				this.code_size = code_size;
 			}
 		}
 
