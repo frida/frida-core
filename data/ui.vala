@@ -201,6 +201,7 @@ namespace Zed.Data.Ui {
 													"<property name=\"visible\">True</property>" +
 													"<property name=\"can_focus\">True</property>" +
 													"<property name=\"editable\">False</property>" +
+													"<property name=\"wrap_mode\">word-char</property>" +
 													"<property name=\"left_margin\">2</property>" +
 													"<property name=\"cursor_visible\">False</property>" +
 												"</object>" +
