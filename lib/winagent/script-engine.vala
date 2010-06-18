@@ -28,7 +28,10 @@ namespace Zed {
 		/* FIXME: Gum.Script is piggy-backing on IOError for now */
 
 		private ScriptInstance attach_script_to (string script_text, uint64 address) throws IOError {
+			uint script_id = ++last_script_id;
+
 			var script = Gum.Script.from_string (script_text);
+			script.set_message_handler ((script, msg) => on_message_from_script (script_id, msg));
 			var instance = new ScriptInstance (script);
 
 			var ret = interceptor.attach_listener ((void *) address, instance, null);
@@ -40,8 +43,6 @@ namespace Zed {
 				case Gum.AttachReturn.ALREADY_ATTACHED:
 					throw new IOError.NOT_SUPPORTED ("Gum.Interceptor reports listener is already attached");
 			}
-
-			uint script_id = ++last_script_id;
 
 			instance.id = script_id;
 			instance_by_id[script_id] = instance;
@@ -98,6 +99,21 @@ namespace Zed {
 		private void unregister_query_handlers () {
 			proxy.unregister_query_handler (detach_handler_id);
 			proxy.unregister_query_handler (attach_handler_id);
+		}
+
+		private void on_message_from_script (uint script_id, Variant msg) {
+			Idle.add (() => {
+				send_message_from_script (script_id, msg);
+				return false;
+			});
+		}
+
+		private async void send_message_from_script (uint script_id, Variant msg) {
+			try {
+				var arg = new Variant ("(uv)", script_id, new Variant.variant (msg));
+				yield proxy.emit ("MessageFromScript", arg);
+			} catch (WinIpc.ProxyError e) {
+			}
 		}
 
 		public class ScriptInstance : Object, Gum.InvocationListener {

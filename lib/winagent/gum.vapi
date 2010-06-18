@@ -22,7 +22,11 @@ namespace Gum {
 	}
 
 	public class Script : GLib.Object {
+		public delegate void MessageHandler (Gum.Script script, owned GLib.Variant msg);
+
 		public static Script from_string (string script_text) throws GLib.IOError;
+
+		public void set_message_handler (owned Gum.Script.MessageHandler func);
 
 		public void execute (void * cpu_context, void * stack_arguments);
 

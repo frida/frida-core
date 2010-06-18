@@ -191,7 +191,17 @@ namespace Zed {
 		public async void inject () {
 			try {
 				update_state (State.INJECTING);
+
 				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
+
+				proxy.add_notify_handler ("MessageFromScript", "(uv)", (arg) => {
+					uint script_id;
+					Variant msg;
+					arg.@get ("(uv)", out script_id, out msg);
+
+					print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
+				});
+
 				update_state (State.SYNCHRONIZING);
 				yield update_module_specs ();
 				update_state (State.INJECTED);
