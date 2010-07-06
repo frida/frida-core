@@ -1,8 +1,14 @@
+#define ENABLE_DEBUG 0
+
 #include "zed-winagent.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <psapi.h>
+#if ENABLE_DEBUG
+#include <io.h>
+#include <stdio.h>
+#endif
 
 #define ZED_MAX_DUMP_SIZE (0xffff)
 
@@ -20,6 +26,13 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 
   if (ul_reason_for_call == DLL_PROCESS_ATTACH)
   {
+#if ENABLE_DEBUG
+    AllocConsole ();
+
+    stdout->_file = _open_osfhandle ((intptr_t) GetStdHandle (STD_OUTPUT_HANDLE), 0);
+    stderr->_file = _open_osfhandle ((intptr_t) GetStdHandle (STD_ERROR_HANDLE), 0);
+#endif
+
     g_type_init ();
     gum_init ();
   }
