@@ -29,8 +29,8 @@ namespace Zed {
 		private static const int DEFAULT_WIDTH = 900;
 		private static const int DEFAULT_HEIGHT = 556;
 
-		private const uint KEYVAL_F11 = 65480;
-		private const uint KEYVAL_F12 = 65481;
+		private const uint KEYVAL_ARROW_LEFT = 65361;
+		private const uint KEYVAL_ARROW_RIGHT = 65363;
 
 		public Root (View.Login login, View.Workspace workspace) {
 			Object (login: login, workspace: workspace);
@@ -57,10 +57,12 @@ namespace Zed {
 			window.position = Gtk.WindowPosition.CENTER;
 
 			window.key_press_event.connect ((event) => {
-				switch (event.keyval) {
-					case KEYVAL_F11: _notebook.set_current_page (0); break;
-					case KEYVAL_F12: _notebook.set_current_page (1); break;
-					default: break;
+				if ((event.state & Gdk.ModifierType.SHIFT_MASK) != 0 && (event.state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+					switch (event.keyval) {
+						case KEYVAL_ARROW_LEFT: _notebook.set_current_page (0); break;
+						case KEYVAL_ARROW_RIGHT: _notebook.set_current_page (1); break;
+						default: break;
+					}
 				}
 
 				return false;
