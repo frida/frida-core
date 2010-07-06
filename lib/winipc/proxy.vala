@@ -151,10 +151,8 @@ namespace WinIpc {
 
 		public async Variant query (string verb, Variant? argument = null, string? response_type = null) throws ProxyError {
 			try {
-				var request_id = yield send_request (verb, argument);
-
 				Variant? response_value;
-				if (!yield receive_response (request_id, out response_value))
+				if (!yield send_request_and_receive_response (verb, argument, out response_value))
 					throw new ProxyError.INVALID_QUERY ("No matching handler for " + verb);
 
 				var response_spec = new VariantTypeSpec (response_type);
@@ -245,26 +243,22 @@ namespace WinIpc {
 			}
 		}
 
-		private async uint32 send_request (string verb, Variant? argument) throws IOError {
-			var id = last_request_id++;
-			var msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, id, verb, MaybeVariant.wrap (argument));
-			yield write_message (MessageType.REQUEST, msg);
-			return id;
+		private async bool send_request_and_receive_response (string verb, Variant? argument, out Variant? response_value) throws IOError {
+			var request_id = last_request_id++;
+			var request_msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, request_id, verb, MaybeVariant.wrap (argument));
+			var pending = new PendingResponse (request_id, () => send_request_and_receive_response.callback ());
+			pending_responses.add (pending);
+			yield write_message (MessageType.REQUEST, request_msg);
+			yield;
+
+			response_value = MaybeVariant.unwrap (pending.response_value);
+			return pending.success;
 		}
 
 		private async uint32 send_response (uint id, bool success, Variant? val) throws IOError {
 			var msg = new Variant (RESPONSE_MESSAGE_TYPE_STRING, id, success, MaybeVariant.wrap (val));
 			yield write_message (MessageType.RESPONSE, msg);
 			return id;
-		}
-
-		private async bool receive_response (uint32 request_id, out Variant? response_value) throws IOError {
-			var pending = new PendingResponse (request_id, () => receive_response.callback ());
-			pending_responses.add (pending);
-			yield;
-
-			response_value = MaybeVariant.unwrap (pending.response_value);
-			return pending.success;
 		}
 
 		private async void send_notify (string id, Variant? argument) throws IOError {
