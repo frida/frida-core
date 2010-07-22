@@ -10,15 +10,25 @@ namespace Gum {
 	}
 
 	public interface InvocationListener : GLib.Object {
-		public abstract void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments);
-		public abstract void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value);
+		public abstract void on_enter (Gum.InvocationContext ctx);
+		public abstract void on_leave (Gum.InvocationContext ctx);
 		public abstract void * provide_thread_data (void * function_instance_data, uint thread_id);
 	}
 
 	[Compact]
 	public class InvocationContext {
+		public InvocationContext parent;
+
 		public void * instance_data;
 		public void * thread_data;
+
+		public void * cpu_context;
+
+		private void * backend;
+
+		public void * get_nth_argument (uint n);
+		public void * get_return_value ();
+		public void * get_stack_pointer ();
 	}
 
 	public class Script : GLib.Object {

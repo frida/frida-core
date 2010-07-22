@@ -58,22 +58,17 @@ namespace Zed {
 			}
 		}
 
-		private void on_object_free (void * instance) {
-		}
-
-		public void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments) {
-			GstFunction func = (GstFunction) context.instance_data;
+		public void on_enter (Gum.InvocationContext ctx) {
+			GstFunction func = (GstFunction) ctx.instance_data;
 			if (func == GstFunction.PAD_PUSH) {
-				unowned GstPadPushArgs push_args = (GstPadPushArgs) function_arguments;
-				on_pad_push (push_args.pad, push_args.buffer);
+				on_pad_push (ctx.get_nth_argument (0), ctx.get_nth_argument (1));
 			} else if (func == GstFunction.OBJECT_FREE) {
-				on_object_free (function_arguments);
 			} else {
 				assert_not_reached ();
 			}
 		}
 
-		public void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value) {
+		public void on_leave (Gum.InvocationContext ctx) {
 		}
 
 		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
@@ -103,11 +98,5 @@ namespace Zed {
 	public enum GstFunction {
 		PAD_PUSH = 1,
 		OBJECT_FREE
-	}
-
-	[Compact]
-	private class GstPadPushArgs {
-		public void * pad;
-		public void * buffer;
 	}
 }

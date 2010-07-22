@@ -19,12 +19,12 @@ namespace Zed {
 		public extern bool attach (TriggerInfo start_trigger, TriggerInfo stop_trigger);
 		public extern void detach ();
 
-		public void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments) {
-			if (context.thread_data == null)
+		public void on_enter (Gum.InvocationContext ctx) {
+			if (ctx.thread_data == null)
 				return;
 
-			TriggerType type = (TriggerType) context.instance_data;
-			weak Journal journal = (Journal) context.thread_data;
+			TriggerType type = (TriggerType) ctx.instance_data;
+			weak Journal journal = (Journal) ctx.thread_data;
 
 			if ((type & TriggerType.STOP) != 0 && journal.state == Journal.State.OPENED) {
 				stalker.unfollow_me ();
@@ -38,12 +38,12 @@ namespace Zed {
 			}
 		}
 
-		public void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value) {
-			if (context.thread_data == null)
+		public void on_leave (Gum.InvocationContext ctx) {
+			if (ctx.thread_data == null)
 				return;
 
-			TriggerType type = (TriggerType) context.instance_data;
-			weak Journal journal = (Journal) context.thread_data;
+			TriggerType type = (TriggerType) ctx.instance_data;
+			weak Journal journal = (Journal) ctx.thread_data;
 
 			if ((type & TriggerType.START) != 0 && journal.state == Journal.State.CREATED) {
 				journal.state = Journal.State.OPENED;

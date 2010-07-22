@@ -131,11 +131,11 @@ namespace Zed {
 				Object (script: script);
 			}
 
-			public void on_enter (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * cpu_context, void * function_arguments) {
-				script.execute (cpu_context, function_arguments);
+			public void on_enter (Gum.InvocationContext ctx) {
+				script.execute (ctx.cpu_context, ctx.get_stack_pointer ());
 			}
 
-			public void on_leave (Gum.InvocationContext context, Gum.InvocationContext parent_context, void * function_return_value) {
+			public void on_leave (Gum.InvocationContext ctx) {
 			}
 
 			public void * provide_thread_data (void * function_instance_data, uint thread_id) {
