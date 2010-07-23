@@ -27,8 +27,8 @@ namespace Gum {
 		private void * backend;
 
 		public void * get_nth_argument (uint n);
+		public void replace_nth_argument (uint n, void * val);
 		public void * get_return_value ();
-		public void * get_stack_pointer ();
 	}
 
 	public class Script : GLib.Object {
@@ -38,7 +38,7 @@ namespace Gum {
 
 		public void set_message_handler (owned Gum.Script.MessageHandler func);
 
-		public void execute (void * cpu_context, void * stack_arguments);
+		public void execute (Gum.InvocationContext ctx);
 
 		public void * get_code_address ();
 		public uint get_code_size ();

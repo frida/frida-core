@@ -132,7 +132,7 @@ namespace Zed {
 			}
 
 			public void on_enter (Gum.InvocationContext ctx) {
-				script.execute (ctx.cpu_context, ctx.get_stack_pointer ());
+				script.execute (ctx);
 			}
 
 			public void on_leave (Gum.InvocationContext ctx) {
