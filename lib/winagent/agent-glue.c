@@ -34,7 +34,8 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 #endif
 
     g_type_init ();
-    gum_init ();
+    gum_init_with_features ((GumFeatureFlags)
+        (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
   }
 
   return TRUE;
