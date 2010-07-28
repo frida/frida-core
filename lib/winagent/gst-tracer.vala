@@ -71,10 +71,6 @@ namespace Zed {
 		public void on_leave (Gum.InvocationContext ctx) {
 		}
 
-		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
-			return null;
-		}
-
 		private class PadEntry {
 			public uint id {
 				get;
