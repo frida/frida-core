@@ -27,7 +27,7 @@ zed_service_winjector_temporary_directory_create_tempdir (void)
   const guint max_chars = MAX_PATH;
   WCHAR * name;
   GUID id;
-  guint len;
+  gsize len;
   gchar * name_utf8;
 
   name = g_new0 (WCHAR, max_chars);

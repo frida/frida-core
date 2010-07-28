@@ -131,7 +131,7 @@ extract_icon_from_process (DWORD pid, IconSize size)
       }
 
       if (icon == NULL)
-        icon = (HICON) GetClassLongPtr (main_window, GCL_HICONSM);
+        icon = (HICON) GetClassLongPtr (main_window, GCLP_HICONSM);
     }
     else if (size == ICON_SIZE_LARGE)
     {
@@ -139,7 +139,7 @@ extract_icon_from_process (DWORD pid, IconSize size)
           flags, timeout, (PDWORD_PTR) &icon);
 
       if (icon == NULL)
-        icon = (HICON) GetClassLongPtr (main_window, GCL_HICON);
+        icon = (HICON) GetClassLongPtr (main_window, GCLP_HICON);
 
       if (icon == NULL)
       {
