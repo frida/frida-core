@@ -55,8 +55,5 @@
     <None Include="script-engine.vala">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="gum.vapi">
-      <Filter>Source Files</Filter>
-    </None>
   </ItemGroup>
 </Project>

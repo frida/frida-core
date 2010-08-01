@@ -88,7 +88,15 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copying GUM's dbghelp.dll into place</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -97,7 +105,15 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
+      <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copying GUM's dbghelp.dll into place</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -106,7 +122,15 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copying GUM's dbghelp.dll into place</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -115,7 +139,15 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
+      <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copying GUM's dbghelp.dll into place</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ProjectReference Include="..\zed-core.vcxproj">
@@ -138,12 +170,14 @@
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -161,12 +195,14 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -184,12 +220,14 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -207,12 +245,14 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"

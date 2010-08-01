@@ -1,6 +1,7 @@
 namespace Zed.Test {
 
 	public static void main (string[] args) {
+		Gum.init ();
 		GLib.Test.init (ref args);
 
 		Zed.Test.CodeService.add_tests ();

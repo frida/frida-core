@@ -52,7 +52,6 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GUM_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <ModuleDefinitionFile>zed-winagent.def</ModuleDefinitionFile>
@@ -66,7 +65,6 @@ resource-compiler.exe --namespace="zed_data" -o "$(IntDir)zed-winagent-64.c" "$(
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>GUM_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <ModuleDefinitionFile>zed-winagent.def</ModuleDefinitionFile>
