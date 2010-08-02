@@ -4,6 +4,7 @@ namespace Zed {
 
 		private static Zed.ScriptEngine script_engine;
 		private static Zed.Investigator investigator;
+		private static Zed.MemoryTracker memory_tracker;
 		private static Zed.GstTracer gst_tracer;
 
 		public void main (string ipc_server_address) {
@@ -71,6 +72,8 @@ namespace Zed {
 				investigator = null;
 			}
 
+			memory_tracker = null;
+
 			script_engine = null;
 		}
 
@@ -83,6 +86,8 @@ namespace Zed {
 			}
 
 			script_engine = new Zed.ScriptEngine (proxy);
+
+			memory_tracker = new Zed.MemoryTracker (proxy);
 
 			/*
 			gst_tracer = new Zed.GstTracer (proxy);

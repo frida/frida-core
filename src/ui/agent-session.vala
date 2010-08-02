@@ -444,6 +444,9 @@ namespace Zed {
 				case "detach":
 					yield handle_detach_command (args);
 					break;
+				case "itracker":
+					yield handle_itracker_command (args);
+					break;
 				default:
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
@@ -643,6 +646,78 @@ namespace Zed {
 			}
 		}
 
+		private void print_itracker_usage () {
+			print_to_console ("Usage: itracker <begin|end|list>");
+		}
+
+		private async void handle_itracker_command (string[] args) {
+			if (args.length != 1) {
+				print_itracker_usage ();
+				return;
+			}
+
+			string action = args[0];
+
+			try {
+				switch (action) {
+					case "begin":
+						yield begin_instance_trace ();
+						print_to_console ("instance trace in progress");
+						break;
+					case "end":
+						yield end_instance_trace ();
+						print_to_console ("instance trace ended");
+						break;
+					case "list":
+						yield handle_itracker_list_command ();
+						break;
+					default:
+						print_itracker_usage ();
+						return;
+				}
+			} catch (IOError e) {
+				print_to_console ("ERROR: " + e.message);
+			}
+		}
+
+		public async void handle_itracker_list_command () throws IOError {
+			var entries = yield dump_instances ();
+			entries.sort ((a_ptr, b_ptr) => {
+				unowned InstanceEntry a = (InstanceEntry) a_ptr;
+				unowned InstanceEntry b = (InstanceEntry) b_ptr;
+
+				int name_equality = GLib.strcmp (a.type_name, b.type_name);
+				if (name_equality != 0)
+					return name_equality;
+
+				if (a.reference_count > b.reference_count)
+					return -1;
+				else if (a.reference_count < b.reference_count)
+					return 1;
+
+				if (a.address < b.address)
+					return -1;
+				else if (a.address > b.address)
+					return 1;
+				else
+					return 0;
+			});
+
+			print_to_console ("%d instances are currently alive".printf (entries.size));
+
+			if (!entries.is_empty) {
+				print_to_console ("");
+				print_to_console ("\t   Address\tRefCount\tTypeName");
+				print_to_console ("\t----------\t--------\t--------");
+
+				foreach (var entry in entries) {
+					print_to_console (("\t0x%08" + uint64.FORMAT_MODIFIER + "x\t%u\t\t%s").printf (entry.address, entry.reference_count, entry.type_name));
+				}
+
+				print_to_console ("");
+			}
+		}
+
 		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
 			var buffer = console_text_buffer;
 
@@ -757,17 +832,68 @@ namespace Zed {
 		private async void detach_script_from_remote_function (uint script_id) throws IOError {
 			try {
 				var argument_variant = new Variant ("u", script_id);
-				var result_variant = yield proxy.query ("DetachScript", argument_variant, "(bs)");
-
-				bool succeeded;
-				string error_message;
-				result_variant.@get ("(bs)", out succeeded, out error_message);
-
-				if (!succeeded)
-					throw new IOError.FAILED (error_message);
+				var result_variant = yield proxy.query ("DetachScript", argument_variant, SIMPLE_RESULT_SIGNATURE);
+				check_simple_result (result_variant);
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.NOT_SUPPORTED (e.message);
 			}
+		}
+
+		private async void begin_instance_trace () throws IOError {
+			try {
+				var result_variant = yield proxy.query ("BeginInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
+				check_simple_result (result_variant);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		private async void end_instance_trace () throws IOError {
+			try {
+				var result_variant = yield proxy.query ("EndInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
+				check_simple_result (result_variant);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		private async Gee.List<InstanceEntry> dump_instances () throws IOError {
+			try {
+				var result_variant = yield proxy.query ("PeekInstances", null, "(ba(tus))");
+
+				bool success;
+				VariantIter entries_iter;
+				result_variant.@get ("(ba(tus))", out success, out entries_iter);
+
+				if (!success)
+					throw new IOError.FAILED ("no trace in progress?");
+
+				var entries = new Gee.ArrayList<InstanceEntry> ();
+
+				Variant entry;
+				while ((entry = entries_iter.next_value ()) != null) {
+					uint64 address;
+					uint ref_count;
+					string type_name;
+					entry.@get ("(tus)", out address, out ref_count, out type_name);
+					entries.add (new InstanceEntry (address, ref_count, type_name));
+				}
+
+				return entries;
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		private const string SIMPLE_RESULT_SIGNATURE = "(bs)";
+
+		private void check_simple_result (Variant result_variant) throws IOError {
+			bool succeeded;
+			string error_message;
+			result_variant.@get (SIMPLE_RESULT_SIGNATURE, out succeeded, out error_message);
+
+			if (!succeeded)
+				throw new IOError.FAILED (error_message);
 		}
 
 		private class ScriptInfo {
@@ -938,6 +1064,29 @@ namespace Zed {
 
 		public FunctionCall (int depth, Service.Module? module, uint64 offset, Service.Function target) {
 			Object (depth: depth, module: module, offset: offset, target: target);
+		}
+	}
+
+	public class InstanceEntry {
+		public uint64 address {
+			get;
+			private set;
+		}
+
+		public uint reference_count {
+			get;
+			private set;
+		}
+
+		public string type_name {
+			get;
+			private set;
+		}
+
+		public InstanceEntry (uint64 address, uint reference_count, string type_name) {
+			this.address = address;
+			this.reference_count = reference_count;
+			this.type_name = type_name;
 		}
 	}
 
