@@ -39,6 +39,12 @@
     <ClCompile Include="$(IntDir)script-engine.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)memory-tracker.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)ipc-types.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
@@ -53,6 +59,12 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="script-engine.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="ipc-types.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="memory-tracker.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
