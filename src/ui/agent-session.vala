@@ -447,6 +447,9 @@ namespace Zed {
 				case "itracker":
 					yield handle_itracker_command (args);
 					break;
+				case "pony":
+					yield handle_pony_command (args);
+					break;
 				default:
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
@@ -477,36 +480,7 @@ namespace Zed {
 
 			try {
 				uint8[] bytes = yield read_remote_memory (address, size);
-
-				uint total_offset = 0;
-				uint line_offset = 0;
-				size_t remaining = bytes.length;
-
-				var builder = new StringBuilder ();
-
-				foreach (uint8 byte in bytes) {
-					if (line_offset == 0) {
-						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
-					} else {
-						builder.append_c (' ');
-						if (line_offset == 7)
-							builder.append_c (' ');
-					}
-
-					builder.append_printf ("%02x", byte);
-
-					total_offset++;
-					line_offset++;
-					remaining--;
-
-					if (line_offset == 16 && remaining != 0) {
-						builder.append_c ('\n');
-						line_offset = 0;
-					}
-				}
-
-				print_to_console (builder.str);
-
+				print_to_console (byte_array_to_hexdump (bytes, address));
 			} catch (IOError read_error) {
 				print_to_console ("ERROR: " + read_error.message);
 			}
@@ -680,7 +654,7 @@ namespace Zed {
 			}
 		}
 
-		public async void handle_itracker_list_command () throws IOError {
+		private async void handle_itracker_list_command () throws IOError {
 			var entries = yield dump_instances ();
 			entries.sort ((a_ptr, b_ptr) => {
 				unowned InstanceEntry a = (InstanceEntry) a_ptr;
@@ -716,6 +690,63 @@ namespace Zed {
 
 				print_to_console ("");
 			}
+		}
+
+		private void print_pony_usage () {
+			print_to_console ("Usage: pony [address-specifier]");
+		}
+
+		private async void handle_pony_command (string[] args) {
+			string hexdump = "";
+
+			if (args.length != 0) {
+				uint64 address = 0, size = 7;
+
+				try {
+					address = yield resolve_address_specifier_arguments (args);
+				} catch (IOError arg_error) {
+					print_to_console ("ERROR: " + arg_error.message);
+					print_to_console ("");
+					print_pony_usage ();
+					return;
+				}
+
+				try {
+					uint8[] bytes = yield read_remote_memory (address, size);
+					hexdump = byte_array_to_hexdump (bytes);
+				} catch (IOError read_error) {
+					print_to_console ("ERROR: " + read_error.message);
+					return;
+				}
+			}
+
+			// Stolen from http://svn.rcbowen.com/svn/public/mod_pony/mod_pony.c
+			print_to_console ("  ,  ,.~\"\"\"\"\"~~..                                           ___");
+			print_to_console ("  )\\,)\\`-,       `~._                                     .'   ``._");
+			print_to_console ("  \\  \\ | )           `~._                   .-\"\"\"\"\"-._   /         ");
+			print_to_console (" _/ ('  ( _(\\            `~~,__________..-\"'          `-<           \\");
+			print_to_console (" )   )   `   )/)   )        \\                            \\           |");
+			print_to_console ("') /)`      \\` \\,-')/\\      (                             \\          |");
+			print_to_console ("(_(\\ /7      |.   /'  )'  _(`                              |         |");
+			print_to_console ("    \\\\      (  `.     ')_/`                                |         /");
+			print_to_console ("     \\       \\   \\              %-26s |        (".printf (hexdump));
+			print_to_console ("      \\ )  /\\/   /                                         |         `~._");
+			print_to_console ("       `-._)     |                                        /.            `~,");
+			print_to_console ("                 |                          |           .'  `~.          (`");
+			print_to_console ("                  \\                       _,\\          /       \\        (``");
+			print_to_console ("                   `/      /       __..-i\"   \\         |        \\      (``");
+			print_to_console ("                  .'     _/`-..--\"\"      `.   `.        \\        ) _.~<``");
+			print_to_console ("                .'    _.j     /            `-.  `.       \\      '=< `");
+			print_to_console ("              .'   _.'   \\    |               `.  `.      \\");
+			print_to_console ("             |   .'       ;   ;               .'  .'`.     \\");
+			print_to_console ("             \\_  `.       |   \\             .'  .'   /    .'");
+			print_to_console ("               `.  `-, __ \\   /           .'  .'     |   (");
+			print_to_console ("                 `.  `'` \\|  |           /  .-`     /   .'");
+			print_to_console ("                   `-._.--t  ;          |_.-)      /  .'");
+			print_to_console ("                          ; /           \\  /      / .'");
+			print_to_console ("                         / /             `'     .' /");
+			print_to_console ("                        /,_\\                  .',_(");
+			print_to_console ("                       /___(                 /___( ");
 		}
 
 		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
@@ -782,6 +813,38 @@ namespace Zed {
 				throw new IOError.INVALID_ARGUMENT ("specified number '%s' is invalid".printf (str));
 
 			return result;
+		}
+
+		private string byte_array_to_hexdump (uint8[] bytes, uint64 address = 0) {
+			uint total_offset = 0;
+			uint line_offset = 0;
+			size_t remaining = bytes.length;
+
+			var builder = new StringBuilder ();
+
+			foreach (uint8 byte in bytes) {
+				if (line_offset == 0) {
+					if (address != 0)
+						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
+				} else {
+					builder.append_c (' ');
+					if (line_offset == 7)
+						builder.append_c (' ');
+				}
+
+				builder.append_printf ("%02x", byte);
+
+				total_offset++;
+				line_offset++;
+				remaining--;
+
+				if (line_offset == 16 && remaining != 0) {
+					builder.append_c ('\n');
+					line_offset = 0;
+				}
+			}
+
+			return builder.str;
 		}
 
 		private async uint8[] read_remote_memory (uint64 address, uint64 size) throws IOError {
