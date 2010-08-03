@@ -81,7 +81,8 @@ win_ipc_server_proxy_connect_named_pipe (void * pipe, WinIpcPipeOperation * op,
 
   win_ipc_pipe_operation_set_function_name (op, "ConnectNamedPipe");
 
-  success = ConnectNamedPipe (pipe, win_ipc_pipe_operation_get_overlapped (op));
+  success = ConnectNamedPipe (pipe, (LPOVERLAPPED)
+      win_ipc_pipe_operation_get_overlapped (op));
   if (!success)
   {
     DWORD os_error;
@@ -153,7 +154,7 @@ win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data)
   guint8 * buf;
   BOOL success;
 
-  buf = g_malloc (PIPE_BUFSIZE);
+  buf = (guint8 *) g_malloc (PIPE_BUFSIZE);
 
   op = win_ipc_pipe_operation_new (data->self->pipe);
   win_ipc_pipe_operation_set_function_name (op, "ReadFileEx");
@@ -162,15 +163,12 @@ win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data)
 
   success = ReadFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
       buf, PIPE_BUFSIZE,
-      win_ipc_pipe_operation_get_overlapped (op),
+      (LPOVERLAPPED) win_ipc_pipe_operation_get_overlapped (op),
       win_ipc_proxy_read_completed);
   if (!success)
   {
     complete_async_result_from_os_error (data->_async_result, GetLastError (),
         op);
-
-    win_ipc_pipe_operation_unref (op);
-    return;
   }
 }
 
@@ -186,15 +184,12 @@ win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data)
 
   success = WriteFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
       data->blob, data->blob_length1,
-      win_ipc_pipe_operation_get_overlapped (op),
+      (LPOVERLAPPED) win_ipc_pipe_operation_get_overlapped (op),
       win_ipc_proxy_write_completed);
   if (!success)
   {
     complete_async_result_from_os_error (data->_async_result, GetLastError (),
         op);
-
-    win_ipc_pipe_operation_unref (op);
-    return;
   }
 }
 
@@ -209,7 +204,7 @@ win_ipc_proxy_read_completed (DWORD os_error, DWORD bytes_transferred,
   guint length;
 
   op = win_ipc_pipe_operation_from_overlapped (overlapped);
-  data = win_ipc_pipe_operation_get_user_data (op);
+  data = (WinIpcProxyReadBlobData *) win_ipc_pipe_operation_get_user_data (op);
 
   res = data->_async_result;
 
@@ -217,7 +212,7 @@ win_ipc_proxy_read_completed (DWORD os_error, DWORD bytes_transferred,
 
   if (err == NULL)
   {
-    data->result = win_ipc_pipe_operation_steal_buffer (op);
+    data->result = (guint8 *) win_ipc_pipe_operation_steal_buffer (op);
     data->result_length1 = bytes_transferred;
   }
   else
@@ -242,7 +237,8 @@ win_ipc_proxy_write_completed (DWORD os_error, DWORD bytes_transferred,
   GError * err = NULL;
 
   op = win_ipc_pipe_operation_from_overlapped (overlapped);
-  data = win_ipc_pipe_operation_get_user_data (op);
+  data = (WinIpcProxyWriteBlobData *)
+      win_ipc_pipe_operation_get_user_data (op);
 
   res = data->_async_result;
 
@@ -408,7 +404,7 @@ pipe_path_from_name (const gchar * name)
   WCHAR * path;
 
   path_utf8 = g_strconcat ("\\\\.\\pipe\\", name, NULL);
-  path = g_utf8_to_utf16 (path_utf8, -1, NULL, NULL, NULL);
+  path = (WCHAR *) g_utf8_to_utf16 (path_utf8, -1, NULL, NULL, NULL);
   g_free (path_utf8);
 
   return path;
