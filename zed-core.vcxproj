@@ -154,11 +154,13 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--library=zed-core				^
 	--header=$(IntDir)zed-core.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -198,11 +200,13 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--library=zed-core				^
 	--header=$(IntDir)zed-core.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -242,11 +246,13 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--library=zed-core				^
 	--header=$(IntDir)zed-core.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -286,11 +292,13 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--library=zed-core				^
 	--header=$(IntDir)zed-core.h			^
 	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
+	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
+	--pkg=gum				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
