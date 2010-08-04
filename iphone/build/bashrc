@@ -1,0 +1,37 @@
+[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
+
+export FRIDA_ROOT="$(pwd)"
+export FRIDA_BUILD="${FRIDA_ROOT}/build"
+export FRIDA_PREFIX="${FRIDA_BUILD}/armv7"
+export FRIDA_PREFIX_LIB="${FRIDA_PREFIX}/lib"
+
+export IPHONE_SDKVER="4.0"
+export IPHONE_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
+export IPHONE_SDKROOT="${IPHONE_DEVROOT}/SDKs/iPhoneOS${IPHONE_SDKVER}.sdk"
+export MACOSX_DEPLOYMENT_TARGET=10.6
+
+export PATH="${FRIDA_BUILD}/tools:${IPHONE_DEVROOT}/usr/bin:/opt/local/bin:${PATH}"
+export PS1="\e[0;33m[\u@\h \w \e[m\e[1;33mfrida-iphone\e[m\e[0;33m]\e[m\n\$ "
+export CLICOLOR=1
+
+export CC="${IPHONE_DEVROOT}/usr/bin/gcc-4.2"
+export CXX="${IPHONE_DEVROOT}/usr/bin/g++-4.2"
+export OBJC="${IPHONE_DEVROOT}/usr/bin/gcc-4.2"
+export LD="${CC}"
+
+export CFLAGS="$CFLAGS -isysroot ${IPHONE_SDKROOT} -miphoneos-version-min=${IPHONE_SDKVER} -arch armv7"
+export CXXFLAGS="$CFLAGS"
+export OBJCFLAGS="$CFLAGS"
+export CPPFLAGS="$CFLAGS"
+export LDFLAGS="-isysroot ${IPHONE_SDKROOT} -Wl,-iphoneos_version_min,${IPHONE_SDKVER} -arch armv7 -Wl,-dead_strip -Wl,-headerpad_max_install_names"
+
+export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I /opt/local/share/aclocal"
+export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
+export LIBTOOLIZE="glibtoolize"
+export CONFIG_SITE="${FRIDA_BUILD}/config.site"
+export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig ${IPHONE_SDKROOT}/usr/lib/pkgconfig"
+
+export LANG="C"
+
+[ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
+
