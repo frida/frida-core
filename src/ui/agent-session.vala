@@ -450,6 +450,9 @@ namespace Zed {
 				case "pony":
 					yield handle_pony_command (args);
 					break;
+				case "test":
+					yield handle_test_command (args);
+					break;
 				default:
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
@@ -747,6 +750,29 @@ namespace Zed {
 			print_to_console ("                         / /             `'     .' /");
 			print_to_console ("                        /,_\\                  .',_(");
 			print_to_console ("                       /___(                 /___( ");
+		}
+
+		private DBusConnection conn;
+
+		private async void handle_test_command (string[] args) {
+			if (args.length != 2) {
+				print_to_console ("nope");
+				return;
+			}
+
+			string ipaddr = args[0];
+			int port = args[1].to_int ();
+
+			var address = "tcp:host=%s,port=%d".printf (ipaddr, port);
+			print_to_console ("connecting to " + address + "...");
+			try {
+				conn = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+			} catch (Error e) {
+				print_to_console ("failed to connect: " + e.message);
+				return;
+			}
+
+			print_to_console ("connected!");
 		}
 
 		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
