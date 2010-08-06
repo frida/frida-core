@@ -26,5 +26,7 @@ autoreconf -ifv
 result=$?
 
 popd &>/dev/null
-exit $result
 
+[ $result -ne 0 ] && exit $result
+
+./configure $*

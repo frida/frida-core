@@ -30,6 +30,10 @@ case "$PACKAGE_TARNAME" in
     ac_cv_func_posix_getgrgid_r=yes
     ac_cv_func_posix_getpwuid_r=yes
   ;;
+  'libgee')
+    enable_shared=no
+    enable_static=yes
+  ;;
   *)
     frida_flags="$frida_warning_flags $frida_flags"
   ;;

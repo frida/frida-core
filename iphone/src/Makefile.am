@@ -1,7 +1,8 @@
 bin_PROGRAMS = zid-server
 
 zid_server_SOURCES = \
-	server.vala
+	server.vala \
+	server-api.vala
 zid_server_LDADD = \
 	$(ZID_LIBS)
 

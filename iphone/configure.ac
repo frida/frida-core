@@ -15,8 +15,8 @@ AM_PROG_VALAC([0.9.4])
 AC_PROG_INSTALL
 
 GLIB_VERSION=2.25.13
-pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION"
-ZID_PACKAGES="--pkg glib-2.0 --pkg gio-2.0"
+pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2"
+ZID_PACKAGES="--pkg glib-2.0 --pkg gio-2.0 --pkg gee-1.0"
 PKG_CHECK_MODULES(ZID, [$pkg_modules])
 AC_SUBST(ZID_CFLAGS)
 AC_SUBST(ZID_LIBS)
