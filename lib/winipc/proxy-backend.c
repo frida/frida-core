@@ -1,12 +1,3 @@
-typedef struct _WinIpcProxyReadBlobData WinIpcProxyReadBlobData;
-typedef struct _WinIpcProxyWriteBlobData WinIpcProxyWriteBlobData;
-typedef struct _WinIpcProxyWaitForOperationData WinIpcProxyWaitForOperationData;
-
-static void win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data);
-static void win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data);
-static void win_ipc_proxy_wait_for_operation_co (
-    WinIpcProxyWaitForOperationData * data);
-
 #include "proxy.c"
 
 #include "wait-handle-source.h"
@@ -25,19 +16,27 @@ struct _WinIpcPipeOverlapped
   WinIpcPipeOperation * operation;
 };
 
+typedef struct _WinIpcProxyWaitContext WinIpcProxyWaitContext;
+
+struct _WinIpcProxyWaitContext
+{
+  GSource * wait_source;
+  GSource * timeout_source;
+  gboolean timed_out;
+};
+
 static gboolean win_ipc_proxy_handle_message (const char * message,
     void * user_data);
 
-static void CALLBACK win_ipc_proxy_read_completed (DWORD os_error,
+static void CALLBACK win_ipc_proxy_read_or_write_completed (DWORD os_error,
     DWORD bytes_transferred, OVERLAPPED * overlapped);
-static void CALLBACK win_ipc_proxy_write_completed (DWORD os_error,
-    DWORD bytes_transferred, OVERLAPPED * overlapped);
+static void win_ipc_proxy_wait_context_free (WinIpcProxyWaitContext * ctx);
 static gboolean win_ipc_proxy_wait_satisfied (gpointer data);
 static gboolean win_ipc_proxy_wait_timed_out (gpointer data);
 
 static WCHAR * pipe_path_from_name (const gchar * name);
 static void complete_async_result_from_os_error (GSimpleAsyncResult * res,
-    DWORD os_error, WinIpcPipeOperation * op);
+    DWORD os_error);
 static GIOErrorEnum io_error_from_os_error (DWORD os_error);
 
 void *
@@ -148,143 +147,174 @@ win_ipc_client_proxy_close_pipe (void * pipe)
 }
 
 static void
-win_ipc_proxy_read_blob_co (WinIpcProxyReadBlobData * data)
+win_ipc_proxy_read_blob (WinIpcProxy * self, GAsyncReadyCallback _callback_,
+    gpointer _user_data_)
 {
-  WinIpcPipeOperation * op;
   guint8 * buf;
+  WinIpcPipeOperation * op;
+  GSimpleAsyncResult * res;
   BOOL success;
 
   buf = (guint8 *) g_malloc (PIPE_BUFSIZE);
 
-  op = win_ipc_pipe_operation_new (data->self->pipe);
+  op = win_ipc_pipe_operation_new (self->pipe);
   win_ipc_pipe_operation_set_function_name (op, "ReadFileEx");
   win_ipc_pipe_operation_set_buffer (op, buf);
-  win_ipc_pipe_operation_set_user_data (op, data);
+
+  res = g_simple_async_result_new (G_OBJECT (self), _callback_, _user_data_,
+      win_ipc_proxy_read_blob);
+  win_ipc_pipe_operation_set_user_data (op, res);
+  g_simple_async_result_set_op_res_gpointer (res, op,
+      win_ipc_pipe_operation_unref);
 
   success = ReadFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
       buf, PIPE_BUFSIZE,
       (LPOVERLAPPED) win_ipc_pipe_operation_get_overlapped (op),
-      win_ipc_proxy_read_completed);
+      win_ipc_proxy_read_or_write_completed);
   if (!success)
-  {
-    complete_async_result_from_os_error (data->_async_result, GetLastError (),
-        op);
-  }
+    complete_async_result_from_os_error (res, GetLastError ());
 }
 
-static void
-win_ipc_proxy_write_blob_co (WinIpcProxyWriteBlobData * data)
+static guint8 *
+win_ipc_proxy_read_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
+    int * result_length1, GError ** error)
 {
-  WinIpcPipeOperation * op;
-  BOOL success;
-
-  op = win_ipc_pipe_operation_new (data->self->pipe);
-  win_ipc_pipe_operation_set_function_name (op, "WriteFileEx");
-  win_ipc_pipe_operation_set_user_data (op, data);
-
-  success = WriteFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
-      data->blob, data->blob_length1,
-      (LPOVERLAPPED) win_ipc_pipe_operation_get_overlapped (op),
-      win_ipc_proxy_write_completed);
-  if (!success)
-  {
-    complete_async_result_from_os_error (data->_async_result, GetLastError (),
-        op);
-  }
-}
-
-static void CALLBACK
-win_ipc_proxy_read_completed (DWORD os_error, DWORD bytes_transferred,
-    OVERLAPPED * overlapped)
-{
-  WinIpcPipeOperation * op;
-  WinIpcProxyReadBlobData * data;
+  guint8 * buffer;
   GSimpleAsyncResult * res;
-  GError * err = NULL;
+  WinIpcPipeOperation * op;
+  GError * err;
   guint length;
 
-  op = win_ipc_pipe_operation_from_overlapped (overlapped);
-  data = (WinIpcProxyReadBlobData *) win_ipc_pipe_operation_get_user_data (op);
-
-  res = data->_async_result;
+  res = G_SIMPLE_ASYNC_RESULT (_res_);
+  op = WIN_IPC_PIPE_OPERATION (g_simple_async_result_get_op_res_gpointer (
+      res));
 
   length = win_ipc_pipe_operation_consume_result (op, &err);
-
   if (err == NULL)
   {
-    data->result = (guint8 *) win_ipc_pipe_operation_steal_buffer (op);
-    data->result_length1 = bytes_transferred;
+    buffer = (guint8 *) win_ipc_pipe_operation_steal_buffer (op);
+    *result_length1 = length;
   }
   else
   {
+    buffer = NULL;
+    *result_length1 = -1;
+
     g_simple_async_result_set_from_error (res, err);
+    g_simple_async_result_propagate_error (res, error);
     g_clear_error (&err);
   }
 
-  g_simple_async_result_complete (res);
-  g_object_unref (res);
-
-  win_ipc_pipe_operation_unref (op);
+  return buffer;
 }
 
-static void CALLBACK
-win_ipc_proxy_write_completed (DWORD os_error, DWORD bytes_transferred,
-    OVERLAPPED * overlapped)
+static void
+win_ipc_proxy_write_blob (WinIpcProxy * self, guint8 * blob, int blob_length1,
+    GAsyncReadyCallback _callback_, gpointer _user_data_)
 {
   WinIpcPipeOperation * op;
-  WinIpcProxyWriteBlobData * data;
   GSimpleAsyncResult * res;
-  GError * err = NULL;
+  BOOL success;
 
-  op = win_ipc_pipe_operation_from_overlapped (overlapped);
-  data = (WinIpcProxyWriteBlobData *)
-      win_ipc_pipe_operation_get_user_data (op);
+  op = win_ipc_pipe_operation_new (self->pipe);
+  win_ipc_pipe_operation_set_function_name (op, "WriteFileEx");
 
-  res = data->_async_result;
+  res = g_simple_async_result_new (G_OBJECT (self), _callback_, _user_data_,
+      win_ipc_proxy_write_blob);
+  win_ipc_pipe_operation_set_user_data (op, res);
+  g_simple_async_result_set_op_res_gpointer (res, op,
+      win_ipc_pipe_operation_unref);
+
+  success = WriteFileEx (win_ipc_pipe_operation_get_pipe_handle (op),
+      blob, blob_length1,
+      (LPOVERLAPPED) win_ipc_pipe_operation_get_overlapped (op),
+      win_ipc_proxy_read_or_write_completed);
+  if (!success)
+    complete_async_result_from_os_error (res, GetLastError ());
+}
+
+static void
+win_ipc_proxy_write_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
+    GError ** error)
+{
+  GSimpleAsyncResult * res;
+  WinIpcPipeOperation * op;
+  GError * err;
+  guint length;
+
+  res = G_SIMPLE_ASYNC_RESULT (_res_);
+  op = WIN_IPC_PIPE_OPERATION (g_simple_async_result_get_op_res_gpointer (
+      res));
 
   win_ipc_pipe_operation_consume_result (op, &err);
-
   if (err != NULL)
   {
     g_simple_async_result_set_from_error (res, err);
+    g_simple_async_result_propagate_error (res, error);
     g_clear_error (&err);
   }
-
-  g_simple_async_result_complete (res);
-  g_object_unref (res);
-
-  win_ipc_pipe_operation_unref (op);
 }
 
-typedef struct _WinIpcProxyWaitContext WinIpcProxyWaitContext;
-
-struct _WinIpcProxyWaitContext
+static void CALLBACK
+win_ipc_proxy_read_or_write_completed (DWORD os_error, DWORD bytes_transferred,
+    OVERLAPPED * overlapped)
 {
-  WinIpcProxyWaitForOperationData * data;
-  GSource * wait_source;
-  GSource * timeout_source;
-};
+  WinIpcPipeOperation * op;
+  GSimpleAsyncResult * res;
+
+  op = win_ipc_pipe_operation_from_overlapped (overlapped);
+  res = G_SIMPLE_ASYNC_RESULT (win_ipc_pipe_operation_get_user_data (op));
+  g_simple_async_result_complete (res);
+  g_object_unref (res);
+}
 
 static void
-win_ipc_proxy_wait_for_operation_co (WinIpcProxyWaitForOperationData * data)
+win_ipc_proxy_wait_for_operation (WinIpcProxy * self, WinIpcPipeOperation * op,
+    guint timeout_msec, GAsyncReadyCallback _callback_, gpointer _user_data_)
 {
+  GSimpleAsyncResult * res;
   WinIpcProxyWaitContext * ctx;
   HANDLE wait_handle;
-  GSource * source;
+
+  res = g_simple_async_result_new (G_OBJECT (self), _callback_, _user_data_,
+      win_ipc_proxy_wait_for_operation);
 
   ctx = g_new0 (WinIpcProxyWaitContext, 1);
-  ctx->data = data;
+  g_simple_async_result_set_op_res_gpointer (res, ctx,
+      (GDestroyNotify) win_ipc_proxy_wait_context_free);
 
-  wait_handle = win_ipc_pipe_operation_get_wait_handle (data->op);
-  ctx->wait_source = source = win_ipc_wait_handle_source_new (wait_handle);
-  g_source_set_callback (source, win_ipc_proxy_wait_satisfied, ctx, NULL);
-  g_source_attach (source, g_main_context_get_thread_default ());
+  wait_handle = win_ipc_pipe_operation_get_wait_handle (op);
+  ctx->wait_source = win_ipc_wait_handle_source_new (wait_handle);
+  g_source_set_callback (ctx->wait_source, win_ipc_proxy_wait_satisfied,
+      res, NULL);
+  g_source_attach (ctx->wait_source, g_main_context_get_thread_default ());
 
-  if (data->timeout_msec != 0)
+  if (timeout_msec != 0)
   {
-    ctx->timeout_source = source = g_timeout_source_new (data->timeout_msec);
-    g_source_set_callback (source, win_ipc_proxy_wait_timed_out, ctx, NULL);
-    g_source_attach (source, g_main_context_get_thread_default ());
+    ctx->timeout_source = g_timeout_source_new (timeout_msec);
+    g_source_set_callback (ctx->timeout_source, win_ipc_proxy_wait_timed_out,
+        res, NULL);
+    g_source_attach (ctx->timeout_source,
+        g_main_context_get_thread_default ());
+  }
+}
+
+static void
+win_ipc_proxy_wait_for_operation_finish (WinIpcProxy * self,
+    GAsyncResult * _res_, GError ** error)
+{
+  GSimpleAsyncResult * res;
+  WinIpcProxyWaitContext * ctx;
+
+  res = G_SIMPLE_ASYNC_RESULT (_res_);
+  ctx = (WinIpcProxyWaitContext *)
+      g_simple_async_result_get_op_res_gpointer (res);
+
+  if (ctx->timed_out)
+  {
+    g_simple_async_result_set_error (res, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+        "Operation timed out");
+    g_simple_async_result_propagate_error (res, error);
   }
 }
 
@@ -300,17 +330,20 @@ win_ipc_proxy_wait_context_free (WinIpcProxyWaitContext * ctx)
 static gboolean
 win_ipc_proxy_wait_satisfied (gpointer data)
 {
-  WinIpcProxyWaitContext * ctx = data;
   GSimpleAsyncResult * res;
+  WinIpcProxyWaitContext * ctx;
+
+  res = G_SIMPLE_ASYNC_RESULT (data);
+  ctx = (WinIpcProxyWaitContext *)
+      g_simple_async_result_get_op_res_gpointer (res);
+
+  ctx->timed_out = FALSE;
 
   if (ctx->timeout_source != NULL)
     g_source_destroy (ctx->timeout_source);
 
-  res = ctx->data->_async_result;
   g_simple_async_result_complete (res);
   g_object_unref (res);
-
-  win_ipc_proxy_wait_context_free (ctx);
 
   return FALSE;
 }
@@ -318,18 +351,19 @@ win_ipc_proxy_wait_satisfied (gpointer data)
 static gboolean
 win_ipc_proxy_wait_timed_out (gpointer data)
 {
-  WinIpcProxyWaitContext * ctx = data;
   GSimpleAsyncResult * res;
+  WinIpcProxyWaitContext * ctx;
+
+  res = G_SIMPLE_ASYNC_RESULT (data);
+  ctx = (WinIpcProxyWaitContext *)
+      g_simple_async_result_get_op_res_gpointer (res);
+
+  ctx->timed_out = TRUE;
 
   g_source_destroy (ctx->wait_source);
 
-  res = ctx->data->_async_result;
-  g_simple_async_result_set_error (res, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
-      "Operation timed out");
   g_simple_async_result_complete (res);
   g_object_unref (res);
-
-  win_ipc_proxy_wait_context_free (ctx);
 
   return FALSE;
 }
@@ -350,7 +384,10 @@ win_ipc_pipe_operation_consume_result (WinIpcPipeOperation * self,
   BOOL success;
 
   pipe = win_ipc_pipe_operation_get_pipe_handle (self);
-  overlapped = win_ipc_pipe_operation_get_overlapped (self);
+  overlapped = (OVERLAPPED *) win_ipc_pipe_operation_get_overlapped (self);
+
+  if (error != NULL)
+    *error = NULL;
 
   success = GetOverlappedResult (pipe, overlapped, &bytes_transferred, FALSE);
   if (!success)
@@ -411,16 +448,18 @@ pipe_path_from_name (const gchar * name)
 }
 
 static void
-complete_async_result_from_os_error (GSimpleAsyncResult * res, DWORD os_error,
-    WinIpcPipeOperation * op)
+complete_async_result_from_os_error (GSimpleAsyncResult * res, DWORD os_error)
 {
+  WinIpcPipeOperation * op;
+
+  op = (WinIpcPipeOperation *) g_simple_async_result_get_op_res_gpointer (res);
   g_simple_async_result_set_error (res,
       G_IO_ERROR, io_error_from_os_error (os_error),
-      "%s failed: %d", win_ipc_pipe_operation_get_function_name (op), os_error);
+      "%s failed: %d",
+      win_ipc_pipe_operation_get_function_name (op),
+      os_error);
   g_simple_async_result_complete (res);
   g_object_unref (res);
-
-  win_ipc_pipe_operation_unref (op);
 }
 
 static GIOErrorEnum

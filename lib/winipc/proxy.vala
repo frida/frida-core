@@ -122,7 +122,7 @@ namespace WinIpc {
 			}
 
 			if (matching_id != null)
-				query_handlers.remove (matching_id);
+				query_handlers.unset (matching_id);
 		}
 
 		public uint add_notify_handler (string id, string? argument_type, NotifySyncHandler sync_handler) {
