@@ -37,6 +37,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
+    <Filter Include="Source Files\generated\iphone">
+      <UniqueIdentifier>{da4a0633-9d04-4089-b979-b3f2f8f083d3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\iphone\src">
+      <UniqueIdentifier>{6fa799fd-4d40-4c6e-a61e-c7ee28b14a72}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -184,6 +190,9 @@
     </ClCompile>
     <ClCompile Include="src\ui\agent-session-glue.c">
       <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)iphone\src\server-api.c">
+      <Filter>Source Files\generated\iphone\src</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

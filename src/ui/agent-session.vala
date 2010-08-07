@@ -767,12 +767,31 @@ namespace Zed {
 			print_to_console ("connecting to " + address + "...");
 			try {
 				conn = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (Error e) {
-				print_to_console ("failed to connect: " + e.message);
+			} catch (Error conn_error) {
+				print_to_console ("failed to connect: " + conn_error.message);
 				return;
 			}
 
 			print_to_console ("connected!");
+
+			print_to_console ("getting proxy");
+			Zid.Controller controller;
+
+			try {
+				controller = Bus.get_proxy_for_connection_sync (conn, null, Zid.ObjectPath.CONTROLLER);
+			} catch (IOError get_proxy_error) {
+				print_to_console ("failed to get proxy: " + get_proxy_error.message);
+				return;
+			}
+			print_to_console ("got it");
+
+			try {
+				controller.say ("baby");
+			} catch (IOError proxy_error) {
+				print_to_console ("failed: " + proxy_error.message);
+				return;
+			}
+			print_to_console ("all done");
 		}
 
 		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
