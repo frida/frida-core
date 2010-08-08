@@ -7,6 +7,7 @@ namespace Zed.Test {
 		Zed.Test.CodeService.add_tests ();
 		Zed.Test.WinIpc.add_tests ();
 		Zed.Test.Winjector.add_tests ();
+		Zed.Test.HostSession.add_tests ();
 
 		GLib.Test.run ();
 	}
