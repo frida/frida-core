@@ -19,6 +19,11 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
+			var h = new Harness ((h) => Fruity.backend (h));
+			h.run ();
+		});
+
 #endif
 	}
 
@@ -105,6 +110,32 @@ namespace Zed.HostSessionTest {
 
 	}
 
+	namespace Fruity {
+
+		private static async void backend (Harness h) {
+			h.service.add_backend (new FruityHostSessionBackend ());
+			h.service.start ();
+			h.disable_timeout (); /* this is a manual test after all */
+			yield h.wait_for_provider ();
+			var prov = h.first_provider ();
+
+			try {
+				var session = yield prov.create ();
+				var processes = yield session.enumerate_processes ();
+				assert (processes.length > 0);
+				/*
+				foreach (var process in processes)
+					stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
+				*/
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+	}
+
 #endif
 
 	private class Harness : Object {
@@ -120,6 +151,7 @@ namespace Zed.HostSessionTest {
 
 		private MainContext main_context;
 		private MainLoop main_loop;
+		private TimeoutSource timeout_source;
 
 		public Harness (TestSequenceFunc func) {
 			test_sequence = func;
@@ -137,6 +169,12 @@ namespace Zed.HostSessionTest {
 			main_loop = new MainLoop (main_context);
 		}
 
+		public async void wait_for_provider () {
+			while (available_providers.is_empty) {
+				yield process_events ();
+			}
+		}
+
 		public void assert_no_providers_available () {
 			assert (available_providers.is_empty);
 		}
@@ -150,16 +188,21 @@ namespace Zed.HostSessionTest {
 			return available_providers[0];
 		}
 
+		public void disable_timeout () {
+			timeout_source.destroy ();
+			timeout_source = null;
+		}
+
 		public void run () {
 			var timed_out = false;
 
-			var timeout = new TimeoutSource.seconds (5);
-			timeout.set_callback (() => {
+			timeout_source = new TimeoutSource.seconds (5);
+			timeout_source.set_callback (() => {
 				timed_out = true;
 				main_loop.quit ();
 				return false;
 			});
-			timeout.attach (main_context);
+			timeout_source.attach (main_context);
 
 			var idle = new IdleSource ();
 			var func = test_sequence; /* FIXME: workaround for bug in valac */

@@ -49,6 +49,12 @@
     <Filter Include="Source Files\generated\service\windows">
       <UniqueIdentifier>{21f538e1-a14f-441b-9e2e-7303c1465c5b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\service\fruity">
+      <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25619}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\service\fruity">
+      <UniqueIdentifier>{2d5a13f8-9bcb-4d70-9f8a-9597707fc771}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -109,6 +115,9 @@
       <Filter>Source Files\service\windows</Filter>
     </None>
     <None Include="src\service\windows\windows-host-session.vala" />
+    <None Include="src\service\fruity\fruity-host-session.vala">
+      <Filter>Source Files\service\fruity</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -124,9 +133,6 @@
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\muc-service.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\ui\chat.c">
@@ -207,11 +213,17 @@
     <ClCompile Include="$(IntDir)src\service\windows\winjector.c">
       <Filter>Source Files\generated\service\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\service\windows\windows-host-session-glue.c">
       <Filter>Source Files\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
+      <Filter>Source Files\generated\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\fruity\fruity-host-session.c">
+      <Filter>Source Files\generated\service\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
+      <Filter>Source Files\generated\service</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
