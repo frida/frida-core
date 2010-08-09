@@ -1,6 +1,6 @@
 using WinIpc;
 
-namespace Zed.Test.WinIpc {
+namespace Zed.WinIpcTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/already-connected", () => {
 			var h = new IpcHarness ((h) => Establish.already_connected (h));

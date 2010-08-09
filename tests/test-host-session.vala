@@ -1,30 +1,122 @@
 using Zed.Service;
 
-namespace Zed.Test.HostSession {
+namespace Zed.HostSessionTest {
 	public static void add_tests () {
-		GLib.Test.add_func ("/HostSession/Factory/new-provider", () => {
-			var h = new Harness ((h) => Factory.new_provider (h));
+		GLib.Test.add_func ("/HostSession/Service/provider-available", () => {
+			var h = new Harness ((h) => Service.provider_available (h));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Service/provider-unavailable", () => {
+			var h = new Harness ((h) => Service.provider_unavailable (h));
+			h.run ();
+		});
+
+#if WINDOWS
+
+		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
+			var h = new Harness ((h) => Windows.backend (h));
+			h.run ();
+		});
+
+#endif
 	}
 
-	namespace Factory {
+	namespace Service {
 
-		private static async void new_provider (Harness h) {
+		private static async void provider_available (Harness h) {
+			h.assert_no_providers_available ();
+			var backend = new StubBackend ();
+			h.service.add_backend (backend);
+			yield h.process_events ();
+			h.assert_no_providers_available ();
+
+			h.service.start ();
+			h.assert_no_providers_available ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+
+			h.done ();
+		}
+
+		private static async void provider_unavailable (Harness h) {
+			var backend = new StubBackend ();
+			h.service.add_backend (backend);
+			h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+
+			backend.disable_provider ();
+			h.assert_n_providers_available (0);
+
+			h.done ();
+		}
+
+		private class StubBackend : Object, HostSessionBackend {
+			private StubProvider provider = new StubProvider ();
+
+			public void start () {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					provider_available (provider);
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
+
+			public void disable_provider () {
+				provider_unavailable (provider);
+			}
+		}
+
+		private class StubProvider : Object, HostSessionProvider {
+			public async HostSession create () throws IOError {
+				throw new IOError.FAILED ("Not implemented");
+			}
+		}
+
+	}
+
+#if WINDOWS
+
+	namespace Windows {
+
+		private static async void backend (Harness h) {
+			h.service.add_backend (new WindowsHostSessionBackend ());
+			h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			try {
+				var session = yield prov.create ();
+				var processes = yield session.enumerate_processes ();
+				assert (processes.length > 0);
+				/*
+				foreach (var process in processes)
+					stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
+				*/
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 
 			h.done ();
 		}
 
 	}
 
+#endif
+
 	private class Harness : Object {
 		public delegate void TestSequenceFunc (Harness h);
 		private TestSequenceFunc test_sequence;
 
-		public HostSessionFactory factory {
+		public HostSessionService service {
 			get;
 			private set;
 		}
+
+		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
 		private MainContext main_context;
 		private MainLoop main_loop;
@@ -34,15 +126,34 @@ namespace Zed.Test.HostSession {
 		}
 
 		construct {
-			factory = new HostSessionFactory ();
+			service = new HostSessionService ();
+			service.provider_available.connect ((provider) => {
+				assert (available_providers.add (provider));
+			});
+			service.provider_unavailable.connect ((provider) => {
+				assert (available_providers.remove (provider));
+			});
 			main_context = new MainContext ();
 			main_loop = new MainLoop (main_context);
+		}
+
+		public void assert_no_providers_available () {
+			assert (available_providers.is_empty);
+		}
+
+		public void assert_n_providers_available (int n) {
+			assert (available_providers.size == n);
+		}
+
+		public HostSessionProvider first_provider () {
+			assert (available_providers.size >= 1);
+			return available_providers[0];
 		}
 
 		public void run () {
 			var timed_out = false;
 
-			var timeout = new TimeoutSource.seconds (1);
+			var timeout = new TimeoutSource.seconds (5);
 			timeout.set_callback (() => {
 				timed_out = true;
 				main_loop.quit ();

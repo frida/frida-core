@@ -1,7 +1,7 @@
 #include <windows.h>
 #include <strsafe.h>
 
-#include "src/service/winjector.c"
+#include "src/service/windows/winjector.c"
 
 gboolean
 zed_service_winjector_helper_is_process_still_running (void * handle)

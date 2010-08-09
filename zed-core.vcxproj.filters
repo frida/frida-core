@@ -43,6 +43,12 @@
     <Filter Include="Source Files\generated\iphone\src">
       <UniqueIdentifier>{6fa799fd-4d40-4c6e-a61e-c7ee28b14a72}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\service\windows">
+      <UniqueIdentifier>{28f8e0ab-f994-4a5b-b62b-edcdcb9d0c34}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\service\windows">
+      <UniqueIdentifier>{21f538e1-a14f-441b-9e2e-7303c1465c5b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -67,9 +73,6 @@
       <Filter>Source Files\service</Filter>
     </None>
     <None Include="src\service\muc-service.vala">
-      <Filter>Source Files\service</Filter>
-    </None>
-    <None Include="src\service\winjector.vala">
       <Filter>Source Files\service</Filter>
     </None>
     <None Include="src\service\xmpp-client.vala">
@@ -102,6 +105,10 @@
     <None Include="src\service\host-session.vala">
       <Filter>Source Files\service</Filter>
     </None>
+    <None Include="src\service\windows\winjector.vala">
+      <Filter>Source Files\service\windows</Filter>
+    </None>
+    <None Include="src\service\windows\windows-host-session.vala" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -117,9 +124,6 @@
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\muc-service.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\winjector.c">
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
@@ -140,20 +144,11 @@
     <ClCompile Include="$(IntDir)src\ui\workspace.c">
       <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\winjector-impl.c">
-      <Filter>Source Files\service</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.c">
       <Filter>Source Files\data\generated</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.c">
       <Filter>Source Files\data\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\winjector-error.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\winjector-ipc.c">
-      <Filter>Source Files\generated\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.c">
       <Filter>Source Files\data\generated</Filter>
@@ -199,6 +194,24 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\host-session.c">
       <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\windows\winjector-error.c">
+      <Filter>Source Files\generated\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\service\windows\winjector-impl.c">
+      <Filter>Source Files\generated\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\windows\winjector-ipc.c">
+      <Filter>Source Files\generated\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\windows\winjector.c">
+      <Filter>Source Files\generated\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\service\windows\windows-host-session-glue.c">
+      <Filter>Source Files\service\windows</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

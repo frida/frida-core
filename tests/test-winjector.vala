@@ -1,6 +1,6 @@
 using WinIpc;
 
-namespace Zed.Test.Winjector {
+namespace Zed.WinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Winjector/inject/x86", () => {
 			var rat = new LabRat ("winvictim-busy32");
@@ -24,7 +24,7 @@ namespace Zed.Test.Winjector {
 	}
 
 	private class LabRat {
-		public Process process {
+		public Zed.Test.Process process {
 			get;
 			private set;
 		}
@@ -34,12 +34,12 @@ namespace Zed.Test.Winjector {
 		private Service.Winjector injector;
 
 		public LabRat (string name) {
-			var self_filename = Process.current.filename;
+			var self_filename = Zed.Test.Process.current.filename;
 			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename)))),
 				"tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			process = Process.start (rat_file);
+			process = Zed.Test.Process.start (rat_file);
 		}
 
 		public Proxy inject (string name) {
@@ -61,8 +61,8 @@ namespace Zed.Test.Winjector {
 
 			try {
 				exitcode = process.join (1000);
-			} catch (ProcessError e) {
-				var timed_out_error = new ProcessError.TIMED_OUT ("");
+			} catch (Zed.Test.ProcessError e) {
+				var timed_out_error = new Zed.Test.ProcessError.TIMED_OUT ("");
 				if (e.code == timed_out_error.code)
 					wait_for_exit_timed_out = true;
 				else

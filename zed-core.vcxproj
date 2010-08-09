@@ -137,9 +137,10 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/service/process-info.vala			^
 	src/service/process-list.vala			^
 	src/service/storage-backend.vala		^
-	src/service/winjector-error.vala			^
-	src/service/winjector-ipc.vala			^
-	src/service/winjector.vala			^
+	src/service/windows/windows-host-session.vala		^
+	src/service/windows/winjector-error.vala		^
+	src/service/windows/winjector-ipc.vala		^
+	src/service/windows/winjector.vala		^
 	src/service/xmpp-client.vala			^
 	src/ui/agent-session.vala			^
 	src/ui/chat.vala				^
@@ -166,7 +167,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\winjector-error.vala;$(ProjectDir)src\service\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
@@ -185,9 +186,10 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/service/process-info.vala			^
 	src/service/process-list.vala			^
 	src/service/storage-backend.vala		^
-	src/service/winjector-error.vala			^
-	src/service/winjector-ipc.vala			^
-	src/service/winjector.vala			^
+	src/service/windows/windows-host-session.vala		^
+	src/service/windows/winjector-error.vala		^
+	src/service/windows/winjector-ipc.vala		^
+	src/service/windows/winjector.vala		^
 	src/service/xmpp-client.vala			^
 	src/ui/agent-session.vala			^
 	src/ui/chat.vala				^
@@ -214,7 +216,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\winjector-error.vala;$(ProjectDir)src\service\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
@@ -233,9 +235,10 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/service/process-info.vala			^
 	src/service/process-list.vala			^
 	src/service/storage-backend.vala		^
-	src/service/winjector-error.vala			^
-	src/service/winjector-ipc.vala			^
-	src/service/winjector.vala			^
+	src/service/windows/windows-host-session.vala		^
+	src/service/windows/winjector-error.vala		^
+	src/service/windows/winjector-ipc.vala		^
+	src/service/windows/winjector.vala		^
 	src/service/xmpp-client.vala			^
 	src/ui/agent-session.vala			^
 	src/ui/chat.vala				^
@@ -262,7 +265,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\winjector-error.vala;$(ProjectDir)src\service\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
@@ -281,9 +284,10 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/service/process-info.vala			^
 	src/service/process-list.vala			^
 	src/service/storage-backend.vala		^
-	src/service/winjector-error.vala			^
-	src/service/winjector-ipc.vala			^
-	src/service/winjector.vala			^
+	src/service/windows/windows-host-session.vala		^
+	src/service/windows/winjector-error.vala		^
+	src/service/windows/winjector-ipc.vala		^
+	src/service/windows/winjector.vala		^
 	src/service/xmpp-client.vala			^
 	src/ui/agent-session.vala			^
 	src/ui/chat.vala				^
@@ -310,12 +314,20 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\winjector.vala;$(ProjectDir)src\service\winjector-error.vala;$(ProjectDir)src\service\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\spy.vala;$(ProjectDir)src\ui\workspace.vala;$(ProjectDir)iphone\src\server-api.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
+    <None Include="data\ui.vala" />
+    <None Include="src\service\base-service.vala" />
     <None Include="src\service\code-service.vala" />
     <None Include="src\service\host-session.vala" />
+    <None Include="src\service\muc-service.vala" />
+    <None Include="src\service\process-info.vala" />
+    <None Include="src\service\process-list.vala" />
     <None Include="src\service\storage-backend.vala" />
+    <None Include="src\service\windows\windows-host-session.vala" />
+    <None Include="src\service\windows\winjector.vala" />
+    <None Include="src\service\xmpp-client.vala" />
     <None Include="src\ui\agent-session.vala" />
     <None Include="src\ui\chat.vala" />
     <None Include="src\ui\function-selector.vala" />
@@ -324,13 +336,6 @@ echo &gt; "$(IntDir)valacode.stamp"
     <None Include="src\ui\root.vala" />
     <None Include="src\ui\spy.vala" />
     <None Include="src\ui\workspace.vala" />
-    <None Include="data\ui.vala" />
-    <None Include="src\service\base-service.vala" />
-    <None Include="src\service\muc-service.vala" />
-    <None Include="src\service\process-info.vala" />
-    <None Include="src\service\process-list.vala" />
-    <None Include="src\service\winjector.vala" />
-    <None Include="src\service\xmpp-client.vala" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c" />
@@ -343,14 +348,15 @@ echo &gt; "$(IntDir)valacode.stamp"
     <ClCompile Include="$(IntDir)src\service\process-info.c" />
     <ClCompile Include="$(IntDir)src\service\process-list.c" />
     <ClCompile Include="$(IntDir)src\service\storage-backend.c" />
-    <ClCompile Include="$(IntDir)src\service\winjector.c">
+    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c" />
+    <ClCompile Include="$(IntDir)src\service\windows\winjector.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\winjector-error.c" />
-    <ClCompile Include="$(IntDir)src\service\winjector-ipc.c" />
+    <ClCompile Include="$(IntDir)src\service\windows\winjector-error.c" />
+    <ClCompile Include="$(IntDir)src\service\windows\winjector-ipc.c" />
     <ClCompile Include="$(IntDir)src\service\xmpp-client.c" />
     <ClCompile Include="$(IntDir)src\ui\agent-session.c" />
     <ClCompile Include="$(IntDir)src\ui\chat.c" />
@@ -365,7 +371,8 @@ echo &gt; "$(IntDir)valacode.stamp"
     <ClCompile Include="data\windows.c" />
     <ClCompile Include="src\service\process-list-glue.c" />
     <ClCompile Include="src\service\storage-backend-glue.c" />
-    <ClCompile Include="src\service\winjector-impl.c" />
+    <ClCompile Include="src\service\windows\windows-host-session-glue.c" />
+    <ClCompile Include="src\service\windows\winjector-impl.c" />
     <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.c" />
     <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.c" />
     <ClCompile Include="src\ui\agent-session-glue.c" />
@@ -388,7 +395,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="src\service\winjector-helper-32.vcxproj">
+    <ProjectReference Include="src\service\windows\winjector-helper-32.vcxproj">
       <Project>{e0ac03f2-f077-4ba7-88dd-bbe95b4e4ef0}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -396,7 +403,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="src\service\winjector-helper-64.vcxproj">
+    <ProjectReference Include="src\service\windows\winjector-helper-64.vcxproj">
       <Project>{037e8466-f87b-486d-b6ad-fecb5740ce2c}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>

@@ -1,6 +1,6 @@
 using WinIpc;
 
-namespace Zed.Test.CodeService {
+namespace Zed.CodeServiceTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/CodeService/Lookup/module-spec-by-uid", () => {
 			var h = new CodeServiceHarness ((h) => Lookup.module_spec_by_uid (h));

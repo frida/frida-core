@@ -167,6 +167,7 @@
 	test-winipc.vala				^
 	test-winjector.vala				^
 	process.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
@@ -193,6 +194,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	test-winipc.vala				^
 	test-winjector.vala				^
 	process.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
@@ -219,6 +221,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	test-winipc.vala				^
 	test-winjector.vala				^
 	process.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
@@ -245,6 +248,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	test-winipc.vala				^
 	test-winjector.vala				^
 	process.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^

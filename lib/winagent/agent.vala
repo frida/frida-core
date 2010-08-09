@@ -82,7 +82,6 @@ namespace Zed {
 				yield proxy.establish ();
 			} catch (WinIpc.ProxyError e) {
 				error (e.message);
-				return;
 			}
 
 			script_engine = new Zed.ScriptEngine (proxy);
