@@ -97,10 +97,8 @@ namespace Zed.HostSessionTest {
 				var session = yield prov.create ();
 				var processes = yield session.enumerate_processes ();
 				assert (processes.length > 0);
-				/*
 				foreach (var process in processes)
 					stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
-				*/
 			} catch (IOError e) {
 				assert_not_reached ();
 			}

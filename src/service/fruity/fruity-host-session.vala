@@ -49,6 +49,9 @@ namespace Zed.Service {
 		}
 
 		public async HostSession create () throws IOError {
+			var client = new Fruity.Client ();
+			yield client.establish ();
+			yield client.connect_to_port (device_id, 1337);
 			return new FruityHostSession ();
 		}
 	}
@@ -61,36 +64,73 @@ namespace Zed.Service {
 
 	namespace Fruity {
 		private class Client : Object {
-			private SocketConnection connection;
+			public SocketConnection connection {
+				get;
+				private set;
+			}
 			private InputStream input;
 			private OutputStream output;
 
-			private bool running = false;
-			private uint last_tag = 1;
-			private Gee.ArrayList<PendingResponse> pending_responses = new Gee.ArrayList<PendingResponse> ();
+			private bool running;
+			private uint last_tag;
+			private uint mode_switch_tag;
+			private Gee.ArrayList<PendingResponse> pending_responses;
 
 			public signal void device_connected (uint device_id);
 			public signal void device_disconnected (uint device_id);
 
-			public async void establish () throws Error {
+			public Client () {
+				reset ();
+			}
+
+			private void reset () {
+				connection = null;
+				input = null;
+				output = null;
+
+				running = false;
+				last_tag = 1;
+				mode_switch_tag = 0;
+				pending_responses = new Gee.ArrayList<PendingResponse> ();
+			}
+
+			public async void establish () throws IOError {
 				assert (!running);
-				running = true;
 
 				var client = new SocketClient ();
 
 				try {
 					connection = yield client.connect_to_host_async ("127.0.0.1", 27015);
+					input = connection.get_input_stream ();
+					output = connection.get_output_stream ();
+
+					running = true;
+
+					process_incoming_messages ();
+
+					yield perform_handshake ();
 				} catch (Error e) {
-					running = false;
-					return;
+					reset ();
+					throw new IOError.FAILED (e.message);
 				}
+			}
 
-				input = new BufferedInputStream (connection.get_input_stream ());
-				output = connection.get_output_stream ();
+			public async void connect_to_port (uint device_id, uint port) throws IOError {
+				assert (running);
 
-				process_incoming_messages ();
+				uint8[] connect_body = new uint8[8];
 
-				yield perform_handshake ();
+				uint32 * p = (void *) connect_body;
+				p[0] = device_id.to_little_endian ();
+				p[1] = port.to_big_endian ();
+
+				try {
+					int result = yield send_request_and_receive_response (MessageType.CONNECT, connect_body, true);
+					if (result != ResultCode.SUCCESS)
+						throw new IOError.FAILED ("connect failed: %d", result);
+				} catch (Error e) {
+					throw new IOError.FAILED (e.message);
+				}
 			}
 
 			private async void perform_handshake () throws Error {
@@ -99,9 +139,13 @@ namespace Zed.Service {
 					throw new IOError.FAILED ("handshake failed, result %d", result);
 			}
 
-			private async int send_request_and_receive_response (MessageType type) throws Error {
+			private async int send_request_and_receive_response (MessageType type, uint8[]? body = null, bool is_mode_switch_request = false) throws Error {
 				uint32 tag = last_tag++;
-				var request = create_message (type, tag);
+
+				if (is_mode_switch_request)
+					mode_switch_tag = tag;
+
+				var request = create_message (type, tag, body);
 				var pending = new PendingResponse (tag, () => send_request_and_receive_response.callback ());
 				pending_responses.add (pending);
 				yield write_message (request);
@@ -143,6 +187,14 @@ namespace Zed.Service {
 									throw new IOError.FAILED ("response to unknown tag");
 								pending_responses.remove (match);
 								match.complete (result);
+
+								if (tag == mode_switch_tag) {
+									if (result == ResultCode.SUCCESS)
+										return;
+									else
+										mode_switch_tag = 0;
+								}
+
 								break;
 
 							case MessageType.DEVICE_CONNECTED:
@@ -165,7 +217,7 @@ namespace Zed.Service {
 
 					} catch (Error e) {
 						debug ("read error: %s", e.message);
-						running = false;
+						reset ();
 					}
 				}
 			}
@@ -203,13 +255,24 @@ namespace Zed.Service {
 					throw new IOError.FAILED ("short write");
 			}
 
-			private uint8[] create_message (MessageType type, uint32 tag) {
-				uint8[] blob = new uint8[16];
+			private uint8[] create_message (MessageType type, uint32 tag, uint8[]? body = null) {
+				uint body_size = 0;
+				if (body != null)
+					body_size = body.length;
+
+				uint8[] blob = new uint8[16 + body_size];
+
 				uint32 * p = (void *) blob;
 				p[0] = blob.length;
 				p[1] = 0;
 				p[2] = ((uint) type).to_little_endian ();
 				p[3] = tag.to_little_endian ();
+
+				if (body_size != 0) {
+					uint8 * blob_start = (void *) blob;
+					Memory.copy (blob_start + 16, body, body_size);
+				}
+
 				return blob;
 			}
 

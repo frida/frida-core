@@ -114,9 +114,11 @@
     <None Include="src\service\windows\winjector.vala">
       <Filter>Source Files\service\windows</Filter>
     </None>
-    <None Include="src\service\windows\windows-host-session.vala" />
     <None Include="src\service\fruity\fruity-host-session.vala">
       <Filter>Source Files\service\fruity</Filter>
+    </None>
+    <None Include="src\service\windows\windows-host-session.vala">
+      <Filter>Source Files\service\windows</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
