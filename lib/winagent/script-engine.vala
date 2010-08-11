@@ -19,10 +19,15 @@ namespace Zed {
 		}
 
 		~ScriptEngine () {
-			foreach (var entry in instance_by_id)
-				interceptor.detach_listener (entry.@value);
+			shutdown ();
 
 			unregister_query_handlers ();
+		}
+
+		public void shutdown () {
+			foreach (var entry in instance_by_id)
+				interceptor.detach_listener (entry.@value);
+			instance_by_id.clear ();
 		}
 
 		/* FIXME: Gum.Script is piggy-backing on IOError for now */

@@ -74,6 +74,7 @@ namespace Zed {
 
 			memory_tracker = null;
 
+			script_engine.shutdown ();
 			script_engine = null;
 		}
 
