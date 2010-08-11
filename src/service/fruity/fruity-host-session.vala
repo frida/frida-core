@@ -122,7 +122,7 @@ namespace Zed.Service {
 
 				uint32 * p = (void *) connect_body;
 				p[0] = device_id.to_little_endian ();
-				p[1] = port.to_big_endian ();
+				p[1] = ((uint32) port << 16).to_big_endian ();
 
 				try {
 					int result = yield send_request_and_receive_response (MessageType.CONNECT, connect_body, true);
