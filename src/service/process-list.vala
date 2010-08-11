@@ -54,7 +54,7 @@ public class Zed.Service.ProcessList : Object {
 		}
 
 		if (info == null)
-			info = new ProcessInfo (pid, "<Unknown Process>");
+			info = new ProcessInfo (pid, "[Unknown Process]");
 
 		return info;
 	}
