@@ -2,24 +2,27 @@ using Gee;
 
 namespace Zed.Service {
 	public class Winjector : Object {
-		private ResourceStore resource_store;
+		private ResourceStore normal_resource_store;
 		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
+
+		private ResourceStore elevated_resource_store;
 		private HelperFactory elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
 		public async void close () {
 			yield normal_helper_factory.close ();
 			yield elevated_helper_factory.close ();
+
+			normal_resource_store = null;
+			elevated_resource_store = null;
 		}
 
 		public async WinIpc.Proxy inject (uint32 target_pid, AgentDescriptor desc, Cancellable? cancellable = null) throws WinjectorError {
-			if (resource_store == null) {
-				resource_store = new ResourceStore ();
-
-				normal_helper_factory.resource_store = resource_store;
-				elevated_helper_factory.resource_store = resource_store;
+			if (normal_resource_store == null) {
+				normal_resource_store = new ResourceStore ();
+				normal_helper_factory.resource_store = normal_resource_store;
 			}
 
-			var filename = resource_store.ensure_copy_of (desc);
+			var filename = normal_resource_store.ensure_copy_of (desc);
 
 			var proxy = new WinIpc.ServerProxy ();
 
@@ -36,6 +39,13 @@ namespace Zed.Service {
 			}
 
 			if (!injected) {
+				if (elevated_resource_store == null) {
+					elevated_resource_store = new ResourceStore ();
+					elevated_helper_factory.resource_store = elevated_resource_store;
+				}
+
+				filename = elevated_resource_store.ensure_copy_of (desc);
+
 				var elevated_helper = yield elevated_helper_factory.obtain ();
 				yield elevated_helper.inject (target_pid, filename, proxy.address, cancellable);
 			}
@@ -129,6 +139,8 @@ namespace Zed.Service {
 					yield helper.close ();
 					helper = null;
 				}
+
+				resource_store = null;
 			}
 
 			public async Helper obtain () throws WinjectorError {
@@ -344,17 +356,42 @@ namespace Zed.Service {
 		}
 
 		public InputStream dll32 {
-			get;
-			construct;
+			get {
+				reset_stream (_dll32);
+				return _dll32;
+			}
+
+			construct {
+				_dll32 = value;
+			}
 		}
+		private InputStream _dll32;
 
 		public InputStream dll64 {
-			get;
-			construct;
+			get {
+				reset_stream (_dll64);
+				return _dll64;
+			}
+
+			construct {
+				_dll64 = value;
+			}
 		}
+		private InputStream _dll64;
 
 		public AgentDescriptor (string name_template, InputStream dll32, InputStream dll64) {
 			Object (name_template: name_template, dll32: dll32, dll64: dll64);
+
+			assert (dll32 is Seekable);
+			assert (dll64 is Seekable);
+		}
+
+		private void reset_stream (InputStream stream) {
+			try {
+				(stream as Seekable).seek (0, SeekType.SET);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
 		}
 	}
 }
