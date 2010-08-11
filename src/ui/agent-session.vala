@@ -53,6 +53,16 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.TextTag console_line_number_tag {
+			get;
+			private set;
+		}
+
+		public Gtk.TextTag console_code_text_tag {
+			get;
+			private set;
+		}
+
 		public Gtk.Entry console_entry {
 			get;
 			private set;
@@ -77,6 +87,10 @@ namespace Zed {
 				console_view = builder.get_object ("console_view") as Gtk.TextView;
 
 				console_input_tag = console_view.buffer.create_tag ("console-input",
+					"foreground", "#ffffff");
+				console_line_number_tag = console_view.buffer.create_tag ("console-line-number",
+					"foreground", "#ffff00");
+				console_code_text_tag = console_view.buffer.create_tag ("console-code-text",
 					"foreground", "#ffffff");
 
 				console_entry = builder.get_object ("console_entry") as Gtk.Entry;
@@ -589,9 +603,22 @@ namespace Zed {
 				return;
 			}
 
+			script_text = script_text.replace ("\r\n", "\n");
+
+			print_to_console ("script:");
+			var lines = script_text.split ("\n");
+			uint line_number = 1;
+			foreach (var line in lines) {
+				if (line_number == lines.length && line == "")
+					break;
+
+				print_code_to_console (line_number, line);
+				line_number++;
+			}
+
 			try {
 				var script = yield attach_script_to_remote_function (script_text, address);
-				print_to_console (("script compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
+				print_to_console (("compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
 					"x").printf (script.code_size, script.code_address));
 				print_to_console ("attached with id %u".printf (script.id));
 			} catch (IOError attach_error) {
@@ -795,20 +822,36 @@ namespace Zed {
 		}
 
 		private void print_to_console (string line, Gtk.TextTag? with_tag = null) {
-			var buffer = console_text_buffer;
+			var iter = prepare_console_for_insertion ();
+
+			if (with_tag != null)
+				console_text_buffer.insert_with_tags (iter, line, -1, with_tag);
+			else
+				console_text_buffer.insert (iter, line, -1);
+		}
+
+		private void print_code_to_console (uint line_number, string line) {
+			var iter = prepare_console_for_insertion ();
+
+			var buf = console_text_buffer;
+			buf.insert (iter, "\t", -1);
+			buf.insert_with_tags (iter, line_number.to_string (), -1, view.console_line_number_tag);
+			buf.insert (iter, " ", -1);
+			buf.insert_with_tags (iter, line, -1, view.console_code_text_tag);
+		}
+
+		private Gtk.TextIter prepare_console_for_insertion () {
+			var buf = console_text_buffer;
 
 			Gtk.TextIter iter;
-			buffer.get_end_iter (out iter);
+			buf.get_end_iter (out iter);
 
-			if (buffer.get_char_count () > 0)
-				buffer.insert (iter, "\n", -1);
+			if (buf.get_char_count () > 0)
+				buf.insert (iter, "\n", -1);
 
 			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
 
-			if (with_tag != null)
-				buffer.insert_with_tags (iter, line, -1, with_tag);
-			else
-				buffer.insert (iter, line, -1);
+			return iter;
 		}
 
 		private async uint64 resolve_address_specifier_arguments (string[] args) throws IOError {
