@@ -31,6 +31,7 @@ namespace Zed.Service {
 		private async void do_establish () {
 			try {
 				yield control_client.establish ();
+				yield control_client.enable_monitor_mode ();
 			} catch (Error e) {
 				debug ("failed to establish: %s", e.message);
 			}
@@ -107,12 +108,18 @@ namespace Zed.Service {
 					running = true;
 
 					process_incoming_messages ();
-
-					yield perform_handshake ();
 				} catch (Error e) {
 					reset ();
 					throw new IOError.FAILED (e.message);
 				}
+			}
+
+			public async void enable_monitor_mode () throws Error {
+				assert (running);
+
+				var result = yield send_request_and_receive_response (MessageType.HELLO);
+				if (result != ResultCode.SUCCESS)
+					throw new IOError.FAILED ("handshake failed, result %d", result);
 			}
 
 			public async void connect_to_port (uint device_id, uint port) throws IOError {
@@ -131,12 +138,6 @@ namespace Zed.Service {
 				} catch (Error e) {
 					throw new IOError.FAILED (e.message);
 				}
-			}
-
-			private async void perform_handshake () throws Error {
-				var result = yield send_request_and_receive_response (MessageType.HELLO);
-				if (result != ResultCode.SUCCESS)
-					throw new IOError.FAILED ("handshake failed, result %d", result);
 			}
 
 			private async int send_request_and_receive_response (MessageType type, uint8[]? body = null, bool is_mode_switch_request = false) throws Error {
