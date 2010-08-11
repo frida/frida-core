@@ -126,6 +126,7 @@ namespace Zed.HostSessionTest {
 					stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				*/
 			} catch (IOError e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
 

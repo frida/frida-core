@@ -8,7 +8,7 @@ namespace Zed.Service {
 			control_client.device_connected.connect ((device_id) => {
 				assert (!provider_by_device_id.has_key (device_id));
 
-				debug ("device %u connected!", device_id);
+				debug ("device with id %u connected!", device_id);
 
 				var provider = new FruityHostSessionProvider (device_id);
 				provider_by_device_id[device_id] = provider;
@@ -18,7 +18,7 @@ namespace Zed.Service {
 			control_client.device_disconnected.connect ((device_id) => {
 				assert (provider_by_device_id.has_key (device_id));
 
-				debug ("device %u disconnected!", device_id);
+				debug ("device with id %u disconnected!", device_id);
 
 				FruityHostSessionProvider provider;
 				provider_by_device_id.unset (device_id, out provider);
@@ -53,18 +53,39 @@ namespace Zed.Service {
 			var client = new Fruity.Client ();
 			yield client.establish ();
 			yield client.connect_to_port (device_id, 1337);
-			return new FruityHostSession ();
+
+			DBusConnection connection;
+			try {
+				connection = yield DBusConnection.new_for_stream (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
+
+			return new FruityHostSession (client, connection);
 		}
 	}
 
 	public class FruityHostSession : Object, HostSession {
+		private Fruity.Client client;
+		private DBusConnection connection;
+		private Zid.Controller controller;
+
+		public FruityHostSession (Fruity.Client client, DBusConnection connection) throws IOError {
+			this.client = client;
+			this.connection = connection;
+			this.controller = Bus.get_proxy_for_connection_sync (connection, null, Zid.ObjectPath.CONTROLLER);
+		}
+
 		public async HostProcessInfo[] enumerate_processes () throws IOError {
-			throw new IOError.FAILED ("not implemented");
+			controller.say ("Hello iOS, this is Frida speaking");
+
+			var fake_process = HostProcessInfo (1337, "Fake Process", null, null);
+			return new HostProcessInfo[] { fake_process };
 		}
 	}
 
 	namespace Fruity {
-		private class Client : Object {
+		public class Client : Object {
 			public SocketConnection connection {
 				get;
 				private set;
@@ -133,8 +154,16 @@ namespace Zed.Service {
 
 				try {
 					int result = yield send_request_and_receive_response (MessageType.CONNECT, connect_body, true);
-					if (result != ResultCode.SUCCESS)
-						throw new IOError.FAILED ("connect failed: %d", result);
+					switch (result) {
+						case ResultCode.SUCCESS:
+							break;
+						case ResultCode.CONNECTION_REFUSED:
+							throw new IOError.FAILED ("connect failed (connection refused)");
+						case ResultCode.INVALID_REQUEST:
+							throw new IOError.FAILED ("connect failed (invalid request)");
+						default:
+							throw new IOError.FAILED ("connect failed (error code: %d)", result);
+					}
 				} catch (Error e) {
 					throw new IOError.FAILED (e.message);
 				}
@@ -163,8 +192,6 @@ namespace Zed.Service {
 						uint32 * header = (void *) message_blob;
 						MessageType type = (MessageType) uint.from_little_endian (header[0]);
 						uint32 tag = uint.from_little_endian (header[1]);
-
-						debug ("read message of size %d: type=%s, tag=%u", message_blob.length, type.to_string (), tag);
 
 						uint32 body_size = message_blob.length - 8;
 						int32 * body_i32 = (int32 *) header + 2;
@@ -312,7 +339,9 @@ namespace Zed.Service {
 		}
 
 		private enum ResultCode {
-			SUCCESS		    = 0
+			SUCCESS		    = 0,
+			CONNECTION_REFUSED  = 3,
+			INVALID_REQUEST	    = 5
 		}
 	}
 }
