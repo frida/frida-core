@@ -326,11 +326,8 @@ namespace Zed.Data.Ui {
 					"<property name=\"visible\">True</property>" +
 					"<property name=\"orientation\">vertical</property>" +
 					"<child>" +
-						"<object class=\"GtkButton\" id=\"provider_button\">" +
-							"<property name=\"label\" translatable=\"yes\">Choose Provider...</property>" +
+						"<object class=\"GtkComboBox\" id=\"provider_combo\">" +
 							"<property name=\"visible\">True</property>" +
-							"<property name=\"can_focus\">True</property>" +
-							"<property name=\"receives_default\">True</property>" +
 						"</object>" +
 						"<packing>" +
 							"<property name=\"expand\">False</property>" +

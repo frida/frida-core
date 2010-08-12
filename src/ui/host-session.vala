@@ -8,7 +8,7 @@ namespace Zed {
 			}
 		}
 
-		public Gtk.Button provider_button {
+		public Gtk.ComboBox provider_combo {
 			get;
 			private set;
 		}
@@ -52,7 +52,7 @@ namespace Zed {
 
 				hpaned = builder.get_object ("root_hpaned") as Gtk.HPaned;
 
-				provider_button = builder.get_object ("provider_button") as Gtk.Button;
+				provider_combo = builder.get_object ("provider_combo") as Gtk.ComboBox;
 				top_hbox = builder.get_object ("top_hbox") as Gtk.HBox;
 				pid_entry = builder.get_object ("pid_entry") as Gtk.Entry;
 				add_button = builder.get_object ("add_button") as Gtk.Button;
@@ -86,7 +86,7 @@ namespace Zed {
 			construct;
 		}
 
-		private Gee.ArrayList<Service.HostSessionProvider> providers = new Gee.ArrayList<Service.HostSessionProvider> ();
+		private Gtk.ListStore provider_store = new Gtk.ListStore (1, typeof (Service.HostSessionProvider));
 		private Gee.HashMap<Service.HostSessionProvider, SessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, SessionEntry> ();
 		private SessionEntry active_session;
 
@@ -113,6 +113,7 @@ namespace Zed {
 		construct {
 			configure_service ();
 
+			configure_provider_combo ();
 			configure_pid_entry ();
 			configure_add_button ();
 			configure_session_treeview ();
@@ -128,21 +129,25 @@ namespace Zed {
 			var entry = session_by_provider.get (provider);
 			if (entry == null) {
 				try {
-					view.provider_button.label = "Attaching to '%s'".printf (provider.name);
 					var session = yield provider.create ();
 
 					entry = new SessionEntry (session);
 					session_by_provider[provider] = entry;
 				} catch (IOError e) {
-					view.provider_button.sensitive = true;
+					view.provider_combo.sensitive = true;
 					update_session_control_ui ();
 					return;
 				}
 			}
 
-			view.provider_button.label = provider.name;
-			view.provider_button.sensitive = true;
+			Gtk.TreeIter iter;
+			var path = provider_store_path_of (provider);
+			provider_store.get_iter (out iter, path);
+			view.provider_combo.set_active_iter (iter);
+			view.provider_combo.sensitive = true;
+
 			active_session = entry;
+
 			update_session_control_ui ();
 		}
 
@@ -289,20 +294,36 @@ namespace Zed {
 
 		private void configure_service () {
 			service.provider_available.connect ((provider) => {
-				providers.add (provider);
+				Gtk.TreeIter iter;
+				provider_store.append (out iter);
+				provider_store.set (iter, 0, provider);
 
-				if (active_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_button.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
-					view.provider_button.sensitive = false;
+				if (active_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
+					view.provider_combo.sensitive = false;
 
 					activate_session (provider);
 				}
 			});
 			service.provider_unavailable.connect ((provider) => {
 				session_by_provider.unset (provider);
-				providers.remove (provider);
+
+				Gtk.TreeIter iter;
+				var path = provider_store_path_of (provider);
+				provider_store.get_iter (out iter, path);
+				provider_store.remove (iter);
 			});
 
 			service.start ();
+		}
+
+		private void configure_provider_combo () {
+			var combo = view.provider_combo;
+
+			combo.set_model (provider_store);
+
+			var name_renderer = new Gtk.CellRendererText ();
+			combo.pack_end (name_renderer, true);
+			combo.set_cell_data_func (name_renderer, provider_combo_data_callback);
 		}
 
 		private void configure_pid_entry () {
@@ -408,6 +429,20 @@ namespace Zed {
 			return session;
 		}
 
+		private Gtk.TreePath provider_store_path_of (Service.HostSessionProvider provider) {
+			Gtk.TreeIter iter;
+			if (provider_store.get_iter_first (out iter)) {
+				do {
+					Service.HostSessionProvider p;
+					provider_store.get (iter, 0, out p);
+					if (p == provider)
+						return provider_store.get_path (iter);
+				} while (provider_store.iter_next (ref iter));
+			}
+
+			assert_not_reached ();
+		}
+
 		private Gtk.TreePath session_store_path_of (AgentSession session) {
 			Gtk.TreeIter iter;
 			if (session_store.get_iter_first (out iter)) {
@@ -432,6 +467,13 @@ namespace Zed {
 			}
 
 			assert_not_reached ();
+		}
+
+		private void provider_combo_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
+			Service.HostSessionProvider p;
+			model.get (iter, 0, out p);
+
+			(renderer as Gtk.CellRendererText).text = p.name;
 		}
 
 		private void pid_entry_completion_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {

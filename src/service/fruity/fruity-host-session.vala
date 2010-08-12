@@ -8,8 +8,6 @@ namespace Zed.Service {
 			control_client.device_connected.connect ((device_id) => {
 				assert (!provider_by_device_id.has_key (device_id));
 
-				debug ("device with id %u connected!", device_id);
-
 				var provider = new FruityHostSessionProvider (device_id);
 				provider_by_device_id[device_id] = provider;
 
@@ -17,8 +15,6 @@ namespace Zed.Service {
 			});
 			control_client.device_disconnected.connect ((device_id) => {
 				assert (provider_by_device_id.has_key (device_id));
-
-				debug ("device with id %u disconnected!", device_id);
 
 				FruityHostSessionProvider provider;
 				provider_by_device_id.unset (device_id, out provider);
