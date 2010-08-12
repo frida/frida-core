@@ -81,7 +81,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
         process_info = &g_array_index (processes, ZedHostProcessInfo,
             processes->len - 1);
         zed_host_process_info_init (process_info, pids[i], name,
-            small_icon, large_icon);
+            small_icon ? small_icon : "", large_icon ? large_icon : "");
 
         g_free (name);
       }
