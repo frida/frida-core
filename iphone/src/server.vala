@@ -1,25 +1,24 @@
 namespace Zid {
-	public class Application : Object, Controller {
+	public class Application : Object, Zed.HostSession {
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
 
-		public void say (string message) throws IOError {
-			stdout.printf ("say: %s\n", message);
+		public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
+			return System.enumerate_processes ();
 		}
 
 		public void run () throws Error {
-			server = new DBusServer.sync ("tcp:host=0.0.0.0,port=1337", DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+			server = new DBusServer.sync ("tcp:host=127.0.0.1,port=27042", DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
 				try {
-					Controller controller = this;
-					connection.register_object (Zid.ObjectPath.CONTROLLER, controller);
+					Zed.HostSession session = this;
+					connection.register_object (Zed.ObjectPath.HOST_SESSION, session);
 				} catch (IOError e) {
-					stderr.printf ("failed to register object: %s\n", e.message);
+					printerr ("failed to register object: %s\n", e.message);
 					return;
 				}
 
 				connections.add (connection);
-				stdout.printf ("yay, new connection handled!\n");
 			});
 
 			server.start ();
@@ -31,13 +30,17 @@ namespace Zid {
 		}
 	}
 
+	namespace System {
+		public static extern Zed.HostProcessInfo[] enumerate_processes ();
+	}
+
 	public static int main (string[] args) {
 		var app = new Application ();
 
 		try {
 			app.run ();
 		} catch (Error e) {
-			stderr.printf ("error: %s\n", e.message);
+			printerr ("error: %s\n", e.message);
 			return 1;
 		}
 

@@ -15,17 +15,17 @@ namespace Zed {
 			private set;
 		}
 
-		public string? small_icon {
+		public string small_icon {
 			get;
 			private set;
 		}
 
-		public string? large_icon {
+		public string large_icon {
 			get;
 			private set;
 		}
 
-		public HostProcessInfo (uint pid, string name, string? small_icon, string? large_icon) {
+		public HostProcessInfo (uint pid, string name, string small_icon = "", string large_icon = "") {
 			this.pid = pid;
 			this.name = name;
 			this.small_icon = small_icon;
