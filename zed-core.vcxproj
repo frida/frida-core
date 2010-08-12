@@ -118,6 +118,45 @@
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <CustomBuild Include="data\browse-processes.png">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
+	--namespace="zed_data" ^
+	-o "$(IntDir)data\images.c" ^
+	$(SolutionDir)data\browse-processes.png || exit 1
+echo &gt; "$(IntDir)data\images.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing images</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
+	--namespace="zed_data" ^
+	-o "$(IntDir)data\images.c" ^
+	$(SolutionDir)data\browse-processes.png || exit 1
+echo &gt; "$(IntDir)data\images.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing images</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
+	--namespace="zed_data" ^
+	-o "$(IntDir)data\images.c" ^
+	$(SolutionDir)data\browse-processes.png || exit 1
+echo &gt; "$(IntDir)data\images.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing images</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
+	--namespace="zed_data" ^
+	-o "$(IntDir)data\images.c" ^
+	$(SolutionDir)data\browse-processes.png || exit 1
+echo &gt; "$(IntDir)data\images.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing images</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
+    </CustomBuild>
     <None Include="src\configuration.vala" />
     <CustomBuild Include="src\zed.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
@@ -513,6 +552,12 @@ echo &gt; "$(IntDir)valacode.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\service\windows\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\service\windows\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\images.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
     </ClCompile>
     <ClCompile Include="data\windows.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>

@@ -64,6 +64,9 @@
     <Filter Include="Source Files\generated\data">
       <UniqueIdentifier>{e441c3c0-5949-44e4-8617-0483732946e8}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files\images">
+      <UniqueIdentifier>{6da456ee-c4ca-46b6-bda4-6152a6b4fe67}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -239,10 +242,16 @@
     <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)data\images.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\zed.vala">
       <Filter>Source Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\browse-processes.png">
+      <Filter>Resource Files\images</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
