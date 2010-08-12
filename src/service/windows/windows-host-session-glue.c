@@ -30,7 +30,7 @@ static void destroy_bitmap (guchar * pixels, gpointer data);
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
 
-ZedServiceHostProcessInfo *
+ZedHostProcessInfo *
 zed_service_windows_process_backend_enumerate_processes_sync (
     int * result_length1)
 {
@@ -40,7 +40,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
   DWORD bytes_returned;
   guint i;
 
-  processes = g_array_new (FALSE, FALSE, sizeof (ZedServiceHostProcessInfo));
+  processes = g_array_new (FALSE, FALSE, sizeof (ZedHostProcessInfo));
 
   do
   {
@@ -64,7 +64,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
       if (QueryFullProcessImageNameW (handle, 0, name_utf16, &name_length))
       {
         gchar * name, * tmp;
-        ZedServiceHostProcessInfo * process_info;
+        ZedHostProcessInfo * process_info;
         gchar * small_icon, * large_icon;
 
         name = g_utf16_to_utf8 ((gunichar2 *) name_utf16, -1, NULL, NULL, NULL);
@@ -78,9 +78,9 @@ zed_service_windows_process_backend_enumerate_processes_sync (
             ICON_SIZE_LARGE);
 
         g_array_set_size (processes, processes->len + 1);
-        process_info = &g_array_index (processes, ZedServiceHostProcessInfo,
+        process_info = &g_array_index (processes, ZedHostProcessInfo,
             processes->len - 1);
-        zed_service_host_process_info_init (process_info, pids[i], name,
+        zed_host_process_info_init (process_info, pids[i], name,
             small_icon, large_icon);
 
         g_free (name);
@@ -93,7 +93,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
   g_free (pids);
 
   *result_length1 = processes->len;
-  return (ZedServiceHostProcessInfo *) g_array_free (processes, FALSE);
+  return (ZedHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
 static gchar *

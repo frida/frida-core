@@ -45,6 +45,10 @@ namespace Zed.Service {
 			construct;
 		}
 
+		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
+
+		private const uint ZID_SERVER_PORT = 27042;
+
 		public FruityHostSessionProvider (uint device_id) {
 			Object (device_id: device_id);
 		}
@@ -52,7 +56,7 @@ namespace Zed.Service {
 		public async HostSession create () throws IOError {
 			var client = new Fruity.Client ();
 			yield client.establish ();
-			yield client.connect_to_port (device_id, 1337);
+			yield client.connect_to_port (device_id, ZID_SERVER_PORT);
 
 			DBusConnection connection;
 			try {
@@ -61,26 +65,35 @@ namespace Zed.Service {
 				throw new IOError.FAILED (e.message);
 			}
 
-			return new FruityHostSession (client, connection);
-		}
-	}
+			HostSession session = Bus.get_proxy_for_connection_sync (connection, null, ObjectPath.HOST_SESSION);
 
-	public class FruityHostSession : Object, HostSession {
-		private Fruity.Client client;
-		private DBusConnection connection;
-		private Zid.Controller controller;
+			var entry = new Entry (client, connection, session);
+			entries.add (entry);
 
-		public FruityHostSession (Fruity.Client client, DBusConnection connection) throws IOError {
-			this.client = client;
-			this.connection = connection;
-			this.controller = Bus.get_proxy_for_connection_sync (connection, null, Zid.ObjectPath.CONTROLLER);
+			return entry.session;
 		}
 
-		public async HostProcessInfo[] enumerate_processes () throws IOError {
-			controller.say ("Hello iOS, this is Frida speaking");
+		private class Entry {
+			public Fruity.Client client {
+				get;
+				private set;
+			}
 
-			var fake_process = HostProcessInfo (1337, "Fake Process", null, null);
-			return new HostProcessInfo[] { fake_process };
+			public DBusConnection connection {
+				get;
+				private set;
+			}
+
+			public HostSession session {
+				get;
+				private set;
+			}
+
+			public Entry (Fruity.Client client, DBusConnection connection, HostSession session) {
+				this.client = client;
+				this.connection = connection;
+				this.session = session;
+			}
 		}
 	}
 
@@ -97,6 +110,8 @@ namespace Zed.Service {
 			private uint last_tag;
 			private uint mode_switch_tag;
 			private Gee.ArrayList<PendingResponse> pending_responses;
+
+			private const uint16 USBMUX_SERVER_PORT = 27015;
 
 			public signal void device_connected (uint device_id);
 			public signal void device_disconnected (uint device_id);
@@ -122,7 +137,7 @@ namespace Zed.Service {
 				var client = new SocketClient ();
 
 				try {
-					connection = yield client.connect_to_host_async ("127.0.0.1", 27015);
+					connection = yield client.connect_to_host_async ("127.0.0.1", USBMUX_SERVER_PORT);
 					input = connection.get_input_stream ();
 					output = connection.get_output_stream ();
 
