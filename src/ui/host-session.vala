@@ -243,7 +243,7 @@ namespace Zed {
 
 		private void configure_service () {
 			service.provider_available.connect ((provider) => {
-				if (active_session == null && provider.kind == HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_button.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
+				if (active_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_button.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
 					view.provider_button.sensitive = false;
 				}
 			});
