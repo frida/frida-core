@@ -369,7 +369,7 @@ namespace Zed.Data.Ui {
 						"</packing>" +
 					"</child>" +
 					"<child>" +
-						"<object class=\"GtkScrolledWindow\" id=\"sessionlist_scrollwin\">" +
+						"<object class=\"GtkScrolledWindow\" id=\"session_scrollwin\">" +
 							"<property name=\"can_focus\">True</property>" +
 							"<property name=\"hscrollbar_policy\">automatic</property>" +
 							"<property name=\"vscrollbar_policy\">automatic</property>" +

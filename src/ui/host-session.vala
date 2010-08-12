@@ -13,12 +13,22 @@ namespace Zed {
 			private set;
 		}
 
+		public Gtk.HBox top_hbox {
+			get;
+			private set;
+		}
+
 		public Gtk.Entry pid_entry {
 			get;
 			private set;
 		}
 
 		public Gtk.Button add_button {
+			get;
+			private set;
+		}
+
+		public Gtk.ScrolledWindow session_scrollwin {
 			get;
 			private set;
 		}
@@ -43,8 +53,10 @@ namespace Zed {
 				hpaned = builder.get_object ("root_hpaned") as Gtk.HPaned;
 
 				provider_button = builder.get_object ("provider_button") as Gtk.Button;
+				top_hbox = builder.get_object ("top_hbox") as Gtk.HBox;
 				pid_entry = builder.get_object ("pid_entry") as Gtk.Entry;
 				add_button = builder.get_object ("add_button") as Gtk.Button;
+				session_scrollwin = builder.get_object ("session_scrollwin") as Gtk.ScrolledWindow;
 				session_treeview = builder.get_object ("session_treeview") as Gtk.TreeView;
 				session_notebook = builder.get_object ("session_notebook") as Gtk.Notebook;
 			} catch (Error e) {
@@ -74,8 +86,9 @@ namespace Zed {
 			construct;
 		}
 
+		private Gee.ArrayList<Service.HostSessionProvider> providers = new Gee.ArrayList<Service.HostSessionProvider> ();
 		private Gee.HashMap<Service.HostSessionProvider, SessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, SessionEntry> ();
-		private Service.HostSessionProvider active_session;
+		private SessionEntry active_session;
 
 		private uint sync_handler_id;
 
@@ -109,6 +122,39 @@ namespace Zed {
 				new MemoryInputStream.from_data (get_winagent_64_data (), get_winagent_64_size (), null));
 
 			load_data_from_storage_backend ();
+		}
+
+		private async void activate_session (Service.HostSessionProvider provider) {
+			var entry = session_by_provider.get (provider);
+			if (entry == null) {
+				try {
+					view.provider_button.label = "Attaching to '%s'".printf (provider.name);
+					var session = yield provider.create ();
+
+					entry = new SessionEntry (session);
+					session_by_provider[provider] = entry;
+				} catch (IOError e) {
+					view.provider_button.sensitive = true;
+					update_session_control_ui ();
+					return;
+				}
+			}
+
+			view.provider_button.label = provider.name;
+			view.provider_button.sensitive = true;
+			active_session = entry;
+			update_session_control_ui ();
+		}
+
+		private void update_session_control_ui () {
+			bool have_active_session = active_session != null;
+			if (have_active_session) {
+				view.top_hbox.show ();
+				view.session_scrollwin.show ();
+			} else {
+				view.top_hbox.hide ();
+				view.session_scrollwin.hide ();
+			}
 		}
 
 		private async void start_session (uint pid) {
@@ -243,11 +289,17 @@ namespace Zed {
 
 		private void configure_service () {
 			service.provider_available.connect ((provider) => {
+				providers.add (provider);
+
 				if (active_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_button.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
 					view.provider_button.sensitive = false;
+
+					activate_session (provider);
 				}
 			});
 			service.provider_unavailable.connect ((provider) => {
+				session_by_provider.unset (provider);
+				providers.remove (provider);
 			});
 
 			service.start ();
@@ -425,12 +477,12 @@ namespace Zed {
 		private static extern uint get_winagent_64_size ();
 
 		private class SessionEntry {
-			public HostSession session {
+			public Zed.HostSession session {
 				get;
 				private set;
 			}
 
-			public SessionEntry (HostSession session) {
+			public SessionEntry (Zed.HostSession session) {
 				this.session = session;
 			}
 		}

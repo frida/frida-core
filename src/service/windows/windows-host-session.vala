@@ -23,6 +23,14 @@ namespace Zed.Service {
 		}
 
 		public async HostSession create () throws IOError {
+			var source = new TimeoutSource (2500);
+			source.set_callback (() => {
+				create.callback ();
+				return false;
+			});
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
 			return new WindowsHostSession ();
 		}
 	}

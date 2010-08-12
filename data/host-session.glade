@@ -56,7 +56,7 @@
               </packing>
             </child>
             <child>
-              <widget class="GtkScrolledWindow" id="sessionlist_scrollwin">
+              <widget class="GtkScrolledWindow" id="session_scrollwin">
                 <property name="can_focus">True</property>
                 <property name="hscrollbar_policy">automatic</property>
                 <property name="vscrollbar_policy">automatic</property>

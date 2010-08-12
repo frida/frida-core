@@ -75,6 +75,14 @@ namespace Zed.HostSessionTest {
 		}
 
 		private class StubProvider : Object, HostSessionProvider {
+			public string name {
+				get { return "Stub"; }
+			}
+
+			public HostSessionProviderKind kind {
+				get { return HostSessionProviderKind.LOCAL_SYSTEM; }
+			}
+
 			public async HostSession create () throws IOError {
 				throw new IOError.FAILED ("Not implemented");
 			}
