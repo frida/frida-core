@@ -13,8 +13,21 @@
             <property name="visible">True</property>
             <property name="orientation">vertical</property>
             <child>
+              <widget class="GtkButton" id="provider_button">
+                <property name="label" translatable="yes">Choose Provider...</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="receives_default">True</property>
+              </widget>
+              <packing>
+                <property name="expand">False</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
               <widget class="GtkHBox" id="top_hbox">
                 <property name="visible">True</property>
+                <property name="sensitive">False</property>
                 <child>
                   <widget class="GtkEntry" id="pid_entry">
                     <property name="visible">True</property>
@@ -41,12 +54,13 @@
               </widget>
               <packing>
                 <property name="expand">False</property>
-                <property name="position">0</property>
+                <property name="position">1</property>
               </packing>
             </child>
             <child>
               <widget class="GtkScrolledWindow" id="sessionlist_scrollwin">
                 <property name="visible">True</property>
+                <property name="sensitive">False</property>
                 <property name="can_focus">True</property>
                 <property name="hscrollbar_policy">automatic</property>
                 <property name="vscrollbar_policy">automatic</property>
@@ -58,7 +72,7 @@
                 </child>
               </widget>
               <packing>
-                <property name="position">1</property>
+                <property name="position">2</property>
               </packing>
             </child>
           </widget>
@@ -76,6 +90,12 @@
             <property name="show_border">False</property>
             <child>
               <placeholder/>
+            </child>
+            <child>
+              <placeholder/>
+              <packing>
+                <property name="type">tab</property>
+              </packing>
             </child>
           </widget>
           <packing>

@@ -35,25 +35,25 @@ zed_service_winjector_resource_store_get_helper_64_size (void)
 }
 
 void *
-zed_presenter_spy_get_winagent_32_data (void)
+zed_presenter_host_session_get_winagent_32_data (void)
 {
   return (void *) zed_data_zed_winagent_32_data;
 }
 
 guint
-zed_presenter_spy_get_winagent_32_size (void)
+zed_presenter_host_session_get_winagent_32_size (void)
 {
   return zed_data_zed_winagent_32_size;
 }
 
 void *
-zed_presenter_spy_get_winagent_64_data (void)
+zed_presenter_host_session_get_winagent_64_data (void)
 {
   return (void *) zed_data_zed_winagent_64_data;
 }
 
 guint
-zed_presenter_spy_get_winagent_64_size (void)
+zed_presenter_host_session_get_winagent_64_size (void)
 {
   return zed_data_zed_winagent_64_size;
 }

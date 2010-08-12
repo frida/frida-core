@@ -16,7 +16,7 @@ namespace Zed {
 			private set;
 		}
 
-		public View.Spy spy {
+		public View.HostSession host_session {
 			get;
 			private set;
 		}
@@ -42,8 +42,8 @@ namespace Zed {
 				error (e.message);
 			}
 
-			spy = new View.Spy ();
-			upper_frame.add (spy.widget);
+			host_session = new View.HostSession ();
+			upper_frame.add (host_session.widget);
 
 			chat = new View.Chat ();
 			bottom_frame.add (chat.widget);
@@ -56,7 +56,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Presenter.Spy spy {
+		public Presenter.HostSession host_session {
 			get;
 			construct;
 		}
@@ -66,8 +66,8 @@ namespace Zed {
 			construct;
 		}
 
-		public Workspace (View.Workspace view, Service.StorageBackend storage_backend, Service.MucService muc_service) {
-			Object (view: view, spy: new Presenter.Spy (view.spy, storage_backend), chat: new Presenter.Chat (view.chat, muc_service));
+		public Workspace (View.Workspace view, Service.HostSessionService host_session_service, Service.MucService muc_service, Service.StorageBackend storage_backend) {
+			Object (view: view, host_session: new Presenter.HostSession (view.host_session, host_session_service, storage_backend), chat: new Presenter.Chat (view.chat, muc_service));
 		}
 	}
 }

@@ -314,6 +314,108 @@ namespace Zed.Data.Ui {
 			"</child>" +
 		"</object></interface>";
 
+	public static const string HOST_SESSION_XML = "<?xml version=\"1.0\" ?>" +
+		"<interface><!-- interface-naming-policy project-wide -->" +
+"" +
+"<object class=\"GtkHPaned\" id=\"root_hpaned\">" +
+			"<property name=\"visible\">True</property>" +
+			"<property name=\"can_focus\">True</property>" +
+			"<property name=\"position\">215</property>" +
+			"<child>" +
+				"<object class=\"GtkVBox\" id=\"left_vbox\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"orientation\">vertical</property>" +
+					"<child>" +
+						"<object class=\"GtkButton\" id=\"provider_button\">" +
+							"<property name=\"label\" translatable=\"yes\">Choose Provider...</property>" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"can_focus\">True</property>" +
+							"<property name=\"receives_default\">True</property>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"expand\">False</property>" +
+							"<property name=\"position\">0</property>" +
+						"</packing>" +
+					"</child>" +
+					"<child>" +
+						"<object class=\"GtkHBox\" id=\"top_hbox\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"sensitive\">False</property>" +
+							"<child>" +
+								"<object class=\"GtkEntry\" id=\"pid_entry\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"invisible_char\">●</property>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"position\">0</property>" +
+								"</packing>" +
+							"</child>" +
+							"<child>" +
+								"<object class=\"GtkButton\" id=\"add_button\">" +
+									"<property name=\"label\">gtk-add</property>" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+									"<property name=\"receives_default\">True</property>" +
+									"<property name=\"use_stock\">True</property>" +
+								"</object>" +
+								"<packing>" +
+									"<property name=\"expand\">False</property>" +
+									"<property name=\"position\">1</property>" +
+								"</packing>" +
+							"</child>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"expand\">False</property>" +
+							"<property name=\"position\">1</property>" +
+						"</packing>" +
+					"</child>" +
+					"<child>" +
+						"<object class=\"GtkScrolledWindow\" id=\"sessionlist_scrollwin\">" +
+							"<property name=\"visible\">True</property>" +
+							"<property name=\"sensitive\">False</property>" +
+							"<property name=\"can_focus\">True</property>" +
+							"<property name=\"hscrollbar_policy\">automatic</property>" +
+							"<property name=\"vscrollbar_policy\">automatic</property>" +
+							"<child>" +
+								"<object class=\"GtkTreeView\" id=\"session_treeview\">" +
+									"<property name=\"visible\">True</property>" +
+									"<property name=\"can_focus\">True</property>" +
+								"</object>" +
+							"</child>" +
+						"</object>" +
+						"<packing>" +
+							"<property name=\"position\">2</property>" +
+						"</packing>" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"resize\">False</property>" +
+					"<property name=\"shrink\">True</property>" +
+				"</packing>" +
+			"</child>" +
+			"<child>" +
+				"<object class=\"GtkNotebook\" id=\"session_notebook\">" +
+					"<property name=\"visible\">True</property>" +
+					"<property name=\"can_focus\">True</property>" +
+					"<property name=\"tab_pos\">bottom</property>" +
+					"<property name=\"show_tabs\">False</property>" +
+					"<property name=\"show_border\">False</property>" +
+					"<child>" +
+						"<placeholder/>" +
+					"</child>" +
+					"<child type=\"tab\">" +
+						"<placeholder/>" +
+						"" +
+					"</child>" +
+				"</object>" +
+				"<packing>" +
+					"<property name=\"resize\">True</property>" +
+					"<property name=\"shrink\">True</property>" +
+				"</packing>" +
+			"</child>" +
+		"</object></interface>";
+
 	public static const string LOGIN_XML = "<?xml version=\"1.0\" ?>" +
 		"<interface><object class=\"GtkTable\" id=\"root_table\">" +
 			"<property name=\"visible\">True</property>" +
@@ -423,109 +525,12 @@ namespace Zed.Data.Ui {
 			"</child>" +
 		"</object></interface>";
 
-	public static const string SPY_XML = "<?xml version=\"1.0\" ?>" +
-		"<interface><!-- interface-naming-policy project-wide -->" +
-"" +
-"<object class=\"GtkHPaned\" id=\"root_hpaned\">" +
-			"<property name=\"visible\">True</property>" +
-			"<property name=\"can_focus\">True</property>" +
-			"<property name=\"position\">215</property>" +
-			"<child>" +
-				"<object class=\"GtkVBox\" id=\"left_vbox\">" +
-					"<property name=\"visible\">True</property>" +
-					"<property name=\"orientation\">vertical</property>" +
-					"<child>" +
-						"<object class=\"GtkHBox\" id=\"top_hbox\">" +
-							"<property name=\"visible\">True</property>" +
-							"<child>" +
-								"<object class=\"GtkEntry\" id=\"pid_entry\">" +
-									"<property name=\"visible\">True</property>" +
-									"<property name=\"can_focus\">True</property>" +
-									"<property name=\"invisible_char\">●</property>" +
-								"</object>" +
-								"<packing>" +
-									"<property name=\"position\">0</property>" +
-								"</packing>" +
-							"</child>" +
-							"<child>" +
-								"<object class=\"GtkButton\" id=\"add_button\">" +
-									"<property name=\"label\">gtk-add</property>" +
-									"<property name=\"visible\">True</property>" +
-									"<property name=\"can_focus\">True</property>" +
-									"<property name=\"receives_default\">True</property>" +
-									"<property name=\"use_stock\">True</property>" +
-								"</object>" +
-								"<packing>" +
-									"<property name=\"expand\">False</property>" +
-									"<property name=\"position\">1</property>" +
-								"</packing>" +
-							"</child>" +
-						"</object>" +
-						"<packing>" +
-							"<property name=\"expand\">False</property>" +
-							"<property name=\"position\">0</property>" +
-						"</packing>" +
-					"</child>" +
-					"<child>" +
-						"<object class=\"GtkScrolledWindow\" id=\"sessionlist_scrollwin\">" +
-							"<property name=\"visible\">True</property>" +
-							"<property name=\"can_focus\">True</property>" +
-							"<property name=\"hscrollbar_policy\">automatic</property>" +
-							"<property name=\"vscrollbar_policy\">automatic</property>" +
-							"<child>" +
-								"<object class=\"GtkTreeView\" id=\"session_treeview\">" +
-									"<property name=\"visible\">True</property>" +
-									"<property name=\"can_focus\">True</property>" +
-								"</object>" +
-							"</child>" +
-						"</object>" +
-						"<packing>" +
-							"<property name=\"position\">1</property>" +
-						"</packing>" +
-					"</child>" +
-				"</object>" +
-				"<packing>" +
-					"<property name=\"resize\">False</property>" +
-					"<property name=\"shrink\">True</property>" +
-				"</packing>" +
-			"</child>" +
-			"<child>" +
-				"<object class=\"GtkNotebook\" id=\"session_notebook\">" +
-					"<property name=\"visible\">True</property>" +
-					"<property name=\"can_focus\">True</property>" +
-					"<property name=\"tab_pos\">bottom</property>" +
-					"<property name=\"show_tabs\">False</property>" +
-					"<property name=\"show_border\">False</property>" +
-					"<child>" +
-						"<placeholder/>" +
-					"</child>" +
-				"</object>" +
-				"<packing>" +
-					"<property name=\"resize\">True</property>" +
-					"<property name=\"shrink\">True</property>" +
-				"</packing>" +
-			"</child>" +
-		"</object></interface>";
-
 	public static const string WORKSPACE_XML = "<?xml version=\"1.0\" ?>" +
-		"<interface><object class=\"GtkUIManager\" id=\"uimanager1\"><child><object class=\"GtkActionGroup\" id=\"actiongroup1\"><child><object class=\"GtkAction\" id=\"file_menuitem\"><property name=\"name\">file_menuitem</property><property name=\"label\" translatable=\"yes\">_File</property></object></child><child><object class=\"GtkAction\" id=\"new_menuitem\"><property name=\"stock_id\">gtk-new</property><property name=\"name\">new_menuitem</property></object></child><child><object class=\"GtkAction\" id=\"open_menuitem\"><property name=\"stock_id\">gtk-open</property><property name=\"name\">open_menuitem</property></object></child><child><object class=\"GtkAction\" id=\"quit_menuitem\"><property name=\"stock_id\">gtk-quit</property><property name=\"name\">quit_menuitem</property></object></child><child><object class=\"GtkAction\" id=\"help_menuitem\"><property name=\"name\">help_menuitem</property><property name=\"label\" translatable=\"yes\">_Help</property></object></child><child><object class=\"GtkAction\" id=\"about_menuitem\"><property name=\"stock_id\">gtk-about</property><property name=\"name\">about_menuitem</property></object></child></object></child><ui><menubar name=\"menubar\"><menu action=\"file_menuitem\"><menuitem action=\"new_menuitem\"/><menuitem action=\"open_menuitem\"/><separator/><menuitem action=\"quit_menuitem\"/></menu><menu action=\"help_menuitem\"><menuitem action=\"about_menuitem\"/></menu></menubar></ui></object>" +
-"" +
-"" +
-"<!-- interface-naming-policy toplevel-contextual -->" +
+		"<interface><!-- interface-naming-policy toplevel-contextual -->" +
 "" +
 "<object class=\"GtkVBox\" id=\"root_vbox\">" +
 			"<property name=\"visible\">True</property>" +
-			"<child>" +
-				"<object class=\"GtkMenuBar\" constructor=\"uimanager1\" id=\"menubar\">" +
-					"<property name=\"visible\">True</property>" +
-					"" +
-					"" +
-				"</object>" +
-				"<packing>" +
-					"<property name=\"expand\">False</property>" +
-					"<property name=\"position\">0</property>" +
-				"</packing>" +
-			"</child>" +
+			"<property name=\"orientation\">vertical</property>" +
 			"<child>" +
 				"<object class=\"GtkVPaned\" id=\"vpaned\">" +
 					"<property name=\"visible\">True</property>" +
@@ -557,7 +562,7 @@ namespace Zed.Data.Ui {
 					"</child>" +
 				"</object>" +
 				"<packing>" +
-					"<property name=\"position\">1</property>" +
+					"<property name=\"position\">0</property>" +
 				"</packing>" +
 			"</child>" +
 			"<child>" +
@@ -567,7 +572,7 @@ namespace Zed.Data.Ui {
 				"</object>" +
 				"<packing>" +
 					"<property name=\"expand\">False</property>" +
-					"<property name=\"position\">2</property>" +
+					"<property name=\"position\">1</property>" +
 				"</packing>" +
 			"</child>" +
 		"</object></interface>";

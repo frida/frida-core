@@ -1,11 +1,16 @@
 using Gee;
 
 namespace Zed {
-	public class View.Spy : Object {
+	public class View.HostSession : Object {
 		public Gtk.Widget widget {
 			get {
 				return hpaned;
 			}
+		}
+
+		public Gtk.Button provider_button {
+			get;
+			private set;
 		}
 
 		public Gtk.Entry pid_entry {
@@ -30,13 +35,14 @@ namespace Zed {
 
 		private Gtk.HPaned hpaned;
 
-		public Spy () {
+		public HostSession () {
 			try {
 				var builder = new Gtk.Builder ();
-				builder.add_from_string (Zed.Data.Ui.SPY_XML, -1);
+				builder.add_from_string (Zed.Data.Ui.HOST_SESSION_XML, -1);
 
 				hpaned = builder.get_object ("root_hpaned") as Gtk.HPaned;
 
+				provider_button = builder.get_object ("provider_button") as Gtk.Button;
 				pid_entry = builder.get_object ("pid_entry") as Gtk.Entry;
 				add_button = builder.get_object ("add_button") as Gtk.Button;
 				session_treeview = builder.get_object ("session_treeview") as Gtk.TreeView;
@@ -47,8 +53,13 @@ namespace Zed {
 		}
 	}
 
-	public class Presenter.Spy : Object {
-		public View.Spy view {
+	public class Presenter.HostSession : Object {
+		public View.HostSession view {
+			get;
+			construct;
+		}
+
+		public Service.HostSessionService service {
 			get;
 			construct;
 		}
@@ -75,11 +86,12 @@ namespace Zed {
 
 		private const int KEYVAL_DELETE = 65535;
 
-		public Spy (View.Spy view, Service.StorageBackend storage_backend) {
-			Object (view: view, winjector: new Service.Winjector () /* here for now */);
-
+		public HostSession (View.HostSession view, Service.HostSessionService service, Service.StorageBackend storage_backend) {
+			Object (view: view, service: service, winjector: new Service.Winjector () /* here for now */);
 			this.storage_backend = storage_backend;
+		}
 
+		construct {
 			configure_pid_entry ();
 			configure_add_button ();
 			configure_session_treeview ();
