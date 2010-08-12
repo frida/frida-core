@@ -153,6 +153,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/ui/root.vala				^
 	src/ui/workspace.vala			^
 	src/zed.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--library=zed-core				^
@@ -203,6 +204,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/ui/root.vala				^
 	src/ui/workspace.vala			^
 	src/zed.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--library=zed-core				^
@@ -253,6 +255,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/ui/root.vala				^
 	src/ui/workspace.vala			^
 	src/zed.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--library=zed-core				^
@@ -303,6 +306,7 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	src/ui/root.vala				^
 	src/ui/workspace.vala			^
 	src/zed.vala				^
+	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--library=zed-core				^

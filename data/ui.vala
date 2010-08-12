@@ -339,8 +339,6 @@ namespace Zed.Data.Ui {
 					"</child>" +
 					"<child>" +
 						"<object class=\"GtkHBox\" id=\"top_hbox\">" +
-							"<property name=\"visible\">True</property>" +
-							"<property name=\"sensitive\">False</property>" +
 							"<child>" +
 								"<object class=\"GtkEntry\" id=\"pid_entry\">" +
 									"<property name=\"visible\">True</property>" +
@@ -372,8 +370,6 @@ namespace Zed.Data.Ui {
 					"</child>" +
 					"<child>" +
 						"<object class=\"GtkScrolledWindow\" id=\"sessionlist_scrollwin\">" +
-							"<property name=\"visible\">True</property>" +
-							"<property name=\"sensitive\">False</property>" +
 							"<property name=\"can_focus\">True</property>" +
 							"<property name=\"hscrollbar_policy\">automatic</property>" +
 							"<property name=\"vscrollbar_policy\">automatic</property>" +

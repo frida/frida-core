@@ -64,12 +64,19 @@ namespace Zed {
 			construct;
 		}
 
+		public Service.StorageBackend storage_backend {
+			get;
+			construct;
+		}
+
 		public Service.Winjector winjector {
 			get;
 			construct;
 		}
 
-		private Service.StorageBackend storage_backend;
+		private Gee.HashMap<Service.HostSessionProvider, SessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, SessionEntry> ();
+		private Service.HostSessionProvider active_session;
+
 		private uint sync_handler_id;
 
 		private HashMap<string, Service.ModuleSpec> module_spec_by_uid = new HashMap<string, Service.ModuleSpec> ();
@@ -87,11 +94,12 @@ namespace Zed {
 		private const int KEYVAL_DELETE = 65535;
 
 		public HostSession (View.HostSession view, Service.HostSessionService service, Service.StorageBackend storage_backend) {
-			Object (view: view, service: service, winjector: new Service.Winjector () /* here for now */);
-			this.storage_backend = storage_backend;
+			Object (view: view, service: service, storage_backend: storage_backend, winjector: new Service.Winjector () /* here for now */);
 		}
 
 		construct {
+			configure_service ();
+
 			configure_pid_entry ();
 			configure_add_button ();
 			configure_session_treeview ();
@@ -231,6 +239,18 @@ namespace Zed {
 			Thread.usleep (50000); /* HACK: give processes 50 ms to unload DLLs */
 
 			yield winjector.close ();
+		}
+
+		private void configure_service () {
+			service.provider_available.connect ((provider) => {
+				if (active_session == null && provider.kind == HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_button.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
+					view.provider_button.sensitive = false;
+				}
+			});
+			service.provider_unavailable.connect ((provider) => {
+			});
+
+			service.start ();
 		}
 
 		private void configure_pid_entry () {
@@ -403,6 +423,17 @@ namespace Zed {
 
 		private static extern void * get_winagent_64_data ();
 		private static extern uint get_winagent_64_size ();
+
+		private class SessionEntry {
+			public HostSession session {
+				get;
+				private set;
+			}
+
+			public SessionEntry (HostSession session) {
+				this.session = session;
+			}
+		}
 	}
 }
 

@@ -3,7 +3,8 @@ namespace Zed.Service {
 		private WindowsHostSessionProvider local_provider = new WindowsHostSessionProvider ();
 
 		public void start () {
-			var source = new IdleSource ();
+			//var source = new IdleSource ();
+			var source = new TimeoutSource (2500);
 			source.set_callback (() => {
 				provider_available (local_provider);
 				return false;
@@ -13,6 +14,14 @@ namespace Zed.Service {
 	}
 
 	public class WindowsHostSessionProvider : Object, HostSessionProvider {
+		public string name {
+			get { return "Local Windows System"; }
+		}
+
+		public HostSessionProviderKind kind {
+			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
+		}
+
 		public async HostSession create () throws IOError {
 			return new WindowsHostSession ();
 		}

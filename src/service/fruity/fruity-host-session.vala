@@ -40,6 +40,14 @@ namespace Zed.Service {
 	}
 
 	public class FruityHostSessionProvider : Object, HostSessionProvider {
+		public string name {
+			get { return "Apple Mobile Device"; }
+		}
+
+		public HostSessionProviderKind kind {
+			get { return HostSessionProviderKind.LOCAL_TETHER; }
+		}
+
 		public uint device_id {
 			get;
 			construct;

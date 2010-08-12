@@ -22,9 +22,22 @@ namespace Zed.Service {
 	}
 
 	public interface HostSessionProvider : Object {
+		public abstract string name {
+			get;
+		}
+
+		public abstract HostSessionProviderKind kind {
+			get;
+		}
+
 		public abstract async HostSession create () throws IOError;
 	}
 
+	public enum HostSessionProviderKind {
+		LOCAL_SYSTEM,
+		LOCAL_TETHER,
+		REMOTE_SYSTEM
+	}
 
 	public interface HostSessionBackend : Object {
 		public signal void provider_available (HostSessionProvider provider);
