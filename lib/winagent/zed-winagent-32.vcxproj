@@ -56,13 +56,6 @@
     <Link>
       <ModuleDefinitionFile>zed-winagent.def</ModuleDefinitionFile>
     </Link>
-    <PostBuildEvent>
-      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
-resource-compiler.exe --namespace="zed_data" -o "$(IntDir)zed-winagent-32.c" "$(TargetPath)"</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>Serializing $(TargetFileName)</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -71,13 +64,6 @@ resource-compiler.exe --namespace="zed_data" -o "$(IntDir)zed-winagent-32.c" "$(
     <Link>
       <ModuleDefinitionFile>zed-winagent.def</ModuleDefinitionFile>
     </Link>
-    <PostBuildEvent>
-      <Command>set PATH=$(IntDir)..\..\Win32-$(ConfigurationName)\resource-compiler;$(IntDir)..\..\x64-$(ConfigurationName)\resource-compiler;%PATH%
-resource-compiler.exe --namespace="zed_data" -o "$(IntDir)zed-winagent-32.c" "$(TargetPath)"</Command>
-    </PostBuildEvent>
-    <PostBuildEvent>
-      <Message>Serializing $(TargetFileName)</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="zed-winagent-common.props" />
   <ItemGroup>

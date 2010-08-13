@@ -48,7 +48,8 @@ namespace Zed {
 		public HostSession () {
 			try {
 				var builder = new Gtk.Builder ();
-				builder.add_from_string (Zed.Data.Ui.HOST_SESSION_XML, -1);
+				var blob = Zed.Data.Ui.get_host_session_ui_blob ();
+				builder.add_from_string ((string) blob.data, blob.size);
 
 				hpaned = builder.get_object ("root_hpaned") as Gtk.HPaned;
 

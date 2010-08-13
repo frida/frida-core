@@ -1,0 +1,1 @@
+Resource files are serialized using resource-compiler.

@@ -118,45 +118,188 @@
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="data\browse-processes.png">
+    <CustomBuild Include="data\images\browse-processes.png">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
-	--namespace="zed_data" ^
-	-o "$(IntDir)data\images.c" ^
-	$(SolutionDir)data\browse-processes.png || exit 1
-echo &gt; "$(IntDir)data\images.stamp"
-</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing images</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
-	--namespace="zed_data" ^
-	-o "$(IntDir)data\images.c" ^
-	$(SolutionDir)data\browse-processes.png || exit 1
-echo &gt; "$(IntDir)data\images.stamp"
-</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing images</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
-	--namespace="zed_data" ^
-	-o "$(IntDir)data\images.c" ^
-	$(SolutionDir)data\browse-processes.png || exit 1
-echo &gt; "$(IntDir)data\images.stamp"
-</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing images</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" ^
-	--namespace="zed_data" ^
-	-o "$(IntDir)data\images.c" ^
-	$(SolutionDir)data\browse-processes.png || exit 1
-echo &gt; "$(IntDir)data\images.stamp"
-</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing images</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\images.c;$(IntDir)data\images.stamp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+      </Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+      </Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+      </Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      </Outputs>
     </CustomBuild>
+    <CustomBuild Include="data\README.txt">
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Ui"			^
+	-o "$(IntDir)data\zed-data-ui"			^
+	"$(SolutionDir)data\ui\workspace.ui"		^
+	"$(SolutionDir)data\ui\login.ui"			^
+	"$(SolutionDir)data\ui\host-session.ui"		^
+	"$(SolutionDir)data\ui\agent-session.ui"		^
+	"$(SolutionDir)data\ui\chat.ui"			^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Images"		^
+	-o "$(IntDir)data\zed-data-images"		^
+	"$(SolutionDir)data\images\browse-processes.png"	^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Winjector"		^
+	-o "$(IntDir)data\zed-data-winjector"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" ^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.WinAgent"		^
+	-o "$(IntDir)data\zed-data-winagent"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.dll" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.dll" ^
+	|| exit 1
+
+echo &gt; "$(IntDir)data\resources.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Ui"			^
+	-o "$(IntDir)data\zed-data-ui"			^
+	"$(SolutionDir)data\ui\workspace.ui"		^
+	"$(SolutionDir)data\ui\login.ui"			^
+	"$(SolutionDir)data\ui\host-session.ui"		^
+	"$(SolutionDir)data\ui\agent-session.ui"		^
+	"$(SolutionDir)data\ui\chat.ui"			^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Images"		^
+	-o "$(IntDir)data\zed-data-images"		^
+	"$(SolutionDir)data\images\browse-processes.png"	^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Winjector"		^
+	-o "$(IntDir)data\zed-data-winjector"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" ^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.WinAgent"		^
+	-o "$(IntDir)data\zed-data-winagent"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.dll" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.dll" ^
+	|| exit 1
+
+echo &gt; "$(IntDir)data\resources.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Ui"			^
+	-o "$(IntDir)data\zed-data-ui"			^
+	"$(SolutionDir)data\ui\workspace.ui"		^
+	"$(SolutionDir)data\ui\login.ui"			^
+	"$(SolutionDir)data\ui\host-session.ui"		^
+	"$(SolutionDir)data\ui\agent-session.ui"		^
+	"$(SolutionDir)data\ui\chat.ui"			^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Images"		^
+	-o "$(IntDir)data\zed-data-images"		^
+	"$(SolutionDir)data\images\browse-processes.png"	^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Winjector"		^
+	-o "$(IntDir)data\zed-data-winjector"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" ^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.WinAgent"		^
+	-o "$(IntDir)data\zed-data-winagent"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.dll" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.dll" ^
+	|| exit 1
+
+echo &gt; "$(IntDir)data\resources.stamp"
+</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Ui"			^
+	-o "$(IntDir)data\zed-data-ui"			^
+	"$(SolutionDir)data\ui\workspace.ui"		^
+	"$(SolutionDir)data\ui\login.ui"			^
+	"$(SolutionDir)data\ui\host-session.ui"		^
+	"$(SolutionDir)data\ui\agent-session.ui"		^
+	"$(SolutionDir)data\ui\chat.ui"			^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Images"		^
+	-o "$(IntDir)data\zed-data-images"		^
+	"$(SolutionDir)data\images\browse-processes.png"	^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.Winjector"		^
+	-o "$(IntDir)data\zed-data-winjector"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" ^
+	|| exit 1
+
+"$(IntDir)..\resource-compiler\resource-compiler.exe"	^
+	--namespace="Zed.Data.WinAgent"		^
+	-o "$(IntDir)data\zed-data-winagent"		^
+	"$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.dll" ^
+	"$(SolutionDir)obj\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.dll" ^
+	|| exit 1
+
+echo &gt; "$(IntDir)data\resources.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+    <None Include="data\ui\agent-session.ui" />
+    <None Include="data\ui\chat.ui" />
+    <None Include="data\ui\host-session.ui" />
+    <None Include="data\ui\login.ui" />
+    <None Include="data\ui\workspace.ui" />
     <None Include="src\configuration.vala" />
     <CustomBuild Include="src\zed.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
@@ -165,8 +308,8 @@ mkdir "$(IntDir)src\platform" 2&gt;NUL
 mkdir "$(IntDir)src\protocol" 2&gt;NUL
 mkdir "$(IntDir)src\service" 2&gt;NUL
 mkdir "$(IntDir)src\ui" 2&gt;NUL
+
 "$(SolutionDir)ext\sdk\vala\valac.exe"			^
-	data/ui.vala				^
 	lib/interfaces/session.vala			^
 	src/configuration.vala			^
 	src/protocol/jid.vala				^
@@ -201,14 +344,21 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	--vapidir="$(IntDir)data"			^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
 	--pkg=gum				^
-	--pkg=zed-winipc || exit 1
+	--pkg=zed-winipc				^
+	--pkg=zed-data-images			^
+	--pkg=zed-data-ui				^
+	--pkg=zed-data-winagent			^
+	--pkg=zed-data-winjector			^
+	|| exit 1
+
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
@@ -216,8 +366,8 @@ mkdir "$(IntDir)src\platform" 2&gt;NUL
 mkdir "$(IntDir)src\protocol" 2&gt;NUL
 mkdir "$(IntDir)src\service" 2&gt;NUL
 mkdir "$(IntDir)src\ui" 2&gt;NUL
+
 "$(SolutionDir)ext\sdk\vala\valac.exe"			^
-	data/ui.vala				^
 	lib/interfaces/session.vala			^
 	src/configuration.vala			^
 	src/protocol/jid.vala				^
@@ -252,14 +402,21 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	--vapidir="$(IntDir)data"			^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
 	--pkg=gum				^
-	--pkg=zed-winipc || exit 1
+	--pkg=zed-winipc				^
+	--pkg=zed-data-images			^
+	--pkg=zed-data-ui				^
+	--pkg=zed-data-winagent			^
+	--pkg=zed-data-winjector			^
+	|| exit 1
+
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
@@ -267,8 +424,8 @@ mkdir "$(IntDir)src\platform" 2&gt;NUL
 mkdir "$(IntDir)src\protocol" 2&gt;NUL
 mkdir "$(IntDir)src\service" 2&gt;NUL
 mkdir "$(IntDir)src\ui" 2&gt;NUL
+
 "$(SolutionDir)ext\sdk\vala\valac.exe"			^
-	data/ui.vala				^
 	lib/interfaces/session.vala			^
 	src/configuration.vala			^
 	src/protocol/jid.vala				^
@@ -303,14 +460,21 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	--vapidir="$(IntDir)data"			^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
 	--pkg=gum				^
-	--pkg=zed-winipc || exit 1
+	--pkg=zed-winipc				^
+	--pkg=zed-data-images			^
+	--pkg=zed-data-ui				^
+	--pkg=zed-data-winagent			^
+	--pkg=zed-data-winjector			^
+	|| exit 1
+
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
@@ -318,8 +482,8 @@ mkdir "$(IntDir)src\platform" 2&gt;NUL
 mkdir "$(IntDir)src\protocol" 2&gt;NUL
 mkdir "$(IntDir)src\service" 2&gt;NUL
 mkdir "$(IntDir)src\ui" 2&gt;NUL
+
 "$(SolutionDir)ext\sdk\vala\valac.exe"			^
-	data/ui.vala				^
 	lib/interfaces/session.vala			^
 	src/configuration.vala			^
 	src/protocol/jid.vala				^
@@ -354,17 +518,23 @@ mkdir "$(IntDir)src\ui" 2&gt;NUL
 	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	--vapidir="$(IntDir)data"			^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
 	--pkg=gum				^
-	--pkg=zed-winipc || exit 1
+	--pkg=zed-winipc				^
+	--pkg=zed-data-images			^
+	--pkg=zed-data-ui				^
+	--pkg=zed-data-winagent			^
+	--pkg=zed-data-winjector			^
+	|| exit 1
+
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)data\ui.vala;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\configuration.vala;$(ProjectDir)src\protocol\jid.vala;$(ProjectDir)src\service\base-service.vala;$(ProjectDir)src\service\code-service.vala;$(ProjectDir)src\service\host-session.vala;$(ProjectDir)src\service\muc-service.vala;$(ProjectDir)src\service\process-info.vala;$(ProjectDir)src\service\process-list.vala;$(ProjectDir)src\service\storage-backend.vala;$(ProjectDir)src\service\xmpp-client.vala;$(ProjectDir)src\service\fruity\fruity-host-session.vala;$(ProjectDir)src\service\windows\windows-host-session.vala;$(ProjectDir)src\service\windows\winjector.vala;$(ProjectDir)src\service\windows\winjector-error.vala;$(ProjectDir)src\service\windows\winjector-ipc.vala;$(ProjectDir)src\ui\agent-session.vala;$(ProjectDir)src\ui\chat.vala;$(ProjectDir)src\ui\function-selector.vala;$(ProjectDir)src\ui\host-session.vala;$(ProjectDir)src\ui\login.vala;$(ProjectDir)src\ui\process-info-label.vala;$(ProjectDir)src\ui\root.vala;$(ProjectDir)src\ui\workspace.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
-    <None Include="data\ui.vala" />
     <None Include="lib\interfaces\session.vala" />
     <None Include="src\service\base-service.vala" />
     <None Include="src\service\code-service.vala" />
@@ -541,25 +711,25 @@ echo &gt; "$(IntDir)valacode.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\ui\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\ui\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\service\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\service\windows\</ObjectFileName>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\service\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\service\windows\</ObjectFileName>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)data\images.c">
+    <ClCompile Include="$(IntDir)data\zed-data-images.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="data\windows.c">
+    <ClCompile Include="$(IntDir)data\zed-data-ui.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\zed-data-winagent.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
@@ -584,18 +754,6 @@ echo &gt; "$(IntDir)valacode.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\service\windows\</ObjectFileName>
     </ClCompile>
     <ClCompile Include="src\service\windows\winjector-impl.c" />
-    <ClCompile Include="$(IntDir)..\..\Win32-$(ConfigurationName)\zed-winagent-32\zed-winagent-32.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)lib\winagent\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)lib\winagent\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)lib\winagent\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)lib\winagent\</ObjectFileName>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)..\..\x64-$(ConfigurationName)\zed-winagent-64\zed-winagent-64.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)lib\winagent\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)lib\winagent\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)lib\winagent\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)lib\winagent\</ObjectFileName>
-    </ClCompile>
     <ClCompile Include="src\ui\agent-session-glue.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\ui\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\ui\</ObjectFileName>
