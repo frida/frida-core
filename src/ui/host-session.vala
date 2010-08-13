@@ -119,9 +119,11 @@ namespace Zed {
 			configure_add_button ();
 			configure_session_treeview ();
 
+			var blob32 = Zed.Data.WinAgent.get_zed_winagent_32_dll_blob ();
+			var blob64 = Zed.Data.WinAgent.get_zed_winagent_64_dll_blob ();
 			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
-				new MemoryInputStream.from_data (get_winagent_32_data (), get_winagent_32_size (), null),
-				new MemoryInputStream.from_data (get_winagent_64_data (), get_winagent_64_size (), null));
+				new MemoryInputStream.from_data (blob32.data, blob32.size, null),
+				new MemoryInputStream.from_data (blob64.data, blob64.size, null));
 
 			load_data_from_storage_backend ();
 		}
@@ -512,12 +514,6 @@ namespace Zed {
 			model.get (iter, 0, out session);
 			(renderer as Gtk.CellRendererText).text = session.state_to_string ();
 		}
-
-		private static extern void * get_winagent_32_data ();
-		private static extern uint get_winagent_32_size ();
-
-		private static extern void * get_winagent_64_data ();
-		private static extern uint get_winagent_64_size ();
 
 		private class SessionEntry {
 			public Zed.HostSession session {

@@ -15,13 +15,16 @@ class Vala.ResourceCompiler {
 
 	private int run () {
 		var vapi_file = File.new_for_commandline_arg (output_basename + ".vapi");
+		var cheader_file = File.new_for_commandline_arg (output_basename + ".h");
 		var csource_file = File.new_for_commandline_arg (output_basename + ".c");
 
 		DataOutputStream vapi = null;
+		DataOutputStream cheader = null;
 		DataOutputStream csource = null;
 
 		try {
 			vapi = new DataOutputStream (vapi_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
+			cheader = new DataOutputStream (cheader_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
 			csource = new DataOutputStream (csource_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
 		} catch (Error e) {
 			stderr.printf ("%s\n", e.message);
@@ -34,26 +37,42 @@ class Vala.ResourceCompiler {
 
 			uint file_index = 0;
 
+			var incguard_name = "__" + output_namespace.up ().replace (".", "_") + "_H__";
 			var blob_ctype = output_namespace.replace (".", "") + "Blob";
-			var namespace_cprefix = output_namespace.down ().replace (".", "_");
+			var namespace_cprefix = c_namespace_from_vala (output_namespace);
 
 			vapi.put_string (
 				"// generated file, do not modify\n" +
 				"\n" +
+				"[CCode (cheader_filename = \"" + cheader_file.get_basename () + "\")]\n" +
 				"namespace " + output_namespace +  " {\n" +
 				"\n",
+				null);
+
+			cheader.put_string ((
+				"/* generated file, do not modify */\n" +
+				"\n" +
+				"#ifndef %s\n" +
+				"#define %s\n" +
+				"\n" +
+				"#include <glib.h>\n" +
+				"\n" +
+				"G_BEGIN_DECLS\n" +
+				"\n" +
+				"typedef struct _%s %s;\n" +
+				"\n" +
+				"struct _%s\n" +
+				"{\n" +
+				"  const unsigned char * data;\n" +
+				"  unsigned int size;\n" +
+				"};\n" +
+				"\n").printf (incguard_name, incguard_name, blob_ctype, blob_ctype, blob_ctype),
 				null);
 
 			csource.put_string (
 				"/* generated file, do not modify */\n" +
 				"\n" +
-				"typedef struct _" + blob_ctype + " " + blob_ctype + ";\n" +
-				"\n" +
-				"struct _" + blob_ctype + "\n" +
-				"{\n" +
-				"  const unsigned char * data;\n" +
-				"  unsigned int size;\n" +
-				"};\n" +
+				"#include \"" + cheader_file.get_basename () + "\"\n" +
 				"\n",
 				null);
 
@@ -70,7 +89,7 @@ class Vala.ResourceCompiler {
 
 				var file_input_stream = input_file.read (null);
 				var input_info = file_input_stream.query_info (FILE_ATTRIBUTE_STANDARD_SIZE, null);
-				var identifier = identifier_from_filename (input_file.get_basename (), false);
+				var identifier = identifier_from_filename (input_file.get_basename ());
 				var file_size = input_info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
 
 				vapi.put_string ("\tpublic static " + output_namespace + ".Blob get_" + identifier + "_blob ();\n", null);
@@ -101,18 +120,24 @@ class Vala.ResourceCompiler {
 						}
 					}
 
+					builder.truncate (builder.len - 1);
+
 					csource.put_string (builder.str, null);
 					builder.truncate (0);
 				}
 
 				csource.put_string ("\n};\n\n", null);
 
+				var func_name_and_arglist = namespace_cprefix + "_get_" + identifier + "_blob (" + blob_ctype + " * blob)";
+				cheader.put_string (
+					"void " + func_name_and_arglist + ";\n",
+					null);
 				csource.put_string (
-					blob_ctype + "\n" +
-					namespace_cprefix + "_get_" + identifier + "_blob (void)\n" +
+					"void\n" +
+					func_name_and_arglist + "\n" +
 					"{\n" +
-					"  " + blob_ctype + " blob = { " + identifier + ", sizeof (" + identifier + ") };\n" +
-					"  return blob;\n" +
+					"  blob->data = " + identifier + ";\n" +
+					"  blob->size = sizeof (" + identifier + ");\n" +
 					"}\n",
 					null);
 
@@ -133,6 +158,8 @@ class Vala.ResourceCompiler {
 				"\n" +
 				"}\n",
 				null);
+
+			cheader.put_string ("\nG_END_DECLS\n\n#endif\n", null);
 		} catch (Error e) {
 			stderr.printf ("IO Error: %s\n", e.message);
 			return 1;
@@ -141,13 +168,29 @@ class Vala.ResourceCompiler {
 		return 0;
 	}
 
-	private string identifier_from_filename (string filename, bool include_namespace = false) {
+	private string c_namespace_from_vala (string vala_ns) {
 		var builder = new StringBuilder ();
 
-		if (include_namespace && output_namespace != null) {
-			builder.append (output_namespace);
-			builder.append_c ('_');
+		bool previous_was_lowercase = false;
+
+		for (int i = 0; i != vala_ns.length; i++) {
+			unichar c = vala_ns[i];
+			if (c == '.')
+				continue;
+
+			if (previous_was_lowercase && c.isupper ())
+				builder.append_c ('_');
+			else
+				previous_was_lowercase = true;
+
+			builder.append_unichar (c.tolower ());
 		}
+
+		return builder.str;
+	}
+
+	private string identifier_from_filename (string filename) {
+		var builder = new StringBuilder ();
 
 		for (int i = 0; i != filename.length; i++) {
 			unichar c = filename[i];

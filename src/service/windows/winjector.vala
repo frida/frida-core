@@ -244,11 +244,13 @@ namespace Zed.Service {
 			private HashMap<string, TemporaryAgent> agents = new HashMap<string, TemporaryAgent> ();
 
 			public ResourceStore () throws WinjectorError {
+				var blob32 = Zed.Data.Winjector.get_winjector_helper_32_exe_blob ();
 				helper32 = new TemporaryFile.from_stream ("zed-winjector-helper-32.exe",
-					new MemoryInputStream.from_data (get_helper_32_data (), get_helper_32_size (), null),
+					new MemoryInputStream.from_data (blob32.data, blob32.size, null),
 					tempdir);
+				var blob64 = Zed.Data.Winjector.get_winjector_helper_64_exe_blob ();
 				helper64 = new TemporaryFile.from_stream ("zed-winjector-helper-64.exe",
-					new MemoryInputStream.from_data (get_helper_64_data (), get_helper_64_size (), null),
+					new MemoryInputStream.from_data (blob64.data, blob64.size, null),
 					tempdir);
 			}
 
@@ -261,12 +263,6 @@ namespace Zed.Service {
 
 				return temp_agent.filename_template;
 			}
-
-			private static extern void * get_helper_32_data ();
-			private static extern uint get_helper_32_size ();
-
-			private static extern void * get_helper_64_data ();
-			private static extern uint get_helper_64_size ();
 		}
 
 		private class TemporaryAgent {

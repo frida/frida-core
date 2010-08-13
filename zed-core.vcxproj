@@ -83,7 +83,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -92,7 +92,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -101,7 +101,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -110,7 +110,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -283,13 +283,13 @@ echo &gt; "$(IntDir)data\resources.stamp"
 echo &gt; "$(IntDir)data\resources.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing resources</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.h;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.h;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\zed-data-winagent.c;$(IntDir)data\zed-data-winagent.h;$(IntDir)data\zed-data-winagent.vapi;$(IntDir)data\zed-data-winjector.c;$(IntDir)data\zed-data-winjector.h;$(IntDir)data\zed-data-winjector.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing resources</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.h;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.h;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\zed-data-winagent.c;$(IntDir)data\zed-data-winagent.h;$(IntDir)data\zed-data-winagent.vapi;$(IntDir)data\zed-data-winjector.c;$(IntDir)data\zed-data-winjector.h;$(IntDir)data\zed-data-winjector.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing resources</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.h;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.h;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\zed-data-winagent.c;$(IntDir)data\zed-data-winagent.h;$(IntDir)data\zed-data-winagent.vapi;$(IntDir)data\zed-data-winjector.c;$(IntDir)data\zed-data-winjector.h;$(IntDir)data\zed-data-winjector.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing resources</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\zed-data-images.c;$(IntDir)data\zed-data-images.h;$(IntDir)data\zed-data-images.vapi;$(IntDir)data\zed-data-ui.c;$(IntDir)data\zed-data-ui.h;$(IntDir)data\zed-data-ui.vapi;$(IntDir)data\zed-data-winagent.c;$(IntDir)data\zed-data-winagent.h;$(IntDir)data\zed-data-winagent.vapi;$(IntDir)data\zed-data-winjector.c;$(IntDir)data\zed-data-winjector.h;$(IntDir)data\zed-data-winjector.vapi;$(IntDir)data\resources.stamp;%(Outputs)</Outputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)data\images\browse-processes.png;$(SolutionDir)data\ui\agent-session.ui;$(SolutionDir)data\ui\chat.ui;$(SolutionDir)data\ui\host-session.ui;$(SolutionDir)data\ui\login.ui;$(SolutionDir)data\ui\workspace.ui;%(AdditionalInputs)</AdditionalInputs>
