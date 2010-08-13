@@ -147,6 +147,9 @@
     <None Include="data\ui\login.ui">
       <Filter>Resource Files\ui</Filter>
     </None>
+    <None Include="src\ui\process-selector.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -250,6 +253,9 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
       <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\process-selector.c">
+      <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

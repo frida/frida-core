@@ -18,7 +18,7 @@ namespace Zed {
 			private set;
 		}
 
-		public Gtk.Entry pid_entry {
+		public ProcessSelector process_selector {
 			get;
 			private set;
 		}
@@ -54,9 +54,15 @@ namespace Zed {
 				hpaned = builder.get_object ("root_hpaned") as Gtk.HPaned;
 
 				provider_combo = builder.get_object ("provider_combo") as Gtk.ComboBox;
+
 				top_hbox = builder.get_object ("top_hbox") as Gtk.HBox;
-				pid_entry = builder.get_object ("pid_entry") as Gtk.Entry;
+
+				process_selector = new ProcessSelector ();
+				var alignment = builder.get_object ("process_selector_alignment") as Gtk.Alignment;
+				alignment.add (process_selector);
+
 				add_button = builder.get_object ("add_button") as Gtk.Button;
+
 				session_scrollwin = builder.get_object ("session_scrollwin") as Gtk.ScrolledWindow;
 				session_treeview = builder.get_object ("session_treeview") as Gtk.TreeView;
 				session_notebook = builder.get_object ("session_notebook") as Gtk.Notebook;
@@ -91,6 +97,8 @@ namespace Zed {
 		private Gee.HashMap<Service.HostSessionProvider, SessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, SessionEntry> ();
 		private SessionEntry active_session;
 
+		private ProcessSelector process_selector;
+
 		private uint sync_handler_id;
 
 		private HashMap<string, Service.ModuleSpec> module_spec_by_uid = new HashMap<string, Service.ModuleSpec> ();
@@ -100,7 +108,6 @@ namespace Zed {
 
 		private Service.AgentDescriptor agent_desc;
 
-		private Service.ProcessList process_list = new Service.ProcessList ();
 		private const double PROCESS_LIST_MIN_UPDATE_INTERVAL = 5.0;
 
 		private const int STORAGE_BACKEND_SYNC_TIMEOUT_MSEC = 5000;
@@ -112,10 +119,11 @@ namespace Zed {
 		}
 
 		construct {
+			process_selector = new ProcessSelector (view.process_selector);
+
 			configure_service ();
 
 			configure_provider_combo ();
-			configure_pid_entry ();
 			configure_add_button ();
 			configure_session_treeview ();
 
@@ -165,6 +173,7 @@ namespace Zed {
 			}
 		}
 
+		/*
 		private async void start_session (uint pid) {
 			var process_info = yield process_list.info_from_pid (pid);
 
@@ -181,6 +190,7 @@ namespace Zed {
 
 			session.inject ();
 		}
+		*/
 
 		private void switch_to_session (AgentSession session) {
 			var previous_session = current_session;
@@ -329,45 +339,8 @@ namespace Zed {
 			combo.set_cell_data_func (name_renderer, provider_combo_data_callback);
 		}
 
-		private void configure_pid_entry () {
-			var pe = view.pid_entry;
-
-			pe.activate.connect (() => {
-				view.add_button.clicked ();
-			});
-			pe.focus_in_event.connect ((event) => {
-				if (process_list.time_since_last_update () >= PROCESS_LIST_MIN_UPDATE_INTERVAL)
-					process_list.update ();
-				return false;
-			});
-
-			var completion = new Gtk.EntryCompletion ();
-
-			completion.set_model (process_list.model);
-			completion.set_popup_completion (true);
-
-			var icon_renderer = new Gtk.CellRendererPixbuf ();
-			completion.pack_start (icon_renderer, false);
-			completion.set_cell_data_func (icon_renderer, pid_entry_completion_data_callback);
-
-			completion.set_text_column (0);
-
-			var pid_renderer = new Gtk.CellRendererText ();
-			completion.pack_end (pid_renderer, false);
-			completion.set_cell_data_func (pid_renderer, pid_entry_completion_data_callback);
-
-			completion.match_selected.connect ((model, iter) => {
-				ProcessInfo pi;
-				model.get (iter, 1, out pi);
-				pe.set_text (pi.pid.to_string ());
-				pe.move_cursor (Gtk.MovementStep.BUFFER_ENDS, 1, false);
-				return true;
-			});
-
-			pe.set_completion (completion);
-		}
-
 		private void configure_add_button () {
+			/*
 			view.add_button.clicked.connect (() => {
 				var pid = view.pid_entry.text.to_int ();
 				if (pid != 0) {
@@ -375,6 +348,7 @@ namespace Zed {
 					start_session (pid);
 				}
 			});
+			*/
 		}
 
 		private void configure_session_treeview () {
@@ -477,16 +451,6 @@ namespace Zed {
 			model.get (iter, 0, out p);
 
 			(renderer as Gtk.CellRendererText).text = p.name;
-		}
-
-		private void pid_entry_completion_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
-			ProcessInfo pi;
-			model.get (iter, 1, out pi);
-
-			if (renderer is Gtk.CellRendererPixbuf)
-				(renderer as Gtk.CellRendererPixbuf).pixbuf = pi.small_icon;
-			else
-				(renderer as Gtk.CellRendererText).text = pi.pid.to_string ();
 		}
 
 		private void session_process_column_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
