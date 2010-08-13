@@ -97,7 +97,6 @@
                 <property name="can_default">True</property>
                 <property name="receives_default">True</property>
                 <property name="label" translatable="yes">Sign In</property>
-                <property name="response_id">0</property>
               </object>
             </child>
           </object>
