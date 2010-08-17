@@ -19,13 +19,13 @@ enum _IconSize
   ICON_SIZE_LARGE
 };
 
-static gchar * extract_icon_from_process_or_file (DWORD pid,
+static GVariant * extract_icon_from_process_or_file (DWORD pid,
     WCHAR * filename, IconSize size);
 
-static gchar * extract_icon_from_process (DWORD pid, IconSize size);
-static gchar * extract_icon_from_file (WCHAR * filename, IconSize size);
+static GVariant * extract_icon_from_process (DWORD pid, IconSize size);
+static GVariant * extract_icon_from_file (WCHAR * filename, IconSize size);
 
-static gchar * icon_to_rgba32_string (HICON icon, IconSize size);
+static GVariant * icon_to_variant (HICON icon, IconSize size);
 static void destroy_bitmap (guchar * pixels, gpointer data);
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
@@ -65,7 +65,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
       {
         gchar * name, * tmp;
         ZedHostProcessInfo * process_info;
-        gchar * small_icon, * large_icon;
+        GVariant * small_icon, * large_icon;
 
         name = g_utf16_to_utf8 ((gunichar2 *) name_utf16, -1, NULL, NULL, NULL);
         tmp = g_path_get_basename (name);
@@ -81,7 +81,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
         process_info = &g_array_index (processes, ZedHostProcessInfo,
             processes->len - 1);
         zed_host_process_info_init (process_info, pids[i], name,
-            small_icon ? small_icon : "", large_icon ? large_icon : "");
+            small_icon, large_icon);
 
         g_free (name);
       }
@@ -96,10 +96,10 @@ zed_service_windows_process_backend_enumerate_processes_sync (
   return (ZedHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
-static gchar *
+static GVariant *
 extract_icon_from_process_or_file (DWORD pid, WCHAR * filename, IconSize size)
 {
-  gchar * icon;
+  GVariant * icon;
 
   icon = extract_icon_from_process (pid, size);
   if (icon == NULL)
@@ -108,10 +108,10 @@ extract_icon_from_process_or_file (DWORD pid, WCHAR * filename, IconSize size)
   return icon;
 }
 
-static gchar *
+static GVariant *
 extract_icon_from_process (DWORD pid, IconSize size)
 {
-  gchar * result = NULL;
+  GVariant * result = NULL;
   HICON icon = NULL;
   HWND main_window;
 
@@ -158,15 +158,15 @@ extract_icon_from_process (DWORD pid, IconSize size)
   }
 
   if (icon != NULL)
-    result = icon_to_rgba32_string (icon, size);
+    result = icon_to_variant (icon, size);
 
   return result;
 }
 
-static gchar *
+static GVariant *
 extract_icon_from_file (WCHAR * filename, IconSize size)
 {
-  gchar * result = NULL;
+  GVariant * result = NULL;
   SHFILEINFO shfi = { 0, };
   UINT flags;
 
@@ -180,15 +180,16 @@ extract_icon_from_file (WCHAR * filename, IconSize size)
 
   SHGetFileInfoW (filename, 0, &shfi, sizeof (shfi), flags);
   if (shfi.hIcon != NULL)
-    result = icon_to_rgba32_string (shfi.hIcon, size);
+    result = icon_to_variant (shfi.hIcon, size);
 
   return result;
 }
 
-static gchar *
-icon_to_rgba32_string (HICON icon, IconSize size)
+static GVariant *
+icon_to_variant (HICON icon, IconSize size)
 {
-  gchar * result;
+  GVariant * result;
+  GVariantBuilder * builder;
   HDC dc;
   gint width = -1, height = -1;
   BITMAPV5HEADER bi = { 0, };
@@ -243,7 +244,14 @@ icon_to_rgba32_string (HICON icon, IconSize size)
     data[i + 2] = hold;
   }
 
-  result = g_base64_encode (data, height * rowstride);
+  /*
+  builder = g_variant_builder_new (G_VARIANT_TYPE ("(uuay)"));
+  g_variant_builder_add (builder, "u", width);
+  g_variant_builder_add (builder, "u", height);
+  g_variant_builder_add (builder, "ay", height);*/
+  //g_variant_new_byte_array (
+
+  result = NULL; // g_variant_new ("(uuay)", width, height, builder);
 
   DeleteObject (bm);
 
