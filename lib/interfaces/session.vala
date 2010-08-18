@@ -15,21 +15,50 @@ namespace Zed {
 			private set;
 		}
 
-		public Variant small_icon {
+		public HostProcessIcon small_icon {
 			get;
 			private set;
 		}
 
-		public Variant large_icon {
+		public HostProcessIcon large_icon {
 			get;
 			private set;
 		}
 
-		public HostProcessInfo (uint pid, string name, Variant small_icon, Variant large_icon) {
+		public HostProcessInfo (uint pid, string name, HostProcessIcon small_icon, HostProcessIcon large_icon) {
 			this.pid = pid;
 			this.name = name;
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
+		}
+	}
+
+	public struct HostProcessIcon {
+		public int width {
+			get;
+			private set;
+		}
+
+		public int height {
+			get;
+			private set;
+		}
+
+		public int rowstride {
+			get;
+			private set;
+		}
+
+		public string data {
+			get;
+			private set;
+		}
+
+		public HostProcessIcon (int width, int height, int rowstride, string data) {
+			this.width = width;
+			this.height = height;
+			this.rowstride = rowstride;
+			this.data = data;
 		}
 	}
 

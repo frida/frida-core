@@ -333,6 +333,14 @@ namespace Zed {
 
 		private void configure_provider_combo () {
 			var combo = view.provider_combo;
+			combo.changed.connect (() => {
+				Gtk.TreeIter iter;
+				if (view.provider_combo.get_active_iter (out iter)) {
+					Service.HostSessionProvider provider;
+					provider_store.get (iter, 0, out provider);
+					activate_session (provider);
+				}
+			});
 
 			combo.set_model (provider_store);
 

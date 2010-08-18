@@ -19,14 +19,16 @@ enum _IconSize
   ICON_SIZE_LARGE
 };
 
-static GVariant * extract_icon_from_process_or_file (DWORD pid,
+static ZedHostProcessIcon * extract_icon_from_process_or_file (DWORD pid,
     WCHAR * filename, IconSize size);
 
-static GVariant * extract_icon_from_process (DWORD pid, IconSize size);
-static GVariant * extract_icon_from_file (WCHAR * filename, IconSize size);
+static ZedHostProcessIcon * extract_icon_from_process (DWORD pid,
+    IconSize size);
+static ZedHostProcessIcon * extract_icon_from_file (WCHAR * filename,
+    IconSize size);
 
-static GVariant * icon_to_variant (HICON icon, IconSize size);
-static void destroy_bitmap (guchar * pixels, gpointer data);
+static ZedHostProcessIcon * icon_from_native_icon_handle (HICON icon,
+    IconSize size);
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
 
@@ -65,7 +67,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
       {
         gchar * name, * tmp;
         ZedHostProcessInfo * process_info;
-        GVariant * small_icon, * large_icon;
+        ZedHostProcessIcon * small_icon, * large_icon;
 
         name = g_utf16_to_utf8 ((gunichar2 *) name_utf16, -1, NULL, NULL, NULL);
         tmp = g_path_get_basename (name);
@@ -83,6 +85,9 @@ zed_service_windows_process_backend_enumerate_processes_sync (
         zed_host_process_info_init (process_info, pids[i], name,
             small_icon, large_icon);
 
+        zed_host_process_icon_free (large_icon);
+        zed_host_process_icon_free (small_icon);
+
         g_free (name);
       }
 
@@ -96,22 +101,28 @@ zed_service_windows_process_backend_enumerate_processes_sync (
   return (ZedHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
-static GVariant *
+static ZedHostProcessIcon *
 extract_icon_from_process_or_file (DWORD pid, WCHAR * filename, IconSize size)
 {
-  GVariant * icon;
+  ZedHostProcessIcon * icon;
 
   icon = extract_icon_from_process (pid, size);
   if (icon == NULL)
     icon = extract_icon_from_file (filename, size);
 
+  if (icon == NULL)
+  {
+    icon = g_new (ZedHostProcessIcon, 1);
+    zed_host_process_icon_init (icon, 0, 0, 0, "");
+  }
+
   return icon;
 }
 
-static GVariant *
+static ZedHostProcessIcon *
 extract_icon_from_process (DWORD pid, IconSize size)
 {
-  GVariant * result = NULL;
+  ZedHostProcessIcon * result = NULL;
   HICON icon = NULL;
   HWND main_window;
 
@@ -158,15 +169,15 @@ extract_icon_from_process (DWORD pid, IconSize size)
   }
 
   if (icon != NULL)
-    result = icon_to_variant (icon, size);
+    result = icon_from_native_icon_handle (icon, size);
 
   return result;
 }
 
-static GVariant *
+static ZedHostProcessIcon *
 extract_icon_from_file (WCHAR * filename, IconSize size)
 {
-  GVariant * result = NULL;
+  ZedHostProcessIcon * result = NULL;
   SHFILEINFO shfi = { 0, };
   UINT flags;
 
@@ -180,21 +191,22 @@ extract_icon_from_file (WCHAR * filename, IconSize size)
 
   SHGetFileInfoW (filename, 0, &shfi, sizeof (shfi), flags);
   if (shfi.hIcon != NULL)
-    result = icon_to_variant (shfi.hIcon, size);
+    result = icon_from_native_icon_handle (shfi.hIcon, size);
 
   return result;
 }
 
-static GVariant *
-icon_to_variant (HICON icon, IconSize size)
+static ZedHostProcessIcon *
+icon_from_native_icon_handle (HICON icon, IconSize size)
 {
-  GVariant * result;
+  ZedHostProcessIcon * result;
   GVariantBuilder * builder;
   HDC dc;
   gint width = -1, height = -1;
   BITMAPV5HEADER bi = { 0, };
   guint rowstride;
   guchar * data = NULL;
+  gchar * data_base64;
   HBITMAP bm;
   guint i;
 
@@ -244,14 +256,10 @@ icon_to_variant (HICON icon, IconSize size)
     data[i + 2] = hold;
   }
 
-  /*
-  builder = g_variant_builder_new (G_VARIANT_TYPE ("(uuay)"));
-  g_variant_builder_add (builder, "u", width);
-  g_variant_builder_add (builder, "u", height);
-  g_variant_builder_add (builder, "ay", height);*/
-  //g_variant_new_byte_array (
-
-  result = NULL; // g_variant_new ("(uuay)", width, height, builder);
+  result = g_new (ZedHostProcessIcon, 1);
+  data_base64 = g_base64_encode (data, rowstride * height);
+  zed_host_process_icon_init (result, width, height, width * 4, data_base64);
+  g_free (data_base64);
 
   DeleteObject (bm);
 
