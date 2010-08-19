@@ -70,6 +70,25 @@ namespace Zed {
 				error (e.message);
 			}
 		}
+
+		public void show_error_message (string message) {
+			var dialog = new Gtk.MessageDialog (find_parent_window (), Gtk.DialogFlags.DESTROY_WITH_PARENT, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, "Error: %s", message);
+			dialog.response.connect ((response_id) => dialog.destroy ());
+			dialog.run ();
+		}
+
+		private Gtk.Window? find_parent_window () {
+			Gtk.Widget cur = this.widget;
+
+			do {
+				cur = cur.parent;
+				if (cur is Gtk.Window)
+					return cur as Gtk.Window;
+			} while (cur != null);
+
+			return null;
+		}
+
 	}
 
 	public class Presenter.HostSession : Object {
@@ -136,30 +155,39 @@ namespace Zed {
 			load_data_from_storage_backend ();
 		}
 
-		private async void activate_session (Service.HostSessionProvider provider) {
+		private async void activate_provider (Service.HostSessionProvider provider) {
 			var entry = session_by_provider.get (provider);
 			if (entry == null) {
 				try {
 					var session = yield provider.create ();
 
-					entry = new SessionEntry (session);
+					entry = new SessionEntry (provider, session);
 					session_by_provider[provider] = entry;
 				} catch (IOError e) {
 					view.provider_combo.sensitive = true;
+
+					if (active_session != null)
+						select_provider (active_session.provider);
 					update_session_control_ui ();
+
+					view.show_error_message (e.message);
+
 					return;
 				}
 			}
 
-			Gtk.TreeIter iter;
-			var path = provider_store_path_of (provider);
-			provider_store.get_iter (out iter, path);
-			view.provider_combo.set_active_iter (iter);
 			view.provider_combo.sensitive = true;
-
+			select_provider (provider);
 			active_session = entry;
 
 			update_session_control_ui ();
+		}
+
+		private void select_provider (Service.HostSessionProvider provider) {
+			var path = provider_store_path_of_provider (provider);
+			Gtk.TreeIter iter;
+			provider_store.get_iter (out iter, path);
+			view.provider_combo.set_active_iter (iter);
 		}
 
 		private void update_session_control_ui () {
@@ -316,14 +344,14 @@ namespace Zed {
 				if (active_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
 					view.provider_combo.sensitive = false;
 
-					activate_session (provider);
+					activate_provider (provider);
 				}
 			});
 			service.provider_unavailable.connect ((provider) => {
 				session_by_provider.unset (provider);
 
 				Gtk.TreeIter iter;
-				var path = provider_store_path_of (provider);
+				var path = provider_store_path_of_provider (provider);
 				provider_store.get_iter (out iter, path);
 				provider_store.remove (iter);
 			});
@@ -338,7 +366,7 @@ namespace Zed {
 				if (view.provider_combo.get_active_iter (out iter)) {
 					Service.HostSessionProvider provider;
 					provider_store.get (iter, 0, out provider);
-					activate_session (provider);
+					activate_provider (provider);
 				}
 			});
 
@@ -416,7 +444,7 @@ namespace Zed {
 			return session;
 		}
 
-		private Gtk.TreePath provider_store_path_of (Service.HostSessionProvider provider) {
+		private Gtk.TreePath provider_store_path_of_provider (Service.HostSessionProvider provider) {
 			Gtk.TreeIter iter;
 			if (provider_store.get_iter_first (out iter)) {
 				do {
@@ -490,12 +518,18 @@ namespace Zed {
 		}
 
 		private class SessionEntry {
+			public Service.HostSessionProvider provider {
+				get;
+				private set;
+			}
+
 			public Zed.HostSession session {
 				get;
 				private set;
 			}
 
-			public SessionEntry (Zed.HostSession session) {
+			public SessionEntry (Service.HostSessionProvider provider, Zed.HostSession session) {
+				this.provider = provider;
 				this.session = session;
 			}
 		}
