@@ -130,6 +130,8 @@ namespace Zed.Service {
 			construct;
 		}
 
+		private const string SIMPLE_RESULT_SIGNATURE = "(bs)";
+
 		public WindowsAgentSession (WinIpc.Proxy proxy) {
 			Object (proxy: proxy);
 		}
@@ -188,6 +190,45 @@ namespace Zed.Service {
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.FAILED (e.message);
 			}
+		}
+
+		public async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError {
+			try {
+				var argument_variant = new Variant ("(st)", script_text, address);
+				var result_variant = yield proxy.query ("AttachScriptTo", argument_variant, "(ustu)");
+
+				uint id;
+				string error_message;
+				uint64 code_address;
+				uint32 code_size;
+				result_variant.@get ("(ustu)", out id, out error_message, out code_address, out code_size);
+
+				if (id != 0)
+					return AgentScriptInfo (id, code_address, code_size);
+				else
+					throw new IOError.FAILED (error_message);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		public async void detach_script (uint script_id) throws IOError {
+			try {
+				var argument_variant = new Variant ("u", script_id);
+				var result_variant = yield proxy.query ("DetachScript", argument_variant, SIMPLE_RESULT_SIGNATURE);
+				check_simple_result (result_variant);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.NOT_SUPPORTED (e.message);
+			}
+		}
+
+		private void check_simple_result (Variant result_variant) throws IOError {
+			bool succeeded;
+			string error_message;
+			result_variant.@get (SIMPLE_RESULT_SIGNATURE, out succeeded, out error_message);
+
+			if (!succeeded)
+				throw new IOError.FAILED (error_message);
 		}
 	}
 

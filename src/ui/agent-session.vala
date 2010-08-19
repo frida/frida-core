@@ -171,7 +171,7 @@ namespace Zed {
 		}
 		private string error_message;
 
-		public Zed.AgentSession agent_session {
+		public Zed.AgentSession session {
 			get;
 			private set;
 		}
@@ -207,14 +207,14 @@ namespace Zed {
 				update_state (State.ATTACHING);
 
 				var session_id = yield host_session.session.attach_to (process_info.pid);
-				agent_session = yield host_session.provider.obtain_agent_session (session_id);
+				session = yield host_session.provider.obtain_agent_session (session_id);
 
 				update_state (State.SYNCHRONIZING);
 				yield update_module_specs ();
 				update_state (State.ATTACHED);
 
-				start_selector.set_session (agent_session);
-				stop_selector.set_session (agent_session);
+				start_selector.set_session (session);
+				stop_selector.set_session (session);
 			} catch (IOError e) {
 				this.error (e.message);
 			}
@@ -346,14 +346,14 @@ namespace Zed {
 
 		private async bool update_module_specs () {
 			try {
-				var module_info_list = yield agent_session.query_modules ();
+				var module_info_list = yield session.query_modules ();
 				foreach (var mi in module_info_list) {
 					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mi.uid);
 					if (module_spec == null) {
 						module_spec = new Service.ModuleSpec (mi.name, mi.uid, mi.size);
 						code_service.add_module_spec (module_spec);
 
-						var function_info_list = yield agent_session.query_module_functions (mi.name);
+						var function_info_list = yield session.query_module_functions (mi.name);
 						foreach (var fi in function_info_list) {
 							var func_spec = new Service.FunctionSpec (fi.name, fi.address - mi.address);
 							yield code_service.add_function_spec_to_module (func_spec, module_spec);
@@ -603,7 +603,7 @@ namespace Zed {
 			}
 
 			try {
-				var script = yield attach_script_to_remote_function (script_text, address);
+				var script = yield session.attach_script_to (script_text, address);
 				print_to_console (("compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
 					"x").printf (script.code_size, script.code_address));
 				print_to_console ("attached with id %u".printf (script.id));
@@ -629,7 +629,7 @@ namespace Zed {
 			}
 
 			try {
-				yield detach_script_from_remote_function (id);
+				yield session.detach_script (id);
 				print_to_console ("script detached");
 			} catch (IOError detach_error) {
 				print_to_console ("ERROR: " + detach_error.message);
@@ -908,38 +908,6 @@ namespace Zed {
 			}
 		}
 
-		private async ScriptInfo attach_script_to_remote_function (string script_text, uint64 address) throws IOError {
-			try {
-				var argument_variant = new Variant ("(st)", script_text, address);
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var result_variant = yield dummy_proxy.query ("AttachScriptTo", argument_variant, "(ustu)");
-
-				uint id;
-				string error_message;
-				uint64 code_address;
-				uint32 code_size;
-				result_variant.@get ("(ustu)", out id, out error_message, out code_address, out code_size);
-
-				if (id != 0)
-					return new ScriptInfo (id, code_address, code_size);
-				else
-					throw new IOError.FAILED (error_message);
-			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
-			}
-		}
-
-		private async void detach_script_from_remote_function (uint script_id) throws IOError {
-			try {
-				var argument_variant = new Variant ("u", script_id);
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var result_variant = yield dummy_proxy.query ("DetachScript", argument_variant, SIMPLE_RESULT_SIGNATURE);
-				check_simple_result (result_variant);
-			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
-			}
-		}
-
 		private async void begin_instance_trace () throws IOError {
 			try {
 				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
@@ -998,29 +966,6 @@ namespace Zed {
 
 			if (!succeeded)
 				throw new IOError.FAILED (error_message);
-		}
-
-		private class ScriptInfo {
-			public uint id {
-				get;
-				private set;
-			}
-
-			public uint64 code_address {
-				get;
-				private set;
-			}
-
-			public uint32 code_size {
-				get;
-				private set;
-			}
-
-			public ScriptInfo (uint id, uint64 code_address, uint32 code_size) {
-				this.id = id;
-				this.code_address = code_address;
-				this.code_size = code_size;
-			}
 		}
 
 		/* TODO: move this to a Service later */

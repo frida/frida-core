@@ -10,6 +10,9 @@ namespace Zed {
 	public interface AgentSession : Object {
 		public abstract async AgentModuleInfo[] query_modules () throws IOError;
 		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
+
+		public abstract async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError;
+		public abstract async void detach_script (uint script_id) throws IOError;
 	}
 
 	public struct HostProcessInfo {
@@ -95,6 +98,29 @@ namespace Zed {
 		public AgentFunctionInfo (string name, uint64 address) {
 			this.name = name;
 			this.address = address;
+		}
+	}
+
+	public struct AgentScriptInfo {
+		public uint id {
+			get;
+			private set;
+		}
+
+		public uint64 code_address {
+			get;
+			private set;
+		}
+
+		public uint32 code_size {
+			get;
+			private set;
+		}
+
+		public AgentScriptInfo (uint id, uint64 code_address, uint32 code_size) {
+			this.id = id;
+			this.code_address = code_address;
+			this.code_size = code_size;
 		}
 	}
 
