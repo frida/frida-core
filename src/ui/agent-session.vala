@@ -208,6 +208,7 @@ namespace Zed {
 
 				var session_id = yield host_session.session.attach_to (process_info.pid);
 				session = yield host_session.provider.obtain_agent_session (session_id);
+				session.message_from_script.connect (on_message_from_script);
 
 				update_state (State.SYNCHRONIZING);
 				yield update_module_specs ();
@@ -632,6 +633,10 @@ namespace Zed {
 			} catch (IOError detach_error) {
 				print_to_console ("ERROR: " + detach_error.message);
 			}
+		}
+
+		private void on_message_from_script (uint script_id, Variant msg) {
+			print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
 		}
 
 		private void print_itracker_usage () {

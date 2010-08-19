@@ -139,15 +139,13 @@ namespace Zed.Service {
 		}
 
 		construct {
-			/*
 			proxy.add_notify_handler ("MessageFromScript", "(uv)", (arg) => {
 				uint script_id;
 				Variant msg;
 				arg.@get ("(uv)", out script_id, out msg);
 
-				print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
+				message_from_script (script_id, msg);
 			});
-			*/
 		}
 
 		public async void close () throws IOError {
