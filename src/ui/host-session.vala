@@ -142,8 +142,6 @@ namespace Zed {
 
 		private Service.AgentDescriptor agent_desc;
 
-		private const double PROCESS_LIST_MIN_UPDATE_INTERVAL = 5.0;
-
 		private const int STORAGE_BACKEND_SYNC_TIMEOUT_MSEC = 5000;
 
 		private const int KEYVAL_DELETE = 65535;

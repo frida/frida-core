@@ -63,6 +63,10 @@ namespace Zed {
 		private Gee.HashMap<uint, ProcessInfo> process_info_by_pid = new Gee.HashMap<uint, ProcessInfo> ();
 		private Gee.HashMap<void *, IconData> icon_data_by_pointer = new Gee.HashMap<void *, IconData> ();
 
+		private Timer last_refresh = new Timer ();
+		private bool refresh_in_progress = false;
+		private const double MIN_REFRESH_INTERVAL = 5.0;
+
 		public ProcessSelector (View.ProcessSelector view) {
 			Object (view: view);
 
@@ -81,14 +85,38 @@ namespace Zed {
 			if (new_session == this._session)
 				return;
 
-			process_store.clear ();
-			process_info_by_pid.clear ();
 			view.entry.text = "";
 
 			this._session = new_session;
 
-			if (new_session != null)
-				fetch_processes_from (new_session);
+			refresh ();
+		}
+
+		private void consider_refresh () {
+			if (last_refresh.elapsed () < MIN_REFRESH_INTERVAL)
+				return;
+
+			refresh ();
+		}
+
+		private async void refresh () {
+			if (refresh_in_progress)
+				return;
+
+			refresh_in_progress = true;
+
+			process_store.clear ();
+			process_info_by_pid.clear ();
+
+			last_refresh.reset ();
+
+			if (_session != null) {
+				yield fetch_processes_from (_session);
+
+				last_refresh.reset ();
+			}
+
+			refresh_in_progress = false;
 		}
 
 		private async void fetch_processes_from (Zed.HostSession session) {
@@ -120,9 +148,14 @@ namespace Zed {
 
 		private void configure_combo_entry () {
 			var combo = view.combo;
+			combo.popup.connect (() => consider_refresh ());
 			configure_cell_layout (combo);
 
 			var entry = view.entry;
+			entry.focus_in_event.connect ((event) => {
+				consider_refresh ();
+				return false;
+			});
 			entry.changed.connect (() => {
 				Gtk.TreeIter iter;
 				if (view.combo.get_active_iter (out iter))
@@ -235,12 +268,4 @@ namespace Zed {
 		}
 	}
 }
-
-	/*
-			pe.focus_in_event.connect ((event) => {
-				if (process_list.time_since_last_update () >= PROCESS_LIST_MIN_UPDATE_INTERVAL)
-					process_list.update ();
-				return false;
-			});
-	*/
 
