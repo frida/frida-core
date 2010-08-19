@@ -46,7 +46,7 @@ namespace Zed {
 			configure_combo_entry ();
 		}
 
-		private void switch_session (Zed.HostSession new_session) {
+		private void switch_session (Zed.HostSession? new_session) {
 			if (new_session == this._session)
 				return;
 

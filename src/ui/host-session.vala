@@ -354,6 +354,12 @@ namespace Zed {
 				var path = provider_store_path_of_provider (provider);
 				provider_store.get_iter (out iter, path);
 				provider_store.remove (iter);
+
+				if (active_session != null && active_session.provider == provider) {
+					process_selector.session = null;
+					active_session = null;
+					update_session_control_ui ();
+				}
 			});
 
 			service.start ();
