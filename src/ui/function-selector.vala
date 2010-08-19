@@ -45,14 +45,16 @@ namespace Zed {
 			get { return view.function_entry.get_active_text (); }
 		}
 
-		private WinIpc.Proxy proxy;
-
 		private Gtk.ListStore module_store = new Gtk.ListStore (1, typeof (string));
 		private Gtk.ListStore function_store = new Gtk.ListStore (1, typeof (string));
 
+		private Zed.AgentSession session;
+
 		public FunctionSelector (View.FunctionSelector view) {
 			Object (view: view);
+		}
 
+		construct {
 			module_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
 			function_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
 
@@ -61,9 +63,9 @@ namespace Zed {
 			configure_entries ();
 		}
 
-		public void set_proxy (WinIpc.Proxy proxy) {
-			assert (this.proxy == null);
-			this.proxy = proxy;
+		public void set_session (Zed.AgentSession session) {
+			assert (this.session == null);
+			this.session = session;
 
 			fetch_modules ();
 		}
@@ -88,19 +90,13 @@ namespace Zed {
 			module_store.clear ();
 
 			try {
-				var modules = yield proxy.query ("QueryModules", null, "a(sstt)");
-				foreach (var module in modules) {
-					string name;
-					string uid;
-					uint64 size;
-					uint64 base_address;
-					module.get ("(sstt)", out name, out uid, out size, out base_address);
-
+				var module_info_list = yield session.query_modules ();
+				foreach (var mi in module_info_list) {
 					Gtk.TreeIter iter;
 					module_store.append (out iter);
-					module_store.set (iter, 0, name);
+					module_store.set (iter, 0, mi.name);
 				}
-			} catch (WinIpc.ProxyError e) {
+			} catch (IOError e) {
 			}
 
 			(view.module_entry.child as Gtk.Entry).set_text ("WS2_32.dll");
@@ -113,17 +109,13 @@ namespace Zed {
 			var module_name = view.module_entry.get_active_text ();
 
 			try {
-				var functions = yield proxy.query ("QueryModuleFunctions", new Variant.string (module_name), "a(st)");
-				foreach (var function in functions) {
-					string name;
-					uint64 base_address;
-					function.get ("(st)", out name, out base_address);
-
+				var function_info_list = yield session.query_module_functions (module_name);
+				foreach (var fi in function_info_list) {
 					Gtk.TreeIter iter;
 					function_store.append (out iter);
-					function_store.set (iter, 0, name);
+					function_store.set (iter, 0, fi.name);
 				}
-			} catch (WinIpc.ProxyError e) {
+			} catch (IOError e) {
 			}
 		}
 	}

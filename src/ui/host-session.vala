@@ -135,8 +135,6 @@ namespace Zed {
 		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
 		private AgentSession active_agent_session;
 
-		private Service.AgentDescriptor agent_desc;
-
 		private const int STORAGE_BACKEND_SYNC_TIMEOUT_MSEC = 5000;
 
 		private const int KEYVAL_DELETE = 65535;
@@ -155,12 +153,6 @@ namespace Zed {
 			configure_session_treeview ();
 
 			view.process_selector.activated.connect (() => Signal.emit_by_name (view.attach_button, "activate"));
-
-			var blob32 = Zed.Data.WinAgent.get_zed_winagent_32_dll_blob ();
-			var blob64 = Zed.Data.WinAgent.get_zed_winagent_64_dll_blob ();
-			agent_desc = new Service.AgentDescriptor ("zed-winagent-%u.dll",
-				new MemoryInputStream.from_data (blob32.data, blob32.size, null),
-				new MemoryInputStream.from_data (blob64.data, blob64.size, null));
 
 			load_data_from_storage_backend ();
 		}

@@ -209,21 +209,12 @@ namespace Zed {
 				var session_id = yield host_session.session.attach_to (process_info.pid);
 				agent_session = yield host_session.provider.obtain_agent_session (session_id);
 
-				/*
-				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
-
-				proxy.add_notify_handler ("MessageFromScript", "(uv)", (arg) => {
-					uint script_id;
-					Variant msg;
-					arg.@get ("(uv)", out script_id, out msg);
-
-					print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
-				});
-				*/
-
 				update_state (State.SYNCHRONIZING);
-				//yield update_module_specs ();
+				yield update_module_specs ();
 				update_state (State.ATTACHED);
+
+				start_selector.set_session (agent_session);
+				stop_selector.set_session (agent_session);
 			} catch (IOError e) {
 				this.error (e.message);
 			}
@@ -355,38 +346,27 @@ namespace Zed {
 
 		private async bool update_module_specs () {
 			try {
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var module_values = yield dummy_proxy.query ("QueryModules", null, "a(sstt)");
-				foreach (var module_value in module_values) {
-					string mod_name;
-					string mod_uid;
-					uint64 mod_size;
-					uint64 mod_base;
-					module_value.@get ("(sstt)", out mod_name, out mod_uid, out mod_size, out mod_base);
-
-					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mod_uid);
+				var module_info_list = yield agent_session.query_modules ();
+				foreach (var mi in module_info_list) {
+					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mi.uid);
 					if (module_spec == null) {
-						module_spec = new Service.ModuleSpec (mod_name, mod_uid, mod_size);
+						module_spec = new Service.ModuleSpec (mi.name, mi.uid, mi.size);
 						code_service.add_module_spec (module_spec);
 
-						var function_values = yield dummy_proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
-						foreach (var function_value in function_values) {
-							string func_name;
-							uint64 func_address;
-							function_value.@get ("(st)", out func_name, out func_address);
-
-							var func_spec = new Service.FunctionSpec (func_name, func_address - mod_base);
+						var function_info_list = yield agent_session.query_module_functions (mi.name);
+						foreach (var fi in function_info_list) {
+							var func_spec = new Service.FunctionSpec (fi.name, fi.address - mi.address);
 							yield code_service.add_function_spec_to_module (func_spec, module_spec);
 						}
 					}
 
-					Service.Module module = yield code_service.find_module_by_address (mod_base);
+					Service.Module module = yield code_service.find_module_by_address (mi.address);
 					if (module == null) {
-						module = new Service.Module (module_spec, mod_base);
+						module = new Service.Module (module_spec, mi.address);
 						code_service.add_module (module);
 					}
 				}
-			} catch (WinIpc.ProxyError e) {
+			} catch (IOError e) {
 				return false;
 			}
 
