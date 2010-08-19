@@ -11,11 +11,15 @@ namespace Zed {
 			}
 		}
 
+		public signal void activated ();
+
 		public void set_model (Gtk.TreeModel process_model) {
 			assert (combo == null);
 
 			combo = new Gtk.ComboBoxEntry.with_model (process_model, 0);
 			pack_start (combo, true, true, 0);
+
+			entry.activate.connect (() => this.activated ());
 
 			show_all ();
 		}

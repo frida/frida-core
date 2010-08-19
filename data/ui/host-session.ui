@@ -20,7 +20,7 @@
           </packing>
         </child>
         <child>
-          <object class="GtkHBox" id="top_hbox">
+          <object class="GtkHBox" id="process_hbox">
             <child>
               <object class="GtkAlignment" id="process_selector_alignment">
                 <property name="visible">True</property>

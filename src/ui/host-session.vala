@@ -1,5 +1,3 @@
-using Gee;
-
 namespace Zed {
 	public class View.HostSession : Object {
 		public Gtk.Widget widget {
@@ -8,12 +6,17 @@ namespace Zed {
 			}
 		}
 
+		public Gtk.VBox left_vbox {
+			get;
+			private set;
+		}
+
 		public Gtk.ComboBox provider_combo {
 			get;
 			private set;
 		}
 
-		public Gtk.HBox top_hbox {
+		public Gtk.HBox process_hbox {
 			get;
 			private set;
 		}
@@ -53,9 +56,11 @@ namespace Zed {
 
 				hpaned = builder.get_object ("root_hpaned") as Gtk.HPaned;
 
+				left_vbox = builder.get_object ("left_vbox") as Gtk.VBox;
+
 				provider_combo = builder.get_object ("provider_combo") as Gtk.ComboBox;
 
-				top_hbox = builder.get_object ("top_hbox") as Gtk.HBox;
+				process_hbox = builder.get_object ("process_hbox") as Gtk.HBox;
 
 				process_selector = new ProcessSelector ();
 				var alignment = builder.get_object ("process_selector_alignment") as Gtk.Alignment;
@@ -66,6 +71,8 @@ namespace Zed {
 				session_scrollwin = builder.get_object ("session_scrollwin") as Gtk.ScrolledWindow;
 				session_treeview = builder.get_object ("session_treeview") as Gtk.TreeView;
 				session_notebook = builder.get_object ("session_notebook") as Gtk.Notebook;
+
+				configure_focus_chain ();
 			} catch (Error e) {
 				error (e.message);
 			}
@@ -75,6 +82,14 @@ namespace Zed {
 			var dialog = new Gtk.MessageDialog (find_parent_window (), Gtk.DialogFlags.DESTROY_WITH_PARENT, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, "Error: %s", message);
 			dialog.response.connect ((response_id) => dialog.destroy ());
 			dialog.run ();
+		}
+
+		private void configure_focus_chain () {
+			var widgets = new List<Gtk.Widget> ();
+			widgets.append (process_hbox);
+			widgets.append (session_scrollwin);
+			widgets.append (provider_combo);
+			left_vbox.set_focus_chain (widgets);
 		}
 
 		private Gtk.Window? find_parent_window () {
@@ -120,7 +135,7 @@ namespace Zed {
 
 		private uint sync_handler_id;
 
-		private HashMap<string, Service.ModuleSpec> module_spec_by_uid = new HashMap<string, Service.ModuleSpec> ();
+		private Gee.HashMap<string, Service.ModuleSpec> module_spec_by_uid = new Gee.HashMap<string, Service.ModuleSpec> ();
 
 		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
 		private AgentSession current_session;
@@ -145,6 +160,8 @@ namespace Zed {
 			configure_provider_combo ();
 			configure_attach_button ();
 			configure_session_treeview ();
+
+			view.process_selector.activated.connect (() => Signal.emit_by_name (view.attach_button, "activate"));
 
 			var blob32 = Zed.Data.WinAgent.get_zed_winagent_32_dll_blob ();
 			var blob64 = Zed.Data.WinAgent.get_zed_winagent_64_dll_blob ();
@@ -193,10 +210,10 @@ namespace Zed {
 		private void update_session_control_ui () {
 			bool have_active_session = active_session != null;
 			if (have_active_session) {
-				view.top_hbox.show ();
+				view.process_hbox.show ();
 				process_selector.session = active_session.session;
 			} else {
-				view.top_hbox.hide ();
+				view.process_hbox.hide ();
 				process_selector.session = null;
 			}
 		}
