@@ -193,13 +193,11 @@ namespace Zed {
 		private void update_session_control_ui () {
 			bool have_active_session = active_session != null;
 			if (have_active_session) {
-				process_selector.session = active_session.session;
 				view.top_hbox.show ();
-				view.session_scrollwin.show ();
+				process_selector.session = active_session.session;
 			} else {
-				process_selector.session = null;
 				view.top_hbox.hide ();
-				view.session_scrollwin.hide ();
+				process_selector.session = null;
 			}
 		}
 
@@ -356,7 +354,6 @@ namespace Zed {
 				provider_store.remove (iter);
 
 				if (active_session != null && active_session.provider == provider) {
-					process_selector.session = null;
 					active_session = null;
 					update_session_control_ui ();
 				}
