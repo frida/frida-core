@@ -75,11 +75,24 @@ namespace Zed {
 			}
 		}
 
+		private void update_entry_with (Gtk.TreeModel model, Gtk.TreeIter iter) {
+			ProcessInfo pi;
+			model.get (iter, 1, out pi);
+			var entry = view.entry;
+			entry.set_text (pi.pid.to_string ());
+			entry.move_cursor (Gtk.MovementStep.BUFFER_ENDS, 1, false);
+		}
+
 		private void configure_combo_entry () {
 			var combo = view.combo;
 			configure_cell_layout (combo);
 
 			var entry = view.entry;
+			entry.changed.connect (() => {
+				Gtk.TreeIter iter;
+				if (view.combo.get_active_iter (out iter))
+					update_entry_with (process_store, iter);
+			});
 
 			var completion = new Gtk.EntryCompletion ();
 
@@ -90,10 +103,7 @@ namespace Zed {
 			completion.set_text_column (0);
 
 			completion.match_selected.connect ((model, iter) => {
-				ProcessInfo pi;
-				model.get (iter, 1, out pi);
-				entry.set_text (pi.pid.to_string ());
-				entry.move_cursor (Gtk.MovementStep.BUFFER_ENDS, 1, false);
+				update_entry_with (model, iter);
 				return true;
 			});
 
