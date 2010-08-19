@@ -23,7 +23,7 @@ namespace Zed {
 			private set;
 		}
 
-		public Gtk.Button add_button {
+		public Gtk.Button attach_button {
 			get;
 			private set;
 		}
@@ -61,7 +61,7 @@ namespace Zed {
 				var alignment = builder.get_object ("process_selector_alignment") as Gtk.Alignment;
 				alignment.add (process_selector);
 
-				add_button = builder.get_object ("add_button") as Gtk.Button;
+				attach_button = builder.get_object ("attach_button") as Gtk.Button;
 
 				session_scrollwin = builder.get_object ("session_scrollwin") as Gtk.ScrolledWindow;
 				session_treeview = builder.get_object ("session_treeview") as Gtk.TreeView;
@@ -143,7 +143,7 @@ namespace Zed {
 			configure_service ();
 
 			configure_provider_combo ();
-			configure_add_button ();
+			configure_attach_button ();
 			configure_session_treeview ();
 
 			var blob32 = Zed.Data.WinAgent.get_zed_winagent_32_dll_blob ();
@@ -380,16 +380,14 @@ namespace Zed {
 			combo.set_cell_data_func (name_renderer, provider_combo_data_callback);
 		}
 
-		private void configure_add_button () {
-			/*
-			view.add_button.clicked.connect (() => {
-				var pid = view.pid_entry.text.to_int ();
-				if (pid != 0) {
-					view.pid_entry.text = "";
-					start_session (pid);
+		private void configure_attach_button () {
+			view.attach_button.clicked.connect (() => {
+				var pi = process_selector.selected_process;
+				if (pi != null) {
+					process_selector.clear_selection ();
+					//start_session (pid);
 				}
 			});
-			*/
 		}
 
 		private void configure_session_treeview () {

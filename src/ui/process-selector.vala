@@ -33,7 +33,30 @@ namespace Zed {
 		}
 		private Zed.HostSession _session;
 
+		public ProcessInfo? selected_process {
+			owned get {
+				Gtk.TreeIter iter;
+				if (view.combo.get_active_iter (out iter)) {
+					ProcessInfo pi;
+					process_store.get (iter, 1, out pi);
+
+					return pi;
+				} else {
+					int pid = view.entry.text.to_int ();
+					if (pid <= 0)
+						return null;
+
+					var pi = process_info_by_pid[pid];
+					if (pi != null)
+						return pi;
+
+					return new ProcessInfo (pid, "[Unknown Process]");
+				}
+			}
+		}
+
 		private Gtk.ListStore process_store = new Gtk.ListStore (2, typeof (string), typeof (ProcessInfo));
+		private Gee.HashMap<uint, ProcessInfo> process_info_by_pid = new Gee.HashMap<uint, ProcessInfo> ();
 		private Gee.HashMap<void *, IconData> icon_data_by_pointer = new Gee.HashMap<void *, IconData> ();
 
 		public ProcessSelector (View.ProcessSelector view) {
@@ -46,11 +69,16 @@ namespace Zed {
 			configure_combo_entry ();
 		}
 
+		public void clear_selection () {
+			view.entry.text = "";
+		}
+
 		private void switch_session (Zed.HostSession? new_session) {
 			if (new_session == this._session)
 				return;
 
 			process_store.clear ();
+			process_info_by_pid.clear ();
 			view.entry.text = "";
 
 			this._session = new_session;
@@ -71,6 +99,8 @@ namespace Zed {
 					Gtk.TreeIter iter;
 					process_store.append (out iter);
 					process_store.set (iter, 0, p.name, 1, info);
+
+					process_info_by_pid[p.pid] = info;
 				}
 			} catch (IOError e) {
 			}
@@ -172,7 +202,35 @@ namespace Zed {
 		}
 	}
 
-	// FIXME: move ProcessInfo here
+	public class ProcessInfo : Object {
+		public uint pid {
+			get;
+			private set;
+		}
+
+		public string name {
+			get;
+			private set;
+		}
+
+		public Gdk.Pixbuf? small_icon {
+			get;
+			private set;
+		}
+
+		public Gdk.Pixbuf? large_icon {
+			get;
+			private set;
+		}
+
+		public ProcessInfo (uint pid, string name, Gdk.Pixbuf? small_icon = null, Gdk.Pixbuf? large_icon = null) {
+			this.pid = pid;
+			this.name = name;
+			this.small_icon = small_icon;
+			this.large_icon = large_icon;
+		}
+	}
+}
 
 	/*
 			pe.focus_in_event.connect ((event) => {
@@ -181,4 +239,4 @@ namespace Zed {
 				return false;
 			});
 	*/
-}
+

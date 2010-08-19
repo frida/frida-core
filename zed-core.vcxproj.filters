@@ -99,12 +99,6 @@
     <None Include="src\ui\function-selector.vala">
       <Filter>Source Files\ui</Filter>
     </None>
-    <None Include="src\service\process-info.vala">
-      <Filter>Source Files\service</Filter>
-    </None>
-    <None Include="src\service\process-list.vala">
-      <Filter>Source Files\service</Filter>
-    </None>
     <None Include="src\ui\process-info-label.vala">
       <Filter>Source Files\ui</Filter>
     </None>
@@ -184,15 +178,6 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\ui\function-selector.c">
       <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\process-list.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\process-info.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="src\service\process-list-glue.c">
-      <Filter>Source Files\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\ui\process-info-label.c">
       <Filter>Source Files\generated\ui</Filter>
