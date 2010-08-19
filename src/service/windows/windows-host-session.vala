@@ -27,18 +27,19 @@ namespace Zed.Service {
 
 			assert (local_provider == null);
 			local_provider = new WindowsHostSessionProvider (this);
-
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				provider_available (local_provider);
-				return false;
-			});
-			source.attach (MainContext.get_thread_default ());
+			provider_available (local_provider);
 		}
 
 		public async void stop () {
+			foreach (var agent_session in agent_session_by_id.values) {
+				try {
+					yield agent_session.close ();
+				} catch (IOError e) {
+				}
+			}
+			agent_session_by_id.clear ();
+
 			assert (local_provider != null);
-			//yield local_provider.stop ();
 			local_provider = null;
 
 			// HACK: give processes 50 ms to unload DLLs
@@ -50,9 +51,10 @@ namespace Zed.Service {
 			source.attach (MainContext.get_thread_default ());
 			yield;
 
-			yield winjector.close ();
-
 			agent_desc = null;
+
+			yield winjector.close ();
+			winjector = null;
 		}
 
 		public AgentSessionId register_agent_session (WindowsAgentSession session) {
@@ -146,6 +148,14 @@ namespace Zed.Service {
 				print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
 			});
 			*/
+		}
+
+		public async void close () throws IOError {
+			try {
+				yield proxy.emit ("Stop");
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
 		}
 
 		public async AgentModuleInfo[] query_modules () throws IOError {

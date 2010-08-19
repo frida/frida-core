@@ -225,14 +225,12 @@ namespace Zed {
 				return;
 
 			if (state == State.ATTACHED) {
-				/*
 				try {
-					yield proxy.emit ("Stop");
+					yield session.close ();
 				} catch (IOError e) {
 					this.error (e.message);
 					return;
 				}
-				*/
 			}
 
 			update_state (State.TERMINATED);

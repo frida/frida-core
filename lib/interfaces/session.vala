@@ -8,6 +8,8 @@ namespace Zed {
 
 	[DBus (name = "org.boblycat.frida.AgentSession")]
 	public interface AgentSession : Object {
+		public abstract async void close () throws IOError;
+
 		public abstract async AgentModuleInfo[] query_modules () throws IOError;
 		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
 
