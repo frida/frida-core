@@ -6,7 +6,8 @@ namespace Zed.Service {
 		public void start () {
 			control_client = new Fruity.Client ();
 			control_client.device_connected.connect ((device_id) => {
-				assert (!provider_by_device_id.has_key (device_id));
+				if (provider_by_device_id.has_key (device_id))
+					return;
 
 				var provider = new FruityHostSessionProvider (device_id);
 				provider_by_device_id[device_id] = provider;
@@ -14,7 +15,8 @@ namespace Zed.Service {
 				provider_available (provider);
 			});
 			control_client.device_disconnected.connect ((device_id) => {
-				assert (provider_by_device_id.has_key (device_id));
+				if (!provider_by_device_id.has_key (device_id))
+					return;
 
 				FruityHostSessionProvider provider;
 				provider_by_device_id.unset (device_id, out provider);
