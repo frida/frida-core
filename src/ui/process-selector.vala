@@ -51,6 +51,7 @@ namespace Zed {
 				return;
 
 			process_store.clear ();
+			view.entry.text = "";
 
 			this._session = new_session;
 
