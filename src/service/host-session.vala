@@ -5,9 +5,14 @@ namespace Zed.Service {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);
 
-		public void start () {
+		public async void start () {
 			foreach (var backend in backends)
-				backend.start ();
+				yield backend.start ();
+		}
+
+		public async void stop () {
+			foreach (var backend in backends)
+				yield backend.stop ();
 		}
 
 		public void add_backend (HostSessionBackend backend) {
@@ -31,6 +36,8 @@ namespace Zed.Service {
 		}
 
 		public abstract async HostSession create () throws IOError;
+
+		public abstract async AgentSession obtain_agent_session (AgentSessionId id) throws IOError;
 	}
 
 	public enum HostSessionProviderKind {
@@ -43,6 +50,7 @@ namespace Zed.Service {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);
 
-		public abstract void start ();
+		public abstract async void start ();
+		public abstract async void stop ();
 	}
 }

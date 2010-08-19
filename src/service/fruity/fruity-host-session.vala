@@ -3,7 +3,7 @@ namespace Zed.Service {
 		private Fruity.Client control_client;
 		private Gee.HashMap<uint, FruityHostSessionProvider> provider_by_device_id = new Gee.HashMap<uint, FruityHostSessionProvider> ();
 
-		public void start () {
+		public async void start () {
 			control_client = new Fruity.Client ();
 			control_client.device_connected.connect ((device_id) => {
 				if (provider_by_device_id.has_key (device_id))
@@ -23,10 +23,6 @@ namespace Zed.Service {
 				provider_unavailable (provider);
 			});
 
-			do_establish ();
-		}
-
-		private async void do_establish () {
 			try {
 				yield control_client.establish ();
 				yield control_client.enable_monitor_mode ();
@@ -35,6 +31,8 @@ namespace Zed.Service {
 			}
 		}
 
+		public async void stop () {
+		}
 	}
 
 	public class FruityHostSessionProvider : Object, HostSessionProvider {
@@ -77,6 +75,10 @@ namespace Zed.Service {
 			entries.add (entry);
 
 			return entry.session;
+		}
+
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+			throw new IOError.FAILED ("not yet implemented");
 		}
 
 		private class Entry {

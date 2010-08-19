@@ -141,6 +141,11 @@ namespace Zed {
 			construct;
 		}
 
+		public HostSessionEntry host_session {
+			get;
+			construct;
+		}
+
 		public ProcessInfo process_info {
 			get;
 			construct;
@@ -153,9 +158,9 @@ namespace Zed {
 
 		public enum State {
 			UNINITIALIZED,
-			INJECTING,
+			ATTACHING,
 			SYNCHRONIZING,
-			INJECTED,
+			ATTACHED,
 			ERROR,
 			TERMINATED
 		}
@@ -164,11 +169,12 @@ namespace Zed {
 			get;
 			private set;
 		}
-
 		private string error_message;
 
-		private Service.Winjector winjector;
-		private Service.AgentDescriptor agent_desc;
+		public Zed.AgentSession agent_session {
+			get;
+			private set;
+		}
 
 		private ProcessInfoLabel process_info_label;
 		private FunctionSelector start_selector;
@@ -181,17 +187,10 @@ namespace Zed {
 
 		private Investigation investigation;
 
-		public WinIpc.Proxy proxy {
-			get;
-			private set;
-		}
-
-		public AgentSession (View.AgentSession view, ProcessInfo process_info, Service.CodeService code_service, Service.Winjector winjector, Service.AgentDescriptor agent_desc) {
-			Object (view: view, process_info: process_info, code_service: code_service);
+		public AgentSession (View.AgentSession view, HostSessionEntry host_session, ProcessInfo process_info, Service.CodeService code_service) {
+			Object (view: view, host_session: host_session, process_info: process_info, code_service: code_service);
 
 			update_state (State.UNINITIALIZED);
-			this.winjector = winjector;
-			this.agent_desc = agent_desc;
 
 			process_info_label = new ProcessInfoLabel (view.process_info_label, process_info);
 			start_selector = new FunctionSelector (view.start_selector);
@@ -203,10 +202,14 @@ namespace Zed {
 			configure_console ();
 		}
 
-		public async void inject () {
+		public async void start () {
 			try {
-				update_state (State.INJECTING);
+				update_state (State.ATTACHING);
 
+				var session_id = yield host_session.session.attach_to (process_info.pid);
+				agent_session = yield host_session.provider.obtain_agent_session (session_id);
+
+				/*
 				proxy = yield winjector.inject (process_info.pid, agent_desc, null);
 
 				proxy.add_notify_handler ("MessageFromScript", "(uv)", (arg) => {
@@ -216,14 +219,12 @@ namespace Zed {
 
 					print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
 				});
+				*/
 
 				update_state (State.SYNCHRONIZING);
-				yield update_module_specs ();
-				update_state (State.INJECTED);
-
-				start_selector.set_proxy (proxy);
-				stop_selector.set_proxy (proxy);
-			} catch (Service.WinjectorError e) {
+				//yield update_module_specs ();
+				update_state (State.ATTACHED);
+			} catch (IOError e) {
 				this.error (e.message);
 			}
 		}
@@ -232,13 +233,15 @@ namespace Zed {
 			if (state == State.TERMINATED)
 				return;
 
-			if (state == State.INJECTED) {
+			if (state == State.ATTACHED) {
+				/*
 				try {
 					yield proxy.emit ("Stop");
-				} catch (WinIpc.ProxyError e) {
+				} catch (IOError e) {
 					this.error (e.message);
 					return;
 				}
+				*/
 			}
 
 			update_state (State.TERMINATED);
@@ -247,7 +250,8 @@ namespace Zed {
 		private async void start_investigation () {
 			function_call_store.clear ();
 
-			investigation = new Investigation (proxy, code_service);
+			var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+			investigation = new Investigation (dummy_proxy, code_service);
 			investigation.new_function_call.connect (on_new_function_call);
 			investigation.finished.connect (end_investigation);
 
@@ -331,9 +335,9 @@ namespace Zed {
 		}
 
 		private void update_view () {
-			view.control_frame.sensitive = (state == State.INJECTED);
+			view.control_frame.sensitive = (state == State.ATTACHED);
 
-			if (state == State.INJECTED) {
+			if (state == State.ATTACHED) {
 				view.start_selector.sensitive = (investigation == null);
 				view.stop_selector.sensitive = (investigation == null);
 				view.go_button.sensitive = (start_selector.selection_is_set && stop_selector.selection_is_set && investigation == null);
@@ -351,7 +355,8 @@ namespace Zed {
 
 		private async bool update_module_specs () {
 			try {
-				var module_values = yield proxy.query ("QueryModules", null, "a(sstt)");
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var module_values = yield dummy_proxy.query ("QueryModules", null, "a(sstt)");
 				foreach (var module_value in module_values) {
 					string mod_name;
 					string mod_uid;
@@ -364,7 +369,7 @@ namespace Zed {
 						module_spec = new Service.ModuleSpec (mod_name, mod_uid, mod_size);
 						code_service.add_module_spec (module_spec);
 
-						var function_values = yield proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
+						var function_values = yield dummy_proxy.query ("QueryModuleFunctions", new Variant.string (mod_name), "a(st)");
 						foreach (var function_value in function_values) {
 							string func_name;
 							uint64 func_address;
@@ -392,12 +397,12 @@ namespace Zed {
 			switch (state) {
 				case State.UNINITIALIZED:
 					return "Uninitialized";
-				case State.INJECTING:
-					return "Injecting";
+				case State.ATTACHING:
+					return "Attaching";
 				case State.SYNCHRONIZING:
 					return "Synchronizing";
-				case State.INJECTED:
-					return "Injected";
+				case State.ATTACHED:
+					return "Attached";
 				case State.ERROR:
 					return "Error: %s".printf (error_message);
 				case State.TERMINATED:
@@ -899,7 +904,8 @@ namespace Zed {
 
 		private async uint8[] read_remote_memory (uint64 address, uint64 size) throws IOError {
 			try {
-				var result_variant = yield proxy.query ("DumpMemory", new Variant ("(tt)", address, size), "(bsay)");
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var result_variant = yield dummy_proxy.query ("DumpMemory", new Variant ("(tt)", address, size), "(bsay)");
 
 				bool succeeded;
 				string error_message;
@@ -925,7 +931,8 @@ namespace Zed {
 		private async ScriptInfo attach_script_to_remote_function (string script_text, uint64 address) throws IOError {
 			try {
 				var argument_variant = new Variant ("(st)", script_text, address);
-				var result_variant = yield proxy.query ("AttachScriptTo", argument_variant, "(ustu)");
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var result_variant = yield dummy_proxy.query ("AttachScriptTo", argument_variant, "(ustu)");
 
 				uint id;
 				string error_message;
@@ -945,7 +952,8 @@ namespace Zed {
 		private async void detach_script_from_remote_function (uint script_id) throws IOError {
 			try {
 				var argument_variant = new Variant ("u", script_id);
-				var result_variant = yield proxy.query ("DetachScript", argument_variant, SIMPLE_RESULT_SIGNATURE);
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var result_variant = yield dummy_proxy.query ("DetachScript", argument_variant, SIMPLE_RESULT_SIGNATURE);
 				check_simple_result (result_variant);
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.NOT_SUPPORTED (e.message);
@@ -954,7 +962,8 @@ namespace Zed {
 
 		private async void begin_instance_trace () throws IOError {
 			try {
-				var result_variant = yield proxy.query ("BeginInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var result_variant = yield dummy_proxy.query ("BeginInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
 				check_simple_result (result_variant);
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.NOT_SUPPORTED (e.message);
@@ -963,7 +972,8 @@ namespace Zed {
 
 		private async void end_instance_trace () throws IOError {
 			try {
-				var result_variant = yield proxy.query ("EndInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var result_variant = yield dummy_proxy.query ("EndInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
 				check_simple_result (result_variant);
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.NOT_SUPPORTED (e.message);
@@ -972,7 +982,8 @@ namespace Zed {
 
 		private async Gee.List<InstanceEntry> dump_instances () throws IOError {
 			try {
-				var result_variant = yield proxy.query ("PeekInstances", null, "(ba(tus))");
+				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
+				var result_variant = yield dummy_proxy.query ("PeekInstances", null, "(ba(tus))");
 
 				bool success;
 				VariantIter entries_iter;

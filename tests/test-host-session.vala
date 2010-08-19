@@ -60,13 +60,16 @@ namespace Zed.HostSessionTest {
 		private class StubBackend : Object, HostSessionBackend {
 			private StubProvider provider = new StubProvider ();
 
-			public void start () {
+			public async void start () {
 				var source = new IdleSource ();
 				source.set_callback (() => {
 					provider_available (provider);
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
+			}
+
+			public async void stop () {
 			}
 
 			public void disable_provider () {
@@ -84,7 +87,11 @@ namespace Zed.HostSessionTest {
 			}
 
 			public async HostSession create () throws IOError {
-				throw new IOError.FAILED ("Not implemented");
+				throw new IOError.FAILED ("not implemented");
+			}
+
+			public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+				throw new IOError.FAILED ("not implemented");
 			}
 		}
 

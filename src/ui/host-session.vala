@@ -122,14 +122,9 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.Winjector winjector {
-			get;
-			construct;
-		}
-
 		private Gtk.ListStore provider_store = new Gtk.ListStore (1, typeof (Service.HostSessionProvider));
-		private Gee.HashMap<Service.HostSessionProvider, SessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, SessionEntry> ();
-		private SessionEntry active_session;
+		private Gee.HashMap<Service.HostSessionProvider, HostSessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, HostSessionEntry> ();
+		private HostSessionEntry active_host_session;
 
 		private ProcessSelector process_selector;
 
@@ -138,7 +133,7 @@ namespace Zed {
 		private Gee.HashMap<string, Service.ModuleSpec> module_spec_by_uid = new Gee.HashMap<string, Service.ModuleSpec> ();
 
 		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
-		private AgentSession current_session;
+		private AgentSession active_agent_session;
 
 		private Service.AgentDescriptor agent_desc;
 
@@ -147,7 +142,7 @@ namespace Zed {
 		private const int KEYVAL_DELETE = 65535;
 
 		public HostSession (View.HostSession view, Service.HostSessionService service, Service.StorageBackend storage_backend) {
-			Object (view: view, service: service, storage_backend: storage_backend, winjector: new Service.Winjector () /* here for now */);
+			Object (view: view, service: service, storage_backend: storage_backend);
 		}
 
 		construct {
@@ -176,13 +171,13 @@ namespace Zed {
 				try {
 					var session = yield provider.create ();
 
-					entry = new SessionEntry (provider, session);
+					entry = new HostSessionEntry (provider, session);
 					session_by_provider[provider] = entry;
 				} catch (IOError e) {
 					view.provider_combo.sensitive = true;
 
-					if (active_session != null)
-						select_provider (active_session.provider);
+					if (active_host_session != null)
+						select_provider (active_host_session.provider);
 					update_session_control_ui ();
 
 					view.show_error_message (e.message);
@@ -193,7 +188,7 @@ namespace Zed {
 
 			view.provider_combo.sensitive = true;
 			select_provider (provider);
-			active_session = entry;
+			active_host_session = entry;
 
 			update_session_control_ui ();
 		}
@@ -206,23 +201,20 @@ namespace Zed {
 		}
 
 		private void update_session_control_ui () {
-			bool have_active_session = active_session != null;
-			if (have_active_session) {
+			bool have_active_host_session = active_host_session != null;
+			if (have_active_host_session) {
 				view.process_hbox.show ();
-				process_selector.session = active_session.session;
+				process_selector.session = active_host_session.session;
 			} else {
 				view.process_hbox.hide ();
 				process_selector.session = null;
 			}
 		}
 
-		/*
-		private async void start_session (uint pid) {
-			var process_info = yield process_list.info_from_pid (pid);
-
+		private async void launch_agent_session (ProcessInfo process_info) {
 			var code_service = create_code_service ();
 
-			var session = new AgentSession (new View.AgentSession (), process_info, code_service, winjector, agent_desc);
+			var session = new AgentSession (new View.AgentSession (), active_host_session, process_info, code_service);
 			session.notify["state"].connect (() => on_session_state_changed (session));
 
 			Gtk.TreeIter iter;
@@ -231,16 +223,15 @@ namespace Zed {
 
 			view.session_notebook.append_page (session.view.widget, null);
 
-			session.inject ();
+			session.start ();
 		}
-		*/
 
 		private void switch_to_session (AgentSession session) {
-			var previous_session = current_session;
-			current_session = session;
+			var previous_session = active_agent_session;
+			active_agent_session = session;
 			if (previous_session != null)
 				refresh_row_for (previous_session);
-			refresh_row_for (current_session);
+			refresh_row_for (active_agent_session);
 
 			view.session_notebook.set_current_page (notebook_page_index_of (session));
 		}
@@ -254,8 +245,8 @@ namespace Zed {
 			session_store.get_iter (out iter, path);
 			session_store.remove (iter);
 
-			if (current_session == session) {
-				current_session = null;
+			if (active_agent_session == session) {
+				active_agent_session = null;
 
 				if (session_store.get_iter_first (out iter)) {
 					AgentSession first_session;
@@ -325,27 +316,12 @@ namespace Zed {
 			refresh_row_for (session);
 
 			switch (session.state) {
-				case AgentSession.State.INJECTED:
+				case AgentSession.State.ATTACHED:
 					switch_to_session (session);
 					break;
 				default:
 					break;
 			}
-		}
-
-		public async void close () {
-			Gtk.TreeIter iter;
-			if (session_store.get_iter_first (out iter)) {
-				do {
-					AgentSession session;
-					session_store.get (iter, 0, out session);
-					yield session.terminate ();
-				} while (session_store.iter_next (ref iter));
-			}
-
-			Thread.usleep (50000); /* HACK: give processes 50 ms to unload DLLs */
-
-			yield winjector.close ();
 		}
 
 		private void configure_service () {
@@ -354,7 +330,7 @@ namespace Zed {
 				provider_store.append (out iter);
 				provider_store.set (iter, 0, provider);
 
-				if (active_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
+				if (active_host_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
 					view.provider_combo.sensitive = false;
 
 					activate_provider (provider);
@@ -368,8 +344,8 @@ namespace Zed {
 				provider_store.get_iter (out iter, path);
 				provider_store.remove (iter);
 
-				if (active_session != null && active_session.provider == provider) {
-					active_session = null;
+				if (active_host_session != null && active_host_session.provider == provider) {
+					active_host_session = null;
 					update_session_control_ui ();
 				}
 			});
@@ -400,7 +376,7 @@ namespace Zed {
 				var pi = process_selector.selected_process;
 				if (pi != null) {
 					process_selector.clear_selection ();
-					//start_session (pid);
+					launch_agent_session (pi);
 				}
 			});
 		}
@@ -514,7 +490,7 @@ namespace Zed {
 				(renderer as Gtk.CellRendererPixbuf).pixbuf = session.process_info.small_icon;
 			} else {
 				var text_renderer = renderer as Gtk.CellRendererText;
-				if (session == current_session)
+				if (session == active_agent_session)
 					text_renderer.markup = "<b>%s</b>".printf (session.process_info.name.to_string ());
 				else
 					text_renderer.text = session.process_info.name.to_string ();
@@ -532,22 +508,22 @@ namespace Zed {
 			model.get (iter, 0, out session);
 			(renderer as Gtk.CellRendererText).text = session.state_to_string ();
 		}
+	}
 
-		private class SessionEntry {
-			public Service.HostSessionProvider provider {
-				get;
-				private set;
-			}
+	public class HostSessionEntry {
+		public Service.HostSessionProvider provider {
+			get;
+			private set;
+		}
 
-			public Zed.HostSession session {
-				get;
-				private set;
-			}
+		public Zed.HostSession session {
+			get;
+			private set;
+		}
 
-			public SessionEntry (Service.HostSessionProvider provider, Zed.HostSession session) {
-				this.provider = provider;
-				this.session = session;
-			}
+		public HostSessionEntry (Service.HostSessionProvider provider, Zed.HostSession session) {
+			this.provider = provider;
+			this.session = session;
 		}
 	}
 }

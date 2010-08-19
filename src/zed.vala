@@ -22,7 +22,7 @@ public class Zed.Application : Object {
 	}
 
 	private async void stop () {
-		yield root.workspace.host_session.close (); /* TODO: move relevant parts out into a service later */
+		yield host_session_service.stop ();
 		yield xmpp_client.close ();
 		Gtk.main_quit ();
 	}
