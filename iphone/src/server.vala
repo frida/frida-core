@@ -9,7 +9,7 @@ namespace Zid {
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
 			System.kill (pid);
-			throw new IOError.FAILED ("not yet implemented");
+			throw new IOError.FAILED ("not yet implemented, so I killed your process instead");
 		}
 
 		public void run () throws Error {
