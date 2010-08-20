@@ -248,7 +248,7 @@ namespace WinIpc {
 			var request_msg = new Variant (REQUEST_MESSAGE_TYPE_STRING, request_id, verb, MaybeVariant.wrap (argument));
 			var pending = new PendingResponse (request_id, () => send_request_and_receive_response.callback ());
 			pending_responses.add (pending);
-			yield write_message (MessageType.REQUEST, request_msg);
+			write_message (MessageType.REQUEST, request_msg);
 			yield;
 
 			response_value = MaybeVariant.unwrap (pending.response_value);
