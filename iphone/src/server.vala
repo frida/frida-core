@@ -7,6 +7,11 @@ namespace Zid {
 			return System.enumerate_processes ();
 		}
 
+		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
+			System.kill (pid);
+			throw new IOError.FAILED ("not yet implemented");
+		}
+
 		public void run () throws Error {
 			server = new DBusServer.sync ("tcp:host=127.0.0.1,port=27042", DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
@@ -32,6 +37,7 @@ namespace Zid {
 
 	namespace System {
 		public static extern Zed.HostProcessInfo[] enumerate_processes ();
+		public static extern void kill (uint pid);
 	}
 
 	public static int main (string[] args) {

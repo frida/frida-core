@@ -1,5 +1,7 @@
 #include "zid-server.h"
 
+#include <signal.h>
+#include <unistd.h>
 #include <sys/sysctl.h>
 
 ZedHostProcessInfo *
@@ -41,5 +43,11 @@ zid_system_enumerate_processes (int * result_length1)
   g_free (entries);
 
   return result;
+}
+
+void
+zid_system_kill (guint pid)
+{
+  killpg (getpgid (pid), SIGTERM);
 }
 
