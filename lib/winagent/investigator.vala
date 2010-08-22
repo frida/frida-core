@@ -59,7 +59,7 @@ namespace Zed {
 
 		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
 			lock (journal) {
-				if (selected_thread_id == 0) {
+				if (selected_thread_id == 0 || thread_id == selected_thread_id) {
 					selected_thread_id = thread_id;
 
 					if (journal == null)
