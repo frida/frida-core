@@ -22,6 +22,10 @@ namespace Zed {
 		public abstract async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError;
 		public abstract async void detach_script (uint script_id) throws IOError;
 		public signal void message_from_script (uint script_id, Variant msg);
+
+		public abstract async void begin_instance_trace () throws IOError;
+		public abstract async void end_instance_trace () throws IOError;
+		public abstract async AgentInstanceInfo[] peek_instances () throws IOError;
 	}
 
 	public struct HostProcessInfo {
@@ -170,6 +174,29 @@ namespace Zed {
 			this.id = id;
 			this.code_address = code_address;
 			this.code_size = code_size;
+		}
+	}
+
+	public struct AgentInstanceInfo {
+		public uint64 address {
+			get;
+			private set;
+		}
+
+		public uint reference_count {
+			get;
+			private set;
+		}
+
+		public string type_name {
+			get;
+			private set;
+		}
+
+		public AgentInstanceInfo (uint64 address, uint reference_count, string type_name) {
+			this.address = address;
+			this.reference_count = reference_count;
+			this.type_name = type_name;
 		}
 	}
 

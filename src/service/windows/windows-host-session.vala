@@ -279,7 +279,7 @@ namespace Zed.Service {
 				else
 					throw new IOError.FAILED (error_message);
 			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
+				throw new IOError.FAILED (e.message);
 			}
 		}
 
@@ -288,6 +288,53 @@ namespace Zed.Service {
 				var argument_variant = new Variant ("u", script_id);
 				var result_variant = yield proxy.query ("DetachScript", argument_variant, SIMPLE_RESULT_SIGNATURE);
 				check_simple_result (result_variant);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		public async void begin_instance_trace () throws IOError {
+			try {
+				var result_variant = yield proxy.query ("BeginInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
+				check_simple_result (result_variant);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		public async void end_instance_trace () throws IOError {
+			try {
+				var result_variant = yield proxy.query ("EndInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
+				check_simple_result (result_variant);
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		public async AgentInstanceInfo[] peek_instances () throws IOError {
+			try {
+				var result_variant = yield proxy.query ("PeekInstances", null, "(ba(tus))");
+
+				bool success;
+				VariantIter entries_iter;
+				result_variant.@get ("(ba(tus))", out success, out entries_iter);
+
+				if (!success)
+					throw new IOError.FAILED ("no trace in progress?");
+
+				var entries = new AgentInstanceInfo[entries_iter.n_children ()];
+				uint i = 0;
+
+				Variant entry;
+				while ((entry = entries_iter.next_value ()) != null) {
+					uint64 address;
+					uint ref_count;
+					string type_name;
+					entry.@get ("(tus)", out address, out ref_count, out type_name);
+					entries[i++] = AgentInstanceInfo (address, ref_count, type_name);
+				}
+
+				return entries;
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.NOT_SUPPORTED (e.message);
 			}

@@ -655,11 +655,11 @@ namespace Zed {
 			try {
 				switch (action) {
 					case "begin":
-						yield begin_instance_trace ();
+						yield session.begin_instance_trace ();
 						print_to_console ("instance trace in progress");
 						break;
 					case "end":
-						yield end_instance_trace ();
+						yield session.end_instance_trace ();
 						print_to_console ("instance trace ended");
 						break;
 					case "list":
@@ -675,10 +675,14 @@ namespace Zed {
 		}
 
 		private async void handle_itracker_list_command () throws IOError {
-			var entries = yield dump_instances ();
+			var entries = new Gee.ArrayList<AgentInstanceInfo?> ();
+			var entries_array = yield session.peek_instances ();
+			foreach (var e in entries_array)
+				entries.add (e);
+
 			entries.sort ((a_ptr, b_ptr) => {
-				unowned InstanceEntry a = (InstanceEntry) a_ptr;
-				unowned InstanceEntry b = (InstanceEntry) b_ptr;
+				unowned AgentInstanceInfo? a = (AgentInstanceInfo?) a_ptr;
+				unowned AgentInstanceInfo? b = (AgentInstanceInfo?) b_ptr;
 
 				int name_equality = GLib.strcmp (a.type_name, b.type_name);
 				if (name_equality != 0)
@@ -887,66 +891,6 @@ namespace Zed {
 			return builder.str;
 		}
 
-		private async void begin_instance_trace () throws IOError {
-			try {
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var result_variant = yield dummy_proxy.query ("BeginInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
-				check_simple_result (result_variant);
-			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
-			}
-		}
-
-		private async void end_instance_trace () throws IOError {
-			try {
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var result_variant = yield dummy_proxy.query ("EndInstanceTrace", null, SIMPLE_RESULT_SIGNATURE);
-				check_simple_result (result_variant);
-			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
-			}
-		}
-
-		private async Gee.List<InstanceEntry> dump_instances () throws IOError {
-			try {
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var result_variant = yield dummy_proxy.query ("PeekInstances", null, "(ba(tus))");
-
-				bool success;
-				VariantIter entries_iter;
-				result_variant.@get ("(ba(tus))", out success, out entries_iter);
-
-				if (!success)
-					throw new IOError.FAILED ("no trace in progress?");
-
-				var entries = new Gee.ArrayList<InstanceEntry> ();
-
-				Variant entry;
-				while ((entry = entries_iter.next_value ()) != null) {
-					uint64 address;
-					uint ref_count;
-					string type_name;
-					entry.@get ("(tus)", out address, out ref_count, out type_name);
-					entries.add (new InstanceEntry (address, ref_count, type_name));
-				}
-
-				return entries;
-			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
-			}
-		}
-
-		private const string SIMPLE_RESULT_SIGNATURE = "(bs)";
-
-		private void check_simple_result (Variant result_variant) throws IOError {
-			bool succeeded;
-			string error_message;
-			result_variant.@get (SIMPLE_RESULT_SIGNATURE, out succeeded, out error_message);
-
-			if (!succeeded)
-				throw new IOError.FAILED (error_message);
-		}
-
 		/* TODO: move this to a Service later */
 		public extern string disassemble (uint64 pc, uint8[] bytes, out uint instruction_length);
 	}
@@ -1076,29 +1020,6 @@ namespace Zed {
 
 		public FunctionCall (int depth, Service.Module? module, uint64 offset, Service.Function target) {
 			Object (depth: depth, module: module, offset: offset, target: target);
-		}
-	}
-
-	public class InstanceEntry {
-		public uint64 address {
-			get;
-			private set;
-		}
-
-		public uint reference_count {
-			get;
-			private set;
-		}
-
-		public string type_name {
-			get;
-			private set;
-		}
-
-		public InstanceEntry (uint64 address, uint reference_count, string type_name) {
-			this.address = address;
-			this.reference_count = reference_count;
-			this.type_name = type_name;
 		}
 	}
 
