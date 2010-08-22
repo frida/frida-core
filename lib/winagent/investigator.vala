@@ -59,7 +59,7 @@ namespace Zed {
 
 		public void * provide_thread_data (void * function_instance_data, uint thread_id) {
 			lock (journal) {
-				if (selected_thread_id == 0 || thread_id == selected_thread_id) {
+				if (selected_thread_id == 0) {
 					selected_thread_id = thread_id;
 
 					if (journal == null)
@@ -139,7 +139,7 @@ namespace Zed {
 				set;
 			}
 
-			private const uint CAPACITY = 500000;
+			private const uint CAPACITY = 2000000;
 
 			public Gum.CallEvent[] seen_calls = new Gum.CallEvent[CAPACITY];
 			public uint seen_call_count = 0;

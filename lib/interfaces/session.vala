@@ -13,6 +13,11 @@ namespace Zed {
 		public abstract async AgentModuleInfo[] query_modules () throws IOError;
 		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
 
+		public abstract async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError;
+		public abstract async void stop_investigation () throws IOError;
+		public signal void new_batch_of_clues (AgentClue[] clues);
+		public signal void investigation_complete ();
+
 		public abstract async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError;
 		public abstract async void detach_script (uint script_id) throws IOError;
 		public signal void message_from_script (uint script_id, Variant msg);
@@ -101,6 +106,46 @@ namespace Zed {
 		public AgentFunctionInfo (string name, uint64 address) {
 			this.name = name;
 			this.address = address;
+		}
+	}
+
+	public struct AgentTriggerInfo {
+		public string module_name {
+			get;
+			private set;
+		}
+
+		public string function_name {
+			get;
+			private set;
+		}
+
+		public AgentTriggerInfo (string module_name, string function_name) {
+			this.module_name = module_name;
+			this.function_name = function_name;
+		}
+	}
+
+	public struct AgentClue {
+		public int depth {
+			get;
+			private set;
+		}
+
+		public uint64 location {
+			get;
+			private set;
+		}
+
+		public uint64 target {
+			get;
+			private set;
+		}
+
+		public AgentClue (int depth, uint64 location, uint64 target) {
+			this.depth = depth;
+			this.location = location;
+			this.target = target;
 		}
 	}
 

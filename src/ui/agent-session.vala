@@ -240,8 +240,7 @@ namespace Zed {
 		private async void start_investigation () {
 			function_call_store.clear ();
 
-			var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-			investigation = new Investigation (dummy_proxy, code_service);
+			investigation = new Investigation (session, code_service);
 			investigation.new_function_call.connect (on_new_function_call);
 			investigation.finished.connect (end_investigation);
 
@@ -249,8 +248,8 @@ namespace Zed {
 
 			yield update_module_specs ();
 
-			var start_trigger = new TriggerInfo (start_selector.selected_module_name, start_selector.selected_function_name);
-			var stop_trigger = new TriggerInfo (stop_selector.selected_module_name, stop_selector.selected_function_name);
+			var start_trigger = AgentTriggerInfo (start_selector.selected_module_name, start_selector.selected_function_name);
+			var stop_trigger = AgentTriggerInfo (stop_selector.selected_module_name, stop_selector.selected_function_name);
 			bool success = yield investigation.start (start_trigger, stop_trigger);
 			if (!success)
 				investigation = null;
@@ -979,51 +978,57 @@ namespace Zed {
 		public signal void new_function_call (FunctionCall function_call);
 		public signal void finished ();
 
-		private WinIpc.Proxy proxy;
-		private Service.CodeService code_service;
+		public AgentSession session {
+			get;
+			construct;
+		}
 
-		private uint new_batch_handler_id;
-		private uint complete_handler_id;
+		public Service.CodeService code_service {
+			get;
+			construct;
+		}
 
-		private LinkedList<Variant> pending_clue_batches = new LinkedList<Variant> ();
+		private ulong new_batch_handler_id;
+		private ulong complete_handler_id;
+
+		private LinkedList<AgentClue?> pending_clues = new LinkedList<AgentClue?> ();
 		private bool is_processing_clues;
 
-		public Investigation (WinIpc.Proxy proxy, Service.CodeService code_service) {
-			this.proxy = proxy;
-			this.code_service = code_service;
+		public Investigation (AgentSession session, Service.CodeService code_service) {
+			Object (session: session, code_service: code_service);
+		}
 
-			new_batch_handler_id = proxy.add_notify_handler ("NewBatchOfClues", "a(itt)", on_new_batch_of_clues);
-			complete_handler_id = proxy.add_notify_handler ("InvestigationComplete", "", (arg) => stop ());
+		construct {
+			new_batch_handler_id = session.new_batch_of_clues.connect (on_new_batch_of_clues);
+			complete_handler_id = session.investigation_complete.connect (() => stop ());
 		}
 
 		~Investigation () {
-			proxy.remove_notify_handler (complete_handler_id);
-			proxy.remove_notify_handler (new_batch_handler_id);
+			SignalHandler.disconnect (session, complete_handler_id);
+			SignalHandler.disconnect (session, new_batch_handler_id);
 		}
 
-		public async bool start (TriggerInfo start_trigger, TriggerInfo stop_trigger) {
+		public async bool start (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) {
 			try {
-				var arg = new Variant ("(ssss)",
-					start_trigger.module_name, start_trigger.function_name,
-					stop_trigger.module_name, stop_trigger.function_name);
-				var result = yield proxy.query ("StartInvestigation", arg, "b");
-				return result.get_boolean ();
-			} catch (WinIpc.ProxyError e) {
+				yield session.start_investigation (start_trigger, stop_trigger);
+				return true;
+			} catch (IOError e) {
 				return false;
 			}
 		}
 
 		private async void stop () {
 			try {
-				yield proxy.query ("StopInvestigation");
-			} catch (WinIpc.ProxyError e) {
+				yield session.stop_investigation ();
+			} catch (IOError e) {
 			}
 
 			finished ();
 		}
 
-		private void on_new_batch_of_clues (Variant? arg) {
-			pending_clue_batches.add (arg);
+		private void on_new_batch_of_clues (AgentClue[] clues) {
+			foreach (var clue in clues)
+				pending_clues.add (clue);
 
 			if (!is_processing_clues) {
 				is_processing_clues = true;
@@ -1037,59 +1042,37 @@ namespace Zed {
 
 		private async void process_clues () {
 			while (true) {
-				var clue_batch = pending_clue_batches.poll ();
-				if (clue_batch == null)
+				var clue = pending_clues.poll ();
+				if (clue == null)
 					break;
+				var location = clue.location;
+				var target = clue.target;
 
-				foreach (var clue in clue_batch) {
-					int depth;
-					uint64 location;
-					uint64 target;
-					clue.@get ("(itt)", out depth, out location, out target);
+				var location_module = yield code_service.find_module_by_address (location);
+				uint64 location_offset = (location_module != null) ? location - location_module.address : location;
 
-					var location_module = yield code_service.find_module_by_address (location);
-					uint64 location_offset = (location_module != null) ? location - location_module.address : location;
-
-					var target_func = yield code_service.find_function_by_address (target);
-					if (target_func == null) {
-						var target_func_module = yield code_service.find_module_by_address (target);
-						if (target_func_module != null) {
-							var target_func_offset = target - target_func_module.address;
-							var target_func_name = "%s_%08llx".printf (target_func_module.spec.bare_name, target_func_offset);
-							var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
-							target_func = new Service.Function (target_func_spec, target);
-							yield code_service.add_function_to_module (target_func, target_func_module);
-						} else {
-							var dynamic_func_name = "dynamic_%08llx".printf (target);
-							var dynamic_func_spec = new Service.FunctionSpec (dynamic_func_name, target);
-							target_func = new Service.Function (dynamic_func_spec, target);
-							yield code_service.add_function (target_func);
-						}
+				var target_func = yield code_service.find_function_by_address (target);
+				if (target_func == null) {
+					var target_func_module = yield code_service.find_module_by_address (target);
+					if (target_func_module != null) {
+						var target_func_offset = target - target_func_module.address;
+						var target_func_name = "%s_%08llx".printf (target_func_module.spec.bare_name, target_func_offset);
+						var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
+						target_func = new Service.Function (target_func_spec, target);
+						yield code_service.add_function_to_module (target_func, target_func_module);
+					} else {
+						var dynamic_func_name = "dynamic_%08llx".printf (target);
+						var dynamic_func_spec = new Service.FunctionSpec (dynamic_func_name, target);
+						target_func = new Service.Function (dynamic_func_spec, target);
+						yield code_service.add_function (target_func);
 					}
-
-					var func_call = new FunctionCall (depth, location_module, location_offset, target_func);
-					new_function_call (func_call);
 				}
+
+				var func_call = new FunctionCall (clue.depth, location_module, location_offset, target_func);
+				new_function_call (func_call);
 			}
 
 			is_processing_clues = false;
-		}
-	}
-
-	public class TriggerInfo {
-		public string module_name {
-			get;
-			private set;
-		}
-
-		public string function_name {
-			get;
-			private set;
-		}
-
-		public TriggerInfo (string module_name, string function_name) {
-			this.module_name = module_name;
-			this.function_name = function_name;
 		}
 	}
 

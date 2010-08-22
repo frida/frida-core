@@ -27,6 +27,9 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
   if (ul_reason_for_call == DLL_PROCESS_ATTACH)
   {
 #if ENABLE_DEBUG
+    g_setenv ("G_DEBUG", "fatal-warnings;fatal-criticals", TRUE);
+    g_setenv ("G_SLICE", "always-malloc", TRUE);
+
     AllocConsole ();
 
     stdout->_file = _open_osfhandle ((intptr_t) GetStdHandle (STD_OUTPUT_HANDLE), 0);

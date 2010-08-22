@@ -139,6 +139,23 @@ namespace Zed.Service {
 		}
 
 		construct {
+			proxy.add_notify_handler ("NewBatchOfClues", "a(itt)", (arg) => {
+				AgentClue[] clues = new AgentClue[arg.n_children ()];
+
+				uint i = 0;
+				foreach (var entry in arg) {
+					int depth;
+					uint64 location;
+					uint64 target;
+					entry.@get ("(itt)", out depth, out location, out target);
+
+					clues[i++] = AgentClue (depth, location, target);
+				}
+
+				new_batch_of_clues (clues);
+			});
+			proxy.add_notify_handler ("InvestigationComplete", "", (arg) => investigation_complete ());
+
 			proxy.add_notify_handler ("MessageFromScript", "(uv)", (arg) => {
 				uint script_id;
 				Variant msg;
@@ -195,6 +212,27 @@ namespace Zed.Service {
 				}
 
 				return result;
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		public async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError {
+			try {
+				var arg = new Variant ("(ssss)",
+					start_trigger.module_name, start_trigger.function_name,
+					stop_trigger.module_name, stop_trigger.function_name);
+				var result = yield proxy.query ("StartInvestigation", arg, "b");
+				if (!result.get_boolean ())
+					throw new IOError.FAILED ("failed to start investigation");
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		public async void stop_investigation () throws IOError {
+			try {
+				yield proxy.query ("StopInvestigation");
 			} catch (WinIpc.ProxyError e) {
 				throw new IOError.FAILED (e.message);
 			}
