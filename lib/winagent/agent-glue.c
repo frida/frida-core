@@ -120,7 +120,7 @@ zed_agent_query_module_functions (const char * module_name)
 }
 
 GVariant *
-zed_agent_dump_memory (guint64 address, guint64 size)
+zed_agent_dump_memory (guint64 address, guint size)
 {
   GVariant * result;
   gboolean success = FALSE;

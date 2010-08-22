@@ -217,6 +217,31 @@ namespace Zed.Service {
 			}
 		}
 
+		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
+			try {
+				var result_variant = yield proxy.query ("DumpMemory", new Variant ("(tu)", address, size), "(bsay)");
+
+				bool succeeded;
+				string error_message;
+				VariantIter bytes;
+				result_variant.@get ("(bsay)", out succeeded, out error_message, out bytes);
+
+				if (succeeded) {
+					uint8[] result = new uint8[bytes.n_children ()];
+
+					Variant byte_wrapper;
+					for (uint i = 0; (byte_wrapper = bytes.next_value ()) != null; i++)
+						result[i] = byte_wrapper.get_byte ();
+
+					return result;
+				} else {
+					throw new IOError.FAILED (error_message);
+				}
+			} catch (WinIpc.ProxyError e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
 		public async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError {
 			try {
 				var arg = new Variant ("(ssss)",

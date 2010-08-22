@@ -462,7 +462,8 @@ namespace Zed {
 		}
 
 		private async void handle_dump_command (string[] args) {
-			uint64 address, size;
+			uint64 address;
+			uint size;
 
 			if (args.length < 2) {
 				print_dump_usage ();
@@ -471,7 +472,7 @@ namespace Zed {
 
 			try {
 				address = yield resolve_address_specifier_arguments (args[0:args.length - 1]);
-				size = uint64_from_string (args[args.length - 1]);
+				size = (uint) uint64_from_string (args[args.length - 1]);
 			} catch (IOError arg_error) {
 				print_to_console ("ERROR: " + arg_error.message);
 				print_to_console ("");
@@ -480,7 +481,7 @@ namespace Zed {
 			}
 
 			try {
-				uint8[] bytes = yield read_remote_memory (address, size);
+				uint8[] bytes = yield session.read_memory (address, size);
 				print_to_console (byte_array_to_hexdump (bytes, address));
 			} catch (IOError read_error) {
 				print_to_console ("ERROR: " + read_error.message);
@@ -492,7 +493,8 @@ namespace Zed {
 		}
 
 		private async void handle_dasm_command (string[] args) {
-			uint64 address, size;
+			uint64 address;
+			uint size;
 
 			if (args.length < 2) {
 				print_dasm_usage ();
@@ -501,7 +503,7 @@ namespace Zed {
 
 			try {
 				address = yield resolve_address_specifier_arguments (args[0:args.length - 1]);
-				size = uint64_from_string (args[args.length - 1]);
+				size = (uint) uint64_from_string (args[args.length - 1]);
 			} catch (IOError arg_error) {
 				print_to_console ("ERROR: " + arg_error.message);
 				print_to_console ("");
@@ -510,7 +512,7 @@ namespace Zed {
 			}
 
 			try {
-				uint8[] bytes = yield read_remote_memory (address, size);
+				uint8[] bytes = yield session.read_memory (address, size);
 
 				var builder = new StringBuilder ();
 
@@ -718,7 +720,8 @@ namespace Zed {
 			string hexdump = "";
 
 			if (args.length != 0) {
-				uint64 address = 0, size = 7;
+				uint64 address = 0;
+				uint size = 7;
 
 				try {
 					address = yield resolve_address_specifier_arguments (args);
@@ -730,7 +733,7 @@ namespace Zed {
 				}
 
 				try {
-					uint8[] bytes = yield read_remote_memory (address, size);
+					uint8[] bytes = yield session.read_memory (address, size);
 					hexdump = byte_array_to_hexdump (bytes);
 				} catch (IOError read_error) {
 					print_to_console ("ERROR: " + read_error.message);
@@ -882,32 +885,6 @@ namespace Zed {
 			}
 
 			return builder.str;
-		}
-
-		private async uint8[] read_remote_memory (uint64 address, uint64 size) throws IOError {
-			try {
-				var dummy_proxy = new WinIpc.ServerProxy (); /* FIXME */
-				var result_variant = yield dummy_proxy.query ("DumpMemory", new Variant ("(tt)", address, size), "(bsay)");
-
-				bool succeeded;
-				string error_message;
-				VariantIter bytes;
-				result_variant.@get ("(bsay)", out succeeded, out error_message, out bytes);
-
-				if (succeeded) {
-					uint8[] result = new uint8[bytes.n_children ()];
-
-					Variant byte_wrapper;
-					for (uint i = 0; (byte_wrapper = bytes.next_value ()) != null; i++)
-						result[i] = byte_wrapper.get_byte ();
-
-					return result;
-				} else {
-					throw new IOError.FAILED (error_message);
-				}
-			} catch (WinIpc.ProxyError e) {
-				throw new IOError.NOT_SUPPORTED (e.message);
-			}
 		}
 
 		private async void begin_instance_trace () throws IOError {

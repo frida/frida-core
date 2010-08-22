@@ -49,9 +49,10 @@ namespace Zed {
 				var module_name = arg.get_string ();
 				return query_module_functions (module_name);
 			});
-			proxy.register_query_sync_handler ("DumpMemory", "(tt)", (arg) => {
-				uint64 address, size;
-				arg.@get ("(tt)", out address, out size);
+			proxy.register_query_sync_handler ("DumpMemory", "(tu)", (arg) => {
+				uint64 address;
+				uint size;
+				arg.@get ("(tu)", out address, out size);
 				return dump_memory (address, size);
 			});
 
@@ -97,7 +98,7 @@ namespace Zed {
 
 		public extern Variant query_modules ();
 		public extern Variant query_module_functions (string module_name);
-		public extern Variant dump_memory (uint64 address, uint64 size);
+		public extern Variant dump_memory (uint64 address, uint size);
 	}
 }
 
