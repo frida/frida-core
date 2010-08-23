@@ -8,14 +8,18 @@ enable_nls=no
 frida_common_flags="-pipe -gdwarf-2 -g3"
 frida_warning_flags="-Wall"
 
-host_alias="arm-apple-darwin"
-cross_compiling=yes
+frida_flags="$frida_common_flags -Os"
+
+if [ "$FRIDA_TARGET" = "ios" ]; then
+  frida_flags="$frida_flags -mthumb"
+
+  host_alias="arm-apple-darwin"
+  cross_compiling=yes
+fi
 
 # Work around a bug in stdint generation m4, where CFLAGS is overwritten,
 # causing this check to conclude that there's no stdint.h support...
 ac_cv_header_stdint_t=yes
-
-frida_flags="$frida_common_flags -Os -mthumb"
 
 if [ -x /usr/bin/install ]; then
   ac_cv_path_install="/usr/bin/install -p"
@@ -44,5 +48,5 @@ OBJCFLAGS="$OBJCFLAGS $frida_flags"
 CXXFLAGS="$CXXFLAGS $frida_flags"
 
 if test "$cache_file" = /dev/null; then
-  cache_file="${FRIDA_BUILD}/config.cache"
+  cache_file="${FRIDA_BUILD}/config-${FRIDA_TARGET}.cache"
 fi
