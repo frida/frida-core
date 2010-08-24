@@ -43,7 +43,7 @@ else
 fi
 
 export LD="${CC}"
-export VALAC="${FRIDA_TOOLROOT}/bin/valac --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\""
+export VALAC="${FRIDA_TOOLROOT}/bin/valac --vapidir=\"${FRIDA_TOOLROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\""
 
 export CXXFLAGS="$CFLAGS"
 export OBJCFLAGS="$CFLAGS"
