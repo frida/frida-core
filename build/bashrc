@@ -60,10 +60,9 @@ export LANG="C"
 
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 
-pushd "${FRIDA_SDKROOT}/lib" &>/dev/null || exit 1
-for template in *.la.in; do
-  target=$(echo $template | sed 's,\.in$,,')
-  sed "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" $template > $target
+for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
+  target=$(echo $template | sed 's,\.frida\.in$,,')
+  cp -a "$template" "$target"
+  sed -e "s,@FRIDA_TOOLROOT@,${FRIDA_TOOLROOT},g" -e "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" "$template" > "$target"
 done
-popd &>/dev/null
 
