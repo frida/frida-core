@@ -1,5 +1,6 @@
 SUBDIRS = \
 	src \
+	tests \
 	vapi
 
 deploy: install

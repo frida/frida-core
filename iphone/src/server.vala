@@ -35,11 +35,6 @@ namespace Zid {
 		}
 	}
 
-	namespace System {
-		public static extern Zed.HostProcessInfo[] enumerate_processes ();
-		public static extern void kill (uint pid);
-	}
-
 	public static int main (string[] args) {
 		var app = new Application ();
 
