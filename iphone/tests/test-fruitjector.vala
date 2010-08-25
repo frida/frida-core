@@ -3,7 +3,7 @@ namespace Zid.FruitjectorTest {
 		GLib.Test.add_func ("/Fruitjector/inject", () => {
 			var rat = new LabRat ("victim-busy");
 			Thread.usleep (10000); /* give it 10 ms to settle */
-			rat.inject ("attacker.dylib");
+			//rat.inject ("attacker.dylib");
 			rat.wait_for_process_to_exit ();
 		});
 	}
@@ -18,10 +18,15 @@ namespace Zid.FruitjectorTest {
 		private Fruitjector injector;
 
 		public LabRat (string name) {
-			rat_directory = Path.build_filename (Config.PKGDATADIR,
-				"tests", "labrats");
+			var rat_directory = "/var/root";
 			var rat_file = Path.build_filename (rat_directory, name);
-			process = Zid.Test.Process.start (rat_file);
+
+			try {
+				process = Zid.Test.Process.start (rat_file);
+			} catch (IOError e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
 		}
 
 		public void inject (string name) {
@@ -56,16 +61,13 @@ namespace Zid.FruitjectorTest {
 			if (injector == null)
 				injector = new Fruitjector ();
 
-			string inject_error = null;
-
 			try {
 				var dylib = Path.build_filename (rat_directory, name);
-				yield injector.inject ((int) process.id, dylib);
+				yield injector.inject (process.id, dylib);
 			} catch (IOError e) {
-				inject_error = e.message;
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
 			}
-
-			assert (inject_error == null);
 
 			loop.quit ();
 		}
