@@ -1,7 +1,12 @@
 [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
 
 case $FRIDA_TARGET in
-  osx|ios)
+  osx)
+    ;;
+  ios)
+    if [ -z "$IOS_CERTID" -o -z "$IOS_IPADDR" ]; then
+      echo "WARNING: IOS_CERTID and IOS_IPADDR should be set"
+    fi
     ;;
   *)
     echo "Invalid FRIDA_TARGET, must be either osx or ios"

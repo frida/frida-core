@@ -18,3 +18,6 @@ VALAFLAGS = \
 	--vapidir=$(srcdir)/../vapi \
 	--pkg config \
 	@ZID_PACKAGES@
+
+all-local: zid-server
+	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zid-server.xcent" "$<"
