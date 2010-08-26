@@ -16,6 +16,7 @@ zid_server_VALAFLAGS = \
 
 libzid_core_la_SOURCES = \
 	fruitjector.vala \
+	fruitjector-glue.c \
 	session.vala \
 	system.vala \
 	system-glue.c

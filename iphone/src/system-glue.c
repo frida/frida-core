@@ -4,30 +4,6 @@
 #include <unistd.h>
 #include <sys/sysctl.h>
 
-#include <mach/mach.h>
-
-void
-zid_system_init (void)
-{
-  int pid;
-  mach_port_name_t task = 0;
-  kern_return_t ret;
-  arm_thread_state_t state;
-  thread_act_t thread;
-
-  pid = atoi (g_getenv ("ZID_TARGET_PID"));
-
-  ret = task_for_pid (mach_task_self (), pid, &task);
-  g_assert_cmpint (ret, ==, 0);
-
-  ret = thread_create_running (task, ARM_THREAD_STATE,
-      (thread_state_t) &state, ARM_THREAD_STATE_COUNT, &thread);
-  g_assert_cmpint (ret, ==, 0);
-
-  g_print ("yay!\n");
-  exit (42);
-}
-
 ZedHostProcessInfo *
 zid_system_enumerate_processes (int * result_length1)
 {

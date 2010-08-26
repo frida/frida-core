@@ -4,7 +4,8 @@ namespace Zid.FruitjectorTest {
 			var rat = new LabRat ("inject-victim");
 			Thread.usleep (10000); /* give it 10 ms to settle */
 			rat.inject ("inject-attacker.dylib");
-			rat.wait_for_process_to_exit ();
+			var exit_code = rat.wait_for_process_to_exit ();
+			assert (exit_code == 42);
 		});
 	}
 
@@ -37,8 +38,8 @@ namespace Zid.FruitjectorTest {
 			loop.run ();
 		}
 
-		public long wait_for_process_to_exit () {
-			long exitcode = -1;
+		public int wait_for_process_to_exit () {
+			int exitcode = -1;
 			bool wait_for_exit_timed_out = false;
 
 			try {
