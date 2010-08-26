@@ -1,10 +1,17 @@
+RURL := root@${IOS_IPADDR}
+RPFX := ${prefix}
+
 SUBDIRS = \
 	src \
 	tests \
 	vapi
 
-deploy: install
-	scp "$(DESTDIR)$(bindir)/zid-server" "root@$$IOS_IPADDR:/var/root/"
+deploy: all
+	ssh "${RURL}" "mkdir -p ${RPFX}/"
+	scp "$(top_builddir)/src/zid-server" "${RURL}:${RPFX}/"
 
-check: install
-	scp "$(top_builddir)/tests/zid-tests" "root@$$IOS_IPADDR:/var/root/"
+check: all
+	ssh "${RURL}" "mkdir -p ${RPFX}/tests/"
+	scp "$(top_builddir)/tests/zid-tests" "${RURL}:${RPFX}/tests/"
+	scp "$(top_builddir)/tests/inject-victim" "${RURL}:${RPFX}/tests/"
+	scp "$(top_builddir)/tests/.libs/libinject-attacker.dylib" "${RURL}:${RPFX}/tests/inject-attacker.dylib"

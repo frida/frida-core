@@ -1,4 +1,4 @@
-#include "zid-server.h"
+#include "zid-core.h"
 
 #include <signal.h>
 #include <unistd.h>

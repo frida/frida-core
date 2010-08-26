@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <unistd.h>
+#include <gio/gio.h>
 
 int
 zid_test_process_backend_do_start (const char * filename, GError ** error)
@@ -32,12 +33,36 @@ zid_test_process_backend_do_join (int pid, guint timeout_msec,
     GError ** error)
 {
   int status = -1;
+  GTimer * timer;
 
-  if (waitpid (pid, &status, 0) < 0)
+  timer = g_timer_new ();
+
+  while (TRUE)
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "waitpid failed: %d", errno);
+    int ret;
+
+    ret = waitpid (pid, &status, WNOHANG);
+    if (ret > 0)
+    {
+      break;
+    }
+    else if (errno != ETIMEDOUT)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+          "waitpid failed: %d", errno);
+      break;
+    }
+    else if (g_timer_elapsed (timer, NULL) * 1000.0 >= timeout_msec)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+          "waitpid timed out");
+      break;
+    }
+
+    g_usleep (G_USEC_PER_SEC / 50);
   }
+
+  g_timer_destroy (timer);
 
   return status;
 }

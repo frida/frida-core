@@ -1,9 +1,9 @@
 namespace Zid.FruitjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Fruitjector/inject", () => {
-			var rat = new LabRat ("victim-busy");
+			var rat = new LabRat ("inject-victim");
 			Thread.usleep (10000); /* give it 10 ms to settle */
-			//rat.inject ("attacker.dylib");
+			rat.inject ("inject-attacker.dylib");
 			rat.wait_for_process_to_exit ();
 		});
 	}
@@ -18,8 +18,7 @@ namespace Zid.FruitjectorTest {
 		private Fruitjector injector;
 
 		public LabRat (string name) {
-			var rat_directory = "/var/root";
-			var rat_file = Path.build_filename (rat_directory, name);
+			var rat_file = Path.build_filename (Config.PKGTESTDIR, name);
 
 			try {
 				process = Zid.Test.Process.start (rat_file);

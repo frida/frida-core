@@ -1,6 +1,6 @@
 # config.site for configure
 
-test "$prefix" = NONE && prefix="$FRIDA_PREFIX"
+test "$prefix" = NONE && prefix="/Developer/Frida"
 
 enable_maintainer_mode=yes
 enable_nls=no
