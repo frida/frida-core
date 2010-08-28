@@ -15,3 +15,4 @@ check: all
 	scp "$(top_builddir)/tests/zid-tests" "${RURL}:${RPFX}/tests/"
 	scp "$(top_builddir)/tests/inject-victim" "${RURL}:${RPFX}/tests/"
 	scp "$(top_builddir)/tests/.libs/libinject-attacker.dylib" "${RURL}:${RPFX}/tests/inject-attacker.dylib"
+	ssh "${RURL}" "${RPFX}/tests/zid-tests"
