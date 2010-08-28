@@ -19,7 +19,8 @@ namespace Zid.FruitjectorTest {
 		private Fruitjector injector;
 
 		public LabRat (string name) {
-			var rat_file = Path.build_filename (Config.PKGTESTDIR, name);
+			rat_directory = Config.PKGTESTDIR;
+			var rat_file = Path.build_filename (rat_directory, name);
 
 			try {
 				process = Zid.Test.Process.start (rat_file);

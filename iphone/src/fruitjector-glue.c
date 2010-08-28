@@ -4,9 +4,14 @@
 #include <errno.h>
 #include <mach/mach.h>
 
+#define PRINT_DEBUG_OFFSET 0x3d1d
+#define FAKE_DLOPEN_ADDRESS 0x3d3d
+
 #define ZID_AGENT_ENTRYPOINT_NAME "zed_agent_main"
 
 #define ZID_CODE_OFFSET         (0)
+#define ZID_MACH_CODE_OFFSET    (0)
+#define ZID_PTHREAD_CODE_OFFSET (512)
 #define ZID_DATA_OFFSET         (1024)
 #define ZID_STACK_BOTTOM_OFFSET (4096)
 #define ZID_STACK_TOP_OFFSET    (ZID_THREAD_SELF_OFFSET)
@@ -34,58 +39,128 @@ struct _ZidAgentContext {
   gpointer pthread_set_self_impl;
   gpointer thread_self;
 
+  gpointer pthread_create_impl;
+  gpointer worker_func;
+
+  gpointer pthread_join_impl;
+
+  gpointer thread_terminate_impl;
+  gpointer mach_thread_self_impl;
+
   gpointer dlopen_impl;
-  gchar dylib_path[256];
   int dlopen_mode;
 
   gpointer dlsym_impl;
-  gchar entrypoint_name[32];
-  gchar data_string[256];
+  gchar * entrypoint_name;
+  gchar * data_string;
 
   gpointer dlclose_impl;
 
-  gpointer pthread_exit_impl;
+  gchar * dylib_path;
+
+  gpointer print_debug_impl;
+
+  gchar entrypoint_name_data[32];
+  gchar data_string_data[256];
+  gchar dylib_path_data[256];
 };
 
-static const guint32 load_stub_code[] = {
-    0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, thread_self),           /* add	r0, r7, <offset> */
-    0xe5900000,                                                            /* ldr	r0, [r0] */
-    0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_set_self_impl), /* add	r3, r7, <offset> */
-    0xe5933000,                                                            /* ldr	r3, [r3] */
-    0xe12fff33,                                                            /* blx	r3 */
+#define LOOP_FOREVER \
+  0xe24f5008, \
+  0xe12fff15,
+#define DEBUG_CODE \
+  0xe12fff38,
 
-    0xe2871000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_mode),           /* add	r1, r7, <offset> */
-    0xe5911000,                                                            /* ldr	r1, [r1] */
-    0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, dylib_path),            /* add	r0, r7, <offset> */
-    0xe5900000,                                                            /* ldr	r0, [r0] */
-    0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_impl),           /* add	r3, r7, <offset> */
-    0xe5933000,                                                            /* ldr	r3, [r3] */
-    0xe12fff33,                                                            /* blx	r3 */
+static const guint32 mach_stub_code[] = {
+  0xe2878000 | G_STRUCT_OFFSET (ZidAgentContext, print_debug_impl),      /* add r8, r7, <offset> */
+  0xe5988000,                                                            /* ldr r8, [r8] */
 
-    0xe1a04000,                                                            /* mov	r4, r0 */
-    0xe2871000 | G_STRUCT_OFFSET (ZidAgentContext, entrypoint_name),       /* add	r1, r7, <offset> */
-    0xe5911000,                                                            /* ldr	r1, [r1] */
-    0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlsym_impl),            /* add	r3, r7, <offset> */
-    0xe5933000,                                                            /* ldr	r3, [r3] */
-    0xe12fff33,                                                            /* blx	r3 */
+  0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, thread_self),           /* add r0, r7, <offset> */
+  0xe5900000,                                                            /* ldr r0, [r0] */
+  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_set_self_impl), /* add r3, r7, <offset> */
+  0xe5933000,                                                            /* ldr r3, [r3] */
+  0xe12fff33,                                                            /* blx r3 */
 
-    0xe1a05000,                                                            /* mov	r5, r0 */
-    0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, data_string),           /* add	r0, r7, <offset> */
-    0xe5900000,                                                            /* ldr	r0, [r0] */
-    0xe12fff35,                                                            /* blx	r5 */
+  DEBUG_CODE
 
-    0xe1a00004,                                                            /* mov	r0, r4 */
-    0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlclose_impl),          /* add	r3, r7, <offset> */
-    0xe5933000,                                                            /* ldr	r3, [r3] */
-    0xe12fff33,                                                            /* blx	r3 */
+  0xe24dd004,                                                            /* sub sp, sp, 4 */
+  0xe1a03007,                                                            /* mov r3, r7 */
+  0xe2872000 | G_STRUCT_OFFSET (ZidAgentContext, worker_func),           /* add r2, r7, <offset> */
+  0xe5922000,                                                            /* ldr r2, [r2] */
+  0xe0211001,                                                            /* eor r1, r1, r1 */
+  0xe1a0000d,                                                            /* mov r0, sp */
+  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_create_impl),   /* add r4, r7, <offset> */
+  0xe5944000,                                                            /* ldr r4, [r4] */
+  0xe12fff34,                                                            /* blx r4 */
 
-    0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_exit_impl),     /* add	r3, r7, <offset> */
-    0xe5933000,                                                            /* ldr	r3, [r3] */
-    0xe12fff33,                                                            /* blx	r3 */
+  DEBUG_CODE
+
+  0xe0211001,                                                            /* eor r1, r1, r1 */
+  0xe59d0000,                                                            /* ldr r0, [sp] */
+  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_join_impl),     /* add r4, r7, <offset> */
+  0xe5944000,                                                            /* ldr r4, [r4] */
+  0xe12fff34,                                                            /* blx r4 */
+
+  DEBUG_CODE
+
+  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, mach_thread_self_impl), /* add r4, r7, <offset> */
+  0xe5944000,                                                            /* ldr r4, [r4] */
+  0xe12fff34,                                                            /* blx r4 */
+
+  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, thread_terminate_impl), /* add r4, r7, <offset> */
+  0xe5944000,                                                            /* ldr r4, [r4] */
+  0xe12fff34,                                                            /* blx r4 */
+};
+
+static const guint32 pthread_stub_code[] = {
+  0xe92d41b0,                                                            /* push {r4, r5, r7, r8, lr} */
+
+  0xe1a07000,                                                            /* mov r7, r0 */
+
+  0xe2878000 | G_STRUCT_OFFSET (ZidAgentContext, print_debug_impl),      /* add r8, r7, <offset> */
+  0xe5988000,                                                            /* ldr r8, [r8] */
+
+  DEBUG_CODE
+
+  0xe2872000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_mode),           /* add	r1, r7, <offset> */
+  0xe5921000,                                                            /* ldr	r1, [r1] */
+  0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, dylib_path),            /* add	r0, r7, <offset> */
+  0xe5900000,                                                            /* ldr r0, [r0] */
+  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_impl),           /* add	r3, r7, <offset> */
+  0xe5933000,                                                            /* ldr	r3, [r3] */
+  0xe12fff33,                                                            /* blx	r3 */
+  0xe1a04000,                                                            /* mov	r4, r0 */
+
+  DEBUG_CODE
+
+  0xe2871000 | G_STRUCT_OFFSET (ZidAgentContext, entrypoint_name),       /* add	r1, r7, <offset> */
+  0xe5911000,                                                            /* ldr r1, [r1] */
+  0xe1a00004,                                                            /* mov r0, r4 */
+  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlsym_impl),            /* add	r3, r7, <offset> */
+  0xe5933000,                                                            /* ldr	r3, [r3] */
+  0xe12fff33,                                                            /* blx	r3 */
+  0xe1a05000,                                                            /* mov	r5, r0 */
+
+  DEBUG_CODE
+
+  0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, data_string),           /* add	r0, r7, <offset> */
+  0xe5900000,                                                            /* ldr r0, [r0] */
+  0xe12fff35,                                                            /* blx	r5 */
+
+  DEBUG_CODE
+
+  0xe1a00004,                                                            /* mov	r0, r4 */
+  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlclose_impl),          /* add	r3, r7, <offset> */
+  0xe5933000,                                                            /* ldr	r3, [r3] */
+  0xe12fff33,                                                            /* blx	r3 */
+
+  DEBUG_CODE
+
+  0xe8bd81b0,                                                            /* pop {r4, r5, r7, r8, pc} */
 };
 
 static gboolean fill_agent_context (ZidAgentContext * ctx,
-    const char * dylib_path, vm_address_t thread_self, GError ** error);
+    const char * dylib_path, vm_address_t remote_payload_base, GError ** error);
 
 void
 zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
@@ -105,15 +180,16 @@ zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
   ret = vm_allocate (task, &payload_address, ZID_PAYLOAD_SIZE, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
 
-  ret = vm_write (task, payload_address + ZID_CODE_OFFSET,
-      (vm_offset_t) load_stub_code, sizeof (load_stub_code));
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(code)");
+  ret = vm_write (task, payload_address + ZID_MACH_CODE_OFFSET,
+      (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
+  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(mach_stub_code)");
 
-  if (!fill_agent_context (&ctx, dylib_path,
-      payload_address + ZID_THREAD_SELF_OFFSET, error))
-  {
+  ret = vm_write (task, payload_address + ZID_PTHREAD_CODE_OFFSET,
+      (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
+  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(pthread_stub_code)");
+
+  if (!fill_agent_context (&ctx, dylib_path, payload_address, error))
     goto beach;
-  }
   ret = vm_write (task, payload_address + ZID_DATA_OFFSET,
       (vm_offset_t) &ctx, sizeof (ctx));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(data)");
@@ -123,6 +199,7 @@ zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
   state.__r[7] = payload_address + ZID_DATA_OFFSET;
+
   state.__sp = payload_address + ZID_STACK_TOP_OFFSET;
   state.__lr = 0xcafebabe;
   state.__pc = payload_address + ZID_CODE_OFFSET;
@@ -131,6 +208,36 @@ zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
   ret = thread_create_running (task, ARM_THREAD_STATE,
       (thread_state_t) &state, ARM_THREAD_STATE_COUNT, &thread);
   CHECK_MACH_RESULT (ret, ==, 0, "thread_create_running");
+
+  while (FALSE)
+  {
+    mach_msg_type_number_t n = ARM_THREAD_STATE_COUNT;
+
+    ret = thread_get_state (thread, ARM_THREAD_STATE,
+        (thread_state_t) &state, &n);
+    g_print ("ret = %d, errno = %d\n", ret, errno);
+
+    if (ret == 0)
+    {
+      guint i;
+
+      g_assert_cmpint (n, ==, ARM_THREAD_STATE_COUNT);
+
+      for (i = 0; i != G_N_ELEMENTS (state.__r); i++)
+      {
+        g_print ("r[%u] = 0x%08x\n", i, state.__r[i]);
+      }
+
+      g_print ("sp = 0x%08x\n", state.__sp);
+      g_print ("lr = 0x%08x\n", state.__lr);
+      g_print ("pc = 0x%08x\n", state.__pc);
+      g_print ("cpsr = 0x%08x\n", state.__cpsr);
+
+      g_print ("\n");
+    }
+
+    g_usleep (G_USEC_PER_SEC);
+  }
 
   goto beach;
 
@@ -148,8 +255,8 @@ beach:
 }
 
 static gboolean
-fill_agent_context (ZidAgentContext * ctx,const char * dylib_path,
-    vm_address_t thread_self, GError ** error)
+fill_agent_context (ZidAgentContext * ctx, const char * dylib_path,
+    vm_address_t remote_payload_base, GError ** error)
 {
   gboolean result = FALSE;
   void * syslib_handle = NULL;
@@ -161,23 +268,43 @@ fill_agent_context (ZidAgentContext * ctx,const char * dylib_path,
   ctx->pthread_set_self_impl = dlsym (syslib_handle, "__pthread_set_self");
   CHECK_DL_RESULT (ctx->pthread_set_self_impl, !=, NULL,
       "dlsym(\"__pthread_set_self\")");
-  ctx->thread_self = (gpointer) thread_self;
+  ctx->thread_self = (gpointer) (remote_payload_base + ZID_THREAD_SELF_OFFSET);
+
+  ctx->pthread_create_impl = dlsym (syslib_handle, "pthread_create");
+  CHECK_DL_RESULT (ctx->pthread_create_impl, !=, NULL,
+      "dlsym(\"pthread_create\")");
+  ctx->worker_func = (gpointer) (remote_payload_base + ZID_PTHREAD_CODE_OFFSET);
+
+  ctx->pthread_join_impl = dlsym (syslib_handle, "pthread_join");
+  CHECK_DL_RESULT (ctx->pthread_join_impl, !=, NULL, "dlsym(\"pthread_join\")");
+
+  ctx->thread_terminate_impl = dlsym (syslib_handle, "thread_terminate");
+  CHECK_DL_RESULT (ctx->thread_terminate_impl, !=, NULL,
+      "dlsym(\"thread_terminate\")");
+  ctx->mach_thread_self_impl = dlsym (syslib_handle, "mach_thread_self");
+  CHECK_DL_RESULT (ctx->mach_thread_self_impl, !=, NULL,
+      "dlsym(\"mach_thread_self\")");
 
   ctx->dlopen_impl = dlsym (syslib_handle, "dlopen");
   CHECK_DL_RESULT (ctx->dlopen_impl, !=, NULL, "dlsym(\"dlopen\")");
-  strcpy (ctx->dylib_path, dylib_path);
+  ctx->dylib_path = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZidAgentContext, dylib_path_data));
+  strcpy (ctx->dylib_path_data, dylib_path);
   ctx->dlopen_mode = RTLD_LAZY;
 
   ctx->dlsym_impl = dlsym (syslib_handle, "dlsym");
   CHECK_DL_RESULT (ctx->dlsym_impl, !=, NULL, "dlsym(\"dlsym\")");
-  strcpy (ctx->entrypoint_name, ZID_AGENT_ENTRYPOINT_NAME);
-  strcpy (ctx->data_string, "FIXME");
+  ctx->entrypoint_name = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZidAgentContext, entrypoint_name_data));
+  strcpy (ctx->entrypoint_name_data, ZID_AGENT_ENTRYPOINT_NAME);
+  ctx->data_string = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZidAgentContext, data_string_data));
+  strcpy (ctx->data_string_data, "FIXME");
 
   ctx->dlclose_impl = dlsym (syslib_handle, "dlclose");
   CHECK_DL_RESULT (ctx->dlclose_impl, !=, NULL, "dlsym(\"dlclose\")");
 
-  ctx->pthread_exit_impl = dlsym (syslib_handle, "pthread_exit");
-  CHECK_DL_RESULT (ctx->pthread_exit_impl, !=, NULL, "dlsym(\"pthread_exit\")");
+  ctx->print_debug_impl = (gpointer) PRINT_DEBUG_OFFSET;
 
   result = TRUE;
   goto beach;
