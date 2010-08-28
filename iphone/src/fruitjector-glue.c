@@ -4,9 +4,6 @@
 #include <errno.h>
 #include <mach/mach.h>
 
-#define PRINT_DEBUG_OFFSET 0x3d1d
-#define FAKE_DLOPEN_ADDRESS 0x3d3d
-
 #define ZID_AGENT_ENTRYPOINT_NAME "zed_agent_main"
 
 #define ZID_CODE_OFFSET         (0)
@@ -58,30 +55,17 @@ struct _ZidAgentContext {
 
   gchar * dylib_path;
 
-  gpointer print_debug_impl;
-
   gchar entrypoint_name_data[32];
   gchar data_string_data[256];
   gchar dylib_path_data[256];
 };
 
-#define LOOP_FOREVER \
-  0xe24f5008, \
-  0xe12fff15,
-#define DEBUG_CODE \
-  0xe12fff38,
-
 static const guint32 mach_stub_code[] = {
-  0xe2878000 | G_STRUCT_OFFSET (ZidAgentContext, print_debug_impl),      /* add r8, r7, <offset> */
-  0xe5988000,                                                            /* ldr r8, [r8] */
-
   0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, thread_self),           /* add r0, r7, <offset> */
   0xe5900000,                                                            /* ldr r0, [r0] */
   0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_set_self_impl), /* add r3, r7, <offset> */
   0xe5933000,                                                            /* ldr r3, [r3] */
   0xe12fff33,                                                            /* blx r3 */
-
-  DEBUG_CODE
 
   0xe24dd004,                                                            /* sub sp, sp, 4 */
   0xe1a03007,                                                            /* mov r3, r7 */
@@ -93,15 +77,11 @@ static const guint32 mach_stub_code[] = {
   0xe5944000,                                                            /* ldr r4, [r4] */
   0xe12fff34,                                                            /* blx r4 */
 
-  DEBUG_CODE
-
   0xe0211001,                                                            /* eor r1, r1, r1 */
   0xe59d0000,                                                            /* ldr r0, [sp] */
   0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_join_impl),     /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
   0xe12fff34,                                                            /* blx r4 */
-
-  DEBUG_CODE
 
   0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, mach_thread_self_impl), /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
@@ -109,18 +89,13 @@ static const guint32 mach_stub_code[] = {
 
   0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, thread_terminate_impl), /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
-  0xe12fff34,                                                            /* blx r4 */
+  0xe12fff34                                                             /* blx r4 */
 };
 
 static const guint32 pthread_stub_code[] = {
-  0xe92d41b0,                                                            /* push {r4, r5, r7, r8, lr} */
+  0xe92d40b0,                                                            /* push {r4, r5, r7, lr} */
 
   0xe1a07000,                                                            /* mov r7, r0 */
-
-  0xe2878000 | G_STRUCT_OFFSET (ZidAgentContext, print_debug_impl),      /* add r8, r7, <offset> */
-  0xe5988000,                                                            /* ldr r8, [r8] */
-
-  DEBUG_CODE
 
   0xe2872000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_mode),           /* add	r1, r7, <offset> */
   0xe5921000,                                                            /* ldr	r1, [r1] */
@@ -131,8 +106,6 @@ static const guint32 pthread_stub_code[] = {
   0xe12fff33,                                                            /* blx	r3 */
   0xe1a04000,                                                            /* mov	r4, r0 */
 
-  DEBUG_CODE
-
   0xe2871000 | G_STRUCT_OFFSET (ZidAgentContext, entrypoint_name),       /* add	r1, r7, <offset> */
   0xe5911000,                                                            /* ldr r1, [r1] */
   0xe1a00004,                                                            /* mov r0, r4 */
@@ -141,22 +114,16 @@ static const guint32 pthread_stub_code[] = {
   0xe12fff33,                                                            /* blx	r3 */
   0xe1a05000,                                                            /* mov	r5, r0 */
 
-  DEBUG_CODE
-
   0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, data_string),           /* add	r0, r7, <offset> */
   0xe5900000,                                                            /* ldr r0, [r0] */
   0xe12fff35,                                                            /* blx	r5 */
-
-  DEBUG_CODE
 
   0xe1a00004,                                                            /* mov	r0, r4 */
   0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlclose_impl),          /* add	r3, r7, <offset> */
   0xe5933000,                                                            /* ldr	r3, [r3] */
   0xe12fff33,                                                            /* blx	r3 */
 
-  DEBUG_CODE
-
-  0xe8bd81b0,                                                            /* pop {r4, r5, r7, r8, pc} */
+  0xe8bd80b0                                                             /* pop {r4, r5, r7, pc} */
 };
 
 static gboolean fill_agent_context (ZidAgentContext * ctx,
@@ -208,36 +175,6 @@ zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
   ret = thread_create_running (task, ARM_THREAD_STATE,
       (thread_state_t) &state, ARM_THREAD_STATE_COUNT, &thread);
   CHECK_MACH_RESULT (ret, ==, 0, "thread_create_running");
-
-  while (FALSE)
-  {
-    mach_msg_type_number_t n = ARM_THREAD_STATE_COUNT;
-
-    ret = thread_get_state (thread, ARM_THREAD_STATE,
-        (thread_state_t) &state, &n);
-    g_print ("ret = %d, errno = %d\n", ret, errno);
-
-    if (ret == 0)
-    {
-      guint i;
-
-      g_assert_cmpint (n, ==, ARM_THREAD_STATE_COUNT);
-
-      for (i = 0; i != G_N_ELEMENTS (state.__r); i++)
-      {
-        g_print ("r[%u] = 0x%08x\n", i, state.__r[i]);
-      }
-
-      g_print ("sp = 0x%08x\n", state.__sp);
-      g_print ("lr = 0x%08x\n", state.__lr);
-      g_print ("pc = 0x%08x\n", state.__pc);
-      g_print ("cpsr = 0x%08x\n", state.__cpsr);
-
-      g_print ("\n");
-    }
-
-    g_usleep (G_USEC_PER_SEC);
-  }
 
   goto beach;
 
@@ -303,8 +240,6 @@ fill_agent_context (ZidAgentContext * ctx, const char * dylib_path,
 
   ctx->dlclose_impl = dlsym (syslib_handle, "dlclose");
   CHECK_DL_RESULT (ctx->dlclose_impl, !=, NULL, "dlsym(\"dlclose\")");
-
-  ctx->print_debug_impl = (gpointer) PRINT_DEBUG_OFFSET;
 
   result = TRUE;
   goto beach;
