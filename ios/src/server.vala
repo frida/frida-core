@@ -15,7 +15,6 @@ namespace Zid {
 			var agent_path = Path.build_filename (Config.PKGLIBDIR, "zid-agent.dylib");
 			var port = last_agent_port++;
 			var listen_address = "tcp:host=127.0.0.1,port=%u".printf (port);
-			stdout.printf ("injecting into pid %u, agent_path '%s', listen_address '%s'\n", pid, agent_path, listen_address);
 			injector.inject (pid, agent_path, listen_address);
 
 			return Zed.AgentSessionId (port);
