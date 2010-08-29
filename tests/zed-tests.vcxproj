@@ -179,7 +179,7 @@
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
-	--pkg=gum				^
+	--pkg=gum-1.0				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -206,7 +206,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
-	--pkg=gum				^
+	--pkg=gum-1.0				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -233,7 +233,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
-	--pkg=gum				^
+	--pkg=gum-1.0				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -260,7 +260,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
 	--pkg=wocky-0.0				^
-	--pkg=gum				^
+	--pkg=gum-1.0				^
 	--pkg=zed-core				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
