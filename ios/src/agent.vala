@@ -21,17 +21,22 @@ namespace Zed.Agent {
 		}
 
 		public async AgentModuleInfo[] query_modules () throws IOError {
-			return new AgentModuleInfo[] {
-				AgentModuleInfo ("yomama.dylib", "uid-a", 42, 1000),
-				AgentModuleInfo ("yopapa.dylib", "uid-b", 44, 2000)
-			};
+			var modules = new AgentModuleInfo[0];
+			Gum.Process.enumerate_modules ((name, address, path) => {
+				modules += AgentModuleInfo (name, path, 42, (uint64) address);
+				return true;
+			});
+			return modules;
 		}
 
 		public async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError {
-			return new AgentFunctionInfo[] {
-				AgentFunctionInfo ("do_foo", 10),
-				AgentFunctionInfo ("do_bar", 20)
-			};
+			var functions = new AgentFunctionInfo[0];
+			Gum.Module.enumerate_exports (module_name, (name, address) => {
+				functions += AgentFunctionInfo (name, (uint64) address);
+				return true;
+			});
+			stdout.printf ("enumeration of %s yielded %d results\n", module_name, functions.length);
+			return functions;
 		}
 
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
