@@ -74,11 +74,44 @@ namespace Zed.Service {
 			var entry = new Entry (client, connection, session);
 			entries.add (entry);
 
-			return entry.session;
+			return session;
 		}
 
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
-			throw new IOError.FAILED ("not yet implemented");
+			var client = new Fruity.Client ();
+			yield client.establish ();
+
+			bool connected = false;
+			for (int i = 0; !connected; i++) {
+				try {
+					yield client.connect_to_port (device_id, id.handle);
+					connected = true;
+				} catch (IOError client_error) {
+					if (i != 20 - 1) {
+						Timeout.add (50, () => {
+							obtain_agent_session.callback ();
+							return false;
+						});
+						yield;
+					} else {
+						throw client_error;
+					}
+				}
+			}
+
+			DBusConnection connection;
+			try {
+				connection = yield DBusConnection.new_for_stream (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+			} catch (Error dbus_error) {
+				throw new IOError.FAILED (dbus_error.message);
+			}
+
+			AgentSession session = Bus.get_proxy_for_connection_sync (connection, null, ObjectPath.AGENT_SESSION);
+
+			var entry = new Entry (client, connection, session);
+			entries.add (entry);
+
+			return session;
 		}
 
 		private class Entry {
@@ -92,15 +125,15 @@ namespace Zed.Service {
 				private set;
 			}
 
-			public HostSession session {
+			public Object proxy {
 				get;
 				private set;
 			}
 
-			public Entry (Fruity.Client client, DBusConnection connection, HostSession session) {
+			public Entry (Fruity.Client client, DBusConnection connection, Object proxy) {
 				this.client = client;
 				this.connection = connection;
-				this.session = session;
+				this.proxy = proxy;
 			}
 		}
 	}
