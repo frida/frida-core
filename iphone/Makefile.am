@@ -7,8 +7,9 @@ SUBDIRS = \
 	vapi
 
 deploy: all
-	ssh "${RURL}" "mkdir -p ${RPFX}/"
-	scp "$(top_builddir)/src/zid-server" "${RURL}:${RPFX}/"
+	ssh "${RURL}" "mkdir -p ${RPFX}/{sbin,lib}/"
+	scp -Bq "$(top_builddir)/src/zid-server" "${RURL}:${RPFX}/sbin/"
+	scp -Bq "$(top_builddir)/src/.libs/libzid-agent.dylib" "${RURL}:${RPFX}/lib/zid-agent.dylib"
 
 check: all
 	ssh "${RURL}" "mkdir -p ${RPFX}/tests/"

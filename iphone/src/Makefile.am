@@ -1,6 +1,7 @@
-bin_PROGRAMS = zid-server
-
+sbin_PROGRAMS = zid-server
 noinst_LTLIBRARIES = libzid-core.la
+
+lib_LTLIBRARIES = libzid-agent.la
 
 zid_server_SOURCES = \
 	server.vala
@@ -24,6 +25,14 @@ libzid_core_la_VALAFLAGS = \
 	--vapi=zid-core.vapi \
 	--library=zid-core \
 	--header=zid-core.h \
+	--vapidir=$(top_srcdir)/vapi \
+	--pkg config \
+	@ZID_PACKAGES@
+
+libzid_agent_la_SOURCES = \
+	agent.vala \
+	session.vala
+libzid_agent_la_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
 	--pkg config \
 	@ZID_PACKAGES@
