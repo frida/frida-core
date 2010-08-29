@@ -1,6 +1,6 @@
 # config.site for configure
 
-test "$prefix" = NONE && prefix="/Developer/Frida"
+test "$prefix" = NONE && prefix="$FRIDA_PREFIX"
 
 enable_maintainer_mode=yes
 enable_nls=no
@@ -37,6 +37,15 @@ case "$PACKAGE_TARNAME" in
   'libgee')
     enable_shared=no
     enable_static=yes
+  ;;
+  'libgum')
+    enable_shared=no
+    enable_static=yes
+    frida_flags="$frida_warning_flags $frida_flags"
+  ;;
+  'zid')
+    prefix="/Developer/Frida"
+    frida_flags="$frida_warning_flags $frida_flags"
   ;;
   *)
     frida_flags="$frida_warning_flags $frida_flags"
