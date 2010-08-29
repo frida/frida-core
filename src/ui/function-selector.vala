@@ -89,18 +89,25 @@ namespace Zed {
 		private async void fetch_modules () {
 			module_store.clear ();
 
+			bool seen_winsock_module = false;
+
 			try {
 				var module_info_list = yield session.query_modules ();
 				foreach (var mi in module_info_list) {
 					Gtk.TreeIter iter;
 					module_store.append (out iter);
 					module_store.set (iter, 0, mi.name);
+
+					if (mi.name == "WS2_32.dll")
+						seen_winsock_module = true;
 				}
 			} catch (IOError e) {
 			}
 
-			(view.module_entry.child as Gtk.Entry).set_text ("WS2_32.dll");
-			(view.function_entry.child as Gtk.Entry).set_text ("WSARecv");
+			if (seen_winsock_module) {
+				(view.module_entry.child as Gtk.Entry).set_text ("WS2_32.dll");
+				(view.function_entry.child as Gtk.Entry).set_text ("WSARecv");
+			}
 		}
 
 		private async void fetch_functions_in_selected_module () {
