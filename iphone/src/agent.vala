@@ -1,5 +1,5 @@
 namespace Zed.Agent {
-	public class Server : Object, AgentSession {
+	public class FruityServer : Object, AgentSession {
 		public string listen_address {
 			get;
 			construct;
@@ -9,12 +9,12 @@ namespace Zed.Agent {
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
 
-		public Server (string listen_address) {
+		public FruityServer (string listen_address) {
 			Object (listen_address: listen_address);
 		}
 
 		public async void close () throws IOError {
-			Idle.add (() => {
+			Timeout.add (500, () => {
 				main_loop.quit ();
 				return false;
 			});
@@ -84,15 +84,11 @@ namespace Zed.Agent {
 
 			main_loop = new MainLoop ();
 			main_loop.run ();
-
-			server.stop ();
 		}
 	}
 
 	public void main (string data_string) {
-		stdout.printf ("got data_string='%s'\n", data_string);
-
-		var server = new Server (data_string);
+		var server = new FruityServer (data_string);
 
 		try {
 			server.run ();

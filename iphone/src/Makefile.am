@@ -36,7 +36,8 @@ libzid_core_la_VALAFLAGS = \
 	@ZID_PACKAGES@
 
 libzid_agent_la_SOURCES = \
-	agent.vala
+	agent.vala \
+	agent-glue.c
 libzid_agent_la_LIBADD = \
 	$(top_builddir)/ext/interfaces/libzed-interfaces.la \
 	$(ZID_LIBS)
