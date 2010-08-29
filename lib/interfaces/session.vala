@@ -231,5 +231,6 @@ namespace Zed {
 
 	namespace ObjectPath {
 		public const string HOST_SESSION = "/org/boblycat/frida/HostSession";
+		public const string AGENT_SESSION = "/org/boblycat/frida/AgentSession";
 	}
 }
