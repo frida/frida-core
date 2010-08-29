@@ -78,26 +78,31 @@ namespace Zed.Service {
 		}
 
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
-			var client = new Fruity.Client ();
-			yield client.establish ();
+			Fruity.Client client = null;
 
 			bool connected = false;
 			for (int i = 0; !connected; i++) {
+				client = new Fruity.Client ();
+				yield client.establish ();
+
 				try {
 					yield client.connect_to_port (device_id, id.handle);
 					connected = true;
 				} catch (IOError client_error) {
-					if (i != 20 - 1) {
-						Timeout.add (50, () => {
+					if (i != 10 - 1) {
+						Timeout.add (200, () => {
 							obtain_agent_session.callback ();
 							return false;
 						});
 						yield;
 					} else {
-						throw client_error;
+						break;
 					}
 				}
 			}
+
+			if (!connected)
+				throw new IOError.TIMED_OUT ("timed out");
 
 			DBusConnection connection;
 			try {
