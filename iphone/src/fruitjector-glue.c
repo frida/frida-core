@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <dispatch/dispatch.h>
 #include <mach/mach.h>
 
 #define ZID_AGENT_ENTRYPOINT_NAME "zed_agent_main"
@@ -30,9 +31,26 @@
     goto handle_dl_error; \
   }
 
+typedef struct _ZidFruitContext ZidFruitContext;
+typedef struct _ZidInjectionInstance ZidInjectionInstance;
 typedef struct _ZidAgentContext ZidAgentContext;
 
-struct _ZidAgentContext {
+struct _ZidFruitContext
+{
+  dispatch_queue_t dispatch_queue;
+};
+
+struct _ZidInjectionInstance
+{
+  ZidFruitjector * fruitjector;
+  guint id;
+  mach_port_t task;
+  mach_port_t thread;
+  dispatch_source_t thread_monitor_source;
+};
+
+struct _ZidAgentContext
+{
   gpointer pthread_set_self_impl;
   gpointer thread_self;
 
@@ -60,7 +78,8 @@ struct _ZidAgentContext {
   gchar dylib_path_data[256];
 };
 
-static const guint32 mach_stub_code[] = {
+static const guint32 mach_stub_code[] =
+{
   0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, thread_self),           /* add r0, r7, <offset> */
   0xe5900000,                                                            /* ldr r0, [r0] */
   0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_set_self_impl), /* add r3, r7, <offset> */
@@ -92,7 +111,8 @@ static const guint32 mach_stub_code[] = {
   0xe12fff34                                                             /* blx r4 */
 };
 
-static const guint32 pthread_stub_code[] = {
+static const guint32 pthread_stub_code[] =
+{
   0xe92d40b0,                                                            /* push {r4, r5, r7, lr} */
 
   0xe1a07000,                                                            /* mov r7, r0 */
@@ -127,22 +147,92 @@ static const guint32 pthread_stub_code[] = {
 };
 
 static gboolean fill_agent_context (ZidAgentContext * ctx,
-    const char * dylib_path, vm_address_t remote_payload_base, GError ** error);
+    const char * dylib_path, const char * data_string,
+    vm_address_t remote_payload_base, GError ** error);
 
 void
-zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
-    const char * dylib_path, GError ** error)
+_zid_fruitjector_create_context (ZidFruitjector * self)
 {
+  ZidFruitContext * ctx;
+
+  ctx = g_new0 (ZidFruitContext, 1);
+  ctx->dispatch_queue = dispatch_queue_create (
+      "org.boblycat.frida.fruitjector.queue", NULL);
+
+  self->context = ctx;
+}
+
+void
+_zid_fruitjector_destroy_context (ZidFruitjector * self)
+{
+  ZidFruitContext * ctx = self->context;
+
+  dispatch_release (ctx->dispatch_queue);
+  g_free (ctx);
+}
+
+static ZidInjectionInstance *
+zid_injection_instance_new (ZidFruitjector * fruitjector, guint id)
+{
+  ZidInjectionInstance * instance;
+
+  instance = g_new0 (ZidInjectionInstance, 1);
+  instance->fruitjector = g_object_ref (fruitjector);
+  instance->id = id;
+  instance->task = MACH_PORT_NULL;
+  instance->thread = MACH_PORT_NULL;
+
+  return instance;
+}
+
+static void
+zid_injection_instance_free (ZidInjectionInstance * instance)
+{
+  task_t self_task = mach_task_self ();
+
+  if (instance->thread_monitor_source != NULL)
+    dispatch_release (instance->thread_monitor_source);
+  if (instance->thread != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->thread);
+  if (instance->task != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->task);
+  g_object_unref (instance->fruitjector);
+  g_free (instance);
+}
+
+static void
+zid_injection_instance_handle_event (void * context)
+{
+  ZidInjectionInstance * instance = context;
+
+  _zid_fruitjector_on_instance_dead (instance->fruitjector, instance->id);
+}
+
+void
+_zid_fruitjector_free_instance (ZidFruitjector * self, void * instance)
+{
+  zid_injection_instance_free (instance);
+}
+
+guint
+_zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
+    const char * dylib_path, const char * data_string, GError ** error)
+{
+  ZidFruitContext * ctx = self->context;
+  ZidInjectionInstance * instance;
   const gchar * failed_operation;
   mach_port_name_t task = 0;
   kern_return_t ret;
   vm_address_t payload_address = (vm_address_t) NULL;
-  ZidAgentContext ctx;
+  ZidAgentContext agent_ctx;
   arm_thread_state_t state;
-  thread_act_t thread;
+  dispatch_source_t source;
+
+  instance = zid_injection_instance_new (self, self->last_id++);
 
   ret = task_for_pid (mach_task_self (), pid, &task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
+  instance->task = task;
 
   ret = vm_allocate (task, &payload_address, ZID_PAYLOAD_SIZE, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
@@ -155,10 +245,13 @@ zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
       (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(pthread_stub_code)");
 
-  if (!fill_agent_context (&ctx, dylib_path, payload_address, error))
-    goto beach;
+  if (!fill_agent_context (&agent_ctx, dylib_path, data_string, payload_address,
+      error))
+  {
+    goto error_epilogue;
+  }
   ret = vm_write (task, payload_address + ZID_DATA_OFFSET,
-      (vm_offset_t) &ctx, sizeof (ctx));
+      (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(data)");
 
   ret = vm_protect (task, payload_address + ZID_CODE_OFFSET, ZID_PAGE_SIZE,
@@ -173,27 +266,39 @@ zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
   state.__cpsr = 0;
 
   ret = thread_create_running (task, ARM_THREAD_STATE,
-      (thread_state_t) &state, ARM_THREAD_STATE_COUNT, &thread);
+      (thread_state_t) &state, ARM_THREAD_STATE_COUNT, &instance->thread);
   CHECK_MACH_RESULT (ret, ==, 0, "thread_create_running");
 
-  goto beach;
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_id),
+      GUINT_TO_POINTER (instance->id), instance);
+
+  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND,
+      instance->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
+  instance->thread_monitor_source = source;
+  dispatch_set_context (source, instance);
+  dispatch_source_set_event_handler_f (source,
+      zid_injection_instance_handle_event);
+  dispatch_resume (source);
+
+  return instance->id;
 
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
         "%s failed: %d", failed_operation, errno);
-    goto beach;
+    goto error_epilogue;
   }
 
-beach:
+error_epilogue:
   {
-    return;
+    zid_injection_instance_free (instance);
+    return 0;
   }
 }
 
 static gboolean
 fill_agent_context (ZidAgentContext * ctx, const char * dylib_path,
-    vm_address_t remote_payload_base, GError ** error)
+    const char * data_string, vm_address_t remote_payload_base, GError ** error)
 {
   gboolean result = FALSE;
   void * syslib_handle = NULL;
@@ -236,7 +341,8 @@ fill_agent_context (ZidAgentContext * ctx, const char * dylib_path,
   strcpy (ctx->entrypoint_name_data, ZID_AGENT_ENTRYPOINT_NAME);
   ctx->data_string = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
       G_STRUCT_OFFSET (ZidAgentContext, data_string_data));
-  strcpy (ctx->data_string_data, "FIXME");
+  g_assert_cmpint (strlen (data_string), <, sizeof (ctx->data_string_data));
+  strcpy (ctx->data_string_data, data_string);
 
   ctx->dlclose_impl = dlsym (syslib_handle, "dlclose");
   CHECK_DL_RESULT (ctx->dlclose_impl, !=, NULL, "dlsym(\"dlclose\")");

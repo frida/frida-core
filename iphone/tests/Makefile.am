@@ -17,7 +17,7 @@ inject_victim_LDADD = \
 	$(ZID_LIBS)
 
 libinject_attacker_la_SOURCES = \
-	inject-attacker.vala
+	inject-attacker.c
 libinject_attacker_la_LDFLAGS = \
 	-rpath /nowhere
 libinject_attacker_la_LIBADD = \
