@@ -1,19 +1,28 @@
 namespace Zid {
 	public class Application : Object, Zed.HostSession {
+		private Fruitjector injector = new Fruitjector ();
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
+
+		private const uint LISTEN_PORT = 27042;
+		private uint last_agent_port = LISTEN_PORT + 1;
 
 		public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
 			return System.enumerate_processes ();
 		}
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
-			System.kill (pid);
-			throw new IOError.FAILED ("not yet implemented, so I killed your process instead");
+			var agent_path = Path.build_filename (Config.PKGLIBDIR, "zid-agent.dylib");
+			var port = last_agent_port++;
+			var listen_address = "tcp:host=127.0.0.1,port=%u".printf (port);
+			stdout.printf ("injecting into pid %u, agent_path '%s', listen_address '%s'\n", pid, agent_path, listen_address);
+			injector.inject (pid, agent_path, listen_address);
+
+			return Zed.AgentSessionId (port);
 		}
 
 		public void run () throws Error {
-			server = new DBusServer.sync ("tcp:host=127.0.0.1,port=27042", DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+			server = new DBusServer.sync ("tcp:host=127.0.0.1,port=%u".printf (LISTEN_PORT), DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
 				try {
 					Zed.HostSession session = this;

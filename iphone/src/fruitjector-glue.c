@@ -215,7 +215,7 @@ _zid_fruitjector_free_instance (ZidFruitjector * self, void * instance)
 }
 
 guint
-_zid_fruitjector_do_inject (ZidFruitjector * self, gint pid,
+_zid_fruitjector_do_inject (ZidFruitjector * self, guint pid,
     const char * dylib_path, const char * data_string, GError ** error)
 {
   ZidFruitContext * ctx = self->context;

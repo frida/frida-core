@@ -22,7 +22,7 @@ fi
 # regenerated from their corresponding *.in files by ./configure anyway.
 touch README INSTALL
 
-ln -sf ../../lib/interfaces/session.vala src/session.vala
+ln -sf ../../../lib/interfaces/session.vala ext/interfaces/session.vala
 
 autoreconf -ifv
 result=$?

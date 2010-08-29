@@ -2,14 +2,15 @@ RURL := root@${IOS_IPADDR}
 RPFX := ${prefix}
 
 SUBDIRS = \
+	ext \
 	src \
 	tests \
 	vapi
 
 deploy: all
-	ssh "${RURL}" "mkdir -p ${RPFX}/{sbin,lib}/"
+	ssh "${RURL}" "mkdir -p ${RPFX}/{sbin,lib/zid}/"
 	scp -Bq "$(top_builddir)/src/zid-server" "${RURL}:${RPFX}/sbin/"
-	scp -Bq "$(top_builddir)/src/.libs/libzid-agent.dylib" "${RURL}:${RPFX}/lib/zid-agent.dylib"
+	scp -Bq "$(top_builddir)/src/.libs/libzid-agent.dylib" "${RURL}:${RPFX}/lib/zid/zid-agent.dylib"
 
 check: all
 	ssh "${RURL}" "mkdir -p ${RPFX}/tests/"

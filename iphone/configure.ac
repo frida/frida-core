@@ -25,6 +25,8 @@ AC_SUBST(ZID_PACKAGES)
 
 AC_CONFIG_FILES([
 	Makefile
+	ext/Makefile
+	ext/interfaces/Makefile
 	src/Makefile
 	tests/Makefile
 	vapi/Makefile

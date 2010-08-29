@@ -25,6 +25,7 @@ libinject_attacker_la_LIBADD = \
 
 AM_CPPFLAGS = \
 	-include config.h \
+	-I $(top_builddir)/ext/interfaces \
 	-I $(top_builddir)/src \
 	$(ZID_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
@@ -34,9 +35,11 @@ AM_CPPFLAGS = \
 VALAFLAGS = \
 	--header=zid-tests.h \
 	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_srcdir)/src \
+	--vapidir=$(top_builddir)/ext/interfaces \
+	--vapidir=$(top_builddir)/src \
 	--pkg config \
 	--pkg zid-core \
+	--pkg zed-interfaces \
 	@ZID_PACKAGES@
 
 all-local: zid-tests
