@@ -35,7 +35,6 @@ namespace Zed.Agent {
 				functions += AgentFunctionInfo (name, (uint64) address);
 				return true;
 			});
-			stdout.printf ("enumeration of %s yielded %d results\n", module_name, functions.length);
 			return functions;
 		}
 
