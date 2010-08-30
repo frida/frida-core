@@ -10,6 +10,7 @@ zid_server_LDADD = \
 	$(top_builddir)/ext/interfaces/libzed-interfaces.la \
 	$(ZID_LIBS)
 zid_server_LDFLAGS = \
+	-Wl,-framework -Wl,CoreGraphics \
 	-Wl,-framework -Wl,Foundation \
 	-Wl,-framework -Wl,UIKit
 zid_server_VALAFLAGS = \

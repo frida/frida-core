@@ -9,6 +9,7 @@ zid_tests_SOURCES = \
 	process.vala \
 	process-glue.c
 zid_tests_LDFLAGS = \
+	-Wl,-framework -Wl,CoreGraphics \
 	-Wl,-framework -Wl,Foundation \
 	-Wl,-framework -Wl,UIKit
 zid_tests_LDADD = \

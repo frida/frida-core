@@ -13,7 +13,8 @@ typedef NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifierFunc) (NSString *
 static SBSCopyDisplayIdentifierForProcessIDFunc SBSCopyDisplayIdentifierForProcessIDImpl = NULL;
 static SBSCopyIconImagePNGDataForDisplayIdentifierFunc SBSCopyIconImagePNGDataForDisplayIdentifierImpl = NULL;
 
-gboolean extract_icon_from_pid (guint pid, ZedHostProcessIcon * icon);
+gboolean extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon);
+static void init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, guint target_width, guint target_height);
 
 ZedHostProcessInfo *
 zid_system_enumerate_processes (int * result_length1)
@@ -24,7 +25,7 @@ zid_system_enumerate_processes (int * result_length1)
   gint err;
   guint count, i;
   ZedHostProcessInfo * result;
-  ZedHostProcessIcon no_icon;
+  ZedHostProcessIcon empty_icon = { 0, };
 
   err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
   g_assert_cmpint (err, !=, -1);
@@ -38,29 +39,22 @@ zid_system_enumerate_processes (int * result_length1)
   result = g_new (ZedHostProcessInfo, count);
   *result_length1 = count;
 
-  zed_host_process_icon_init (&no_icon, 0, 0, 0, "");
-
   for (i = 0; i != count; i++)
   {
     struct kinfo_proc * e = &entries[i];
+    ZedHostProcessInfo * info = &result[i];
     guint pid = e->kp_proc.p_pid;
-    ZedHostProcessIcon extracted_icon, * small_icon, * large_icon;
-    gboolean has_icon;
+    gboolean has_icons;
 
-    small_icon = &no_icon;
-    has_icon = extract_icon_from_pid (pid, &extracted_icon);
-    if (has_icon)
-      large_icon = &extracted_icon;
-    else
-      large_icon = &no_icon;
+    zed_host_process_info_init (info, pid, e->kp_proc.p_comm, &empty_icon, &empty_icon);
 
-    zed_host_process_info_init (&result[i], e->kp_proc.p_pid, e->kp_proc.p_comm, small_icon, large_icon);
-
-    if (has_icon)
-      zed_host_process_icon_destroy (&extracted_icon);
+    has_icons = extract_icons_from_pid (pid, &info->_small_icon, &info->_large_icon);
+    if (!has_icons)
+    {
+      zed_host_process_icon_init (&info->_small_icon, 0, 0, 0, "");
+      zed_host_process_icon_init (&info->_large_icon, 0, 0, 0, "");
+    }
   }
-
-  zed_host_process_icon_destroy (&no_icon);
 
   g_free (entries);
 
@@ -74,8 +68,9 @@ zid_system_kill (guint pid)
 }
 
 gboolean
-extract_icon_from_pid (guint pid, ZedHostProcessIcon * icon)
+extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon)
 {
+  gboolean result = FALSE;
   NSAutoreleasePool * pool;
   NSString * identifier;
 
@@ -104,17 +99,13 @@ extract_icon_from_pid (guint pid, ZedHostProcessIcon * icon)
     if (png_data != nil)
     {
       UIImage * image;
-      CGSize size;
-      CGFloat scale;
-      guint width, height;
 
       image = [UIImage imageWithData: png_data];
-      size = [image size];
-      scale = [image scale];
-      width = size.width * scale;
-      height = size.height * scale;
 
-      NSLog (@"%@ image of %ux%u (%fx%f, scale=%f)", identifier, width, height, size.width, size.height, scale);
+      init_icon_from_ui_image_scaled_to (small_icon, image, 16, 16);
+      init_icon_from_ui_image_scaled_to (large_icon, image, 32, 32);
+
+      result = TRUE;
     }
 
     [png_data release];
@@ -123,6 +114,68 @@ extract_icon_from_pid (guint pid, ZedHostProcessIcon * icon)
 
   [pool release];
 
-  return FALSE;
+  return result;
+}
+
+static void
+init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, guint target_width, guint target_height)
+{
+  CGImageRef cgimage;
+  CGSize full, scaled;
+  guint pixel_buf_size;
+  guint8 * pixel_buf;
+  guint32 * pixels;
+  guint i;
+  CGColorSpaceRef colorspace;
+  CGContextRef cgctx;
+  CGRect target_rect = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
+
+  icon->_width = target_width;
+  icon->_height = target_height;
+  icon->_rowstride = target_width * 4;
+
+  cgimage = [image CGImage];
+
+  full.width = CGImageGetWidth (cgimage);
+  full.height = CGImageGetHeight (cgimage);
+
+  if (full.height > full.width)
+  {
+    scaled.width = (CGFloat) full.width * ((CGFloat) target_height / full.height);
+    scaled.height = target_height;
+  }
+  else
+  {
+    scaled.width = target_width;
+    scaled.height = (CGFloat) full.height * ((CGFloat) target_width / full.width);
+  }
+
+  pixel_buf_size = icon->_width * icon->_rowstride;
+  pixel_buf = g_malloc (pixel_buf_size);
+
+  /*
+   * HACK ALERT:
+   *
+   * CoreGraphics does not yet support non-premultiplied, so we make sure it multiplies with the same pixels as
+   * those usually rendered onto by the zed GUI... ICK!
+   */
+  pixels = (guint32 *) pixel_buf;
+  for (i = 0; i != icon->_width * icon->_height; i++)
+    pixels[i] = GUINT32_TO_BE (0xf0f0f0ff);
+
+  colorspace = CGColorSpaceCreateDeviceRGB ();
+  cgctx = CGBitmapContextCreate (pixel_buf, icon->_width, icon->_height, 8, icon->_rowstride, colorspace,
+      kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedLast);
+  g_assert (cgctx != NULL);
+
+  target_rect.size = scaled;
+
+  CGContextDrawImage (cgctx, target_rect, cgimage);
+
+  icon->_data = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
+
+  CGContextRelease (cgctx);
+  CGColorSpaceRelease (colorspace);
+  g_free (pixel_buf);
 }
 
