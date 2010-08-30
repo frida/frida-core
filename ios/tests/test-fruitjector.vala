@@ -21,7 +21,7 @@ namespace Zid.FruitjectorTest {
 				assert_not_reached ();
 			}
 
-			var requested_exit_code = Random.int_range (42, 82);
+			var requested_exit_code = 43;
 			rat.inject ("inject-attacker.dylib", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
