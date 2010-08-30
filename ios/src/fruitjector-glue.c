@@ -262,7 +262,7 @@ _zid_fruitjector_do_inject (ZidFruitjector * self, guint pid,
 
   state.__sp = payload_address + ZID_STACK_TOP_OFFSET;
   state.__lr = 0xcafebabe;
-  state.__pc = payload_address + ZID_CODE_OFFSET;
+  state.__pc = payload_address + ZID_MACH_CODE_OFFSET;
   state.__cpsr = 0;
 
   ret = thread_create_running (task, ARM_THREAD_STATE,
