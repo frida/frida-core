@@ -4,6 +4,7 @@ namespace Zid.Test {
 		GLib.Test.init (ref args);
 
 		Zid.FruitjectorTest.add_tests ();
+		Zid.SystemTest.add_tests ();
 
 		GLib.Test.run ();
 	}

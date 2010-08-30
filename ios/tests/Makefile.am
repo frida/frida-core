@@ -5,8 +5,12 @@ noinst_LTLIBRARIES = libinject-attacker.la
 zid_tests_SOURCES = \
 	test-main.vala \
 	test-fruitjector.vala \
+	test-system.vala \
 	process.vala \
 	process-glue.c
+zid_tests_LDFLAGS = \
+	-Wl,-framework -Wl,Foundation \
+	-Wl,-framework -Wl,UIKit
 zid_tests_LDADD = \
 	$(top_builddir)/src/libzid-core.la \
 	$(ZID_LIBS)

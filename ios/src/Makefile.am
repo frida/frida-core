@@ -1,5 +1,5 @@
 sbin_PROGRAMS = zid-server
-noinst_LTLIBRARIES = libzid-core.la
+noinst_LTLIBRARIES = libzid-core.la libzid-core-glue.la
 
 lib_LTLIBRARIES = libzid-agent.la
 
@@ -9,6 +9,9 @@ zid_server_LDADD = \
 	$(builddir)/libzid-core.la \
 	$(top_builddir)/ext/interfaces/libzed-interfaces.la \
 	$(ZID_LIBS)
+zid_server_LDFLAGS = \
+	-Wl,-framework -Wl,Foundation \
+	-Wl,-framework -Wl,UIKit
 zid_server_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/ext/interfaces \
@@ -20,10 +23,9 @@ zid_server_VALAFLAGS = \
 
 libzid_core_la_SOURCES = \
 	fruitjector.vala \
-	fruitjector-glue.c \
-	system.vala \
-	system-glue.c
+	system.vala
 libzid_core_la_LIBADD = \
+        libzid-core-glue.la \
 	$(top_builddir)/ext/interfaces/libzed-interfaces.la
 libzid_core_la_VALAFLAGS = \
 	--vapi=zid-core.vapi \
@@ -34,6 +36,10 @@ libzid_core_la_VALAFLAGS = \
 	--pkg config \
 	--pkg zed-interfaces \
 	@ZID_PACKAGES@
+
+libzid_core_glue_la_SOURCES = \
+	fruitjector-glue.c \
+	system-glue.m
 
 libzid_agent_la_SOURCES = \
 	agent.vala \
