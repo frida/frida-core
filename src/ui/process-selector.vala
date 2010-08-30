@@ -70,7 +70,8 @@ namespace Zed {
 		public ProcessSelector (View.ProcessSelector view) {
 			Object (view: view);
 
-			process_store.set_sort_column_id (0, Gtk.SortType.ASCENDING);
+			process_store.set_sort_func (1, compare_process_info_by_icon_name_and_pid);
+			process_store.set_sort_column_id (1, Gtk.SortType.ASCENDING);
 
 			view.set_model (process_store);
 
@@ -213,6 +214,29 @@ namespace Zed {
 			ProcessInfo pi;
 			model.get (iter, 1, out pi);
 			(renderer as Gtk.CellRendererText).text = pi.pid.to_string ();
+		}
+
+		private int compare_process_info_by_icon_name_and_pid (Gtk.TreeModel model, Gtk.TreeIter iter_a, Gtk.TreeIter iter_b) {
+			ProcessInfo a, b;
+			model.get (iter_a, 1, out a);
+			model.get (iter_b, 1, out b);
+
+			var a_has_icon = a.small_icon != null;
+			var b_has_icon = b.small_icon != null;
+			if (a_has_icon == b_has_icon) {
+				var name_equality = a.name.ascii_casecmp (b.name);
+				if (name_equality != 0)
+					return name_equality;
+
+				if (a.pid < b.pid)
+					return -1;
+				else
+					return 1;
+			} else if (a_has_icon) {
+				return -1;
+			} else {
+				return 1;
+			}
 		}
 
 		private Gdk.Pixbuf? pixbuf_from_icon (HostProcessIcon icon) {
