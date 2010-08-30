@@ -63,6 +63,16 @@ export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgco
 
 export LANG="C"
 
+if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
+  echo "Downloading and deploying toolchain..."
+  curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20100806.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+fi
+
+if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
+  echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
+  curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-20100806.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+fi
+
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 
 for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
