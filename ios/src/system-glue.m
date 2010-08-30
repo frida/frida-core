@@ -7,14 +7,24 @@
 #include <unistd.h>
 #include <sys/sysctl.h>
 
+typedef struct _ZidIconPair ZidIconPair;
 typedef NSString * (* SBSCopyDisplayIdentifierForProcessIDFunc) (UInt32 pid);
 typedef NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifierFunc) (NSString * identifier);
 
+struct _ZidIconPair
+{
+  ZedHostProcessIcon small_icon;
+  ZedHostProcessIcon large_icon;
+};
+
+static gboolean extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon);
+static void init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, guint target_width, guint target_height);
+
+static void zid_icon_pair_free (ZidIconPair * pair);
+
+static GHashTable * icon_pair_by_identifier = NULL;
 static SBSCopyDisplayIdentifierForProcessIDFunc SBSCopyDisplayIdentifierForProcessIDImpl = NULL;
 static SBSCopyIconImagePNGDataForDisplayIdentifierFunc SBSCopyIconImagePNGDataForDisplayIdentifierImpl = NULL;
-
-gboolean extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon);
-static void init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, guint target_width, guint target_height);
 
 ZedHostProcessInfo *
 zid_system_enumerate_processes (int * result_length1)
@@ -67,7 +77,7 @@ zid_system_kill (guint pid)
   killpg (getpgid (pid), SIGTERM);
 }
 
-gboolean
+static gboolean
 extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon)
 {
   gboolean result = FALSE;
@@ -76,9 +86,11 @@ extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProce
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  if (SBSCopyDisplayIdentifierForProcessIDImpl == NULL)
+  if (icon_pair_by_identifier == NULL)
   {
     void * sblib;
+
+    icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) zid_icon_pair_free);
 
     sblib = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY | RTLD_GLOBAL);
     g_assert (sblib != NULL);
@@ -93,22 +105,35 @@ extract_icons_from_pid (guint pid, ZedHostProcessIcon * small_icon, ZedHostProce
   identifier = SBSCopyDisplayIdentifierForProcessIDImpl (pid);
   if (identifier != nil)
   {
-    NSData * png_data;
+    ZidIconPair * pair;
 
-    png_data = SBSCopyIconImagePNGDataForDisplayIdentifierImpl (identifier);
-    if (png_data != nil)
+    pair = g_hash_table_lookup (icon_pair_by_identifier, [identifier UTF8String]);
+    if (pair == NULL)
     {
-      UIImage * image;
+      NSData * png_data;
 
-      image = [UIImage imageWithData: png_data];
+      png_data = SBSCopyIconImagePNGDataForDisplayIdentifierImpl (identifier);
+      if (png_data != nil)
+      {
+        UIImage * image;
 
-      init_icon_from_ui_image_scaled_to (small_icon, image, 16, 16);
-      init_icon_from_ui_image_scaled_to (large_icon, image, 32, 32);
+        pair = g_new (ZidIconPair, 1);
+        image = [UIImage imageWithData: png_data];
+        init_icon_from_ui_image_scaled_to (&pair->small_icon, image, 16, 16);
+        init_icon_from_ui_image_scaled_to (&pair->large_icon, image, 32, 32);
+        g_hash_table_insert (icon_pair_by_identifier, g_strdup ([identifier UTF8String]), pair);
+      }
+
+      [png_data release];
+    }
+
+    if (pair != NULL)
+    {
+      zed_host_process_icon_copy (&pair->small_icon, small_icon);
+      zed_host_process_icon_copy (&pair->large_icon, large_icon);
 
       result = TRUE;
     }
-
-    [png_data release];
   }
   [identifier release];
 
@@ -177,5 +202,13 @@ init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, g
   CGContextRelease (cgctx);
   CGColorSpaceRelease (colorspace);
   g_free (pixel_buf);
+}
+
+static void
+zid_icon_pair_free (ZidIconPair * pair)
+{
+  zed_host_process_icon_destroy (&pair->small_icon);
+  zed_host_process_icon_destroy (&pair->large_icon);
+  g_free (pair);
 }
 
