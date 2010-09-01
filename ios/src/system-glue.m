@@ -21,12 +21,12 @@ struct _ZidSpringboardApi
 
 struct _ZidIconPair
 {
-  ZedHostProcessIcon small_icon;
-  ZedHostProcessIcon large_icon;
+  ZedImageData small_icon;
+  ZedImageData large_icon;
 };
 
-static void extract_icons_from_identifier (NSString * identifier, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon);
-static void init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, guint target_width, guint target_height);
+static void extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon);
+static void init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height);
 
 static void zid_icon_pair_free (ZidIconPair * pair);
 
@@ -131,7 +131,7 @@ zid_system_kill (guint pid)
 }
 
 static void
-extract_icons_from_identifier (NSString * identifier, ZedHostProcessIcon * small_icon, ZedHostProcessIcon * large_icon)
+extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon)
 {
   ZidIconPair * pair;
 
@@ -157,7 +157,7 @@ extract_icons_from_identifier (NSString * identifier, ZedHostProcessIcon * small
 }
 
 static void
-init_icon_from_ui_image_scaled_to (ZedHostProcessIcon * icon, UIImage * image, guint target_width, guint target_height)
+init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height)
 {
   CGImageRef cgimage;
   CGSize full, scaled;

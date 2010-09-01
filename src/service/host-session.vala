@@ -31,6 +31,10 @@ namespace Zed.Service {
 			get;
 		}
 
+		public abstract ImageData? icon {
+			get;
+		}
+
 		public abstract HostSessionProviderKind kind {
 			get;
 		}

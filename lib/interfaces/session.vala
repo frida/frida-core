@@ -39,17 +39,17 @@ namespace Zed {
 			private set;
 		}
 
-		public HostProcessIcon small_icon {
+		public ImageData small_icon {
 			get;
 			private set;
 		}
 
-		public HostProcessIcon large_icon {
+		public ImageData large_icon {
 			get;
 			private set;
 		}
 
-		public HostProcessInfo (uint pid, string name, HostProcessIcon small_icon, HostProcessIcon large_icon) {
+		public HostProcessInfo (uint pid, string name, ImageData small_icon, ImageData large_icon) {
 			this.pid = pid;
 			this.name = name;
 			this.small_icon = small_icon;
@@ -200,7 +200,7 @@ namespace Zed {
 		}
 	}
 
-	public struct HostProcessIcon {
+	public struct ImageData {
 		public int width {
 			get;
 			private set;
@@ -216,16 +216,16 @@ namespace Zed {
 			private set;
 		}
 
-		public string data {
+		public string pixels {
 			get;
 			private set;
 		}
 
-		public HostProcessIcon (int width, int height, int rowstride, string data) {
+		public ImageData (int width, int height, int rowstride, string pixels) {
 			this.width = width;
 			this.height = height;
 			this.rowstride = rowstride;
-			this.data = data;
+			this.pixels = pixels;
 		}
 	}
 

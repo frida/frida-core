@@ -40,6 +40,11 @@ namespace Zed.Service {
 			get { return "Apple Mobile Device"; }
 		}
 
+		public ImageData? icon {
+			get { return _icon; }
+		}
+		private ImageData? _icon = null;
+
 		public HostSessionProviderKind kind {
 			get { return HostSessionProviderKind.LOCAL_TETHER; }
 		}

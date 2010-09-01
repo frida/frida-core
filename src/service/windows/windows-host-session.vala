@@ -78,6 +78,11 @@ namespace Zed.Service {
 			get { return "Local System"; }
 		}
 
+		public ImageData? icon {
+			get { return _icon; }
+		}
+		private ImageData? _icon;
+
 		public HostSessionProviderKind kind {
 			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
 		}

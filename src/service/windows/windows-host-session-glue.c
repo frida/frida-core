@@ -19,15 +19,15 @@ enum _IconSize
   ICON_SIZE_LARGE
 };
 
-static ZedHostProcessIcon * extract_icon_from_process_or_file (DWORD pid,
+static ZedImageData * extract_icon_from_process_or_file (DWORD pid,
     WCHAR * filename, IconSize size);
 
-static ZedHostProcessIcon * extract_icon_from_process (DWORD pid,
+static ZedImageData * extract_icon_from_process (DWORD pid,
     IconSize size);
-static ZedHostProcessIcon * extract_icon_from_file (WCHAR * filename,
+static ZedImageData * extract_icon_from_file (WCHAR * filename,
     IconSize size);
 
-static ZedHostProcessIcon * icon_from_native_icon_handle (HICON icon,
+static ZedImageData * icon_from_native_icon_handle (HICON icon,
     IconSize size);
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
@@ -67,7 +67,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
       {
         gchar * name, * tmp;
         ZedHostProcessInfo * process_info;
-        ZedHostProcessIcon * small_icon, * large_icon;
+        ZedImageData * small_icon, * large_icon;
 
         name = g_utf16_to_utf8 ((gunichar2 *) name_utf16, -1, NULL, NULL, NULL);
         tmp = g_path_get_basename (name);
@@ -85,8 +85,8 @@ zed_service_windows_process_backend_enumerate_processes_sync (
         zed_host_process_info_init (process_info, pids[i], name,
             small_icon, large_icon);
 
-        zed_host_process_icon_free (large_icon);
-        zed_host_process_icon_free (small_icon);
+        zed_image_data_free (large_icon);
+        zed_image_data_free (small_icon);
 
         g_free (name);
       }
@@ -101,10 +101,10 @@ zed_service_windows_process_backend_enumerate_processes_sync (
   return (ZedHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
-static ZedHostProcessIcon *
+static ZedImageData *
 extract_icon_from_process_or_file (DWORD pid, WCHAR * filename, IconSize size)
 {
-  ZedHostProcessIcon * icon;
+  ZedImageData * icon;
 
   icon = extract_icon_from_process (pid, size);
   if (icon == NULL)
@@ -112,17 +112,17 @@ extract_icon_from_process_or_file (DWORD pid, WCHAR * filename, IconSize size)
 
   if (icon == NULL)
   {
-    icon = g_new (ZedHostProcessIcon, 1);
-    zed_host_process_icon_init (icon, 0, 0, 0, "");
+    icon = g_new (ZedImageData, 1);
+    zed_image_data_init (icon, 0, 0, 0, "");
   }
 
   return icon;
 }
 
-static ZedHostProcessIcon *
+static ZedImageData *
 extract_icon_from_process (DWORD pid, IconSize size)
 {
-  ZedHostProcessIcon * result = NULL;
+  ZedImageData * result = NULL;
   HICON icon = NULL;
   HWND main_window;
 
@@ -174,10 +174,10 @@ extract_icon_from_process (DWORD pid, IconSize size)
   return result;
 }
 
-static ZedHostProcessIcon *
+static ZedImageData *
 extract_icon_from_file (WCHAR * filename, IconSize size)
 {
-  ZedHostProcessIcon * result = NULL;
+  ZedImageData * result = NULL;
   SHFILEINFO shfi = { 0, };
   UINT flags;
 
@@ -196,10 +196,10 @@ extract_icon_from_file (WCHAR * filename, IconSize size)
   return result;
 }
 
-static ZedHostProcessIcon *
+static ZedImageData *
 icon_from_native_icon_handle (HICON icon, IconSize size)
 {
-  ZedHostProcessIcon * result;
+  ZedImageData * result;
   GVariantBuilder * builder;
   HDC dc;
   gint width = -1, height = -1;
@@ -256,9 +256,9 @@ icon_from_native_icon_handle (HICON icon, IconSize size)
     data[i + 2] = hold;
   }
 
-  result = g_new (ZedHostProcessIcon, 1);
+  result = g_new (ZedImageData, 1);
   data_base64 = g_base64_encode (data, rowstride * height);
-  zed_host_process_icon_init (result, width, height, width * 4, data_base64);
+  zed_image_data_init (result, width, height, width * 4, data_base64);
   g_free (data_base64);
 
   DeleteObject (bm);

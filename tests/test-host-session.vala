@@ -82,6 +82,11 @@ namespace Zed.HostSessionTest {
 				get { return "Stub"; }
 			}
 
+			public ImageData? icon {
+				get { return _icon; }
+			}
+			private ImageData? _icon;
+
 			public HostSessionProviderKind kind {
 				get { return HostSessionProviderKind.LOCAL_SYSTEM; }
 			}
@@ -108,6 +113,14 @@ namespace Zed.HostSessionTest {
 			h.assert_n_providers_available (1);
 			var prov = h.first_provider ();
 
+			assert (prov.name == "Local System");
+
+			var icon = prov.icon;
+			assert (icon != null);
+			assert (icon.width == 16 && icon.height == 16);
+			assert (icon.rowstride == icon.width * 4);
+			assert (icon.pixels.length > 0);
+
 			try {
 				var session = yield prov.create ();
 				var processes = yield session.enumerate_processes ();
@@ -131,6 +144,14 @@ namespace Zed.HostSessionTest {
 			h.disable_timeout (); /* this is a manual test after all */
 			yield h.wait_for_provider ();
 			var prov = h.first_provider ();
+
+			assert (prov.name == "Apple Mobile Device");
+
+			var icon = prov.icon;
+			assert (icon != null);
+			assert (icon.width == 16 && icon.height == 16);
+			assert (icon.rowstride == icon.width * 4);
+			assert (icon.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();

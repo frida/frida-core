@@ -239,7 +239,7 @@ namespace Zed {
 			}
 		}
 
-		private Gdk.Pixbuf? pixbuf_from_icon (HostProcessIcon icon) {
+		private Gdk.Pixbuf? pixbuf_from_icon (ImageData icon) {
 			if (icon.width == 0)
 				return null;
 
@@ -257,8 +257,8 @@ namespace Zed {
 				private set;
 			}
 
-			public IconData.from_icon (HostProcessIcon icon) {
-				pixels = Base64.decode (icon.data);
+			public IconData.from_icon (ImageData icon) {
+				pixels = Base64.decode (icon.pixels);
 			}
 		}
 	}
