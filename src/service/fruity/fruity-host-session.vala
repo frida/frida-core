@@ -5,11 +5,11 @@ namespace Zed.Service {
 
 		public async void start () {
 			control_client = new Fruity.Client ();
-			control_client.device_connected.connect ((device_id) => {
+			control_client.device_connected.connect ((device_id, device_udid) => {
 				if (provider_by_device_id.has_key (device_id))
 					return;
 
-				var provider = new FruityHostSessionProvider (device_id);
+				var provider = new FruityHostSessionProvider (device_id, device_udid);
 				provider_by_device_id[device_id] = provider;
 
 				provider_available (provider);
@@ -58,8 +58,10 @@ namespace Zed.Service {
 
 		private const uint ZID_SERVER_PORT = 27042;
 
-		public FruityHostSessionProvider (uint device_id) {
+		public FruityHostSessionProvider (uint device_id, string device_udid) {
 			Object (device_id: device_id);
+
+			_icon = _extract_icon_for_udid (device_udid);
 		}
 
 		public async HostSession create () throws IOError {
@@ -124,6 +126,8 @@ namespace Zed.Service {
 			return session;
 		}
 
+		public static extern ImageData? _extract_icon_for_udid (string udid);
+
 		private class Entry {
 			public Fruity.Client client {
 				get;
@@ -164,7 +168,7 @@ namespace Zed.Service {
 
 			private const uint16 USBMUX_SERVER_PORT = 27015;
 
-			public signal void device_connected (uint device_id);
+			public signal void device_connected (uint device_id, string device_udid);
 			public signal void device_disconnected (uint device_id);
 
 			public Client () {
@@ -260,8 +264,9 @@ namespace Zed.Service {
 						uint32 tag = uint.from_little_endian (header[1]);
 
 						uint32 body_size = message_blob.length - 8;
-						int32 * body_i32 = (int32 *) header + 2;
-						uint32 * body_u32 = (uint32 *) header + 2;
+						uint8 * body = (uint8 *) header + 8;
+						int32 * body_i32 = (int32 *) body;
+						uint32 * body_u32 = (uint32 *) body;
 
 						switch (type) {
 							case MessageType.RESULT:
@@ -295,7 +300,8 @@ namespace Zed.Service {
 								if (body_size < 4)
 									throw new IOError.FAILED ("unexpected payload size for CONNECTED");
 								uint conn_device_id = body_u32[0];
-								device_connected (conn_device_id);
+								unowned string conn_device_udid = (string) (body + 6);
+								device_connected (conn_device_id, conn_device_udid);
 								break;
 
 							case MessageType.DEVICE_DISCONNECTED:

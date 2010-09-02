@@ -242,6 +242,9 @@
     <ClCompile Include="$(IntDir)src\ui\process-selector.c">
       <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
+    <ClCompile Include="src\service\fruity\fruity-host-session-glue.c">
+      <Filter>Source Files\service\fruity</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\zed.vala">
