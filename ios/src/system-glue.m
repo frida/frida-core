@@ -112,8 +112,8 @@ zid_system_enumerate_processes (int * result_length1)
     {
       info->_name = g_strdup (e->kp_proc.p_comm);
 
-      zed_host_process_icon_init (&info->_small_icon, 0, 0, 0, "");
-      zed_host_process_icon_init (&info->_large_icon, 0, 0, 0, "");
+      zed_image_data_init (&info->_small_icon, 0, 0, 0, "");
+      zed_image_data_init (&info->_large_icon, 0, 0, 0, "");
     }
   }
 
@@ -152,8 +152,8 @@ extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon,
     [png_data release];
   }
 
-  zed_host_process_icon_copy (&pair->small_icon, small_icon);
-  zed_host_process_icon_copy (&pair->large_icon, large_icon);
+  zed_image_data_copy (&pair->small_icon, small_icon);
+  zed_image_data_copy (&pair->large_icon, large_icon);
 }
 
 static void
@@ -211,7 +211,7 @@ init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint t
 
   CGContextDrawImage (cgctx, target_rect, cgimage);
 
-  icon->_data = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
+  icon->_pixels = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
 
   CGContextRelease (cgctx);
   CGColorSpaceRelease (colorspace);
@@ -221,8 +221,8 @@ init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint t
 static void
 zid_icon_pair_free (ZidIconPair * pair)
 {
-  zed_host_process_icon_destroy (&pair->small_icon);
-  zed_host_process_icon_destroy (&pair->large_icon);
+  zed_image_data_destroy (&pair->small_icon);
+  zed_image_data_destroy (&pair->large_icon);
   g_free (pair);
 }
 

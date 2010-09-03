@@ -9,7 +9,7 @@ namespace Zid.SystemTest {
 
 			int num_icons_seen = 0;
 			foreach (var p in processes) {
-				if (p.small_icon.data != "" && p.large_icon.data != "")
+				if (p.small_icon.pixels != "" && p.large_icon.pixels != "")
 					num_icons_seen++;
 			}
 			assert (num_icons_seen > 0);
