@@ -86,7 +86,7 @@
       <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -95,7 +95,7 @@
       <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -104,7 +104,7 @@
       <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -113,7 +113,7 @@
       <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
