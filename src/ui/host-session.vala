@@ -122,7 +122,8 @@ namespace Zed {
 			construct;
 		}
 
-		private Gtk.ListStore provider_store = new Gtk.ListStore (1, typeof (Service.HostSessionProvider));
+		private Gtk.ListStore provider_store = new Gtk.ListStore (2, typeof (Service.HostSessionProvider), typeof (Gdk.Pixbuf));
+		private ImageFactory image_factory = new ImageFactory ();
 		private Gee.HashMap<Service.HostSessionProvider, HostSessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, HostSessionEntry> ();
 		private HostSessionEntry active_host_session;
 
@@ -320,7 +321,7 @@ namespace Zed {
 			service.provider_available.connect ((provider) => {
 				Gtk.TreeIter iter;
 				provider_store.append (out iter);
-				provider_store.set (iter, 0, provider);
+				provider_store.set (iter, 0, provider, 1, image_factory.create_pixbuf_from_image_data (provider.icon));
 
 				if (active_host_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
 					view.provider_combo.sensitive = false;
@@ -357,6 +358,10 @@ namespace Zed {
 			});
 
 			combo.set_model (provider_store);
+
+			var icon_renderer = new Gtk.CellRendererPixbuf ();
+			combo.pack_start (icon_renderer, false);
+			combo.add_attribute (icon_renderer, "pixbuf", 1);
 
 			var name_renderer = new Gtk.CellRendererText ();
 			combo.pack_end (name_renderer, true);
