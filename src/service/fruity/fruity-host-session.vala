@@ -55,13 +55,20 @@ namespace Zed.Service {
 			construct;
 		}
 
+		public string device_udid {
+			get;
+			construct;
+		}
+
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		private const uint ZID_SERVER_PORT = 27042;
 
 		public FruityHostSessionProvider (uint device_id, string device_udid) {
-			Object (device_id: device_id);
+			Object (device_id: device_id, device_udid: device_udid);
+		}
 
+		construct {
 			try {
 				_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
 			} catch (IOError e) {

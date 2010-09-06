@@ -91,6 +91,13 @@ namespace Zed.Service {
 			Object (session_backend: session_backend);
 		}
 
+		construct {
+			try {
+				_icon = _extract_icon ();
+			} catch (IOError e) {
+			}
+		}
+
 		public async HostSession create () throws IOError {
 			return new WindowsHostSession (session_backend);
 		}
@@ -101,6 +108,8 @@ namespace Zed.Service {
 				throw new IOError.FAILED ("invalid session id");
 			return agent_session;
 		}
+
+		public static extern ImageData? _extract_icon () throws IOError;
 	}
 
 	public class WindowsHostSession : Object, HostSession {
