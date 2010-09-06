@@ -248,6 +248,9 @@
     <ClCompile Include="src\service\windows-icon-helpers.c">
       <Filter>Source Files\service</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\image-factory.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\zed.vala">

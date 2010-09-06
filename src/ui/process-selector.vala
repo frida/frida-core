@@ -61,7 +61,7 @@ namespace Zed {
 
 		private Gtk.ListStore process_store = new Gtk.ListStore (2, typeof (string), typeof (ProcessInfo));
 		private Gee.HashMap<uint, ProcessInfo> process_info_by_pid = new Gee.HashMap<uint, ProcessInfo> ();
-		private Gee.HashMap<void *, IconData> icon_data_by_pointer = new Gee.HashMap<void *, IconData> ();
+		private ImageFactory image_factory = new ImageFactory ();
 
 		private Timer last_refresh = new Timer ();
 		private bool refresh_in_progress = false;
@@ -127,7 +127,9 @@ namespace Zed {
 					return;
 
 				foreach (var p in processes) {
-					var info = new ProcessInfo (p.pid, p.name, pixbuf_from_icon (p.small_icon), pixbuf_from_icon (p.large_icon));
+					var info = new ProcessInfo (p.pid, p.name,
+						image_factory.create_pixbuf_from_image_data (p.small_icon),
+						image_factory.create_pixbuf_from_image_data (p.large_icon));
 
 					Gtk.TreeIter iter;
 					process_store.append (out iter);
@@ -239,28 +241,6 @@ namespace Zed {
 			}
 		}
 
-		private Gdk.Pixbuf? pixbuf_from_icon (ImageData icon) {
-			if (icon.width == 0)
-				return null;
-
-			var icon_data = new IconData.from_icon (icon);
-			icon_data_by_pointer[icon_data.pixels] = icon_data;
-
-			return new Gdk.Pixbuf.from_data (icon_data.pixels, Gdk.Colorspace.RGB, true, 8, icon.width, icon.height, icon.rowstride, (pixels) => {
-				icon_data_by_pointer.unset (pixels);
-			});
-		}
-
-		private class IconData {
-			public uchar[] pixels {
-				get;
-				private set;
-			}
-
-			public IconData.from_icon (ImageData icon) {
-				pixels = Base64.decode (icon.pixels);
-			}
-		}
 	}
 
 	public class ProcessInfo : Object {
