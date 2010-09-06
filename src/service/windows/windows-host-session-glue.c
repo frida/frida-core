@@ -40,10 +40,10 @@ _zed_service_windows_host_session_provider_extract_icon (GError ** error)
       goto next_child;
     StrRetToBufW (&display_name_value, child, display_name, MAX_PATH);
 
-    if (wcsicmp (display_name, my_computer_parse_string) != 0)
+    if (_wcsicmp (display_name, my_computer_parse_string) != 0)
       goto next_child;
 
-    if (SHGetFileInfoW (child, 0, &file_info, sizeof (file_info), SHGFI_PIDL | SHGFI_ICON | SHGFI_SMALLICON | SHGFI_ADDOVERLAYS) == 0)
+    if (SHGetFileInfoW ((LPCWSTR) child, 0, &file_info, sizeof (file_info), SHGFI_PIDL | SHGFI_ICON | SHGFI_SMALLICON | SHGFI_ADDOVERLAYS) == 0)
       goto next_child;
 
     result = _zed_image_data_from_native_icon_handle (file_info.hIcon, ZED_ICON_SMALL);
