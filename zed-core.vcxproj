@@ -83,7 +83,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\service;$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -92,7 +92,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\service;$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -101,7 +101,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\service;$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -110,7 +110,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\service;$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -439,6 +439,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\service\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\service\</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="src\service\windows-icon-helpers.c" />
     <ClCompile Include="src\service\windows\windows-host-session-glue.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\service\windows\</ObjectFileName>
@@ -489,6 +490,7 @@ echo &gt; "$(IntDir)valacode.stamp"
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)zed-core.h" />
+    <ClInclude Include="src\service\windows-icon-helpers.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -245,6 +245,9 @@
     <ClCompile Include="src\service\fruity\fruity-host-session-glue.c">
       <Filter>Source Files\service\fruity</Filter>
     </ClCompile>
+    <ClCompile Include="src\service\windows-icon-helpers.c">
+      <Filter>Source Files\service</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\zed.vala">
@@ -260,6 +263,9 @@
   <ItemGroup>
     <ClInclude Include="$(IntDir)zed-core.h">
       <Filter>Header Files\generated</Filter>
+    </ClInclude>
+    <ClInclude Include="src\service\windows-icon-helpers.h">
+      <Filter>Source Files\service</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

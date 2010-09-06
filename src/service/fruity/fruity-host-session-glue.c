@@ -1,19 +1,41 @@
 #include "zed-core.h"
 
-#define VC_EXTRALEAN
-#include <windows.h>
+#include "windows-icon-helpers.h"
+
 #include <setupapi.h>
 #include <devguid.h>
 
-typedef struct _FindLocationContext FindLocationContext;
+typedef struct _ZedMobileDeviceInfo ZedMobileDeviceInfo;
+typedef struct _ZedImageDeviceInfo ZedImageDeviceInfo;
+
+typedef struct _ZedFindMobileDeviceContext ZedFindMobileDeviceContext;
+typedef struct _ZedFindImageDeviceContext ZedFindImageDeviceContext;
+
 typedef struct _ZedDeviceInfo ZedDeviceInfo;
 
 typedef gboolean (* ZedEnumerateDeviceFunc) (const ZedDeviceInfo * device_info, gpointer user_data);
 
-struct _FindLocationContext
+struct _ZedMobileDeviceInfo
 {
-  WCHAR * udid;
   WCHAR * location;
+};
+
+struct _ZedImageDeviceInfo
+{
+  WCHAR * friendly_name;
+  WCHAR * icon_url;
+};
+
+struct _ZedFindMobileDeviceContext
+{
+  const WCHAR * udid;
+  ZedMobileDeviceInfo * mobile_device;
+};
+
+struct _ZedFindImageDeviceContext
+{
+  const WCHAR * location;
+  ZedImageDeviceInfo * image_device;
 };
 
 struct _ZedDeviceInfo
@@ -27,8 +49,17 @@ struct _ZedDeviceInfo
   PSP_DEVINFO_DATA device_info_data;
 };
 
-static WCHAR * find_location_of_device_with_udid (const char * udid);
-static gboolean compare_udid_and_store_location_if_matching (const ZedDeviceInfo * device_info, gpointer user_data);
+static ZedMobileDeviceInfo * find_mobile_device_by_udid (const WCHAR * udid);
+static ZedImageDeviceInfo * find_image_device_by_location (const WCHAR * location);
+
+static gboolean compare_udid_and_create_mobile_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data);
+static gboolean compare_location_and_create_image_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data);
+
+ZedMobileDeviceInfo * zed_mobile_device_info_new (WCHAR * location);
+void zed_mobile_device_info_free (ZedMobileDeviceInfo * mdev);
+
+ZedImageDeviceInfo * zed_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url);
+void zed_image_device_info_free (ZedImageDeviceInfo * idev);
 
 static void zed_foreach_usb_device (const GUID * guid, ZedEnumerateDeviceFunc func, gpointer user_data);
 
@@ -39,82 +70,73 @@ static gpointer zed_read_registry_value (HKEY key, WCHAR * value_name, DWORD exp
 
 static GUID GUID_APPLE_USB = { 0xF0B32BE3, 0x6678, 0x4879, 0x92, 0x30, 0x0E4, 0x38, 0x45, 0xD8, 0x05, 0xEE };
 
-ZedImageData *
-_zed_service_fruity_host_session_provider_extract_icon_for_udid (const char * udid)
+void
+_zed_service_fruity_host_session_provider_extract_details_for_device_with_udid (const char * udid, char ** name, ZedImageData ** icon, GError ** error)
 {
-  WCHAR * location = NULL;
+  gboolean result = FALSE;
+  WCHAR * udid_utf16 = NULL;
+  ZedMobileDeviceInfo * mdev = NULL;
+  ZedImageDeviceInfo * idev = NULL;
+  ZedImageData * idev_icon;
 
-  location = find_location_of_device_with_udid (udid);
-  if (location == NULL)
+  udid_utf16 = (WCHAR *) g_utf8_to_utf16 (udid, -1, NULL, NULL, NULL);
+
+  mdev = find_mobile_device_by_udid (udid_utf16);
+  if (mdev == NULL)
     goto beach;
-  wprintf (L"found with location '%s'\n", location);
+
+  idev = find_image_device_by_location (mdev->location);
+  if (idev == NULL)
+    goto beach;
+
+  idev_icon = _zed_image_data_from_resource_url (idev->icon_url, ZED_ICON_SMALL);
+  if (idev_icon == NULL)
+    goto beach;
+
+  *name = g_utf16_to_utf8 ((gunichar2 *) idev->friendly_name, -1, NULL, NULL, NULL);
+  *icon = idev_icon;
+  result = TRUE;
 
 beach:
-  g_free (location);
-  return NULL;
+  if (!result)
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Failed to extract details for device by UDID");
+
+  zed_image_device_info_free (idev);
+  zed_mobile_device_info_free (mdev);
+  g_free (udid_utf16);
+}
+
+static ZedMobileDeviceInfo *
+find_mobile_device_by_udid (const WCHAR * udid)
+{
+  ZedFindMobileDeviceContext ctx;
+
+  ctx.udid = udid;
+  ctx.mobile_device = NULL;
+
+  zed_foreach_usb_device (&GUID_APPLE_USB, compare_udid_and_create_mobile_device_info_if_matching, &ctx);
+
+  return ctx.mobile_device;
+}
+
+static ZedImageDeviceInfo *
+find_image_device_by_location (const WCHAR * location)
+{
+  ZedFindImageDeviceContext ctx;
+
+  ctx.location = location;
+  ctx.image_device = NULL;
+
+  zed_foreach_usb_device (&GUID_DEVCLASS_IMAGE, compare_location_and_create_image_device_info_if_matching, &ctx);
+
+  return ctx.image_device;
 }
 
 static gboolean
-print_device (const ZedDeviceInfo * device_info, gpointer user_data)
+compare_udid_and_create_mobile_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data)
 {
-  WCHAR * instance_id = NULL;
-  DWORD instance_id_size;
-  BOOL ret;
-  HKEY devkey;
-
-  wprintf (L"Found device '%s' with friendly_name '%s' and instance id '%s'\n", device_info->device_path, device_info->friendly_name, device_info->instance_id);
-
-  devkey = SetupDiOpenDevRegKey (device_info->device_info_set, device_info->device_info_data, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
-  if (devkey != INVALID_HANDLE_VALUE)
-  {
-    WCHAR * friendly_name;
-    WCHAR * icons;
-
-    friendly_name = zed_read_registry_string (devkey, L"FriendlyName");
-    if (friendly_name != NULL)
-      wprintf (L"\tGot '%s'\n", friendly_name);
-    g_free (friendly_name);
-
-    icons = zed_read_registry_multi_string (devkey, L"Icons");
-    if (icons != NULL)
-    {
-      WCHAR * str = icons;
-
-      wprintf (L"\tGot icons:\n");
-      while (*str != L'\0')
-      {
-        wprintf (L"\t\t'%s'\n", str);
-        str += wcslen (str) + 1;
-      }
-    }
-    g_free (icons);
-
-    RegCloseKey (devkey);
-  }
-
-  return TRUE;
-}
-
-static WCHAR *
-find_location_of_device_with_udid (const char * udid)
-{
-  FindLocationContext ctx;
-
-  ctx.udid = (WCHAR *) g_utf8_to_utf16 (udid, -1, NULL, NULL, NULL);
-  ctx.location = NULL;
-
-  zed_foreach_usb_device (&GUID_APPLE_USB, compare_udid_and_store_location_if_matching, &ctx);
-
-  g_free (ctx.udid);
-
-  return ctx.location;
-}
-
-static gboolean
-compare_udid_and_store_location_if_matching (const ZedDeviceInfo * device_info, gpointer user_data)
-{
-  FindLocationContext * ctx = (FindLocationContext *) user_data;
-  WCHAR * udid;
+  ZedFindMobileDeviceContext * ctx = (ZedFindMobileDeviceContext *) user_data;
+  WCHAR * udid, * location;
 
   udid = wcsrchr (device_info->instance_id, L'\\');
   if (udid == NULL)
@@ -124,12 +146,93 @@ compare_udid_and_store_location_if_matching (const ZedDeviceInfo * device_info, 
   if (_wcsicmp (udid, ctx->udid) != 0)
     goto keep_looking;
 
-  ctx->location = (WCHAR *) g_memdup (device_info->location, (wcslen (device_info->location) + 1) * sizeof (WCHAR));
+  location = (WCHAR *) g_memdup (device_info->location, (wcslen (device_info->location) + 1) * sizeof (WCHAR));
+  ctx->mobile_device = zed_mobile_device_info_new (location);
 
   return FALSE;
 
 keep_looking:
   return TRUE;
+}
+
+static gboolean
+compare_location_and_create_image_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data)
+{
+  ZedFindImageDeviceContext * ctx = (ZedFindImageDeviceContext *) user_data;
+  HKEY devkey = (HKEY) INVALID_HANDLE_VALUE;
+  WCHAR * friendly_name = NULL;
+  WCHAR * icon_url = NULL;
+
+  if (_wcsicmp (device_info->location, ctx->location) != 0)
+    goto keep_looking;
+
+  devkey = SetupDiOpenDevRegKey (device_info->device_info_set, device_info->device_info_data, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
+  if (devkey == INVALID_HANDLE_VALUE)
+    goto keep_looking;
+
+  friendly_name = zed_read_registry_string (devkey, L"FriendlyName");
+  if (friendly_name == NULL)
+    goto keep_looking;
+
+  icon_url = zed_read_registry_multi_string (devkey, L"Icons");
+  if (icon_url == NULL)
+    goto keep_looking;
+
+  ctx->image_device = zed_image_device_info_new (friendly_name, icon_url);
+
+  RegCloseKey (devkey);
+  return FALSE;
+
+keep_looking:
+  g_free (icon_url);
+  g_free (friendly_name);
+  if (devkey != INVALID_HANDLE_VALUE)
+    RegCloseKey (devkey);
+  return TRUE;
+}
+
+ZedMobileDeviceInfo *
+zed_mobile_device_info_new (WCHAR * location)
+{
+  ZedMobileDeviceInfo * mdev;
+
+  mdev = g_new (ZedMobileDeviceInfo, 1);
+  mdev->location = location;
+
+  return mdev;
+}
+
+void
+zed_mobile_device_info_free (ZedMobileDeviceInfo * mdev)
+{
+  if (mdev == NULL)
+    return;
+
+  g_free (mdev->location);
+  g_free (mdev);
+}
+
+ZedImageDeviceInfo *
+zed_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url)
+{
+  ZedImageDeviceInfo * idev;
+
+  idev = g_new (ZedImageDeviceInfo, 1);
+  idev->friendly_name = friendly_name;
+  idev->icon_url = icon_url;
+
+  return idev;
+}
+
+void
+zed_image_device_info_free (ZedImageDeviceInfo * idev)
+{
+  if (idev == NULL)
+    return;
+
+  g_free (idev->icon_url);
+  g_free (idev->friendly_name);
+  g_free (idev);
 }
 
 static void

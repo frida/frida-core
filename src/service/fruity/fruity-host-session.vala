@@ -37,8 +37,9 @@ namespace Zed.Service {
 
 	public class FruityHostSessionProvider : Object, HostSessionProvider {
 		public string name {
-			get { return "Apple Mobile Device"; }
+			get { return _name; }
 		}
+		private string _name = "Apple Mobile Device";
 
 		public ImageData? icon {
 			get { return _icon; }
@@ -61,7 +62,10 @@ namespace Zed.Service {
 		public FruityHostSessionProvider (uint device_id, string device_udid) {
 			Object (device_id: device_id);
 
-			_icon = _extract_icon_for_udid (device_udid);
+			try {
+				_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
+			} catch (IOError e) {
+			}
 		}
 
 		public async HostSession create () throws IOError {
@@ -126,7 +130,7 @@ namespace Zed.Service {
 			return session;
 		}
 
-		public static extern ImageData? _extract_icon_for_udid (string udid);
+		public static extern void _extract_details_for_device_with_udid (string udid, out string name, out ImageData? icon) throws IOError;
 
 		private class Entry {
 			public Fruity.Client client {
