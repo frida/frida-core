@@ -35,6 +35,8 @@ namespace Zed.Agent {
 				functions += AgentFunctionInfo (name, (uint64) address);
 				return true;
 			});
+			if (functions.length == 0)
+				functions += AgentFunctionInfo ("<placeholdertotemporarilyworkaroundemptylistbug>", 1337);
 			return functions;
 		}
 
