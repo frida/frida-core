@@ -39,8 +39,6 @@ case "$PACKAGE_TARNAME" in
     enable_static=yes
   ;;
   'libgum')
-    enable_shared=no
-    enable_static=yes
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
   'zid')
