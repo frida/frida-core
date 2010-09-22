@@ -42,7 +42,7 @@ case "$PACKAGE_TARNAME" in
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
   'zid')
-    prefix="/Developer/Frida"
+    prefix="/Library/Frida"
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
   *)
