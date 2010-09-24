@@ -106,6 +106,9 @@ namespace Zed.Agent {
 	}
 
 	public void main (string data_string) {
+		var interceptor = Gum.Interceptor.obtain ();
+		interceptor.ignore_caller ();
+
 		var server = new FruityServer (data_string);
 
 		try {
