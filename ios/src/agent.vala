@@ -8,12 +8,22 @@ namespace Zed.Agent {
 		private MainLoop main_loop = new MainLoop ();
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
+		private ScriptEngine script_engine = new ScriptEngine ();
 
 		public FruityServer (string listen_address) {
 			Object (listen_address: listen_address);
 		}
 
+		construct {
+			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
+		}
+
 		public async void close () throws IOError {
+			if (script_engine != null) {
+				script_engine.shutdown ();
+				script_engine = null;
+			}
+
 			Timeout.add (500, () => {
 				main_loop.quit ();
 				return false;
@@ -53,11 +63,13 @@ namespace Zed.Agent {
 		}
 
 		public async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError {
-			throw new IOError.FAILED ("not implemented");
+			var instance = script_engine.attach_script_to (script_text, address);
+			var script = instance.script;
+			return AgentScriptInfo (instance.id, (uint64) script.get_code_address (), script.get_code_size ());
 		}
 
 		public async void detach_script (uint script_id) throws IOError {
-			throw new IOError.FAILED ("not implemented");
+			script_engine.detach_script (script_id);
 		}
 
 		public async void begin_instance_trace () throws IOError {
