@@ -51,7 +51,7 @@ namespace Zed.Agent {
 		}
 
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
-			throw new IOError.FAILED ("not implemented");
+			return Gum.Memory.read ((void *) address, size);
 		}
 
 		public async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError {
