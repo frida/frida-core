@@ -51,7 +51,10 @@ namespace Zed.Agent {
 		}
 
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
-			return Gum.Memory.read ((void *) address, size);
+			var bytes = Gum.Memory.read ((void *) address, size);
+			if (bytes.length == 0)
+				throw new IOError.FAILED ("specified memory region is not readable");
+			return bytes;
 		}
 
 		public async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError {
