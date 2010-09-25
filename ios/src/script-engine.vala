@@ -29,7 +29,7 @@ namespace Zed.Agent {
 			uint script_id = ++last_script_id;
 
 			var script = Gum.Script.from_string (script_text);
-			script.set_message_handler ((script, msg) => message_from_script (script_id, msg));
+			script.set_message_handler ((script, msg) => on_message_from_script (script_id, msg));
 			var instance = new ScriptInstance (script);
 
 			var ret = interceptor.attach_listener ((void *) address, instance, null);
@@ -53,6 +53,13 @@ namespace Zed.Agent {
 			if (!instance_by_id.unset (script_id, out instance))
 				throw new IOError.FAILED ("invalid script id");
 			interceptor.detach_listener (instance);
+		}
+
+		private void on_message_from_script (uint script_id, Variant msg) {
+			Idle.add (() => {
+				this.message_from_script (script_id, msg);
+				return false;
+			});
 		}
 
 		public class ScriptInstance : Object, Gum.InvocationListener {
