@@ -26,6 +26,7 @@ namespace Zed.Agent {
 			closing = true;
 
 			server.stop ();
+			server = null;
 
 			if (script_engine != null) {
 				script_engine.shutdown ();
@@ -134,8 +135,6 @@ namespace Zed.Agent {
 
 			main_loop = new MainLoop ();
 			main_loop.run ();
-
-			server = null;
 		}
 	}
 
@@ -150,5 +149,11 @@ namespace Zed.Agent {
 		} catch (Error e) {
 			printerr ("error: %s\n", e.message);
 		}
+
+		server = null;
+		interceptor = null;
+
+		IO.deinit ();
+		Thread.deinit ();
 	}
 }

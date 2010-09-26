@@ -1,5 +1,4 @@
 #include <glib-object.h>
-#include <gio/gio.h>
 #include <gum/gum.h>
 
 #ifdef G_OS_WIN32
@@ -8,7 +7,6 @@
 #include <windows.h>
 
 static void on_load (void);
-static void on_unload (void);
 
 BOOL APIENTRY
 DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
@@ -21,10 +19,6 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
   {
     case DLL_PROCESS_ATTACH:
       on_load ();
-      break;
-
-    case DLL_PROCESS_DETACH:
-      on_unload ();
       break;
 
     default:
@@ -46,11 +40,3 @@ on_load (void)
   gum_init_with_features (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP);
 }
 
-#ifdef __GNUC__
-__attribute__ ((destructor))
-#endif
-static void
-on_unload (void)
-{
-  g_io_deinit ();
-}
