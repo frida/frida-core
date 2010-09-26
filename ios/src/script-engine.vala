@@ -18,8 +18,8 @@ namespace Zed.Agent {
 		}
 
 		public void shutdown () {
-			foreach (var entry in instance_by_id)
-				interceptor.detach_listener (entry.@value);
+			foreach (var instance in instance_by_id.values)
+				interceptor.detach_listener (instance);
 			instance_by_id.clear ();
 		}
 

@@ -30,7 +30,7 @@ namespace Zed.WinjectorTest {
 		}
 
 		private string rat_directory;
-		private Proxy cur_proxy;
+		private WinIpc.Proxy cur_proxy;
 		private Service.Winjector injector;
 
 		public LabRat (string name) {
@@ -42,7 +42,7 @@ namespace Zed.WinjectorTest {
 			process = Zed.Test.Process.start (rat_file);
 		}
 
-		public Proxy inject (string name) {
+		public WinIpc.Proxy inject (string name) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
 				do_injection (name, loop);
@@ -50,7 +50,7 @@ namespace Zed.WinjectorTest {
 			});
 			loop.run ();
 
-			Proxy proxy = cur_proxy;
+			var proxy = cur_proxy;
 			cur_proxy = null;
 			return proxy;
 		}

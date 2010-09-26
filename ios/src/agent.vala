@@ -31,23 +31,23 @@ namespace Zed.Agent {
 		}
 
 		public async AgentModuleInfo[] query_modules () throws IOError {
-			var modules = new AgentModuleInfo[0];
+			var modules = new Gee.ArrayList<AgentModuleInfo?> ();
 			Gum.Process.enumerate_modules ((name, address, path) => {
-				modules += AgentModuleInfo (name, path, 42, (uint64) address);
+				modules.add (AgentModuleInfo (name, path, 42, (uint64) address));
 				return true;
 			});
-			return modules;
+			return modules.to_array ();
 		}
 
 		public async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError {
-			var functions = new AgentFunctionInfo[0];
+			var functions = new Gee.ArrayList<AgentFunctionInfo?> ();
 			Gum.Module.enumerate_exports (module_name, (name, address) => {
-				functions += AgentFunctionInfo (name, (uint64) address);
+				functions.add (AgentFunctionInfo (name, (uint64) address));
 				return true;
 			});
-			if (functions.length == 0)
-				functions += AgentFunctionInfo ("<placeholdertotemporarilyworkaroundemptylistbug>", 1337);
-			return functions;
+			if (functions.is_empty)
+				functions.add (AgentFunctionInfo ("<placeholdertotemporarilyworkaroundemptylistbug>", 1337));
+			return functions.to_array ();
 		}
 
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
@@ -95,10 +95,11 @@ namespace Zed.Agent {
 					connection.register_object (Zed.ObjectPath.AGENT_SESSION, session);
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
-					return;
+					return false;
 				}
 
 				connections.add (connection);
+				return true;
 			});
 
 			server.start ();

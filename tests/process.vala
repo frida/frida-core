@@ -50,7 +50,7 @@ namespace Zed.Test {
 		}
 	}
 
-	errordomain ProcessError {
+	public errordomain ProcessError {
 		TIMED_OUT
 	}
 

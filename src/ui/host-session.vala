@@ -252,8 +252,8 @@ namespace Zed {
 		private Service.CodeService create_code_service () {
 			var service = new Service.CodeService ();
 
-			foreach (var entry in module_spec_by_uid)
-				service.add_module_spec (entry.@value);
+			foreach (var mspec in module_spec_by_uid.values)
+				service.add_module_spec (mspec);
 
 			service.module_spec_added.connect ((module_spec) => {
 				var uid = module_spec.uid;
@@ -292,8 +292,8 @@ namespace Zed {
 
 		private void save_data_to_storage_backend () {
 			var builder = new VariantBuilder (new VariantType ("av"));
-			foreach (var entry in module_spec_by_uid)
-				builder.add ("v", entry.@value.to_variant ());
+			foreach (var mspec in module_spec_by_uid.values)
+				builder.add ("v", mspec.to_variant ());
 			storage_backend.write ("module-specs", builder.end ());
 		}
 

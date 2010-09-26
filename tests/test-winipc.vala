@@ -303,7 +303,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private async void do_forever_query (Proxy proxy, ForeverQuery query) {
+		private async void do_forever_query (WinIpc.Proxy proxy, ForeverQuery query) {
 			try {
 				var val = yield proxy.query ("ForeverTask");
 				query.result = val.get_string ();
