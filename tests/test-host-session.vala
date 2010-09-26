@@ -36,10 +36,13 @@ namespace Zed.HostSessionTest {
 			yield h.process_events ();
 			h.assert_no_providers_available ();
 
-			h.service.start ();
+			yield h.service.start ();
 			h.assert_no_providers_available ();
 			yield h.process_events ();
 			h.assert_n_providers_available (1);
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
 
 			h.done ();
 		}
@@ -47,12 +50,15 @@ namespace Zed.HostSessionTest {
 		private static async void provider_unavailable (Harness h) {
 			var backend = new StubBackend ();
 			h.service.add_backend (backend);
-			h.service.start ();
+			yield h.service.start ();
 			yield h.process_events ();
 			h.assert_n_providers_available (1);
 
 			backend.disable_provider ();
 			h.assert_n_providers_available (0);
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
 
 			h.done ();
 		}
@@ -107,8 +113,9 @@ namespace Zed.HostSessionTest {
 	namespace Windows {
 
 		private static async void backend (Harness h) {
-			h.service.add_backend (new WindowsHostSessionBackend ());
-			h.service.start ();
+			var backend = new WindowsHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
 			yield h.process_events ();
 			h.assert_n_providers_available (1);
 			var prov = h.first_provider ();
@@ -134,6 +141,9 @@ namespace Zed.HostSessionTest {
 				assert_not_reached ();
 			}
 
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+
 			h.done ();
 		}
 
@@ -142,8 +152,9 @@ namespace Zed.HostSessionTest {
 	namespace Fruity {
 
 		private static async void backend (Harness h) {
-			h.service.add_backend (new FruityHostSessionBackend ());
-			h.service.start ();
+			var backend = new FruityHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
 			h.disable_timeout (); /* this is a manual test after all */
 			yield h.wait_for_provider ();
 			var prov = h.first_provider ();
@@ -169,6 +180,9 @@ namespace Zed.HostSessionTest {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
 
 			h.done ();
 		}
@@ -244,9 +258,8 @@ namespace Zed.HostSessionTest {
 			timeout_source.attach (main_context);
 
 			var idle = new IdleSource ();
-			var func = test_sequence; /* FIXME: workaround for bug in valac */
 			idle.set_callback (() => {
-				func (this);
+				test_sequence (this);
 				return false;
 			});
 			idle.attach (main_context);
@@ -271,7 +284,16 @@ namespace Zed.HostSessionTest {
 		}
 
 		public void done () {
-			main_loop.quit ();
+			available_providers.clear ();
+			service = null;
+
+			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				main_loop.quit ();
+				return false;
+			});
+			idle.attach (main_context);
 		}
 	}
 }

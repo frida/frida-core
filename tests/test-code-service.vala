@@ -235,9 +235,8 @@ namespace Zed.CodeServiceTest {
 			timeout.attach (main_context);
 
 			var idle = new IdleSource ();
-			var func = test_sequence; /* FIXME: workaround for bug in valac */
 			idle.set_callback (() => {
-				func (this);
+				test_sequence (this);
 				return false;
 			});
 			idle.attach (main_context);
@@ -250,7 +249,15 @@ namespace Zed.CodeServiceTest {
 		}
 
 		public void done () {
-			main_loop.quit ();
+			service = null;
+
+			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				main_loop.quit ();
+				return false;
+			});
+			idle.attach (main_context);
 		}
 	}
 }

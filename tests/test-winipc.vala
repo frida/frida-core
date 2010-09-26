@@ -578,9 +578,8 @@ namespace Zed.WinIpcTest {
 			timeout.attach (main_context);
 
 			var idle = new IdleSource ();
-			var func = test_sequence; /* FIXME: workaround for bug in valac */
 			idle.set_callback (() => {
-				func (this);
+				test_sequence (this);
 				return false;
 			});
 			idle.attach (main_context);
@@ -614,15 +613,28 @@ namespace Zed.WinIpcTest {
 		}
 
 		public void remove_server () {
+			server.close ();
 			server = null;
 		}
 
 		public void remove_client () {
+			client.close ();
 			client = null;
 		}
 
 		public void done () {
-			main_loop.quit ();
+			if (server != null)
+				remove_server ();
+			if (client != null)
+				remove_client ();
+
+			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				main_loop.quit ();
+				return false;
+			});
+			idle.attach (main_context);
 		}
 	}
 }

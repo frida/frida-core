@@ -24,6 +24,10 @@ namespace Zed.Service {
 				provider_unavailable (provider);
 			});
 		}
+
+		public void remove_backend (HostSessionBackend backend) {
+			backends.remove (backend);
+		}
 	}
 
 	public interface HostSessionProvider : Object {

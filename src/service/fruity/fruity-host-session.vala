@@ -32,6 +32,17 @@ namespace Zed.Service {
 		}
 
 		public async void stop () {
+			try {
+				yield control_client.close ();
+			} catch (IOError e) {
+			}
+			control_client = null;
+
+			foreach (var provider in provider_by_device_id.values) {
+				provider_unavailable (provider);
+				yield provider.close ();
+			}
+			provider_by_device_id.clear ();
 		}
 	}
 
@@ -73,6 +84,21 @@ namespace Zed.Service {
 				_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
 			} catch (IOError e) {
 			}
+		}
+
+		public async void close () {
+			foreach (var entry in entries) {
+				try {
+					yield entry.connection.close ();
+				} catch (IOError conn_error) {
+				}
+
+				try {
+					yield entry.client.close ();
+				} catch (IOError client_error) {
+				}
+			}
+			entries.clear ();
 		}
 
 		public async HostSession create () throws IOError {
@@ -139,7 +165,7 @@ namespace Zed.Service {
 
 		public static extern void _extract_details_for_device_with_udid (string udid, out string name, out ImageData? icon) throws IOError;
 
-		private class Entry {
+		private class Entry : Object {
 			public Fruity.Client client {
 				get;
 				private set;
@@ -214,6 +240,21 @@ namespace Zed.Service {
 					reset ();
 					throw new IOError.FAILED (e.message);
 				}
+			}
+
+			public async void close () throws IOError {
+				if (!running)
+					throw new IOError.FAILED ("not running");
+				running = false;
+
+				try {
+					var conn = this.connection;
+					yield conn.close_async (Priority.DEFAULT);
+				} catch (Error e) {
+				}
+				connection = null;
+				input = null;
+				output = null;
 			}
 
 			public async void enable_monitor_mode () throws Error {
@@ -327,7 +368,6 @@ namespace Zed.Service {
 						}
 
 					} catch (Error e) {
-						debug ("read error: %s", e.message);
 						reset ();
 					}
 				}

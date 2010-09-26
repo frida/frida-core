@@ -11,14 +11,14 @@ namespace WinIpc {
 			Object (address: address);
 		}
 
-		~ServerProxy () {
-			destroy_named_pipe (pipe);
-		}
-
 		construct {
 			if (address == null)
 				address = generate_address ();
 			pipe = create_named_pipe (address);
+		}
+
+		~ServerProxy () {
+			close ();
 		}
 
 		public async void establish (uint timeout_msec=0) throws ProxyError {
@@ -31,6 +31,13 @@ namespace WinIpc {
 			}
 
 			process_messages ();
+		}
+
+		public void close () {
+			if (pipe != null) {
+				destroy_named_pipe (pipe);
+				pipe = null;
+			}
 		}
 
 		private string generate_address () {
@@ -60,8 +67,7 @@ namespace WinIpc {
 		}
 
 		~ClientProxy () {
-			if (pipe != null)
-				close_pipe (pipe);
+			close ();
 		}
 
 		public async void establish () throws ProxyError {
@@ -77,6 +83,13 @@ namespace WinIpc {
 			}
 
 			process_messages ();
+		}
+
+		public void close () {
+			if (pipe != null) {
+				close_pipe (pipe);
+				pipe = null;
+			}
 		}
 
 		private extern static void * open_pipe (string name) throws IOError;

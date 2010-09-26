@@ -39,6 +39,7 @@ namespace Zed.Service {
 			}
 			agent_session_by_id.clear ();
 
+			provider_unavailable (local_provider);
 			assert (local_provider != null);
 			local_provider = null;
 
