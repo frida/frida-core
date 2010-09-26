@@ -12,7 +12,13 @@ namespace Zed {
 
 			proxy = new WinIpc.ClientProxy (ipc_server_address);
 			proxy.add_notify_handler ("Stop", "", (arg) => {
-				loop.quit ();
+				proxy.close ();
+				proxy = null;
+
+				Idle.add (() => {
+					loop.quit ();
+					return false;
+				});
 			});
 			proxy.register_query_sync_handler ("StartInvestigation", "(ssss)", (arg) => {
 				if (investigator != null)
@@ -77,6 +83,10 @@ namespace Zed {
 
 			script_engine.shutdown ();
 			script_engine = null;
+
+			Gum.deinit ();
+			IO.deinit ();
+			Thread.deinit ();
 		}
 
 		private async void do_establish (WinIpc.ClientProxy proxy) {
