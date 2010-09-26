@@ -22,15 +22,10 @@ namespace Zed.Test {
 		private string _filename = null;
 
 		public static Process current {
-			get {
-				if (_current == null) {
-					_current = new Process (ProcessBackend.self_handle (), ProcessBackend.self_id ());
-				}
-
-				return _current;
+			owned get {
+				return new Process (ProcessBackend.self_handle (), ProcessBackend.self_id ());
 			}
 		}
-		private static Process _current = null;
 
 		private Process (void * handle, long id) {
 			Object (handle: handle, id: id);

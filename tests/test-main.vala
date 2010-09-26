@@ -11,6 +11,8 @@ namespace Zed.Test {
 		Zed.HostSessionTest.add_tests ();
 
 		GLib.Test.run ();
+
+		GLib.IO.deinit ();
 	}
 
 }

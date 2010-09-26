@@ -7,7 +7,9 @@ namespace Zed.Agent {
 
 		private MainLoop main_loop = new MainLoop ();
 		private DBusServer server;
+		private bool closing = false;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
+		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 		private ScriptEngine script_engine = new ScriptEngine ();
 
 		public FruityServer (string listen_address) {
@@ -19,12 +21,37 @@ namespace Zed.Agent {
 		}
 
 		public async void close () throws IOError {
+			if (closing)
+				throw new IOError.FAILED ("close already in progress");
+			closing = true;
+
+			server.stop ();
+
 			if (script_engine != null) {
 				script_engine.shutdown ();
 				script_engine = null;
 			}
 
-			Timeout.add (500, () => {
+			Timeout.add (100, () => {
+				close_connections_and_schedule_shutdown ();
+				return false;
+			});
+		}
+
+		private async void close_connections_and_schedule_shutdown () {
+			foreach (var connection in connections) {
+				uint registration_id;
+				if (registration_id_by_connection.unset (connection, out registration_id))
+					connection.unregister_object (registration_id);
+
+				try {
+					yield connection.close ();
+				} catch (IOError e) {
+				}
+			}
+			connections.clear ();
+
+			Timeout.add (100, () => {
 				main_loop.quit ();
 				return false;
 			});
@@ -92,7 +119,8 @@ namespace Zed.Agent {
 			server.new_connection.connect ((connection) => {
 				try {
 					Zed.AgentSession session = this;
-					connection.register_object (Zed.ObjectPath.AGENT_SESSION, session);
+					var registration_id = connection.register_object (Zed.ObjectPath.AGENT_SESSION, session);
+					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
 					return false;
@@ -106,6 +134,8 @@ namespace Zed.Agent {
 
 			main_loop = new MainLoop ();
 			main_loop.run ();
+
+			server = null;
 		}
 	}
 

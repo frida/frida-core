@@ -120,13 +120,18 @@ namespace Zed.AgentTest {
 		public async void unload_agent () {
 			try {
 				yield session.close ();
-			} catch (IOError close_error) {
+			} catch (IOError session_error) {
 				assert_not_reached ();
 			}
 
 			session = null;
 
-			connection = null;
+			try {
+				yield connection.close ();
+				connection = null;
+			} catch (IOError conn_error) {
+				assert_not_reached ();
+			}
 
 			main_thread.join ();
 			main_thread = null;
@@ -192,6 +197,7 @@ namespace Zed.AgentTest {
 			main_context.pop_thread_default ();
 
 			assert (!timed_out);
+			timeout_source = null;
 		}
 
 		public async void process_events () {
@@ -207,7 +213,13 @@ namespace Zed.AgentTest {
 		}
 
 		public void done () {
-			main_loop.quit ();
+			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
+			var idle = new IdleSource ();
+			idle.set_callback (() => {
+				main_loop.quit ();
+				return false;
+			});
+			idle.attach (main_context);
 		}
 	}
 }
