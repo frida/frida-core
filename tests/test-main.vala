@@ -12,6 +12,7 @@ namespace Zed.Test {
 
 		GLib.Test.run ();
 
+		Gum.deinit ();
 		GLib.IO.deinit ();
 		GLib.Thread.deinit ();
 	}

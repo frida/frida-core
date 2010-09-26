@@ -153,6 +153,7 @@ namespace Zed.Agent {
 		server = null;
 		interceptor = null;
 
+		Gum.deinit ();
 		IO.deinit ();
 		Thread.deinit ();
 	}
