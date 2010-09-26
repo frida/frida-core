@@ -11,8 +11,7 @@ namespace Zed.Service {
 
 				var provider = new FruityHostSessionProvider (device_id, device_udid);
 				provider_by_device_id[device_id] = provider;
-
-				provider_available (provider);
+				open_provider (provider);
 			});
 			control_client.device_disconnected.connect ((device_id) => {
 				if (!provider_by_device_id.has_key (device_id))
@@ -43,6 +42,16 @@ namespace Zed.Service {
 				yield provider.close ();
 			}
 			provider_by_device_id.clear ();
+		}
+
+		private async void open_provider (FruityHostSessionProvider provider) {
+			try {
+				yield provider.open ();
+
+				provider_available (provider);
+			} catch (IOError e) {
+				provider_by_device_id.unset (provider.device_id);
+			}
 		}
 	}
 
@@ -80,10 +89,29 @@ namespace Zed.Service {
 		}
 
 		construct {
-			try {
-				_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
-			} catch (IOError e) {
+		}
+
+		public async void open () throws IOError {
+			bool got_details = false;
+			for (int i = 0; !got_details; i++) {
+				try {
+					_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
+					got_details = true;
+				} catch (IOError e) {
+					if (i != 60 - 1) {
+						Timeout.add (1000, () => {
+							open.callback ();
+							return false;
+						});
+						yield;
+					} else {
+						break;
+					}
+				}
 			}
+
+			if (!got_details)
+				throw new IOError.TIMED_OUT ("timed out");
 		}
 
 		public async void close () {
