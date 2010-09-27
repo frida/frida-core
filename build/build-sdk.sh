@@ -9,7 +9,7 @@ function build_all ()
   pushd "$BUILDROOT" &>/dev/null || exit 1
 
   build_module glib "git@gitorious.org:frida/glib.git"
-  build_module libgee "git://git.gnome.org/libgee" "235d9b0410b68062911c414badf9a94bce1d34b6"
+  build_module libgee "git@gitorious.org:frida/libgee.git"
 
   popd &>/dev/null
 }
