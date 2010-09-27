@@ -1,9 +1,65 @@
 namespace Zed.AgentTest {
 	public static void add_tests () {
+		GLib.Test.add_func ("/Agent/Memory/query-modules", () => {
+			var h = new Harness ((h) => Memory.query_modules (h));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/Agent/Memory/query-module-functions", () => {
+			var h = new Harness ((h) => Memory.query_module_functions (h));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Agent/Script/attach-and-receive-messages", () => {
 			var h = new Harness ((h) => Script.attach_and_receive_messages (h));
 			h.run ();
 		});
+	}
+
+	namespace Memory {
+
+		private static async void query_modules (Harness h) {
+			var session = yield h.load_agent ();
+
+			AgentModuleInfo[] modules;
+			try {
+				modules = yield session.query_modules ();
+			} catch (IOError attach_error) {
+				assert_not_reached ();
+			}
+
+			assert (modules.length > 0);
+			if (GLib.Test.verbose ()) {
+				foreach (var module in modules)
+					stdout.printf ("module: '%s'\n", module.name);
+			}
+
+			yield h.unload_agent ();
+
+			h.done ();
+		}
+
+		private static async void query_module_functions (Harness h) {
+			var session = yield h.load_agent ();
+
+			AgentFunctionInfo[] functions;
+			try {
+				functions = yield session.query_module_functions ("kernel32.dll");
+			} catch (IOError attach_error) {
+				assert_not_reached ();
+			}
+
+			assert (functions.length > 0);
+			if (GLib.Test.verbose ()) {
+				foreach (var function in functions)
+					stdout.printf ("function: '%s'\n", function.name);
+			}
+
+			yield h.unload_agent ();
+
+			h.done ();
+		}
+
 	}
 
 	namespace Script {

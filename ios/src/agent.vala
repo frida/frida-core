@@ -59,23 +59,33 @@ namespace Zed.Agent {
 		}
 
 		public async AgentModuleInfo[] query_modules () throws IOError {
-			var modules = new Gee.ArrayList<AgentModuleInfo?> ();
+			var module_list = new Gee.ArrayList<AgentModuleInfo?> ();
 			Gum.Process.enumerate_modules ((name, address, path) => {
-				modules.add (AgentModuleInfo (name, path, 42, (uint64) address));
+				module_list.add (AgentModuleInfo (name, path, 42, (uint64) address));
 				return true;
 			});
-			return modules.to_array ();
+
+			var modules = new AgentModuleInfo[0];
+			foreach (var module in module_list)
+				modules += module;
+
+			return modules;
 		}
 
 		public async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError {
-			var functions = new Gee.ArrayList<AgentFunctionInfo?> ();
+			var function_list = new Gee.ArrayList<AgentFunctionInfo?> ();
 			Gum.Module.enumerate_exports (module_name, (name, address) => {
-				functions.add (AgentFunctionInfo (name, (uint64) address));
+				function_list.add (AgentFunctionInfo (name, (uint64) address));
 				return true;
 			});
-			if (functions.is_empty)
-				functions.add (AgentFunctionInfo ("<placeholdertotemporarilyworkaroundemptylistbug>", 1337));
-			return functions.to_array ();
+			if (function_list.is_empty)
+				function_list.add (AgentFunctionInfo ("<placeholdertotemporarilyworkaroundemptylistbug>", 1337));
+
+			var functions = new AgentFunctionInfo[0];
+			foreach (var function in function_list)
+				functions += function;
+
+			return functions;
 		}
 
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
