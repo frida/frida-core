@@ -14,9 +14,9 @@ namespace Zid.FruitjectorTest {
 			rat.wait_for_uninject ();
 
 			try {
-				string contents;
-				logfile.load_contents (null, out contents);
-				assert (contents == ">m<");
+				string log_of_first_injection;
+				logfile.load_contents (null, out log_of_first_injection);
+				assert (log_of_first_injection == ">m<");
 			} catch (Error first_load_error) {
 				assert_not_reached ();
 			}
@@ -26,9 +26,9 @@ namespace Zid.FruitjectorTest {
 			rat.wait_for_uninject ();
 
 			try {
-				string contents;
-				logfile.load_contents (null, out contents);
-				assert (contents == ">m<>m<");
+				string log_of_second_injection;
+				logfile.load_contents (null, out log_of_second_injection);
+				assert (log_of_second_injection == ">m<>m<");
 			} catch (Error second_load_error) {
 				assert_not_reached ();
 			}

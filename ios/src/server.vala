@@ -28,10 +28,11 @@ namespace Zid {
 					connection.register_object (Zed.ObjectPath.HOST_SESSION, session);
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
-					return;
+					return false;
 				}
 
 				connections.add (connection);
+				return true;
 			});
 
 			server.start ();
