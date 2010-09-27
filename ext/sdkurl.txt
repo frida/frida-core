@@ -1,1 +1,1 @@
-http://frida-ire.googlecode.com/files/windows-ui-builddeps-20100909.exe
+http://frida-ire.googlecode.com/files/windows-ui-builddeps-20100927.exe
