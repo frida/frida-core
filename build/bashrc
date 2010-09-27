@@ -48,7 +48,7 @@ else
 fi
 
 export LD="${CC}"
-export VALAC="${FRIDA_TOOLROOT}/bin/valac --vapidir=\"${FRIDA_TOOLROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.12 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.12/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
 
 export CXXFLAGS="$CFLAGS"
 export OBJCFLAGS="$CFLAGS"
@@ -65,12 +65,12 @@ export LANG="C"
 
 if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
   echo "Downloading and deploying toolchain..."
-  curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20100806.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20100927.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
 fi
 
 if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
   echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
-  curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-20100806.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-20100927.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
 fi
 
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
