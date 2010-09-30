@@ -253,6 +253,7 @@ namespace Zed.AgentTest {
 			main_context.pop_thread_default ();
 
 			assert (!timed_out);
+			timeout_source.destroy ();
 			timeout_source = null;
 		}
 

@@ -1,6 +1,7 @@
 namespace Zed.Test {
 
 	public static void main (string[] args) {
+		Environment.init ();
 		Gum.init ();
 		GLib.Test.init (ref args);
 
@@ -12,9 +13,18 @@ namespace Zed.Test {
 
 		GLib.Test.run ();
 
-		Gum.deinit ();
 		GLib.IO.deinit ();
+		Gum.deinit ();
+		GLib.Type.deinit ();
 		GLib.Thread.deinit ();
+		GLib.Test.deinit ();
+		GLib.mem_deinit ();
+		Environment.deinit ();
+	}
+
+	namespace Environment {
+		public extern void init ();
+		public extern void deinit ();
 	}
 
 }

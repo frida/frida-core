@@ -308,6 +308,7 @@ echo &gt; "$(IntDir)valacode.stamp"
     <ClCompile Include="$(IntDir)test-winjector.c" />
     <ClCompile Include="$(IntDir)process.c" />
     <ClCompile Include="process-windows.c" />
+    <ClCompile Include="test-main-glue.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

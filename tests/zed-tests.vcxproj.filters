@@ -65,6 +65,9 @@
     <ClCompile Include="$(IntDir)test-agent.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="test-main-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="test-main.vala">

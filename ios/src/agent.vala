@@ -149,6 +149,10 @@ namespace Zed.Agent {
 	}
 
 	public void main (string data_string) {
+		GLib.Thread.init ();
+		GLib.Type.init ();
+		Gum.init_with_features (Gum.FeatureFlags.ALL & ~Gum.FeatureFlags.SYMBOL_LOOKUP);
+
 		var interceptor = Gum.Interceptor.obtain ();
 		interceptor.ignore_caller ();
 
@@ -163,8 +167,10 @@ namespace Zed.Agent {
 		server = null;
 		interceptor = null;
 
+		GLib.IO.deinit ();
 		Gum.deinit ();
-		IO.deinit ();
-		Thread.deinit ();
+		GLib.Type.deinit ();
+		GLib.Thread.deinit ();
+		GLib.mem_deinit ();
 	}
 }
