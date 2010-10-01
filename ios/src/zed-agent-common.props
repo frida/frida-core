@@ -16,6 +16,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 
   <ItemGroup>
     <ClCompile Include="$(IntDir)agent.c" />
+    <ClCompile Include="agent-glue.c" />
     <ClCompile Include="$(IntDir)script-engine.c" />
     <ClCompile Include="$(IntDir)session.c" />
   </ItemGroup>

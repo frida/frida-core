@@ -8,6 +8,8 @@ namespace Zed {
 		private static Zed.GstTracer gst_tracer;
 
 		public void main (string ipc_server_address) {
+			Environment.init ();
+
 			var loop = new MainLoop ();
 
 			proxy = new WinIpc.ClientProxy (ipc_server_address);
@@ -68,6 +70,7 @@ namespace Zed {
 			});
 
 			loop.run ();
+			loop = null;
 
 			if (gst_tracer != null) {
 				gst_tracer.detach ();
@@ -84,9 +87,7 @@ namespace Zed {
 			script_engine.shutdown ();
 			script_engine = null;
 
-			Gum.deinit ();
-			IO.deinit ();
-			Thread.deinit ();
+			Environment.deinit ();
 		}
 
 		private async void do_establish (WinIpc.ClientProxy proxy) {
@@ -109,6 +110,11 @@ namespace Zed {
 		public extern Variant query_modules ();
 		public extern Variant query_module_functions (string module_name);
 		public extern Variant dump_memory (uint64 address, uint size);
+
+		namespace Environment {
+			public extern void init ();
+			public extern void deinit ();
+		}
 	}
 }
 

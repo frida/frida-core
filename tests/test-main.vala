@@ -1,9 +1,7 @@
 namespace Zed.Test {
 
 	public static void main (string[] args) {
-		Environment.init ();
-		Gum.init ();
-		GLib.Test.init (ref args);
+		Environment.init (ref args);
 
 		Zed.AgentTest.add_tests ();
 		Zed.CodeServiceTest.add_tests ();
@@ -13,17 +11,11 @@ namespace Zed.Test {
 
 		GLib.Test.run ();
 
-		GLib.IO.deinit ();
-		Gum.deinit ();
-		GLib.Type.deinit ();
-		GLib.Thread.deinit ();
-		GLib.Test.deinit ();
-		GLib.mem_deinit ();
 		Environment.deinit ();
 	}
 
 	namespace Environment {
-		public extern void init ();
+		public extern void init ([CCode (array_length_pos = 0.9)] ref unowned string[] args);
 		public extern void deinit ();
 	}
 

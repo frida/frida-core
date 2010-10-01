@@ -1,18 +1,16 @@
 #define DEBUG_HEAP_LEAKS 0
 
-#include "zed-tests.h"
+#include "zed-agent.h"
 
 #include <gio/gio.h>
 #include <gum/gum.h>
 
 #ifdef G_OS_WIN32
-#include <windows.h>
-#include <conio.h>
 #include <crtdbg.h>
 #endif
 
 void
-zed_test_environment_init (int * args_length1, char *** args)
+zed_agent_environment_init (void)
 {
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   int tmp_flag;
@@ -35,28 +33,23 @@ zed_test_environment_init (int * args_length1, char *** args)
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
+#ifdef _DEBUG
+  g_thread_init_with_errorcheck_mutexes (NULL);
+#else
   g_thread_init (NULL);
+#endif
   g_type_init ();
-  g_test_init (args_length1, args, NULL);
-  gum_init ();
+  gum_init_with_features ((GumFeatureFlags)
+      (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
 }
 
 void
-zed_test_environment_deinit (void)
+zed_agent_environment_deinit (void)
 {
   g_io_deinit ();
 
   gum_deinit ();
-  g_test_deinit ();
   g_type_deinit ();
   g_thread_deinit ();
   g_mem_deinit ();
-
-#if defined (G_OS_WIN32) && !DEBUG_HEAP_LEAKS
-  if (IsDebuggerPresent ())
-  {
-    g_print ("\nPress a key to exit.\n");
-    _getch ();
-  }
-#endif
 }

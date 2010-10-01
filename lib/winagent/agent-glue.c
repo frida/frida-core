@@ -1,4 +1,5 @@
-#define ENABLE_DEBUG 0
+#define DEBUG_HEAP_LEAKS  0
+#define ENABLE_DEBUG      0
 
 #include "zed-winagent.h"
 
@@ -24,24 +25,60 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
   (void) ul_reason_for_call;
   (void) lpReserved;
 
+#if ENABLE_DEBUG
   if (ul_reason_for_call == DLL_PROCESS_ATTACH)
   {
-#if ENABLE_DEBUG
-    g_setenv ("G_DEBUG", "fatal-warnings;fatal-criticals", TRUE);
-    g_setenv ("G_SLICE", "always-malloc", TRUE);
-
     AllocConsole ();
 
     stdout->_file = _open_osfhandle ((intptr_t) GetStdHandle (STD_OUTPUT_HANDLE), 0);
     stderr->_file = _open_osfhandle ((intptr_t) GetStdHandle (STD_ERROR_HANDLE), 0);
+  }
 #endif
 
-    g_type_init ();
-    gum_init_with_features ((GumFeatureFlags)
-        (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
-  }
-
   return TRUE;
+}
+
+void
+zed_agent_environment_init (void)
+{
+#if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
+  int tmp_flag;
+
+  /*_CrtSetBreakAlloc (1337);*/
+
+  _CrtSetReportMode (_CRT_ERROR, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile (_CRT_ERROR, _CRTDBG_FILE_STDERR);
+
+  tmp_flag = _CrtSetDbgFlag (_CRTDBG_REPORT_FLAG);
+
+  tmp_flag |= _CRTDBG_ALLOC_MEM_DF;
+  tmp_flag |= _CRTDBG_LEAK_CHECK_DF;
+  tmp_flag &= ~_CRTDBG_CHECK_CRT_DF;
+
+  _CrtSetDbgFlag (tmp_flag);
+#endif
+
+  g_setenv ("G_DEBUG", "fatal-warnings:fatal-criticals", TRUE);
+#if DEBUG_HEAP_LEAKS || ENABLE_DEBUG
+  g_setenv ("G_SLICE", "always-malloc", TRUE);
+#endif
+#ifdef _DEBUG
+  g_thread_init_with_errorcheck_mutexes (NULL);
+#else
+  g_thread_init (NULL);
+#endif
+  g_type_init ();
+  gum_init_with_features ((GumFeatureFlags)
+      (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
+}
+
+void
+zed_agent_environment_deinit (void)
+{
+  gum_deinit ();
+  g_type_deinit ();
+  g_thread_deinit ();
+  g_mem_deinit ();
 }
 
 GVariant *
