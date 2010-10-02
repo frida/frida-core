@@ -44,11 +44,14 @@ libzid_core_glue_la_SOURCES = \
 
 libzid_agent_la_SOURCES = \
 	agent.vala \
+	agent-glue.c \
 	script-engine.vala
 libzid_agent_la_LIBADD = \
 	$(top_builddir)/ext/interfaces/libzed-interfaces.la \
 	$(ZID_LIBS)
 libzid_agent_la_VALAFLAGS = \
+	--library=zed-agent \
+	--header=zed-agent.h \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/ext/interfaces \
 	--pkg config \
