@@ -3,94 +3,94 @@ using WinIpc;
 namespace Zed.WinIpcTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/already-connected", () => {
-			var h = new IpcHarness ((h) => Establish.already_connected (h));
+			var h = new Harness ((h) => Establish.already_connected (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/delayed", () => {
-			var h = new IpcHarness ((h) => Establish.delayed (h));
+			var h = new Harness ((h) => Establish.delayed (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/no-server", () => {
-			var h = new IpcHarness ((h) => Establish.no_server (h));
+			var h = new Harness ((h) => Establish.no_server (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/server-with-timeout", () => {
-			var h = new IpcHarness ((h) => Establish.server_with_timeout (h));
+			var h = new Harness ((h) => Establish.server_with_timeout (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/custom-server-address", () => {
-			var h = new IpcHarness ((h) => Establish.custom_server_address (h));
+			var h = new Harness ((h) => Establish.custom_server_address (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/establish/sudden-disconnect", () => {
-			var h = new IpcHarness ((h) => Establish.sudden_disconnect (h));
+			var h = new Harness ((h) => Establish.sudden_disconnect (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/simple", () => {
-			var h = new IpcHarness ((h) => Query.simple (h));
+			var h = new Harness ((h) => Query.simple (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/with-argument", () => {
-			var h = new IpcHarness ((h) => Query.with_argument (h));
+			var h = new Harness ((h) => Query.with_argument (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/async-handler", () => {
-			var h = new IpcHarness ((h) => Query.async_handler (h));
+			var h = new Harness ((h) => Query.async_handler (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/overlapping-queries", () => {
-			var h = new IpcHarness ((h) => Query.overlapping_queries (h));
+			var h = new Harness ((h) => Query.overlapping_queries (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/no-handler", () => {
-			var h = new IpcHarness ((h) => Query.no_handler (h));
+			var h = new Harness ((h) => Query.no_handler (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/handler-response-validation", () => {
-			var h = new IpcHarness ((h) => Query.handler_response_validation (h));
+			var h = new Harness ((h) => Query.handler_response_validation (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/handler-argument-validation", () => {
-			var h = new IpcHarness ((h) => Query.handler_argument_validation (h));
+			var h = new Harness ((h) => Query.handler_argument_validation (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/query/unregister-handler", () => {
-			var h = new IpcHarness ((h) => Query.unregister_handler (h));
+			var h = new Harness ((h) => Query.unregister_handler (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/notify/simple", () => {
-			var h = new IpcHarness ((h) => Notify.simple (h));
+			var h = new Harness ((h) => Notify.simple (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/notify/with-argument", () => {
-			var h = new IpcHarness ((h) => Notify.with_argument (h));
+			var h = new Harness ((h) => Notify.with_argument (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/WinIpc/Proxy/notify/remove-handler", () => {
-			var h = new IpcHarness ((h) => Notify.remove_handler (h));
+			var h = new Harness ((h) => Notify.remove_handler (h as Harness));
 			h.run ();
 		});
 	}
 
 	namespace Establish {
 
-		private static async void already_connected (IpcHarness h) {
+		private static async void already_connected (Harness h) {
 			try {
 				yield h.client.establish ();
 				yield h.server.establish ();
@@ -101,7 +101,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void delayed (IpcHarness h) {
+		private static async void delayed (Harness h) {
 			try {
 				var timeout = new TimeoutSource (100);
 				timeout.set_callback (() => {
@@ -118,7 +118,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private async void no_server (IpcHarness h) {
+		private async void no_server (Harness h) {
 			h.remove_server ();
 
 			try {
@@ -135,7 +135,7 @@ namespace Zed.WinIpcTest {
 			assert_not_reached ();
 		}
 
-		private async void server_with_timeout (IpcHarness h) {
+		private async void server_with_timeout (Harness h) {
 			try {
 				yield h.server.establish (100);
 			} catch (ProxyError e) {
@@ -150,12 +150,14 @@ namespace Zed.WinIpcTest {
 			assert_not_reached ();
 		}
 
-		private async void custom_server_address (IpcHarness h) {
+		private async void custom_server_address (Harness h) {
 			try {
 				var server = new ServerProxy ("my-custom-address-1234");
 				var client = new ClientProxy ("my-custom-address-1234");
 				yield client.establish ();
 				yield server.establish ();
+				client.close ();
+				server.close ();
 			} catch (ProxyError e) {
 				assert_not_reached ();
 			}
@@ -163,7 +165,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private async void sudden_disconnect (IpcHarness h) {
+		private async void sudden_disconnect (Harness h) {
 			try {
 				yield h.client.establish ();
 				yield h.server.establish ();
@@ -180,7 +182,7 @@ namespace Zed.WinIpcTest {
 
 	namespace Query {
 
-		private static async void simple (IpcHarness h) {
+		private static async void simple (Harness h) {
 			yield h.establish_client_and_server ();
 
 			h.server.register_query_sync_handler ("TellMeAJoke", null, (arg) => {
@@ -197,7 +199,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void with_argument (IpcHarness h) {
+		private static async void with_argument (Harness h) {
 			yield h.establish_client_and_server ();
 
 			h.client.register_query_sync_handler ("AddTwoNumbers", null, (arg) => {
@@ -232,7 +234,7 @@ namespace Zed.WinIpcTest {
 			}
 		}
 
-		private static async void async_handler (IpcHarness h) {
+		private static async void async_handler (Harness h) {
 			yield h.establish_client_and_server ();
 
 			h.client.register_query_async_handler ("LongRunningTask", null, new LongRunningTaskHandler ());
@@ -276,7 +278,7 @@ namespace Zed.WinIpcTest {
 			}
 		}
 
-		private static async void overlapping_queries (IpcHarness h) {
+		private static async void overlapping_queries (Harness h) {
 			yield h.establish_client_and_server ();
 
 			var forever_handler = new ForeverTaskHandler ();
@@ -312,7 +314,7 @@ namespace Zed.WinIpcTest {
 			}
 		}
 
-		private static async void no_handler (IpcHarness h) {
+		private static async void no_handler (Harness h) {
 			yield h.establish_client_and_server ();
 
 			try {
@@ -327,7 +329,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void handler_response_validation (IpcHarness h) {
+		private static async void handler_response_validation (Harness h) {
 			yield h.establish_client_and_server ();
 
 			h.server.register_query_sync_handler ("TellMeAJoke", null, (arg) => {
@@ -371,7 +373,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void handler_argument_validation (IpcHarness h) {
+		private static async void handler_argument_validation (Harness h) {
 			yield h.establish_client_and_server ();
 
 			h.client.register_query_sync_handler ("AddTwoNumbers", "(uu)", (arg) => {
@@ -419,7 +421,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void unregister_handler (IpcHarness h) {
+		private static async void unregister_handler (Harness h) {
 			yield h.establish_client_and_server ();
 
 			var handler_tag = h.server.register_query_sync_handler ("TellMeAJoke", null, (arg) => {
@@ -443,7 +445,7 @@ namespace Zed.WinIpcTest {
 
 	namespace Notify {
 
-		private static async void simple (IpcHarness h) {
+		private static async void simple (Harness h) {
 			yield h.establish_client_and_server ();
 
 			bool first_handler_got_notify = false;
@@ -468,7 +470,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void with_argument (IpcHarness h) {
+		private static async void with_argument (Harness h) {
 			yield h.establish_client_and_server ();
 
 			bool first_handler_got_notify = false;
@@ -509,7 +511,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private static async void remove_handler (IpcHarness h) {
+		private static async void remove_handler (Harness h) {
 			yield h.establish_client_and_server ();
 
 			bool handler_got_notify = false;
@@ -538,10 +540,7 @@ namespace Zed.WinIpcTest {
 
 	}
 
-	private class IpcHarness : Object {
-		public delegate void TestSequenceFunc (IpcHarness h);
-		private TestSequenceFunc test_sequence;
-
+	private class Harness : Zed.Test.AsyncHarness {
 		public ServerProxy server {
 			get;
 			private set;
@@ -552,55 +551,13 @@ namespace Zed.WinIpcTest {
 			private set;
 		}
 
-		private MainContext main_context;
-		private MainLoop main_loop;
-
-		public IpcHarness (TestSequenceFunc func) {
-			test_sequence = func;
+		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base (func);
 		}
 
 		construct {
 			server = new ServerProxy ();
 			client = new ClientProxy (server.address);
-			main_context = new MainContext ();
-			main_loop = new MainLoop (main_context);
-		}
-
-		public void run () {
-			var timed_out = false;
-
-			var timeout = new TimeoutSource.seconds (1);
-			timeout.set_callback (() => {
-				timed_out = true;
-				main_loop.quit ();
-				return false;
-			});
-			timeout.attach (main_context);
-
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				test_sequence (this);
-				return false;
-			});
-			idle.attach (main_context);
-
-			main_context.push_thread_default ();
-			main_loop.run ();
-			main_context.pop_thread_default ();
-
-			assert (!timed_out);
-		}
-
-		public async void process_events () {
-			var timeout = new TimeoutSource (10);
-			timeout.set_callback (() => {
-				process_events.callback ();
-				return false;
-			});
-			timeout.attach (main_context);
-			yield;
-
-			return;
 		}
 
 		public async void establish_client_and_server () {
@@ -622,19 +579,13 @@ namespace Zed.WinIpcTest {
 			client = null;
 		}
 
-		public void done () {
+		public override void done () {
 			if (server != null)
 				remove_server ();
 			if (client != null)
 				remove_client ();
 
-			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				main_loop.quit ();
-				return false;
-			});
-			idle.attach (main_context);
+			base.done ();
 		}
 	}
 }

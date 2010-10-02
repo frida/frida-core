@@ -1,17 +1,17 @@
 namespace Zed.AgentTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Agent/Memory/query-modules", () => {
-			var h = new Harness ((h) => Memory.query_modules (h));
+			var h = new Harness ((h) => Memory.query_modules (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Agent/Memory/query-module-functions", () => {
-			var h = new Harness ((h) => Memory.query_module_functions (h));
+			var h = new Harness ((h) => Memory.query_module_functions (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Agent/Script/attach-and-receive-messages", () => {
-			var h = new Harness ((h) => Script.attach_and_receive_messages (h));
+			var h = new Harness ((h) => Script.attach_and_receive_messages (h as Harness));
 			h.run ();
 		});
 	}
@@ -95,10 +95,7 @@ namespace Zed.AgentTest {
 		}
 	}
 
-	private class Harness : Object {
-		public delegate void TestSequenceFunc (Harness h);
-		private TestSequenceFunc test_sequence;
-
+	private class Harness : Zed.Test.AsyncHarness {
 		private GLib.Module module;
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data_string);
@@ -110,17 +107,8 @@ namespace Zed.AgentTest {
 
 		private Gee.LinkedList<ScriptMessage> message_queue = new Gee.LinkedList<ScriptMessage> ();
 
-		private MainContext main_context;
-		private MainLoop main_loop;
-		private TimeoutSource timeout_source;
-
-		public Harness (TestSequenceFunc func) {
-			test_sequence = func;
-		}
-
-		construct {
-			main_context = new MainContext ();
-			main_loop = new MainLoop (main_context);
+		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base (func);
 		}
 
 		public async AgentSession load_agent () {
@@ -228,55 +216,6 @@ namespace Zed.AgentTest {
 		private void * agent_main_worker () {
 			main_impl (listen_address);
 			return null;
-		}
-
-		public void run () {
-			var timed_out = false;
-
-			timeout_source = new TimeoutSource.seconds (5);
-			timeout_source.set_callback (() => {
-				timed_out = true;
-				main_loop.quit ();
-				return false;
-			});
-			timeout_source.attach (main_context);
-
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				test_sequence (this);
-				return false;
-			});
-			idle.attach (main_context);
-
-			main_context.push_thread_default ();
-			main_loop.run ();
-			main_context.pop_thread_default ();
-
-			assert (!timed_out);
-			timeout_source.destroy ();
-			timeout_source = null;
-		}
-
-		public async void process_events () {
-			var timeout = new TimeoutSource (10);
-			timeout.set_callback (() => {
-				process_events.callback ();
-				return false;
-			});
-			timeout.attach (main_context);
-			yield;
-
-			return;
-		}
-
-		public void done () {
-			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				main_loop.quit ();
-				return false;
-			});
-			idle.attach (main_context);
 		}
 	}
 }

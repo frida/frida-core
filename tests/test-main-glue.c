@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <conio.h>
 #include <crtdbg.h>
+#include <stdio.h>
 #endif
 
 void
@@ -55,7 +56,7 @@ zed_test_environment_deinit (void)
 #if defined (G_OS_WIN32) && !DEBUG_HEAP_LEAKS
   if (IsDebuggerPresent ())
   {
-    g_print ("\nPress a key to exit.\n");
+    printf ("\nPress a key to exit.\n");
     _getch ();
   }
 #endif

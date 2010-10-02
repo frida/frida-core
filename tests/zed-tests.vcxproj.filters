@@ -27,9 +27,6 @@
     <None Include="test-winjector.vala">
       <Filter>Tests</Filter>
     </None>
-    <None Include="process.vala">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="test-code-service.vala">
       <Filter>Tests</Filter>
     </None>
@@ -38,6 +35,12 @@
     </None>
     <None Include="test-agent.vala">
       <Filter>Tests</Filter>
+    </None>
+    <None Include="async-harness.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="process.vala">
+      <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

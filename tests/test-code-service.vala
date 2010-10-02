@@ -3,32 +3,32 @@ using WinIpc;
 namespace Zed.CodeServiceTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/CodeService/Lookup/module-spec-by-uid", () => {
-			var h = new CodeServiceHarness ((h) => Lookup.module_spec_by_uid (h));
+			var h = new Harness ((h) => Lookup.module_spec_by_uid (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/CodeService/Lookup/module-by-address", () => {
-			var h = new CodeServiceHarness ((h) => Lookup.module_by_address (h));
+			var h = new Harness ((h) => Lookup.module_by_address (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/CodeService/Lookup/function-by-address", () => {
-			var h = new CodeServiceHarness ((h) => Lookup.function_by_address (h));
+			var h = new Harness ((h) => Lookup.function_by_address (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/CodeService/Lookup/function-with-no-module", () => {
-			var h = new CodeServiceHarness ((h) => Lookup.function_with_no_module (h));
+			var h = new Harness ((h) => Lookup.function_with_no_module (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/CodeService/Persist/function-spec", () => {
-			var h = new CodeServiceHarness ((h) => Persist.function_spec (h));
+			var h = new Harness ((h) => Persist.function_spec (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/CodeService/Persist/module-spec", () => {
-			var h = new CodeServiceHarness ((h) => Persist.module_spec (h));
+			var h = new Harness ((h) => Persist.module_spec (h as Harness));
 			h.run ();
 		});
 	}
@@ -49,7 +49,7 @@ namespace Zed.CodeServiceTest {
 
 	namespace Lookup {
 
-		private static async void module_spec_by_uid (CodeServiceHarness h) {
+		private static async void module_spec_by_uid (Harness h) {
 			assert (yield h.service.find_module_spec_by_uid (KERNEL32_UID) == null);
 
 			yield h.add_module_specs ();
@@ -63,7 +63,7 @@ namespace Zed.CodeServiceTest {
 			h.done ();
 		}
 
-		private static async void module_by_address (CodeServiceHarness h) {
+		private static async void module_by_address (Harness h) {
 			uint64 address = WS2_32_BASE + 42;
 
 			assert (yield h.service.find_module_by_address (address) == null);
@@ -84,7 +84,7 @@ namespace Zed.CodeServiceTest {
 			h.done ();
 		}
 
-		private static async void function_by_address (CodeServiceHarness h) {
+		private static async void function_by_address (Harness h) {
 			uint64 address = WS2_32_BASE + WSARECV_OFFSET;
 
 			assert (yield h.service.find_function_by_address (address) == null);
@@ -103,7 +103,7 @@ namespace Zed.CodeServiceTest {
 			h.done ();
 		}
 
-		private static async void function_with_no_module (CodeServiceHarness h) {
+		private static async void function_with_no_module (Harness h) {
 			yield h.add_module_specs ();
 			yield h.add_modules ();
 
@@ -127,7 +127,7 @@ namespace Zed.CodeServiceTest {
 
 	namespace Persist {
 
-		private static async void function_spec (CodeServiceHarness h) {
+		private static async void function_spec (Harness h) {
 			yield h.add_module_specs ();
 			yield h.add_modules ();
 
@@ -142,7 +142,7 @@ namespace Zed.CodeServiceTest {
 			h.done ();
 		}
 
-		private static async void module_spec (CodeServiceHarness h) {
+		private static async void module_spec (Harness h) {
 			yield h.add_module_specs ();
 
 			var spec_a = yield h.service.find_module_spec_by_uid (WS2_32_UID);
@@ -171,14 +171,11 @@ namespace Zed.CodeServiceTest {
 
 	}
 
-	private class CodeServiceHarness : Object {
+	private class Harness : Zed.Test.AsyncHarness {
 		public Service.CodeService service {
 			get;
 			private set;
 		}
-
-		public delegate void TestSequenceFunc (CodeServiceHarness h);
-		private TestSequenceFunc test_sequence;
 
 		private Service.ModuleSpec ntdll_mspec;
 		private Service.ModuleSpec kernel32_mspec;
@@ -188,11 +185,8 @@ namespace Zed.CodeServiceTest {
 		private Service.Module kernel32_mod;
 		private Service.Module ws2_32_mod;
 
-		private MainContext main_context;
-		private MainLoop main_loop;
-
-		public CodeServiceHarness (TestSequenceFunc func) {
-			test_sequence = func;
+		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base (func);
 		}
 
 		construct {
@@ -206,9 +200,6 @@ namespace Zed.CodeServiceTest {
 			ntdll_mod = new Service.Module (ntdll_mspec, NTDLL_BASE);
 			kernel32_mod = new Service.Module (kernel32_mspec, KERNEL32_BASE);
 			ws2_32_mod = new Service.Module (ws2_32_mspec, WS2_32_BASE);
-
-			main_context = new MainContext ();
-			main_loop = new MainLoop (main_context);
 		}
 
 		public async void add_module_specs () {
@@ -223,41 +214,10 @@ namespace Zed.CodeServiceTest {
 			yield service.add_module (ws2_32_mod);
 		}
 
-		public void run () {
-			var timed_out = false;
-
-			var timeout = new TimeoutSource.seconds (1);
-			timeout.set_callback (() => {
-				timed_out = true;
-				main_loop.quit ();
-				return false;
-			});
-			timeout.attach (main_context);
-
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				test_sequence (this);
-				return false;
-			});
-			idle.attach (main_context);
-
-			main_context.push_thread_default ();
-			main_loop.run ();
-			main_context.pop_thread_default ();
-
-			assert (!timed_out);
-		}
-
-		public void done () {
+		public override void done () {
 			service = null;
 
-			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				main_loop.quit ();
-				return false;
-			});
-			idle.attach (main_context);
+			base.done ();
 		}
 	}
 }

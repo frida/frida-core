@@ -3,24 +3,24 @@ using Zed.Service;
 namespace Zed.HostSessionTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/HostSession/Service/provider-available", () => {
-			var h = new Harness ((h) => Service.provider_available (h));
+			var h = new Harness ((h) => Service.provider_available (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Service/provider-unavailable", () => {
-			var h = new Harness ((h) => Service.provider_unavailable (h));
+			var h = new Harness ((h) => Service.provider_unavailable (h as Harness));
 			h.run ();
 		});
 
 #if WINDOWS
 
 		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
-			var h = new Harness ((h) => Windows.backend (h));
+			var h = new Harness ((h) => Windows.backend (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
-			var h = new Harness ((h) => Fruity.backend (h));
+			var h = new Harness ((h) => Fruity.backend (h as Harness));
 			h.run ();
 		});
 
@@ -191,10 +191,7 @@ namespace Zed.HostSessionTest {
 
 #endif
 
-	private class Harness : Object {
-		public delegate void TestSequenceFunc (Harness h);
-		private TestSequenceFunc test_sequence;
-
+	private class Harness : Zed.Test.AsyncHarness {
 		public HostSessionService service {
 			get;
 			private set;
@@ -202,12 +199,8 @@ namespace Zed.HostSessionTest {
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
-		private MainContext main_context;
-		private MainLoop main_loop;
-		private TimeoutSource timeout_source;
-
-		public Harness (TestSequenceFunc func) {
-			test_sequence = func;
+		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base (func);
 		}
 
 		construct {
@@ -218,8 +211,6 @@ namespace Zed.HostSessionTest {
 			service.provider_unavailable.connect ((provider) => {
 				assert (available_providers.remove (provider));
 			});
-			main_context = new MainContext ();
-			main_loop = new MainLoop (main_context);
 		}
 
 		public async void wait_for_provider () {
@@ -239,61 +230,6 @@ namespace Zed.HostSessionTest {
 		public HostSessionProvider first_provider () {
 			assert (available_providers.size >= 1);
 			return available_providers[0];
-		}
-
-		public void disable_timeout () {
-			timeout_source.destroy ();
-			timeout_source = null;
-		}
-
-		public void run () {
-			var timed_out = false;
-
-			timeout_source = new TimeoutSource.seconds (5);
-			timeout_source.set_callback (() => {
-				timed_out = true;
-				main_loop.quit ();
-				return false;
-			});
-			timeout_source.attach (main_context);
-
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				test_sequence (this);
-				return false;
-			});
-			idle.attach (main_context);
-
-			main_context.push_thread_default ();
-			main_loop.run ();
-			main_context.pop_thread_default ();
-
-			assert (!timed_out);
-		}
-
-		public async void process_events () {
-			var timeout = new TimeoutSource (10);
-			timeout.set_callback (() => {
-				process_events.callback ();
-				return false;
-			});
-			timeout.attach (main_context);
-			yield;
-
-			return;
-		}
-
-		public void done () {
-			available_providers.clear ();
-			service = null;
-
-			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
-				main_loop.quit ();
-				return false;
-			});
-			idle.attach (main_context);
 		}
 	}
 }

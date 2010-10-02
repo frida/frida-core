@@ -118,7 +118,13 @@ namespace Zed.Service {
 			foreach (var entry in entries) {
 				try {
 					yield entry.connection.close ();
-				} catch (IOError conn_error) {
+				} catch (IOError first_close_error) {
+				}
+
+				/* FIXME: close again to make sure things are shut down, needs further investigation */
+				try {
+					yield entry.connection.close ();
+				} catch (IOError second_close_error) {
 				}
 
 				try {
