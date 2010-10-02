@@ -1,5 +1,8 @@
 #include "winjector-helper.h"
 
+#include <gum/gum.h>
+#include <gum/arch-x86/gumx86writer.h>
+
 #include <windows.h>
 #include <tlhelp32.h>
 #include <strsafe.h>
@@ -21,11 +24,9 @@ struct _RemoteWorkerContext
   gpointer get_proc_address_impl;
   gpointer free_library_impl;
   gpointer virtual_free_impl;
-  gpointer exit_thread_impl;
-
-  gchar zed_agent_main_string[14 + 1];
 
   WCHAR dll_path[MAX_PATH + 1];
+  gchar zed_agent_main_string[14 + 1];
   gchar ipc_server_address[MAX_PATH + 1];
 
   gpointer entrypoint;
@@ -467,112 +468,98 @@ static gboolean
 initialize_remote_worker_context (RemoteWorkerContext * rwc,
     InjectionDetails * details, GError ** error)
 {
+  gpointer code;
+  guint code_size;
+  GumX86Writer cw;
   HMODULE kmod;
   const guint data_alignment = 4;
-  guint8 code[] = {
-#ifdef _M_X64
-    /*
-     * Remove return address, so VirtualFree will return directly to
-     * ExitThread instead of freed memory.
-     */
-    0x5E,                                              /* pop rsi              (return address) */
-    0x48, 0x89, 0xCB,                                  /* mov rbx, rcx (WorkerContext argument) */
 
-    /*
-     * Reserve stack space for arguments (24), rounded up to next 16 byte boundary (32)
-     */
-    0x48, 0x83, 0xEC, 32,                              /* sub rsp, 32                           */
+  gum_init_with_features ((GumFeatureFlags) (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
 
-    /*
-     * HANDLE mod = LoadLibraryW (ctx->dll_path);
-     */
-    0x48, 0x8D, 0x4B, offsetof (RemoteWorkerContext, dll_path),          /* lea rcx, [rbx+X]    */
-    0xFF, 0x53,       offsetof (RemoteWorkerContext, load_library_impl), /* call qword [rbx+X]  */
-    0x48, 0x89, 0xC7,                                                    /* mov rdi, rax        */
+  code = gum_alloc_n_pages (1, GUM_PAGE_RWX); /* executable so debugger can be used to inspect code */
+  gum_x86_writer_init (&cw, code);
 
-    /*
-     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
-     */
-    0x48, 0x8D, 0x53,                                                /* lea rdx, [rbx + 0xAA]   */
-                      offsetof (RemoteWorkerContext, zed_agent_main_string),
-    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
-    0xFF, 0x53, offsetof (RemoteWorkerContext, get_proc_address_impl),/* call qword [rbx + X]   */
+  /* Put a placeholder for chaining to VirtualFree */
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XAX);
 
-    /*
-     * func (ctx->ipc_server_address);
-     */
-    0x48, 0x8D, 0x8B,
-        offsetof (RemoteWorkerContext, ipc_server_address) & 0xff,          /* lea rcx, rbx + X */
-        (offsetof (RemoteWorkerContext, ipc_server_address) >> 8) & 0xff,
-        0,
-        0,
-    0xFF, 0xD0,                                                             /* call rax         */
+  /* Will clobber these */
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XSI);
 
-    /*
-     * FreeLibrary (mod);
-     */
-    0x48, 0x89, 0xF9,                                                /* mov rcx, rdi            */
-    0xFF, 0x53, offsetof (RemoteWorkerContext, free_library_impl),   /* call qword [rbx + 0xAA] */
-
-    /*
-     * VirtualFree (worker_data, ...); -> ExitThread ();
-     */
-    0x41, 0xB8, 0x00, 0x80, 0x00, 0x00,       /* mov r8d, MEM_RELEASE        (arg3: dwFreeType) */
-    0x48, 0x31, 0xD2,                         /* xor rdx, rdx                    (arg2: dwSize) */
-    0x48, 0x89, 0xD9,                         /* mov rcx, rbx     (VirtualFree arg1: lpAddress) */
-    0xFF, 0x73, offsetof (RemoteWorkerContext, exit_thread_impl), /* push (fake return address) */
-    0xFF, 0x63, offsetof (RemoteWorkerContext, virtual_free_impl),                       /* jmp */
+  /* xbx = (RemoteWorkerContext *) lpParameter */
+#if GLIB_SIZEOF_VOID_P == 4
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EBX, GUM_REG_ESP, (3 + 1) * sizeof (gpointer));
 #else
-    /*
-     * Remove argument and return address, so VirtualFree will return directly
-     * to our caller instead of freed memory.
-     */
-    0x5E,                                           /* pop esi                 (return address) */
-    0x5B,                                           /* pop ebx         (WorkerContext argument) */
-
-    /*
-     * HANDLE mod = LoadLibraryW (ctx->dll_path);
-     */
-    0x8D, 0x43, offsetof (RemoteWorkerContext, dll_path),                     /* lea eax, ebx+X */
-    0x50,                                                                     /* push eax       */
-    0xFF, 0x53, offsetof (RemoteWorkerContext, load_library_impl),            /* call           */
-    0x89, 0xC7,                                                               /* mov edi, eax   */
-
-    /*
-     * ZedAgentMainFunc func = (ZedAgentMainFunc) GetProcAddress (mod, "zed_agent_main");
-     */
-    0x8D, 0x43, offsetof (RemoteWorkerContext, zed_agent_main_string),        /* lea eax, ebx+X */
-    0x50,                                                                     /* push eax       */
-    0x57,                                                                     /* push edi       */
-    0xFF, 0x53, offsetof (RemoteWorkerContext, get_proc_address_impl),        /* call           */
-
-    /*
-     * func (ctx->ipc_server_address);
-     */
-    0x8D, 0xAB, offsetof (RemoteWorkerContext, ipc_server_address) & 0xff,    /* lea ebp, [ebx + X] */
-                (offsetof (RemoteWorkerContext, ipc_server_address) >> 8) & 0xff,
-                0,
-                0,
-    0x55,                                                                           /* push ebp */
-    0xFF, 0xD0,                                                                     /* call eax */
-    0x5D,                                                                           /* pop ebp  */
-
-    /*
-     * FreeLibrary (mod);
-     */
-    0x57,                                                                           /* push edi */
-    0xFF, 0x53, offsetof (RemoteWorkerContext, free_library_impl),                  /* call     */
-
-    /*
-     * VirtualFree (worker_data, ...);
-     */
-    0x68, 0x00, 0x80, 0x00, 0x00,                    /* push MEM_RELEASE      (arg3: dwFreeType) */
-    0x6A, 0x00,                                      /* push 0                    (arg2: dwSize) */
-    0x53,                                            /* push ebx   (VirtualFree arg1: lpAddress) */
-    0x56,                                            /* push esi           (fake return address) */
-    0xFF, 0x63, offsetof (RemoteWorkerContext, virtual_free_impl),                        /* jmp */
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_RBX, GUM_REG_RCX);
 #endif
-  };
+
+  /* xsi = LoadLibrary (xbx->dll_path) */
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, dll_path));
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, load_library_impl),
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XCX);
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
+
+  /* xax = GetProcAddress (xsi, xbx->zed_agent_main_string) */
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
+      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, zed_agent_main_string));
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_proc_address_impl),
+      2,
+      GUM_ARG_REGISTER, GUM_REG_XSI,
+      GUM_ARG_REGISTER, GUM_REG_XDX);
+
+  /* xax (xbx->ipc_server_address) */
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, ipc_server_address));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XCX);
+
+  /* FreeLibrary (xsi) */
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
+      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, free_library_impl),
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XSI);
+
+#if GLIB_SIZEOF_VOID_P == 4
+  /* Store away return address before we overwrite it on the stack */
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_ECX, GUM_REG_ESP, 3 * sizeof (gpointer));
+
+  /* And address of VirtualFree also */
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EDX, GUM_REG_EBX, G_STRUCT_OFFSET (RemoteWorkerContext, virtual_free_impl));
+
+  /* Set up argument list for VirtualFree on the stack */
+  gum_x86_writer_put_mov_reg_offset_ptr_u32 (&cw, GUM_REG_ESP, (2 + 2) * sizeof (gpointer), MEM_RELEASE);
+  gum_x86_writer_put_mov_reg_offset_ptr_u32 (&cw, GUM_REG_ESP, (2 + 1) * sizeof (gpointer), 0);
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_EBX, G_STRUCT_OFFSET (RemoteWorkerContext, entrypoint));
+  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_ESP, (2 + 0) * sizeof (gpointer), GUM_REG_EAX);
+#else
+  /* Set up argument list for VirtualFree */
+  gum_x86_writer_put_mov_reg_u32 (&cw, GUM_REG_R8D, MEM_RELEASE);
+  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_RDX, GUM_REG_RDX);
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_RCX, GUM_REG_RBX, G_STRUCT_OFFSET (RemoteWorkerContext, entrypoint));
+
+  /* Then fill in the placeholder */
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_RAX, GUM_REG_RBX, G_STRUCT_OFFSET (RemoteWorkerContext, virtual_free_impl));
+  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_RSP, 2 * sizeof (gpointer), GUM_REG_RAX);
+#endif
+
+  /* Restore registers */
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XSI);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
+
+#if GLIB_SIZEOF_VOID_P == 4
+  /* Make VirtualFree return to where we would have returned */
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_ECX);
+
+  /* Put address of VirtualFree at the top of the stack so the ret will jump to it */
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_EDX);
+#endif
+
+  gum_x86_writer_put_ret (&cw);
+
+  gum_x86_writer_flush (&cw);
+  code_size = gum_x86_writer_offset (&cw);
+  gum_x86_writer_free (&cw);
 
   memset (rwc, 0, sizeof (RemoteWorkerContext));
 
@@ -582,7 +569,6 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   rwc->get_proc_address_impl = GetProcAddress (kmod, "GetProcAddress");
   rwc->free_library_impl = GetProcAddress (kmod, "FreeLibrary");
   rwc->virtual_free_impl = GetProcAddress (kmod, "VirtualFree");
-  rwc->exit_thread_impl = GetProcAddress (kmod, "ExitThread");
 
   StringCbCopyA (rwc->zed_agent_main_string, sizeof (rwc->zed_agent_main_string), "zed_agent_main");
 
@@ -590,18 +576,19 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   StringCbCopyA (rwc->ipc_server_address, sizeof (rwc->ipc_server_address), details->ipc_server_address);
 
   rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL,
-      sizeof (code) + data_alignment + sizeof (RemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+      code_size + data_alignment + sizeof (RemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
   if (rwc->entrypoint == NULL)
     goto virtual_alloc_failed;
 
-  if (!WriteProcessMemory (details->process_handle, rwc->entrypoint, code, sizeof (code), NULL))
+  if (!WriteProcessMemory (details->process_handle, rwc->entrypoint, code, code_size, NULL))
     goto write_process_memory_failed;
 
   rwc->argument = GSIZE_TO_POINTER (
-      (GPOINTER_TO_SIZE (rwc->entrypoint) + sizeof (code) + data_alignment - 1) & ~(data_alignment - 1));
+      (GPOINTER_TO_SIZE (rwc->entrypoint) + code_size + data_alignment - 1) & ~(data_alignment - 1));
   if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (RemoteWorkerContext), NULL))
     goto write_process_memory_failed;
 
+  gum_free_pages (code);
   return TRUE;
 
   /* ERRORS */
@@ -626,6 +613,7 @@ write_process_memory_failed:
 error_common:
   {
     cleanup_remote_worker_context (rwc, details);
+    gum_free_pages (code);
     return FALSE;
   }
 }

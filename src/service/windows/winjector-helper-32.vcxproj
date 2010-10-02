@@ -65,6 +65,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\..\ext\libgum\gum-32.vcxproj">
+      <Project>{b31c7d42-54b6-49bb-b30c-11745c48b062}</Project>
+      <Private>false</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
     <ProjectReference Include="..\..\..\lib\winipc\zed-winipc-32.vcxproj">
       <Project>{ab1784e5-24ce-4cfc-a6c3-1e2c092b8cdc}</Project>
       <Private>false</Private>
