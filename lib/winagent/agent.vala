@@ -9,7 +9,11 @@ namespace Zed {
 
 		public void main (string ipc_server_address) {
 			Environment.init ();
+			run_server_listening_on (ipc_server_address);
+			Environment.deinit ();
+		}
 
+		private void run_server_listening_on (string ipc_server_address) {
 			var loop = new MainLoop ();
 
 			proxy = new WinIpc.ClientProxy (ipc_server_address);
@@ -70,7 +74,6 @@ namespace Zed {
 			});
 
 			loop.run ();
-			loop = null;
 
 			if (gst_tracer != null) {
 				gst_tracer.detach ();
@@ -86,8 +89,6 @@ namespace Zed {
 
 			script_engine.shutdown ();
 			script_engine = null;
-
-			Environment.deinit ();
 		}
 
 		private async void do_establish (WinIpc.ClientProxy proxy) {

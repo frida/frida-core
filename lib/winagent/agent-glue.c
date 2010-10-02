@@ -6,6 +6,9 @@
 #define VC_EXTRALEAN
 #include <windows.h>
 #include <psapi.h>
+#if DEBUG_HEAP_LEAKS
+#include <crtdbg.h>
+#endif
 #if ENABLE_DEBUG
 #include <io.h>
 #include <stdio.h>
@@ -41,7 +44,7 @@ DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 void
 zed_agent_environment_init (void)
 {
-#if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
+#if DEBUG_HEAP_LEAKS
   int tmp_flag;
 
   /*_CrtSetBreakAlloc (1337);*/

@@ -42,6 +42,9 @@
     <None Include="process.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="test-winagent.vala">
+      <Filter>Tests</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)test-main.c">
@@ -70,6 +73,12 @@
     </ClCompile>
     <ClCompile Include="test-main-glue.c">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)test-winagent.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)async-harness.c">
+      <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

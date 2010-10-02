@@ -176,7 +176,7 @@ namespace Zed.Service {
 				Variant msg;
 				arg.@get ("(uv)", out script_id, out msg);
 
-				message_from_script (script_id, msg);
+				message_from_script (script_id, msg.get_variant ());
 			});
 		}
 

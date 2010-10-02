@@ -3,10 +3,11 @@ namespace Zed.Test {
 	public static void main (string[] args) {
 		Environment.init (ref args);
 
-		Zed.AgentTest.add_tests ();
 		Zed.CodeServiceTest.add_tests ();
 		Zed.WinIpcTest.add_tests ();
 		Zed.WinjectorTest.add_tests ();
+		Zed.WinAgentTest.add_tests ();
+		Zed.AgentTest.add_tests ();
 		Zed.HostSessionTest.add_tests ();
 
 		GLib.Test.run ();

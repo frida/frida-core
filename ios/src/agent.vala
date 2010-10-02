@@ -148,24 +148,23 @@ namespace Zed.Agent {
 		}
 	}
 
-	public void main (string data_string) {
+	public void main (string listen_address) {
 		Environment.init ();
+		run_server_listening_on (listen_address);
+		Environment.deinit ();
+	}
 
+	private void run_server_listening_on (string listen_address) {
 		var interceptor = Gum.Interceptor.obtain ();
 		interceptor.ignore_caller ();
 
-		var server = new FruityServer (data_string);
+		var server = new FruityServer (listen_address);
 
 		try {
 			server.run ();
 		} catch (Error e) {
 			printerr ("error: %s\n", e.message);
 		}
-
-		server = null;
-		interceptor = null;
-
-		Environment.deinit ();
 	}
 
 	namespace Environment {
