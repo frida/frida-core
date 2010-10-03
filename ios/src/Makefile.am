@@ -49,6 +49,10 @@ libzid_agent_la_SOURCES = \
 libzid_agent_la_LIBADD = \
 	$(top_builddir)/ext/interfaces/libzed-interfaces.la \
 	$(ZID_LIBS)
+libzid_agent_la_LDFLAGS = \
+	-export-symbols-regex zed_agent_main \
+	-no-undefined \
+	-avoid-version
 libzid_agent_la_VALAFLAGS = \
 	--library=zed-agent \
 	--header=zed-agent.h \
