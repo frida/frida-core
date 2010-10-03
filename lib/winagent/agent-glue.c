@@ -21,6 +21,8 @@ static gboolean append_function_info (const gchar * name, gpointer address,
 
 static gchar * compute_md5sum_for_file_at (const gchar * path);
 
+static GHashTable * md5sum_by_path = NULL;
+
 BOOL APIENTRY
 DllMain (HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
@@ -73,11 +75,17 @@ zed_agent_environment_init (void)
   g_type_init ();
   gum_init_with_features ((GumFeatureFlags)
       (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
+
+  md5sum_by_path = g_hash_table_new_full (g_str_hash, g_str_equal,
+      g_free, g_free);
 }
 
 void
 zed_agent_environment_deinit (void)
 {
+  g_hash_table_unref (md5sum_by_path);
+  md5sum_by_path = NULL;
+
   gum_deinit ();
   g_type_deinit ();
   g_thread_deinit ();
@@ -251,16 +259,20 @@ append_function_info (const gchar * name, gpointer address, gpointer user_data)
 static gchar *
 compute_md5sum_for_file_at (const gchar * path)
 {
-  gchar * result = NULL;
+  gchar * result;
   guchar * data;
   gsize length;
 
-  if (g_file_get_contents (path, (gchar **) &data, &length, NULL))
-  {
-    result = g_compute_checksum_for_data (G_CHECKSUM_MD5, data, length);
+  result = (gchar *) g_hash_table_lookup (md5sum_by_path, path);
+  if (result != NULL)
+    return g_strdup (result);
 
-    g_free (data);
-  }
+  if (!g_file_get_contents (path, (gchar **) &data, &length, NULL))
+    return NULL;
+  result = g_compute_checksum_for_data (G_CHECKSUM_MD5, data, length);
+  g_free (data);
+
+  g_hash_table_insert (md5sum_by_path, g_strdup (path), g_strdup (result));
 
   return result;
 }
