@@ -41,9 +41,7 @@ namespace Zed.Agent {
 
 		private async void close_connections_and_schedule_shutdown () {
 			foreach (var connection in connections) {
-				uint registration_id;
-				if (registration_id_by_connection.unset (connection, out registration_id))
-					connection.unregister_object (registration_id);
+				unregister (connection);
 
 				try {
 					yield connection.close ();
@@ -56,6 +54,24 @@ namespace Zed.Agent {
 				main_loop.quit ();
 				return false;
 			});
+		}
+
+		private async void unregister (DBusConnection connection) {
+			uint registration_id;
+			if (registration_id_by_connection.unset (connection, out registration_id))
+				connection.unregister_object (registration_id);
+		}
+
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (closed_by_us)
+				return;
+
+			unregister (connection);
+
+			connections.remove (connection);
+			if (connections.is_empty)
+				close ();
 		}
 
 		public async AgentModuleInfo[] query_modules () throws IOError {
@@ -128,12 +144,15 @@ namespace Zed.Agent {
 		public void run () throws Error {
 			server = new DBusServer.sync (listen_address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
+				connection.closed.connect (on_connection_closed);
+
 				try {
 					Zed.AgentSession session = this;
 					var registration_id = connection.register_object (Zed.ObjectPath.AGENT_SESSION, session);
 					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
+					close ();
 					return false;
 				}
 
