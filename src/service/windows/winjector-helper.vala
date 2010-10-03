@@ -40,6 +40,11 @@ namespace Winjector {
 	}
 
 	public class Manager : Object, WinIpc.QueryAsyncHandler {
+		public string parent_address {
+			get;
+			construct;
+		}
+
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
 
@@ -48,16 +53,16 @@ namespace Winjector {
 		private WinIpc.ServerProxy helper64;
 
 		public Manager (string parent_address) {
+			Object (parent_address: parent_address);
+		}
+
+		construct {
 			parent = new WinIpc.ClientProxy (parent_address);
-			parent.add_notify_handler ("Stop", "", (arg) => {
-				Idle.add (() => {
-					if (System.is_x64 ())
-						helper64.emit ("Stop");
-					helper32.emit ("Stop");
-					loop.quit ();
-					return false;
-				});
+			parent.closed.connect ((remote_peer_vanished) => {
+				if (remote_peer_vanished)
+					stop ();
 			});
+			parent.add_notify_handler ("Stop", "", (arg) => stop ());
 			parent.register_query_async_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, this);
 
 			helper32 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("32"));
@@ -78,6 +83,16 @@ namespace Winjector {
 			stop_services (ctx);
 
 			return run_result;
+		}
+
+		private void stop () {
+			Idle.add (() => {
+				if (System.is_x64 ())
+					helper64.emit ("Stop");
+				helper32.emit ("Stop");
+				loop.quit ();
+				return false;
+			});
 		}
 
 		private async void establish () {
