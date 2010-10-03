@@ -43,8 +43,8 @@ namespace Zed.Service {
 			assert (local_provider != null);
 			local_provider = null;
 
-			// HACK: give processes 50 ms to unload DLLs
-			var source = new TimeoutSource (50);
+			// HACK: give processes 100 ms to unload DLLs
+			var source = new TimeoutSource (100);
 			source.set_callback (() => {
 				stop.callback ();
 				return false;
