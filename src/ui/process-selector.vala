@@ -5,7 +5,7 @@ namespace Zed {
 			private set;
 		}
 
-		public Gtk.Entry entry {
+		public Gtk.Entry? entry {
 			get {
 				return combo.get_child () as Gtk.Entry;
 			}
@@ -86,7 +86,9 @@ namespace Zed {
 			if (new_session == this._session)
 				return;
 
-			view.entry.text = "";
+			var entry = view.entry;
+			if (entry != null)
+				entry.text = "";
 
 			this._session = new_session;
 
