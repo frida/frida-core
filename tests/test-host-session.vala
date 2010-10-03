@@ -152,6 +152,12 @@ namespace Zed.HostSessionTest {
 	namespace Fruity {
 
 		private static async void backend (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf (" <skipping, run in slow mode with iOS device connected>");
+				h.done ();
+				return;
+			}
+
 			var backend = new FruityHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
