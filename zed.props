@@ -7,10 +7,17 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <PreprocessorDefinitions>WIN32;_WINDOWS;GUM_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\atk-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\pango-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\cairo;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include;$(SolutionDir)ext\libgum;$(SolutionDir)ext\libgum\libs;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level4</WarningLevel>
-      <DisableSpecificWarnings>4055;4090;4100;4101;4102;4127;4152;4189;4244;4305;4389;4702;4715;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+
+      <PreprocessorDefinitions>
+        WIN32;
+        _WINDOWS;
+        WINVER=0x0501;
+        _WIN32_WINNT=0x0501;
+        GUM_STATIC;
+        %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib;$(IntDir)..\gum-32;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>

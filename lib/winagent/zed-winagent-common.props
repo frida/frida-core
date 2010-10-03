@@ -22,9 +22,7 @@ echo &gt; "$(IntDir)valacode.stamp"
     <ClCompile Include="agent-glue.c" />
     <ClCompile Include="$(IntDir)gst-tracer.c" />
     <ClCompile Include="gst-tracer-glue.c" />
-    <ClCompile Include="$(IntDir)investigator.c" >
-      <DisableSpecificWarnings>4028;4090;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-    </ClCompile>
+    <ClCompile Include="$(IntDir)investigator.c" />
     <ClCompile Include="investigator-glue.c" />
     <ClCompile Include="$(IntDir)ipc-types.c" />
     <ClCompile Include="$(IntDir)memory-tracker.c" />

@@ -47,7 +47,6 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\gee-1.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\lib\glib-2.0\include;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\glib-2.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <DisableSpecificWarnings>4100;4127;4152</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\obj\x64-Release\zed-winipc-64;$(SolutionDir)..\..\ext\sdk\$(PlatformName)-Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -58,7 +57,6 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\gee-1.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\lib\glib-2.0\include;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include\glib-2.0;$(SolutionDir)..\..\ext\sdk\$(Platform)-Release\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <DisableSpecificWarnings>4100;4127;4152</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)..\..\obj\Win32-Release\zed-winipc-32;$(SolutionDir)..\..\obj\x64-Release\zed-winipc-64;$(SolutionDir)..\..\ext\sdk\$(PlatformName)-Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
