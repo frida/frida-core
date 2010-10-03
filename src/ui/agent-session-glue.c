@@ -26,6 +26,8 @@ zed_presenter_agent_session_disassemble (ZedPresenterAgentSession * self, guint6
 {
   ud_t ud_obj;
 
+  (void) self;
+
   ud_init (&ud_obj);
   ud_set_mode (&ud_obj, 32);
   ud_set_syntax (&ud_obj, UD_SYN_INTEL);

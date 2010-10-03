@@ -14,8 +14,6 @@ struct _WinIpcWaitHandleSource
   GPollFD handle_poll_fd;
 };
 
-static void win_ipc_wait_handle_source_finalize (GSource * source);
-
 static gboolean win_ipc_wait_handle_source_prepare (GSource * source,
     gint * timeout);
 static gboolean win_ipc_wait_handle_source_check (GSource * source);
@@ -26,7 +24,7 @@ static GSourceFuncs win_ipc_wait_handle_source_funcs = {
   win_ipc_wait_handle_source_prepare,
   win_ipc_wait_handle_source_check,
   win_ipc_wait_handle_source_dispatch,
-  win_ipc_wait_handle_source_finalize
+  NULL
 };
 
 GSource *
@@ -50,11 +48,6 @@ win_ipc_wait_handle_source_new (void * handle)
   g_source_add_poll (source, pfd);
 
   return source;
-}
-
-static void
-win_ipc_wait_handle_source_finalize (GSource * source)
-{
 }
 
 static gboolean

@@ -30,8 +30,10 @@ zed_gst_tracer_attach (ZedGstTracer * self)
   if (glib_mod == NULL || gobj_mod == NULL || gst_mod == NULL)
     return;
 
-  instance_free_impl = GetProcAddress (gobj_mod, "g_type_free_instance");
-  pad_push_impl = GetProcAddress (gst_mod, "gst_pad_push");
+  instance_free_impl = GUM_FUNCPTR_TO_POINTER (
+      GetProcAddress (gobj_mod, "g_type_free_instance"));
+  pad_push_impl = GUM_FUNCPTR_TO_POINTER (
+      GetProcAddress (gst_mod, "gst_pad_push"));
   if (instance_free_impl == NULL || pad_push_impl == NULL)
     return;
 
@@ -117,7 +119,8 @@ zed_gst_tracer_attach (ZedGstTracer * self)
     g_object_unref (interceptor);
     interceptor = NULL;
   }
-
+#else
+  (void) self;
 #endif
 }
 
@@ -133,6 +136,8 @@ zed_gst_tracer_detach (ZedGstTracer * self)
 
   g_object_unref (interceptor);
   interceptor = NULL;
+#else
+  (void) self;
 #endif
 }
 
@@ -140,6 +145,8 @@ char *
 zed_gst_tracer_query_object_path (ZedGstTracer * self, void * instance)
 {
   gchar * result, * tmp;
+
+  (void) self;
 
   tmp = object_get_path_string_impl (instance);
   result = g_strdup (tmp);

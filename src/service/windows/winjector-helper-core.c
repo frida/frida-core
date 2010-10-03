@@ -131,7 +131,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   gboolean rwc_initialized = FALSE;
   RemoteWorkerContext rwc;
 
-  details.dll_path = g_utf8_to_utf16 (dll_path, -1, NULL, NULL, NULL);
+  details.dll_path = (WCHAR *) g_utf8_to_utf16 (dll_path, -1, NULL, NULL, NULL);
   details.ipc_server_address = ipc_server_address;
   details.process_handle = NULL;
 
@@ -197,7 +197,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   }
   else
   {
-    thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, (LPTHREAD_START_ROUTINE) rwc.entrypoint, rwc.argument, 0, NULL);
+    thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint), rwc.argument, 0, NULL);
     if (thread_handle == NULL)
     {
       g_set_error (error,
@@ -387,8 +387,8 @@ trick_thread_into_spawning_worker_thread (HANDLE process_handle, HANDLE thread_h
   trick_ctx.entrypoint = rwc->entrypoint;
   trick_ctx.argument = rwc->argument;
 
-  trick_ctx.create_thread_impl = GetProcAddress (kmod, "CreateThread");
-  trick_ctx.close_handle_impl = GetProcAddress (kmod, "CloseHandle");
+  trick_ctx.create_thread_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "CreateThread"));
+  trick_ctx.close_handle_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "CloseHandle"));
 
   ctx.ContextFlags = CONTEXT_INTEGER | CONTEXT_CONTROL;
   if (!GetThreadContext (thread_handle, &ctx))
@@ -565,10 +565,10 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 
   kmod = GetModuleHandleW (L"kernel32.dll");
 
-  rwc->load_library_impl = GetProcAddress (kmod, "LoadLibraryW");
-  rwc->get_proc_address_impl = GetProcAddress (kmod, "GetProcAddress");
-  rwc->free_library_impl = GetProcAddress (kmod, "FreeLibrary");
-  rwc->virtual_free_impl = GetProcAddress (kmod, "VirtualFree");
+  rwc->load_library_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "LoadLibraryW"));
+  rwc->get_proc_address_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "GetProcAddress"));
+  rwc->free_library_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "FreeLibrary"));
+  rwc->virtual_free_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "VirtualFree"));
 
   StringCbCopyA (rwc->zed_agent_main_string, sizeof (rwc->zed_agent_main_string), "zed_agent_main");
 

@@ -213,6 +213,9 @@ winjector_managed_service_main (DWORD argc, WCHAR ** argv)
 {
   GMainLoop * loop;
 
+  (void) argc;
+  (void) argv;
+
   loop = g_main_loop_new (NULL, FALSE);
 
   winjector_managed_service_status_handle = RegisterServiceCtrlHandlerExW (
@@ -244,6 +247,9 @@ winjector_managed_service_handle_control_code (DWORD control, DWORD event_type,
     void * event_data, void * context)
 {
   GMainLoop * loop = context;
+
+  (void) event_type;
+  (void) event_data;
 
   switch (control)
   {
@@ -517,12 +523,16 @@ register_service (WinjectorServiceContext * self, const gchar * suffix)
 static gboolean
 unregister_service (WinjectorServiceContext * self, SC_HANDLE handle)
 {
+  (void) self;
+
   return DeleteService (handle);
 }
 
 static gboolean
 start_service (WinjectorServiceContext * self, SC_HANDLE handle)
 {
+  (void) self;
+
   return StartService (handle, 0, NULL);
 }
 
@@ -530,6 +540,9 @@ static gboolean
 stop_service (WinjectorServiceContext * self, SC_HANDLE handle)
 {
   SERVICE_STATUS status = { 0, };
+
+  (void) self;
+
   return ControlService (handle, SERVICE_CONTROL_STOP, &status);
 }
 
@@ -544,11 +557,13 @@ spawn_standalone_service (WinjectorServiceContext * self, const gchar * suffix)
   STARTUPINFOW si = { 0, };
   PROCESS_INFORMATION pi = { 0, };
 
+  (void) self;
+
   appname_utf8 = winjector_service_derive_filename_for_suffix (suffix);
-  appname = g_utf8_to_utf16 (appname_utf8, -1, NULL, NULL, NULL);
+  appname = (WCHAR *) g_utf8_to_utf16 (appname_utf8, -1, NULL, NULL, NULL);
 
   cmdline_utf8 = g_strconcat ("\"", appname_utf8, "\" STANDALONE", NULL);
-  cmdline = g_utf8_to_utf16 (cmdline_utf8, -1, NULL, NULL, NULL);
+  cmdline = (WCHAR *) g_utf8_to_utf16 (cmdline_utf8, -1, NULL, NULL, NULL);
 
   si.cb = sizeof (si);
 
@@ -571,6 +586,8 @@ spawn_standalone_service (WinjectorServiceContext * self, const gchar * suffix)
 static gboolean
 join_standalone_service (WinjectorServiceContext * self, HANDLE handle)
 {
+  (void) self;
+
   return WaitForSingleObject (handle,
       STANDALONE_JOIN_TIMEOUT_MSEC) == WAIT_OBJECT_0;
 }
@@ -578,6 +595,8 @@ join_standalone_service (WinjectorServiceContext * self, HANDLE handle)
 static void
 kill_standalone_service (WinjectorServiceContext * self, HANDLE handle)
 {
+  (void) self;
+
   TerminateProcess (handle, 1);
 }
 

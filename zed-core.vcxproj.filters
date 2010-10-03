@@ -200,9 +200,6 @@
     <ClCompile Include="$(IntDir)src\service\windows\winjector-error.c">
       <Filter>Source Files\generated\service\windows</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\windows\winjector-impl.c">
-      <Filter>Source Files\generated\service\windows</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)src\service\windows\winjector-ipc.c">
       <Filter>Source Files\generated\service\windows</Filter>
     </ClCompile>
@@ -250,6 +247,9 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\ui\image-factory.c">
       <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\service\windows\winjector-glue.c">
+      <Filter>Source Files\service\windows</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

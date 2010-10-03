@@ -179,7 +179,7 @@ zed_agent_dump_memory (guint64 address, guint size)
     MEMORY_BASIC_INFORMATION mbi;
     guint len, i;
 
-    cur = (guint8 *) (address + size - remaining);
+    cur = (guint8 *) GSIZE_TO_POINTER (address) + size - remaining;
 
     if (VirtualQuery (cur, &mbi, sizeof (mbi)) == 0)
       goto virtual_query_failed;

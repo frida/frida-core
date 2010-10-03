@@ -146,7 +146,7 @@ compare_udid_and_create_mobile_device_info_if_matching (const ZedDeviceInfo * de
   if (_wcsicmp (udid, ctx->udid) != 0)
     goto keep_looking;
 
-  location = (WCHAR *) g_memdup (device_info->location, (wcslen (device_info->location) + 1) * sizeof (WCHAR));
+  location = (WCHAR *) g_memdup (device_info->location, ((guint) wcslen (device_info->location) + 1) * sizeof (WCHAR));
   ctx->mobile_device = zed_mobile_device_info_new (location);
 
   return FALSE;

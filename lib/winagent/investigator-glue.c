@@ -68,6 +68,8 @@ error:
 void
 zed_investigator_detach (ZedInvestigator * self)
 {
+  (void) self;
+
   if (interceptor == NULL)
     return;
 
@@ -93,8 +95,8 @@ resolve_trigger_function (ZedTriggerInfo * trigger)
   g_free (module_name_utf16);
   if (module != NULL)
   {
-    result = GetProcAddress (module,
-        zed_trigger_info_get_function_name (trigger));
+    result = GUM_FUNCPTR_TO_POINTER (GetProcAddress (module,
+        zed_trigger_info_get_function_name (trigger)));
   }
 
   return result;
@@ -107,11 +109,17 @@ attach_listener_to_trigger_function (ZedInvestigator * self, gpointer func,
 #ifndef _M_X64
   GumAttachReturn attach_ret;
 
+  (void) func;
+
   attach_ret = gum_interceptor_attach_listener (interceptor, func,
       GUM_INVOCATION_LISTENER (self), GSIZE_TO_POINTER (type));
 
   return (attach_ret == GUM_ATTACH_OK);
 #else
+  (void) self;
+  (void) func;
+  (void) type;
+
   return FALSE;
 #endif
 }

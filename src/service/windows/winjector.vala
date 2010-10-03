@@ -115,7 +115,7 @@ namespace Zed.Service {
 			private static extern void close_process_handle (void * handle);
 		}
 
-		private enum PrivilegeLevel {
+		protected enum PrivilegeLevel {
 			NORMAL,
 			ELEVATED
 		}
@@ -282,7 +282,7 @@ namespace Zed.Service {
 			}
 		}
 
-		private class TemporaryDirectory {
+		protected class TemporaryDirectory {
 			public string path {
 				get;
 				private set;
@@ -300,8 +300,8 @@ namespace Zed.Service {
 			private static extern void destroy_tempdir (string path);
 		}
 
-		private class TemporaryFile {
-			private File file;
+		protected class TemporaryFile {
+			protected File file;
 			private TemporaryDirectory directory;
 
 			public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory directory) throws WinjectorError {

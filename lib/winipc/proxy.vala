@@ -299,7 +299,7 @@ namespace WinIpc {
 		private async MessageType read_message (out Variant? v) throws IOError {
 			v = null;
 
-			uint8[] blob = yield read_blob ();
+			uint8[] blob = yield _read_blob ();
 			if (blob.length < MESSAGE_FIELD_ALIGNMENT + 1)
 				return MessageType.INVALID;
 
@@ -332,20 +332,20 @@ namespace WinIpc {
 			blob[0] = t;
 			unowned uint8 * blob_start = blob;
 			v.store (blob_start + MESSAGE_FIELD_ALIGNMENT);
-			yield write_blob (blob);
+			yield _write_blob (blob);
 		}
 
-		private extern async uint8[] read_blob () throws IOError;
-		private extern async void write_blob (uint8[] blob) throws IOError;
+		protected extern async uint8[] _read_blob () throws IOError;
+		protected extern async void _write_blob (uint8[] blob) throws IOError;
 
 		protected async void complete_pipe_operation (IOResult result, PipeOperation operation, uint timeout_msec) throws IOError {
 			if (result == IOResult.SUCCESS)
 				return;
-			yield wait_for_operation (operation, timeout_msec);
+			yield _wait_for_operation (operation, timeout_msec);
 			operation.consume_result ();
 		}
 
-		private extern async void wait_for_operation (PipeOperation op, uint timeout_msec) throws IOError;
+		protected extern async void _wait_for_operation (PipeOperation op, uint timeout_msec) throws IOError;
 
 		private class QueryHandler {
 			private string id;
@@ -531,17 +531,17 @@ namespace WinIpc {
 	protected class PipeOperation {
 		public void * pipe_handle {
 			get;
-			private set;
+			set;
 		}
 
 		public void * wait_handle {
 			get;
-			private set;
+			set;
 		}
 
 		public void * overlapped {
 			get;
-			private set;
+			set;
 		}
 
 		public string function_name {

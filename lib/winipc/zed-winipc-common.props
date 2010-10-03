@@ -17,10 +17,13 @@ echo &gt; "$(IntDir)valacode.stamp"
   </ItemGroup>
 
   <ItemGroup>
-    <ClCompile Include="proxy-backend.c" />
+    <ClCompile Include="proxy-glue.c" />
     <ClCompile Include="wait-handle-source.c" />
     <ClCompile Include="$(IntDir)proxy.c">
-      <ExcludedFromBuild>true</ExcludedFromBuild>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
   </ItemGroup>
 

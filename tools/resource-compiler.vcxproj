@@ -134,7 +134,12 @@ echo &gt; "$(IntDir)valacode.stamp"
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)resource-compiler.c" />
+    <ClCompile Include="$(IntDir)resource-compiler.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ext\sdk.vcxproj">

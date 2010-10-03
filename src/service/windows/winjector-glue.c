@@ -1,8 +1,8 @@
+#include "zed-core.h"
+
 #define VC_EXTRALEAN
 #include <windows.h>
 #include <strsafe.h>
-
-#include "src/service/windows/winjector.c"
 
 gboolean
 zed_service_winjector_helper_is_process_still_running (void * handle)
@@ -86,7 +86,7 @@ zed_service_winjector_temporary_file_execute (
   else
     ei.lpVerb = L"open";
 
-  file = g_file_get_path (self->priv->file);
+  file = g_file_get_path (self->file);
   file_utf16 = g_utf8_to_utf16 (file, -1, NULL, NULL, NULL);
   ei.lpFile = file_utf16;
   g_free (file);

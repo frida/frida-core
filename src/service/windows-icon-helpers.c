@@ -179,7 +179,6 @@ ZedImageData *
 _zed_image_data_from_native_icon_handle (HICON icon, ZedIconSize size)
 {
   ZedImageData * result;
-  GVariantBuilder * builder;
   HDC dc;
   gint width = -1, height = -1;
   BITMAPV5HEADER bi = { 0, };

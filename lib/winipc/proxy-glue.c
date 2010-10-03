@@ -1,4 +1,4 @@
-#include "proxy.c"
+#include "zed-winipc.h"
 
 #include "wait-handle-source.h"
 
@@ -146,8 +146,8 @@ win_ipc_client_proxy_close_pipe (void * pipe)
   CloseHandle (pipe);
 }
 
-static void
-win_ipc_proxy_read_blob (WinIpcProxy * self, GAsyncReadyCallback _callback_,
+void
+_win_ipc_proxy_read_blob (WinIpcProxy * self, GAsyncReadyCallback _callback_,
     gpointer _user_data_)
 {
   guint8 * buf;
@@ -162,7 +162,7 @@ win_ipc_proxy_read_blob (WinIpcProxy * self, GAsyncReadyCallback _callback_,
   win_ipc_pipe_operation_set_buffer (op, buf);
 
   res = g_simple_async_result_new (G_OBJECT (self), _callback_, _user_data_,
-      win_ipc_proxy_read_blob);
+      GSIZE_TO_POINTER (_win_ipc_proxy_read_blob));
   win_ipc_pipe_operation_set_user_data (op, res);
   g_simple_async_result_set_op_res_gpointer (res, op,
       win_ipc_pipe_operation_unref);
@@ -175,8 +175,8 @@ win_ipc_proxy_read_blob (WinIpcProxy * self, GAsyncReadyCallback _callback_,
     complete_async_result_from_os_error (res, GetLastError ());
 }
 
-static guint8 *
-win_ipc_proxy_read_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
+guint8 *
+_win_ipc_proxy_read_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
     int * result_length1, GError ** error)
 {
   guint8 * buffer;
@@ -184,6 +184,8 @@ win_ipc_proxy_read_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
   WinIpcPipeOperation * op;
   GError * err;
   guint length;
+
+  (void) self;
 
   res = G_SIMPLE_ASYNC_RESULT (_res_);
   op = WIN_IPC_PIPE_OPERATION (g_simple_async_result_get_op_res_gpointer (
@@ -208,8 +210,8 @@ win_ipc_proxy_read_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
   return buffer;
 }
 
-static void
-win_ipc_proxy_write_blob (WinIpcProxy * self, guint8 * blob, int blob_length1,
+void
+_win_ipc_proxy_write_blob (WinIpcProxy * self, guint8 * blob, int blob_length1,
     GAsyncReadyCallback _callback_, gpointer _user_data_)
 {
   WinIpcPipeOperation * op;
@@ -220,7 +222,7 @@ win_ipc_proxy_write_blob (WinIpcProxy * self, guint8 * blob, int blob_length1,
   win_ipc_pipe_operation_set_function_name (op, "WriteFileEx");
 
   res = g_simple_async_result_new (G_OBJECT (self), _callback_, _user_data_,
-      win_ipc_proxy_write_blob);
+      GSIZE_TO_POINTER (_win_ipc_proxy_write_blob));
   win_ipc_pipe_operation_set_user_data (op, res);
   g_simple_async_result_set_op_res_gpointer (res, op,
       win_ipc_pipe_operation_unref);
@@ -233,14 +235,15 @@ win_ipc_proxy_write_blob (WinIpcProxy * self, guint8 * blob, int blob_length1,
     complete_async_result_from_os_error (res, GetLastError ());
 }
 
-static void
-win_ipc_proxy_write_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
+void
+_win_ipc_proxy_write_blob_finish (WinIpcProxy * self, GAsyncResult * _res_,
     GError ** error)
 {
   GSimpleAsyncResult * res;
   WinIpcPipeOperation * op;
   GError * err;
-  guint length;
+
+  (void) self;
 
   res = G_SIMPLE_ASYNC_RESULT (_res_);
   op = WIN_IPC_PIPE_OPERATION (g_simple_async_result_get_op_res_gpointer (
@@ -262,14 +265,17 @@ win_ipc_proxy_read_or_write_completed (DWORD os_error, DWORD bytes_transferred,
   WinIpcPipeOperation * op;
   GSimpleAsyncResult * res;
 
+  (void) os_error;
+  (void) bytes_transferred;
+
   op = win_ipc_pipe_operation_from_overlapped (overlapped);
   res = G_SIMPLE_ASYNC_RESULT (win_ipc_pipe_operation_get_user_data (op));
   g_simple_async_result_complete (res);
   g_object_unref (res);
 }
 
-static void
-win_ipc_proxy_wait_for_operation (WinIpcProxy * self, WinIpcPipeOperation * op,
+void
+_win_ipc_proxy_wait_for_operation (WinIpcProxy * self, WinIpcPipeOperation * op,
     guint timeout_msec, GAsyncReadyCallback _callback_, gpointer _user_data_)
 {
   GSimpleAsyncResult * res;
@@ -277,7 +283,7 @@ win_ipc_proxy_wait_for_operation (WinIpcProxy * self, WinIpcPipeOperation * op,
   HANDLE wait_handle;
 
   res = g_simple_async_result_new (G_OBJECT (self), _callback_, _user_data_,
-      win_ipc_proxy_wait_for_operation);
+      GSIZE_TO_POINTER (_win_ipc_proxy_wait_for_operation));
 
   ctx = g_new0 (WinIpcProxyWaitContext, 1);
   g_simple_async_result_set_op_res_gpointer (res, ctx,
@@ -299,12 +305,14 @@ win_ipc_proxy_wait_for_operation (WinIpcProxy * self, WinIpcPipeOperation * op,
   }
 }
 
-static void
-win_ipc_proxy_wait_for_operation_finish (WinIpcProxy * self,
+void
+_win_ipc_proxy_wait_for_operation_finish (WinIpcProxy * self,
     GAsyncResult * _res_, GError ** error)
 {
   GSimpleAsyncResult * res;
   WinIpcProxyWaitContext * ctx;
+
+  (void) self;
 
   res = G_SIMPLE_ASYNC_RESULT (_res_);
   ctx = (WinIpcProxyWaitContext *)
