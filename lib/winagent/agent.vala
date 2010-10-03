@@ -17,9 +17,16 @@ namespace Zed {
 			var loop = new MainLoop ();
 
 			proxy = new WinIpc.ClientProxy (ipc_server_address);
+			proxy.closed.connect ((remote_peer_vanished) => {
+				if (remote_peer_vanished) {
+					Idle.add (() => {
+						loop.quit ();
+						return false;
+					});
+				}
+			});
 			proxy.add_notify_handler ("Stop", "", (arg) => {
 				proxy.close ();
-				proxy = null;
 
 				Idle.add (() => {
 					loop.quit ();
@@ -89,6 +96,8 @@ namespace Zed {
 
 			script_engine.shutdown ();
 			script_engine = null;
+
+			proxy = null;
 		}
 
 		private async void do_establish (WinIpc.ClientProxy proxy) {
