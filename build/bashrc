@@ -65,7 +65,7 @@ export LANG="C"
 
 if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
   echo "Downloading and deploying toolchain..."
-  curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20100927.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20101003.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
 fi
 
 if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
