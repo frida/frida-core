@@ -10,7 +10,10 @@
 #include <shobjidl.h>
 #include <unknwn.h>
 
-#define PARSE_STRING_MAX_LENGTH (40 + 1)
+#define PARSE_STRING_MAX_LENGTH   (40 + 1)
+#define DRIVE_STRINGS_MAX_LENGTH     (512)
+
+static gboolean get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity);
 
 ZedImageData *
 _zed_service_windows_host_session_provider_extract_icon (GError ** error)
@@ -96,7 +99,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
       WCHAR name_utf16[MAX_PATH];
       DWORD name_length = MAX_PATH;
 
-      if (GetProcessImageFileNameW (handle, name_utf16, name_length) != 0)
+      if (get_process_filename (handle, name_utf16, name_length))
       {
         gchar * name, * tmp;
         ZedHostProcessInfo * process_info;
@@ -128,4 +131,49 @@ zed_service_windows_process_backend_enumerate_processes_sync (
 
   *result_length1 = processes->len;
   return (ZedHostProcessInfo *) g_array_free (processes, FALSE);
+}
+
+static gboolean
+get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
+{
+  guint name_length;
+  WCHAR drive_strings[DRIVE_STRINGS_MAX_LENGTH];
+  WCHAR *drive;
+
+  if (GetProcessImageFileName (process, name, name_capacity) == 0)
+    return FALSE;
+  name_length = wcslen (name);
+
+  drive_strings[0] = L'\0';
+  drive_strings[DRIVE_STRINGS_MAX_LENGTH - 1] = L'\0';
+  GetLogicalDriveStringsW (DRIVE_STRINGS_MAX_LENGTH - 1, drive_strings);
+  for (drive = drive_strings; *drive != '\0'; drive += wcslen (drive) + 1)
+  {
+    WCHAR device_name[3];
+    WCHAR mapping_strings[MAX_PATH];
+    WCHAR *mapping;
+    guint mapping_length;
+
+    wcsncpy_s (device_name, 3, drive, 2);
+
+    mapping_strings[0] = '\0';
+    mapping_strings[MAX_PATH - 1] = '\0';
+    QueryDosDevice (device_name, mapping_strings, MAX_PATH - 1);
+    for (mapping = mapping_strings; *mapping != '\0'; mapping += mapping_length + 1)
+    {
+      mapping_length = wcslen (mapping);
+
+      if (mapping_length > name_length)
+        continue;
+
+      if (wcsncmp (name, mapping, mapping_length) == 0)
+      {
+        wcscpy_s (name, 3, device_name);
+        memmove (name + 2, name + mapping_length, (name_length - mapping_length + 1) * sizeof (WCHAR));
+        return TRUE;
+      }
+    }
+  }
+
+  return FALSE;
 }
