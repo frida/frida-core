@@ -94,7 +94,7 @@ zed_service_windows_process_backend_enumerate_processes_sync (
       WCHAR name_utf16[MAX_PATH];
       DWORD name_length = MAX_PATH;
 
-      if (QueryFullProcessImageNameW (handle, 0, name_utf16, &name_length))
+      if (GetProcessImageFileNameW (handle, name_utf16, name_length) != 0)
       {
         gchar * name, * tmp;
         ZedHostProcessInfo * process_info;
