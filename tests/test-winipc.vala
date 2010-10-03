@@ -27,8 +27,13 @@ namespace Zed.WinIpcTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/WinIpc/Proxy/establish/sudden-disconnect", () => {
-			var h = new Harness ((h) => Establish.sudden_disconnect (h as Harness));
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/sudden-disconnect-of-client", () => {
+			var h = new Harness ((h) => Establish.sudden_disconnect_of_client (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/WinIpc/Proxy/establish/sudden-disconnect-of-server", () => {
+			var h = new Harness ((h) => Establish.sudden_disconnect_of_server (h as Harness));
 			h.run ();
 		});
 
@@ -165,7 +170,7 @@ namespace Zed.WinIpcTest {
 			h.done ();
 		}
 
-		private async void sudden_disconnect (Harness h) {
+		private async void sudden_disconnect_of_client (Harness h) {
 			try {
 				yield h.client.establish ();
 				yield h.server.establish ();
@@ -174,6 +179,31 @@ namespace Zed.WinIpcTest {
 			}
 
 			h.remove_client ();
+
+			var close_event_from_client = yield h.wait_for_close_event_from_client ();
+			assert (!close_event_from_client.remote_peer_vanished);
+
+			var close_event_from_server = yield h.wait_for_close_event_from_server ();
+			assert (close_event_from_server.remote_peer_vanished);
+
+			h.done ();
+		}
+
+		private async void sudden_disconnect_of_server (Harness h) {
+			try {
+				yield h.client.establish ();
+				yield h.server.establish ();
+			} catch (ProxyError e) {
+				assert_not_reached ();
+			}
+
+			h.remove_server ();
+
+			var close_event_from_server = yield h.wait_for_close_event_from_server ();
+			assert (!close_event_from_server.remote_peer_vanished);
+
+			var close_event_from_client = yield h.wait_for_close_event_from_client ();
+			assert (close_event_from_client.remote_peer_vanished);
 
 			h.done ();
 		}
@@ -551,13 +581,25 @@ namespace Zed.WinIpcTest {
 			private set;
 		}
 
+		private CloseEvent server_close_event;
+		private CloseEvent client_close_event;
+
 		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
 			base (func);
 		}
 
 		construct {
 			server = new ServerProxy ();
+			server.closed.connect ((remote_peer_vanished) => {
+				assert (server_close_event == null);
+				server_close_event = new CloseEvent (remote_peer_vanished);
+			});
+
 			client = new ClientProxy (server.address);
+			client.closed.connect ((remote_peer_vanished) => {
+				assert (client_close_event == null);
+				client_close_event = new CloseEvent (remote_peer_vanished);
+			});
 		}
 
 		public async void establish_client_and_server () {
@@ -577,6 +619,29 @@ namespace Zed.WinIpcTest {
 		public void remove_client () {
 			client.close ();
 			client = null;
+		}
+
+		public async CloseEvent wait_for_close_event_from_server () {
+			while (server_close_event == null)
+				yield process_events ();
+			return server_close_event;
+		}
+
+		public async CloseEvent wait_for_close_event_from_client () {
+			while (client_close_event == null)
+				yield process_events ();
+			return client_close_event;
+		}
+
+		public class CloseEvent {
+			public bool remote_peer_vanished {
+				get;
+				private set;
+			}
+
+			public CloseEvent (bool remote_peer_vanished) {
+				this.remote_peer_vanished = remote_peer_vanished;
+			}
 		}
 
 		public override void done () {

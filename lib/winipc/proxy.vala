@@ -33,11 +33,13 @@ namespace WinIpc {
 			process_messages ();
 		}
 
-		public void close () {
+		public override void close () {
 			if (pipe != null) {
 				destroy_named_pipe (pipe);
 				pipe = null;
 			}
+
+			base.close ();
 		}
 
 		private string generate_address () {
@@ -85,11 +87,13 @@ namespace WinIpc {
 			process_messages ();
 		}
 
-		public void close () {
+		public override void close () {
 			if (pipe != null) {
 				close_pipe (pipe);
 				pipe = null;
 			}
+
+			base.close ();
 		}
 
 		private extern static void * open_pipe (string name) throws IOError;
@@ -97,6 +101,9 @@ namespace WinIpc {
 	}
 
 	public abstract class Proxy : Object {
+		public signal void closed (bool remote_peer_vanished);
+		private bool has_been_closed = false;
+
 		protected void * pipe;
 
 		private uint last_handler_id = 1;
@@ -105,6 +112,13 @@ namespace WinIpc {
 
 		private uint32 last_request_id = 1;
 		private ArrayList<PendingResponse> pending_responses = new ArrayList<PendingResponse> ();
+
+		public virtual void close () {
+			if (has_been_closed)
+				return;
+			has_been_closed = true;
+			closed (false);
+		}
 
 		public uint register_query_sync_handler (string id, string? argument_type, QuerySyncHandler sync_handler) {
 			assert (!query_handlers.has_key (id));
@@ -207,7 +221,10 @@ namespace WinIpc {
 					}
 				}
 			} catch (IOError e) {
-				/* FIXME */
+				if (!has_been_closed) {
+					has_been_closed = true;
+					closed (true);
+				}
 			}
 		}
 
