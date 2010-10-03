@@ -23,7 +23,6 @@
     </ClCompile>
     <Link>
       <LinkIncremental>false</LinkIncremental>
-      <LinkTimeCodeGeneration>NOSTATUS</LinkTimeCodeGeneration>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
