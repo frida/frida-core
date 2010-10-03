@@ -153,7 +153,7 @@ namespace Zed.HostSessionTest {
 
 		private static async void backend (Harness h) {
 			if (!GLib.Test.slow ()) {
-				stdout.printf (" <skipping, run in slow mode with iOS device connected>");
+				stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
 				h.done ();
 				return;
 			}
