@@ -1,10 +1,11 @@
 #!/bin/sh
 
+BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
+
 function build_all ()
 {
-  mkdir -p "${FRIDA_SDKROOT}/share/aclocal"
+  mkdir -p "$FRIDA_SDKROOT/share/aclocal"
 
-  BUILDROOT="${FRIDA_BUILD}/tmp-${FRIDA_TARGET}"
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" &>/dev/null || exit 1
 
@@ -44,10 +45,37 @@ function apply_fixups ()
   done
 }
 
-[ -z "${FRIDA_BUILD}" ] && exit 1
+function make_package ()
+{
+  target_filename="$FRIDA_BUILD/sdk-ios-$(date '+%Y%m%d').tar.bz2"
+
+  rm -rf "$BUILDROOT/sdk-ios"
+  mkdir "$BUILDROOT/sdk-ios"
+  pushd "$FRIDA_PREFIX" &>/dev/null || exit 1
+  tar c \
+      include \
+      lib/*.a \
+      lib/*.la.frida.in \
+      lib/glib-2.0 \
+      lib/pkgconfig \
+      share/aclocal \
+      share/glib-2.0/schemas \
+      share/vala \
+      | tar -C "$BUILDROOT/sdk-ios" -x - || exit 1
+  popd &>/dev/null
+
+  pushd "$BUILDROOT" &>/dev/null || exit 1
+  tar cfj "$target_filename" sdk-ios || exit 1
+  popd &>/dev/null
+
+  rm -rf "$BUILDROOT/sdk-ios"
+}
+
+[ -z "$FRIDA_BUILD" ] && exit 1
 
 build_all
 apply_fixups
+make_package
 
 echo "All done."
 
