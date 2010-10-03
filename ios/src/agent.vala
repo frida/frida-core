@@ -56,24 +56,6 @@ namespace Zed.Agent {
 			});
 		}
 
-		private async void unregister (DBusConnection connection) {
-			uint registration_id;
-			if (registration_id_by_connection.unset (connection, out registration_id))
-				connection.unregister_object (registration_id);
-		}
-
-		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			bool closed_by_us = (!remote_peer_vanished && error == null);
-			if (closed_by_us)
-				return;
-
-			unregister (connection);
-
-			connections.remove (connection);
-			if (connections.is_empty)
-				close ();
-		}
-
 		public async AgentModuleInfo[] query_modules () throws IOError {
 			var module_list = new Gee.ArrayList<AgentModuleInfo?> ();
 			Gum.Process.enumerate_modules ((name, address, path) => {
@@ -164,6 +146,24 @@ namespace Zed.Agent {
 
 			main_loop = new MainLoop ();
 			main_loop.run ();
+		}
+
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (closed_by_us)
+				return;
+
+			unregister (connection);
+
+			connections.remove (connection);
+			if (connections.is_empty)
+				close ();
+		}
+
+		private async void unregister (DBusConnection connection) {
+			uint registration_id;
+			if (registration_id_by_connection.unset (connection, out registration_id))
+				connection.unregister_object (registration_id);
 		}
 	}
 
