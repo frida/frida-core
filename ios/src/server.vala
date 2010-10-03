@@ -3,6 +3,7 @@ namespace Zid {
 		private Fruitjector injector = new Fruitjector ();
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
+		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
 		private const uint LISTEN_PORT = 27042;
 		private uint last_agent_port = LISTEN_PORT + 1;
@@ -23,9 +24,12 @@ namespace Zid {
 		public void run () throws Error {
 			server = new DBusServer.sync ("tcp:host=127.0.0.1,port=%u".printf (LISTEN_PORT), DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
+				connection.closed.connect (on_connection_closed);
+
 				try {
 					Zed.HostSession session = this;
-					connection.register_object (Zed.ObjectPath.HOST_SESSION, session);
+					var registration_id = connection.register_object (Zed.ObjectPath.HOST_SESSION, session);
+					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
 					return false;
@@ -41,6 +45,20 @@ namespace Zid {
 			loop.run ();
 
 			server.stop ();
+		}
+
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (closed_by_us)
+				return;
+			unregister (connection);
+			connections.remove (connection);
+		}
+
+		private async void unregister (DBusConnection connection) {
+			uint registration_id;
+			if (registration_id_by_connection.unset (connection, out registration_id))
+				connection.unregister_object (registration_id);
 		}
 	}
 
