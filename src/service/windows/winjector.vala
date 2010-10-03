@@ -94,7 +94,7 @@ namespace Zed.Service {
 				}
 
 				if (is_process_still_running (manager_process)) {
-					Timeout.add (10, () => {
+					Timeout.add (50, () => {
 						if (is_process_still_running (manager_process))
 							return true; /* wait and try again */
 						close.callback ();

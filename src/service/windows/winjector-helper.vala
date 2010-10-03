@@ -47,6 +47,7 @@ namespace Winjector {
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
+		private bool stopping = false;
 
 		private WinIpc.ClientProxy parent;
 		private WinIpc.ServerProxy helper32;
@@ -86,10 +87,16 @@ namespace Winjector {
 		}
 
 		private void stop () {
-			Idle.add (() => {
-				if (System.is_x64 ())
-					helper64.emit ("Stop");
-				helper32.emit ("Stop");
+			if (stopping)
+				return;
+			stopping = true;
+
+			if (System.is_x64 ())
+				helper64.emit ("Stop");
+			helper32.emit ("Stop");
+
+			// HACK: give child processes some time to shut down
+			Timeout.add (100, () => {
 				loop.quit ();
 				return false;
 			});
