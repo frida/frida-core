@@ -45,6 +45,7 @@ struct _ZidInjectionInstance
   ZidFruitjector * fruitjector;
   guint id;
   mach_port_t task;
+  vm_address_t payload_address;
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
 };
@@ -176,11 +177,13 @@ zid_injection_instance_new (ZidFruitjector * fruitjector, guint id)
 {
   ZidInjectionInstance * instance;
 
-  instance = g_new0 (ZidInjectionInstance, 1);
+  instance = g_new (ZidInjectionInstance, 1);
   instance->fruitjector = g_object_ref (fruitjector);
   instance->id = id;
   instance->task = MACH_PORT_NULL;
+  instance->payload_address = 0;
   instance->thread = MACH_PORT_NULL;
+  instance->thread_monitor_source = NULL;
 
   return instance;
 }
@@ -194,6 +197,8 @@ zid_injection_instance_free (ZidInjectionInstance * instance)
     dispatch_release (instance->thread_monitor_source);
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
+  if (instance->payload_address != 0)
+    vm_deallocate (instance->task, instance->payload_address, ZID_PAYLOAD_SIZE);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
   g_object_unref (instance->fruitjector);
@@ -236,6 +241,7 @@ _zid_fruitjector_do_inject (ZidFruitjector * self, guint pid,
 
   ret = vm_allocate (task, &payload_address, ZID_PAYLOAD_SIZE, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
+  instance->payload_address = payload_address;
 
   ret = vm_write (task, payload_address + ZID_MACH_CODE_OFFSET,
       (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
