@@ -19,7 +19,9 @@ namespace Zed.Service {
 
 				FruityHostSessionProvider provider;
 				provider_by_device_id.unset (device_id, out provider);
-				provider_unavailable (provider);
+
+				if (provider.is_open)
+					provider_unavailable (provider);
 			});
 
 			try {
@@ -38,7 +40,8 @@ namespace Zed.Service {
 			control_client = null;
 
 			foreach (var provider in provider_by_device_id.values) {
-				provider_unavailable (provider);
+				if (provider.is_open)
+					provider_unavailable (provider);
 				yield provider.close ();
 			}
 			provider_by_device_id.clear ();
@@ -80,15 +83,17 @@ namespace Zed.Service {
 			construct;
 		}
 
+		public bool is_open {
+			get;
+			private set;
+		}
+
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		private const uint ZID_SERVER_PORT = 27042;
 
 		public FruityHostSessionProvider (uint device_id, string device_udid) {
 			Object (device_id: device_id, device_udid: device_udid);
-		}
-
-		construct {
 		}
 
 		public async void open () throws IOError {
@@ -112,6 +117,8 @@ namespace Zed.Service {
 
 			if (!got_details)
 				throw new IOError.TIMED_OUT ("timed out");
+
+			is_open = true;
 		}
 
 		public async void close () {
