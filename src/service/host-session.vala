@@ -46,6 +46,7 @@ namespace Zed.Service {
 		public abstract async HostSession create () throws IOError;
 
 		public abstract async AgentSession obtain_agent_session (AgentSessionId id) throws IOError;
+		public signal void agent_session_closed (AgentSessionId id, Error? error);
 	}
 
 	public enum HostSessionProviderKind {

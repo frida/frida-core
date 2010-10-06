@@ -175,6 +175,8 @@ namespace Zed {
 			get;
 			private set;
 		}
+		private bool is_closing = false;
+		private ulong closed_handler_id;
 
 		private ProcessInfoLabel process_info_label;
 		private FunctionSelector start_selector;
@@ -202,12 +204,31 @@ namespace Zed {
 			configure_console ();
 		}
 
+		public void close () {
+			/* break strong references */
+			view.widget.destroy ();
+
+			if (session != null) {
+				assert (closed_handler_id != 0);
+				host_session.provider.disconnect (closed_handler_id);
+			}
+		}
+
 		public async void start () {
 			try {
 				update_state (State.ATTACHING);
 
 				var session_id = yield host_session.session.attach_to (process_info.pid);
 				session = yield host_session.provider.obtain_agent_session (session_id);
+				closed_handler_id = host_session.provider.agent_session_closed.connect ((id, err) => {
+					if (id != session_id)
+						return;
+
+					if (!is_closing && error != null)
+						this.error (err.message);
+					else
+						this.update_state (State.TERMINATED);
+				});
 				session.message_from_script.connect (on_message_from_script);
 
 				update_state (State.SYNCHRONIZING);
@@ -227,6 +248,7 @@ namespace Zed {
 
 			if (state == State.ATTACHED) {
 				try {
+					is_closing = true;
 					yield session.close ();
 				} catch (IOError e) {
 					this.error (e.message);

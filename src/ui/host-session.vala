@@ -133,7 +133,7 @@ namespace Zed {
 
 		private Gee.HashMap<string, Service.ModuleSpec> module_spec_by_uid = new Gee.HashMap<string, Service.ModuleSpec> ();
 
-		private Gtk.ListStore session_store = new Gtk.ListStore (1, typeof (AgentSession));
+		private Gtk.ListStore session_store = new Gtk.ListStore (2, typeof (AgentSession), typeof (ulong));
 		private AgentSession active_agent_session;
 
 		private const int STORAGE_BACKEND_SYNC_TIMEOUT_MSEC = 5000;
@@ -208,11 +208,11 @@ namespace Zed {
 			var code_service = create_code_service ();
 
 			var session = new AgentSession (new View.AgentSession (), active_host_session, process_info, code_service);
-			session.notify["state"].connect (() => on_session_state_changed (session));
+			var handler_id = session.notify["state"].connect (() => on_session_state_changed (session));
 
 			Gtk.TreeIter iter;
 			session_store.append (out iter);
-			session_store.set (iter, 0, session);
+			session_store.set (iter, 0, session, 1, handler_id);
 
 			view.session_notebook.append_page (session.view.widget, null);
 
@@ -236,7 +236,14 @@ namespace Zed {
 
 			Gtk.TreeIter iter;
 			session_store.get_iter (out iter, path);
+
+			ulong handler_id;
+			session_store.get (iter, 1, out handler_id);
+			session.disconnect (handler_id);
+
 			session_store.remove (iter);
+
+			session.close ();
 
 			if (active_agent_session == session) {
 				active_agent_session = null;

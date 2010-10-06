@@ -149,8 +149,10 @@ namespace Zed.Service {
 
 			HostSession session = connection.get_proxy_sync (null, ObjectPath.HOST_SESSION);
 
-			var entry = new Entry (client, connection, session);
+			var entry = new Entry (0, client, connection, session);
 			entries.add (entry);
+
+			connection.closed.connect (on_connection_closed);
 
 			return session;
 		}
@@ -191,15 +193,42 @@ namespace Zed.Service {
 
 			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
 
-			var entry = new Entry (client, connection, session);
+			var entry = new Entry (id.handle, client, connection, session);
 			entries.add (entry);
+
+			connection.closed.connect (on_connection_closed);
 
 			return session;
 		}
 
 		public static extern void _extract_details_for_device_with_udid (string udid, out string name, out ImageData? icon) throws IOError;
 
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (closed_by_us)
+				return;
+
+			Entry entry_to_remove = null;
+			foreach (var entry in entries) {
+				if (entry.connection == connection) {
+					entry_to_remove = entry;
+					break;
+				}
+			}
+			assert (entry_to_remove != null);
+
+			entries.remove (entry_to_remove);
+
+			if (entry_to_remove.id != 0) /* otherwise it's a HostSession */
+				agent_session_closed (AgentSessionId (entry_to_remove.id), error);
+		}
+
 		private class Entry : Object {
+			public uint id {
+				get;
+				private set;
+			}
+
 			public Fruity.Client client {
 				get;
 				private set;
@@ -215,7 +244,8 @@ namespace Zed.Service {
 				private set;
 			}
 
-			public Entry (Fruity.Client client, DBusConnection connection, Object proxy) {
+			public Entry (uint id, Fruity.Client client, DBusConnection connection, Object proxy) {
+				this.id = id;
 				this.client = client;
 				this.connection = connection;
 				this.proxy = proxy;

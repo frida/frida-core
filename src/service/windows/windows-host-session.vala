@@ -49,6 +49,7 @@ namespace Zed.Service {
 			if (host_session != null)
 				throw new IOError.FAILED ("may only create one HostSession");
 			host_session = new WindowsHostSession ();
+			host_session.agent_session_closed.connect ((id, error) => this.agent_session_closed (id, error));
 			return host_session;
 		}
 
@@ -62,6 +63,8 @@ namespace Zed.Service {
 	}
 
 	public class WindowsHostSession : Object, HostSession {
+		public signal void agent_session_closed (AgentSessionId id, Error? error);
+
 		private WindowsProcessBackend process_backend = new WindowsProcessBackend ();
 
 		private Winjector winjector = new Winjector ();
@@ -94,7 +97,7 @@ namespace Zed.Service {
 			}
 			entries.clear ();
 
-			// HACK: give processes 100 ms to unload DLLs
+			/* HACK: give processes 100 ms to unload DLLs */
 			var source = new TimeoutSource (100);
 			source.set_callback (() => {
 				close.callback ();
@@ -151,26 +154,53 @@ namespace Zed.Service {
 
 			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
 
-			var entry = new Entry (connection, session);
+			var entry = new Entry (id, connection, session);
 			entries.add (entry);
+
+			connection.closed.connect (on_connection_closed);
 
 			return session;
 		}
 
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (closed_by_us)
+				return;
+
+			Entry entry_to_remove = null;
+			foreach (var entry in entries) {
+				if (entry.connection == connection) {
+					entry_to_remove = entry;
+					break;
+				}
+			}
+
+			assert (entry_to_remove != null);
+			entries.remove (entry_to_remove);
+
+			agent_session_closed (entry_to_remove.id, error);
+		}
+
 		private class Entry : Object {
+			public AgentSessionId id {
+				get;
+				private set;
+			}
+
 			public DBusConnection connection {
 				get;
 				private set;
 			}
 
-			public AgentSession session {
+			public Object proxy {
 				get;
 				private set;
 			}
 
-			public Entry (DBusConnection connection, AgentSession session) {
+			public Entry (AgentSessionId id, DBusConnection connection, Object proxy) {
+				this.id = id;
 				this.connection = connection;
-				this.session = session;
+				this.proxy = proxy;
 			}
 		}
 	}
