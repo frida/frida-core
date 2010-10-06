@@ -6,7 +6,6 @@ namespace Zed.Test {
 		Zed.CodeServiceTest.add_tests ();
 		Zed.WinIpcTest.add_tests ();
 		Zed.WinjectorTest.add_tests ();
-		Zed.WinAgentTest.add_tests ();
 		Zed.AgentTest.add_tests ();
 		Zed.HostSessionTest.add_tests ();
 

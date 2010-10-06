@@ -19,19 +19,15 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-winipc-32", "lib\winipc
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-winipc-64", "lib\winipc\zed-winipc-64.vcxproj", "{90B16D19-1102-4AED-8452-F8DFBF59EA52}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-winagent-32", "lib\winagent\zed-winagent-32.vcxproj", "{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-winagent-64", "lib\winagent\zed-winagent-64.vcxproj", "{3194EC55-C1E5-423D-820F-13D38409B9D0}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-32", "ext\libgum\gum-32.vcxproj", "{B31C7D42-54B6-49BB-B30C-11745C48B062}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-64", "ext\libgum\gum-64.vcxproj", "{DC30A450-95BC-4476-A2F9-45100562424E}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-tests", "ext\libgum\tests\gum-tests.vcxproj", "{B6CA6DE9-B48B-47C0-B738-87DC3C06655F}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-32", "ios\src\zed-agent-32.vcxproj", "{F4F9AF1C-3111-4563-8066-8FAE8CBEFBDC}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-32", "lib\agent\zed-agent-32.vcxproj", "{F4F9AF1C-3111-4563-8066-8FAE8CBEFBDC}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-64", "ios\src\zed-agent-64.vcxproj", "{D873638D-AA0D-4252-9334-456557A65D95}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-64", "lib\agent\zed-agent-64.vcxproj", "{D873638D-AA0D-4252-9334-456557A65D95}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -113,22 +109,6 @@ Global
 		{90B16D19-1102-4AED-8452-F8DFBF59EA52}.Release|Win32.Build.0 = Release|x64
 		{90B16D19-1102-4AED-8452-F8DFBF59EA52}.Release|x64.ActiveCfg = Release|x64
 		{90B16D19-1102-4AED-8452-F8DFBF59EA52}.Release|x64.Build.0 = Release|x64
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Debug|Win32.ActiveCfg = Debug|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Debug|Win32.Build.0 = Debug|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Debug|x64.ActiveCfg = Debug|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Debug|x64.Build.0 = Debug|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Release|Win32.ActiveCfg = Release|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Release|Win32.Build.0 = Release|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Release|x64.ActiveCfg = Release|Win32
-		{B111BA27-807A-4B16-A4DE-A33D7D6D7CE1}.Release|x64.Build.0 = Release|Win32
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Debug|Win32.ActiveCfg = Debug|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Debug|Win32.Build.0 = Debug|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Debug|x64.ActiveCfg = Debug|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Debug|x64.Build.0 = Debug|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Release|Win32.ActiveCfg = Release|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Release|Win32.Build.0 = Release|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Release|x64.ActiveCfg = Release|x64
-		{3194EC55-C1E5-423D-820F-13D38409B9D0}.Release|x64.Build.0 = Release|x64
 		{B31C7D42-54B6-49BB-B30C-11745C48B062}.Debug|Win32.ActiveCfg = Debug|Win32
 		{B31C7D42-54B6-49BB-B30C-11745C48B062}.Debug|Win32.Build.0 = Debug|Win32
 		{B31C7D42-54B6-49BB-B30C-11745C48B062}.Debug|x64.ActiveCfg = Debug|Win32

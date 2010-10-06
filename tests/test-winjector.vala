@@ -1,12 +1,8 @@
-using WinIpc;
-
 namespace Zed.WinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Winjector/inject/x86", () => {
 			var rat = new LabRat ("winvictim-busy32");
-			Thread.usleep (10000); /* give it 10 ms to settle */
-			var proxy = rat.inject ("winattacker%u.dll");
-			proxy.emit ("ExitProcess", new Variant ("u", 12345));
+			rat.inject ("winattacker%u.dll", "12345");
 			long exitcode = rat.wait_for_process_to_exit ();
 			rat.close ();
 			assert (exitcode == 12345);
@@ -14,26 +10,32 @@ namespace Zed.WinjectorTest {
 
 		GLib.Test.add_func ("/Winjector/inject/x64", () => {
 			var rat = new LabRat ("winvictim-busy64");
-			Thread.usleep (10000); /* give it 10 ms to settle */
-			var proxy = rat.inject ("winattacker%u.dll");
-			proxy.emit ("ExitProcess", new Variant ("u", 54321));
+			rat.inject ("winattacker%u.dll", "54321");
 			long exitcode = rat.wait_for_process_to_exit ();
 			rat.close ();
 			assert (exitcode == 54321);
 		});
 	}
 
-	private class LabRat {
+	private class LabRat : Object {
+		public string name {
+			get;
+			construct;
+		}
+
 		public Zed.Test.Process process {
 			get;
 			private set;
 		}
 
 		private string rat_directory;
-		private WinIpc.Proxy cur_proxy;
 		private Service.Winjector injector;
 
 		public LabRat (string name) {
+			Object (name: name);
+		}
+
+		construct {
 			var self_filename = Zed.Test.Process.current.filename;
 			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename)))),
 				"tests", "labrats");
@@ -42,17 +44,13 @@ namespace Zed.WinjectorTest {
 			process = Zed.Test.Process.start (rat_file);
 		}
 
-		public WinIpc.Proxy inject (string name) {
+		public void inject (string name, string data_string) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_injection (name, loop);
+				do_injection (name, data_string, loop);
 				return false;
 			});
 			loop.run ();
-
-			var proxy = cur_proxy;
-			cur_proxy = null;
-			return proxy;
 		}
 
 		public long wait_for_process_to_exit () {
@@ -83,7 +81,7 @@ namespace Zed.WinjectorTest {
 			loop.run ();
 		}
 
-		private async void do_injection (string name, MainLoop loop) {
+		private async void do_injection (string name, string data_string, MainLoop loop) {
 			if (injector == null)
 				injector = new Service.Winjector ();
 
@@ -100,7 +98,7 @@ namespace Zed.WinjectorTest {
 			}
 
 			try {
-				cur_proxy = yield injector.inject ((uint32) process.id, desc);
+				yield injector.inject ((uint32) process.id, desc, data_string);
 			} catch (Service.WinjectorError e) {
 				inject_error = e.message;
 			}

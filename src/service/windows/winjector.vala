@@ -16,7 +16,7 @@ namespace Zed.Service {
 			elevated_resource_store = null;
 		}
 
-		public async WinIpc.Proxy inject (uint32 target_pid, AgentDescriptor desc, Cancellable? cancellable = null) throws WinjectorError {
+		public async void inject (uint32 target_pid, AgentDescriptor desc, string data_string, Cancellable? cancellable = null) throws WinjectorError {
 			if (normal_resource_store == null) {
 				normal_resource_store = new ResourceStore ();
 				normal_helper_factory.resource_store = normal_resource_store;
@@ -24,13 +24,11 @@ namespace Zed.Service {
 
 			var filename = normal_resource_store.ensure_copy_of (desc);
 
-			var proxy = new WinIpc.ServerProxy ();
-
 			bool injected = false;
 
 			var normal_helper = yield normal_helper_factory.obtain ();
 			try {
-				yield normal_helper.inject (target_pid, filename, proxy.address, cancellable);
+				yield normal_helper.inject (target_pid, filename, data_string, cancellable);
 				injected = true;
 			} catch (WinjectorError inject_error) {
 				var permission_error = new WinjectorError.ACCESS_DENIED ("");
@@ -47,16 +45,8 @@ namespace Zed.Service {
 				filename = elevated_resource_store.ensure_copy_of (desc);
 
 				var elevated_helper = yield elevated_helper_factory.obtain ();
-				yield elevated_helper.inject (target_pid, filename, proxy.address, cancellable);
+				yield elevated_helper.inject (target_pid, filename, data_string, cancellable);
 			}
-
-			try {
-				yield proxy.establish ();
-			} catch (WinIpc.ProxyError proxy_error) {
-				throw new WinjectorError.FAILED (proxy_error.message);
-			}
-
-			return proxy;
 		}
 
 		private class Helper {

@@ -230,7 +230,7 @@
     <ClCompile Include="$(IntDir)data\zed-data-ui.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-winagent.c">
+    <ClCompile Include="$(IntDir)data\zed-data-agent.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
