@@ -1,4 +1,4 @@
-namespace Zid.FruitjectorTest {
+namespace Zed.FruitjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Fruitjector/inject", () => {
 			var logfile = File.new_for_path (Path.build_filename (Config.PKGTESTDIR, "inject-attacker.log"));
@@ -45,7 +45,7 @@ namespace Zid.FruitjectorTest {
 	}
 
 	private class LabRat {
-		public Zid.Test.Process process {
+		public Zed.Test.Process process {
 			get;
 			private set;
 		}
@@ -62,7 +62,7 @@ namespace Zid.FruitjectorTest {
 			var rat_file = Path.build_filename (rat_directory, name);
 
 			try {
-				process = Zid.Test.Process.start (rat_file);
+				process = Zed.Test.Process.start (rat_file);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();

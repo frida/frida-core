@@ -1,51 +1,51 @@
-noinst_PROGRAMS = zid-tests inject-victim
+noinst_PROGRAMS = zed-server-tests inject-victim
 
 noinst_LTLIBRARIES = libinject-attacker.la
 
-zid_tests_SOURCES = \
+zed_server_tests_SOURCES = \
 	test-main.vala \
 	test-fruitjector.vala \
 	test-system.vala \
 	process.vala \
 	process-glue.c
-zid_tests_LDFLAGS = \
+zed_server_tests_LDFLAGS = \
 	-Wl,-framework -Wl,CoreGraphics \
 	-Wl,-framework -Wl,Foundation \
 	-Wl,-framework -Wl,UIKit
-zid_tests_LDADD = \
-	$(top_builddir)/src/libzid-core.la \
-	$(ZID_LIBS)
+zed_server_tests_LDADD = \
+	$(top_builddir)/server/src/libzed-server-core.la \
+	$(ZED_LIBS)
 
 inject_victim_SOURCES = \
 	inject-victim.vala
 inject_victim_LDADD = \
-	$(ZID_LIBS)
+	$(ZED_LIBS)
 
 libinject_attacker_la_SOURCES = \
 	inject-attacker.c
 libinject_attacker_la_LDFLAGS = \
 	-rpath /nowhere
 libinject_attacker_la_LIBADD = \
-	$(ZID_LIBS)
+	$(ZED_LIBS)
 
 AM_CPPFLAGS = \
 	-include config.h \
-	-I $(top_builddir)/ext/interfaces \
-	-I $(top_builddir)/src \
-	$(ZID_CFLAGS) \
+	-I $(top_builddir)/lib/interfaces \
+	-I $(top_builddir)/server/src \
+	$(ZED_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\" \
 	-DPKGTESTDIR=\""$(prefix)/tests"\"
 
 VALAFLAGS = \
-	--header=zid-tests.h \
-	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_builddir)/ext/interfaces \
-	--vapidir=$(top_builddir)/src \
+	--header=zed-server-tests.h \
+	--vapidir=$(top_srcdir)/server/vapi \
+	--vapidir=$(top_builddir)/lib/interfaces \
+	--vapidir=$(top_builddir)/server/src \
 	--pkg config \
-	--pkg zid-core \
+	--pkg zed-server-core \
 	--pkg zed-interfaces \
-	@ZID_PACKAGES@
+	@ZED_PACKAGES@
 
-all-local: zid-tests
-	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zid-tests.xcent" "$<"
+all-local: zed-server-tests
+	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-server-tests.xcent" "$<"

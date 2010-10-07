@@ -1,11 +1,11 @@
-#include "zid-tests.h"
+#include "zed-server-tests.h"
 
 #include <errno.h>
 #include <unistd.h>
 #include <gio/gio.h>
 
 int
-zid_test_process_backend_do_start (const char * filename, GError ** error)
+zed_test_process_backend_do_start (const char * filename, GError ** error)
 {
   pid_t pid;
 
@@ -26,7 +26,7 @@ zid_test_process_backend_do_start (const char * filename, GError ** error)
 }
 
 int
-zid_test_process_backend_do_join (int pid, guint timeout_msec,
+zed_test_process_backend_do_join (int pid, guint timeout_msec,
     GError ** error)
 {
   int status = -1;

@@ -1,4 +1,4 @@
-namespace Zid.Test {
+namespace Zed.Test {
 	public class Process : Object {
 		public int id {
 			get;

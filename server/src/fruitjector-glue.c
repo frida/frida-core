@@ -1,4 +1,4 @@
-#include "zid-core.h"
+#include "zed-server-core.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -31,18 +31,18 @@
     goto handle_dl_error; \
   }
 
-typedef struct _ZidFruitContext ZidFruitContext;
-typedef struct _ZidInjectionInstance ZidInjectionInstance;
-typedef struct _ZidAgentContext ZidAgentContext;
+typedef struct _ZedFruitContext ZedFruitContext;
+typedef struct _ZedInjectionInstance ZedInjectionInstance;
+typedef struct _ZedAgentContext ZedAgentContext;
 
-struct _ZidFruitContext
+struct _ZedFruitContext
 {
   dispatch_queue_t dispatch_queue;
 };
 
-struct _ZidInjectionInstance
+struct _ZedInjectionInstance
 {
-  ZidFruitjector * fruitjector;
+  ZedFruitjector * fruitjector;
   guint id;
   mach_port_t task;
   vm_address_t payload_address;
@@ -50,7 +50,7 @@ struct _ZidInjectionInstance
   dispatch_source_t thread_monitor_source;
 };
 
-struct _ZidAgentContext
+struct _ZedAgentContext
 {
   gpointer pthread_set_self_impl;
   gpointer thread_self;
@@ -81,33 +81,33 @@ struct _ZidAgentContext
 
 static const guint32 mach_stub_code[] =
 {
-  0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, thread_self),           /* add r0, r7, <offset> */
+  0xe2870000 | G_STRUCT_OFFSET (ZedAgentContext, thread_self),           /* add r0, r7, <offset> */
   0xe5900000,                                                            /* ldr r0, [r0] */
-  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_set_self_impl), /* add r3, r7, <offset> */
+  0xe2873000 | G_STRUCT_OFFSET (ZedAgentContext, pthread_set_self_impl), /* add r3, r7, <offset> */
   0xe5933000,                                                            /* ldr r3, [r3] */
   0xe12fff33,                                                            /* blx r3 */
 
   0xe24dd004,                                                            /* sub sp, sp, 4 */
   0xe1a03007,                                                            /* mov r3, r7 */
-  0xe2872000 | G_STRUCT_OFFSET (ZidAgentContext, worker_func),           /* add r2, r7, <offset> */
+  0xe2872000 | G_STRUCT_OFFSET (ZedAgentContext, worker_func),           /* add r2, r7, <offset> */
   0xe5922000,                                                            /* ldr r2, [r2] */
   0xe0211001,                                                            /* eor r1, r1, r1 */
   0xe1a0000d,                                                            /* mov r0, sp */
-  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_create_impl),   /* add r4, r7, <offset> */
+  0xe2874000 | G_STRUCT_OFFSET (ZedAgentContext, pthread_create_impl),   /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
   0xe12fff34,                                                            /* blx r4 */
 
   0xe0211001,                                                            /* eor r1, r1, r1 */
   0xe59d0000,                                                            /* ldr r0, [sp] */
-  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, pthread_join_impl),     /* add r4, r7, <offset> */
+  0xe2874000 | G_STRUCT_OFFSET (ZedAgentContext, pthread_join_impl),     /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
   0xe12fff34,                                                            /* blx r4 */
 
-  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, mach_thread_self_impl), /* add r4, r7, <offset> */
+  0xe2874000 | G_STRUCT_OFFSET (ZedAgentContext, mach_thread_self_impl), /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
   0xe12fff34,                                                            /* blx r4 */
 
-  0xe2874000 | G_STRUCT_OFFSET (ZidAgentContext, thread_terminate_impl), /* add r4, r7, <offset> */
+  0xe2874000 | G_STRUCT_OFFSET (ZedAgentContext, thread_terminate_impl), /* add r4, r7, <offset> */
   0xe5944000,                                                            /* ldr r4, [r4] */
   0xe12fff34                                                             /* blx r4 */
 };
@@ -118,45 +118,45 @@ static const guint32 pthread_stub_code[] =
 
   0xe1a07000,                                                            /* mov r7, r0 */
 
-  0xe2872000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_mode),           /* add	r1, r7, <offset> */
+  0xe2872000 | G_STRUCT_OFFSET (ZedAgentContext, dlopen_mode),           /* add	r1, r7, <offset> */
   0xe5921000,                                                            /* ldr	r1, [r1] */
-  0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, dylib_path),            /* add	r0, r7, <offset> */
+  0xe2870000 | G_STRUCT_OFFSET (ZedAgentContext, dylib_path),            /* add	r0, r7, <offset> */
   0xe5900000,                                                            /* ldr r0, [r0] */
-  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlopen_impl),           /* add	r3, r7, <offset> */
+  0xe2873000 | G_STRUCT_OFFSET (ZedAgentContext, dlopen_impl),           /* add	r3, r7, <offset> */
   0xe5933000,                                                            /* ldr	r3, [r3] */
   0xe12fff33,                                                            /* blx	r3 */
   0xe1a04000,                                                            /* mov	r4, r0 */
 
-  0xe2871000 | G_STRUCT_OFFSET (ZidAgentContext, entrypoint_name),       /* add	r1, r7, <offset> */
+  0xe2871000 | G_STRUCT_OFFSET (ZedAgentContext, entrypoint_name),       /* add	r1, r7, <offset> */
   0xe5911000,                                                            /* ldr r1, [r1] */
   0xe1a00004,                                                            /* mov r0, r4 */
-  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlsym_impl),            /* add	r3, r7, <offset> */
+  0xe2873000 | G_STRUCT_OFFSET (ZedAgentContext, dlsym_impl),            /* add	r3, r7, <offset> */
   0xe5933000,                                                            /* ldr	r3, [r3] */
   0xe12fff33,                                                            /* blx	r3 */
   0xe1a05000,                                                            /* mov	r5, r0 */
 
-  0xe2870000 | G_STRUCT_OFFSET (ZidAgentContext, data_string),           /* add	r0, r7, <offset> */
+  0xe2870000 | G_STRUCT_OFFSET (ZedAgentContext, data_string),           /* add	r0, r7, <offset> */
   0xe5900000,                                                            /* ldr r0, [r0] */
   0xe12fff35,                                                            /* blx	r5 */
 
   0xe1a00004,                                                            /* mov	r0, r4 */
-  0xe2873000 | G_STRUCT_OFFSET (ZidAgentContext, dlclose_impl),          /* add	r3, r7, <offset> */
+  0xe2873000 | G_STRUCT_OFFSET (ZedAgentContext, dlclose_impl),          /* add	r3, r7, <offset> */
   0xe5933000,                                                            /* ldr	r3, [r3] */
   0xe12fff33,                                                            /* blx	r3 */
 
   0xe8bd80b0                                                             /* pop {r4, r5, r7, pc} */
 };
 
-static gboolean fill_agent_context (ZidAgentContext * ctx,
+static gboolean fill_agent_context (ZedAgentContext * ctx,
     const char * dylib_path, const char * data_string,
     vm_address_t remote_payload_base, GError ** error);
 
 void
-_zid_fruitjector_create_context (ZidFruitjector * self)
+_zed_fruitjector_create_context (ZedFruitjector * self)
 {
-  ZidFruitContext * ctx;
+  ZedFruitContext * ctx;
 
-  ctx = g_new0 (ZidFruitContext, 1);
+  ctx = g_new0 (ZedFruitContext, 1);
   ctx->dispatch_queue = dispatch_queue_create (
       "org.boblycat.frida.fruitjector.queue", NULL);
 
@@ -164,20 +164,20 @@ _zid_fruitjector_create_context (ZidFruitjector * self)
 }
 
 void
-_zid_fruitjector_destroy_context (ZidFruitjector * self)
+_zed_fruitjector_destroy_context (ZedFruitjector * self)
 {
-  ZidFruitContext * ctx = self->context;
+  ZedFruitContext * ctx = self->context;
 
   dispatch_release (ctx->dispatch_queue);
   g_free (ctx);
 }
 
-static ZidInjectionInstance *
-zid_injection_instance_new (ZidFruitjector * fruitjector, guint id)
+static ZedInjectionInstance *
+zed_injection_instance_new (ZedFruitjector * fruitjector, guint id)
 {
-  ZidInjectionInstance * instance;
+  ZedInjectionInstance * instance;
 
-  instance = g_new (ZidInjectionInstance, 1);
+  instance = g_new (ZedInjectionInstance, 1);
   instance->fruitjector = g_object_ref (fruitjector);
   instance->id = id;
   instance->task = MACH_PORT_NULL;
@@ -189,7 +189,7 @@ zid_injection_instance_new (ZidFruitjector * fruitjector, guint id)
 }
 
 static void
-zid_injection_instance_free (ZidInjectionInstance * instance)
+zed_injection_instance_free (ZedInjectionInstance * instance)
 {
   task_t self_task = mach_task_self ();
 
@@ -206,34 +206,34 @@ zid_injection_instance_free (ZidInjectionInstance * instance)
 }
 
 static void
-zid_injection_instance_handle_event (void * context)
+zed_injection_instance_handle_event (void * context)
 {
-  ZidInjectionInstance * instance = context;
+  ZedInjectionInstance * instance = context;
 
-  _zid_fruitjector_on_instance_dead (instance->fruitjector, instance->id);
+  _zed_fruitjector_on_instance_dead (instance->fruitjector, instance->id);
 }
 
 void
-_zid_fruitjector_free_instance (ZidFruitjector * self, void * instance)
+_zed_fruitjector_free_instance (ZedFruitjector * self, void * instance)
 {
-  zid_injection_instance_free (instance);
+  zed_injection_instance_free (instance);
 }
 
 guint
-_zid_fruitjector_do_inject (ZidFruitjector * self, guint pid,
+_zed_fruitjector_do_inject (ZedFruitjector * self, guint pid,
     const char * dylib_path, const char * data_string, GError ** error)
 {
-  ZidFruitContext * ctx = self->context;
-  ZidInjectionInstance * instance;
+  ZedFruitContext * ctx = self->context;
+  ZedInjectionInstance * instance;
   const gchar * failed_operation;
   mach_port_name_t task = 0;
   kern_return_t ret;
   vm_address_t payload_address = (vm_address_t) NULL;
-  ZidAgentContext agent_ctx;
+  ZedAgentContext agent_ctx;
   arm_thread_state_t state;
   dispatch_source_t source;
 
-  instance = zid_injection_instance_new (self, self->last_id++);
+  instance = zed_injection_instance_new (self, self->last_id++);
 
   ret = task_for_pid (mach_task_self (), pid, &task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
@@ -283,7 +283,7 @@ _zid_fruitjector_do_inject (ZidFruitjector * self, guint pid,
   instance->thread_monitor_source = source;
   dispatch_set_context (source, instance);
   dispatch_source_set_event_handler_f (source,
-      zid_injection_instance_handle_event);
+      zed_injection_instance_handle_event);
   dispatch_resume (source);
 
   return instance->id;
@@ -297,13 +297,13 @@ handle_mach_error:
 
 error_epilogue:
   {
-    zid_injection_instance_free (instance);
+    zed_injection_instance_free (instance);
     return 0;
   }
 }
 
 static gboolean
-fill_agent_context (ZidAgentContext * ctx, const char * dylib_path,
+fill_agent_context (ZedAgentContext * ctx, const char * dylib_path,
     const char * data_string, vm_address_t remote_payload_base, GError ** error)
 {
   gboolean result = FALSE;
@@ -336,17 +336,17 @@ fill_agent_context (ZidAgentContext * ctx, const char * dylib_path,
   ctx->dlopen_impl = dlsym (syslib_handle, "dlopen");
   CHECK_DL_RESULT (ctx->dlopen_impl, !=, NULL, "dlsym(\"dlopen\")");
   ctx->dylib_path = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZidAgentContext, dylib_path_data));
+      G_STRUCT_OFFSET (ZedAgentContext, dylib_path_data));
   strcpy (ctx->dylib_path_data, dylib_path);
   ctx->dlopen_mode = RTLD_LAZY;
 
   ctx->dlsym_impl = dlsym (syslib_handle, "dlsym");
   CHECK_DL_RESULT (ctx->dlsym_impl, !=, NULL, "dlsym(\"dlsym\")");
   ctx->entrypoint_name = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZidAgentContext, entrypoint_name_data));
+      G_STRUCT_OFFSET (ZedAgentContext, entrypoint_name_data));
   strcpy (ctx->entrypoint_name_data, ZID_AGENT_ENTRYPOINT_NAME);
   ctx->data_string = (gchar *) (remote_payload_base + ZID_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZidAgentContext, data_string_data));
+      G_STRUCT_OFFSET (ZedAgentContext, data_string_data));
   g_assert_cmpint (strlen (data_string), <, sizeof (ctx->data_string_data));
   strcpy (ctx->data_string_data, data_string);
 

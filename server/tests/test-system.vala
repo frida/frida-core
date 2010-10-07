@@ -1,4 +1,4 @@
-namespace Zid.SystemTest {
+namespace Zed.SystemTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/System/enumerate-processes", () => {
 			var timer = new Timer ();

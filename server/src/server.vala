@@ -1,4 +1,4 @@
-namespace Zid {
+namespace Zed {
 	public class Application : Object, Zed.HostSession {
 		private Fruitjector injector = new Fruitjector ();
 		private DBusServer server;
@@ -13,7 +13,7 @@ namespace Zid {
 		}
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
-			var agent_path = Path.build_filename (Config.PKGLIBDIR, "zid-agent.dylib");
+			var agent_path = Path.build_filename (Config.PKGLIBDIR, "zed-agent.dylib");
 			var port = last_agent_port++;
 			var listen_address = "tcp:host=127.0.0.1,port=%u".printf (port);
 			injector.inject (pid, agent_path, listen_address);

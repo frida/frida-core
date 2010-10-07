@@ -1,4 +1,4 @@
-#include "zid-core.h"
+#include "zed-server-core.h"
 
 #import <UIKit/UIKit.h>
 
@@ -7,10 +7,10 @@
 #include <unistd.h>
 #include <sys/sysctl.h>
 
-typedef struct _ZidSpringboardApi ZidSpringboardApi;
-typedef struct _ZidIconPair ZidIconPair;
+typedef struct _ZedSpringboardApi ZedSpringboardApi;
+typedef struct _ZedIconPair ZedIconPair;
 
-struct _ZidSpringboardApi
+struct _ZedSpringboardApi
 {
   void * module;
 
@@ -19,7 +19,7 @@ struct _ZidSpringboardApi
   NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifier) (NSString * identifier);
 };
 
-struct _ZidIconPair
+struct _ZedIconPair
 {
   ZedImageData small_icon;
   ZedImageData large_icon;
@@ -28,19 +28,19 @@ struct _ZidIconPair
 static void extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon);
 static void init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height);
 
-static void zid_icon_pair_free (ZidIconPair * pair);
+static void zed_icon_pair_free (ZedIconPair * pair);
 
-static ZidSpringboardApi * zid_springboard_api = NULL;
+static ZedSpringboardApi * zed_springboard_api = NULL;
 static GHashTable * icon_pair_by_identifier = NULL;
 
 static void
-zid_system_init (void)
+zed_system_init (void)
 {
-  if (zid_springboard_api == NULL)
+  if (zed_springboard_api == NULL)
   {
-    ZidSpringboardApi * api;
+    ZedSpringboardApi * api;
 
-    api = g_new (ZidSpringboardApi, 1);
+    api = g_new (ZedSpringboardApi, 1);
 
     api->module = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY | RTLD_GLOBAL);
     g_assert (api->module != NULL);
@@ -54,14 +54,14 @@ zid_system_init (void)
     api->SBSCopyIconImagePNGDataForDisplayIdentifier = dlsym (api->module, "SBSCopyIconImagePNGDataForDisplayIdentifier");
     g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
 
-    zid_springboard_api = api;
+    zed_springboard_api = api;
 
-    icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) zid_icon_pair_free);
+    icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) zed_icon_pair_free);
   }
 }
 
 ZedHostProcessInfo *
-zid_system_enumerate_processes (int * result_length1)
+zed_system_enumerate_processes (int * result_length1)
 {
   NSAutoreleasePool * pool;
   int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
@@ -71,7 +71,7 @@ zid_system_enumerate_processes (int * result_length1)
   guint count, i;
   ZedHostProcessInfo * result;
 
-  zid_system_init ();
+  zed_system_init ();
 
   pool = [[NSAutoreleasePool alloc] init];
 
@@ -95,12 +95,12 @@ zid_system_enumerate_processes (int * result_length1)
 
     info->_pid = e->kp_proc.p_pid;
 
-    identifier = zid_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
+    identifier = zed_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
     if (identifier != nil)
     {
       NSString * app_name;
 
-      app_name = zid_springboard_api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+      app_name = zed_springboard_api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
       info->_name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
@@ -125,7 +125,7 @@ zid_system_enumerate_processes (int * result_length1)
 }
 
 void
-zid_system_kill (guint pid)
+zed_system_kill (guint pid)
 {
   killpg (getpgid (pid), SIGTERM);
 }
@@ -133,7 +133,7 @@ zid_system_kill (guint pid)
 static void
 extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon)
 {
-  ZidIconPair * pair;
+  ZedIconPair * pair;
 
   pair = g_hash_table_lookup (icon_pair_by_identifier, [identifier UTF8String]);
   if (pair == NULL)
@@ -141,9 +141,9 @@ extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon,
     NSData * png_data;
     UIImage * image;
 
-    png_data = zid_springboard_api->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
+    png_data = zed_springboard_api->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
 
-    pair = g_new (ZidIconPair, 1);
+    pair = g_new (ZedIconPair, 1);
     image = [UIImage imageWithData: png_data];
     init_icon_from_ui_image_scaled_to (&pair->small_icon, image, 16, 16);
     init_icon_from_ui_image_scaled_to (&pair->large_icon, image, 32, 32);
@@ -219,7 +219,7 @@ init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint t
 }
 
 static void
-zid_icon_pair_free (ZidIconPair * pair)
+zed_icon_pair_free (ZedIconPair * pair)
 {
   zed_image_data_destroy (&pair->small_icon);
   zed_image_data_destroy (&pair->large_icon);

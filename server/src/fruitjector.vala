@@ -1,4 +1,4 @@
-public class Zid.Fruitjector : Object {
+public class Zed.Fruitjector : Object {
 	public signal void uninjected (uint id);
 
 	/* these should be private, but must be accessible to glue code */
