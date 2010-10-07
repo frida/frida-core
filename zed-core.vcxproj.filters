@@ -108,7 +108,7 @@
     <None Include="src\service\code-service.vala">
       <Filter>Source Files\service</Filter>
     </None>
-    <None Include="src\service\host-session.vala">
+    <None Include="src\service\host-session-service.vala">
       <Filter>Source Files\service</Filter>
     </None>
     <None Include="src\service\windows\winjector.vala">
@@ -194,7 +194,7 @@
     <ClCompile Include="src\ui\agent-session-glue.c">
       <Filter>Source Files\ui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\host-session.c">
+    <ClCompile Include="$(IntDir)src\service\host-session-service.c">
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\windows\winjector-error.c">

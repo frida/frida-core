@@ -1,6 +1,8 @@
 [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
 
 case $FRIDA_TARGET in
+  linux)
+    ;;
   osx)
     ;;
   ios)
@@ -9,7 +11,7 @@ case $FRIDA_TARGET in
     fi
     ;;
   *)
-    echo "Invalid FRIDA_TARGET, must be either osx or ios"
+    echo "Invalid FRIDA_TARGET, must be either linux, osx or ios"
     exit 1
     ;;
 esac
@@ -21,11 +23,16 @@ export FRIDA_PREFIX_LIB="${FRIDA_PREFIX}/lib"
 export FRIDA_TOOLROOT="${FRIDA_BUILD}/toolchain"
 export FRIDA_SDKROOT="${FRIDA_BUILD}/sdk-${FRIDA_TARGET}"
 
-export MACOSX_DEPLOYMENT_TARGET=10.6
+if [ "$FRIDA_TARGET" = "linux" ]; then
+  export PATH="${FRIDA_PREFIX}/bin:${PATH}"
+else
+  export PATH="${FRIDA_TOOLROOT}/bin:${IPHONE_DEVROOT}/usr/bin:/opt/local/bin:${PATH}"
 
-export PATH="${FRIDA_TOOLROOT}/bin:${IPHONE_DEVROOT}/usr/bin:/opt/local/bin:${PATH}"
+  export MACOSX_DEPLOYMENT_TARGET=10.6
+  export CLICOLOR=1
+fi
+
 export PS1="\e[0;33m[\u@\h \w \e[m\e[1;33mfrida-${FRIDA_TARGET}\e[m\e[0;33m]\e[m\n\$ "
-export CLICOLOR=1
 
 if [ "$FRIDA_TARGET" = "osx" ]; then
   export CC="/usr/bin/gcc-4.2"
@@ -34,7 +41,7 @@ if [ "$FRIDA_TARGET" = "osx" ]; then
 
   export CFLAGS=""
   export LDFLAGS=""
-else
+elif [ "$FRIDA_TARGET" = "ios" ]; then
   export IPHONE_SDKVER="4.0"
   export IPHONE_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
   export IPHONE_SDKROOT="${IPHONE_DEVROOT}/SDKs/iPhoneOS${IPHONE_SDKVER}.sdk"
@@ -45,39 +52,56 @@ else
 
   export CFLAGS="-isysroot ${IPHONE_SDKROOT} -miphoneos-version-min=${IPHONE_SDKVER} -arch armv7"
   export LDFLAGS="-isysroot ${IPHONE_SDKROOT} -Wl,-iphoneos_version_min,${IPHONE_SDKVER} -arch armv7"
+else
+  export CC="gcc"
+  export CXX="g++"
+
+  export CFLAGS=""
+  export LDFLAGS=""
 fi
 
 export LD="${CC}"
-export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.12 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.12/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
 
 export CXXFLAGS="$CFLAGS"
 export OBJCFLAGS="$CFLAGS"
 export CPPFLAGS="$CFLAGS"
-export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
 
-export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
+if [ "$FRIDA_TARGET" = "linux" ]; then
+  export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal"
+
+  export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig"
+  export VALAC="${FRIDA_PREFIX}/bin/valac-0.12 --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+else
+  export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
+  export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
+
+  export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
+  export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig:${IPHONE_SDKROOT}/usr/lib/pkgconfig"
+  export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.12 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.12/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+fi
 export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
 export CONFIG_SITE="${FRIDA_BUILD}/config.site"
-export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
-export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig:${IPHONE_SDKROOT}/usr/lib/pkgconfig"
 
 export LANG="C"
 
-if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
-  echo "Downloading and deploying toolchain..."
-  curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20101003.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
-fi
-
-if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
-  echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
-  curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-20101003.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
-fi
-
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 
-for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
-  target=$(echo $template | sed 's,\.frida\.in$,,')
-  cp -a "$template" "$target"
-  sed -e "s,@FRIDA_TOOLROOT@,${FRIDA_TOOLROOT},g" -e "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" "$template" > "$target"
-done
+if [ ! "$FRIDA_TARGET" = "linux" ]; then
 
+  if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
+    echo "Downloading and deploying toolchain..."
+    curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20101003.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  fi
+
+  if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
+    echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
+    curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-20101003.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  fi
+
+  for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
+    target=$(echo $template | sed 's,\.frida\.in$,,')
+    cp -a "$template" "$target"
+    sed -e "s,@FRIDA_TOOLROOT@,${FRIDA_TOOLROOT},g" -e "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" "$template" > "$target"
+  done
+
+fi

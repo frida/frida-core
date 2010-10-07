@@ -1,9 +1,18 @@
 RURL := root@${IOS_IPADDR}
 RPFX := ${prefix}
 
+ACLOCAL_AMFLAGS = -I m4
+
 SUBDIRS = \
-	lib \
-	server
+	lib
+
+if ENABLE_CLIENT
+SUBDIRS += src
+endif
+
+if ENABLE_SERVER
+SUBDIRS += server
+endif
 
 deploy: all
 	ssh "${RURL}" "mkdir -p ${RPFX}/{sbin,lib/zed}/"
