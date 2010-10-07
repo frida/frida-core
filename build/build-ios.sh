@@ -2,10 +2,10 @@
 
 pushd "${FRIDA_ROOT}/ext/libgum" >/dev/null || exit 1
 ./autogen.sh || exit 1
-make install
+make install || exit 1
 popd >/dev/null
 
-pushd "${FRIDA_ROOT}/ios" >/dev/null || exit 1
+pushd "${FRIDA_ROOT}" >/dev/null || exit 1
 ./autogen.sh || exit 1
-make deploy
+make deploy || exit 1
 popd >/dev/null
