@@ -14,7 +14,8 @@ zed_VALAFLAGS = \
 	--pkg config \
 	--pkg zed-core \
 	--pkg zed-interfaces \
-	@ZED_PACKAGES@
+	@ZED_PACKAGES@ \
+	@ZED_CLIENT_PACKAGES@
 
 libzed_core_la_SOURCES = \
 	$(srcdir)/configuration.vala \
@@ -45,7 +46,8 @@ libzed_core_la_VALAFLAGS = \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--pkg config \
 	--pkg zed-interfaces \
-	@ZED_PACKAGES@
+	@ZED_PACKAGES@ \
+	@ZED_CLIENT_PACKAGES@
 
 AM_CPPFLAGS = \
 	-include config.h \
