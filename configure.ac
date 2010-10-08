@@ -23,7 +23,7 @@ AM_CONDITIONAL(ENABLE_CLIENT, [test "x$enable_client" = "xyes"])
 AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=no]])],, [enable_server=no])
 AM_CONDITIONAL(ENABLE_SERVER, [test "x$enable_server" = "xyes"])
 
-GLIB_VERSION=2.24.0
+GLIB_VERSION=2.26.0
 pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
 ZED_PACKAGES="--pkg glib-2.0 --pkg gio-2.0 --pkg gee-1.0 --pkg gum-1.0"
 PKG_CHECK_MODULES(ZED, [$pkg_modules])
