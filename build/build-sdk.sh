@@ -47,10 +47,10 @@ function apply_fixups ()
 
 function make_package ()
 {
-  target_filename="$FRIDA_BUILD/sdk-ios-$(date '+%Y%m%d').tar.bz2"
+  target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
 
-  rm -rf "$BUILDROOT/sdk-ios"
-  mkdir "$BUILDROOT/sdk-ios"
+  rm -rf "$BUILDROOT/sdk-$FRIDA_TARGET"
+  mkdir "$BUILDROOT/sdk-$FRIDA_TARGET"
   pushd "$FRIDA_PREFIX" &>/dev/null || exit 1
   tar c \
       include \
@@ -61,14 +61,14 @@ function make_package ()
       share/aclocal \
       share/glib-2.0/schemas \
       share/vala \
-      | tar -C "$BUILDROOT/sdk-ios" -x - || exit 1
+      | tar -C "$BUILDROOT/sdk-$FRIDA_TARGET" -x - || exit 1
   popd &>/dev/null
 
   pushd "$BUILDROOT" &>/dev/null || exit 1
-  tar cfj "$target_filename" sdk-ios || exit 1
+  tar cfj "$target_filename" sdk-$FRIDA_TARGET || exit 1
   popd &>/dev/null
 
-  rm -rf "$BUILDROOT/sdk-ios"
+  rm -rf "$BUILDROOT/sdk-$FRIDA_TARGET"
 }
 
 [ -z "$FRIDA_BUILD" ] && exit 1
