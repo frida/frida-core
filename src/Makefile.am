@@ -2,12 +2,15 @@ bin_PROGRAMS = zed
 noinst_LTLIBRARIES = libzed-core.la
 
 zed_SOURCES = \
+	$(srcdir)/ui/agent-session-glue.c \
+	$(srcdir)/service/storage-backend-glue.c \
 	zed.vala
 zed_LDADD = \
 	$(builddir)/libzed-core.la \
 	$(top_builddir)/data/libzed-data.la \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la \
-	$(ZED_LIBS)
+	$(ZED_LIBS) \
+	$(ZED_CLIENT_LIBS)
 zed_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/lib/interfaces \
@@ -59,5 +62,6 @@ AM_CPPFLAGS = \
 	-I $(top_builddir)/data \
 	-I $(top_builddir)/lib/interfaces \
 	$(ZED_CFLAGS) \
+	$(ZED_CLIENT_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
