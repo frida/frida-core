@@ -67,6 +67,12 @@
     <Filter Include="Resource Files\ui">
       <UniqueIdentifier>{6bb46df1-f0f2-46da-9f76-c9a3497e1644}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\generated\service\tcp">
+      <UniqueIdentifier>{620f3726-c7dd-4d6f-8f54-ad08f2ff594a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\service\tcp">
+      <UniqueIdentifier>{d4552ab5-00ec-4394-bf75-666ac4f869a1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -144,6 +150,9 @@
     <None Include="src\ui\process-selector.vala">
       <Filter>Source Files\ui</Filter>
     </None>
+    <None Include="src\service\tcp\tcp-host-session.vala">
+      <Filter>Source Files\service\tcp</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -209,11 +218,11 @@
     <ClCompile Include="src\service\windows\windows-host-session-glue.c">
       <Filter>Source Files\service\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
-      <Filter>Source Files\generated\service\windows</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)src\service\fruity\fruity-host-session.c">
       <Filter>Source Files\generated\service\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
+      <Filter>Source Files\generated\service\windows</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
       <Filter>Source Files\generated\service</Filter>
@@ -250,6 +259,9 @@
     </ClCompile>
     <ClCompile Include="src\service\windows\winjector-glue.c">
       <Filter>Source Files\service\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\tcp\tcp-host-session.c">
+      <Filter>Source Files\generated\service\tcp</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
