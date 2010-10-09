@@ -7,6 +7,7 @@ SUBDIRS = \
 	lib
 
 if ENABLE_CLIENT
+SUBDIRS += tools
 SUBDIRS += src
 endif
 

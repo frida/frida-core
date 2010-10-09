@@ -46,6 +46,7 @@ AC_CONFIG_FILES([
 	lib/Makefile
 	lib/interfaces/Makefile
 	lib/agent/Makefile
+	tools/Makefile
 	src/Makefile
 	server/Makefile
 	server/src/Makefile
