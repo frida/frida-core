@@ -171,6 +171,8 @@ namespace Zed {
 
 					if (active_host_session != null)
 						select_provider (active_host_session.provider);
+					else
+						select_provider (null);
 					update_session_control_ui ();
 
 					view.show_error_message (e.message);
@@ -186,7 +188,12 @@ namespace Zed {
 			update_session_control_ui ();
 		}
 
-		private void select_provider (Service.HostSessionProvider provider) {
+		private void select_provider (Service.HostSessionProvider? provider) {
+			if (provider == null) {
+				view.provider_combo.set_active_iter (null);
+				return;
+			}
+
 			var path = provider_store_path_of_provider (provider);
 			Gtk.TreeIter iter;
 			provider_store.get_iter (out iter, path);

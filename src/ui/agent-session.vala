@@ -493,7 +493,8 @@ namespace Zed {
 			}
 
 			try {
-				address = yield resolve_address_specifier_arguments (args[0:args.length - 1]);
+				var address_args = args[0:args.length - 1];
+				address = yield resolve_address_specifier_arguments (address_args);
 				size = (uint) uint64_from_string (args[args.length - 1]);
 			} catch (IOError arg_error) {
 				print_to_console ("ERROR: " + arg_error.message);
@@ -524,7 +525,8 @@ namespace Zed {
 			}
 
 			try {
-				address = yield resolve_address_specifier_arguments (args[0:args.length - 1]);
+				var address_args = args[0:args.length - 1];
+				address = yield resolve_address_specifier_arguments (address_args);
 				size = (uint) uint64_from_string (args[args.length - 1]);
 			} catch (IOError arg_error) {
 				print_to_console ("ERROR: " + arg_error.message);
@@ -543,14 +545,16 @@ namespace Zed {
 
 					builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", pc);
 
+					var slice = bytes[offset:bytes.length];
 					uint instruction_length;
-					var instruction_str = disassemble (pc, bytes[offset:bytes.length], out instruction_length);
+					var instruction_str = disassemble (pc, slice, out instruction_length);
 					if (instruction_str == null) {
 						print_to_console ("<bad instruction>");
 						break;
 					}
 
-					foreach (uint8 byte in bytes[offset:offset + instruction_length])
+					slice = bytes[offset:offset + instruction_length];
+					foreach (uint8 byte in slice)
 						builder.append_printf ("%02x ", byte);
 					builder.truncate (builder.len - 1);
 
@@ -589,7 +593,8 @@ namespace Zed {
 			uint64 address;
 
 			try {
-				address = yield resolve_address_specifier_arguments (args[2:args.length]);
+				var address_args = args[2:args.length];
+				address = yield resolve_address_specifier_arguments (address_args);
 			} catch (IOError resolve_error) {
 				print_to_console ("ERROR: " + resolve_error.message);
 				print_to_console ("");

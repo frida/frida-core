@@ -30,6 +30,7 @@ libzed_core_la_SOURCES = \
 	$(srcdir)/service/muc-service.vala \
 	$(srcdir)/service/storage-backend.vala \
 	$(srcdir)/service/xmpp-client.vala \
+	$(srcdir)/service/tcp/tcp-host-session.vala \
 	$(srcdir)/ui/agent-session.vala \
 	$(srcdir)/ui/chat.vala \
 	$(srcdir)/ui/function-selector.vala \

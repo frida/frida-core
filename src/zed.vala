@@ -33,6 +33,7 @@ public class Zed.Application : Object {
 		xmpp_client = new Service.XmppClient ();
 		muc_service = new Service.MucService (xmpp_client);
 
+		host_session_service.add_backend (new Service.TcpHostSessionBackend ());
 #if WINDOWS
 		host_session_service.add_backend (new Service.WindowsHostSessionBackend ());
 		host_session_service.add_backend (new Service.FruityHostSessionBackend ());
