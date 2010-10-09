@@ -7,8 +7,10 @@ SUBDIRS = \
 	lib
 
 if ENABLE_CLIENT
-SUBDIRS += tools
-SUBDIRS += src
+SUBDIRS += \
+	tools \
+	data \
+	src
 endif
 
 if ENABLE_SERVER

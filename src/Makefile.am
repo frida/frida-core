@@ -5,15 +5,16 @@ zed_SOURCES = \
 	zed.vala
 zed_LDADD = \
 	$(builddir)/libzed-core.la \
+	$(top_builddir)/data/libzed-data.la \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la \
 	$(ZED_LIBS)
 zed_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--vapidir=$(srcdir) \
-	--pkg config \
-	--pkg zed-core \
-	--pkg zed-interfaces \
+	--pkg=config \
+	--pkg=zed-core \
+	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_CLIENT_PACKAGES@
 
@@ -37,20 +38,25 @@ libzed_core_la_SOURCES = \
 	$(srcdir)/ui/root.vala \
 	$(srcdir)/ui/workspace.vala
 libzed_core_la_LIBADD = \
+	$(top_builddir)/data/libzed-data.la \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la
 libzed_core_la_VALAFLAGS = \
 	--vapi=zed-core.vapi \
 	--library=zed-core \
 	--header=zed-core.h \
 	--vapidir=$(top_srcdir)/vapi \
+	--vapidir=$(top_builddir)/data \
 	--vapidir=$(top_builddir)/lib/interfaces \
-	--pkg config \
-	--pkg zed-interfaces \
+	--pkg=config \
+	--pkg=zed-data-ui \
+	--pkg=zed-data-images \
+	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_CLIENT_PACKAGES@
 
 AM_CPPFLAGS = \
 	-include config.h \
+	-I $(top_builddir)/data \
 	-I $(top_builddir)/lib/interfaces \
 	$(ZED_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
