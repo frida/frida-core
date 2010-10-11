@@ -18,13 +18,14 @@ class Vala.ResourceCompiler {
 		var cheader_file = File.new_for_commandline_arg (output_basename + ".h");
 		var csource_file = File.new_for_commandline_arg (output_basename + ".c");
 
-		DataOutputStream vapi = null;
-		DataOutputStream cheader = null;
+		MemoryOutputStream vapi_content = new MemoryOutputStream (null, 0, realloc, free);
+		MemoryOutputStream cheader_content = new MemoryOutputStream (null, 0, realloc, free);
+
+		DataOutputStream vapi = new DataOutputStream (vapi_content);
+		DataOutputStream cheader = new DataOutputStream (cheader_content);
 		DataOutputStream csource = null;
 
 		try {
-			vapi = new DataOutputStream (vapi_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
-			cheader = new DataOutputStream (cheader_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
 			csource = new DataOutputStream (csource_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
 		} catch (Error e) {
 			stderr.printf ("%s\n", e.message);
@@ -160,12 +161,39 @@ class Vala.ResourceCompiler {
 				null);
 
 			cheader.put_string ("\nG_END_DECLS\n\n#endif\n", null);
+
+			replace_file_if_different (vapi_file, vapi_content);
+			replace_file_if_different (cheader_file, cheader_content);
 		} catch (Error e) {
 			stderr.printf ("IO Error: %s\n", e.message);
 			return 1;
 		}
 
 		return 0;
+	}
+
+	private void replace_file_if_different (File file, MemoryOutputStream new_content) throws Error {
+		bool different = true;
+
+		try {
+			var input = file.read ();
+			var info = input.query_info (FILE_ATTRIBUTE_STANDARD_SIZE);
+			var existing_size = (size_t) info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
+
+			if (existing_size == new_content.get_data_size ()) {
+				var existing_content = new MemoryOutputStream (malloc (existing_size), existing_size, null, free);
+				size_t bytes_read;
+				if (input.read_all (existing_content.get_data (), existing_size, out bytes_read) && bytes_read == existing_size)
+					different = Memory.cmp (existing_content.get_data (), new_content.get_data (), existing_size) != 0;
+			}
+		} catch (Error e) {
+		}
+
+		if (!different)
+			return;
+
+		var output = file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null);
+		output.write_all (new_content.get_data (), new_content.get_data_size ());
 	}
 
 	private string c_namespace_from_vala (string vala_ns) {
