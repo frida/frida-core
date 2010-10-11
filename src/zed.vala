@@ -53,7 +53,7 @@ public class Zed.Application : Object {
 
 int main (string[] args) {
 	Wocky.init ();
-	Gtk.init (ref args);
+	GtkClutter.init (ref args);
 
 	// Access types needed in XML
 	typeof (Gtk.ActionGroup);

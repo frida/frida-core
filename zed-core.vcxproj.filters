@@ -73,6 +73,12 @@
     <Filter Include="Source Files\service\tcp">
       <UniqueIdentifier>{d4552ab5-00ec-4394-bf75-666ac4f869a1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files\winjector">
+      <UniqueIdentifier>{c619adbc-c722-4220-8c57-9d40ce4e94ee}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\agent">
+      <UniqueIdentifier>{e7df245c-eab8-41b6-bdd6-aa44dfcd8426}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -271,8 +277,17 @@
     <CustomBuild Include="data\images\browse-processes.png">
       <Filter>Resource Files\images</Filter>
     </CustomBuild>
-    <CustomBuild Include="data\README.txt">
-      <Filter>Resource Files</Filter>
+    <CustomBuild Include="data\ui\ui.resources">
+      <Filter>Resource Files\ui</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\images\image.resources">
+      <Filter>Resource Files\images</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\winjector\winjector.resources">
+      <Filter>Resource Files\winjector</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\agent\agent.resources">
+      <Filter>Resource Files\agent</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>

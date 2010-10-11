@@ -83,6 +83,9 @@ namespace Zed {
 
 				content_notebook = builder.get_object ("content_notebook") as Gtk.Notebook;
 
+				var alignment = builder.get_object ("overview_alignment") as Gtk.Alignment;
+				setup_overview (alignment);
+
 				event_view = builder.get_object ("event_view") as Gtk.TreeView;
 
 				console_view = builder.get_object ("console_view") as Gtk.TextView;
@@ -101,17 +104,36 @@ namespace Zed {
 				process_info_alignment.add (process_info_label);
 
 				start_selector = new FunctionSelector ();
-				var start_alignment = builder.get_object ("start_alignment") as Gtk.Alignment;
-				start_alignment.add (start_selector);
+				alignment = builder.get_object ("start_alignment") as Gtk.Alignment;
+				alignment.add (start_selector);
 
 				stop_selector = new FunctionSelector ();
-				var stop_alignment = builder.get_object ("stop_alignment") as Gtk.Alignment;
-				stop_alignment.add (stop_selector);
+				alignment = builder.get_object ("stop_alignment") as Gtk.Alignment;
+				alignment.add (stop_selector);
 			} catch (Error e) {
 				error (e.message);
 			}
 
 			customize_widget_styles ();
+		}
+
+		private void setup_overview (Gtk.Container parent) {
+			var frame = new MxGtk.Frame ();
+			parent.add (frame);
+
+			var embed = new GtkClutter.Embed ();
+			frame.add (embed);
+
+			var stage = embed.get_stage () as Clutter.Stage;
+
+			var button = new Mx.Button.with_label ("Hello");
+			stage.add_actor (button);
+
+			frame.show_all ();
+			frame.map_event.connect ((ev) => {
+				stage.show_all ();
+				return false;
+			});
 		}
 
 		private void customize_widget_styles () {
