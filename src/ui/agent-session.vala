@@ -70,6 +70,9 @@ namespace Zed {
 
 		private Gtk.VBox root_vbox;
 
+		private Clutter.BehaviourRotate rotation;
+		private Clutter.BehaviourScale scaling;
+
 		public AgentSession () {
 			try {
 				var builder = new Gtk.Builder ();
@@ -125,8 +128,43 @@ namespace Zed {
 			frame.add (embed);
 
 			var stage = embed.get_stage () as Clutter.Stage;
+			stage.color = Clutter.Color.from_string ("#c0c0c0ff");
 
 			var button = new Mx.Button.with_label ("Hello");
+			button.set_position (160.0f, 50.0f);
+
+			var rotation_timeline = new Clutter.Timeline (5000);
+			rotation_timeline.loop = true;
+
+			var alpha = new Clutter.Alpha.full (rotation_timeline, Clutter.AnimationMode.LINEAR);
+			rotation = new Clutter.BehaviourRotate (alpha, Clutter.RotateAxis.Z_AXIS, Clutter.RotateDirection.CW, 0.0, 360.0) as Clutter.BehaviourRotate;
+			rotation.set_center (80, 60, 0);
+			rotation.apply (button);
+
+			var scaling_timeline = new Clutter.Timeline (2000);
+			scaling_timeline.loop = true;
+
+			alpha = new Clutter.Alpha.full (scaling_timeline, Clutter.AnimationMode.EASE_IN_OUT_SINE);
+			scaling = new Clutter.BehaviourScale (alpha, 1.0, 1.0, 20.0, 20.0);
+			scaling.apply (button);
+
+			var start_count = 0;
+
+			button.clicked.connect (() => {
+				if (!rotation_timeline.is_playing ()) {
+					rotation_timeline.start ();
+
+					if (start_count == 1)
+						scaling_timeline.start ();
+					else if (start_count == 2)
+						scaling_timeline.pause ();
+
+					start_count++;
+				} else {
+					rotation_timeline.pause ();
+				}
+
+			});
 			stage.add_actor (button);
 
 			frame.show_all ();
