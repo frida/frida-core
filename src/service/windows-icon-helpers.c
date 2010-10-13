@@ -1,6 +1,7 @@
 #include "windows-icon-helpers.h"
 
 #include <psapi.h>
+#include <shellapi.h>
 
 typedef struct _FindMainWindowCtx FindMainWindowCtx;
 

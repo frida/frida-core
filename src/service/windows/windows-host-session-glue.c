@@ -5,6 +5,7 @@
 #include "windows-icon-helpers.h"
 
 #include <psapi.h>
+#include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
