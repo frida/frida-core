@@ -79,6 +79,9 @@
     <Filter Include="Resource Files\agent">
       <UniqueIdentifier>{e7df245c-eab8-41b6-bdd6-aa44dfcd8426}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files\mx">
+      <UniqueIdentifier>{2ef325af-2301-4baf-ae6b-7543601936a5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\configuration.vala">
@@ -288,6 +291,9 @@
     </CustomBuild>
     <CustomBuild Include="data\agent\agent.resources">
       <Filter>Resource Files\agent</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\style\mx.resources">
+      <Filter>Resource Files\mx</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>

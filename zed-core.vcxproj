@@ -207,6 +207,37 @@ REM. &gt; "$(IntDir)data\images.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Image resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\images.stamp;%(Outputs)</Outputs>
     </CustomBuild>
+    <CustomBuild Include="data\style\mx.resources">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" --namespace="Zed.Data.Mx" -o "$(IntDir)data\zed-data-mx" "$(SolutionDir)data\mx\mx.resources" || exit 1
+REM. &gt; "$(IntDir)data\mx.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing Mx resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\mx.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)data\mx\default.css;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" --namespace="Zed.Data.Mx" -o "$(IntDir)data\zed-data-mx" "$(SolutionDir)data\mx\mx.resources" || exit 1
+REM. &gt; "$(IntDir)data\mx.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing Mx resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\mx.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)data\mx\default.css;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" --namespace="Zed.Data.Mx" -o "$(IntDir)data\zed-data-mx" "$(SolutionDir)data\mx\mx.resources" || exit 1
+REM. &gt; "$(IntDir)data\mx.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing Mx resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\mx.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)data\mx\default.css;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
+"$(IntDir)..\resource-compiler\resource-compiler.exe" --namespace="Zed.Data.Mx" -o "$(IntDir)data\zed-data-mx" "$(SolutionDir)data\mx\mx.resources" || exit 1
+REM. &gt; "$(IntDir)data\mx.stamp"
+</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Mx resources</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\mx.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)data\mx\default.css;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
     <None Include="data\ui\agent-session.ui" />
     <None Include="data\ui\chat.ui" />
     <None Include="data\ui\host-session.ui" />

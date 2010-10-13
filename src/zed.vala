@@ -1,4 +1,4 @@
-public class Zed.Application : Object {
+public class Zed.Application : Object, Mx.ResourceProvider {
 	private Configuration configuration;
 
 	private Service.StorageBackend storage_backend;
@@ -8,12 +8,18 @@ public class Zed.Application : Object {
 
 	private Presenter.Root root;
 
-	public Application () {
+	construct {
+		Mx.ResourceProvider.set_default (this);
+
 		setup_services ();
 
 		configuration = new Configuration (storage_backend);
 
 		setup_presenters ();
+	}
+
+	~Application () {
+		Mx.ResourceProvider.set_default (null);
 	}
 
 	public void run () {
@@ -48,6 +54,14 @@ public class Zed.Application : Object {
 		root = new Zed.Presenter.Root (root_view, login, workspace);
 
 		root_view.widget.destroy.connect (() => stop ());
+	}
+
+	public string? get_string (string name) {
+		return null;
+	}
+
+	public uint8 * get_image (string name, out uint width, out uint height) {
+		return null;
 	}
 }
 
