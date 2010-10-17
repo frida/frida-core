@@ -1,4 +1,6 @@
-public class Zed.Application : Object, Mx.ResourceProvider {
+public class Zed.Application : Object {
+	private Mx.ResourceProvider resource_provider = new EmbeddedResourceProvider ();
+
 	private Configuration configuration;
 
 	private Service.StorageBackend storage_backend;
@@ -9,7 +11,7 @@ public class Zed.Application : Object, Mx.ResourceProvider {
 	private Presenter.Root root;
 
 	construct {
-		Mx.ResourceProvider.set_default (this);
+		Mx.ResourceProvider.set_default (resource_provider);
 
 		setup_services ();
 
@@ -56,12 +58,14 @@ public class Zed.Application : Object, Mx.ResourceProvider {
 		root_view.widget.destroy.connect (() => stop ());
 	}
 
-	public string? get_string (string name) {
-		return null;
-	}
+	private class EmbeddedResourceProvider : Object, Mx.ResourceProvider {
+		public string? get_string (string name) {
+			return null;
+		}
 
-	public uint8 * get_image (string name, out uint width, out uint height) {
-		return null;
+		public uint8 * get_image (string name, out uint width, out uint height) {
+			return null;
+		}
 	}
 }
 
