@@ -272,6 +272,9 @@
     <ClCompile Include="$(IntDir)src\service\tcp\tcp-host-session.c">
       <Filter>Source Files\generated\service\tcp</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)data\zed-data-mx.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\zed.vala">
@@ -292,7 +295,7 @@
     <CustomBuild Include="data\agent\agent.resources">
       <Filter>Resource Files\agent</Filter>
     </CustomBuild>
-    <CustomBuild Include="data\style\mx.resources">
+    <CustomBuild Include="data\mx\mx.resources">
       <Filter>Resource Files\mx</Filter>
     </CustomBuild>
   </ItemGroup>

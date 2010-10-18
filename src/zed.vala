@@ -60,11 +60,26 @@ public class Zed.Application : Object {
 
 	private class EmbeddedResourceProvider : Object, Mx.ResourceProvider {
 		public string? get_string (string name) {
-			return null;
+			assert (name == "default.css");
+			return (string) Zed.Data.Mx.get_default_css_blob ().data;
 		}
 
 		public uint8 * get_image (string name, out uint width, out uint height) {
-			return null;
+			var blob = Zed.Data.Mx.find_image_by_name (name);
+			assert (blob != null);
+
+			var stream = new MemoryInputStream.from_data (blob.data, blob.size, null);
+
+			try {
+				var pixbuf = new Gdk.Pixbuf.from_stream (stream, null);
+
+				width = pixbuf.get_width ();
+				height = pixbuf.get_height ();
+
+				return Memory.dup (pixbuf.get_pixels (), pixbuf.get_height () * pixbuf.get_rowstride ());
+			} catch (Error pixbuf_error) {
+				assert_not_reached ();
+			}
 		}
 	}
 }

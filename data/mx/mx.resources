@@ -1,0 +1,8 @@
+[resource-compiler]
+namespace = Zed.Data.Mx
+
+[root]
+inputs = default\\.css
+
+[image]
+inputs = ^button.*\\.png

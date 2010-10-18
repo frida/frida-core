@@ -1,11 +1,11 @@
 class Vala.ResourceCompiler {
+	private static string config_filename;
+	private static string output_basename;
 	[CCode (array_length = false, array_null_terminated = true)]
 	private static string[] input_filenames;
-	private static string output_basename;
-	private static string output_namespace;
 
 	private const OptionEntry[] options = {
-		{ "namespace", 0, 0, OptionArg.STRING, ref output_namespace, "Output namespace", "NAMESPACE" },
+		{ "config-filename", 'c', 0, OptionArg.FILENAME, ref config_filename, "Read configuration from CONFIGFILE", "CONFIGFILE" },
 		{ "output-basename", 'o', 0, OptionArg.FILENAME, ref output_basename, "Place output in BASENAME", "BASENAME" },
 		{ "", 0, 0, OptionArg.FILENAME_ARRAY, ref input_filenames, null, "FILE..." },
 		{ null }
@@ -13,163 +13,259 @@ class Vala.ResourceCompiler {
 
 	private const char NIBBLE_TO_HEX_CHAR[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
 
-	private int run () {
+	private void run () throws Error {
+		var input_dir = File.new_for_path (Path.get_dirname (config_filename));
+		string output_namespace;
+
+		var categories = new Gee.ArrayList<ResourceCategory> ();
+
+		var root_category = new ResourceCategory ("root");
+		foreach (var filename in input_filenames)
+			root_category.files.add (filename);
+		root_category.files.sort ();
+		categories.add (root_category);
+
+		var config = new KeyFile ();
+		config.load_from_file (config_filename, KeyFileFlags.NONE);
+
+		output_namespace = config.get_string ("resource-compiler", "namespace");
+
+		foreach (var group in config.get_groups ()) {
+			if (group == "resource-compiler")
+				continue;
+
+			ResourceCategory category = (group == "root") ? root_category : new ResourceCategory (group);
+
+			foreach (var input in config.get_string_list (group, "inputs")) {
+				var regex = new Regex (input);
+
+				var enumerator = input_dir.enumerate_children (FILE_ATTRIBUTE_STANDARD_NAME, FileQueryInfoFlags.NONE);
+
+				FileInfo file_info;
+				while ((file_info = enumerator.next_file ()) != null) {
+					var filename = file_info.get_name ();
+					if (regex.match (filename)) {
+						category.files.add (Path.build_filename (input_dir.get_path (), filename));
+					}
+				}
+
+			}
+
+			category.files.sort ();
+
+			if (category != root_category)
+				categories.add (category);
+		}
+
 		var vapi_file = File.new_for_commandline_arg (output_basename + ".vapi");
 		var cheader_file = File.new_for_commandline_arg (output_basename + ".h");
 		var csource_file = File.new_for_commandline_arg (output_basename + ".c");
-
 		MemoryOutputStream vapi_content = new MemoryOutputStream (null, 0, realloc, free);
 		MemoryOutputStream cheader_content = new MemoryOutputStream (null, 0, realloc, free);
 
 		DataOutputStream vapi = new DataOutputStream (vapi_content);
 		DataOutputStream cheader = new DataOutputStream (cheader_content);
-		DataOutputStream csource = null;
+		DataOutputStream csource = new DataOutputStream (csource_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION));
 
-		try {
-			csource = new DataOutputStream (csource_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null));
-		} catch (Error e) {
-			stderr.printf ("%s\n", e.message);
-			return 1;
+		var incguard_name = "__" + output_namespace.up ().replace (".", "_") + "_H__";
+		var blob_ctype = output_namespace.replace (".", "") + "Blob";
+		var namespace_cprefix = c_namespace_from_vala (output_namespace);
+
+		vapi.put_string (
+			"// generated file, do not modify\n" +
+			"\n" +
+			"[CCode (cheader_filename = \"" + cheader_file.get_basename () + "\")]\n" +
+			"namespace " + output_namespace +  " {\n" +
+			"\n",
+			null);
+
+		cheader.put_string ((
+			"/* generated file, do not modify */\n" +
+			"\n" +
+			"#ifndef %s\n" +
+			"#define %s\n" +
+			"\n" +
+			"#include <glib.h>\n" +
+			"\n" +
+			"G_BEGIN_DECLS\n" +
+			"\n" +
+			"typedef struct _%s %s;\n" +
+			"\n" +
+			"struct _%s\n" +
+			"{\n" +
+			"  const gchar * name;\n" +
+			"  gconstpointer data;\n" +
+			"  guint size;\n" +
+			"};\n" +
+			"\n").printf (incguard_name, incguard_name, blob_ctype, blob_ctype, blob_ctype),
+			null);
+
+		csource.put_string (
+			"/* generated file, do not modify */\n" +
+			"\n" +
+			"#include \"" + cheader_file.get_basename () + "\"\n" +
+			"\n",
+			null);
+
+		var compare_func_identifier = namespace_cprefix + "_blob_compare";
+
+		if (categories.size > 1) {
+			csource.put_string (
+				"#include <stdlib.h>\n" +
+				"#include <string.h>\n" +
+				"\n" +
+				"static int\n" +
+				compare_func_identifier + " (const void * aptr, const void * bptr)\n" +
+				"{\n" +
+				"  const " + blob_ctype + " * a = aptr;\n" +
+				"  const " + blob_ctype + " * b = bptr;\n" +
+				"\n" +
+				"  return strcmp (a->name, b->name);\n" +
+				"}\n" +
+				"\n",
+				null);
 		}
 
-		try {
-			uint8[] input_buf = new uint8[128 * 1024];
-			var builder = new StringBuilder.sized (input_buf.length * 6);
+		foreach (var category in categories) {
+			bool is_root_category = (category.name == "root");
+			var category_identifier = identifier_from_filename (category.name);
+			var identifier_by_index = new Gee.ArrayList<string> ();
+			int file_count = category.files.size;
 
-			uint file_index = 0;
-
-			var incguard_name = "__" + output_namespace.up ().replace (".", "_") + "_H__";
-			var blob_ctype = output_namespace.replace (".", "") + "Blob";
-			var namespace_cprefix = c_namespace_from_vala (output_namespace);
-
-			vapi.put_string (
-				"// generated file, do not modify\n" +
-				"\n" +
-				"[CCode (cheader_filename = \"" + cheader_file.get_basename () + "\")]\n" +
-				"namespace " + output_namespace +  " {\n" +
-				"\n",
-				null);
-
-			cheader.put_string ((
-				"/* generated file, do not modify */\n" +
-				"\n" +
-				"#ifndef %s\n" +
-				"#define %s\n" +
-				"\n" +
-				"#include <glib.h>\n" +
-				"\n" +
-				"G_BEGIN_DECLS\n" +
-				"\n" +
-				"typedef struct _%s %s;\n" +
-				"\n" +
-				"struct _%s\n" +
-				"{\n" +
-				"  const unsigned char * data;\n" +
-				"  unsigned int size;\n" +
-				"};\n" +
-				"\n").printf (incguard_name, incguard_name, blob_ctype, blob_ctype, blob_ctype),
-				null);
-
-			csource.put_string (
-				"/* generated file, do not modify */\n" +
-				"\n" +
-				"#include \"" + cheader_file.get_basename () + "\"\n" +
-				"\n",
-				null);
-
-			foreach (string input_filename in input_filenames) {
-				if (file_index != 0)
-					csource.put_string ("\n", null);
-
+			foreach (string input_filename in category.files) {
 				var input_file = File.new_for_commandline_arg (input_filename);
 
-				if (!input_file.query_exists (null)) {
-					stderr.printf ("File '%s' does not exist.\n", input_file.get_path ());
-					return 1;
-				}
-
 				var file_input_stream = input_file.read (null);
-				var input_info = file_input_stream.query_info (FILE_ATTRIBUTE_STANDARD_SIZE, null);
+				var input_info = file_input_stream.query_info (FILE_ATTRIBUTE_STANDARD_SIZE);
 				var identifier = identifier_from_filename (input_file.get_basename ());
 				var file_size = input_info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
 
-				vapi.put_string ("\tpublic static " + output_namespace + ".Blob get_" + identifier + "_blob ();\n", null);
+				identifier_by_index.add (identifier);
 
-				csource.put_string ("static const unsigned char " + identifier + "[" + file_size.to_string () + "] =\n{\n"  , null);
+				csource.put_string ("static const unsigned char " + identifier + "[" + file_size.to_string () + " + 1] =\n{\n");
+				serialize_to_c_array (file_input_stream, csource);
+				csource.put_string ("\n};\n\n");
+			}
 
-				var input_stream = new DataInputStream (file_input_stream);
-				int line_offset = 0;
+			var blob_list_identifier = category_identifier + "_blobs";
 
-				while (true) {
-					size_t bytes_read = input_stream.read (input_buf, input_buf.length, null);
-					if (bytes_read == 0)
-						break;
+			csource.put_string ("static const " + blob_ctype + " " + blob_list_identifier + "[" + category.files.size.to_string () + "] =\n{");
+			for (int file_index = 0; file_index != file_count; file_index++) {
+				var filename = Path.get_basename (category.files[file_index]);
+				var identifier = identifier_by_index[file_index];
+				csource.put_string ("\n  { \"%s\", %s, sizeof (%s) - 1 },".printf (filename, identifier, identifier));
+			}
+			csource.put_string ("\n};\n\n");
 
-					for (size_t i = 0; i != bytes_read; i++) {
-						if (line_offset == 0)
-							builder.append ("  ");
+			if (is_root_category) {
+				for (int file_index = 0; file_index != file_count; file_index++) {
+					var identifier = identifier_by_index[file_index];
 
-						append_hexbyte (input_buf[i], builder);
-						builder.append_c (',');
+					var func_name_and_arglist = namespace_cprefix + "_get_" + identifier + "_blob (" + blob_ctype + " * blob)";
 
-						line_offset++;
-						if (line_offset % 12 != 0) {
-							builder.append_c (' ');
-						} else {
-							line_offset = 0;
-							builder.append_c ('\n');
-						}
-					}
+					cheader.put_string (
+						"void " + func_name_and_arglist + ";\n",
+						null);
 
-					builder.truncate (builder.len - 1);
+					csource.put_string (
+						"void\n" +
+						func_name_and_arglist + "\n" +
+						"{\n" +
+						"  *blob = " + blob_list_identifier + "[" + file_index.to_string () + "];\n" +
+						"}\n" +
+						"\n",
+						null);
 
-					csource.put_string (builder.str, null);
-					builder.truncate (0);
+					vapi.put_string ("\tpublic static " + output_namespace + ".Blob get_" + identifier + "_blob ();\n");
 				}
 
-				csource.put_string ("\n};\n\n", null);
+				if (categories.size > 1) {
+					cheader.put_string ("\n");
 
-				var func_name_and_arglist = namespace_cprefix + "_get_" + identifier + "_blob (" + blob_ctype + " * blob)";
+					vapi.put_string ("\n");
+				}
+			} else {
+				var func_name_and_arglist = namespace_cprefix + "_find_" + category_identifier + "_by_name (const char * name)";
+
 				cheader.put_string (
-					"void " + func_name_and_arglist + ";\n",
+					"const " + blob_ctype + " * " + func_name_and_arglist + ";\n",
 					null);
+
 				csource.put_string (
-					"void\n" +
+					"const " + blob_ctype + " *\n" +
 					func_name_and_arglist + "\n" +
 					"{\n" +
-					"  blob->data = " + identifier + ";\n" +
-					"  blob->size = sizeof (" + identifier + ");\n" +
+					"  " + blob_ctype + " needle;\n" +
+					"\n" +
+					"  needle.name = name;\n" +
+					"  needle.data = NULL;\n" +
+					"  needle.size = 0;\n" +
+					"\n" +
+					"  return bsearch (&needle, " + blob_list_identifier + ", G_N_ELEMENTS (" + blob_list_identifier + "), sizeof (" + blob_ctype + "), " + compare_func_identifier + ");\n" +
 					"}\n",
 					null);
 
-				file_index++;
+				vapi.put_string ("\tpublic static unowned " + output_namespace + ".Blob? find_" + category_identifier + "_by_name (string name);\n");
 			}
-
-			vapi.put_string (
-				"\n" +
-				"	public struct Blob {\n" +
-				"		public void * data;\n" +
-				"		public uint size;\n" +
-				"\n" +
-				"		public Blob (void * data, uint size) {\n" +
-				"			this.data = data;\n" +
-				"			this.size = size;\n" +
-				"		}\n" +
-				"	}\n" +
-				"\n" +
-				"}\n",
-				null);
-
-			cheader.put_string ("\nG_END_DECLS\n\n#endif\n", null);
-
-			replace_file_if_different (vapi_file, vapi_content);
-			replace_file_if_different (cheader_file, cheader_content);
-		} catch (Error e) {
-			stderr.printf ("IO Error: %s\n", e.message);
-			return 1;
 		}
 
-		return 0;
+		vapi.put_string (
+			"\n" +
+			"	public struct Blob {\n" +
+			"		public unowned string name;\n" +
+			"		public void * data;\n" +
+			"		public uint size;\n" +
+			"\n" +
+			"		public Blob (string name, void * data, uint size) {\n" +
+			"			this.name = name;\n" +
+			"			this.data = data;\n" +
+			"			this.size = size;\n" +
+			"		}\n" +
+			"	}\n" +
+			"\n" +
+			"}\n",
+			null);
+
+		cheader.put_string ("\nG_END_DECLS\n\n#endif\n");
+
+		replace_file_if_different (vapi_file, vapi_content);
+		replace_file_if_different (cheader_file, cheader_content);
+	}
+
+	private void serialize_to_c_array (InputStream input, DataOutputStream output) throws Error {
+		var input_stream = new DataInputStream (input);
+
+		var input_buf = new uint8[128 * 1024];
+		var builder = new StringBuilder.sized (input_buf.length * 6);
+		int line_offset = 0;
+
+		while (true) {
+			size_t bytes_read = input_stream.read (input_buf, input_buf.length);
+			if (bytes_read == 0)
+				break;
+
+			for (size_t i = 0; i != bytes_read; i++) {
+				if (line_offset == 0)
+					builder.append ("  ");
+
+				append_hexbyte (input_buf[i], builder);
+				builder.append_c (',');
+
+				line_offset++;
+				if (line_offset % 12 != 0) {
+					builder.append_c (' ');
+				} else {
+					line_offset = 0;
+					builder.append_c ('\n');
+				}
+			}
+
+			builder.truncate (builder.len - 1);
+			output.put_string (builder.str);
+			builder.truncate (0);
+		}
+
+		output.put_string ("0x00"); /* so text file resources may be used as C strings */
 	}
 
 	private void replace_file_if_different (File file, MemoryOutputStream new_content) throws Error {
@@ -192,7 +288,7 @@ class Vala.ResourceCompiler {
 		if (!different)
 			return;
 
-		var output = file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION, null);
+		var output = file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
 		output.write_all (new_content.get_data (), new_content.get_data_size ());
 	}
 
@@ -248,8 +344,8 @@ class Vala.ResourceCompiler {
 			return 1;
 		}
 
-		if (input_filenames == null) {
-			stderr.printf ("No input file specified.\n");
+		if (config_filename == null) {
+			stderr.printf ("No config file specified.\n");
 			return 1;
 		}
 
@@ -259,7 +355,31 @@ class Vala.ResourceCompiler {
 		}
 
 		var compiler = new ResourceCompiler ();
-		return compiler.run ();
+		try {
+			compiler.run ();
+		} catch (Error e) {
+			stderr.printf ("%s\n", e.message);
+			return 1;
+		}
+
+		return 0;
+	}
+
+	private class ResourceCategory {
+		public string name {
+			get;
+			private set;
+		}
+
+		public Gee.ArrayList<string> files {
+			get;
+			private set;
+		}
+
+		public ResourceCategory (string name) {
+			this.name = name;
+			this.files = new Gee.ArrayList<string> ();
+		}
 	}
 }
 
