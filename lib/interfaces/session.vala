@@ -21,6 +21,7 @@ namespace Zed {
 
 		public abstract async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError;
 		public abstract async void detach_script (uint script_id) throws IOError;
+		public abstract async void redirect_script_messages_to (uint script_id, string folder, uint keep_last_n) throws IOError;
 		public signal void message_from_script (uint script_id, Variant msg);
 
 		public abstract async void begin_instance_trace () throws IOError;

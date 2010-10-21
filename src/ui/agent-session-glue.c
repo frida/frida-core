@@ -16,10 +16,13 @@
 # define CINTERFACE
 # define COBJMACROS
 # include <shobjidl.h>
-static gchar * ask_for_filename_windows (const gchar * title);
 #endif
 
-static gchar * ask_for_filename_fallback (const gchar * title);
+static gchar * ask_for_path (const gchar * title, GtkFileChooserAction action);
+#ifdef G_OS_WIN32
+static gchar * ask_for_path_windows (const gchar * title, GtkFileChooserAction action);
+#endif
+static gchar * ask_for_path_fallback (const gchar * title, GtkFileChooserAction action);
 
 char *
 zed_presenter_agent_session_disassemble (ZedPresenterAgentSession * self, guint64 pc, guint8 * bytes, int bytes_length1, guint * instruction_length)
@@ -42,6 +45,30 @@ zed_presenter_agent_session_disassemble (ZedPresenterAgentSession * self, guint6
 char *
 zed_file_open_dialog_ask_for_filename (const gchar * title)
 {
+  return ask_for_path (title, GTK_FILE_CHOOSER_ACTION_OPEN);
+}
+
+char *
+zed_file_save_dialog_ask_for_filename (const gchar * title)
+{
+  return ask_for_path (title, GTK_FILE_CHOOSER_ACTION_SAVE);
+}
+
+char *
+zed_folder_select_dialog_ask_for_folder (const gchar * title)
+{
+  return ask_for_path (title, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
+}
+
+char *
+zed_folder_create_dialog_ask_for_folder (const gchar * title)
+{
+  return ask_for_path (title, GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER);
+}
+
+static gchar *
+ask_for_path (const gchar * title, GtkFileChooserAction action)
+{
 #ifdef G_OS_WIN32
   OSVERSIONINFO osvi = { 0, };
   gboolean is_vista_or_later;
@@ -52,19 +79,20 @@ zed_file_open_dialog_ask_for_filename (const gchar * title)
 
   is_vista_or_later = (osvi.dwMajorVersion >= 6);
   if (is_vista_or_later)
-    return ask_for_filename_windows (title);
+    return ask_for_path_windows (title, action);
 #endif
 
-  return ask_for_filename_fallback (title);
+  return ask_for_path_fallback (title, action);
 }
 
 #ifdef G_OS_WIN32
 
 static gchar *
-ask_for_filename_windows (const gchar * title)
+ask_for_path_windows (const gchar * title, GtkFileChooserAction action)
 {
   gchar * result = NULL;
   gunichar2 * title_utf16 = NULL;
+  const GUID * dialog_clsid = NULL;
   HRESULT hr;
   IFileDialog * fd = NULL;
   IShellItem * si = NULL;
@@ -72,13 +100,36 @@ ask_for_filename_windows (const gchar * title)
 
   title_utf16 = g_utf8_to_utf16 (title, -1, NULL, NULL, NULL);
 
-  hr = CoCreateInstance (&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, &IID_IFileDialog, (LPVOID *) &fd);
+  switch (action)
+  {
+    case GTK_FILE_CHOOSER_ACTION_OPEN:
+    case GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER:
+    case GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER:
+      dialog_clsid = &CLSID_FileOpenDialog;
+      break;
+
+    case GTK_FILE_CHOOSER_ACTION_SAVE:
+      dialog_clsid = &CLSID_FileSaveDialog;
+      break;
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  hr = CoCreateInstance (dialog_clsid, NULL, CLSCTX_INPROC_SERVER, &IID_IFileDialog, (LPVOID *) &fd);
   if (!SUCCEEDED (hr))
     goto beach;
 
   hr = IFileDialog_SetTitle (fd, (LPCWSTR) title_utf16);
   if (!SUCCEEDED (hr))
     goto beach;
+
+  if (action == GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER || action == GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER)
+  {
+    hr = IFileDialog_SetOptions (fd, FOS_PICKFOLDERS);
+    if (!SUCCEEDED (hr))
+      goto beach;
+  }
 
   hr = IFileDialog_Show (fd, NULL);
   if (!SUCCEEDED (hr))
@@ -111,13 +162,13 @@ beach:
 #endif /* G_OS_WIN32 */
 
 static gchar *
-ask_for_filename_fallback (const gchar * title)
+ask_for_path_fallback (const gchar * title, GtkFileChooserAction action)
 {
   gchar * result = NULL;
   GtkWidget * dialog;
 
-  dialog = gtk_file_chooser_dialog_new (title, NULL, GTK_FILE_CHOOSER_ACTION_OPEN,
-      GTK_STOCK_OPEN, GTK_RESPONSE_ACCEPT,
+  dialog = gtk_file_chooser_dialog_new (title, NULL, action,
+      (action == GTK_FILE_CHOOSER_ACTION_SAVE) ? GTK_STOCK_SAVE : GTK_STOCK_OPEN, GTK_RESPONSE_ACCEPT,
       GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
       NULL);
   if (gtk_dialog_run (GTK_DIALOG (dialog)) == GTK_RESPONSE_ACCEPT)

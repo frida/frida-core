@@ -524,6 +524,9 @@ namespace Zed {
 				case "detach":
 					yield handle_detach_command (args);
 					break;
+				case "redirect":
+					yield handle_redirect_command (args);
+					break;
 				case "itracker":
 					yield handle_itracker_command (args);
 					break;
@@ -664,7 +667,7 @@ namespace Zed {
 
 			var filename = FileOpenDialog.ask_for_filename ("Choose script to attach");
 			if (filename == null) {
-				print_to_console ("ERROR: no filename specified");
+				print_to_console ("error: no filename specified");
 				return;
 			}
 
@@ -718,6 +721,45 @@ namespace Zed {
 			try {
 				yield session.detach_script (id);
 				print_to_console ("script detached");
+			} catch (IOError detach_error) {
+				print_to_console ("ERROR: " + detach_error.message);
+			}
+		}
+
+		private void print_redirect_usage () {
+			print_to_console ("Usage: redirect script <script-id> output to folder [keep N]");
+		}
+
+		private async void handle_redirect_command (string[] args) {
+			if ((args.length != 5 && args.length != 7) || args[0] != "script" || args[2] != "output" || args[3] != "to" || args[4] != "folder") {
+				print_redirect_usage ();
+				return;
+			}
+
+			int id = args[1].to_int ();
+			if (id <= 0) {
+				print_redirect_usage ();
+				return;
+			}
+
+			int keep_last_n = 0;
+			if (args.length == 7) {
+				keep_last_n = args[6].to_int ();
+				if (args[5] != "keep" || keep_last_n <= 0) {
+					print_redirect_usage ();
+					return;
+				}
+			}
+
+			var folder = FolderCreateDialog.ask_for_folder ("Choose output folder");
+			if (folder == null) {
+				print_to_console ("error: no folder specified");
+				return;
+			}
+
+			try {
+				yield session.redirect_script_messages_to (id, folder, keep_last_n);
+				print_to_console ("output from script %u is now redirected to '%s'".printf (id, folder));
 			} catch (IOError detach_error) {
 				print_to_console ("ERROR: " + detach_error.message);
 			}
@@ -1112,6 +1154,18 @@ namespace Zed {
 
 	namespace FileOpenDialog {
 		public extern string? ask_for_filename (string title);
+	}
+
+	namespace FileSaveDialog {
+		public extern string? ask_for_filename (string title);
+	}
+
+	namespace FolderSelectDialog {
+		public extern string? ask_for_folder (string title);
+	}
+
+	namespace FolderCreateDialog {
+		public extern string? ask_for_folder (string title);
 	}
 }
 

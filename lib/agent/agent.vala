@@ -117,6 +117,10 @@ namespace Zed.Agent {
 			script_engine.detach_script (script_id);
 		}
 
+		public async void redirect_script_messages_to (uint script_id, string folder, uint keep_last_n) throws IOError {
+			script_engine.redirect_script_messages_to (script_id, folder, keep_last_n);
+		}
+
 		public async void begin_instance_trace () throws IOError {
 			throw new IOError.FAILED ("not implemented");
 		}
