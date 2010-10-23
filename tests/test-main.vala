@@ -8,6 +8,7 @@ namespace Zed.Test {
 		Zed.WinjectorTest.add_tests ();
 		Zed.AgentTest.add_tests ();
 		Zed.HostSessionTest.add_tests ();
+		Zed.HexViewTest.add_tests ();
 
 		GLib.Test.run ();
 

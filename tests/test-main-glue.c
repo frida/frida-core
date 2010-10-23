@@ -4,6 +4,7 @@
 
 #include <gio/gio.h>
 #include <gum/gum.h>
+#include <clutter/clutter.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -40,6 +41,7 @@ zed_test_environment_init (int * args_length1, char *** args)
   g_type_init ();
   g_test_init (args_length1, args, NULL);
   gum_init ();
+  clutter_init (args_length1, args);
 }
 
 void

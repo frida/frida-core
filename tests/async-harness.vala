@@ -11,21 +11,22 @@ namespace Zed.Test {
 			test_sequence = func;
 		}
 
-		construct {
-			main_context = new MainContext ();
-			main_loop = new MainLoop (main_context);
-		}
-
 		public void run () {
+			main_context = provide_main_context ();
+			main_loop = new MainLoop (main_context);
+
 			var timed_out = false;
 
-			timeout_source = new TimeoutSource.seconds (5);
-			timeout_source.set_callback (() => {
-				timed_out = true;
-				main_loop.quit ();
-				return false;
-			});
-			timeout_source.attach (main_context);
+			uint timeout = provide_timeout ();
+			if (timeout != 0) {
+				timeout_source = new TimeoutSource.seconds (timeout);
+				timeout_source.set_callback (() => {
+					timed_out = true;
+					main_loop.quit ();
+					return false;
+				});
+				timeout_source.attach (main_context);
+			}
 
 			var idle = new IdleSource ();
 			idle.set_callback (() => {
@@ -43,6 +44,14 @@ namespace Zed.Test {
 				timeout_source.destroy ();
 				timeout_source = null;
 			}
+		}
+
+		protected virtual MainContext provide_main_context () {
+			return new MainContext ();
+		}
+
+		protected virtual uint provide_timeout () {
+			return 5;
 		}
 
 		public async void process_events () {
