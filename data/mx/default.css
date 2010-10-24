@@ -3,6 +3,11 @@
   color: #616261;
 }
 
+ZedHexView
+{
+  background-color: #ff0000ff;
+}
+
 MxIcon.ResizeGrip
 {
   -mx-content-image: url('resize-grip.png');

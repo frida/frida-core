@@ -775,7 +775,7 @@ namespace Mx {
 		public void apply_clutter_text_attributes (Clutter.Text text);
 		public void connect_change_notifiers ();
 		public unowned Clutter.ParamSpecColor find_property (string property_name);
-		public void @get (...);
+		public void @get (string first_property_name, ...);
 		public bool get_default_value (string property_name, GLib.Value value_out);
 		public void get_property (string property_name, GLib.Value value);
 		public abstract unowned Mx.Style get_style ();

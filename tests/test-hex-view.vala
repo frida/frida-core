@@ -17,24 +17,6 @@ namespace Zed.HexViewTest {
 
 	}
 
-	/* SCRATCH BEGIN */
-
-	public class HexView : Mx.Widget {
-		protected override void paint () {
-			Clutter.Geometry geo;
-			get_allocation_geometry (out geo);
-
-			Cogl.Color bgcolor = Cogl.Color ();
-			bgcolor.set_from_4ub (128, 128, 128, 255);
-
-			Cogl.path_round_rectangle (0, 0, geo.width, geo.height, 5, (float) Math.PI_4 / 4.0f);
-			Cogl.set_source_color (bgcolor);
-			Cogl.path_stroke ();
-		}
-	}
-
-	/* SCRATCH END */
-
 	private class Harness : Zed.Test.AsyncHarness {
 		private Clutter.Stage stage = new Clutter.Stage ();
 
@@ -69,3 +51,27 @@ namespace Zed.HexViewTest {
 		}
 	}
 }
+
+/* SCRATCH BEGIN */
+
+namespace Zed {
+
+	public class HexView : Mx.Widget, Mx.Stylable {
+		protected override void paint () {
+			Clutter.Geometry geo;
+			get_allocation_geometry (out geo);
+
+			Cogl.Color bg_color = Cogl.Color ();
+			Clutter.Color? c = null;
+			get ("background-color", out c);
+			bg_color.set_from_4ub (c.red, c.green, c.blue, c.alpha);
+
+			Cogl.path_round_rectangle (0, 0, geo.width, geo.height, 5, (float) Math.PI_4 / 4.0f);
+			Cogl.set_source_color (bg_color);
+			Cogl.path_stroke ();
+		}
+	}
+
+}
+
+/* SCRATCH END */
