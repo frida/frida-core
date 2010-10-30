@@ -783,7 +783,7 @@ namespace Mx {
 		public abstract unowned string get_style_pseudo_class ();
 		public unowned Clutter.ParamSpecColor list_properties (uint n_props);
 		public abstract void set_style (Mx.Style style);
-		public abstract void set_style_class (string style_class);
+		public abstract void set_style_class (string? style_class);
 		public abstract void set_style_pseudo_class (string pseudo_class);
 		[HasEmitter]
 		public signal void style_changed (Mx.StyleChangedFlags flags);
