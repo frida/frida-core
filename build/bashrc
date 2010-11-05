@@ -42,7 +42,7 @@ if [ "$FRIDA_TARGET" = "osx" ]; then
   export CFLAGS=""
   export LDFLAGS=""
 elif [ "$FRIDA_TARGET" = "ios" ]; then
-  export IPHONE_SDKVER="4.0"
+  export IPHONE_SDKVER="4.1"
   export IPHONE_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
   export IPHONE_SDKROOT="${IPHONE_DEVROOT}/SDKs/iPhoneOS${IPHONE_SDKVER}.sdk"
 
@@ -70,14 +70,14 @@ if [ "$FRIDA_TARGET" = "linux" ]; then
   export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal"
 
   export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig"
-  export VALAC="${FRIDA_PREFIX}/bin/valac-0.12 --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+  export VALAC="${FRIDA_PREFIX}/bin/valac-0.10 --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
 else
   export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
   export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
 
   export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
   export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig:${IPHONE_SDKROOT}/usr/lib/pkgconfig"
-  export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.12 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.12/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+  export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
 fi
 export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
 export CONFIG_SITE="${FRIDA_BUILD}/config.site"
