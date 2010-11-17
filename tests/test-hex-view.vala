@@ -90,8 +90,6 @@ namespace Zed {
 			float min_width = heading.get_width ();
 			min_width_p = min_width;
 			natural_width_p = min_width;
-
-			stdout.printf ("get_preferred_width for_height=%f => %f\n", for_height, min_width);
 		}
 
 		public override void get_preferred_height (float for_width, out float min_height_p, out float natural_height_p) {
@@ -101,8 +99,6 @@ namespace Zed {
 			float min_height = min_width * 1.61f;
 			min_height_p = min_height;
 			natural_height_p = min_height;
-
-			stdout.printf ("get_preferred_height for_width=%f => %f\n", for_width, min_height);
 		}
 
 		protected override void map () {
