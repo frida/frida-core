@@ -105,7 +105,9 @@
 
   <autotools id="gnome-common" autogen-sh="configure">
     <branch module="gnome-common/2.28/gnome-common-2.28.0.tar.bz2"
-	    version="2.28.0" hash="sha256:dd4817103d23745d00c735dd137951552ba7b576cb8f68e6a529d06661e9b6a1"/>
+	    version="2.28.0" hash="sha256:dd4817103d23745d00c735dd137951552ba7b576cb8f68e6a529d06661e9b6a1">
+      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gtkselection.patch" strip="1"/>
+    </branch>
   </autotools>
 
   <autotools id="libxml2" autogen-sh="configure">
@@ -147,7 +149,7 @@
     </dependencies>
   </autotools>
 
-  <metamodule id="meta-gtk-osx-bootstrap">
+  <metamodule id="meta-frida-sdk-osx-bootstrap">
     <dependencies>
       <dep package="libpng"/>
       <dep package="gtk-doc"/>
@@ -164,7 +166,7 @@
     </dependencies>
   </metamodule>
 
-  <metamodule id="meta-gtk-osx-freetype">
+  <metamodule id="meta-frida-sdk-osx-freetype">
     <dependencies>
       <dep package="freetype"/>
       <dep package="fontconfig"/>

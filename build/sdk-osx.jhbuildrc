@@ -22,7 +22,6 @@
 import sys
 import errno
 
-
 # Register an extra command to get the checkout dir for a module.
 #
 import jhbuild
@@ -393,13 +392,13 @@ def setup_universal_build(target="10.5", sdk_version="10.5",
 # Moduleset to use. You can override this in .jhbuildrc-custom or on
 # the command line.
 #
-moduleset = 'http://github.com/jralls/gtk-osx-build/raw/master/modulesets-stable/gtk-osx.modules'
+moduleset = 'sdk-osx.modules'
 use_local_modulesets = True
 
 # A list of the modules to build. You can override this in
 # .jhbuildrc-custom or on the command line.
 #
-modules = [ 'meta-gtk-osx-bootstrap', 'meta-gtk-osx-core' ]
+modules = [ 'meta-frida-sdk-osx-bootstrap' ]
 
 # A list of modules to skip.
 #
@@ -408,7 +407,7 @@ skip.append('guile')
 
 # Source and installation locations.
 #
-_root = os.path.expanduser("~/gtk")
+_root = os.path.expanduser("~/frida-sdk")
 checkoutroot = os.path.join(_root, "source")
 prefix = os.path.join(_root, "inst")
 _exec_prefix = None
@@ -447,6 +446,9 @@ else:
 # the prefix or default build setup for example, or CFLAGS or
 # module_autogenargs, etc.
 #
+
+setup_debug()
+
 _userrc = os.path.join(os.environ['HOME'], '.jhbuildrc-custom')
 if os.path.exists(_userrc):
     execfile(_userrc)
@@ -490,21 +492,15 @@ if _build != "":
 # override this to somewhere common (~/.local/pkgs is one alternative)
 if tarballdir == None:
     tarballdir = os.path.join(checkoutroot, 'pkgs')
-# _exec_prefix is used to set $M4 and $LIBTOOLIZE. We set it here to
-# prefix if it wasn't over-ridden in .jhbuildrc-custom
-if _exec_prefix == None:
-    _exec_prefix = prefix
 
+_toolchain_prefix = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'toolchain')
 
 os.environ['PREFIX'] = prefix # Deprecated, please move to JHBUILD_PREFIX.
 os.environ['JHBUILD_PREFIX'] = prefix
 os.environ['JHBUILD_SOURCE'] = checkoutroot
 
-# Some packages go off and find /usr/lib/gm4, which is broken Note the
-# use of _exec_prefix here. By default it's prefix, but you can
-# override it to somewhere else in jhbuildrc-custom if you like.
-os.environ["M4"] = _exec_prefix + "/bin/m4"
-os.environ['LIBTOOLIZE'] = _exec_prefix + '/bin/libtoolize'
+os.environ['M4'] = os.path.join(_toolchain_prefix, 'bin', 'm4')
+os.environ['LIBTOOLIZE'] = os.path.join(_toolchain_prefix, 'bin', 'libtoolize')
 
 # By default, we want the system perl and python, not from macports or
 # so.
