@@ -439,6 +439,8 @@ namespace Zed.Service {
 						}
 
 					} catch (Error e) {
+						foreach (var pending_response in pending_responses)
+							pending_response.complete (ResultCode.PROTOCOL_ERROR);
 						reset ();
 					}
 				}
@@ -533,6 +535,7 @@ namespace Zed.Service {
 		}
 
 		private enum ResultCode {
+			PROTOCOL_ERROR      = -1,
 			SUCCESS		    = 0,
 			CONNECTION_REFUSED  = 3,
 			INVALID_REQUEST	    = 5
