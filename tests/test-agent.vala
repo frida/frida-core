@@ -10,6 +10,11 @@ namespace Zed.AgentTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Agent/Memory/scan-module-for-pattern", () => {
+			var h = new Harness ((h) => Memory.scan_module_for_pattern (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Agent/Script/attach-and-receive-messages", () => {
 			var h = new Harness ((h) => Script.attach_and_receive_messages (h as Harness));
 			h.run ();
@@ -53,6 +58,28 @@ namespace Zed.AgentTest {
 			if (GLib.Test.verbose ()) {
 				foreach (var function in functions)
 					stdout.printf ("function: '%s'\n", function.name);
+			}
+
+			yield h.unload_agent ();
+
+			h.done ();
+		}
+
+		private static async void scan_module_for_pattern (Harness h) {
+			var session = yield h.load_agent ();
+
+			uint64[] matches;
+			try {
+				matches = yield session.scan_module_for_pattern ("kernel32.dll", "55 8b ec");
+			} catch (IOError scan_error) {
+				assert_not_reached ();
+			}
+
+			assert (matches.length > 0);
+			//if (GLib.Test.verbose ()) {
+			if (true) {
+				foreach (var address in matches)
+					stdout.puts ("address: " + address.to_string () + "\n");
 			}
 
 			yield h.unload_agent ();

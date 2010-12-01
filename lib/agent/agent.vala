@@ -92,6 +92,28 @@ namespace Zed.Agent {
 			return functions;
 		}
 
+		public async uint64[] scan_module_for_pattern (string module_name, string pattern) throws IOError {
+			void * base_address = null;
+			Gum.Process.enumerate_modules ((name, address, path) => {
+				if (name == module_name) {
+					base_address = address;
+					return false;
+				}
+				return true;
+			});
+			if (base_address == null)
+				throw new IOError.FAILED ("specified module not found");
+
+			foreach (var token in pattern.split (" ")) {
+				token = token.strip ();
+				if (token.length == 0)
+					continue;
+				stdout.printf ("token: '%s'\n", token);
+			}
+
+			return new uint64[] { };
+		}
+
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {
 			var bytes = Gum.Memory.read ((void *) address, size);
 			if (bytes.length == 0)
