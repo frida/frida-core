@@ -518,6 +518,9 @@ namespace Zed {
 				args = new string[0];
 
 			switch (verb) {
+				case "clear":
+					yield handle_clear_command (args);
+					break;
 				case "scan":
 					yield handle_scan_command (args);
 					break;
@@ -549,6 +552,19 @@ namespace Zed {
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
 			}
+		}
+
+		private void print_clear_usage () {
+			print_to_console ("Usage: clear");
+		}
+
+		private async void handle_clear_command (string[] args) {
+			if (args.length != 0) {
+				print_clear_usage ();
+				return;
+			}
+
+			clear_console ();
 		}
 
 		private void print_scan_usage () {
@@ -986,6 +1002,13 @@ namespace Zed {
 			view.console_view.scroll_to_mark (console_scroll_mark, 0.0, true, 0.0, 1.0);
 
 			return iter;
+		}
+
+		private void clear_console () {
+			Gtk.TextIter start_iter, end_iter;
+			console_text_buffer.get_iter_at_offset (out start_iter, 0);
+			console_text_buffer.get_iter_at_offset (out end_iter, -1);
+			console_text_buffer.delete (start_iter, end_iter);
 		}
 
 		private async uint64 resolve_address_specifier_arguments (string[] args) throws IOError {
