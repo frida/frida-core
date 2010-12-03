@@ -12,7 +12,7 @@ namespace Zed {
 
 		public abstract async AgentModuleInfo[] query_modules () throws IOError;
 		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
-		public abstract async uint64[] scan_module_for_pattern (string module_name, string pattern) throws IOError;
+		public abstract async uint64[] scan_module_for_code_pattern (string module_name, string pattern) throws IOError;
 		public abstract async uint8[] read_memory (uint64 address, uint size) throws IOError;
 
 		public abstract async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError;

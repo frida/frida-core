@@ -90,26 +90,26 @@ namespace Zed.Agent {
 			return functions;
 		}
 
-		public async uint64[] scan_module_for_pattern (string module_name, string pattern) throws IOError {
-			void * base_address = null;
-			Gum.Process.enumerate_modules ((name, address, path) => {
-				if (name == module_name) {
-					base_address = address;
-					return false;
-				}
+		public async uint64[] scan_module_for_code_pattern (string module_name, string pattern) throws IOError {
+			var match_pattern = new Gum.MatchPattern.from_string (pattern);
+			if (match_pattern == null)
+				throw new IOError.FAILED ("invalid match pattern");
+
+			var match_list = new Gee.ArrayList<void *> ();
+			Gum.Module.enumerate_ranges (module_name, Gum.PageProtection.EXECUTE, (range, prot) => {
+				Gum.Memory.scan (range, match_pattern, (address, size) => {
+					match_list.add (address);
+					return true;
+				});
+
 				return true;
 			});
-			if (base_address == null)
-				throw new IOError.FAILED ("specified module not found");
 
-			foreach (var token in pattern.split (" ")) {
-				token = token.strip ();
-				if (token.length == 0)
-					continue;
-				stdout.printf ("token: '%s'\n", token);
-			}
+			var matches = new uint64[0];
+			foreach (var match in match_list)
+				matches += (uint64) match;
 
-			return new uint64[] { };
+			return matches;
 		}
 
 		public async uint8[] read_memory (uint64 address, uint size) throws IOError {

@@ -10,8 +10,8 @@ namespace Zed.AgentTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/Agent/Memory/scan-module-for-pattern", () => {
-			var h = new Harness ((h) => Memory.scan_module_for_pattern (h as Harness));
+		GLib.Test.add_func ("/Agent/Memory/scan-module-for-code-pattern", () => {
+			var h = new Harness ((h) => Memory.scan_module_for_code_pattern (h as Harness));
 			h.run ();
 		});
 
@@ -65,21 +65,21 @@ namespace Zed.AgentTest {
 			h.done ();
 		}
 
-		private static async void scan_module_for_pattern (Harness h) {
+		private static async void scan_module_for_code_pattern (Harness h) {
 			var session = yield h.load_agent ();
 
 			uint64[] matches;
 			try {
-				matches = yield session.scan_module_for_pattern ("kernel32.dll", "55 8b ec");
+				matches = yield session.scan_module_for_code_pattern ("kernel32.dll", "55 8b ec");
 			} catch (IOError scan_error) {
 				assert_not_reached ();
 			}
 
 			assert (matches.length > 0);
-			//if (GLib.Test.verbose ()) {
-			if (true) {
+			if (GLib.Test.verbose ()) {
+				uint i = 1;
 				foreach (var address in matches)
-					stdout.puts ("address: " + address.to_string () + "\n");
+					stdout.printf ("Match #%u found at 0x%08" + uint64.FORMAT_MODIFIER + "x\n", i++, address);
 			}
 
 			yield h.unload_agent ();
