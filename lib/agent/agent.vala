@@ -82,8 +82,6 @@ namespace Zed.Agent {
 				function_list.add (AgentFunctionInfo (name, (uint64) address));
 				return true;
 			});
-			if (function_list.is_empty)
-				function_list.add (AgentFunctionInfo ("<placeholdertotemporarilyworkaroundemptylistbug>", 1337));
 
 			var functions = new AgentFunctionInfo[0];
 			foreach (var function in function_list)
