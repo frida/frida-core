@@ -502,7 +502,13 @@ namespace Zed {
 		private async void handle_console_input (string input) {
 			print_to_console ("> " + input, view.console_input_tag);
 
-			var tokens = input.split (" ");
+			string[] tokens;
+			try {
+				Shell.parse_argv (input, out tokens);
+			} catch (ShellError parse_error) {
+				print_to_console ("ERROR: " + parse_error.message);
+				return;
+			}
 
 			var verb = tokens[0];
 			string[] args;
@@ -512,6 +518,9 @@ namespace Zed {
 				args = new string[0];
 
 			switch (verb) {
+				case "scan":
+					yield handle_scan_command (args);
+					break;
 				case "dump":
 					yield handle_dump_command (args);
 					break;
@@ -539,6 +548,46 @@ namespace Zed {
 				default:
 					print_to_console ("Unknown command '%s'".printf (verb));
 					break;
+			}
+		}
+
+		private void print_scan_usage () {
+			print_to_console ("Usage: scan <module-name> <pattern>");
+		}
+
+		private async void handle_scan_command (string[] args) {
+			if (args.length != 2) {
+				print_scan_usage ();
+				return;
+			}
+			var module_name = args[0];
+			var pattern = args[1];
+
+			try {
+				uint64[] matches = yield session.scan_module_for_code_pattern (module_name, pattern);
+
+				if (matches.length > 0) {
+					print_to_console ("found %u match%s:".printf (matches.length, (matches.length == 1) ? "" : "es"));
+
+					uint i = 1;
+					foreach (var address in matches) {
+						print_to_console (("  match #%u found at 0x%08" + uint64.FORMAT_MODIFIER + "x").printf (i, address));
+
+						if (i == 10) {
+							var remainder = matches.length - i;
+							if (remainder > 0) {
+								print_to_console ("  (and %u more match%s)".printf (remainder, (remainder == 1) ? "" : "es"));
+								break;
+							}
+						}
+
+						i++;
+					}
+				} else {
+					print_to_console ("no matches found");
+				}
+			} catch (IOError read_error) {
+				print_to_console ("ERROR: " + read_error.message);
 			}
 		}
 
