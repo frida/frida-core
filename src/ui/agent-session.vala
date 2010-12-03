@@ -1050,7 +1050,7 @@ namespace Zed {
 						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
 				} else {
 					builder.append_c (' ');
-					if (line_offset == 7)
+					if (line_offset == 8)
 						builder.append_c (' ');
 				}
 
