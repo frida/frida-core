@@ -290,6 +290,7 @@ namespace Zed {
 						this.update_state (State.TERMINATED);
 				});
 				session.message_from_script.connect (on_message_from_script);
+				session.read_detected_from.connect (on_read_detected_from);
 
 				update_state (State.SYNCHRONIZING);
 				yield update_module_specs ();
@@ -538,6 +539,9 @@ namespace Zed {
 					break;
 				case "redirect":
 					yield handle_redirect_command (args);
+					break;
+				case "monitor":
+					yield handle_monitor_command (args);
 					break;
 				case "itracker":
 					yield handle_itracker_command (args);
@@ -832,6 +836,36 @@ namespace Zed {
 
 		private void on_message_from_script (uint script_id, Variant msg) {
 			print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
+		}
+
+		private void print_monitor_usage () {
+			print_to_console ("Usage: monitor <on|off> <module-name>");
+		}
+
+		private async void handle_monitor_command (string[] args) {
+			if (args.length != 2) {
+				print_monitor_usage ();
+				return;
+			}
+
+			var request = args[0];
+			if (request != "on" && request != "off") {
+				print_monitor_usage ();
+				return;
+			}
+			var module_name = args[1];
+			bool enable = (request == "on");
+
+			try {
+				yield session.set_monitor_enabled (module_name, enable);
+				print_to_console ("monitor %s for %s".printf (enable ? "enabled" : "disabled", module_name));
+			} catch (IOError detach_error) {
+				print_to_console ("ERROR: " + detach_error.message);
+			}
+		}
+
+		private void on_read_detected_from (uint64 address, string module_name) {
+			print_to_console (("[read detected from 0x%08" + uint64.FORMAT_MODIFIER + "x while accessing %s]").printf (address, module_name));
 		}
 
 		private void print_itracker_usage () {

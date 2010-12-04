@@ -141,6 +141,19 @@ namespace Zed.Agent {
 			script_engine.redirect_script_messages_to (script_id, folder, keep_last_n);
 		}
 
+		private bool monitor_enabled = false;
+
+		public async void set_monitor_enabled (string module_name, bool enable) throws IOError {
+			monitor_enabled = enable;
+
+			if (monitor_enabled) {
+				Timeout.add (2000, () => {
+					read_detected_from (0x1337, module_name);
+					return monitor_enabled;
+				});
+			}
+		}
+
 		public async void begin_instance_trace () throws IOError {
 			throw new IOError.FAILED ("not implemented");
 		}
