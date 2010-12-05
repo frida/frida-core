@@ -33,6 +33,12 @@
     <ClCompile Include="$(IntDir)session.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="agent-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)memory-monitor-engine.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
@@ -45,6 +51,9 @@
     </None>
     <None Include="$(SolutionDir)lib\interfaces\session.vala">
       <Filter>Source Files\lib\interfaces</Filter>
+    </None>
+    <None Include="memory-monitor-engine.vala">
+      <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
 </Project>

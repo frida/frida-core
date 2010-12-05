@@ -10,6 +10,7 @@ namespace Zed.Agent {
 		private bool closing = false;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
+		private MemoryMonitorEngine memory_monitor_engine = new MemoryMonitorEngine ();
 		private ScriptEngine script_engine = new ScriptEngine ();
 
 		public FruityServer (string listen_address) {
@@ -17,6 +18,7 @@ namespace Zed.Agent {
 		}
 
 		construct {
+			memory_monitor_engine.read_detected_from.connect ((address, module_name) => this.read_detected_from (address, module_name));
 			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
 		}
 
@@ -141,17 +143,8 @@ namespace Zed.Agent {
 			script_engine.redirect_script_messages_to (script_id, folder, keep_last_n);
 		}
 
-		private bool monitor_enabled = false;
-
 		public async void set_monitor_enabled (string module_name, bool enable) throws IOError {
-			monitor_enabled = enable;
-
-			if (monitor_enabled) {
-				Timeout.add (2000, () => {
-					read_detected_from (0x1337, module_name);
-					return monitor_enabled;
-				});
-			}
+			memory_monitor_engine.set_enabled (module_name, enable);
 		}
 
 		public async void begin_instance_trace () throws IOError {
