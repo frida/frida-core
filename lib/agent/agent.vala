@@ -18,7 +18,7 @@ namespace Zed.Agent {
 		}
 
 		construct {
-			memory_monitor_engine.read_detected_from.connect ((address, module_name) => this.read_detected_from (address, module_name));
+			memory_monitor_engine.memory_read_detected.connect ((from, address, module_name) => this.memory_read_detected (from, address, module_name));
 			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
 		}
 

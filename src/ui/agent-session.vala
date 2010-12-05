@@ -290,7 +290,7 @@ namespace Zed {
 						this.update_state (State.TERMINATED);
 				});
 				session.message_from_script.connect (on_message_from_script);
-				session.read_detected_from.connect (on_read_detected_from);
+				session.memory_read_detected.connect (on_memory_read_detected);
 
 				update_state (State.SYNCHRONIZING);
 				yield update_module_specs ();
@@ -864,8 +864,8 @@ namespace Zed {
 			}
 		}
 
-		private void on_read_detected_from (uint64 address, string module_name) {
-			print_to_console (("[read detected from 0x%08" + uint64.FORMAT_MODIFIER + "x while accessing %s]").printf (address, module_name));
+		private void on_memory_read_detected (uint64 from, uint64 address, string module_name) {
+			print_to_console (("[%s: memory read detected from 0x%08" + uint64.FORMAT_MODIFIER + "x while accessing 0x%08" + uint64.FORMAT_MODIFIER + "x]").printf (module_name, from, address));
 		}
 
 		private void print_itracker_usage () {

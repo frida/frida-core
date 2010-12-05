@@ -26,7 +26,7 @@ namespace Zed {
 		public signal void message_from_script (uint script_id, Variant msg);
 
 		public abstract async void set_monitor_enabled (string module_name, bool enable) throws IOError;
-		public signal void read_detected_from (uint64 address, string module_name);
+		public signal void memory_read_detected (uint64 from, uint64 address, string module_name);
 
 		public abstract async void begin_instance_trace () throws IOError;
 		public abstract async void end_instance_trace () throws IOError;

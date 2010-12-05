@@ -1,6 +1,6 @@
 namespace Zed.Agent {
 	public class MemoryMonitorEngine : Object {
-		public signal void read_detected_from (uint64 address, string module_name);
+		public signal void memory_read_detected (uint64 from, uint64 address, string module_name);
 
 		private Gee.HashMap<string, Session> session_by_module_name = new Gee.HashMap<string, Session> ();
 
@@ -9,7 +9,7 @@ namespace Zed.Agent {
 				if (session_by_module_name.has_key (module_name))
 					throw new IOError.FAILED ("memory monitoring is already enabled for " + module_name);
 				var session = new Session (module_name);
-				session.read_detected_from.connect ((address, module_name) => read_detected_from (address, module_name));
+				session.memory_read_detected.connect ((from, address, module_name) => memory_read_detected (from, address, module_name));
 				session.open ();
 				session_by_module_name[module_name] = session;
 			} else {
@@ -21,7 +21,7 @@ namespace Zed.Agent {
 		}
 
 		public class Session : Object {
-			public signal void read_detected_from (uint64 address, string module_name);
+			public signal void memory_read_detected (uint64 from, uint64 address, string module_name);
 
 			public string module_name {
 				get;
@@ -29,6 +29,7 @@ namespace Zed.Agent {
 			}
 
 			private Gee.ArrayList<Gum.MemoryAccessMonitor> monitors = new Gee.ArrayList<Gum.MemoryAccessMonitor> ();
+			private Gee.HashMap<void *, void *> unique_readers = new Gee.HashMap<void *, void *> ();
 
 			public Session (string module_name) {
 				Object (module_name: module_name);
@@ -54,13 +55,17 @@ namespace Zed.Agent {
 				foreach (var monitor in monitors)
 					monitor.disable ();
 				monitors.clear ();
+				unique_readers.clear ();
 			}
 
 			private void on_memory_access (Gum.MemoryAccessMonitor monitor, Gum.MemoryAccessDetails details) {
 				if (details.operation != Gum.MemoryOperation.READ)
 					return;
 				Idle.add (() => {
-					read_detected_from ((uint64) details.from, module_name);
+					if (!unique_readers.has_key (details.from)) {
+						unique_readers[details.from] = details.address;
+						memory_read_detected ((uint64) details.from, (uint64) details.address, module_name);
+					}
 					return false;
 				});
 			}
