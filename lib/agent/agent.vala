@@ -121,6 +121,13 @@ namespace Zed.Agent {
 			return bytes;
 		}
 
+		public async void write_memory (uint64 address, uint8[] bytes) throws IOError {
+			if (bytes.length == 0)
+				throw new IOError.FAILED ("zero-length write not allowed");
+			if (!Gum.Memory.write ((void *) address, bytes))
+				throw new IOError.FAILED ("specified memory region is not writable");
+		}
+
 		public async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError {
 			throw new IOError.FAILED ("not implemented");
 		}

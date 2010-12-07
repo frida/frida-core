@@ -531,6 +531,9 @@ namespace Zed {
 				case "dasm":
 					yield handle_dasm_command (args);
 					break;
+				case "write":
+					yield handle_write_command (args);
+					break;
 				case "attach":
 					yield handle_attach_command (args);
 					break;
@@ -707,6 +710,39 @@ namespace Zed {
 
 				print_to_console (builder.str);
 
+			} catch (IOError read_error) {
+				print_to_console ("ERROR: " + read_error.message);
+			}
+		}
+
+		private void print_write_usage () {
+			print_to_console ("Usage: write <address-specifier> <hex-string>");
+		}
+
+		private async void handle_write_command (string[] args) {
+			uint64 address;
+			uint8[] bytes;
+
+			if (args.length < 2) {
+				print_write_usage ();
+				return;
+			}
+
+			try {
+				var address_args = args[0:args.length - 1];
+				address = yield resolve_address_specifier_arguments (address_args);
+				bytes = byte_array_from_hex_string (args[args.length - 1]);
+			} catch (IOError arg_error) {
+				print_to_console ("ERROR: " + arg_error.message);
+				print_to_console ("");
+				print_write_usage ();
+				return;
+			}
+
+			try {
+				yield session.write_memory (address, bytes);
+				print_to_console ("wrote:");
+				print_to_console (byte_array_to_hexdump (bytes, address));
 			} catch (IOError read_error) {
 				print_to_console ("ERROR: " + read_error.message);
 			}
@@ -1124,6 +1160,28 @@ namespace Zed {
 			}
 
 			return builder.str;
+		}
+
+		private uint8[] byte_array_from_hex_string (string hex_string) throws IOError {
+			var result = new uint8[0];
+
+			for (char * ch = hex_string; *ch != '\0'; ch++) {
+				if (*ch == ' ')
+					continue;
+
+				int upper = ch[0].xdigit_value ();
+				if (upper == -1)
+					throw new IOError.FAILED ("invalid hex string");
+				int lower = ch[1].xdigit_value ();
+				if (lower == -1)
+					throw new IOError.FAILED ("invalid hex string");
+				uint8 val = (uint8) ((upper << 4) | lower);
+				result += val;
+
+				ch++;
+			}
+
+			return result;
 		}
 
 		/* TODO: move this to a Service later */
