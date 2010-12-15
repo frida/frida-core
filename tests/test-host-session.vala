@@ -24,6 +24,10 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-create-from-xml", () => {
+			Fruity.PropertyList.can_create_from_xml ();
+		});
+
 #endif
 	}
 
@@ -191,6 +195,33 @@ namespace Zed.HostSessionTest {
 			h.service.remove_backend (backend);
 
 			h.done ();
+		}
+
+		namespace PropertyList {
+
+			private static void can_create_from_xml () {
+				var xml =
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+					"<plist version=\"1.0\">\n" +
+					"<dict>\n" +
+					"	<key>MessageType</key>\n" +
+					"	<string>Result</string>\n" +
+					"	<key>Number</key>\n" +
+					"	<integer>0</integer>\n" +
+					"</dict>\n" +
+					"</plist>\n";
+				try {
+					var plist = new Zed.Service.PropertyList.from_xml (xml);
+					var keys = plist.get_keys ();
+					assert (keys.length == 2);
+					assert (plist.get_string ("MessageType") == "Result");
+					assert (plist.get_int ("Number") == 0);
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+			}
+
 		}
 
 	}
