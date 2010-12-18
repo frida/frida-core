@@ -2,6 +2,10 @@
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-core", "zed-core.vcxproj", "{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}"
+	ProjectSection(ProjectDependencies) = postProject
+		{F4F9AF1C-3111-4563-8066-8FAE8CBEFBDC} = {F4F9AF1C-3111-4563-8066-8FAE8CBEFBDC}
+		{D873638D-AA0D-4252-9334-456557A65D95} = {D873638D-AA0D-4252-9334-456557A65D95}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-tests", "tests\zed-tests.vcxproj", "{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}"
 EndProject
