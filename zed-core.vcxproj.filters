@@ -162,6 +162,12 @@
     <None Include="src\service\tcp\tcp-host-session.vala">
       <Filter>Source Files\service\tcp</Filter>
     </None>
+    <None Include="src\service\fruity\fruity-client.vala">
+      <Filter>Source Files\service\fruity</Filter>
+    </None>
+    <None Include="src\service\fruity\fruity-property-list.vala">
+      <Filter>Source Files\service\fruity</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -274,6 +280,12 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)data\zed-data-mx.c">
       <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\fruity\fruity-client.c">
+      <Filter>Source Files\generated\service\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\fruity\fruity-property-list.c">
+      <Filter>Source Files\generated\service\fruity</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -216,7 +216,7 @@ namespace Zed.HostSessionTest {
 					"</dict>\n" +
 					"</plist>\n";
 				try {
-					var plist = new Zed.Service.PropertyList.from_xml (xml);
+					var plist = new Zed.Service.Fruity.PropertyList.from_xml (xml);
 					var keys = plist.get_keys ();
 					assert (keys.length == 2);
 					assert (plist.get_string ("MessageType") == "Result");
@@ -252,7 +252,7 @@ namespace Zed.HostSessionTest {
 					"</dict>\n" +
 					"</plist>\n";
 				try {
-					var plist = new Zed.Service.PropertyList.from_xml (xml);
+					var plist = new Zed.Service.Fruity.PropertyList.from_xml (xml);
 					var plist_keys = plist.get_keys ();
 					assert (plist_keys.length == 3);
 					assert (plist.get_int ("DeviceID") == 2);
