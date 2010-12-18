@@ -24,8 +24,12 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-create-from-xml", () => {
-			Fruity.PropertyList.can_create_from_xml ();
+		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-create-from-simple-xml", () => {
+			Fruity.PropertyList.can_create_from_simple_xml ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-create-from-nested-xml", () => {
+			Fruity.PropertyList.can_create_from_nested_xml ();
 		});
 
 #endif
@@ -199,7 +203,7 @@ namespace Zed.HostSessionTest {
 
 		namespace PropertyList {
 
-			private static void can_create_from_xml () {
+			private static void can_create_from_simple_xml () {
 				var xml =
 					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
 					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
@@ -217,6 +221,51 @@ namespace Zed.HostSessionTest {
 					assert (keys.length == 2);
 					assert (plist.get_string ("MessageType") == "Result");
 					assert (plist.get_int ("Number") == 0);
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+			}
+
+			private static void can_create_from_nested_xml () {
+				var xml =
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+					"<plist version=\"1.0\">\n" +
+					"<dict>\n" +
+					"	<key>DeviceID</key>\n" +
+					"	<integer>2</integer>\n" +
+					"	<key>MessageType</key>\n" +
+					"	<string>Attached</string>\n" +
+					"	<key>Properties</key>\n" +
+					"	<dict>\n" +
+					"		<key>ConnectionType</key>\n" +
+					"		<string>USB</string>\n" +
+					"		<key>DeviceID</key>\n" +
+					"		<integer>2</integer>\n" +
+					"		<key>LocationID</key>\n" +
+					"		<integer>0</integer>\n" +
+					"		<key>ProductID</key>\n" +
+					"		<integer>4759</integer>\n" +
+					"		<key>SerialNumber</key>\n" +
+					"		<string>220f889780dda462091a65df48b9b6aedb05490f</string>\n" +
+					"	</dict>\n" +
+					"</dict>\n" +
+					"</plist>\n";
+				try {
+					var plist = new Zed.Service.PropertyList.from_xml (xml);
+					var plist_keys = plist.get_keys ();
+					assert (plist_keys.length == 3);
+					assert (plist.get_int ("DeviceID") == 2);
+					assert (plist.get_string ("MessageType") == "Attached");
+
+					var proplist = plist.get_plist ("Properties");
+					var proplist_keys = proplist.get_keys ();
+					assert (proplist_keys.length == 5);
+					assert (proplist.get_string ("ConnectionType") == "USB");
+					assert (proplist.get_int ("DeviceID") == 2);
+					assert (proplist.get_int ("LocationID") == 0);
+					assert (proplist.get_int ("ProductID") == 4759);
+					assert (proplist.get_string ("SerialNumber") == "220f889780dda462091a65df48b9b6aedb05490f");
 				} catch (IOError e) {
 					assert_not_reached ();
 				}

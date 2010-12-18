@@ -542,7 +542,7 @@ namespace Zed.Service {
 		}
 	}
 
-	public class PropertyList {
+	public class PropertyList : Object {
 		private Gee.HashMap<string, Value?> value_by_key = new Gee.HashMap<string, Value?> ();
 
 		public PropertyList.from_xml (string xml) throws IOError {
@@ -564,6 +564,10 @@ namespace Zed.Service {
 
 		public int get_int (string key) throws IOError {
 			return get_value (key, typeof (int)).get_int ();
+		}
+
+		public PropertyList get_plist (string key) throws IOError {
+			return get_value (key, typeof (PropertyList)).get_object () as PropertyList;
 		}
 
 		private Value get_value (string key, Type expected_type) throws IOError {
@@ -593,7 +597,7 @@ namespace Zed.Service {
 				null
 			};
 
-			private bool is_in_dict;
+			private Gee.Deque<PropertyList> stack;
 			private KeyValuePair current_pair;
 
 			public XmlParser (PropertyList plist) {
@@ -601,18 +605,20 @@ namespace Zed.Service {
 			}
 
 			public void parse (string xml) throws MarkupError {
-				is_in_dict = false;
+				stack = new Gee.LinkedList<PropertyList> ();
+				current_pair = null;
 
 				var context = new MarkupParseContext (parser, 0, this, null);
 				context.parse (xml, -1);
+
+				stack = null;
+				current_pair = null;
 			}
 
 			private void on_start_element (MarkupParseContext context, string element_name, string[] attribute_names, string[] attribute_values) throws MarkupError {
-				if (!is_in_dict) {
-					if (element_name == "dict") {
-						is_in_dict = true;
-						current_pair = null;
-					}
+				if (stack.is_empty) {
+					if (element_name == "dict")
+						stack.offer_head (plist);
 					return;
 				} else if (current_pair == null) {
 					if (element_name == "key")
@@ -620,13 +626,26 @@ namespace Zed.Service {
 					return;
 				}
 
-				if (current_pair.type == null)
+				if (current_pair.type == null) {
 					current_pair.type = element_name;
+
+					if (current_pair.type == "dict") {
+						var parent_plist = stack.peek ();
+
+						var child_plist = new PropertyList ();
+						stack.offer_head (child_plist);
+						var child_plist_value = Value (typeof (PropertyList));
+						child_plist_value.set_object (child_plist);
+						parent_plist.set_value (current_pair.key, child_plist_value);
+
+						current_pair = null;
+					}
+				}
 			}
 
 			private void on_end_element (MarkupParseContext context, string element_name) throws MarkupError {
-				if (is_in_dict && element_name == "dict")
-					is_in_dict = false;
+				if (element_name == "dict")
+					stack.poll ();
 			}
 
 			private void on_text (MarkupParseContext context, string text, size_t text_len) throws MarkupError {
@@ -639,8 +658,10 @@ namespace Zed.Service {
 					current_pair.val = text;
 
 					var val = current_pair.to_value ();
-					if (val != null)
-						plist.set_value (current_pair.key, val);
+					if (val != null) {
+						var current_plist = stack.peek ();
+						current_plist.set_value (current_pair.key, val);
+					}
 
 					current_pair = null;
 				}
