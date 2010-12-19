@@ -24,12 +24,12 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-create-from-simple-xml", () => {
-			Fruity.PropertyList.can_create_from_simple_xml ();
+		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
+			Fruity.PropertyList.can_construct_from_xml_document ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-create-from-nested-xml", () => {
-			Fruity.PropertyList.can_create_from_nested_xml ();
+		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/to-xml-yields-complete-document", () => {
+			Fruity.PropertyList.to_xml_yields_complete_document ();
 		});
 
 #endif
@@ -203,30 +203,7 @@ namespace Zed.HostSessionTest {
 
 		namespace PropertyList {
 
-			private static void can_create_from_simple_xml () {
-				var xml =
-					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
-					"<plist version=\"1.0\">\n" +
-					"<dict>\n" +
-					"	<key>MessageType</key>\n" +
-					"	<string>Result</string>\n" +
-					"	<key>Number</key>\n" +
-					"	<integer>0</integer>\n" +
-					"</dict>\n" +
-					"</plist>\n";
-				try {
-					var plist = new Zed.Service.Fruity.PropertyList.from_xml (xml);
-					var keys = plist.get_keys ();
-					assert (keys.length == 2);
-					assert (plist.get_string ("MessageType") == "Result");
-					assert (plist.get_int ("Number") == 0);
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-			}
-
-			private static void can_create_from_nested_xml () {
+			private static void can_construct_from_xml_document () {
 				var xml =
 					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
 					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
@@ -269,6 +246,38 @@ namespace Zed.HostSessionTest {
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
+			}
+
+			private static void to_xml_yields_complete_document () {
+				var plist = new Zed.Service.Fruity.PropertyList ();
+				plist.set_string ("MessageType", "Detached");
+				plist.set_int ("DeviceID", 2);
+
+				var proplist = new Zed.Service.Fruity.PropertyList ();
+				proplist.set_string ("ConnectionType", "USB");
+				proplist.set_int ("DeviceID", 2);
+				plist.set_plist ("Properties", proplist);
+
+				var actual_xml = plist.to_xml ();
+				var expected_xml =
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+					"<plist version=\"1.0\">\n" +
+					"<dict>\n" +
+					"	<key>DeviceID</key>\n" +
+					"	<integer>2</integer>\n" +
+					"	<key>MessageType</key>\n" +
+					"	<string>Detached</string>\n" +
+					"	<key>Properties</key>\n" +
+					"	<dict>\n" +
+					"		<key>ConnectionType</key>\n" +
+					"		<string>USB</string>\n" +
+					"		<key>DeviceID</key>\n" +
+					"		<integer>2</integer>\n" +
+					"	</dict>\n" +
+					"</dict>\n" +
+					"</plist>\n";
+				assert (actual_xml == expected_xml);
 			}
 
 		}
