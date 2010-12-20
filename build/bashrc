@@ -26,7 +26,7 @@ export FRIDA_SDKROOT="${FRIDA_BUILD}/sdk-${FRIDA_TARGET}"
 if [ "$FRIDA_TARGET" = "linux" ]; then
   export PATH="${FRIDA_PREFIX}/bin:${PATH}"
 else
-  export PATH="${FRIDA_TOOLROOT}/bin:${IPHONE_DEVROOT}/usr/bin:/opt/local/bin:${PATH}"
+  export PATH="${FRIDA_TOOLROOT}/bin:${IOS_DEVROOT}/usr/bin:/opt/local/bin:${PATH}"
 
   export MACOSX_DEPLOYMENT_TARGET=10.6
   export CLICOLOR=1
@@ -42,16 +42,16 @@ if [ "$FRIDA_TARGET" = "osx" ]; then
   export CFLAGS=""
   export LDFLAGS=""
 elif [ "$FRIDA_TARGET" = "ios" ]; then
-  export IPHONE_SDKVER="4.1"
-  export IPHONE_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
-  export IPHONE_SDKROOT="${IPHONE_DEVROOT}/SDKs/iPhoneOS${IPHONE_SDKVER}.sdk"
+  export IOS_SDKVER="4.1"
+  export IOS_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
+  export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${IOS_SDKVER}.sdk"
 
-  export CC="${IPHONE_DEVROOT}/usr/bin/gcc-4.2"
-  export CXX="${IPHONE_DEVROOT}/usr/bin/g++-4.2"
-  export OBJC="${IPHONE_DEVROOT}/usr/bin/gcc-4.2"
+  export CC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
+  export CXX="${IOS_DEVROOT}/usr/bin/g++-4.2"
+  export OBJC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
 
-  export CFLAGS="-isysroot ${IPHONE_SDKROOT} -miphoneos-version-min=${IPHONE_SDKVER} -arch armv7"
-  export LDFLAGS="-isysroot ${IPHONE_SDKROOT} -Wl,-iphoneos_version_min,${IPHONE_SDKVER} -arch armv7"
+  export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_SDKVER} -arch armv7"
+  export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_SDKVER} -arch armv7"
 else
   export CC="gcc"
   export CXX="g++"
@@ -76,7 +76,7 @@ else
   export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
 
   export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
-  export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig:${IPHONE_SDKROOT}/usr/lib/pkgconfig"
+  export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig:${IOS_SDKROOT}/usr/lib/pkgconfig"
   export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
 fi
 export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
