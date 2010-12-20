@@ -133,15 +133,17 @@ namespace Zed.Service {
 
 			DBusConnection connection = null;
 
-			for (int i = 0; connection == null; i++) {
+			for (int i = 1; connection == null; i++) {
 				try {
 					connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 				} catch (Error connect_error) {
-					if (i != 10 - 1) {
-						Timeout.add (200, () => {
+					if (i != 10) {
+						var source = new TimeoutSource (200);
+						source.set_callback (() => {
 							obtain_agent_session.callback ();
 							return false;
 						});
+						source.attach (MainContext.get_thread_default ());
 						yield;
 					} else {
 						break;
