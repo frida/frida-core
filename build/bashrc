@@ -42,7 +42,8 @@ if [ "$FRIDA_TARGET" = "osx" ]; then
   export CFLAGS=""
   export LDFLAGS=""
 elif [ "$FRIDA_TARGET" = "ios" ]; then
-  export IOS_SDKVER="4.1"
+  export IOS_SDKVER="4.2"
+  export IOS_MINVER="4.0"
   export IOS_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
   export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${IOS_SDKVER}.sdk"
 
@@ -50,8 +51,8 @@ elif [ "$FRIDA_TARGET" = "ios" ]; then
   export CXX="${IOS_DEVROOT}/usr/bin/g++-4.2"
   export OBJC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
 
-  export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_SDKVER} -arch armv7"
-  export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_SDKVER} -arch armv7"
+  export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
+  export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7"
 else
   export CC="gcc"
   export CXX="g++"
@@ -61,6 +62,7 @@ else
 fi
 
 export LD="${CC}"
+export LDFLAGS="$LDFLAGS -no-undefined"
 
 export CXXFLAGS="$CFLAGS"
 export OBJCFLAGS="$CFLAGS"
@@ -90,7 +92,7 @@ if [ ! "$FRIDA_TARGET" = "linux" ]; then
 
   if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
     echo "Downloading and deploying toolchain..."
-    curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20101030.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+    curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20101220.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
   fi
 
   if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
