@@ -84,12 +84,14 @@ namespace Zed.Service {
 				}
 
 				if (is_process_still_running (manager_process)) {
-					Timeout.add (50, () => {
+					var source = new TimeoutSource (50);
+					source.set_callback (() => {
 						if (is_process_still_running (manager_process))
 							return true; /* wait and try again */
 						close.callback ();
 						return false;
 					});
+					source.attach (MainContext.get_thread_default ());
 					yield;
 				}
 
