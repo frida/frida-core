@@ -1,5 +1,135 @@
 namespace Zed.Service.Fruity {
-	public class Client : Object {
+	public class ClientV1 : Client {
+		public override uint protocol_version {
+			get { return 0; }
+		}
+
+		public override async void enable_listen_mode () throws IOError {
+			assert (is_processing_messages);
+
+			var result = yield query (MessageType.LISTEN);
+			if (result != ResultCode.SUCCESS)
+				throw new IOError.FAILED ("failed to enable listen mode, result %d", result);
+		}
+
+		public override async void connect_to_port (uint device_id, uint port) throws IOError {
+			assert (is_processing_messages);
+
+			uint8[] connect_body = new uint8[8];
+
+			uint32 * p = (void *) connect_body;
+			p[0] = device_id.to_little_endian ();
+			p[1] = ((uint32) port << 16).to_big_endian ();
+
+			int result = yield query (MessageType.CONNECT, connect_body, true);
+			handle_connect_result (result);
+		}
+
+		protected override void dispatch_message (Client.Message msg) throws IOError {
+			int32 * body_i32 = (int32 *) msg.body;
+			uint32 * body_u32 = (uint32 *) msg.body;
+
+			switch (msg.type) {
+				case MessageType.RESULT:
+					if (msg.body_size != 4)
+						throw new IOError.FAILED ("unexpected payload size for RESULT");
+					int result = body_i32[0];
+					handle_result_message (msg, result);
+					break;
+
+				case MessageType.DEVICE_ATTACHED:
+					if (msg.body_size < 4)
+						throw new IOError.FAILED ("unexpected payload size for ATTACHED");
+					uint attached_id = body_u32[0];
+					unowned string attached_udid = (string) (msg.body + 6);
+					device_attached (attached_id, attached_udid);
+					break;
+
+				case MessageType.DEVICE_DETACHED:
+					if (msg.body_size != 4)
+						throw new IOError.FAILED ("unexpected payload size for DETACHED");
+					uint detached_id = body_u32[0];
+					device_detached (detached_id);
+					break;
+
+				default:
+					throw new IOError.FAILED ("unexpected message type: %u", (uint) msg.type);
+			}
+		}
+	}
+
+	public class ClientV2 : Client {
+		public override uint protocol_version {
+			get { return 1; }
+		}
+
+		public override async void enable_listen_mode () throws IOError {
+			assert (is_processing_messages);
+
+			var result = yield query_with_plist (create_plist ("Listen"));
+			if (result != ResultCode.SUCCESS)
+				throw new IOError.FAILED ("failed to enable listen mode, result %d", result);
+		}
+
+		public override async void connect_to_port (uint device_id, uint port) throws IOError {
+			assert (is_processing_messages);
+
+			var plist = create_plist ("Connect");
+			plist.set_int ("DeviceID", (int) device_id);
+			plist.set_int ("PortNumber", (int) port);
+
+			var result = yield query_with_plist (plist);
+			handle_connect_result (result);
+		}
+
+		protected override void dispatch_message (Client.Message msg) throws IOError {
+			if (msg.type != MessageType.PROPERTY_LIST)
+				throw new IOError.FAILED ("unexpected message type: %u", (uint) msg.type);
+			else if (msg.body_size == 0)
+				throw new IOError.FAILED ("message has empty body");
+
+			unowned string xml = (string) msg.body;
+			var plist = new PropertyList.from_xml (xml);
+			var message_type = plist.get_string ("MessageType");
+			if (message_type == "Result") {
+				int result = plist.get_int ("Number");
+				handle_result_message (msg, result);
+			} else if (message_type == "Attached") {
+				uint attached_id = (uint) plist.get_int ("DeviceID");
+				var props = plist.get_plist ("Properties");
+				string attached_udid = props.get_string ("SerialNumber");
+				device_attached (attached_id, attached_udid);
+			} else if (message_type == "Detached") {
+				uint detached_id = (uint) plist.get_int ("DeviceID");
+				device_detached (detached_id);
+			} else {
+				throw new IOError.FAILED ("unexpected message type: %s", message_type);
+			}
+		}
+
+		private PropertyList create_plist (string message_type) {
+			var plist = new PropertyList ();
+			plist.set_string ("BundleID", "com.apple.iTunes");
+			plist.set_string ("ClientVersionString", "usbmuxd-??? built for ???");
+			plist.set_string ("MessageType", message_type);
+			return plist;
+		}
+
+		protected async int query_with_plist (PropertyList plist, bool is_mode_switch_request = false) throws IOError {
+			var xml = plist.to_xml ();
+			var size = xml.size ();
+			var body = new uint8[size];
+			Memory.copy (body, xml, size);
+			var result = yield query (MessageType.PROPERTY_LIST, body, is_mode_switch_request);
+			return result;
+		}
+	}
+
+	public abstract class Client : Object {
+		public abstract uint protocol_version {
+			get;
+		}
+
 		public SocketConnection connection {
 			get;
 			private set;
@@ -7,17 +137,18 @@ namespace Zed.Service.Fruity {
 		private InputStream input;
 		private OutputStream output;
 
-		private bool running;
+		protected bool is_processing_messages;
 		private uint last_tag;
 		private uint mode_switch_tag;
 		private Gee.ArrayList<PendingResponse> pending_responses;
 
 		private const uint16 USBMUX_SERVER_PORT = 27015;
+		private const uint16 MAX_MESSAGE_SIZE = 2048;
 
-		public signal void device_connected (uint device_id, string device_udid);
-		public signal void device_disconnected (uint device_id);
+		public signal void device_attached (uint device_id, string device_udid);
+		public signal void device_detached (uint device_id);
 
-		public Client () {
+		construct {
 			reset ();
 		}
 
@@ -26,14 +157,14 @@ namespace Zed.Service.Fruity {
 			input = null;
 			output = null;
 
-			running = false;
+			is_processing_messages = false;
 			last_tag = 1;
 			mode_switch_tag = 0;
 			pending_responses = new Gee.ArrayList<PendingResponse> ();
 		}
 
 		public async void establish () throws IOError {
-			assert (!running);
+			assert (!is_processing_messages);
 
 			var client = new SocketClient ();
 
@@ -42,7 +173,7 @@ namespace Zed.Service.Fruity {
 				input = connection.get_input_stream ();
 				output = connection.get_output_stream ();
 
-				running = true;
+				is_processing_messages = true;
 
 				process_incoming_messages ();
 			} catch (Error e) {
@@ -51,10 +182,13 @@ namespace Zed.Service.Fruity {
 			}
 		}
 
+		public abstract async void enable_listen_mode () throws IOError;
+		public abstract async void connect_to_port (uint device_id, uint port) throws IOError;
+
 		public async void close () throws IOError {
-			if (!running)
-				throw new IOError.FAILED ("not running");
-			running = false;
+			if (!is_processing_messages)
+				throw new IOError.FAILED ("not processing messages");
+			is_processing_messages = false;
 
 			try {
 				var conn = this.connection;
@@ -66,48 +200,14 @@ namespace Zed.Service.Fruity {
 			output = null;
 		}
 
-		public async void enable_monitor_mode () throws Error {
-			assert (running);
-
-			var result = yield send_request_and_receive_response (MessageType.HELLO);
-			if (result != ResultCode.SUCCESS)
-				throw new IOError.FAILED ("handshake failed, result %d", result);
-		}
-
-		public async void connect_to_port (uint device_id, uint port) throws IOError {
-			assert (running);
-
-			uint8[] connect_body = new uint8[8];
-
-			uint32 * p = (void *) connect_body;
-			p[0] = device_id.to_little_endian ();
-			p[1] = ((uint32) port << 16).to_big_endian ();
-
-			try {
-				int result = yield send_request_and_receive_response (MessageType.CONNECT, connect_body, true);
-				switch (result) {
-					case ResultCode.SUCCESS:
-						break;
-					case ResultCode.CONNECTION_REFUSED:
-						throw new IOError.FAILED ("connect failed (connection refused)");
-					case ResultCode.INVALID_REQUEST:
-						throw new IOError.FAILED ("connect failed (invalid request)");
-					default:
-						throw new IOError.FAILED ("connect failed (error code: %d)", result);
-				}
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
-			}
-		}
-
-		private async int send_request_and_receive_response (MessageType type, uint8[]? body = null, bool is_mode_switch_request = false) throws Error {
+		protected async int query (MessageType type, uint8[]? body = null, bool is_mode_switch_request = false) throws IOError {
 			uint32 tag = last_tag++;
 
 			if (is_mode_switch_request)
 				mode_switch_tag = tag;
 
 			var request = create_message (type, tag, body);
-			var pending = new PendingResponse (tag, () => send_request_and_receive_response.callback ());
+			var pending = new PendingResponse (tag, () => query.callback ());
 			pending_responses.add (pending);
 			yield write_message (request);
 			yield;
@@ -116,67 +216,11 @@ namespace Zed.Service.Fruity {
 		}
 
 		private async void process_incoming_messages () {
-			while (running) {
+			while (is_processing_messages) {
 				try {
-					var message_blob = yield read_message ();
-
-					uint32 * header = (void *) message_blob;
-					MessageType type = (MessageType) uint.from_little_endian (header[0]);
-					uint32 tag = uint.from_little_endian (header[1]);
-
-					uint32 body_size = message_blob.length - 8;
-					uint8 * body = (uint8 *) header + 8;
-					int32 * body_i32 = (int32 *) body;
-					uint32 * body_u32 = (uint32 *) body;
-
-					switch (type) {
-						case MessageType.RESULT:
-							if (body_size != 4)
-								throw new IOError.FAILED ("unexpected payload size for RESULT");
-							int result = body_i32[0];
-
-							PendingResponse match = null;
-							foreach (var pending in pending_responses) {
-								if (pending.tag == tag) {
-									match = pending;
-									break;
-								}
-							}
-
-							if (match == null)
-								throw new IOError.FAILED ("response to unknown tag");
-							pending_responses.remove (match);
-							match.complete (result);
-
-							if (tag == mode_switch_tag) {
-								if (result == ResultCode.SUCCESS)
-									return;
-								else
-									mode_switch_tag = 0;
-							}
-
-							break;
-
-						case MessageType.DEVICE_CONNECTED:
-							if (body_size < 4)
-								throw new IOError.FAILED ("unexpected payload size for CONNECTED");
-							uint conn_device_id = body_u32[0];
-							unowned string conn_device_udid = (string) (body + 6);
-							device_connected (conn_device_id, conn_device_udid);
-							break;
-
-						case MessageType.DEVICE_DISCONNECTED:
-							if (body_size != 4)
-								throw new IOError.FAILED ("unexpected payload size for DISCONNECTED");
-							uint disc_device_id = body_u32[0];
-							device_disconnected (disc_device_id);
-							break;
-
-						default:
-							throw new IOError.FAILED ("unexpected message type: %u", (uint) type);
-					}
-
-				} catch (Error e) {
+					var msg = yield read_message ();
+					dispatch_message (msg);
+				} catch (IOError e) {
 					foreach (var pending_response in pending_responses)
 						pending_response.complete (ResultCode.PROTOCOL_ERROR);
 					reset ();
@@ -184,37 +228,98 @@ namespace Zed.Service.Fruity {
 			}
 		}
 
-		private async uint8[] read_message () throws Error {
-			uint32[] u32_buf = new uint32[1];
-			ssize_t len;
+		protected abstract void dispatch_message (Message msg) throws IOError;
 
-			/* total size */
-			len = yield input.read_async (u32_buf, 4);
-			if (len != 4)
-				throw new IOError.FAILED ("short read of size (len = %d)", (int) len);
+		protected void handle_result_message (Message msg, int result) throws IOError {
+			PendingResponse match = null;
+			foreach (var pending in pending_responses) {
+				if (pending.tag == msg.tag) {
+					match = pending;
+					break;
+				}
+			}
 
-			uint size = uint.from_little_endian (u32_buf[0]);
-			if (size < 16 || size > 1024)
-				throw new IOError.FAILED ("protocol error: invalid size");
+			if (match == null)
+				throw new IOError.FAILED ("response to unknown tag");
+			pending_responses.remove (match);
+			match.complete (result);
 
-			/* ignore the next 4 bytes (reserved) */
-			len = yield input.read_async (u32_buf, 4);
-			if (len != 4)
-				throw new IOError.FAILED ("short read of reserved");
-
-			/* body */
-			uint body_size = size - 8;
-			uint8[] body_buf = new uint8[body_size];
-			len = yield input.read_async (body_buf, body_size);
-			if (len != body_size)
-				throw new IOError.FAILED ("short read of body");
-			return body_buf;
+			if (msg.tag == mode_switch_tag) {
+				if (result == ResultCode.SUCCESS)
+					is_processing_messages = false;
+				else
+					mode_switch_tag = 0;
+			}
 		}
 
-		private async void write_message (uint8[] blob) throws Error {
-			var len = yield output.write_async (blob, blob.length);
-			if (len != blob.length)
-				throw new IOError.FAILED ("short write");
+		protected void handle_connect_result (int result) throws IOError {
+			switch (result) {
+				case ResultCode.SUCCESS:
+					break;
+				case ResultCode.CONNECTION_REFUSED:
+					throw new IOError.FAILED ("connect failed (connection refused)");
+				case ResultCode.INVALID_REQUEST:
+					throw new IOError.FAILED ("connect failed (invalid request)");
+				default:
+					throw new IOError.FAILED ("connect failed (error code: %d)", result);
+			}
+		}
+
+		private async Message read_message () throws IOError {
+			uint32 size = 0;
+			yield read (&size, 4);
+			size = uint.from_little_endian (size);
+			if (size < 16 || size > MAX_MESSAGE_SIZE)
+				throw new IOError.FAILED ("protocol error: invalid size");
+
+			uint32 protocol_version;
+			yield read (&protocol_version, 4);
+
+			var msg = new Message ();
+			msg.size = size - 8;
+			msg.data = malloc (msg.size + 1);
+			msg.data[msg.size] = 0;
+			msg.body = msg.data + 8;
+			msg.body_size = msg.size - 8;
+			yield read (msg.data, msg.size);
+
+			uint32 * header = (void *) msg.data;
+			msg.type = (MessageType) uint.from_little_endian (header[0]);
+			msg.tag = uint.from_little_endian (header[1]);
+
+			return msg;
+		}
+
+		private async void write_message (uint8[] blob) throws IOError {
+			yield write (blob, blob.length);
+		}
+
+		private async void read (void * buffer, size_t count) throws IOError {
+			try {
+				uint8 * p = buffer;
+				size_t remaining = count;
+				do {
+					ssize_t len = yield input.read_async (p, remaining);
+					p += len;
+					remaining -= len;
+				} while (remaining != 0);
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		private async void write (void * buffer, size_t count) throws IOError {
+			try {
+				uint8 * p = buffer;
+				size_t remaining = count;
+				do {
+					ssize_t len = yield output.write_async (p, remaining);
+					p += len;
+					remaining -= len;
+				} while (remaining != 0);
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
 		}
 
 		private uint8[] create_message (MessageType type, uint32 tag, uint8[]? body = null) {
@@ -225,8 +330,8 @@ namespace Zed.Service.Fruity {
 			uint8[] blob = new uint8[16 + body_size];
 
 			uint32 * p = (void *) blob;
-			p[0] = blob.length;
-			p[1] = 0;
+			p[0] = blob.length.to_little_endian ();
+			p[1] = protocol_version.to_little_endian ();
 			p[2] = ((uint) type).to_little_endian ();
 			p[3] = tag.to_little_endian ();
 
@@ -236,6 +341,20 @@ namespace Zed.Service.Fruity {
 			}
 
 			return blob;
+		}
+
+		protected class Message {
+			public MessageType type;
+			public uint8 * body;
+			public uint body_size;
+			public uint32 tag;
+
+			public uint8 * data;
+			public uint size;
+
+			~Message () {
+				free (data);
+			}
 		}
 
 		private class PendingResponse {
@@ -264,15 +383,16 @@ namespace Zed.Service.Fruity {
 		}
 	}
 
-	private enum MessageType {
-		RESULT		    = 1,
-		CONNECT		    = 2,
-		HELLO		    = 3,
-		DEVICE_CONNECTED    = 4,
-		DEVICE_DISCONNECTED = 5
+	public enum MessageType {
+		RESULT		= 1,
+		CONNECT		= 2,
+		LISTEN		= 3,
+		DEVICE_ATTACHED	= 4,
+		DEVICE_DETACHED	= 5,
+		PROPERTY_LIST	= 8
 	}
 
-	private enum ResultCode {
+	public enum ResultCode {
 		PROTOCOL_ERROR      = -1,
 		SUCCESS		    = 0,
 		CONNECTION_REFUSED  = 3,

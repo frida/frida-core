@@ -2,18 +2,20 @@ namespace Zed.Service {
 	public class FruityHostSessionBackend : Object, HostSessionBackend {
 		private Fruity.Client control_client;
 		private Gee.HashMap<uint, FruityHostSessionProvider> provider_by_device_id = new Gee.HashMap<uint, FruityHostSessionProvider> ();
+		private bool has_probed_protocol_version = false;
+		private uint protocol_version = 1;
 
 		public async void start () {
-			control_client = new Fruity.Client ();
-			control_client.device_connected.connect ((device_id, device_udid) => {
+			control_client = yield create_client ();
+			control_client.device_attached.connect ((device_id, device_udid) => {
 				if (provider_by_device_id.has_key (device_id))
 					return;
 
-				var provider = new FruityHostSessionProvider (device_id, device_udid);
+				var provider = new FruityHostSessionProvider (this, device_id, device_udid);
 				provider_by_device_id[device_id] = provider;
 				open_provider (provider);
 			});
-			control_client.device_disconnected.connect ((device_id) => {
+			control_client.device_detached.connect ((device_id) => {
 				if (!provider_by_device_id.has_key (device_id))
 					return;
 
@@ -26,8 +28,8 @@ namespace Zed.Service {
 
 			try {
 				yield control_client.establish ();
-				yield control_client.enable_monitor_mode ();
-			} catch (Error e) {
+				yield control_client.enable_listen_mode ();
+			} catch (IOError e) {
 				debug ("failed to establish: %s", e.message);
 			}
 		}
@@ -45,6 +47,35 @@ namespace Zed.Service {
 				yield provider.close ();
 			}
 			provider_by_device_id.clear ();
+		}
+
+		public async Fruity.Client create_client () {
+			if (!has_probed_protocol_version) {
+				bool service_is_present = false;
+
+				var client = new Fruity.ClientV1 ();
+				try {
+					yield client.establish ();
+					service_is_present = true;
+				} catch (IOError establish_error) {
+				}
+
+				if (service_is_present) {
+					try {
+						yield client.enable_listen_mode ();
+						protocol_version = 1;
+					} catch (IOError listen_error) {
+						protocol_version = 2;
+					}
+
+					has_probed_protocol_version = true;
+				}
+			}
+
+			if (protocol_version == 1)
+				return new Fruity.ClientV1 ();
+			else
+				return new Fruity.ClientV2 ();
 		}
 
 		private async void open_provider (FruityHostSessionProvider provider) {
@@ -73,6 +104,11 @@ namespace Zed.Service {
 			get { return HostSessionProviderKind.LOCAL_TETHER; }
 		}
 
+		public FruityHostSessionBackend backend {
+			get;
+			construct;
+		}
+
 		public uint device_id {
 			get;
 			construct;
@@ -92,22 +128,24 @@ namespace Zed.Service {
 
 		private const uint ZID_SERVER_PORT = 27042;
 
-		public FruityHostSessionProvider (uint device_id, string device_udid) {
-			Object (device_id: device_id, device_udid: device_udid);
+		public FruityHostSessionProvider (FruityHostSessionBackend backend, uint device_id, string device_udid) {
+			Object (backend: backend, device_id: device_id, device_udid: device_udid);
 		}
 
 		public async void open () throws IOError {
 			bool got_details = false;
-			for (int i = 0; !got_details; i++) {
+			for (int i = 1; !got_details; i++) {
 				try {
 					_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
 					got_details = true;
 				} catch (IOError e) {
-					if (i != 60 - 1) {
-						Timeout.add (1000, () => {
+					if (i != 60) {
+						var source = new TimeoutSource (1000);
+						source.set_callback (() => {
 							open.callback ();
 							return false;
 						});
+						source.attach (MainContext.get_thread_default ());
 						yield;
 					} else {
 						break;
@@ -143,7 +181,7 @@ namespace Zed.Service {
 		}
 
 		public async HostSession create () throws IOError {
-			var client = new Fruity.Client ();
+			var client = yield backend.create_client ();
 			yield client.establish ();
 			yield client.connect_to_port (device_id, ZID_SERVER_PORT);
 
@@ -169,7 +207,7 @@ namespace Zed.Service {
 
 			bool connected = false;
 			for (int i = 0; !connected; i++) {
-				client = new Fruity.Client ();
+				client = yield backend.create_client ();
 				yield client.establish ();
 
 				try {
@@ -177,10 +215,12 @@ namespace Zed.Service {
 					connected = true;
 				} catch (IOError client_error) {
 					if (i != 10 - 1) {
-						Timeout.add (200, () => {
+						var source = new TimeoutSource (200);
+						source.set_callback (() => {
 							obtain_agent_session.callback ();
 							return false;
 						});
+						source.attach (MainContext.get_thread_default ());
 						yield;
 					} else {
 						break;
