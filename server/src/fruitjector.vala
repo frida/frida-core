@@ -27,7 +27,7 @@ public class Zed.Fruitjector : Object {
 	}
 
 	public bool is_still_injected (uint id) {
-		return id in instance_by_id;
+		return instance_by_id.has_key (id);
 	}
 
 	public void _on_instance_dead (uint id) {
