@@ -1135,31 +1135,54 @@ namespace Zed {
 			uint line_offset = 0;
 			size_t remaining = bytes.length;
 
-			var builder = new StringBuilder ();
+			var result = new StringBuilder ();
+			var ascii = new StringBuilder ();
 
 			foreach (uint8 byte in bytes) {
 				if (line_offset == 0) {
 					if (address != 0)
-						builder.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
+						result.append_printf ("%08" + uint64.FORMAT_MODIFIER + "x:  ", address + total_offset);
 				} else {
-					builder.append_c (' ');
+					result.append_c (' ');
 					if (line_offset == 8)
-						builder.append_c (' ');
+						result.append_c (' ');
 				}
 
-				builder.append_printf ("%02x", byte);
+				result.append_printf ("%02x", byte);
+				if (byte >= 33 && byte <= 126)
+					ascii.append_c ((char) byte);
+				else
+					ascii.append_c ('.');
 
 				total_offset++;
 				line_offset++;
 				remaining--;
 
-				if (line_offset == 16 && remaining != 0) {
-					builder.append_c ('\n');
+				if (line_offset == 16) {
+					result.append ("  ");
+					result.append (ascii.str);
+
+					if (remaining != 0)
+						result.append_c ('\n');
+
 					line_offset = 0;
+					ascii.truncate (0);
 				}
 			}
 
-			return builder.str;
+			if (line_offset != 0) {
+				while (line_offset != 16) {
+					result.append ("   ");
+					if (line_offset == 8)
+						result.append_c (' ');
+					line_offset++;
+				}
+
+				result.append ("  ");
+				result.append (ascii.str);
+			}
+
+			return result.str;
 		}
 
 		private uint8[] byte_array_from_hex_string (string hex_string) throws IOError {
