@@ -103,6 +103,7 @@ namespace Zed.Agent {
 			}
 
 			public void on_leave (Gum.InvocationContext ctx) {
+				script.execute (ctx);
 			}
 
 			public void redirect_future_messages_to (string folder, uint keep_last_n) {
