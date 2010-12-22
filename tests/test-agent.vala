@@ -96,7 +96,7 @@ namespace Zed.AgentTest {
 
 			AgentScriptInfo script;
 			try {
-				script = yield session.attach_script_to ("SendInt32FromArgument 0\nSendNarrowStringFromArgument 1", (uint64) target_function);
+				script = yield session.attach_script_to ("send_int32 (arg0)\nsend_narrow_string (arg1)", (uint64) target_function);
 			} catch (IOError attach_error) {
 				assert_not_reached ();
 			}
