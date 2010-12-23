@@ -547,7 +547,7 @@ namespace Zed {
 			});
 
 			view.content_notebook.switch_page.connect ((page, page_num) => {
-				if (page_num == 1) {
+				if (page_num == 2) {
 					Idle.add (() => {
 						view.console_entry.grab_focus ();
 						return false;
