@@ -75,10 +75,10 @@ namespace Zed.Service.Fruity {
 			assert (is_processing_messages);
 
 			var plist = create_plist ("Connect");
-			plist.set_int ("DeviceID", (int) device_id);
-			plist.set_int ("PortNumber", (int) port);
+			plist.set_uint ("DeviceID", device_id);
+			plist.set_uint ("PortNumber", ((uint32) port << 16).to_big_endian ());
 
-			var result = yield query_with_plist (plist);
+			var result = yield query_with_plist (plist, true);
 			handle_connect_result (result);
 		}
 

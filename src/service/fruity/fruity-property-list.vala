@@ -42,6 +42,16 @@ namespace Zed.Service.Fruity {
 			set_value (key, gval);
 		}
 
+		public uint get_uint (string key) throws IOError {
+			return get_value (key, typeof (uint)).get_uint ();
+		}
+
+		public void set_uint (string key, uint val) {
+			var gval = Value (typeof (uint));
+			gval.set_uint (val);
+			set_value (key, gval);
+		}
+
 		public PropertyList get_plist (string key) throws IOError {
 			return get_value (key, typeof (PropertyList)).get_object () as PropertyList;
 		}
@@ -208,6 +218,8 @@ namespace Zed.Service.Fruity {
 						write_tag ("string", val.get_string ());
 					else if (type == typeof (int))
 						write_tag ("integer", val.get_int ().to_string ());
+					else if (type == typeof (uint))
+						write_tag ("integer", val.get_uint ().to_string ());
 					else if (type == typeof (PropertyList))
 						write (val.get_object () as PropertyList);
 				}
