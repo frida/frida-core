@@ -246,8 +246,13 @@ namespace Zed {
 
 		private Gtk.TextBuffer console_text_buffer;
 		private Gtk.TextMark console_scroll_mark;
+		private Gee.LinkedList<string> console_input_history = new Gee.LinkedList<string> ();
+		private Gee.ListIterator<string> console_input_iter;
 
 		private Investigation investigation;
+
+		private const uint KEYVAL_ARROW_UP = 65362;
+		private const uint KEYVAL_ARROW_DOWN = 65364;
 
 		public AgentSession (View.AgentSession view, HostSessionEntry host_session, ProcessInfo process_info, Service.CodeService code_service) {
 			Object (view: view, host_session: host_session, process_info: process_info, code_service: code_service);
@@ -488,6 +493,57 @@ namespace Zed {
 				if (input.length > 0)
 					handle_console_input (input);
 				view.console_entry.text = "";
+
+				if (console_input_history.is_empty || input != console_input_history.last ())
+					console_input_history.offer_tail (input);
+			});
+			view.console_entry.key_press_event.connect ((ev) => {
+				if (ev.state != 0)
+					return false;
+
+				int direction = 0;
+				if (ev.keyval == KEYVAL_ARROW_UP)
+					direction = 1;
+				else if (ev.keyval == KEYVAL_ARROW_DOWN)
+					direction = -1;
+				else
+					return false;
+
+				if (!console_input_history.is_empty) {
+					if (console_input_iter == null) {
+						console_input_iter = console_input_history.list_iterator ();
+						if (direction == 1) {
+							console_input_iter.last ();
+							view.console_entry.text = console_input_iter.get ();
+						} else {
+							console_input_iter.first ();
+							view.console_entry.text = console_input_iter.get ();
+						}
+					} else {
+						bool handled = true;
+
+						if (direction == 1) {
+							if (console_input_iter.previous ())
+								view.console_entry.text = console_input_iter.get ();
+							else
+								handled = false;
+						} else {
+							if (console_input_iter.next ())
+								view.console_entry.text = console_input_iter.get ();
+							else
+								handled = false;
+						}
+
+						if (!handled) {
+							console_input_iter = null;
+							view.console_entry.text = "";
+						}
+					}
+
+					Signal.emit_by_name (view.console_entry, "move-cursor", Gtk.MovementStep.BUFFER_ENDS, 1, false);
+				}
+
+				return true;
 			});
 
 			view.content_notebook.switch_page.connect ((page, page_num) => {
