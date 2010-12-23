@@ -496,6 +496,7 @@ namespace Zed {
 
 				if (console_input_history.is_empty || input != console_input_history.last ())
 					console_input_history.offer_tail (input);
+				console_input_iter = null;
 			});
 			view.console_entry.key_press_event.connect ((ev) => {
 				if (ev.state != 0)
