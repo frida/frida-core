@@ -48,6 +48,7 @@ namespace Zed {
 
 			chat = new View.Chat ();
 			bottom_frame.add (chat.widget);
+			chat.notify["can-chat"].connect (() => bottom_frame.set_visible (chat.can_chat));
 		}
 	}
 
