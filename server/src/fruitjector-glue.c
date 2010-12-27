@@ -95,6 +95,7 @@ static void zed_emit_mach_stub_code (guint8 * code);
 static void zed_emit_pthread_stub_code (guint8 * code);
 
 static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
+static void zed_emit_clear_newstyle_bit_in_pthread_self (ZedEmitContext * ctx);
 static void zed_emit_pthread_start_call (ZedEmitContext * ctx);
 static void zed_emit_push_ctx_value (guint field_offset, GumThumbWriter * tw);
 static void zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
@@ -336,6 +337,7 @@ zed_emit_pthread_stub_code (guint8 * code)
 
   gum_thumb_writer_put_push_regs (&ctx.tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
   gum_thumb_writer_put_mov_reg_reg (&ctx.tw, GUM_AREG_R7, GUM_AREG_R0);
+  zed_emit_clear_newstyle_bit_in_pthread_self (&ctx);
   zed_emit_pthread_stub_body (&ctx);
   gum_thumb_writer_put_pop_regs (&ctx.tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
 
@@ -372,6 +374,33 @@ zed_emit_pthread_stub_body (ZedEmitContext * ctx)
   ZED_EMIT_MOVE (R0, R4);
   ZED_EMIT_LOAD (R3, dlclose_impl);
   ZED_EMIT_CALL (R3);
+}
+
+static void
+zed_emit_clear_newstyle_bit_in_pthread_self (ZedEmitContext * ctx)
+{
+  /*
+   * We need to clear the newstyle bit, because we're not a BSD thread,
+   * but a Mach thread.
+   *
+   * struct _pthread * t = pthread_self ();
+   * t->newstyle = 0;
+   *
+   * Which translates to:
+   */
+  static const guint16 pthread_self_code[] = {
+      0xee1d, 0x2f70,   /* mrc 15, 0, r2, cr13, cr0, {3} */
+  };
+  gum_thumb_writer_put_bytes (&ctx->tw, (guint8 *) pthread_self_code, sizeof (pthread_self_code));
+
+  gum_thumb_writer_put_ldr_reg_reg (&ctx->tw, GUM_AREG_R2, GUM_AREG_R2);
+
+  static const guint16 clear_code[] = {
+      0x7bd3,           /* ldrb r3, [r2, #15]            */
+      0xf023, 0x0302,   /* bic.w r3, r3, #2              */
+      0x73d3            /* strb r3, [r2, #15]            */
+  };
+  gum_thumb_writer_put_bytes (&ctx->tw, (guint8 *) clear_code, sizeof (clear_code));
 }
 
 static void
