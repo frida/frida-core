@@ -96,6 +96,28 @@ namespace Zed.Agent {
 			return functions;
 		}
 
+		public async uint64[] scan_memory_for_pattern (MemoryProtection required_protection, string pattern) throws IOError {
+			var match_pattern = new Gum.MatchPattern.from_string (pattern);
+			if (match_pattern == null)
+				throw new IOError.FAILED ("invalid match pattern");
+
+			var match_list = new Gee.ArrayList<void *> ();
+			Gum.Process.enumerate_ranges ((Gum.PageProtection) required_protection, (range, prot) => {
+				Gum.Memory.scan (range, match_pattern, (address, size) => {
+					match_list.add (address);
+					return true;
+				});
+
+				return true;
+			});
+
+			var matches = new uint64[0];
+			foreach (var match in match_list)
+				matches += (uint64) match;
+
+			return matches;
+		}
+
 		public async uint64[] scan_module_for_code_pattern (string module_name, string pattern) throws IOError {
 			var match_pattern = new Gum.MatchPattern.from_string (pattern);
 			if (match_pattern == null)

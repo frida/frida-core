@@ -12,6 +12,7 @@ namespace Zed {
 
 		public abstract async AgentModuleInfo[] query_modules () throws IOError;
 		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
+		public abstract async uint64[] scan_memory_for_pattern (MemoryProtection required_protection, string pattern) throws IOError;
 		public abstract async uint64[] scan_module_for_code_pattern (string module_name, string pattern) throws IOError;
 		public abstract async uint8[] read_memory (uint64 address, uint size) throws IOError;
 		public abstract async void write_memory (uint64 address, uint8[] bytes) throws IOError;
@@ -118,6 +119,13 @@ namespace Zed {
 			this.name = name;
 			this.address = address;
 		}
+	}
+
+	[Flags]
+	public enum MemoryProtection {
+		READ	= 1 << 0,
+		WRITE	= 1 << 1,
+		EXECUTE	= 1 << 2
 	}
 
 	public struct AgentTriggerInfo {

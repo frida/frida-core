@@ -10,6 +10,11 @@ namespace Zed.AgentTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/Agent/Memory/scan-memory-for-readwrite-pattern", () => {
+			var h = new Harness ((h) => Memory.scan_memory_for_readwrite_pattern (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/Agent/Memory/scan-module-for-code-pattern", () => {
 			var h = new Harness ((h) => Memory.scan_module_for_code_pattern (h as Harness));
 			h.run ();
@@ -58,6 +63,33 @@ namespace Zed.AgentTest {
 			if (GLib.Test.verbose ()) {
 				foreach (var function in functions)
 					stdout.printf ("function: '%s'\n", function.name);
+			}
+
+			yield h.unload_agent ();
+
+			h.done ();
+		}
+
+		private static async void scan_memory_for_readwrite_pattern (Harness h) {
+			uint8[] magic = new uint8[] { 0x3a, 0xbb, 0xa9, 0xf3, 0x5b, 0x1b, 0x42, 0x07, 0x8d, 0x1c, 0xec, 0xda, 0xb1, 0xd4, 0x55, 0x08 };
+			assert (magic[0] == 0x3a);
+
+			var session = yield h.load_agent ();
+
+			uint64[] matches;
+			try {
+				matches = yield session.scan_memory_for_pattern (MemoryProtection.READ | MemoryProtection.WRITE,
+						"3a bb a9 f3 5b 1b 42 07 8d 1c ec da b1 d4 55 08");
+			} catch (IOError scan_error) {
+				assert_not_reached ();
+			}
+
+			assert (matches.length > 0);
+			if (GLib.Test.verbose ()) {
+				stdout.printf ("Found %u matches\n", matches.length);
+				uint i = 1;
+				foreach (var address in matches)
+					stdout.printf ("Match #%u found at 0x%08" + uint64.FORMAT_MODIFIER + "x\n", i++, address);
 			}
 
 			yield h.unload_agent ();
