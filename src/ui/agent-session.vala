@@ -633,7 +633,7 @@ namespace Zed {
 
 		private void print_scan_usage () {
 			print_to_console ("Usage: scan memory <r|w|x> <pattern>");
-			print_to_console ("	  scan module <module-name> <pattern>");
+			print_to_console ("       scan module <module-name> <pattern>");
 		}
 
 		private async void handle_scan_command (string[] args) {
