@@ -632,42 +632,70 @@ namespace Zed {
 		}
 
 		private void print_scan_usage () {
-			print_to_console ("Usage: scan <module-name> <pattern>");
+			print_to_console ("Usage: scan memory <r|w|x> <pattern>");
+			print_to_console ("	  scan module <module-name> <pattern>");
 		}
 
 		private async void handle_scan_command (string[] args) {
-			if (args.length != 2) {
+			if (args.length != 3) {
 				print_scan_usage ();
 				return;
 			}
-			var module_name = args[0];
-			var pattern = args[1];
+
+			uint64[] matches;
 
 			try {
-				uint64[] matches = yield session.scan_module_for_code_pattern (module_name, pattern);
+				var what = args[0];
+				var where = args[1];
+				var pattern = args[2];
 
-				if (matches.length > 0) {
-					print_to_console ("found %u match%s:".printf (matches.length, (matches.length == 1) ? "" : "es"));
-
-					uint i = 1;
-					foreach (var address in matches) {
-						print_to_console (("  match #%u found at 0x%08" + uint64.FORMAT_MODIFIER + "x").printf (i, address));
-
-						if (i == 10) {
-							var remainder = matches.length - i;
-							if (remainder > 0) {
-								print_to_console ("  (and %u more match%s)".printf (remainder, (remainder == 1) ? "" : "es"));
-								break;
-							}
+				if (what == "memory") {
+					MemoryProtection required_protection = 0;
+					for (uint i = 0; i != where.length; i++) {
+						switch (where[i]) {
+							case 'r': required_protection |= MemoryProtection.READ; break;
+							case 'w': required_protection |= MemoryProtection.WRITE; break;
+							case 'x': required_protection |= MemoryProtection.EXECUTE; break;
+							default:
+								  print_scan_usage ();
+								  return;
 						}
-
-						i++;
 					}
+					if (required_protection == 0) {
+						print_scan_usage ();
+						return;
+					}
+					matches = yield session.scan_memory_for_pattern (required_protection, pattern);
+				} else if (what == "module") {
+					matches = yield session.scan_module_for_code_pattern (where, pattern);
 				} else {
-					print_to_console ("no matches found");
+					print_scan_usage ();
+					return;
 				}
 			} catch (IOError read_error) {
 				print_to_console ("ERROR: " + read_error.message);
+				return;
+			}
+
+			if (matches.length > 0) {
+				print_to_console ("found %u match%s:".printf (matches.length, (matches.length == 1) ? "" : "es"));
+
+				uint match_no = 1;
+				foreach (var address in matches) {
+					print_to_console (("  match #%u found at 0x%08" + uint64.FORMAT_MODIFIER + "x").printf (match_no, address));
+
+					if (match_no == 10) {
+						var remainder = matches.length - match_no;
+						if (remainder > 0) {
+							print_to_console ("  (and %u more match%s)".printf (remainder, (remainder == 1) ? "" : "es"));
+							break;
+						}
+					}
+
+					match_no++;
+				}
+			} else {
+				print_to_console ("no matches found");
 			}
 		}
 
