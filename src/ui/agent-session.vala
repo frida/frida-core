@@ -579,6 +579,9 @@ namespace Zed {
 				case "clear":
 					yield handle_clear_command (args);
 					break;
+				case "encode":
+					yield handle_encode_command (args);
+					break;
 				case "scan":
 					yield handle_scan_command (args);
 					break;
@@ -629,6 +632,55 @@ namespace Zed {
 			}
 
 			clear_console ();
+		}
+
+		private void print_encode_usage () {
+			print_to_console ("Usage: encode utf-8 <string>");
+			print_to_console ("       encode utf-16 <string>");
+			print_to_console ("       encode i32-be <value>");
+			print_to_console ("       encode i32-le <value>");
+		}
+
+		private async void handle_encode_command (string[] args) {
+			if (args.length != 2) {
+				print_encode_usage ();
+				return;
+			}
+
+			var format = args[0];
+			var val = args[1];
+
+			uint8[] bytes = null;
+
+			if (format == "utf-8") {
+				bytes = new uint8[val.size ()];
+				Memory.copy (bytes, val, bytes.length);
+			} else if (format == "utf-16") {
+				try {
+					long items_written;
+					unichar * wideval = TextUtil.utf8_to_utf16 (val, -1, null, out items_written);
+					var size = items_written * 2;
+					bytes = new uint8[size];
+					Memory.copy (bytes, wideval, size);
+					free (wideval);
+				} catch (Error convert_error) {
+					print_to_console ("ERROR: " + convert_error.message);
+					return;
+				}
+			} else if (format == "i32-be") {
+				bytes = new uint8[4];
+				int beval = val.to_int ().to_big_endian ();
+				Memory.copy (bytes, &beval, 4);
+			} else if (format == "i32-le") {
+				bytes = new uint8[4];
+				int leval = val.to_int ().to_little_endian ();
+				Memory.copy (bytes, &leval, 4);
+			} else {
+				print_encode_usage ();
+				return;
+			}
+
+			print_to_console (byte_array_to_hexdump (bytes));
 		}
 
 		private void print_scan_usage () {
