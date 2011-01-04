@@ -84,8 +84,6 @@ fi
 export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
 export CONFIG_SITE="${FRIDA_BUILD}/config.site"
 
-export LANG="C"
-
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 
 if [ ! "$FRIDA_TARGET" = "linux" ]; then
