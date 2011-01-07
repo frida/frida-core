@@ -57,8 +57,8 @@ else
   export CC="gcc"
   export CXX="g++"
 
-  export CFLAGS=""
-  export LDFLAGS=""
+  export CFLAGS="-ffunction-sections -fdata-sections"
+  export LDFLAGS="-Wl,--gc-sections"
 fi
 
 export LD="${CC}"
