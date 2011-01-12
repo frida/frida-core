@@ -10,12 +10,21 @@ frida_warning_flags="-Wall"
 
 frida_flags="$frida_common_flags -Os"
 
-if [ "$FRIDA_TARGET" = "ios" ]; then
-  frida_flags="$frida_flags -mthumb"
+case $FRIDA_TARGET in
+  android)
+    frida_flags="$frida_flags -mthumb"
 
-  host_alias="arm-apple-darwin"
-  cross_compiling=yes
-fi
+    host_alias="arm-linux-eabi"
+    ac_tool_prefix="arm-eabi-"
+    cross_compiling=yes
+  ;;
+  ios)
+    frida_flags="$frida_flags -mthumb"
+
+    host_alias="arm-apple-darwin"
+    cross_compiling=yes
+  ;;
+esac
 
 # Work around a bug in stdint generation m4, where CFLAGS is overwritten,
 # causing this check to conclude that there's no stdint.h support...
