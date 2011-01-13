@@ -23,19 +23,19 @@
 	      href="ftp://xmlsoft.org/libxml2/"/>
 
   <autotools id='libiconv' autogen-sh='configure'>
-    <branch module="libiconv/libiconv-1.13.1.tar.gz" version="1.1.3.1"
+    <branch module="libiconv/libiconv-1.13.1.tar.gz" version="1.13.1"
             repo="ftp.gnu.org"/>
   </autotools>
 
   <autotools id="libpng" autogenargs="--enable-shared" autogen-sh="configure">
-    <branch version="1.2.40" module="libpng/libpng-1.2.40.tar.bz2"
+    <branch version="1.2.44" module="libpng/libpng-1.2.44.tar.bz2"
 	    repo="sourceforge"/>
   </autotools>
 
   <!-- We use this in the framework and universal build creating setup only. -->
   <autotools id="gettext-fw" autogen-sh="configure">
     <branch repo="ftp.gnu.org"
-	    module="gettext/gettext-0.18.1.tar.gz" version="0.18.1" />
+	    module="gettext/gettext-0.18.1.1.tar.gz" version="0.18.1.1" />
     <dependencies>
       <dep package="libiconv"/>
     </dependencies>
@@ -75,7 +75,7 @@
 
   <autotools id="freetype"
 	     autogen-template="%(srcdir)s/configure --prefix %(prefix)s %(autogenargs)s">
-    <branch module="freetype/freetype-2.4.3.tar.gz" version="2.4.3"
+    <branch module="freetype/freetype-2.4.4.tar.gz" version="2.4.4"
             repo="sourceforge">
     </branch>
   </autotools>
@@ -111,7 +111,7 @@
   </autotools>
 
   <autotools id="libxml2" autogen-sh="configure">
-    <branch version="2.7.7" module="libxml2-2.7.7.tar.gz"
+    <branch version="2.7.8" module="libxml2-2.7.8.tar.gz"
 	    repo="xmlsoft.org"/>
   </autotools>
 
