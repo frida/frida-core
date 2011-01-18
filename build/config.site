@@ -2,7 +2,6 @@
 
 test "$prefix" = NONE && prefix="$FRIDA_PREFIX"
 
-enable_maintainer_mode=yes
 enable_nls=no
 
 frida_warning_flags="-Wall"
@@ -56,9 +55,11 @@ case "$PACKAGE_TARNAME" in
     enable_static=yes
   ;;
   'libgum')
+    enable_maintainer_mode=yes
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
   'zed')
+    enable_maintainer_mode=yes
     prefix="/Library/Frida"
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
