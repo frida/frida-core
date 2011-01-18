@@ -63,7 +63,8 @@ case $FRIDA_TARGET in
     export CC=""
     export CXX=""
 
-    export CFLAGS="-fpic \
+    export CFLAGS="--sysroot=${ndk_platform_root} \
+-fpic \
 -ffunction-sections \
 -funwind-tables \
 -D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ \
@@ -79,9 +80,11 @@ case $FRIDA_TARGET in
 -finline-limit=64 \
 -DANDROID \
 -Wa,--noexecstack \
--I$FRIDA_PREFIX/include \
--I${ndk_platform_root}/usr/include"
-    export LDFLAGS="--sysroot=${ndk_platform_root} -L${ndk_platform_root}/usr/lib -Wl,-z,noexecstack"
+-I${FRIDA_SDKROOT}/include"
+    export LDFLAGS="--sysroot=${ndk_platform_root} \
+-L${ndk_platform_root}/usr/lib \
+-Wl,-z,noexecstack \
+-L${FRIDA_SDKROOT}/lib"
     ;;
   osx)
     export CC="/usr/bin/gcc-4.2"
