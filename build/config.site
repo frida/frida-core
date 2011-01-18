@@ -48,6 +48,7 @@ case "$PACKAGE_TARNAME" in
       ac_cv_func_posix_getpwuid_r=yes
     fi
 
+    CFLAGS="$CFLAGS -I$FRIDA_PREFIX/include"
     LDFLAGS="$LDFLAGS -L$FRIDA_PREFIX/lib"
   ;;
   'libgee')
