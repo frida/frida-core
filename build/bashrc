@@ -121,8 +121,7 @@ case $FRIDA_TARGET in
     export VALAC="${FRIDA_PREFIX}/bin/valac-0.10 --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
     ;;
   android)
-    #export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
-    export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
+    export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
 
     export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
     export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig"
@@ -146,7 +145,7 @@ export CONFIG_SITE="${FRIDA_BUILD}/config.site"
 
 if [ ! "$FRIDA_TARGET" = "linux" ]; then
 
-  toolchain_version=20101220
+  toolchain_version=20110118
   if [ "$FRIDA_TARGET" = "android" ]; then
     sdk_version=20110118
   else
