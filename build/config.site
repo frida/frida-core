@@ -6,7 +6,7 @@ enable_nls=no
 
 frida_warning_flags="-Wall"
 
-frida_flags="-Os"
+frida_flags="-Os -pipe -gdwarf-2 -g3"
 
 case $FRIDA_TARGET in
   android)
@@ -15,13 +15,10 @@ case $FRIDA_TARGET in
     cross_compiling=yes
   ;;
   ios)
-    frida_flags="-pipe -gdwarf-2 -g3 $frida_flags -mthumb"
+    frida_flags="$frida_flags -mthumb"
 
     host_alias="arm-apple-darwin"
     cross_compiling=yes
-  ;;
-  *)
-    frida_flags="-pipe -gdwarf-2 -g3 $frida_flags"
   ;;
 esac
 
