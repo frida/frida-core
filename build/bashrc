@@ -34,9 +34,9 @@ case $FRIDA_TARGET in
     export PATH="${FRIDA_PREFIX}/bin:${PATH}"
     ;;
   android)
-    ndk_target_platfom="platform-8"
-    ndk_tools_root="${ANDROID_NDK_ROOT}/build/prebuilt/darwin-x86/arm-eabi-4.4.0"
-    ndk_platform_root="${ANDROID_NDK_ROOT}/build/platforms/${ndk_target_platfom}/arch-arm"
+    ndk_target_platfom="android-8"
+    ndk_tools_root="${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86"
+    ndk_platform_root="${ANDROID_NDK_ROOT}/platforms/${ndk_target_platfom}/arch-arm"
 
     export PATH="${FRIDA_TOOLROOT}/bin:${ndk_tools_root}/bin:${PATH}"
     export CLICOLOR=1
@@ -63,26 +63,25 @@ case $FRIDA_TARGET in
     export CC=""
     export CXX=""
 
-    export CFLAGS="\
---sysroot=${ndk_platform_root} \
--fpic \
--mthumb-interwork \
+    export CFLAGS="-fpic \
 -ffunction-sections \
 -funwind-tables \
--fstack-protector \
--fno-short-enums \
 -D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ \
 -D__ARM_ARCH_5E__ -D__ARM_ARCH_5TE__ \
 -Wno-psabi \
--march=armv7-a \
--mfloat-abi=softfp \
--mfpu=vfp \
--Wa,--noexecstack"
-    export LDFLAGS="\
--Wl,--sysroot=${ndk_platform_root} \
--Wl,--fix-cortex-a8 \
--Wl,--no-undefined \
--Wl,-z,noexecstack"
+-march=armv5te \
+-mtune=xscale \
+-msoft-float \
+-mthumb \
+-Os \
+-fomit-frame-pointer \
+-fno-strict-aliasing \
+-finline-limit=64 \
+-DANDROID \
+-Wa,--noexecstack \
+-I$FRIDA_PREFIX/include \
+-I${ndk_platform_root}/usr/include"
+    export LDFLAGS="--sysroot=${ndk_platform_root} -L${ndk_platform_root}/usr/lib -Wl,-z,noexecstack"
     ;;
   osx)
     export CC="/usr/bin/gcc-4.2"
@@ -108,9 +107,7 @@ case $FRIDA_TARGET in
 esac
 
 export LD="${CC}"
-if [ ! $FRIDA_TARGET = android ]; then
-  export LDFLAGS="$LDFLAGS -no-undefined"
-fi
+export LDFLAGS="$LDFLAGS -no-undefined"
 
 export CXXFLAGS="$CFLAGS"
 export OBJCFLAGS="$CFLAGS"
@@ -124,7 +121,12 @@ case $FRIDA_TARGET in
     export VALAC="${FRIDA_PREFIX}/bin/valac-0.10 --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
     ;;
   android)
-    export FRIDA_SDKROOT=""
+    #export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
+    export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
+
+    export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
+    export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig"
+    export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
     ;;
   osx|ios)
     export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
@@ -140,19 +142,25 @@ export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
 export CONFIG_SITE="${FRIDA_BUILD}/config.site"
 
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
+[ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
 if [ ! "$FRIDA_TARGET" = "linux" ]; then
 
-  if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
-    echo "Downloading and deploying toolchain..."
-    curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-20101220.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  toolchain_version=20101220
+  if [ "$FRIDA_TARGET" = "android" ]; then
+    sdk_version=20110118
+  else
+    sdk_version=20101003
   fi
 
-  if [ ! "$FRIDA_TARGET" = "android" ]; then
-    if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
-      echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
-      curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-20101003.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
-    fi
+  if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
+    echo "Downloading and deploying toolchain..."
+    curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-${toolchain_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
+  fi
+
+  if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
+    echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
+    curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-${sdk_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
   fi
 
   for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
