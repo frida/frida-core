@@ -56,6 +56,9 @@ case "$PACKAGE_TARNAME" in
     enable_static=yes
   ;;
   'libgum')
+    if [ "$FRIDA_TARGET" = "android" ]; then
+      LDFLAGS="$LDFLAGS -lz"
+    fi
     enable_maintainer_mode=yes
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
