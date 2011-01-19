@@ -13,7 +13,7 @@
   <repository type="tarball" name="github.com"
               href="http://github.com/"/>
   <repository type="git" name="gitorious.org"
-              href="git://gitorious.org/frida/"/>
+              href="/Users/oleavr/offline/gitorious"/> <!-- git://gitorious.org/frida/ -->
 
   <!-- This module set works a bit differently than for example the
        GNOME ones do. It's split up in seperate pieces:
@@ -33,6 +33,8 @@
     <dependencies>
       <dep package="gtk+"/>
       <dep package="ige-mac-integration"/>
+      <dep package="clutter"/>
+      <dep package="clutter-gtk"/>
     </dependencies>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
@@ -45,6 +47,13 @@
       <dep package="meta-sdk-osx-bootstrap"/>
       <dep package="gtk-doc"/>
     </after>
+  </autotools>
+
+  <autotools id="json-glib">
+    <branch repo="ftp.gnome.org" module="json-glib/0.12/json-glib-0.12.2.tar.bz2"  version="0.12.2"/>
+    <dependencies>
+      <dep package="glib"/>
+    </dependencies>
   </autotools>
 
   <autotools id="pango"
@@ -63,8 +72,7 @@
   </autotools>
 
  <autotools id="atk" autogen-sh="configure">
-    <branch module="atk/1.30/atk-1.30.0.tar.bz2" version="1.30.0"
-            hash="sha256:92b9b1213cafc68fe9c3806273b968c26423237d7b1f631dd83dc5270b8c268c"/>
+    <branch module="atk/1.30/atk-1.30.0.tar.bz2" version="1.30.0"/>
     <dependencies>
       <dep package="glib"/>
     </dependencies>
@@ -73,20 +81,24 @@
     </after>
   </autotools>
 
-  <autotools id="gtk+"  autogen-sh="configure"
+  <autotools id="gdk-pixbuf"
+             autogenargs="--without-libtiff">
+    <branch repo="gitorious.org" module="gdk-pixbuf"/>
+    <dependencies>
+      <dep package="glib"/>
+    </dependencies>
+    <after>
+      <dep package="meta-sdk-osx-bootstrap"/>
+    </after>
+  </autotools>
+
+  <autotools id="gtk+"
              autogenargs="--with-gdktarget=quartz">
-    <branch module="gtk+/2.20/gtk+-2.20.1.tar.bz2" version="2.20.1"
-            hash="sha256:0e081731d21e34ff45c82199490c2889504fa8b3c7e117c043e82ababaec0f65">
-      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gtkselection.patch" strip="1"/>
-      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gtkcups.patch" strip="1"/>
-      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gdkwindow-quartz.patch" strip="1"/>
-      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gtk-introspection.patch" strip="1"/>
-      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gtk-keyhash.patch" strip="1"/>
-      <patch file="http://github.com/jralls/gtk-osx-build/raw/master/patches/gtk-relocation.patch" strip="1"/>
-    </branch>
+    <branch repo="gitorious.org" module="gtk"/>
     <dependencies>
       <dep package="pango"/>
       <dep package="atk"/>
+      <dep package="gdk-pixbuf"/>
 <!--      <dep package="gir-repository"/> -->
     </dependencies>
     <after>
@@ -94,8 +106,33 @@
     </after>
   </autotools>
 
+  <autotools id="clutter"
+             autogenargs="--with-flavour=osx">
+    <branch repo="gitorious.org" module="clutter"/>
+    <dependencies>
+      <dep package="pango"/>
+      <dep package="atk"/>
+      <dep package="json-glib"/>
+    </dependencies>
+    <after>
+      <dep package="meta-sdk-osx-bootstrap"/>
+    </after>
+  </autotools>
+
+  <autotools id="clutter-gtk"
+             autogenargs="--with-flavour=osx">
+    <branch repo="gitorious.org" module="clutter-gtk"/>
+    <dependencies>
+      <dep package="clutter"/>
+      <dep package="gtk+"/>
+    </dependencies>
+    <after>
+      <dep package="meta-sdk-osx-bootstrap"/>
+    </after>
+  </autotools>
+
   <autotools id="pixman" autogenargs="--disable-gtk" autogen-sh="configure">
-    <branch version="0.18.4" module="pixman-0.18.4.tar.gz"
+    <branch version="0.21.2" module="pixman-0.21.2.tar.gz"
             repo="cairographics"/>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
@@ -104,7 +141,7 @@
 
   <autotools id="cairo"  autogen-sh="configure"
              autogenargs="--enable-pdf --enable-quartz --enable-xlib=no --without-x">
-    <branch module="cairo-1.10.0.tar.gz"  version="1.10.0" repo="cairographics"/>
+    <branch module="cairo-1.10.2.tar.gz"  version="1.10.2" repo="cairographics"/>
     <dependencies>
       <dep package="pixman"/>
     </dependencies>
