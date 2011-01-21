@@ -86,7 +86,11 @@ public class Zed.Application : Object {
 
 int main (string[] args) {
 	Wocky.init ();
+#if WINDOWS
 	GtkClutter.init (ref args);
+#else
+	Gtk.init (ref args);
+#endif
 
 	// Access types needed in XML
 	typeof (Gtk.ActionGroup);

@@ -33,8 +33,8 @@ AC_SUBST(ZED_PACKAGES)
 
 if test "x$enable_client" = "xyes"; then
 	GTK_VERSION=2.16.0
-	pkg_modules="gtk+-2.0 >= $GTK_VERSION, wocky-0.0"
-	ZED_CLIENT_PACKAGES="--pkg gtk+-2.0 --pkg wocky-0.0"
+	pkg_modules="gtk+-2.0 >= $GTK_VERSION, clutter-1.0 >= 1.4.0, clutter-gtk-0.90, mx-1.0, mx-gtk-1.0, wocky-0.0"
+	ZED_CLIENT_PACKAGES="--pkg gtk+-2.0 --pkg=cogl-1.0 --pkg=clutter-1.0 --pkg=clutter-gtk-0.90 --pkg=mx-1.0 --pkg=mx-gtk-1.0 --pkg wocky-0.0"
 	PKG_CHECK_MODULES(ZED_CLIENT, [$pkg_modules])
 	AC_SUBST(ZED_CLIENT_CFLAGS)
 	AC_SUBST(ZED_CLIENT_LIBS)

@@ -13,10 +13,12 @@ zed_LDADD = \
 	$(ZED_CLIENT_LIBS)
 zed_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
+	--vapidir=$(top_builddir)/data \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--vapidir=$(srcdir) \
 	--pkg=config \
 	--pkg=zed-core \
+	--pkg=zed-data-mx \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_CLIENT_PACKAGES@
@@ -62,6 +64,7 @@ AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_builddir)/data \
 	-I $(top_builddir)/lib/interfaces \
+	-I $(top_builddir)/ext/libgum/ext/udis86 \
 	$(ZED_CFLAGS) \
 	$(ZED_CLIENT_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \

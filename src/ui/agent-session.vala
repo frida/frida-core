@@ -70,8 +70,10 @@ namespace Zed {
 
 		private Gtk.VBox root_vbox;
 
+#if WINDOWS
 		private Clutter.BehaviourRotate rotation;
 		private Clutter.BehaviourScale scaling;
+#endif
 
 		public AgentSession () {
 			try {
@@ -121,6 +123,7 @@ namespace Zed {
 		}
 
 		private void setup_overview (Gtk.Container parent) {
+#if WINDOWS
 			var frame = new MxGtk.Frame ();
 			parent.add (frame);
 
@@ -172,6 +175,7 @@ namespace Zed {
 				stage.show_all ();
 				return false;
 			});
+#endif
 		}
 
 		private void customize_widget_styles () {
