@@ -35,6 +35,7 @@
       <dep package="ige-mac-integration"/>
       <dep package="clutter"/>
       <dep package="clutter-gtk"/>
+      <dep package="mx"/>
       <dep package="wocky"/>
     </dependencies>
     <after>
@@ -125,6 +126,18 @@
     <dependencies>
       <dep package="clutter"/>
       <dep package="gtk+"/>
+    </dependencies>
+    <after>
+      <dep package="meta-sdk-osx-bootstrap"/>
+    </after>
+  </autotools>
+
+  <autotools id="mx"
+             autogenargs="--with-winsys=none">
+    <branch repo="gitorious.org" module="mx"/>
+    <dependencies>
+      <dep package="clutter"/>
+      <dep package="gdk-pixbuf"/>
     </dependencies>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
