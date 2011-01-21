@@ -155,8 +155,19 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
   export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
   export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
   export CONFIG_SITE="${FRIDA_BUILD}/config.site"
-  export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
-  export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${PS3DEV}/host/ppu/lib/pkgconfig"
+
+  PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT}"
+  PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig"
+  case $FRIDA_TARGET in
+    android|ios|ps3)
+      PKG_CONFIG="${PKG_CONFIG} --static"
+      if [ $FRIDA_TARGET = "ps3" ]; then
+        PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:${PS3DEV}/host/ppu/lib/pkgconfig"
+      fi
+      ;;
+  esac
+  export PKG_CONFIG
+  export PKG_CONFIG_PATH
 
   case $FRIDA_TARGET in
     osx|ios)
