@@ -298,7 +298,7 @@
     <CustomBuild Include="data\ui\ui.resources">
       <Filter>Resource Files\ui</Filter>
     </CustomBuild>
-    <CustomBuild Include="data\images\image.resources">
+    <CustomBuild Include="data\images\images.resources">
       <Filter>Resource Files\images</Filter>
     </CustomBuild>
     <CustomBuild Include="data\winjector\winjector.resources">

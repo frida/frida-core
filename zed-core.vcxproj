@@ -176,32 +176,32 @@ REM. &gt; "$(IntDir)data\agent.stamp"
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
     </CustomBuild>
-    <CustomBuild Include="data\images\image.resources">
+    <CustomBuild Include="data\images\images.resources">
       <FileType>Document</FileType>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)data\images\browse-processes.png;%(AdditionalInputs)</AdditionalInputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)data\images\browse-processes.png;%(AdditionalInputs)</AdditionalInputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)data\images\browse-processes.png;%(AdditionalInputs)</AdditionalInputs>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)data\images\browse-processes.png;%(AdditionalInputs)</AdditionalInputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\image.resources" -o "$(IntDir)data\zed-data-images" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\images.resources" -o "$(IntDir)data\zed-data-images" || exit 1
 REM. &gt; "$(IntDir)data\images.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing Image resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\images.stamp;%(Outputs)</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\image.resources" -o "$(IntDir)data\zed-data-images" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\images.resources" -o "$(IntDir)data\zed-data-images" || exit 1
 REM. &gt; "$(IntDir)data\images.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing Image resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\images.stamp;%(Outputs)</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\image.resources" -o "$(IntDir)data\zed-data-images" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\images.resources" -o "$(IntDir)data\zed-data-images" || exit 1
 REM. &gt; "$(IntDir)data\images.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Serializing Image resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\images.stamp;%(Outputs)</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\image.resources" -o "$(IntDir)data\zed-data-images" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\images\images.resources" -o "$(IntDir)data\zed-data-images" || exit 1
 REM. &gt; "$(IntDir)data\images.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Image resources</Message>
