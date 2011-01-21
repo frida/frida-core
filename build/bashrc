@@ -77,21 +77,27 @@ case $FRIDA_TARGET in
     ;;
 esac
 
-export PS1="\e[0;33m[\u@\h \w \e[m\e[1;33mfrida-${FRIDA_TARGET}\e[m\e[0;33m]\e[m\n\$ "
+if [ $FRIDA_ENVIRONMENT = normal ]; then
+  color=33
+else
+  color=36
+fi
+export PS1="\e[0;${color}m[\u@\h \w \e[m\e[1;${color}mfrida-${FRIDA_TARGET}\e[m\e[0;${color}m]\e[m\n\$ "
 
-case $FRIDA_TARGET in
-  linux)
-    export CC="gcc"
-    export CXX="g++"
+if [ $FRIDA_ENVIRONMENT = normal ]; then
+  case $FRIDA_TARGET in
+    linux)
+      export CC="gcc"
+      export CXX="g++"
 
-    export CFLAGS="-ffunction-sections -fdata-sections"
-    export LDFLAGS="-Wl,--gc-sections"
-    ;;
-  android)
-    export CC=""
-    export CXX=""
+      export CFLAGS="-ffunction-sections -fdata-sections"
+      export LDFLAGS="-Wl,--gc-sections"
+      ;;
+    android)
+      export CC=""
+      export CXX=""
 
-    export CFLAGS="--sysroot=${ndk_platform_root} \
+      export CFLAGS="--sysroot=${ndk_platform_root} \
 -fpic \
 -ffunction-sections \
 -funwind-tables \
@@ -104,60 +110,68 @@ case $FRIDA_TARGET in
 -DANDROID \
 -Wa,--noexecstack \
 -I${FRIDA_SDKROOT}/include"
-    export LDFLAGS="--sysroot=${ndk_platform_root} \
+      export LDFLAGS="--sysroot=${ndk_platform_root} \
 -L${ndk_platform_root}/usr/lib \
 -Wl,-z,noexecstack \
 -L${FRIDA_SDKROOT}/lib"
-    ;;
-  osx)
-    export CC="/usr/bin/gcc-4.2"
-    export CXX="/usr/bin/g++-4.2"
-    export OBJC="/usr/bin/gcc-4.2"
+      ;;
+    osx)
+      export CC="/usr/bin/gcc-4.2"
+      export CXX="/usr/bin/g++-4.2"
+      export OBJC="/usr/bin/gcc-4.2"
 
-    export CFLAGS=""
-    export LDFLAGS=""
-    ;;
-  ios)
-    export IOS_SDKVER="4.2"
-    export IOS_MINVER="4.0"
-    export IOS_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
-    export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${IOS_SDKVER}.sdk"
+      export CFLAGS=""
+      export LDFLAGS=""
+      ;;
+    ios)
+      export IOS_SDKVER="4.2"
+      export IOS_MINVER="4.0"
+      export IOS_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
+      export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${IOS_SDKVER}.sdk"
 
-    export CC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
-    export CXX="${IOS_DEVROOT}/usr/bin/g++-4.2"
-    export OBJC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
+      export CC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
+      export CXX="${IOS_DEVROOT}/usr/bin/g++-4.2"
+      export OBJC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
 
-    export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
-    export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7"
-    ;;
-  ps3)
-    export CC=""
-    export CXX=""
+      export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
+      export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7"
+      ;;
+    ps3)
+      export CC=""
+      export CXX=""
 
-    export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
-    export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/target/lib"
-    ;;
-esac
+      export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
+      export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/target/lib"
+      ;;
+  esac
 
-export LD="${CC}"
-export LDFLAGS="$LDFLAGS -no-undefined"
+  export LD="${CC}"
+  export LDFLAGS="$LDFLAGS -no-undefined"
 
-export CXXFLAGS="$CFLAGS"
-export OBJCFLAGS="$CFLAGS"
-export CPPFLAGS="$CFLAGS"
+  export CXXFLAGS="$CFLAGS"
+  export OBJCFLAGS="$CFLAGS"
+  export CPPFLAGS="$CFLAGS"
 
-export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
-export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
-export CONFIG_SITE="${FRIDA_BUILD}/config.site"
-export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
-export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${PS3DEV}/host/ppu/lib/pkgconfig"
-export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+  export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
+  export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
+  export CONFIG_SITE="${FRIDA_BUILD}/config.site"
+  export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
+  export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${PS3DEV}/host/ppu/lib/pkgconfig"
 
-case $FRIDA_TARGET in
-  osx|ios)
-    export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
-    ;;
-esac
+  case $FRIDA_TARGET in
+    osx|ios)
+      export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
+      ;;
+  esac
+else
+  export FRIDA_SDKROOT=
+fi
+
+VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" "
+if [ $FRIDA_ENVIRONMENT = normal ]; then
+  VALAC="$VALAC --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+fi
+export VALAC
 
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
@@ -174,7 +188,7 @@ if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
   ${download_command} "http://frida-ire.googlecode.com/files/toolchain-${build_os}-${toolchain_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj ${tar_stdin} || exit 1
 fi
 
-if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
+if [ $FRIDA_ENVIRONMENT = normal ] && [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
   echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
   ${download_command} "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-${sdk_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj ${tar_stdin} || exit 1
 fi
