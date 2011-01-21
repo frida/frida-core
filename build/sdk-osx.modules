@@ -35,6 +35,7 @@
       <dep package="ige-mac-integration"/>
       <dep package="clutter"/>
       <dep package="clutter-gtk"/>
+      <dep package="wocky"/>
     </dependencies>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
@@ -157,6 +158,16 @@
     </branch>
     <dependencies>
       <dep package="gtk+"/>
+    </dependencies>
+    <after>
+      <dep package="meta-sdk-osx-bootstrap"/>
+    </after>
+  </autotools>
+
+  <autotools id="wocky">
+    <branch repo="gitorious.org" module="wocky"/>
+    <dependencies>
+      <dep package="glib"/>
     </dependencies>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
