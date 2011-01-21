@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 
