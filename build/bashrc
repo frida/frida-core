@@ -134,8 +134,8 @@ case $FRIDA_TARGET in
     export CC=""
     export CXX=""
 
-    export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/include"
-    export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/lib"
+    export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
+    export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/target/lib"
     ;;
 esac
 
