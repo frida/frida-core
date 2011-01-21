@@ -13,7 +13,7 @@
   <repository type="tarball" name="github.com"
               href="http://github.com/"/>
   <repository type="git" name="gitorious.org"
-              href="/Users/oleavr/offline/gitorious"/> <!-- git://gitorious.org/frida/ -->
+              href="git://gitorious.org/frida/"/>
 
   <!-- This module set works a bit differently than for example the
        GNOME ones do. It's split up in seperate pieces:
