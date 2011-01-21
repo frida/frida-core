@@ -34,6 +34,7 @@
       <dep package="gee"/>
       <dep package="gtk+"/>
       <dep package="ige-mac-integration"/>
+      <dep package="gtk-quartz-engine"/>
       <dep package="clutter"/>
       <dep package="clutter-gtk"/>
       <dep package="mx"/>
@@ -177,6 +178,16 @@
 	    module="gtk-osx/ige-mac-integration-0.9.6.tar.bz2"
             version="0.9.6">
     </branch>
+    <dependencies>
+      <dep package="gtk+"/>
+    </dependencies>
+    <after>
+      <dep package="meta-sdk-osx-bootstrap"/>
+    </after>
+  </autotools>
+
+  <autotools id="gtk-quartz-engine">
+    <branch repo="gitorious.org" module="gtk-quartz-engine"/>
     <dependencies>
       <dep package="gtk+"/>
     </dependencies>
