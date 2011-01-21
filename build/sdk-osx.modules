@@ -64,8 +64,6 @@
     <dependencies>
       <dep package="glib"/>
       <dep package="cairo"/>
-      <dep package="fontconfig"/>
-      <dep package="freetype"/>
     </dependencies>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
@@ -148,8 +146,6 @@
     </dependencies>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
-      <dep package="fontconfig"/>
-      <dep package="freetype"/>
     </after>
   </autotools>
 

@@ -447,7 +447,7 @@ else:
 # module_autogenargs, etc.
 #
 
-setup_debug()
+setup_release()
 
 _userrc = os.path.join(os.environ['HOME'], '.jhbuildrc-custom')
 if os.path.exists(_userrc):
