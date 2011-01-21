@@ -41,7 +41,8 @@
     </after>
   </metamodule>
 
-  <autotools id="glib">
+  <autotools id="glib"
+             autogenargs="--enable-proxy-libintl">
     <branch repo="gitorious.org" module="glib"/>
     <after>
       <dep package="meta-sdk-osx-bootstrap"/>
