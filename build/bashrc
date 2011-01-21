@@ -1,5 +1,23 @@
 [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
 
+build_os=$(uname -s | tr '[A-Z]' '[a-z]')
+
+case $build_os in
+  linux)
+    download_command="wget -O - -nv"
+    tar_stdin=""
+    ;;
+  darwin)
+    download_command="curl -sS"
+    tar_stdin="-"
+
+    build_os=osx
+    ;;
+  *)
+    echo "Could not determine build OS"
+    exit 1
+esac
+
 case $FRIDA_TARGET in
   linux)
     ;;
@@ -16,8 +34,14 @@ case $FRIDA_TARGET in
       echo "WARNING: IOS_CERTID and IOS_IPADDR should be set"
     fi
     ;;
+  ps3)
+    if [ -z "$PS3DEV" ]; then
+      echo "ERROR: PS3DEV must be set"
+      exit 1
+    fi
+    ;;
   *)
-    echo "Invalid FRIDA_TARGET, must be either linux, osx or ios"
+    echo "Invalid FRIDA_TARGET, must be either linux, android, osx, ios or ps3"
     exit 1
     ;;
 esac
@@ -31,7 +55,7 @@ export FRIDA_SDKROOT="${FRIDA_BUILD}/sdk-${FRIDA_TARGET}"
 
 case $FRIDA_TARGET in
   linux)
-    export PATH="${FRIDA_PREFIX}/bin:${PATH}"
+    export PATH="${FRIDA_TOOLROOT}/bin:${FRIDA_PREFIX}/bin:${PATH}"
     ;;
   android)
     ndk_target_platfom="android-8"
@@ -40,6 +64,10 @@ case $FRIDA_TARGET in
 
     export PATH="${FRIDA_TOOLROOT}/bin:${ndk_tools_root}/bin:${PATH}"
     export CLICOLOR=1
+    ;;
+  ps3)
+    export PSL1GHT="$PS3DEV/psl1ght"
+    export PATH="${FRIDA_TOOLROOT}/bin:$PS3DEV/bin:$PS3DEV/host/ppu/bin:$PS3DEV/host/spu/bin:$PSL1GHT/host/bin:$PATH"
     ;;
   *)
     export PATH="${FRIDA_TOOLROOT}/bin:${IOS_DEVROOT}/usr/bin:/opt/local/bin:${PATH}"
@@ -102,6 +130,13 @@ case $FRIDA_TARGET in
     export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
     export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7"
     ;;
+  ps3)
+    export CC=""
+    export CXX=""
+
+    export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/include"
+    export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/lib"
+    ;;
 esac
 
 export LD="${CC}"
@@ -111,59 +146,41 @@ export CXXFLAGS="$CFLAGS"
 export OBJCFLAGS="$CFLAGS"
 export CPPFLAGS="$CFLAGS"
 
-case $FRIDA_TARGET in
-  linux)
-    export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal"
-
-    export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig"
-    export VALAC="${FRIDA_PREFIX}/bin/valac-0.10 --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
-    ;;
-  android)
-    export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
-
-    export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
-    export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig"
-    export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
-    ;;
-  osx|ios)
-    export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
-    export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
-
-    export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
-    export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${FRIDA_SDKROOT}/lib/pkgconfig:${IOS_SDKROOT}/usr/lib/pkgconfig"
-    export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
-    ;;
-esac
-
+export ACLOCAL_FLAGS="-I ${FRIDA_PREFIX}/share/aclocal -I ${FRIDA_SDKROOT}/share/aclocal -I ${FRIDA_TOOLROOT}/share/aclocal"
 export ACLOCAL="aclocal ${ACLOCAL_FLAGS}"
 export CONFIG_SITE="${FRIDA_BUILD}/config.site"
+export PKG_CONFIG="${FRIDA_TOOLROOT}/bin/pkg-config --define-variable=frida_sdk_prefix=${FRIDA_SDKROOT} --static"
+export PKG_CONFIG_PATH="${FRIDA_PREFIX_LIB}/pkgconfig:${PS3DEV}/host/ppu/lib/pkgconfig"
+export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
+
+case $FRIDA_TARGET in
+  osx|ios)
+    export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
+    ;;
+esac
 
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
-if [ ! "$FRIDA_TARGET" = "linux" ]; then
-
-  toolchain_version=20110118
-  if [ "$FRIDA_TARGET" = "android" ]; then
-    sdk_version=20110118
-  else
-    sdk_version=20101003
-  fi
-
-  if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
-    echo "Downloading and deploying toolchain..."
-    curl -sS "http://frida-ire.googlecode.com/files/toolchain-osx-${toolchain_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
-  fi
-
-  if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
-    echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
-    curl -sS "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-${sdk_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj - || exit 1
-  fi
-
-  for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
-    target=$(echo $template | sed 's,\.frida\.in$,,')
-    cp -a "$template" "$target"
-    sed -e "s,@FRIDA_TOOLROOT@,${FRIDA_TOOLROOT},g" -e "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" "$template" > "$target"
-  done
-
+toolchain_version=20110118
+if [ "$FRIDA_TARGET" = "android" ]; then
+  sdk_version=20110118
+else
+  sdk_version=20101003
 fi
+
+if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
+  echo "Downloading and deploying toolchain..."
+  ${download_command} "http://frida-ire.googlecode.com/files/toolchain-${build_os}-${toolchain_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj ${tar_stdin} || exit 1
+fi
+
+if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
+  echo "Downloading and deploying SDK for ${FRIDA_TARGET}..."
+  ${download_command} "http://frida-ire.googlecode.com/files/sdk-${FRIDA_TARGET}-${sdk_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj ${tar_stdin} || exit 1
+fi
+
+for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); do
+  target=$(echo $template | sed 's,\.frida\.in$,,')
+  cp -a "$template" "$target"
+  sed -e "s,@FRIDA_TOOLROOT@,${FRIDA_TOOLROOT},g" -e "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" "$template" > "$target"
+done
