@@ -37,6 +37,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\libgum\binding
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-ui", "zed-ui.vcxproj", "{BBF6C968-7E08-48D2-A456-F9ED879D3A99}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "pyfrida", "bindings\pyfrida\pyfrida.vcxproj", "{7409F45B-E10E-48AA-9E68-94C113995D4A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -159,10 +161,12 @@ Global
 		{D873638D-AA0D-4252-9334-456557A65D95}.Release|x64.Build.0 = Release|x64
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Debug|Win32.ActiveCfg = Debug|Win32
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Debug|Win32.Build.0 = Debug|Win32
-		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Debug|x64.ActiveCfg = Debug|Win32
+		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Debug|x64.ActiveCfg = Debug|x64
+		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Debug|x64.Build.0 = Debug|x64
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|Win32.ActiveCfg = Release|Win32
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|Win32.Build.0 = Release|Win32
-		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|x64.ActiveCfg = Release|Win32
+		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|x64.ActiveCfg = Release|x64
+		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|x64.Build.0 = Release|x64
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|Win32.ActiveCfg = Debug|Win32
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|Win32.Build.0 = Debug|Win32
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|x64.ActiveCfg = Debug|x64
@@ -171,6 +175,14 @@ Global
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|Win32.Build.0 = Release|Win32
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.ActiveCfg = Release|x64
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.Build.0 = Release|x64
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|Win32.ActiveCfg = Debug|Win32
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|Win32.Build.0 = Debug|Win32
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|x64.ActiveCfg = Debug|x64
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|x64.Build.0 = Debug|x64
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|Win32.ActiveCfg = Release|Win32
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|Win32.Build.0 = Release|Win32
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|x64.ActiveCfg = Release|x64
+		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

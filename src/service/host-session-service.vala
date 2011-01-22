@@ -5,6 +5,14 @@ namespace Zed.Service {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);
 
+		public HostSessionService.with_default_backends () {
+#if WINDOWS
+			add_backend (new Service.WindowsHostSessionBackend ());
+			add_backend (new Service.FruityHostSessionBackend ());
+#endif
+			add_backend (new Service.TcpHostSessionBackend ());
+		}
+
 		public async void start () {
 			foreach (var backend in backends)
 				yield backend.start ();

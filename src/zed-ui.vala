@@ -37,15 +37,9 @@ public class Zed.Application : Object {
 
 	private void setup_services () {
 		storage_backend = new Service.StorageBackend ();
-		host_session_service = new Service.HostSessionService ();
+		host_session_service = new Service.HostSessionService.with_default_backends ();
 		xmpp_client = new Service.XmppClient ();
 		muc_service = new Service.MucService (xmpp_client);
-
-#if WINDOWS
-		host_session_service.add_backend (new Service.WindowsHostSessionBackend ());
-		host_session_service.add_backend (new Service.FruityHostSessionBackend ());
-#endif
-		host_session_service.add_backend (new Service.TcpHostSessionBackend ());
 	}
 
 	private void setup_presenters () {
