@@ -899,6 +899,22 @@ namespace Zed {
 				return;
 			}
 
+			int function_count = 1;
+
+			try {
+				var raw_argument = args[args.length - 1];
+
+				var re = new Regex ("^(.*)\\[(\\d+)\\]$");
+				MatchInfo match_info;
+				if (re.match (raw_argument, 0, out match_info)) {
+					assert (match_info.get_match_count () == 3);
+					args[args.length - 1] = match_info.fetch (1);
+					function_count = match_info.fetch (2).to_int ();
+				}
+			} catch (RegexError re_error) {
+				assert_not_reached ();
+			}
+
 			uint64 address;
 
 			try {
@@ -939,12 +955,46 @@ namespace Zed {
 			}
 
 			try {
-				var script = yield session.attach_script_to (script_text, address);
-				print_to_console (("compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
-					"x").printf (script.code_size, script.code_address));
-				print_to_console ("attached with id %u".printf (script.id));
-			} catch (IOError attach_error) {
-				print_to_console ("ERROR: " + attach_error.message);
+				if (function_count == 1) {
+					var script = yield session.attach_script_to (script_text, address);
+					print_to_console (("compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
+						"x").printf (script.code_size, script.code_address));
+					print_to_console ("attached with id %u".printf (script.id));
+				} else {
+					uint8[] bytes = yield session.read_memory (address, (uint) (function_count * sizeof (uint32)));
+					unowned uint32 * function_address = (uint32 *) bytes;
+
+					var vtable = new MonitoredVTable ();
+					uint first_script_id = 0;
+
+					for (uint function_index = 0; function_index != function_count; function_index++) {
+						var message = "function[%u] <0x%08x> => ".printf (function_index, function_address[function_index]);
+
+						try {
+							var cur_script = yield session.attach_script_to (script_text, function_address[function_index]);
+							if (first_script_id == 0)
+								first_script_id = cur_script.id;
+
+							vtable_by_script_id[cur_script.id] = vtable;
+							vtable.offset_by_script_id[cur_script.id] = function_index;
+
+							message += "OK";
+						} catch (IOError attach_error) {
+							message += "failed (%s)".printf (attach_error.message);
+						}
+
+						print_to_console (message);
+					}
+
+					vtable.id = first_script_id;
+
+					if (first_script_id != 0)
+						print_to_console ("attached with id %u".printf (first_script_id));
+					else
+						print_to_console ("could not attach to any of the specified functions");
+				}
+			} catch (IOError any_error) {
+				print_to_console ("ERROR: " + any_error.message);
 			}
 		}
 
@@ -965,7 +1015,17 @@ namespace Zed {
 			}
 
 			try {
-				yield session.detach_script (id);
+				var vtable = vtable_by_script_id[id];
+				if (vtable == null) {
+					yield session.detach_script (id);
+				} else {
+					foreach (var script_id in vtable.offset_by_script_id.keys) {
+						yield session.detach_script (script_id);
+
+						vtable_by_script_id.unset (script_id);
+					}
+				}
+
 				print_to_console ("script detached");
 			} catch (IOError detach_error) {
 				print_to_console ("ERROR: " + detach_error.message);
@@ -1012,7 +1072,13 @@ namespace Zed {
 		}
 
 		private void on_message_from_script (uint script_id, Variant msg) {
-			print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
+			var vtable = vtable_by_script_id[script_id];
+			if (vtable == null) {
+				print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
+			} else {
+				var offset = vtable.offset_by_script_id[script_id];
+				print_to_console ("[script %u [%u]: %s]".printf (vtable.id, offset, msg.print (false)));
+			}
 		}
 
 		private void print_monitor_usage () {
@@ -1350,6 +1416,13 @@ namespace Zed {
 
 		/* TODO: move this to a Service later */
 		public extern string disassemble (uint64 pc, uint8[] bytes, out uint instruction_length);
+
+		private Gee.HashMap<uint, MonitoredVTable> vtable_by_script_id = new Gee.HashMap<uint, MonitoredVTable> ();
+
+		private class MonitoredVTable {
+			public uint id;
+			public Gee.HashMap<uint, uint> offset_by_script_id = new Gee.HashMap<uint, uint> ();
+		}
 	}
 
 	public class Investigation : Object {
