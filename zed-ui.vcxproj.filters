@@ -1,0 +1,151 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
+    </Filter>
+    <Filter Include="Source Files\generated">
+      <UniqueIdentifier>{e2433245-ba53-4bba-85ba-ea8dd502d59a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\data">
+      <UniqueIdentifier>{a468be99-7d70-40d6-8edc-d8105f0a8995}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\ui">
+      <UniqueIdentifier>{c08d753c-6946-4284-a9fe-0058b1e0d6e7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ui">
+      <UniqueIdentifier>{92f9c76d-08d7-45cf-9155-9cdbcf05c67d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\images">
+      <UniqueIdentifier>{17f0590f-b383-4e2e-8227-68a868340102}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\ui">
+      <UniqueIdentifier>{b8b8271f-9110-4685-94fa-60069f7c76f2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\mx">
+      <UniqueIdentifier>{24c53333-7950-4da8-9543-1319d1c1c6b2}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(IntDir)data\zed-data-images.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\zed-data-ui.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\zed-data-mx.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\agent-session.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\chat.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\function-selector.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\host-session.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\image-factory.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\login.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\process-selector.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\process-info-label.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\root.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\ui\workspace.c">
+      <Filter>Source Files\generated\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\agent-session-glue.c">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\zed-ui.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(IntDir)zed-ui.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="data\images\browse-processes.png">
+      <Filter>Resource Files\images</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\mx\mx.resources">
+      <Filter>Resource Files\mx</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\ui\ui.resources">
+      <Filter>Resource Files\ui</Filter>
+    </CustomBuild>
+    <CustomBuild Include="data\images\images.resources">
+      <Filter>Resource Files\images</Filter>
+    </CustomBuild>
+    <CustomBuild Include="src\zed-ui.vala">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="data\ui\workspace.ui">
+      <Filter>Resource Files\ui</Filter>
+    </None>
+    <None Include="data\ui\login.ui">
+      <Filter>Resource Files\ui</Filter>
+    </None>
+    <None Include="data\ui\host-session.ui">
+      <Filter>Resource Files\ui</Filter>
+    </None>
+    <None Include="data\ui\chat.ui">
+      <Filter>Resource Files\ui</Filter>
+    </None>
+    <None Include="data\ui\agent-session.ui">
+      <Filter>Resource Files\ui</Filter>
+    </None>
+    <None Include="src\ui\agent-session.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\chat.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\function-selector.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\host-session.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\login.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\process-info-label.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\process-selector.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\root.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+    <None Include="src\ui\workspace.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
+  </ItemGroup>
+</Project>

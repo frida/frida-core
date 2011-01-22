@@ -1,4 +1,4 @@
-#include "zed-core.h"
+#include "zed-ui.h"
 
 #include <udis86.h>
 

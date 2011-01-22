@@ -5,8 +5,8 @@ public abstract class Zed.Service.BaseService : Object {
 	}
 
 	construct {
-		client.notify["session"].connect (() => {
-			if (client.session != null)
+		client.notify["is-logged-in"].connect (() => {
+			if (client.is_logged_in)
 				register_handlers ();
 		});
 	}

@@ -120,8 +120,8 @@ namespace Zed {
 				}
 			});
 
-			client.notify["session"].connect (() => {
-				if (client.session != null) {
+			client.notify["is-logged-in"].connect (() => {
+				if (client.is_logged_in) {
 					logged_in ();
 				} else {
 					view.login_in_progress = false;

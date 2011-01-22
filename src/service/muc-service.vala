@@ -37,12 +37,12 @@ public class Zed.Service.MucService : BaseService {
 			BuildTag.NODE, "body",
 				BuildTag.NODE_TEXT, message,
 			BuildTag.NODE_END);
-		client.session.porter.send (stanza);
+		(client.internal_session as Session).porter.send (stanza);
 	}
 
 	private void connect_signals () {
-		client.notify["session"].connect (() => {
-			if (client.session != null)
+		client.notify["is-logged-in"].connect (() => {
+			if (client.is_logged_in)
 				join_muc ();
 			else
 				cleanup_muc ();
@@ -57,7 +57,7 @@ public class Zed.Service.MucService : BaseService {
 		var room_jid = new Protocol.Jid ("frida", conference_server, client.jid.node);
 
 		muc = Object.new (typeof (Muc),
-			"porter", client.session.porter,
+			"porter", (client.internal_session as Session).porter,
 			"jid", room_jid.full,
 			"user", client.jid.full) as Muc;
 

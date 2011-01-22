@@ -213,3 +213,28 @@ namespace Winjector {
 		public static extern void inject (uint32 process_id, string dll_path, string ipc_server_address) throws WinjectorError;
 	}
 }
+
+namespace Zed.Service.WinjectorIpc {
+	private delegate void InjectFunc (uint32 target_pid, string filename_template, string ipc_server_address) throws WinjectorError;
+
+	private Variant? marshal_inject (Variant? arg, InjectFunc func) {
+		uint32 target_pid;
+		string filename_template;
+		string ipc_server_address;
+		arg.get (INJECT_SIGNATURE, out target_pid, out filename_template, out ipc_server_address);
+
+		bool success = true;
+		uint32 error_code = 0;
+		string error_message = "";
+
+		try {
+			func (target_pid, filename_template, ipc_server_address);
+		} catch (WinjectorError e) {
+			success = false;
+			error_code = e.code;
+			error_message = e.message;
+		}
+
+		return new Variant (INJECT_RESPONSE, success, error_code, error_message);
+	}
+}

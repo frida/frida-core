@@ -14,12 +14,6 @@
     <Filter Include="Source Files\generated\service">
       <UniqueIdentifier>{eef66507-e4a8-4117-87d0-a5b24833ddba}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\ui">
-      <UniqueIdentifier>{394013f3-0361-4c2c-837e-410759bdbb71}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\ui">
-      <UniqueIdentifier>{02e977b4-f92d-4c38-b3eb-4862d982f3d7}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\service">
       <UniqueIdentifier>{b6dfc63e-558b-4086-bdb4-0478fe64c3be}</UniqueIdentifier>
     </Filter>
@@ -61,12 +55,6 @@
     <Filter Include="Source Files\generated\data">
       <UniqueIdentifier>{e441c3c0-5949-44e4-8617-0483732946e8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Resource Files\images">
-      <UniqueIdentifier>{6da456ee-c4ca-46b6-bda4-6152a6b4fe67}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Resource Files\ui">
-      <UniqueIdentifier>{6bb46df1-f0f2-46da-9f76-c9a3497e1644}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\generated\service\tcp">
       <UniqueIdentifier>{620f3726-c7dd-4d6f-8f54-ad08f2ff594a}</UniqueIdentifier>
     </Filter>
@@ -79,26 +67,8 @@
     <Filter Include="Resource Files\agent">
       <UniqueIdentifier>{e7df245c-eab8-41b6-bdd6-aa44dfcd8426}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Resource Files\mx">
-      <UniqueIdentifier>{2ef325af-2301-4baf-ae6b-7543601936a5}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="src\configuration.vala">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="src\ui\chat.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
-    <None Include="src\ui\login.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
-    <None Include="src\ui\root.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
-    <None Include="src\ui\workspace.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
     <None Include="src\service\base-service.vala">
       <Filter>Source Files\service</Filter>
     </None>
@@ -107,15 +77,6 @@
     </None>
     <None Include="src\service\xmpp-client.vala">
       <Filter>Source Files\service</Filter>
-    </None>
-    <None Include="src\ui\agent-session.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
-    <None Include="src\ui\function-selector.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
-    <None Include="src\ui\process-info-label.vala">
-      <Filter>Source Files\ui</Filter>
     </None>
     <None Include="src\service\storage-backend.vala">
       <Filter>Source Files\service</Filter>
@@ -138,27 +99,6 @@
     <None Include="lib\interfaces\session.vala">
       <Filter>Source Files\lib\interfaces</Filter>
     </None>
-    <None Include="src\ui\host-session.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
-    <None Include="data\ui\workspace.ui">
-      <Filter>Resource Files\ui</Filter>
-    </None>
-    <None Include="data\ui\agent-session.ui">
-      <Filter>Resource Files\ui</Filter>
-    </None>
-    <None Include="data\ui\chat.ui">
-      <Filter>Resource Files\ui</Filter>
-    </None>
-    <None Include="data\ui\host-session.ui">
-      <Filter>Resource Files\ui</Filter>
-    </None>
-    <None Include="data\ui\login.ui">
-      <Filter>Resource Files\ui</Filter>
-    </None>
-    <None Include="src\ui\process-selector.vala">
-      <Filter>Source Files\ui</Filter>
-    </None>
     <None Include="src\service\tcp\tcp-host-session.vala">
       <Filter>Source Files\service\tcp</Filter>
     </None>
@@ -168,12 +108,12 @@
     <None Include="src\service\fruity\fruity-property-list.vala">
       <Filter>Source Files\service\fruity</Filter>
     </None>
+    <None Include="src\configuration.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\zed.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\protocol\jid.c">
@@ -185,27 +125,6 @@
     <ClCompile Include="$(IntDir)src\service\muc-service.c">
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\chat.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\login.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\root.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\workspace.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\agent-session.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\function-selector.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\process-info-label.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
     <ClCompile Include="src\service\storage-backend-glue.c">
       <Filter>Source Files\service</Filter>
     </ClCompile>
@@ -214,9 +133,6 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\code-service.c">
       <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="src\ui\agent-session-glue.c">
-      <Filter>Source Files\ui</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\host-session-service.c">
       <Filter>Source Files\generated\service</Filter>
@@ -245,23 +161,11 @@
     <ClCompile Include="$(IntDir)lib\interfaces\session.c">
       <Filter>Source Files\generated\lib\interfaces</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\host-session.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-images.c">
-      <Filter>Source Files\generated\data</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-ui.c">
-      <Filter>Source Files\generated\data</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)data\zed-data-agent.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
       <Filter>Source Files\generated\data</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\process-selector.c">
-      <Filter>Source Files\generated\ui</Filter>
     </ClCompile>
     <ClCompile Include="src\service\fruity\fruity-host-session-glue.c">
       <Filter>Source Files\service\fruity</Filter>
@@ -269,17 +173,11 @@
     <ClCompile Include="src\service\windows-icon-helpers.c">
       <Filter>Source Files\service</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\image-factory.c">
-      <Filter>Source Files\generated\ui</Filter>
-    </ClCompile>
     <ClCompile Include="src\service\windows\winjector-glue.c">
       <Filter>Source Files\service\windows</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\tcp\tcp-host-session.c">
       <Filter>Source Files\generated\service\tcp</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-mx.c">
-      <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\service\fruity\fruity-client.c">
       <Filter>Source Files\generated\service\fruity</Filter>
@@ -287,28 +185,19 @@
     <ClCompile Include="$(IntDir)src\service\fruity\fruity-property-list.c">
       <Filter>Source Files\generated\service\fruity</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\zed.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="src\zed.vala">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
-    <CustomBuild Include="data\images\browse-processes.png">
-      <Filter>Resource Files\images</Filter>
-    </CustomBuild>
-    <CustomBuild Include="data\ui\ui.resources">
-      <Filter>Resource Files\ui</Filter>
-    </CustomBuild>
-    <CustomBuild Include="data\images\images.resources">
-      <Filter>Resource Files\images</Filter>
-    </CustomBuild>
     <CustomBuild Include="data\winjector\winjector.resources">
       <Filter>Resource Files\winjector</Filter>
     </CustomBuild>
     <CustomBuild Include="data\agent\agent.resources">
       <Filter>Resource Files\agent</Filter>
     </CustomBuild>
-    <CustomBuild Include="data\mx\mx.resources">
-      <Filter>Resource Files\mx</Filter>
+    <CustomBuild Include="src\zed.vala">
+      <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>

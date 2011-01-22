@@ -35,6 +35,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-64", "lib\agent\z
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\libgum\bindings\gumpp\gumpp.vcxproj", "{BB098FCF-D570-43FF-BB10-985189B2E1AB}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-ui", "zed-ui.vcxproj", "{BBF6C968-7E08-48D2-A456-F9ED879D3A99}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -161,6 +163,14 @@ Global
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|Win32.ActiveCfg = Release|Win32
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|Win32.Build.0 = Release|Win32
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|x64.ActiveCfg = Release|Win32
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|Win32.ActiveCfg = Debug|Win32
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|Win32.Build.0 = Debug|Win32
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|x64.ActiveCfg = Debug|x64
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|x64.Build.0 = Debug|x64
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|Win32.ActiveCfg = Release|Win32
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|Win32.Build.0 = Release|Win32
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.ActiveCfg = Release|x64
+		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

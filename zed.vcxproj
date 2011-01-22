@@ -110,15 +110,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="zed-core.vcxproj">
-      <Project>{b7dc9b02-a5ff-4aa1-b2a2-dc1653168d44}</Project>
-      <Private>false</Private>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-    </ProjectReference>
+    <ClCompile Include="src\winmain.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\winmain.c" />
+    <ProjectReference Include="zed-ui.vcxproj">
+      <Project>{bbf6c968-7e08-48d2-a456-f9ed879d3a99}</Project>
+      <Private>false</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

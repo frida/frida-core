@@ -1,24 +1,20 @@
 using Wocky;
 
 public class Zed.Service.XmppClient : Object {
-	public Session? session {
-		get;
-		private set;
-	}
-
 	public Protocol.Jid? jid {
 		get;
 		private set;
 	}
 
-	public XmppClient () {
-		Object ();
-
-		notify["session"].connect (() => {
-			if (session != null)
-				register_handlers ();
-		});
+	public bool is_logged_in {
+		get;
+		private set;
 	}
+
+	public Object? internal_session {
+		get { return session; }
+	}
+	private Session session;
 
 	public async void close () {
 		/* TODO: fix wocky
@@ -53,6 +49,9 @@ public class Zed.Service.XmppClient : Object {
 
 			session.start ();
 
+			is_logged_in = true;
+			register_handlers ();
+
 			return true;
 		} catch (Error e) {
 			reset ();
@@ -64,6 +63,8 @@ public class Zed.Service.XmppClient : Object {
 	private void reset () {
 		session = null;
 		jid = null;
+
+		is_logged_in = false;
 	}
 
 	private void register_handlers () {
