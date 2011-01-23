@@ -277,6 +277,7 @@ echo &gt; "$(IntDir)valacode.stamp"
     <None Include="src\ui\chat.vala" />
     <None Include="src\ui\function-selector.vala" />
     <None Include="src\ui\host-session.vala" />
+    <None Include="src\ui\image-factory.vala" />
     <None Include="src\ui\login.vala" />
     <None Include="src\ui\process-info-label.vala" />
     <None Include="src\ui\process-selector.vala" />

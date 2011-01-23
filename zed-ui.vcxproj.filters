@@ -147,5 +147,8 @@
     <None Include="src\ui\workspace.vala">
       <Filter>Source Files\ui</Filter>
     </None>
+    <None Include="src\ui\image-factory.vala">
+      <Filter>Source Files\ui</Filter>
+    </None>
   </ItemGroup>
 </Project>
