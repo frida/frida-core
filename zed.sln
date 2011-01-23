@@ -37,7 +37,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\libgum\binding
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-ui", "zed-ui.vcxproj", "{BBF6C968-7E08-48D2-A456-F9ED879D3A99}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "pyfrida", "bindings\pyfrida\pyfrida.vcxproj", "{7409F45B-E10E-48AA-9E68-94C113995D4A}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cloudspy", "bindings\cloudspy\cloudspy.vcxproj", "{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -175,14 +175,14 @@ Global
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|Win32.Build.0 = Release|Win32
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.ActiveCfg = Release|x64
 		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.Build.0 = Release|x64
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|Win32.ActiveCfg = Debug|Win32
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|Win32.Build.0 = Debug|Win32
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|x64.ActiveCfg = Debug|x64
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Debug|x64.Build.0 = Debug|x64
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|Win32.ActiveCfg = Release|Win32
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|Win32.Build.0 = Release|Win32
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|x64.ActiveCfg = Release|x64
-		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|x64.Build.0 = Release|x64
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|Win32.ActiveCfg = Debug|Win32
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|Win32.Build.0 = Debug|Win32
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|x64.ActiveCfg = Debug|x64
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|x64.Build.0 = Debug|x64
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Release|Win32.ActiveCfg = Release|Win32
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Release|Win32.Build.0 = Release|Win32
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Release|x64.ActiveCfg = Release|x64
+		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
