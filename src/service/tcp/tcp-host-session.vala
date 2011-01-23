@@ -1,4 +1,4 @@
-namespace Zed.Service {
+namespace Zed {
 	public class TcpHostSessionBackend : Object, HostSessionBackend {
 		private TcpHostSessionProvider provider;
 

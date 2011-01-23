@@ -69,7 +69,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.XmppClient client {
+		public XmppClient client {
 			private get;
 			construct;
 		}
@@ -84,7 +84,7 @@ namespace Zed {
 
 		private static const string DEFAULT_DOMAIN = "gmail.com";
 
-		public Login (View.Login view, Service.XmppClient client, Configuration configuration) {
+		public Login (View.Login view, XmppClient client, Configuration configuration) {
 			Object (view: view, client: client, configuration: configuration);
 
 			Configuration.Account? default_account = configuration.get_default_account ();

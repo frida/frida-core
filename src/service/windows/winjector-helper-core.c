@@ -138,8 +138,8 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   if (!file_exists_and_is_readable (details.dll_path))
   {
     g_set_error (error,
-        ZED_SERVICE_WINJECTOR_ERROR,
-        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_FAILED,
         "Specified DLL path '%s' does not exist or cannot be opened",
         dll_path);
     goto beach;
@@ -162,11 +162,11 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     os_error = GetLastError ();
 
     if (os_error == ERROR_ACCESS_DENIED)
-      code = ZED_SERVICE_WINJECTOR_ERROR_ACCESS_DENIED;
+      code = ZED_WINJECTOR_ERROR_ACCESS_DENIED;
     else
-      code = ZED_SERVICE_WINJECTOR_ERROR_FAILED;
+      code = ZED_WINJECTOR_ERROR_FAILED;
 
-    g_set_error (error, ZED_SERVICE_WINJECTOR_ERROR, code,
+    g_set_error (error, ZED_WINJECTOR_ERROR, code,
         "OpenProcess(pid=%u) failed: %d",
         process_id, os_error);
     goto beach;
@@ -185,8 +185,8 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     if (thread_handle == NULL)
     {
       g_set_error (error,
-          ZED_SERVICE_WINJECTOR_ERROR,
-          ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+          ZED_WINJECTOR_ERROR,
+          ZED_WINJECTOR_ERROR_FAILED,
           "No usable thread found in pid=%ld", process_id);
       goto beach;
     }
@@ -201,8 +201,8 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     if (thread_handle == NULL)
     {
       g_set_error (error,
-          ZED_SERVICE_WINJECTOR_ERROR,
-          ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+          ZED_WINJECTOR_ERROR,
+          ZED_WINJECTOR_ERROR_FAILED,
           "CreateRemoteThread(pid=%u) failed: %d",
           process_id, (gint) GetLastError ());
       goto beach;
@@ -595,8 +595,8 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 virtual_alloc_failed:
   {
     g_set_error (error,
-        ZED_SERVICE_WINJECTOR_ERROR,
-        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_FAILED,
         "VirtualAlloc failed: %d",
         (gint) GetLastError ());
     goto error_common;
@@ -604,8 +604,8 @@ virtual_alloc_failed:
 write_process_memory_failed:
   {
     g_set_error (error,
-        ZED_SERVICE_WINJECTOR_ERROR,
-        ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_FAILED,
         "WriteProcessMemory failed: %d",
         (gint) GetLastError ());
     goto error_common;
@@ -645,8 +645,8 @@ static void
 set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error)
 {
   g_set_error (error,
-      ZED_SERVICE_WINJECTOR_ERROR,
-      ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+      ZED_WINJECTOR_ERROR,
+      ZED_WINJECTOR_ERROR_FAILED,
       "%s failed while trying to grab thread: %d",
       func_name, GetLastError ());
 }
@@ -655,8 +655,8 @@ static void
 set_trick_thread_error_from_os_error (const gchar * func_name, GError ** error)
 {
   g_set_error (error,
-      ZED_SERVICE_WINJECTOR_ERROR,
-      ZED_SERVICE_WINJECTOR_ERROR_FAILED,
+      ZED_WINJECTOR_ERROR,
+      ZED_WINJECTOR_ERROR_FAILED,
       "%s failed while trying to trick thread: %d",
       func_name, GetLastError ());
 }

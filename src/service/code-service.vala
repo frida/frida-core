@@ -1,6 +1,6 @@
 using Gee;
 
-namespace Zed.Service {
+namespace Zed {
 	public class CodeService : Object {
 		private ArrayList<ModuleSpec> module_specs = new ArrayList<ModuleSpec> ();
 		private ArrayList<Module> modules = new ArrayList<Module> ();

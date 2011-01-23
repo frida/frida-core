@@ -71,7 +71,7 @@ static gpointer zed_read_registry_value (HKEY key, WCHAR * value_name, DWORD exp
 static GUID GUID_APPLE_USB = { 0xF0B32BE3, 0x6678, 0x4879, 0x92, 0x30, 0x0E4, 0x38, 0x45, 0xD8, 0x05, 0xEE };
 
 void
-_zed_service_fruity_host_session_provider_extract_details_for_device_with_udid (const char * udid, char ** name, ZedImageData ** icon, GError ** error)
+_zed_fruity_host_session_provider_extract_details_for_device_with_udid (const char * udid, char ** name, ZedImageData ** icon, GError ** error)
 {
   gboolean result = FALSE;
   WCHAR * udid_utf16 = NULL;

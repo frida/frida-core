@@ -17,7 +17,7 @@
 static gboolean get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity);
 
 ZedImageData *
-_zed_service_windows_host_session_provider_extract_icon (GError ** error)
+_zed_windows_host_session_provider_extract_icon (GError ** error)
 {
   ZedImageData * result = NULL;
   OLECHAR my_computer_parse_string[PARSE_STRING_MAX_LENGTH];
@@ -70,8 +70,7 @@ beach:
 }
 
 ZedHostProcessInfo *
-zed_service_windows_process_backend_enumerate_processes_sync (
-    int * result_length1)
+zed_windows_process_backend_enumerate_processes_sync (int * result_length1)
 {
   GArray * processes;
   DWORD * pids = NULL;

@@ -1,4 +1,4 @@
-public abstract class Zed.Service.BaseService : Object {
+public abstract class Zed.BaseService : Object {
 	public XmppClient client {
 		protected get;
 		construct;

@@ -1,4 +1,4 @@
-using Zed.Service;
+using Zed;
 
 namespace Winjector {
 	public int main (string[] args) {
@@ -214,7 +214,7 @@ namespace Winjector {
 	}
 }
 
-namespace Zed.Service.WinjectorIpc {
+namespace Zed.WinjectorIpc {
 	private delegate void InjectFunc (uint32 target_pid, string filename_template, string ipc_server_address) throws WinjectorError;
 
 	private Variant? marshal_inject (Variant? arg, InjectFunc func) {

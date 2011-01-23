@@ -112,26 +112,26 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.HostSessionService service {
+		public HostSessionService service {
 			get;
 			construct;
 		}
 
-		public Service.StorageBackend storage_backend {
+		public StorageBackend storage_backend {
 			get;
 			construct;
 		}
 
-		private Gtk.ListStore provider_store = new Gtk.ListStore (2, typeof (Service.HostSessionProvider), typeof (Gdk.Pixbuf));
+		private Gtk.ListStore provider_store = new Gtk.ListStore (2, typeof (HostSessionProvider), typeof (Gdk.Pixbuf));
 		private ImageFactory image_factory = new ImageFactory ();
-		private Gee.HashMap<Service.HostSessionProvider, HostSessionEntry> session_by_provider = new Gee.HashMap<Service.HostSessionProvider, HostSessionEntry> ();
+		private Gee.HashMap<HostSessionProvider, HostSessionEntry> session_by_provider = new Gee.HashMap<HostSessionProvider, HostSessionEntry> ();
 		private HostSessionEntry active_host_session;
 
 		private ProcessSelector process_selector;
 
 		private uint sync_handler_id;
 
-		private Gee.HashMap<string, Service.ModuleSpec> module_spec_by_uid = new Gee.HashMap<string, Service.ModuleSpec> ();
+		private Gee.HashMap<string, ModuleSpec> module_spec_by_uid = new Gee.HashMap<string, ModuleSpec> ();
 
 		private Gtk.ListStore session_store = new Gtk.ListStore (2, typeof (AgentSession), typeof (ulong));
 		private AgentSession active_agent_session;
@@ -140,7 +140,7 @@ namespace Zed {
 
 		private const int KEYVAL_DELETE = 65535;
 
-		public HostSession (View.HostSession view, Service.HostSessionService service, Service.StorageBackend storage_backend) {
+		public HostSession (View.HostSession view, HostSessionService service, StorageBackend storage_backend) {
 			Object (view: view, service: service, storage_backend: storage_backend);
 		}
 
@@ -158,7 +158,7 @@ namespace Zed {
 			load_data_from_storage_backend ();
 		}
 
-		private async void activate_provider (Service.HostSessionProvider provider) {
+		private async void activate_provider (HostSessionProvider provider) {
 			var entry = session_by_provider.get (provider);
 			if (entry == null) {
 				try {
@@ -188,7 +188,7 @@ namespace Zed {
 			update_session_control_ui ();
 		}
 
-		private void select_provider (Service.HostSessionProvider? provider) {
+		private void select_provider (HostSessionProvider? provider) {
 			if (provider == null) {
 				view.provider_combo.set_active_iter (null);
 				return;
@@ -263,8 +263,8 @@ namespace Zed {
 			}
 		}
 
-		private Service.CodeService create_code_service () {
-			var service = new Service.CodeService ();
+		private CodeService create_code_service () {
+			var service = new CodeService ();
 
 			foreach (var mspec in module_spec_by_uid.values)
 				service.add_module_spec (mspec);
@@ -298,7 +298,7 @@ namespace Zed {
 			var values = storage_backend.read ("module-specs");
 			if (values != null) {
 				foreach (var val in values) {
-					var module_spec = Service.ModuleSpec.from_variant (val.get_variant ());
+					var module_spec = ModuleSpec.from_variant (val.get_variant ());
 					module_spec_by_uid[module_spec.uid] = module_spec;
 				}
 			}
@@ -337,7 +337,7 @@ namespace Zed {
 				provider_store.append (out iter);
 				provider_store.set (iter, 0, provider, 1, image_factory.create_pixbuf_from_image_data (provider.icon));
 
-				if (active_host_session == null && provider.kind == Service.HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
+				if (active_host_session == null && provider.kind == HostSessionProviderKind.LOCAL_SYSTEM && (view.provider_combo.get_flags () & Gtk.WidgetFlags.SENSITIVE) != 0) {
 					view.provider_combo.sensitive = false;
 
 					activate_provider (provider);
@@ -365,7 +365,7 @@ namespace Zed {
 			combo.changed.connect (() => {
 				Gtk.TreeIter iter;
 				if (view.provider_combo.get_active_iter (out iter)) {
-					Service.HostSessionProvider provider;
+					HostSessionProvider provider;
 					provider_store.get (iter, 0, out provider);
 					activate_provider (provider);
 				}
@@ -447,11 +447,11 @@ namespace Zed {
 			return session;
 		}
 
-		private Gtk.TreePath provider_store_path_of_provider (Service.HostSessionProvider provider) {
+		private Gtk.TreePath provider_store_path_of_provider (HostSessionProvider provider) {
 			Gtk.TreeIter iter;
 			if (provider_store.get_iter_first (out iter)) {
 				do {
-					Service.HostSessionProvider p;
+					HostSessionProvider p;
 					provider_store.get (iter, 0, out p);
 					if (p == provider)
 						return provider_store.get_path (iter);
@@ -488,7 +488,7 @@ namespace Zed {
 		}
 
 		private void provider_combo_data_callback (Gtk.CellLayout layout, Gtk.CellRenderer renderer, Gtk.TreeModel model, Gtk.TreeIter iter) {
-			Service.HostSessionProvider p;
+			HostSessionProvider p;
 			model.get (iter, 0, out p);
 
 			(renderer as Gtk.CellRendererText).text = p.name;
@@ -522,7 +522,7 @@ namespace Zed {
 	}
 
 	public class HostSessionEntry {
-		public Service.HostSessionProvider provider {
+		public HostSessionProvider provider {
 			get;
 			private set;
 		}
@@ -532,7 +532,7 @@ namespace Zed {
 			private set;
 		}
 
-		public HostSessionEntry (Service.HostSessionProvider provider, Zed.HostSession session) {
+		public HostSessionEntry (HostSessionProvider provider, Zed.HostSession session) {
 			this.provider = provider;
 			this.session = session;
 		}

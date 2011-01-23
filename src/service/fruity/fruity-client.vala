@@ -1,4 +1,4 @@
-namespace Zed.Service.Fruity {
+namespace Zed.Fruity {
 	public class ClientV1 : Client {
 		public override uint protocol_version {
 			get { return 0; }

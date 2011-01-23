@@ -7,7 +7,7 @@
 #include <strsafe.h>
 
 gboolean
-zed_service_winjector_helper_is_process_still_running (void * handle)
+zed_winjector_helper_is_process_still_running (void * handle)
 {
   DWORD exit_code;
 
@@ -18,14 +18,14 @@ zed_service_winjector_helper_is_process_still_running (void * handle)
 }
 
 void
-zed_service_winjector_helper_close_process_handle (void * handle)
+zed_winjector_helper_close_process_handle (void * handle)
 {
   g_assert (handle != NULL);
   CloseHandle (handle);
 }
 
 char *
-zed_service_winjector_temporary_directory_create_tempdir (void)
+zed_winjector_temporary_directory_create_tempdir (void)
 {
   const guint max_chars = MAX_PATH;
   WCHAR * name;
@@ -47,7 +47,7 @@ zed_service_winjector_temporary_directory_create_tempdir (void)
   if (!CreateDirectoryW (name, NULL))
     goto error;
 
-  name_utf8 = g_utf16_to_utf8 (name, -1, NULL, NULL, NULL);
+  name_utf8 = g_utf16_to_utf8 ((gunichar2 *) name, -1, NULL, NULL, NULL);
   g_free (name);
   return name_utf8;
 
@@ -57,19 +57,19 @@ error:
 }
 
 void
-zed_service_winjector_temporary_directory_destroy_tempdir (const char * path)
+zed_winjector_temporary_directory_destroy_tempdir (const char * path)
 {
   WCHAR * path_utf16;
 
-  path_utf16 = g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
+  path_utf16 = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
   RemoveDirectoryW (path_utf16);
   g_free (path_utf16);
 }
 
 void *
-zed_service_winjector_temporary_file_execute (
-    ZedServiceWinjectorTemporaryFile * self, const char * parameters,
-    ZedServiceWinjectorPrivilegeLevel level, GError ** error)
+zed_winjector_temporary_file_execute (
+    ZedWinjectorTemporaryFile * self, const char * parameters,
+    ZedWinjectorPrivilegeLevel level, GError ** error)
 {
   HANDLE process_handle;
   SHELLEXECUTEINFOW ei = { 0, };
@@ -83,17 +83,18 @@ zed_service_winjector_temporary_file_execute (
 
   ei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI
       | SEE_MASK_UNICODE | SEE_MASK_WAITFORINPUTIDLE;
-  if (level == ZED_SERVICE_WINJECTOR_PRIVILEGE_LEVEL_ELEVATED)
+  if (level == ZED_WINJECTOR_PRIVILEGE_LEVEL_ELEVATED)
     ei.lpVerb = L"runas";
   else
     ei.lpVerb = L"open";
 
   file = g_file_get_path (self->file);
-  file_utf16 = g_utf8_to_utf16 (file, -1, NULL, NULL, NULL);
+  file_utf16 = (WCHAR *) g_utf8_to_utf16 (file, -1, NULL, NULL, NULL);
   ei.lpFile = file_utf16;
   g_free (file);
 
-  parameters_utf16 = g_utf8_to_utf16 (parameters, -1, NULL, NULL, NULL);
+  parameters_utf16 =
+      (WCHAR *) g_utf8_to_utf16 (parameters, -1, NULL, NULL, NULL);
   ei.lpParameters = parameters_utf16;
 
   ei.nShow = SW_HIDE;
@@ -107,8 +108,8 @@ zed_service_winjector_temporary_file_execute (
     process_handle = NULL;
 
     g_set_error (error,
-        ZED_SERVICE_WINJECTOR_ERROR,
-        ZED_SERVICE_WINJECTOR_ERROR_EXECUTE_FAILED,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_EXECUTE_FAILED,
         "ShellExecuteExW failed: %d", GetLastError ());
   }
 

@@ -1,6 +1,6 @@
 using Wocky;
 
-public class Zed.Service.XmppClient : Object {
+public class Zed.XmppClient : Object {
 	public Protocol.Jid? jid {
 		get;
 		private set;

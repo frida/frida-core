@@ -111,8 +111,8 @@ namespace Zed.CodeServiceTest {
 
 			assert (yield h.service.find_function_by_address (address) == null);
 
-			var spec = new Service.FunctionSpec ("dynamic_0x60000", address);
-			var func = new Service.Function (spec, address);
+			var spec = new FunctionSpec ("dynamic_0x60000", address);
+			var func = new Function (spec, address);
 			yield h.service.add_function (func);
 
 			func = yield h.service.find_function_by_address (address);
@@ -134,7 +134,7 @@ namespace Zed.CodeServiceTest {
 			var spec_a = yield h.service.find_function_by_address (WS2_32_BASE + WSARECV_OFFSET).spec;
 			Variant variant = spec_a.to_variant ();
 
-			var spec_b = Service.FunctionSpec.from_variant (variant);
+			var spec_b = FunctionSpec.from_variant (variant);
 
 			assert (spec_b.name == spec_a.name);
 			assert (spec_b.offset == spec_a.offset);
@@ -150,7 +150,7 @@ namespace Zed.CodeServiceTest {
 
 			assert (spec_a.function_count () == 1);
 
-			var spec_b = Service.ModuleSpec.from_variant (variant);
+			var spec_b = ModuleSpec.from_variant (variant);
 
 			assert (spec_b.name == spec_a.name);
 			assert (spec_b.uid == spec_a.uid);
@@ -172,34 +172,34 @@ namespace Zed.CodeServiceTest {
 	}
 
 	private class Harness : Zed.Test.AsyncHarness {
-		public Service.CodeService service {
+		public CodeService service {
 			get;
 			private set;
 		}
 
-		private Service.ModuleSpec ntdll_mspec;
-		private Service.ModuleSpec kernel32_mspec;
-		private Service.ModuleSpec ws2_32_mspec;
+		private ModuleSpec ntdll_mspec;
+		private ModuleSpec kernel32_mspec;
+		private ModuleSpec ws2_32_mspec;
 
-		private Service.Module ntdll_mod;
-		private Service.Module kernel32_mod;
-		private Service.Module ws2_32_mod;
+		private Module ntdll_mod;
+		private Module kernel32_mod;
+		private Module ws2_32_mod;
 
 		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
 			base (func);
 		}
 
 		construct {
-			service = new Service.CodeService ();
+			service = new CodeService ();
 
-			ntdll_mspec = new Service.ModuleSpec ("ntdll.dll", NTDLL_UID, NTDLL_SIZE);
-			kernel32_mspec = new Service.ModuleSpec ("kernel32.dll", KERNEL32_UID, KERNEL32_SIZE);
-			ws2_32_mspec = new Service.ModuleSpec ("ws2_32.dll", WS2_32_UID, WS2_32_SIZE);
-			ws2_32_mspec.internal_add_function (new Service.FunctionSpec ("WSARecv", WSARECV_OFFSET));
+			ntdll_mspec = new ModuleSpec ("ntdll.dll", NTDLL_UID, NTDLL_SIZE);
+			kernel32_mspec = new ModuleSpec ("kernel32.dll", KERNEL32_UID, KERNEL32_SIZE);
+			ws2_32_mspec = new ModuleSpec ("ws2_32.dll", WS2_32_UID, WS2_32_SIZE);
+			ws2_32_mspec.internal_add_function (new FunctionSpec ("WSARecv", WSARECV_OFFSET));
 
-			ntdll_mod = new Service.Module (ntdll_mspec, NTDLL_BASE);
-			kernel32_mod = new Service.Module (kernel32_mspec, KERNEL32_BASE);
-			ws2_32_mod = new Service.Module (ws2_32_mspec, WS2_32_BASE);
+			ntdll_mod = new Module (ntdll_mspec, NTDLL_BASE);
+			kernel32_mod = new Module (kernel32_mspec, KERNEL32_BASE);
+			ws2_32_mod = new Module (ws2_32_mspec, WS2_32_BASE);
 		}
 
 		public async void add_module_specs () {

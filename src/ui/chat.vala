@@ -56,7 +56,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.MucService muc_service {
+		public MucService muc_service {
 			private get;
 			construct;
 		}
@@ -64,7 +64,7 @@ namespace Zed {
 		private Gtk.ListStore roster_store;
 		private Gtk.TextMark chat_scroll_mark;
 
-		public Chat (View.Chat view, Service.MucService muc_service) {
+		public Chat (View.Chat view, MucService muc_service) {
 			Object (view: view, muc_service: muc_service);
 
 			roster_store = new Gtk.ListStore (1, typeof (string));

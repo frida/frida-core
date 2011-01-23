@@ -1,6 +1,6 @@
 namespace Zed {
 	public class Configuration : Object {
-		public Service.StorageBackend backend {
+		public StorageBackend backend {
 			get;
 			construct;
 		}
@@ -20,7 +20,7 @@ namespace Zed {
 			}
 		}
 
-		public Configuration (Service.StorageBackend backend) {
+		public Configuration (StorageBackend backend) {
 			Object (backend: backend);
 		}
 

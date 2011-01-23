@@ -1,6 +1,6 @@
 using Gee;
 
-namespace Zed.Service {
+namespace Zed {
 	public class Winjector : Object {
 		private ResourceStore normal_resource_store;
 		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
@@ -384,7 +384,7 @@ namespace Zed.Service {
 	}
 }
 
-namespace Zed.Service.WinjectorIpc {
+namespace Zed.WinjectorIpc {
 	private async void invoke_inject (uint32 target_pid, string filename_template, string ipc_server_address, WinIpc.Proxy proxy) throws WinjectorError {
 		Variant response;
 

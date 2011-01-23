@@ -1,4 +1,4 @@
-namespace Zed.Service.Fruity {
+namespace Zed.Fruity {
 	public class PropertyList : Object {
 		private Gee.HashMap<string, Value?> value_by_key = new Gee.HashMap<string, Value?> ();
 

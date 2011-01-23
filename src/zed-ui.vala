@@ -3,10 +3,10 @@ public class Zed.Application : Object {
 
 	private Configuration configuration;
 
-	private Service.StorageBackend storage_backend;
-	private Service.HostSessionService host_session_service;
-	private Service.XmppClient xmpp_client;
-	private Service.MucService muc_service;
+	private StorageBackend storage_backend;
+	private HostSessionService host_session_service;
+	private XmppClient xmpp_client;
+	private MucService muc_service;
 
 	private Presenter.Root root;
 
@@ -36,10 +36,10 @@ public class Zed.Application : Object {
 	}
 
 	private void setup_services () {
-		storage_backend = new Service.StorageBackend ();
-		host_session_service = new Service.HostSessionService.with_default_backends ();
-		xmpp_client = new Service.XmppClient ();
-		muc_service = new Service.MucService (xmpp_client);
+		storage_backend = new StorageBackend ();
+		host_session_service = new HostSessionService.with_default_backends ();
+		xmpp_client = new XmppClient ();
+		muc_service = new MucService (xmpp_client);
 	}
 
 	private void setup_presenters () {

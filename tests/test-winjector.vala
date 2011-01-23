@@ -29,7 +29,7 @@ namespace Zed.WinjectorTest {
 		}
 
 		private string rat_directory;
-		private Service.Winjector injector;
+		private Winjector injector;
 
 		public LabRat (string name) {
 			Object (name: name);
@@ -83,23 +83,23 @@ namespace Zed.WinjectorTest {
 
 		private async void do_injection (string name, string data_string, MainLoop loop) {
 			if (injector == null)
-				injector = new Service.Winjector ();
+				injector = new Winjector ();
 
 			string inject_error = null;
 
-			Service.AgentDescriptor desc;
+			AgentDescriptor desc;
 
 			try {
 				var dll32 = File.new_for_path (Path.build_filename (rat_directory, name.printf (32))).read (null);
 				var dll64 = File.new_for_path (Path.build_filename (rat_directory, name.printf (64))).read (null);
-				desc = new Service.AgentDescriptor (name, dll32, dll64);
+				desc = new AgentDescriptor (name, dll32, dll64);
 			} catch (Error io_error) {
 				assert_not_reached ();
 			}
 
 			try {
 				yield injector.inject ((uint32) process.id, desc, data_string);
-			} catch (Service.WinjectorError e) {
+			} catch (WinjectorError e) {
 				inject_error = e.message;
 			}
 

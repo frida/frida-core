@@ -1,5 +1,3 @@
-using Zed.Service;
-
 namespace Zed.HostSessionTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/HostSession/Service/provider-available", () => {
@@ -229,7 +227,7 @@ namespace Zed.HostSessionTest {
 					"</dict>\n" +
 					"</plist>\n";
 				try {
-					var plist = new Zed.Service.Fruity.PropertyList.from_xml (xml);
+					var plist = new Zed.Fruity.PropertyList.from_xml (xml);
 					var plist_keys = plist.get_keys ();
 					assert (plist_keys.length == 3);
 					assert (plist.get_int ("DeviceID") == 2);
@@ -249,11 +247,11 @@ namespace Zed.HostSessionTest {
 			}
 
 			private static void to_xml_yields_complete_document () {
-				var plist = new Zed.Service.Fruity.PropertyList ();
+				var plist = new Zed.Fruity.PropertyList ();
 				plist.set_string ("MessageType", "Detached");
 				plist.set_int ("DeviceID", 2);
 
-				var proplist = new Zed.Service.Fruity.PropertyList ();
+				var proplist = new Zed.Fruity.PropertyList ();
 				proplist.set_string ("ConnectionType", "USB");
 				proplist.set_int ("DeviceID", 2);
 				plist.set_plist ("Properties", proplist);

@@ -1,4 +1,4 @@
-namespace Zed.Service {
+namespace Zed {
 	public class HostSessionService : Object {
 		private Gee.ArrayList<HostSessionBackend> backends = new Gee.ArrayList<HostSessionBackend> ();
 
@@ -7,10 +7,10 @@ namespace Zed.Service {
 
 		public HostSessionService.with_default_backends () {
 #if WINDOWS
-			add_backend (new Service.WindowsHostSessionBackend ());
-			add_backend (new Service.FruityHostSessionBackend ());
+			add_backend (new WindowsHostSessionBackend ());
+			add_backend (new FruityHostSessionBackend ());
 #endif
-			add_backend (new Service.TcpHostSessionBackend ());
+			add_backend (new TcpHostSessionBackend ());
 		}
 
 		public async void start () {

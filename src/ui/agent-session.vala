@@ -215,7 +215,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.CodeService code_service {
+		public CodeService code_service {
 			get;
 			construct;
 		}
@@ -258,7 +258,7 @@ namespace Zed {
 		private const uint KEYVAL_ARROW_UP = 65362;
 		private const uint KEYVAL_ARROW_DOWN = 65364;
 
-		public AgentSession (View.AgentSession view, HostSessionEntry host_session, ProcessInfo process_info, Service.CodeService code_service) {
+		public AgentSession (View.AgentSession view, HostSessionEntry host_session, ProcessInfo process_info, CodeService code_service) {
 			Object (view: view, host_session: host_session, process_info: process_info, code_service: code_service);
 
 			update_state (State.UNINITIALIZED);
@@ -438,21 +438,21 @@ namespace Zed {
 			try {
 				var module_info_list = yield session.query_modules ();
 				foreach (var mi in module_info_list) {
-					Service.ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mi.uid);
+					ModuleSpec module_spec = yield code_service.find_module_spec_by_uid (mi.uid);
 					if (module_spec == null) {
-						module_spec = new Service.ModuleSpec (mi.name, mi.uid, mi.size);
+						module_spec = new ModuleSpec (mi.name, mi.uid, mi.size);
 						code_service.add_module_spec (module_spec);
 
 						var function_info_list = yield session.query_module_functions (mi.name);
 						foreach (var fi in function_info_list) {
-							var func_spec = new Service.FunctionSpec (fi.name, fi.address - mi.address);
+							var func_spec = new FunctionSpec (fi.name, fi.address - mi.address);
 							yield code_service.add_function_spec_to_module (func_spec, module_spec);
 						}
 					}
 
-					Service.Module module = yield code_service.find_module_by_address (mi.address);
+					Module module = yield code_service.find_module_by_address (mi.address);
 					if (module == null) {
-						module = new Service.Module (module_spec, mi.address);
+						module = new Module (module_spec, mi.address);
 						code_service.add_module (module);
 					}
 				}
@@ -1434,7 +1434,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.CodeService code_service {
+		public CodeService code_service {
 			get;
 			construct;
 		}
@@ -1445,7 +1445,7 @@ namespace Zed {
 		private LinkedList<AgentClue?> pending_clues = new LinkedList<AgentClue?> ();
 		private bool is_processing_clues;
 
-		public Investigation (AgentSession session, Service.CodeService code_service) {
+		public Investigation (AgentSession session, CodeService code_service) {
 			Object (session: session, code_service: code_service);
 		}
 
@@ -1508,13 +1508,13 @@ namespace Zed {
 					if (target_func_module != null) {
 						var target_func_offset = target - target_func_module.address;
 						var target_func_name = "%s_%08llx".printf (target_func_module.spec.bare_name, target_func_offset);
-						var target_func_spec = new Service.FunctionSpec (target_func_name, target_func_offset);
-						target_func = new Service.Function (target_func_spec, target);
+						var target_func_spec = new FunctionSpec (target_func_name, target_func_offset);
+						target_func = new Function (target_func_spec, target);
 						yield code_service.add_function_to_module (target_func, target_func_module);
 					} else {
 						var dynamic_func_name = "dynamic_%08llx".printf (target);
-						var dynamic_func_spec = new Service.FunctionSpec (dynamic_func_name, target);
-						target_func = new Service.Function (dynamic_func_spec, target);
+						var dynamic_func_spec = new FunctionSpec (dynamic_func_name, target);
+						target_func = new Function (dynamic_func_spec, target);
 						yield code_service.add_function (target_func);
 					}
 				}
@@ -1533,7 +1533,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.Module? module {
+		public Module? module {
 			get;
 			construct;
 		}
@@ -1543,12 +1543,12 @@ namespace Zed {
 			construct;
 		}
 
-		public Service.Function target {
+		public Function target {
 			get;
 			construct;
 		}
 
-		public FunctionCall (int depth, Service.Module? module, uint64 offset, Service.Function target) {
+		public FunctionCall (int depth, Module? module, uint64 offset, Function target) {
 			Object (depth: depth, module: module, offset: offset, target: target);
 		}
 	}

@@ -1,6 +1,6 @@
 using Wocky;
 
-public class Zed.Service.MucService : BaseService {
+public class Zed.MucService : BaseService {
 	private Muc muc;
 
 	public signal void you_joined ();

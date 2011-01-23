@@ -68,7 +68,7 @@ namespace Zed {
 			construct;
 		}
 
-		public Workspace (View.Workspace view, Service.HostSessionService host_session_service, Service.MucService muc_service, Service.StorageBackend storage_backend) {
+		public Workspace (View.Workspace view, HostSessionService host_session_service, MucService muc_service, StorageBackend storage_backend) {
 			Object (view: view, host_session: new Presenter.HostSession (view.host_session, host_session_service, storage_backend), chat: new Presenter.Chat (view.chat, muc_service));
 		}
 	}

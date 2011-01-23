@@ -1,4 +1,4 @@
-public class Zed.Service.StorageBackend : Object {
+public class Zed.StorageBackend : Object {
 	private KeyFile keyfile = new KeyFile ();
 	private string keyfile_path = Path.build_filename (get_data_directory (), "zed.dat");
 	private string? keyfile_etag;

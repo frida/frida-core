@@ -6,7 +6,7 @@
 #endif
 
 char *
-zed_service_storage_backend_get_data_directory (void)
+zed_storage_backend_get_data_directory (void)
 {
   gchar * result;
 

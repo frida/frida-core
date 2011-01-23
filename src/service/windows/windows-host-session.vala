@@ -1,4 +1,4 @@
-namespace Zed.Service {
+namespace Zed {
 	public class WindowsHostSessionBackend : Object, HostSessionBackend {
 		private WindowsHostSessionProvider local_provider;
 
@@ -68,7 +68,7 @@ namespace Zed.Service {
 		private WindowsProcessBackend process_backend = new WindowsProcessBackend ();
 
 		private Winjector winjector = new Winjector ();
-		private Service.AgentDescriptor agent_desc;
+		private AgentDescriptor agent_desc;
 
 		private const string LISTEN_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
 		private uint last_agent_port = 27043;
@@ -77,7 +77,7 @@ namespace Zed.Service {
 		construct {
 			var blob32 = Zed.Data.Agent.get_zed_agent_32_dll_blob ();
 			var blob64 = Zed.Data.Agent.get_zed_agent_64_dll_blob ();
-			agent_desc = new Service.AgentDescriptor ("zed-agent-%u.dll",
+			agent_desc = new AgentDescriptor ("zed-agent-%u.dll",
 				new MemoryInputStream.from_data (blob32.data, blob32.size, null),
 				new MemoryInputStream.from_data (blob64.data, blob64.size, null));
 		}
