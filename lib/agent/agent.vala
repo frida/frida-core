@@ -248,7 +248,7 @@ namespace Zed.Agent {
 
 	private void run_server_listening_on (string listen_address) {
 		var interceptor = Gum.Interceptor.obtain ();
-		interceptor.ignore_caller ();
+		interceptor.ignore_current_thread ();
 
 		var server = new FruityServer (listen_address);
 
@@ -257,6 +257,8 @@ namespace Zed.Agent {
 		} catch (Error e) {
 			printerr ("error: %s\n", e.message);
 		}
+
+		interceptor.unignore_current_thread ();
 	}
 
 	namespace Environment {
