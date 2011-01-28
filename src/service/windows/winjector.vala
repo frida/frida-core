@@ -114,6 +114,7 @@ namespace Zed {
 
 		private class HelperFactory {
 			private PrivilegeLevel level;
+			private MainContext main_context;
 			private Helper helper;
 			private ArrayList<ObtainRequest> obtain_requests = new ArrayList<ObtainRequest> ();
 
@@ -124,6 +125,7 @@ namespace Zed {
 
 			public HelperFactory (PrivilegeLevel level) {
 				this.level = level;
+				this.main_context = MainContext.get_thread_default ();
 			}
 
 			public async void close () {
@@ -167,10 +169,12 @@ namespace Zed {
 					error = e;
 				}
 
-				Idle.add (() => {
+				var source = new IdleSource ();
+				source.set_callback (() => {
 					complete_obtain (instance, error);
 					return false;
 				});
+				source.attach (main_context);
 
 				return null;
 			}
