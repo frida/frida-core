@@ -13,6 +13,12 @@ namespace Zed {
 			add_backend (new TcpHostSessionBackend ());
 		}
 
+		public HostSessionService.with_local_backend_only () {
+#if WINDOWS
+			add_backend (new WindowsHostSessionBackend ());
+#endif
+		}
+
 		public async void start () {
 			foreach (var backend in backends)
 				yield backend.start ();
