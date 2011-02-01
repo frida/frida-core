@@ -28,6 +28,13 @@ namespace Zed.AgentTest {
 
 	namespace Memory {
 
+#if WINDOWS
+		private const string SYSTEM_LIBRARY = "kernel32.dll";
+#endif
+#if DARWIN
+		private const string SYSTEM_LIBRARY = "libSystem.B.dylib";
+#endif
+
 		private static async void query_modules (Harness h) {
 			var session = yield h.load_agent ();
 
@@ -54,7 +61,7 @@ namespace Zed.AgentTest {
 
 			AgentFunctionInfo[] functions;
 			try {
-				functions = yield session.query_module_functions ("kernel32.dll");
+				functions = yield session.query_module_functions (SYSTEM_LIBRARY);
 			} catch (IOError attach_error) {
 				assert_not_reached ();
 			}
@@ -165,12 +172,18 @@ namespace Zed.AgentTest {
 		}
 
 		public async AgentSession load_agent () {
-			var intermediate_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
 			string agent_filename;
+#if WINDOWS
+			var intermediate_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
 			if (sizeof (void *) == 4)
 				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-32", "zed-agent-32.dll");
 			else
 				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-64", "zed-agent-64.dll");
+#endif
+#if DARWIN
+			var frida_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
+			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.dylib");
+#endif
 
 			module = GLib.Module.open (agent_filename, 0);
 			assert (module != null);

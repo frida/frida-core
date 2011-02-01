@@ -1,4 +1,4 @@
-#include "zed-server-core.h"
+#include "zed-core.h"
 
 #import <UIKit/UIKit.h>
 

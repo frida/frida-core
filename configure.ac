@@ -1,7 +1,8 @@
 AC_INIT([zed], [0.1])
-AC_CONFIG_SRCDIR([server/src/server.vala])
+AC_CONFIG_SRCDIR([src/zed-core.vala])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
+AC_CANONICAL_SYSTEM
 
 AM_INIT_AUTOMAKE([-Wall -Werror no-dist-gzip dist-bzip2 foreign])
 
@@ -17,17 +18,77 @@ AM_PROG_VALAC([0.10.0])
 AC_PROG_LIBTOOL
 AC_PROG_INSTALL
 
+case $host_os in
+  linux*)  HAVE_LINUX=yes  ;;
+  darwin*) HAVE_DARWIN=yes ;;
+  *)			   ;;
+esac
+if [[ "x$HAVE_LINUX" = "xyes" ]]; then
+  AC_DEFINE(HAVE_LINUX, 1, [Define to 1 if OS is Linux based.])
+fi
+if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
+  AC_DEFINE(HAVE_DARWIN, 1, [Define to 1 if OS is Darwin based.])
+fi
+AM_CONDITIONAL(OS_LINUX, test "x$HAVE_LINUX" = "xyes")
+AM_CONDITIONAL(OS_DARWIN, test "x$HAVE_DARWIN" = "xyes")
+
+case $host_os in
+  darwin10\.*) HAVE_OSX=yes     ;;
+  *-android*)  HAVE_ANDROID=yes ;;
+  *)				;;
+esac
+if [[ "x$HAVE_OSX" = "xyes" ]]; then
+  AC_DEFINE(HAVE_OSX, 1, [Define to 1 if OS is Mac OS X.])
+fi
+AM_CONDITIONAL(OS_OSX, test "x$HAVE_OSX" = "xyes")
+if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
+  AC_DEFINE(HAVE_ANDROID, 1, [Define to 1 if OS is Android based.])
+fi
+AM_CONDITIONAL(OS_ANDROID, test "x$HAVE_ANDROID" = "xyes")
+
+if [[ "x$HAVE_DARWIN" = "xyes" ]] && [[ "x$HAVE_OSX" != "xyes" ]]; then
+  HAVE_IOS=yes
+  AC_DEFINE(HAVE_IOS, 1, [Define to 1 if OS is iOS.])
+else
+  HAVE_IOS=no
+fi
+AM_CONDITIONAL(OS_IOS, test "x$HAVE_IOS" = "xyes")
+
+ZED_VALAFLAGS=
+if [[ "x$HAVE_LINUX" = "xyes" ]]; then
+  ZED_VALAFLAGS="$ZED_VALAFLAGS -D LINUX"
+fi
+if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
+  ZED_VALAFLAGS="$ZED_VALAFLAGS -D DARWIN"
+fi
+if [[ "x$HAVE_IOS" = "xyes" ]]; then
+  ZED_VALAFLAGS="$ZED_VALAFLAGS -D IOS"
+fi
+AC_SUBST(ZED_VALAFLAGS)
+
 AC_ARG_ENABLE(client, [AC_HELP_STRING([--enable-client], [build client [default=yes]])],, [enable_client=yes])
+if test "x$enable_client" = "xyes"; then
+  AC_DEFINE(HAVE_CLIENT, 1, [Define to 1 if client is built.])
+fi
 AM_CONDITIONAL(ENABLE_CLIENT, [test "x$enable_client" = "xyes"])
 
 AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=no]])],, [enable_server=no])
+if test "x$enable_server" = "xyes"; then
+  AC_DEFINE(HAVE_SERVER, 1, [Define to 1 if server is built.])
+fi
 AM_CONDITIONAL(ENABLE_SERVER, [test "x$enable_server" = "xyes"])
 
 GLIB_VERSION=2.26.0
-pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
-ZED_PACKAGES="--pkg glib-2.0 --pkg gio-2.0 --pkg gee-1.0 --pkg gum-1.0"
+pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
+ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gee-1.0 --pkg gum-1.0"
 PKG_CHECK_MODULES(ZED, [$pkg_modules])
+
+if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
+  ZED_LDFLAGS="$ZED_LDFLAGS -Wl,-framework -Wl,CoreGraphics -Wl,-framework,Foundation -Wl,-framework -Wl,UIKit"
+fi
+
 AC_SUBST(ZED_CFLAGS)
+AC_SUBST(ZED_LDFLAGS)
 AC_SUBST(ZED_LIBS)
 AC_SUBST(ZED_PACKAGES)
 
@@ -49,9 +110,6 @@ AC_CONFIG_FILES([
 	tools/Makefile
 	data/Makefile
 	src/Makefile
-	server/Makefile
-	server/src/Makefile
-	server/tests/Makefile
-	server/vapi/Makefile
+	tests/Makefile
 ])
 AC_OUTPUT

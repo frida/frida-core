@@ -5,7 +5,7 @@ namespace Zed.Test {
 			construct;
 		}
 
-		public long id {
+		public ulong id {
 			get;
 			construct;
 		}
@@ -27,33 +27,27 @@ namespace Zed.Test {
 			}
 		}
 
-		private Process (void * handle, long id) {
+		private Process (void * handle, ulong id) {
 			Object (handle: handle, id: id);
 		}
 
-		public static Process? start (string filename) {
+		public static Process start (string filename) throws IOError {
 			void * handle;
-			long id;
-			if (ProcessBackend.do_start (filename, out handle, out id))
-				return new Process (handle, id);
-			else
-				return null;
+			ulong id;
+			ProcessBackend.do_start (filename, out handle, out id);
+			return new Process (handle, id);
 		}
 
-		public long join (uint timeout_msec = 0) throws ProcessError {
+		public int join (uint timeout_msec = 0) throws IOError {
 			return ProcessBackend.do_join (handle, timeout_msec);
 		}
 	}
 
-	public errordomain ProcessError {
-		TIMED_OUT
-	}
-
 	namespace ProcessBackend {
 		private extern void * self_handle ();
-		private extern long self_id ();
+		private extern ulong self_id ();
 		private extern string filename_of (void * handle);
-		private extern bool do_start (string filename, out void * handle, out long id);
-		private extern long do_join (void * handle, uint timeout_msec) throws ProcessError;
+		private extern void do_start (string filename, out void * handle, out ulong id) throws IOError;
+		private extern int do_join (void * handle, uint timeout_msec) throws IOError;
 	}
 }

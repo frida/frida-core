@@ -1,4 +1,4 @@
-#include "zed-server-core.h"
+#include "zed-core.h"
 
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -172,7 +172,7 @@ _zed_fruitjector_free_instance (ZedFruitjector * self, void * instance)
 }
 
 guint
-_zed_fruitjector_do_inject (ZedFruitjector * self, guint pid,
+_zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
     const char * dylib_path, const char * data_string, GError ** error)
 {
   ZedFruitContext * ctx = self->context;

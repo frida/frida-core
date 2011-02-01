@@ -124,19 +124,13 @@ namespace Zed.FruitjectorTest {
 
 		public int wait_for_process_to_exit () {
 			int exitcode = -1;
-			bool wait_for_exit_timed_out = false;
 
 			try {
 				exitcode = process.join (1000);
 			} catch (IOError e) {
-				var timed_out_error = new IOError.TIMED_OUT ("");
-				if (e.code == timed_out_error.code)
-					wait_for_exit_timed_out = true;
-				else
-					assert_not_reached ();
+				stdout.printf ("\n\nunexpected error: %s\n", e.message);
+				assert_not_reached ();
 			}
-
-			assert (!wait_for_exit_timed_out);
 
 			return exitcode;
 		}

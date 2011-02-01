@@ -1,5 +1,3 @@
-using WinIpc;
-
 namespace Zed.CodeServiceTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/CodeService/Lookup/module-spec-by-uid", () => {

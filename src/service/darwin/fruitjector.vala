@@ -22,7 +22,7 @@ public class Zed.Fruitjector : Object {
 		_destroy_context ();
 	}
 
-	public async uint inject (uint pid, string dylib_path, string data_string) throws IOError {
+	public async uint inject (ulong pid, string dylib_path, string data_string) throws IOError {
 		return _do_inject (pid, dylib_path, data_string);
 	}
 
@@ -46,5 +46,5 @@ public class Zed.Fruitjector : Object {
 	public extern void _create_context ();
 	public extern void _destroy_context ();
 	public extern void _free_instance (void * instance);
-	public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
+	public extern uint _do_inject (ulong pid, string dylib_path, string data_string) throws IOError;
 }

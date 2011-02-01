@@ -19,15 +19,15 @@ zed_test_process_backend_self_handle (void)
   return GetCurrentProcess ();
 }
 
-glong
+gulong
 zed_test_process_backend_self_id (void)
 {
   return GetCurrentProcessId ();
 }
 
-gboolean
+void
 zed_test_process_backend_do_start (const char * filename,
-    void ** handle, glong * id)
+    void ** handle, gulong * id, GError ** error)
 {
   LPWSTR filename_utf16;
   STARTUPINFOW startup_info = { 0, };
@@ -49,13 +49,16 @@ zed_test_process_backend_do_start (const char * filename,
     *handle = process_info.hProcess;
     *id = process_info.dwProcessId;
   }
+  else
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "CreateProcess failed: 0x%08x\n", GetLastError ());
+  }
 
   g_free (filename_utf16);
-
-  return success;
 }
 
-glong
+int
 zed_test_process_backend_do_join (void * handle, guint timeout_msec,
     GError ** error)
 {
@@ -64,9 +67,7 @@ zed_test_process_backend_do_join (void * handle, guint timeout_msec,
   if (WaitForSingleObject (handle,
       (timeout_msec != 0) ? timeout_msec : INFINITE) == WAIT_TIMEOUT)
   {
-    g_set_error (error,
-        ZED_TEST_PROCESS_ERROR, ZED_TEST_PROCESS_ERROR_TIMED_OUT,
-        "Timed out");
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "timed out");
     return -1;
   }
 

@@ -3,12 +3,24 @@ namespace Zed.Test {
 	public static void main (string[] args) {
 		Environment.init (ref args);
 
-		Zed.CodeServiceTest.add_tests ();
+		Zed.SystemTest.add_tests ();
+
+#if WINDOWS
 		Zed.WinIpcTest.add_tests ();
 		Zed.WinjectorTest.add_tests ();
+#endif
+
+#if IOS
+		Zed.FruitjectorTest.add_tests ();
+#endif
+
+		Zed.CodeServiceTest.add_tests ();
 		Zed.AgentTest.add_tests ();
 		Zed.HostSessionTest.add_tests ();
+
+#if WINDOWS
 		Zed.HexViewTest.add_tests ();
+#endif
 
 		GLib.Test.run ();
 
