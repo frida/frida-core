@@ -41,7 +41,11 @@ namespace Zed.WinjectorTest {
 				"tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			process = Zed.Test.Process.start (rat_file);
+			try {
+				process = Zed.Test.Process.start (rat_file);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 		}
 
 		public void inject (string name, string data_string) {
@@ -59,8 +63,8 @@ namespace Zed.WinjectorTest {
 
 			try {
 				exitcode = process.join (1000);
-			} catch (Zed.Test.ProcessError e) {
-				var timed_out_error = new Zed.Test.ProcessError.TIMED_OUT ("");
+			} catch (IOError e) {
+				var timed_out_error = new IOError.TIMED_OUT ("");
 				if (e.code == timed_out_error.code)
 					wait_for_exit_timed_out = true;
 				else

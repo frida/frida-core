@@ -155,6 +155,9 @@
     <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
       <Filter>Source Files\generated\service\windows</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\system.c">
+      <Filter>Source Files\generated\service</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
       <Filter>Source Files\generated\service</Filter>
     </ClCompile>
@@ -187,6 +190,9 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\zed-core.c">
       <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="src\service\system-windows.c">
+      <Filter>Source Files\service</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

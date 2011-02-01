@@ -1,6 +1,6 @@
 namespace Zed.SystemTest {
 	public static void add_tests () {
-		GLib.Test.add_func ("/System/enumerate-processes", () => {
+		GLib.Test.add_func ("/System/enumerate-processes-returns-processes-with-icons", () => {
 			var timer = new Timer ();
 			var processes = System.enumerate_processes ();
 			var time_spent_on_first_run = timer.elapsed ();
@@ -18,7 +18,12 @@ namespace Zed.SystemTest {
 			processes = System.enumerate_processes ();
 			var time_spent_on_second_run = timer.elapsed ();
 
+			if (GLib.Test.verbose ())
+				stdout.printf (" [spent %f and %f] ", time_spent_on_first_run, time_spent_on_second_run);
+
+#if DARWIN
 			assert (time_spent_on_second_run <= time_spent_on_first_run / 2.0);
+#endif
 		});
 	}
 }

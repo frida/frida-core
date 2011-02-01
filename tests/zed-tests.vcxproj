@@ -182,6 +182,7 @@
 	test-hex-view.vala				^
 	test-host-session.vala			^
 	test-main.vala				^
+	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
 	async-harness.vala				^
@@ -208,7 +209,7 @@
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
@@ -217,6 +218,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	test-hex-view.vala				^
 	test-host-session.vala			^
 	test-main.vala				^
+	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
 	async-harness.vala				^
@@ -243,7 +245,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
@@ -252,6 +254,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	test-hex-view.vala				^
 	test-host-session.vala			^
 	test-main.vala				^
+	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
 	async-harness.vala				^
@@ -278,7 +281,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
@@ -287,6 +290,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	test-hex-view.vala				^
 	test-host-session.vala			^
 	test-main.vala				^
+	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
 	async-harness.vala				^
@@ -313,7 +317,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-code-service.vala;$(ProjectDir)test-hex-view.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
     <None Include="async-harness.vala" />
@@ -350,6 +354,12 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="$(IntDir)test-main.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)test-system.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
