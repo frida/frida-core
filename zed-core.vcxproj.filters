@@ -185,7 +185,7 @@
     <ClCompile Include="$(IntDir)src\service\fruity\fruity-property-list.c">
       <Filter>Source Files\generated\service\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\zed.c">
+    <ClCompile Include="$(IntDir)src\zed-core.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
@@ -196,7 +196,7 @@
     <CustomBuild Include="data\agent\agent.resources">
       <Filter>Resource Files\agent</Filter>
     </CustomBuild>
-    <CustomBuild Include="src\zed.vala">
+    <CustomBuild Include="src\zed-core.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>

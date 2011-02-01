@@ -1,24 +1,19 @@
 namespace Zed {
-	public class Application : Object, Zed.HostSession {
-		private Fruitjector injector = new Fruitjector ();
+	public class Application : Object {
+		private HostSession host_session;
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
 		private const uint LISTEN_PORT = 27042;
-		private uint last_agent_port = LISTEN_PORT + 1;
 
-		public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
-			return System.enumerate_processes ();
-		}
-
-		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
-			var agent_path = Path.build_filename (Config.PKGLIBDIR, "zed-agent.dylib");
-			var port = last_agent_port++;
-			var listen_address = "tcp:host=127.0.0.1,port=%u".printf (port);
-			injector.inject (pid, agent_path, listen_address);
-
-			return Zed.AgentSessionId (port);
+		construct {
+#if WINDOWS
+			host_session = new WindowsHostSession ();
+#endif
+#if DARWIN
+			host_session = new DarwinHostSession ();
+#endif
 		}
 
 		public void run () throws Error {
@@ -27,8 +22,7 @@ namespace Zed {
 				connection.closed.connect (on_connection_closed);
 
 				try {
-					Zed.HostSession session = this;
-					var registration_id = connection.register_object (Zed.ObjectPath.HOST_SESSION, session);
+					var registration_id = connection.register_object (Zed.ObjectPath.HOST_SESSION, host_session);
 					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
