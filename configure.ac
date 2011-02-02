@@ -58,6 +58,9 @@ ZED_VALAFLAGS=
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
   ZED_VALAFLAGS="$ZED_VALAFLAGS -D LINUX"
 fi
+if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
+  ZED_VALAFLAGS="$ZED_VALAFLAGS -D ANDROID"
+fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   ZED_VALAFLAGS="$ZED_VALAFLAGS -D DARWIN"
 fi
