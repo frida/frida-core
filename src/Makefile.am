@@ -57,6 +57,11 @@ zed_server_VALAFLAGS = \
 backend_sources = $(NULL)
 glue_sources = $(NULL)
 
+if OS_LINUX
+glue_sources += \
+	$(srcdir)/service/system-linux.c
+endif
+
 if OS_DARWIN
 backend_sources += \
 	$(srcdir)/service/darwin/darwin-host-session.vala \
