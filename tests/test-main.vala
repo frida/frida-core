@@ -15,7 +15,9 @@ namespace Zed.Test {
 #endif
 
 		Zed.CodeServiceTest.add_tests ();
+#if !ANDROID
 		Zed.AgentTest.add_tests ();
+#endif
 		Zed.HostSessionTest.add_tests ();
 
 #if WINDOWS

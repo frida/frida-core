@@ -31,6 +31,9 @@ namespace Zed.AgentTest {
 #if WINDOWS
 		private const string SYSTEM_LIBRARY = "kernel32.dll";
 #endif
+#if ANDROID
+		private const string SYSTEM_LIBRARY = "libc.so";
+#endif
 #if DARWIN
 		private const string SYSTEM_LIBRARY = "libSystem.B.dylib";
 #endif
@@ -179,10 +182,13 @@ namespace Zed.AgentTest {
 				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-32", "zed-agent-32.dll");
 			else
 				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-64", "zed-agent-64.dll");
-#endif
-#if DARWIN
+#else
 			var frida_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
+#if DARWIN
 			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.dylib");
+#else
+			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.so");
+#endif
 #endif
 
 			module = GLib.Module.open (agent_filename, 0);

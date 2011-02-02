@@ -1,11 +1,14 @@
 #include "zed-tests.h"
 
 #include <errno.h>
+#include <sys/wait.h>
 #ifdef HAVE_DARWIN
 # include <mach-o/dyld.h>
 #endif
 
 static int zed_magic_self_handle = -1;
+
+#ifdef HAVE_DARWIN
 
 char *
 zed_test_process_backend_filename_of (void * handle)
@@ -26,6 +29,18 @@ zed_test_process_backend_filename_of (void * handle)
   g_assert_not_reached ();
   return NULL;
 }
+
+#else
+
+char *
+zed_test_process_backend_filename_of (void * handle)
+{
+  g_assert (handle == &zed_magic_self_handle);
+
+  return g_file_read_link ("/proc/self/exe", NULL);
+}
+
+#endif
 
 void *
 zed_test_process_backend_self_handle (void)

@@ -284,7 +284,7 @@ namespace Zed.HostSessionTest {
 
 #endif
 
-	private class Harness : Zed.Test.AsyncHarness {
+	public class Harness : Zed.Test.AsyncHarness {
 		public HostSessionService service {
 			get;
 			private set;

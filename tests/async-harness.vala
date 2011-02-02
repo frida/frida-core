@@ -1,5 +1,5 @@
 namespace Zed.Test {
-	private class AsyncHarness : Object {
+	public class AsyncHarness : Object {
 		public delegate void TestSequenceFunc (void * h);
 		private TestSequenceFunc test_sequence;
 
