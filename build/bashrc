@@ -22,8 +22,8 @@ case $FRIDA_TARGET in
   linux)
     ;;
   android)
-    if [ -z "$ANDROID_NDK_ROOT" ]; then
-      echo "ERROR: ANDROID_NDK_ROOT must be set"
+    if [ -z "$ANDROID_TOOLCHAIN_ROOT" ]; then
+      echo "ERROR: ANDROID_TOOLCHAIN_ROOT must be set"
       exit 1
     fi
     ;;
@@ -58,11 +58,9 @@ case $FRIDA_TARGET in
     export PATH="${FRIDA_TOOLROOT}/bin:${FRIDA_PREFIX}/bin:${PATH}"
     ;;
   android)
-    ndk_target_platfom="android-8"
-    ndk_tools_root="${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86"
-    ndk_platform_root="${ANDROID_NDK_ROOT}/platforms/${ndk_target_platfom}/arch-arm"
+    export ANDROID_SYSROOT="${ANDROID_TOOLCHAIN_ROOT}/sysroot"
 
-    export PATH="${FRIDA_TOOLROOT}/bin:${ndk_tools_root}/bin:${PATH}"
+    export PATH="${FRIDA_TOOLROOT}/bin:${ANDROID_TOOLCHAIN_ROOT}/bin:${PATH}"
     export CLICOLOR=1
     ;;
   ps3)
@@ -97,23 +95,14 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export CC=""
       export CXX=""
 
-      export CFLAGS="--sysroot=${ndk_platform_root} \
--fpic \
--ffunction-sections \
--funwind-tables \
--D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ \
--D__ARM_ARCH_5E__ -D__ARM_ARCH_5TE__ \
--Wno-psabi \
--march=armv5te \
--mtune=xscale \
--msoft-float \
--DANDROID \
--Wa,--noexecstack \
+#CXXFLAGS="-frtti"
+
+      export CFLAGS="--sysroot=${ANDROID_SYSROOT} \
+-fpic -ffunction-sections -funwind-tables -DANDROID \
+-D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ -D__ARM_ARCH_5E__ -D__ARM_ARCH_5TE__ \
+-Wno-psabi -march=armv5te -mtune=xscale -msoft-float \
 -I${FRIDA_SDKROOT}/include"
-      export LDFLAGS="--sysroot=${ndk_platform_root} \
--L${ndk_platform_root}/usr/lib \
--Wl,-z,noexecstack \
--L${FRIDA_SDKROOT}/lib"
+      export LDFLAGS="--sysroot=${ANDROID_SYSROOT} -L${FRIDA_SDKROOT}/lib"
       ;;
     osx)
       export CC="/usr/bin/gcc-4.2"
