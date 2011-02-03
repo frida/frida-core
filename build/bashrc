@@ -82,23 +82,24 @@ else
 fi
 export PS1="\e[0;${color}m[\u@\h \w \e[m\e[1;${color}mfrida-${FRIDA_TARGET}\e[m\e[0;${color}m]\e[m\n\$ "
 
+export CC=""
+export CXX=""
+export OBJC=""
+export LD=""
+export CFLAGS=""
+export LDFLAGS=""
+
 if [ $FRIDA_ENVIRONMENT = normal ]; then
   case $FRIDA_TARGET in
     linux)
-      export CC="gcc"
-      export CXX="g++"
-
       export CFLAGS="-ffunction-sections -fdata-sections"
       export LDFLAGS="-Wl,--gc-sections"
       ;;
     android)
-      export CC=""
-      export CXX=""
-
 #CXXFLAGS="-frtti"
 
       export CFLAGS="--sysroot=${ANDROID_SYSROOT} \
--fpic -ffunction-sections -funwind-tables -DANDROID \
+-ffunction-sections -funwind-tables -DANDROID \
 -D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ -D__ARM_ARCH_5E__ -D__ARM_ARCH_5TE__ \
 -Wno-psabi -march=armv5te -mtune=xscale -msoft-float \
 -I${FRIDA_SDKROOT}/include"
@@ -108,9 +109,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export CC="/usr/bin/gcc-4.2"
       export CXX="/usr/bin/g++-4.2"
       export OBJC="/usr/bin/gcc-4.2"
-
-      export CFLAGS=""
-      export LDFLAGS=""
+      export LD="/usr/bin/ld"
       ;;
     ios)
       export IOS_SDKVER="4.2"
@@ -121,22 +120,20 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export CC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
       export CXX="${IOS_DEVROOT}/usr/bin/g++-4.2"
       export OBJC="${IOS_DEVROOT}/usr/bin/gcc-4.2"
+      export LD="${IOS_DEVROOT}/usr/bin/ld"
 
       export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
       export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7"
       ;;
     ps3)
-      export CC=""
-      export CXX=""
-
       export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
       export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/target/lib"
       ;;
   esac
 
-  export LD="${CC}"
   export LDFLAGS="$LDFLAGS -no-undefined"
 
+  export CFLAGS="-fPIC $CFLAGS"
   export CXXFLAGS="$CFLAGS"
   export OBJCFLAGS="$CFLAGS"
   export CPPFLAGS="$CFLAGS"
