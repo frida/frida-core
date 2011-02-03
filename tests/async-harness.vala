@@ -3,7 +3,7 @@ namespace Zed.Test {
 		public delegate void TestSequenceFunc (void * h);
 		private TestSequenceFunc test_sequence;
 
-		private MainContext main_context;
+		protected MainContext main_context;
 		private MainLoop main_loop;
 		private TimeoutSource timeout_source;
 

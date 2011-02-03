@@ -216,10 +216,12 @@ namespace Zed.AgentTest {
 					connection = yield DBusConnection.new_for_address (listen_address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 				} catch (Error conn_error) {
 					if (i != 10 - 1) {
-						Timeout.add (20, () => {
+						var timeout = new TimeoutSource (20);
+						timeout.set_callback (() => {
 							load_agent.callback ();
 							return false;
 						});
+						timeout.attach (main_context);
 						yield;
 					} else {
 						break;
