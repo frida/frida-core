@@ -15,10 +15,12 @@ namespace Zed.AgentTest {
 			h.run ();
 		});
 
+#if WINDOWS
 		GLib.Test.add_func ("/Agent/Memory/scan-module-for-code-pattern", () => {
 			var h = new Harness ((h) => Memory.scan_module_for_code_pattern (h as Harness));
 			h.run ();
 		});
+#endif
 
 		GLib.Test.add_func ("/Agent/Script/attach-and-receive-messages", () => {
 			var h = new Harness ((h) => Script.attach_and_receive_messages (h as Harness));
@@ -30,15 +32,11 @@ namespace Zed.AgentTest {
 
 #if WINDOWS
 		private const string SYSTEM_LIBRARY = "kernel32.dll";
-#endif
-#if LINUX
-#if ANDROID
+#elif ANDROID
 		private const string SYSTEM_LIBRARY = "libc.so";
-#else
+#elif LINUX
 		private const string SYSTEM_LIBRARY = "libc-2.12.1.so";
-#endif
-#endif
-#if DARWIN
+#elif DARWIN
 		private const string SYSTEM_LIBRARY = "libSystem.B.dylib";
 #endif
 
@@ -105,6 +103,7 @@ namespace Zed.AgentTest {
 			h.done ();
 		}
 
+#if WINDOWS
 		private static async void scan_module_for_code_pattern (Harness h) {
 			var session = yield h.load_agent ();
 
@@ -126,6 +125,7 @@ namespace Zed.AgentTest {
 
 			h.done ();
 		}
+#endif
 
 	}
 
