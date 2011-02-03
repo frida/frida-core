@@ -1,5 +1,5 @@
 namespace Zed.Agent {
-	public class FruityServer : Object, AgentSession {
+	public class AgentServer : Object, AgentSession {
 		public string listen_address {
 			get;
 			construct;
@@ -15,7 +15,7 @@ namespace Zed.Agent {
 #endif
 		private ScriptEngine script_engine = new ScriptEngine ();
 
-		public FruityServer (string listen_address) {
+		public AgentServer (string listen_address) {
 			Object (listen_address: listen_address);
 		}
 
@@ -250,7 +250,7 @@ namespace Zed.Agent {
 		var interceptor = Gum.Interceptor.obtain ();
 		interceptor.ignore_current_thread ();
 
-		var server = new FruityServer (listen_address);
+		var server = new AgentServer (listen_address);
 
 		try {
 			server.run ();
