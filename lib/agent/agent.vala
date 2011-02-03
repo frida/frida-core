@@ -46,7 +46,7 @@ namespace Zed.Agent {
 		}
 
 		private async void close_connections_and_schedule_shutdown () {
-			foreach (var connection in connections) {
+			foreach (var connection in connections.to_array ()) {
 				unregister (connection);
 
 				try {
