@@ -31,8 +31,12 @@ namespace Zed.AgentTest {
 #if WINDOWS
 		private const string SYSTEM_LIBRARY = "kernel32.dll";
 #endif
+#if LINUX
 #if ANDROID
 		private const string SYSTEM_LIBRARY = "libc.so";
+#else
+		private const string SYSTEM_LIBRARY = "libc-2.12.1.so";
+#endif
 #endif
 #if DARWIN
 		private const string SYSTEM_LIBRARY = "libSystem.B.dylib";
@@ -188,6 +192,8 @@ namespace Zed.AgentTest {
 			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.dylib");
 #else
 			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.so");
+			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
+				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", ".libs", "libzed-agent.so");
 #endif
 #endif
 
