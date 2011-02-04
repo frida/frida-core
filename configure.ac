@@ -18,6 +18,25 @@ AM_PROG_VALAC([0.10.0])
 AC_PROG_LIBTOOL
 AC_PROG_INSTALL
 
+HAVE_I386=no
+HAVE_ARM=no
+case $target_cpu in
+  i?86|x86*)
+    HAVE_I386=yes
+  ;;
+  arm)
+    HAVE_ARM=yes
+  ;;
+esac
+if [[ "$HAVE_I386" = "yes" ]]; then
+  AC_DEFINE(HAVE_I386, 1, [Define to 1 if target is x86 based.])
+fi
+if [[ "$HAVE_ARM" = "yes" ]]; then
+  AC_DEFINE(HAVE_ARM, 1, [Define to 1 if target is ARM based.])
+fi
+AM_CONDITIONAL(ARCH_I386, test "$HAVE_I386" = "yes")
+AM_CONDITIONAL(ARCH_ARM, test "$HAVE_ARM" = "yes")
+
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
   darwin*) HAVE_DARWIN=yes ;;
@@ -104,6 +123,8 @@ if test "x$enable_client" = "xyes"; then
 	AC_SUBST(ZED_CLIENT_LIBS)
 	AC_SUBST(ZED_CLIENT_PACKAGES)
 fi
+
+AC_CHECK_HEADERS([sys/user.h])
 
 AC_CONFIG_FILES([
 	Makefile

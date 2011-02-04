@@ -2,13 +2,21 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#ifdef HAVE_I386
 #include <gum/arch-x86/gumx86writer.h>
+#endif
+#ifdef HAVE_ARM
+#include <gum/arch-arm/gumarmwriter.h>
+#include <gum/arch-arm/gumthumbwriter.h>
+#endif
 #include <gum/gum.h>
 #include <stdio.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
+#ifdef HAVE_SYS_USER_H
 #include <sys/user.h>
+#endif
 #include <sys/wait.h>
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
@@ -17,6 +25,14 @@
     failed_operation = op; \
     goto handle_os_error; \
   }
+
+#if defined (HAVE_I386)
+#define regs_t struct user_regs_struct
+#elif defined (HAVE_ARM)
+#define regs_t struct pt_regs
+#else
+#error Unspoorted arch
+#endif
 
 typedef struct _ZedCodeChunk ZedCodeChunk;
 typedef struct _ZedLinContext ZedLinContext;
@@ -41,8 +57,8 @@ struct _ZedInjectionInstance
 
 static void zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code);
 
-static gboolean zed_attach_to_process (int pid, struct user_regs_struct * saved_regs, GError ** error);
-static gboolean zed_detach_from_process (int pid, const struct user_regs_struct * saved_regs, GError ** error);
+static gboolean zed_attach_to_process (int pid, regs_t * saved_regs, GError ** error);
+static gboolean zed_detach_from_process (int pid, const regs_t * saved_regs, GError ** error);
 
 static gpointer zed_remote_alloc (int pid, size_t size, int prot, GError ** error);
 static gboolean zed_remote_write (int pid, gpointer remote_address, gconstpointer data, gsize size, GError ** error);
@@ -101,7 +117,7 @@ _zed_linjector_do_inject (ZedLinjector * self, gulong pid, const char * so_path,
     GError ** error)
 {
   ZedInjectionInstance * instance;
-  struct user_regs_struct saved_regs;
+  regs_t saved_regs;
   gpointer remote_code;
   ZedCodeChunk code;
 
@@ -136,6 +152,7 @@ beach:
   }
 }
 
+#if defined (HAVE_I386)
 static void
 zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code)
 {
@@ -155,14 +172,31 @@ zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * cod
 
   code->size = 128 + 9 + 1;
 }
+#elif defined (HAVE_ARM)
+static void
+zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code)
+{
+  GumThumbWriter cw;
+
+  gum_thumb_writer_init (&cw, code->bytes);
+
+  gum_thumb_writer_put_breakpoint (&cw);
+
+  gum_thumb_writer_free (&cw);
+
+  memcpy (code->bytes + 128, "Hey baby\n", 9 + 1);
+
+  code->size = 128 + 9 + 1;
+}
+#endif
 
 static gboolean
-zed_attach_to_process (int pid, struct user_regs_struct * saved_regs, GError ** error)
+zed_attach_to_process (int pid, regs_t * saved_regs, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
   gboolean success;
-  struct user_regs_struct regs;
+  regs_t regs;
 
   ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
@@ -174,7 +208,11 @@ zed_attach_to_process (int pid, struct user_regs_struct * saved_regs, GError ** 
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
   memcpy (saved_regs, &regs, sizeof (regs));
 
+#if defined (HAVE_I386)
   regs.rip = 0;
+#elif defined (HAVE_ARM)
+  regs.ARM_pc = 0;
+#endif
   ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
 
@@ -194,7 +232,7 @@ handle_os_error:
 }
 
 static gboolean
-zed_detach_from_process (int pid, const struct user_regs_struct * saved_regs, GError ** error)
+zed_detach_from_process (int pid, const regs_t * saved_regs, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -219,14 +257,17 @@ zed_remote_alloc (int pid, size_t size, int prot, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
-  struct user_regs_struct regs;
+  regs_t regs;
   gboolean success;
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
-  /* Setup registers for mmap and call it */
+  /* setup argument list for mmap and call it */
+#if defined (HAVE_I386)
   regs.rip = GPOINTER_TO_SIZE (zed_resolve_remote_libc_function (pid, "mmap"));
+
+  /* all six arguments in registers (SysV ABI) */
   regs.rdi = 0;
   regs.rsi = size;
   regs.rdx = prot;
@@ -237,8 +278,32 @@ zed_remote_alloc (int pid, size_t size, int prot, GError ** error)
   regs.rax = 0x1337;
 
   regs.rsp -= 8;
-  ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, 0);
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
+#elif defined (HAVE_ARM)
+  regs.ARM_pc = GPOINTER_TO_SIZE (zed_resolve_remote_libc_function (pid, "mmap"));
+
+  /* first four arguments in r0 - r3 */
+  regs.ARM_r0 = 0;
+  regs.ARM_r1 = size;
+  regs.ARM_r2 = prot;
+  regs.ARM_r3 = MAP_PRIVATE | MAP_ANONYMOUS;
+
+  /* 6th argument on stack */
+  regs.ARM_sp -= 4;
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, GSIZE_TO_POINTER (0));
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
+
+  /* 5th argument on stack */
+  regs.ARM_sp -= 4;
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, GSIZE_TO_POINTER (-1));
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
+
+  /* return address on stack */
+  regs.ARM_sp -= 4;
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, NULL);
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
+#endif
 
   ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
@@ -252,7 +317,11 @@ zed_remote_alloc (int pid, size_t size, int prot, GError ** error)
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
+#if defined (HAVE_I386)
   return GSIZE_TO_POINTER (regs.rax);
+#elif defined (HAVE_ARM)
+  return GSIZE_TO_POINTER (regs.ARM_ORIG_r0);
+#endif
 
 handle_os_error:
   {
@@ -307,13 +376,17 @@ zed_remote_exec (int pid, gpointer remote_address, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
-  struct user_regs_struct regs;
+  regs_t regs;
   gboolean success;
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
+#if defined (HAVE_I386)
   regs.rip = GPOINTER_TO_SIZE (remote_address);
+#elif defined (HAVE_ARM)
+  regs.ARM_pc = GPOINTER_TO_SIZE (remote_address);
+#endif
 
   ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
