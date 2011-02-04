@@ -58,8 +58,11 @@ backend_sources = $(NULL)
 glue_sources = $(NULL)
 
 if OS_LINUX
+backend_sources += \
+	$(srcdir)/service/linux/linjector.vala
 glue_sources += \
-	$(srcdir)/service/system-linux.c
+	$(srcdir)/service/system-linux.c \
+	$(srcdir)/service/linux/linjector-glue.c
 endif
 
 if OS_DARWIN

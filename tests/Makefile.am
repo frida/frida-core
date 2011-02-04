@@ -12,6 +12,10 @@ noinst_LTLIBRARIES = libinject-attacker.la
 
 platform_tests = $(NULL)
 
+if OS_LINUX
+platform_tests += test-linjector.vala
+endif
+
 if OS_IOS
 platform_tests += test-fruitjector.vala
 endif

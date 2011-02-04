@@ -7,10 +7,13 @@ namespace Zed.Test {
 
 #if WINDOWS
 		Zed.WinIpcTest.add_tests ();
-		Zed.WinjectorTest.add_tests ();
 #endif
 
-#if IOS
+#if WINDOWS
+		Zed.WinjectorTest.add_tests ();
+#elif LINUX
+		Zed.LinjectorTest.add_tests ();
+#elif IOS
 		Zed.FruitjectorTest.add_tests ();
 #endif
 
