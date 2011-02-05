@@ -1,4 +1,4 @@
-#include "zed-core.h"
+#vnclude "zed-core.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -67,7 +67,7 @@ struct _ZedInjectionParams
 
 struct _ZedCodeChunk
 {
-  guint8 bytes[256];
+  guint8 bytes[1024];
   gsize size;
 };
 
@@ -238,7 +238,7 @@ static void
 zed_emit_main_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
 {
   GumX86Writer cw;
-  const guint worker_offset = 32;
+  const guint worker_offset = 64;
 
   gum_x86_writer_init (&cw, code->bytes);
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
@@ -246,10 +246,14 @@ zed_emit_main_code (const ZedInjectionParams * params, GumAddress remote_address
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       4,
       GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (worker_thread),
-      GUM_ARG_POINTER, NULL, /* FIXME: we want to create it detached */
+      GUM_ARG_POINTER, NULL,
       GUM_ARG_POINTER, remote_address + worker_offset,
       GUM_ARG_POINTER, NULL);
   gum_x86_writer_put_int3 (&cw);
+  gum_x86_writer_flush (&cw);
+  g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, worker_offset);
+  while (gum_x86_writer_offset (&cw) != worker_offset)
+    gum_x86_writer_put_nop (&cw);
   gum_x86_writer_free (&cw);
 
   gum_x86_writer_init (&cw, code->bytes + worker_offset);
@@ -273,6 +277,8 @@ zed_emit_main_code (const ZedInjectionParams * params, GumAddress remote_address
 
   gum_x86_writer_put_ret (&cw);
 
+  gum_x86_writer_flush (&cw);
+  g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, ZED_REMOTE_DATA_OFFSET);
   gum_x86_writer_free (&cw);
 }
 
@@ -454,7 +460,6 @@ zed_remote_write (int pid, gpointer remote_address, gconstpointer data, gsize si
   long ret;
   const gchar * failed_operation;
   gsize remainder;
-  guint i = 0;
 
   dst = remote_address;
   src = data;
@@ -466,7 +471,6 @@ zed_remote_write (int pid, gpointer remote_address, gconstpointer data, gsize si
 
     dst++;
     src++;
-    i++;
   }
 
   remainder = size % sizeof (gsize);
