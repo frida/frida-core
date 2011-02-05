@@ -19,6 +19,8 @@
 #endif
 #include <sys/wait.h>
 
+#define ZED_RTLD_DLOPEN (0x80000000)
+
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
@@ -31,18 +33,13 @@
 #elif defined (HAVE_ARM)
 #define regs_t struct pt_regs
 #else
-#error Unspoorted arch
+#error Unsupported architecture
 #endif
 
-typedef struct _ZedCodeChunk ZedCodeChunk;
 typedef struct _ZedLinContext ZedLinContext;
 typedef struct _ZedInjectionInstance ZedInjectionInstance;
-
-struct _ZedCodeChunk
-{
-  guint8 bytes[256];
-  gsize size;
-};
+typedef struct _ZedInjectionParams ZedInjectionParams;
+typedef struct _ZedCodeChunk ZedCodeChunk;
 
 struct _ZedLinContext
 {
@@ -53,9 +50,23 @@ struct _ZedInjectionInstance
 {
   ZedLinjector * linjector;
   guint id;
+  gulong pid;
 };
 
-static void zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code);
+struct _ZedInjectionParams
+{
+  gulong pid;
+  const char * so_path;
+  const char * data_string;
+};
+
+struct _ZedCodeChunk
+{
+  guint8 bytes[256];
+  gsize size;
+};
+
+static void zed_emit_trampoline_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
 
 static gboolean zed_attach_to_process (int pid, regs_t * saved_regs, GError ** error);
 static gboolean zed_detach_from_process (int pid, const regs_t * saved_regs, GError ** error);
@@ -88,13 +99,14 @@ _zed_linjector_destroy_context (ZedLinjector * self)
 }
 
 static ZedInjectionInstance *
-zed_injection_instance_new (ZedLinjector * linjector, guint id)
+zed_injection_instance_new (ZedLinjector * linjector, guint id, gulong pid)
 {
   ZedInjectionInstance * instance;
 
   instance = g_new (ZedInjectionInstance, 1);
   instance->linjector = g_object_ref (linjector);
   instance->id = id;
+  instance->pid = pid;
 
   return instance;
 }
@@ -117,11 +129,12 @@ _zed_linjector_do_inject (ZedLinjector * self, gulong pid, const char * so_path,
     GError ** error)
 {
   ZedInjectionInstance * instance;
+  ZedInjectionParams params = { pid, so_path, data_string };
   regs_t saved_regs;
   gpointer remote_code;
   ZedCodeChunk code;
 
-  instance = zed_injection_instance_new (self, self->last_id++);
+  instance = zed_injection_instance_new (self, self->last_id++, pid);
 
   if (!zed_attach_to_process (pid, &saved_regs, error))
     goto beach;
@@ -130,7 +143,7 @@ _zed_linjector_do_inject (ZedLinjector * self, gulong pid, const char * so_path,
   if (remote_code == NULL)
     goto beach;
 
-  zed_emit_trampoline_code (pid, GUM_ADDRESS (remote_code), &code);
+  zed_emit_trampoline_code (&params, GUM_ADDRESS (remote_code), &code);
 
   if (!zed_remote_write (pid, remote_code, code.bytes, code.size, error))
     goto beach;
@@ -153,26 +166,64 @@ beach:
 }
 
 #if defined (HAVE_I386)
+
+typedef struct _ZedTrampolineData ZedTrampolineData;
+
+struct _ZedTrampolineData
+{
+  gchar so_path[256];
+  gchar entrypoint_name[32];
+  gchar data_string[256];
+};
+
+#define ZED_REMOTE_DATA_FIELD(n) \
+  GSIZE_TO_POINTER (remote_address + data_offset + G_STRUCT_OFFSET (ZedTrampolineData, n))
+
 static void
-zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code)
+zed_emit_trampoline_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
 {
   GumX86Writer cw;
+  const guint data_offset = 128;
+  ZedTrampolineData * data;
 
   gum_x86_writer_init (&cw, code->bytes);
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, GUM_ADDRESS (zed_resolve_remote_libc_function (pid, "printf")));
-  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XBX,
-      1, GUM_ARG_POINTER, (remote_address + 128));
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      2,
+      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (so_path),
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (ZED_RTLD_DLOPEN | RTLD_LAZY));
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      2,
+      GUM_ARG_REGISTER, GUM_REG_XBP,
+      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (entrypoint_name));
+
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      1,
+      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (data_string));
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XBP);
+
   gum_x86_writer_put_int3 (&cw);
 
   gum_x86_writer_free (&cw);
 
-  memcpy (code->bytes + 128, "Hey baby\n", 9 + 1);
+  data = (ZedTrampolineData *) (code->bytes + data_offset);
+  strcpy (data->entrypoint_name, "zed_agent_main");
+  strcpy (data->so_path, params->so_path);
+  strcpy (data->data_string, params->data_string);
 
-  code->size = 128 + 9 + 1;
+  code->size = data_offset + sizeof (ZedTrampolineData);
 }
+
 #elif defined (HAVE_ARM)
+
 static void
 zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code)
 {
@@ -188,6 +239,7 @@ zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * cod
 
   code->size = 128 + 9 + 1;
 }
+
 #endif
 
 static gboolean
@@ -226,7 +278,7 @@ zed_attach_to_process (int pid, regs_t * saved_regs, GError ** error)
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "attach_to_process %s failed: %d", failed_operation, errno);
     return FALSE;
   }
 }
@@ -247,7 +299,7 @@ zed_detach_from_process (int pid, const regs_t * saved_regs, GError ** error)
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "detach_from_process %s failed: %d", failed_operation, errno);
     return FALSE;
   }
 }
@@ -275,7 +327,7 @@ zed_remote_alloc (int pid, size_t size, int prot, GError ** error)
   regs.r8 = -1;
   regs.r9 = 0;
 
-  regs.rax = 0x1337;
+  regs.rax = 1337;
 
   regs.rsp -= 8;
   ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, NULL);
@@ -318,6 +370,8 @@ zed_remote_alloc (int pid, size_t size, int prot, GError ** error)
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
 #if defined (HAVE_I386)
+  g_assert (regs.rax != 1337);
+
   return GSIZE_TO_POINTER (regs.rax);
 #elif defined (HAVE_ARM)
   return GSIZE_TO_POINTER (regs.ARM_ORIG_r0);
@@ -325,7 +379,7 @@ zed_remote_alloc (int pid, size_t size, int prot, GError ** error)
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_alloc %s failed: %d", failed_operation, errno);
     return NULL;
   }
 }
@@ -338,17 +392,19 @@ zed_remote_write (int pid, gpointer remote_address, gconstpointer data, gsize si
   long ret;
   const gchar * failed_operation;
   gsize remainder;
+  guint i = 0;
 
   dst = remote_address;
   src = data;
 
   while (dst != remote_address + ((size / sizeof (gsize)) * sizeof (gsize)))
   {
-    ret = ptrace (PTRACE_POKETEXT, pid, dst, *src);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKETEXT head");
+    ret = ptrace (PTRACE_POKEDATA, pid, dst, *src);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA head");
 
     dst++;
     src++;
+    i++;
   }
 
   remainder = size % sizeof (gsize);
@@ -358,15 +414,15 @@ zed_remote_write (int pid, gpointer remote_address, gconstpointer data, gsize si
 
     memcpy (&word, src, remainder);
 
-    ret = ptrace (PTRACE_POKETEXT, pid, dst, word);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKETEXT tail");
+    ret = ptrace (PTRACE_POKEDATA, pid, dst, word);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA tail");
   }
 
   return TRUE;
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_write %s failed: %d", failed_operation, errno);
     return FALSE;
   }
 }
@@ -401,7 +457,7 @@ zed_remote_exec (int pid, gpointer remote_address, GError ** error)
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_exec %s failed: %d", failed_operation, errno);
     return FALSE;
   }
 }

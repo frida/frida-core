@@ -23,6 +23,8 @@ public class Zed.Linjector : Object {
 	}
 
 	public async uint inject (ulong pid, string so_path, string data_string) throws IOError {
+		if (!FileUtils.test (so_path, FileTest.EXISTS))
+			throw new IOError.NOT_FOUND ("%s not found", so_path);
 		return _do_inject (pid, so_path, data_string);
 	}
 

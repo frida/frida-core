@@ -1,7 +1,13 @@
 namespace Zed.LinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Linjector/inject", () => {
-			var logfile = File.new_for_path (Path.build_filename (Config.PKGTESTDIR, "inject-attacker.log"));
+			File logfile;
+
+			try {
+				logfile = File.new_for_path (Path.build_filename (Path.get_dirname (FileUtils.read_link ("/proc/self/exe")), "inject-attacker.log"));
+			} catch (FileError file_error) {
+				assert_not_reached ();
+			}
 
 			try {
 				logfile.delete ();
@@ -90,6 +96,8 @@ namespace Zed.LinjectorTest {
 
 			try {
 				var so = Path.build_filename (rat_directory, name);
+				if (!FileUtils.test (so, FileTest.EXISTS))
+					so = Path.build_filename (rat_directory, ".libs", "lib" + name);
 				yield injector.inject (process.id, so, data_string);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
