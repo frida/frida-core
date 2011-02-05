@@ -41,6 +41,8 @@ typedef struct _ZedInjectionInstance ZedInjectionInstance;
 typedef struct _ZedInjectionParams ZedInjectionParams;
 typedef struct _ZedCodeChunk ZedCodeChunk;
 
+typedef void (* ZedEmitFunc) (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
+
 struct _ZedLinContext
 {
   gpointer foo;
@@ -58,6 +60,8 @@ struct _ZedInjectionParams
   gulong pid;
   const char * so_path;
   const char * data_string;
+  gpointer remote_address;
+  void * agent_module;
 };
 
 struct _ZedCodeChunk
@@ -66,19 +70,26 @@ struct _ZedCodeChunk
   gsize size;
 };
 
-static void zed_emit_trampoline_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
+static gboolean zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params, gpointer * result,
+    GError ** error);
+
+static void zed_emit_dlopen_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
+static void zed_emit_main_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
 
 static gboolean zed_attach_to_process (int pid, regs_t * saved_regs, GError ** error);
 static gboolean zed_detach_from_process (int pid, const regs_t * saved_regs, GError ** error);
 
 static gpointer zed_remote_alloc (int pid, size_t size, int prot, GError ** error);
 static gboolean zed_remote_write (int pid, gpointer remote_address, gconstpointer data, gsize size, GError ** error);
-static gboolean zed_remote_exec (int pid, gpointer remote_address, GError ** error);
+static gboolean zed_remote_exec (int pid, gpointer remote_address, gpointer * result, GError ** error);
 
 static gboolean zed_wait_for_child_signal (gulong pid, int signal);
 
 static gpointer zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
-static gpointer zed_find_libc_base (int pid);
+static gpointer zed_resolve_remote_pthread_function (int remote_pid, const gchar * function_name);
+
+static gpointer zed_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name);
+static gpointer zed_find_library_base (int pid, const gchar * library_name);
 
 void
 _zed_linjector_create_context (ZedLinjector * self)
@@ -131,24 +142,20 @@ _zed_linjector_do_inject (ZedLinjector * self, gulong pid, const char * so_path,
   ZedInjectionInstance * instance;
   ZedInjectionParams params = { pid, so_path, data_string };
   regs_t saved_regs;
-  gpointer remote_code;
-  ZedCodeChunk code;
 
   instance = zed_injection_instance_new (self, self->last_id++, pid);
 
   if (!zed_attach_to_process (pid, &saved_regs, error))
     goto beach;
 
-  remote_code = zed_remote_alloc (pid, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, error);
-  if (remote_code == NULL)
+  params.remote_address = zed_remote_alloc (pid, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, error);
+  if (params.remote_address == NULL)
     goto beach;
 
-  zed_emit_trampoline_code (&params, GUM_ADDRESS (remote_code), &code);
-
-  if (!zed_remote_write (pid, remote_code, code.bytes, code.size, error))
+  if (!zed_emit_and_remote_execute (zed_emit_dlopen_code, &params, &params.agent_module, error))
     goto beach;
 
-  if (!zed_remote_exec (pid, remote_code, error))
+  if (!zed_emit_and_remote_execute (zed_emit_main_code, &params, NULL, error))
     goto beach;
 
   if (!zed_detach_from_process (pid, &saved_regs, error))
@@ -165,8 +172,6 @@ beach:
   }
 }
 
-#if defined (HAVE_I386)
-
 typedef struct _ZedTrampolineData ZedTrampolineData;
 
 struct _ZedTrampolineData
@@ -174,58 +179,106 @@ struct _ZedTrampolineData
   gchar so_path[256];
   gchar entrypoint_name[32];
   gchar data_string[256];
+
+  pthread_t worker_thread;
 };
 
+#define ZED_REMOTE_DATA_OFFSET (128)
 #define ZED_REMOTE_DATA_FIELD(n) \
-  GSIZE_TO_POINTER (remote_address + data_offset + G_STRUCT_OFFSET (ZedTrampolineData, n))
+  GSIZE_TO_POINTER (remote_address + ZED_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (ZedTrampolineData, n))
+
+static gboolean
+zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params, gpointer * result,
+    GError ** error)
+{
+  ZedCodeChunk code;
+  ZedTrampolineData * data;
+
+  func (params, GUM_ADDRESS (params->remote_address), &code);
+
+  data = (ZedTrampolineData *) (code.bytes + ZED_REMOTE_DATA_OFFSET);
+  strcpy (data->entrypoint_name, "zed_agent_main");
+  strcpy (data->so_path, params->so_path);
+  strcpy (data->data_string, params->data_string);
+
+  code.size = ZED_REMOTE_DATA_OFFSET + sizeof (ZedTrampolineData);
+
+  if (!zed_remote_write (params->pid, params->remote_address, code.bytes, code.size, error))
+    return FALSE;
+
+  if (!zed_remote_exec (params->pid, params->remote_address, result, error))
+    return FALSE;
+
+  return TRUE;
+}
+
+#if defined (HAVE_I386)
 
 static void
-zed_emit_trampoline_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
+zed_emit_dlopen_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
 {
   GumX86Writer cw;
-  const guint data_offset = 128;
-  ZedTrampolineData * data;
 
   gum_x86_writer_init (&cw, code->bytes);
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
       GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (so_path),
       GUM_ARG_POINTER, GSIZE_TO_POINTER (ZED_RTLD_DLOPEN | RTLD_LAZY));
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
+  gum_x86_writer_put_int3 (&cw);
+
+  gum_x86_writer_free (&cw);
+}
+
+static void
+zed_emit_main_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
+{
+  GumX86Writer cw;
+  const guint worker_offset = 32;
+
+  gum_x86_writer_init (&cw, code->bytes);
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      GUM_ADDRESS (zed_resolve_remote_pthread_function (params->pid, "pthread_create")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      4,
+      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (worker_thread),
+      GUM_ARG_POINTER, NULL, /* FIXME: we want to create it detached */
+      GUM_ARG_POINTER, remote_address + worker_offset,
+      GUM_ARG_POINTER, NULL);
+  gum_x86_writer_put_int3 (&cw);
+  gum_x86_writer_free (&cw);
+
+  gum_x86_writer_init (&cw, code->bytes + worker_offset);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
-      GUM_ARG_REGISTER, GUM_REG_XBP,
+      GUM_ARG_POINTER, params->agent_module,
       GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (entrypoint_name));
 
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
       GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (data_string));
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
-      GUM_ARG_REGISTER, GUM_REG_XBP);
+      GUM_ARG_POINTER, params->agent_module);
 
-  gum_x86_writer_put_int3 (&cw);
+  gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_free (&cw);
-
-  data = (ZedTrampolineData *) (code->bytes + data_offset);
-  strcpy (data->entrypoint_name, "zed_agent_main");
-  strcpy (data->so_path, params->so_path);
-  strcpy (data->data_string, params->data_string);
-
-  code->size = data_offset + sizeof (ZedTrampolineData);
 }
 
 #elif defined (HAVE_ARM)
 
 static void
-zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * code)
+zed_emit_dlopen_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
 {
   GumThumbWriter cw;
 
@@ -234,10 +287,18 @@ zed_emit_trampoline_code (int pid, GumAddress remote_address, ZedCodeChunk * cod
   gum_thumb_writer_put_breakpoint (&cw);
 
   gum_thumb_writer_free (&cw);
+}
 
-  memcpy (code->bytes + 128, "Hey baby\n", 9 + 1);
+static void
+zed_emit_main_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
+{
+  GumThumbWriter cw;
 
-  code->size = 128 + 9 + 1;
+  gum_thumb_writer_init (&cw, code->bytes);
+
+  gum_thumb_writer_put_breakpoint (&cw);
+
+  gum_thumb_writer_free (&cw);
 }
 
 #endif
@@ -428,7 +489,7 @@ handle_os_error:
 }
 
 static gboolean
-zed_remote_exec (int pid, gpointer remote_address, GError ** error)
+zed_remote_exec (int pid, gpointer remote_address, gpointer * result, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -452,6 +513,15 @@ zed_remote_exec (int pid, gpointer remote_address, GError ** error)
 
   success = zed_wait_for_child_signal (pid, SIGTRAP);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
+
+  if (result != NULL)
+  {
+#if defined (HAVE_I386)
+    *result = GSIZE_TO_POINTER (regs.rax);
+#elif defined (HAVE_ARM)
+    *result = GSIZE_TO_POINTER (regs.ARM_r0);
+#endif
+  }
 
   return TRUE;
 
@@ -478,13 +548,28 @@ zed_wait_for_child_signal (gulong pid, int signal)
 static gpointer
 zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name)
 {
+  return zed_resolve_remote_library_function (remote_pid, "/lib/libc-2.12.1.so", function_name);
+}
+
+static gpointer
+zed_resolve_remote_pthread_function (int remote_pid, const gchar * function_name)
+{
+  return zed_resolve_remote_library_function (remote_pid, "/lib/libpthread-2.12.1.so", function_name);
+}
+
+static gpointer
+zed_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name)
+{
   gpointer local_base, remote_base, module;
   gpointer local_address, remote_address;
 
-  local_base = zed_find_libc_base (getpid ());
-  remote_base = zed_find_libc_base (remote_pid);
+  local_base = zed_find_library_base (getpid (), library_name);
+  g_assert (local_base != NULL);
 
-  module = dlopen ("/lib/libc.so.6", RTLD_GLOBAL | RTLD_NOW);
+  remote_base = zed_find_library_base (remote_pid, library_name);
+  g_assert (remote_base != NULL);
+
+  module = dlopen (library_name, RTLD_GLOBAL | RTLD_NOW);
   g_assert (module != NULL);
 
   local_address = dlsym (module, function_name);
@@ -498,7 +583,7 @@ zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name)
 }
 
 static gpointer
-zed_find_libc_base (int pid)
+zed_find_library_base (int pid, const gchar * library_name)
 {
   gpointer result = NULL;
   gchar * maps_path;
@@ -520,7 +605,6 @@ zed_find_libc_base (int pid)
   {
     gpointer start;
     gint n;
-    gchar * name;
 
     n = sscanf (line, "%p-%*p %*s %*x %*s %*s %s", &start, path);
     if (n == 1)
@@ -530,10 +614,8 @@ zed_find_libc_base (int pid)
     if (path[0] == '[')
       continue;
 
-    name = g_path_get_basename (path);
-    if (g_str_has_prefix (name, "libc"))
+    if (strcmp (path, library_name) == 0)
       result = start;
-    g_free (name);
   }
 
   g_free (path);
