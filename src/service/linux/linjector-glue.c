@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <pthread.h>
 #ifdef HAVE_I386
 #include <gum/arch-x86/gumx86writer.h>
 #endif
