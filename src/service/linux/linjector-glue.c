@@ -1,4 +1,4 @@
-#vnclude "zed-core.h"
+#include "zed-core.h"
 
 #include <dlfcn.h>
 #include <errno.h>
