@@ -39,6 +39,9 @@
     <ClCompile Include="$(IntDir)memory-monitor-engine.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)gmain-watchdog.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">

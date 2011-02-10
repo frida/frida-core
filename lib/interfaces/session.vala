@@ -33,6 +33,8 @@ namespace Zed {
 		public abstract async void begin_instance_trace () throws IOError;
 		public abstract async void end_instance_trace () throws IOError;
 		public abstract async AgentInstanceInfo[] peek_instances () throws IOError;
+
+		public abstract async void set_gmain_watchdog_enabled (bool enable) throws IOError;
 	}
 
 	public struct HostProcessInfo {

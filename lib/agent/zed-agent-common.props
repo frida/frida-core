@@ -4,7 +4,7 @@
   <ItemGroup>
     <CustomBuild Include="agent.vala">
       <Message>Compiling vala code</Message>
-      <Command>"$(SolutionDir)ext\sdk\vala\valac.exe" agent.vala memory-monitor-engine.vala script-engine.vala ..\..\lib\interfaces\session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=zed-agent --header=$(IntDir)zed-agent.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(SolutionDir)ext\libgum\vapi" --pkg=glib-2.0 --pkg=gio-2.0 --pkg=gee-1.0 --pkg=gum-1.0 || exit 1
+      <Command>"$(SolutionDir)ext\sdk\vala\valac.exe" agent.vala gmain-watchdog.vala memory-monitor-engine.vala script-engine.vala ..\..\lib\interfaces\session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=zed-agent --header=$(IntDir)zed-agent.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(SolutionDir)ext\libgum\vapi" --pkg=glib-2.0 --pkg=gio-2.0 --pkg=gee-1.0 --pkg=gum-1.0 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs>$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)memory-monitor-engine.vala;$(ProjectDir)script-engine.vala;$(SolutionDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -23,6 +23,12 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="agent-glue.c" />
+    <ClCompile Include="$(IntDir)gmain-watchdog.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="$(IntDir)memory-monitor-engine.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>

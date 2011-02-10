@@ -14,6 +14,7 @@ namespace Zed.Agent {
 		private MemoryMonitorEngine memory_monitor_engine = new MemoryMonitorEngine ();
 #endif
 		private ScriptEngine script_engine = new ScriptEngine ();
+		private GMainWatchdog gmain_watchdog = new GMainWatchdog ();
 
 		public AgentServer (string listen_address) {
 			Object (listen_address: listen_address);
@@ -194,6 +195,10 @@ namespace Zed.Agent {
 
 		public async AgentInstanceInfo[] peek_instances () throws IOError {
 			throw new IOError.FAILED ("not implemented");
+		}
+
+		public async void set_gmain_watchdog_enabled (bool enable) throws IOError {
+			gmain_watchdog.set_enabled (enable);
 		}
 
 		public void run () throws Error {
