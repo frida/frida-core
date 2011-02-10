@@ -15,6 +15,7 @@ namespace Zed.Agent {
 #endif
 		private ScriptEngine script_engine = new ScriptEngine ();
 		private GMainWatchdog gmain_watchdog = new GMainWatchdog ();
+		private GLogProbe glog_probe = new GLogProbe ();
 
 		public AgentServer (string listen_address) {
 			Object (listen_address: listen_address);
@@ -25,6 +26,7 @@ namespace Zed.Agent {
 			memory_monitor_engine.memory_read_detected.connect ((from, address, module_name) => this.memory_read_detected (from, address, module_name));
 #endif
 			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
+			glog_probe.message.connect ((domain, level, message) => this.glog_message (domain, level, message));
 		}
 
 		public async void close () throws IOError {
@@ -195,6 +197,14 @@ namespace Zed.Agent {
 
 		public async AgentInstanceInfo[] peek_instances () throws IOError {
 			throw new IOError.FAILED ("not implemented");
+		}
+
+		public async void add_glog_pattern (string pattern, uint levels) throws IOError {
+			glog_probe.add (pattern, levels);
+		}
+
+		public async void clear_glog_patterns () throws IOError {
+			glog_probe.clear ();
 		}
 
 		public async void set_gmain_watchdog_enabled (bool enable) throws IOError {

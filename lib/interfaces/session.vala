@@ -34,6 +34,10 @@ namespace Zed {
 		public abstract async void end_instance_trace () throws IOError;
 		public abstract async AgentInstanceInfo[] peek_instances () throws IOError;
 
+		public abstract async void add_glog_pattern (string pattern, uint levels) throws IOError;
+		public abstract async void clear_glog_patterns () throws IOError;
+		public signal void glog_message (string domain, uint level, string message);
+
 		public abstract async void set_gmain_watchdog_enabled (bool enable) throws IOError;
 	}
 

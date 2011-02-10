@@ -42,6 +42,9 @@
     <ClCompile Include="$(IntDir)gmain-watchdog.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)glog-probe.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
@@ -56,6 +59,12 @@
       <Filter>Source Files\lib\interfaces</Filter>
     </None>
     <None Include="memory-monitor-engine.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="glog-probe.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="gmain-watchdog.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>

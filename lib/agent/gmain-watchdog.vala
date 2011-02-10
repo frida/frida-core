@@ -77,7 +77,7 @@ namespace Zed.Agent {
 
 			private Timer timer = new Timer ();
 			private bool active = false;
-			private double max_duration = 0.2;
+			private double max_duration = 0.500;
 
 			construct {
 				funcs.prepare = do_prepare;
