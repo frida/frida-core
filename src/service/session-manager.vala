@@ -81,18 +81,63 @@ namespace Frida {
 		}
 	}
 
-	public class Session {
+	public class Session : Object {
+		public signal void glog_message (string domain, uint level, string message);
+
 		private SessionManager parent;
 		private Zed.AgentSession session;
 
 		public Session (SessionManager parent, Zed.AgentSession session) {
 			this.parent = parent;
 			this.session = session;
+			session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
+		}
+
+		public void add_glog_pattern (string pattern, uint levels) throws Error {
+			var task = new AddGLogPatternTask (parent, session, pattern, levels);
+			task.wait_for_completion ();
+		}
+
+		public void clear_glog_patterns () throws Error {
+			var task = new ClearGLogPatternsTask (parent, session);
+			task.wait_for_completion ();
 		}
 
 		public void set_gmain_watchdog_enabled (bool enable) throws Error {
 			var task = new SetGMainWatchdogEnabledTask (parent, session, enable);
 			task.wait_for_completion ();
+		}
+
+		private class AddGLogPatternTask : AsyncTask<void> {
+			private Zed.AgentSession session;
+			private string pattern;
+			private uint levels;
+
+			public AddGLogPatternTask (SessionManager parent, Zed.AgentSession session, string pattern, uint levels) {
+				base (parent);
+
+				this.session = session;
+				this.pattern = pattern;
+				this.levels = levels;
+			}
+
+			protected override async void perform_operation () throws Error {
+				yield session.add_glog_pattern (pattern, levels);
+			}
+		}
+
+		private class ClearGLogPatternsTask : AsyncTask<void> {
+			private Zed.AgentSession session;
+
+			public ClearGLogPatternsTask (SessionManager parent, Zed.AgentSession session) {
+				base (parent);
+
+				this.session = session;
+			}
+
+			protected override async void perform_operation () throws Error {
+				yield session.clear_glog_patterns ();
+			}
 		}
 
 		private class SetGMainWatchdogEnabledTask : AsyncTask<void> {
