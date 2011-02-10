@@ -111,6 +111,9 @@
     <None Include="src\configuration.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="src\service\session-manager.vala">
+      <Filter>Source Files\service</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\configuration.c">
@@ -193,6 +196,9 @@
     </ClCompile>
     <ClCompile Include="src\service\system-windows.c">
       <Filter>Source Files\service</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\service\session-manager.c">
+      <Filter>Source Files\generated\service</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

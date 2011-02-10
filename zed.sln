@@ -41,6 +41,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cloud-spy", "bindings\cloud
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-server", "zed-server.vcxproj", "{218DDF16-1726-4492-A92F-DC190397DB44}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "frida-clr", "bindings\frida-clr\frida-clr.vcxproj", "{48AFFAE0-8789-44A6-8756-BC9EA344500C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -193,6 +195,14 @@ Global
 		{218DDF16-1726-4492-A92F-DC190397DB44}.Release|Win32.Build.0 = Release|Win32
 		{218DDF16-1726-4492-A92F-DC190397DB44}.Release|x64.ActiveCfg = Release|x64
 		{218DDF16-1726-4492-A92F-DC190397DB44}.Release|x64.Build.0 = Release|x64
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Debug|Win32.ActiveCfg = Debug|Win32
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Debug|Win32.Build.0 = Debug|Win32
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Debug|x64.ActiveCfg = Debug|x64
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Debug|x64.Build.0 = Debug|x64
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Release|Win32.ActiveCfg = Release|Win32
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Release|Win32.Build.0 = Release|Win32
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Release|x64.ActiveCfg = Release|x64
+		{48AFFAE0-8789-44A6-8756-BC9EA344500C}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
