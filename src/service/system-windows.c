@@ -83,7 +83,7 @@ zed_system_kill (guint pid)
 static gboolean
 get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
 {
-  guint name_length;
+  gsize name_length;
   WCHAR drive_strings[DRIVE_STRINGS_MAX_LENGTH];
   WCHAR *drive;
 
@@ -99,7 +99,7 @@ get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
     WCHAR device_name[3];
     WCHAR mapping_strings[MAX_PATH];
     WCHAR *mapping;
-    guint mapping_length;
+    gsize mapping_length;
 
     wcsncpy_s (device_name, 3, drive, 2);
 
