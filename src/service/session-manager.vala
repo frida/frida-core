@@ -39,24 +39,27 @@ namespace Frida {
 		}
 
 		private Object create<T> () {
-			return Object.new (typeof (T), manager: this);
+			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
-		private class CloseTask : AsyncTask<void> {
+		private class CloseTask : ManagerTask<void> {
 			protected override void validate_operation () throws Error {
 			}
 
 			protected override async void perform_operation () throws Error {
-				var service = manager.service;
+				var service = parent.service;
 				if (service == null)
 					return;
+
+				foreach (var session in parent.session_by_pid.values.to_array ())
+					yield session._do_close ();
+				parent.session_by_pid = null;
+
 				yield service.stop ();
-				manager.service = null;
+				parent.service = null;
 
-				manager.local_provider = null;
-				manager.local_session = null;
-
-				manager.session_by_pid = null;
+				parent.local_provider = null;
+				parent.local_session = null;
 			}
 		}
 
@@ -64,14 +67,14 @@ namespace Frida {
 			public uint pid;
 
 			protected override async Session perform_operation () throws Error {
-				var session = manager.session_by_pid[pid];
+				var session = parent.session_by_pid[pid];
 				if (session == null) {
-					yield manager.ensure_host_session_is_available ();
+					yield parent.ensure_host_session_is_available ();
 
-					var agent_session_id = yield manager.local_session.attach_to (pid);
-					var agent_session = yield manager.local_provider.obtain_agent_session (agent_session_id);
-					session = new Session (manager, pid, agent_session);
-					manager.session_by_pid[pid] = session;
+					var agent_session_id = yield parent.local_session.attach_to (pid);
+					var agent_session = yield parent.local_provider.obtain_agent_session (agent_session_id);
+					session = new Session (parent, pid, agent_session);
+					parent.session_by_pid[pid] = session;
 				}
 
 				return session;
@@ -79,8 +82,13 @@ namespace Frida {
 		}
 
 		private abstract class ManagerTask<T> : AsyncTask<T> {
+			public weak SessionManager parent {
+				get;
+				construct;
+			}
+
 			protected override void validate_operation () throws Error {
-				if (manager.service == null)
+				if (parent.service == null)
 					throw new IOError.FAILED ("invalid operation (manager is closed)");
 			}
 		}
@@ -122,12 +130,16 @@ namespace Frida {
 
 		private Zed.AgentSession session;
 
+		private MainContext main_context;
+
 		public signal void glog_message (string domain, uint level, string message);
 
 		public Session (SessionManager manager, uint pid, Zed.AgentSession session) {
 			this.manager = manager;
 			this.pid = pid;
 			this.session = session;
+			this.main_context = manager.main_context;
+
 			session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
 		}
 
@@ -157,7 +169,7 @@ namespace Frida {
 		}
 
 		private Object create<T> () {
-			return Object.new (typeof (T), manager: manager, parent: this);
+			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
 		private class CloseTask : SessionTask<void> {
@@ -165,17 +177,22 @@ namespace Frida {
 			}
 
 			protected override async void perform_operation () throws Error {
-				if (parent.session == null)
-					return;
-
-				try {
-					yield parent.session.close ();
-				} catch (IOError ignored_error) {
-				}
-				parent.session = null;
-
-				manager._release_session (parent);
+				yield parent._do_close ();
 			}
+		}
+
+		public async void _do_close () {
+			if (manager == null)
+				return;
+
+			try {
+				yield session.close ();
+			} catch (IOError ignored_error) {
+			}
+			session = null;
+
+			manager._release_session (this);
+			manager = null;
 		}
 
 		private class AddGLogPatternTask : SessionTask<void> {
@@ -208,14 +225,14 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.session == null)
+				if (parent.manager == null)
 					throw new IOError.FAILED ("invalid operation (session is closed)");
 			}
 		}
 	}
 
 	private abstract class AsyncTask<T> : Object {
-		public weak SessionManager manager {
+		public MainContext main_context {
 			get;
 			construct;
 		}
@@ -233,7 +250,7 @@ namespace Frida {
 				do_perform_operation ();
 				return false;
 			});
-			source.attach (manager.main_context);
+			source.attach (main_context);
 
 			mutex.lock ();
 			while (!completed)
