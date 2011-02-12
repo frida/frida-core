@@ -11,21 +11,47 @@ namespace Frida {
 		private Zed.HostSessionProvider local_provider;
 		private Zed.HostSession local_session;
 
-		private Gee.HashMap<uint, Zed.AgentSession> agent_session_by_process_id = new Gee.HashMap<uint, Zed.AgentSession> ();
-		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
+		private Gee.HashMap<uint, weak Session> session_by_pid = new Gee.HashMap<uint, weak Session> ();
 
 		public SessionManager (MainContext main_context) {
 			this.main_context = main_context;
 		}
 
-		public Session attach_to (uint pid) throws Error {
-			var attach = new AttachTask (this, pid);
-			var session = attach.wait_for_completion ();
-			session_by_pid[pid] = session;
-			return session;
+		public Session obtain_session_for (uint pid) throws Error {
+			var attach = new ObtainSessionTask (this, pid);
+			return attach.wait_for_completion ();
 		}
 
-		protected async Zed.HostSession obtain_host_session () throws IOError {
+		public void _release_session (Session session) {
+			var session_did_exist = session_by_pid.unset (session.pid);
+			assert (session_did_exist);
+		}
+
+		private class ObtainSessionTask : AsyncTask<Session> {
+			private uint pid;
+
+			public ObtainSessionTask (SessionManager manager, uint pid) {
+				base (manager);
+
+				this.pid = pid;
+			}
+
+			protected override async Session perform_operation () throws Error {
+				var session = manager.session_by_pid[pid];
+				if (session == null) {
+					yield manager.ensure_host_session_is_available ();
+
+					var agent_session_id = yield manager.local_session.attach_to (pid);
+					var agent_session = yield manager.local_provider.obtain_agent_session (agent_session_id);
+					session = new Session (manager, pid, agent_session);
+					manager.session_by_pid[pid] = session;
+				}
+
+				return session;
+			}
+		}
+
+		protected async Zed.HostSession ensure_host_session_is_available () throws IOError {
 			if (local_session == null) {
 				service = new Zed.HostSessionService.with_local_backend_only ();
 
@@ -38,7 +64,7 @@ namespace Frida {
 				while (local_provider == null) {
 					var timeout = new TimeoutSource (10);
 					timeout.set_callback (() => {
-						obtain_host_session.callback ();
+						ensure_host_session_is_available.callback ();
 						return false;
 					});
 					timeout.attach (MainContext.get_thread_default ());
@@ -50,71 +76,74 @@ namespace Frida {
 
 			return local_session;
 		}
-
-		protected async Zed.AgentSession obtain_agent_session (uint pid) throws IOError {
-			yield obtain_host_session ();
-
-			var agent_session = agent_session_by_process_id[pid];
-			if (agent_session == null) {
-				var agent_session_id = yield local_session.attach_to (pid);
-				agent_session = yield local_provider.obtain_agent_session (agent_session_id);
-				agent_session_by_process_id[pid] = agent_session;
-			}
-
-			return agent_session;
-		}
-
-		private class AttachTask : AsyncTask<Session> {
-			private uint pid;
-
-			public AttachTask (SessionManager parent, uint pid) {
-				base (parent);
-
-				this.pid = pid;
-			}
-
-			protected override async Session perform_operation () throws Error {
-				var agent_session = yield parent.obtain_agent_session (pid);
-
-				return new Session (parent, agent_session);
-			}
-		}
 	}
 
 	public class Session : Object {
-		public signal void glog_message (string domain, uint level, string message);
+		private unowned SessionManager manager;
 
-		private SessionManager parent;
+		public uint pid {
+			get;
+			private set;
+		}
+
 		private Zed.AgentSession session;
 
-		public Session (SessionManager parent, Zed.AgentSession session) {
-			this.parent = parent;
+		public signal void glog_message (string domain, uint level, string message);
+
+		public Session (SessionManager manager, uint pid, Zed.AgentSession session) {
+			this.manager = manager;
+			this.pid = pid;
 			this.session = session;
 			session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
 		}
 
+		~Session () {
+			var task = new CloseTask (manager, this);
+			task.wait_for_completion ();
+		}
+
 		public void add_glog_pattern (string pattern, uint levels) throws Error {
-			var task = new AddGLogPatternTask (parent, session, pattern, levels);
+			var task = new AddGLogPatternTask (manager, session, pattern, levels);
 			task.wait_for_completion ();
 		}
 
 		public void clear_glog_patterns () throws Error {
-			var task = new ClearGLogPatternsTask (parent, session);
+			var task = new ClearGLogPatternsTask (manager, session);
 			task.wait_for_completion ();
 		}
 
 		public void set_gmain_watchdog_enabled (bool enable) throws Error {
-			var task = new SetGMainWatchdogEnabledTask (parent, session, enable);
+			var task = new SetGMainWatchdogEnabledTask (manager, session, enable);
 			task.wait_for_completion ();
 		}
 
+		private class CloseTask : AsyncTask<void> {
+			private weak Session parent;
+
+			public CloseTask (SessionManager manager, Session parent) {
+				base (manager);
+
+				this.parent = parent;
+			}
+
+			protected override async void perform_operation () throws Error {
+				try {
+					yield parent.session.close ();
+				} catch (IOError ignored_error) {
+				}
+				parent.session = null;
+
+				manager._release_session (parent);
+			}
+		}
+
 		private class AddGLogPatternTask : AsyncTask<void> {
-			private Zed.AgentSession session;
+			private weak Zed.AgentSession session;
 			private string pattern;
 			private uint levels;
 
-			public AddGLogPatternTask (SessionManager parent, Zed.AgentSession session, string pattern, uint levels) {
-				base (parent);
+			public AddGLogPatternTask (SessionManager manager, Zed.AgentSession session, string pattern, uint levels) {
+				base (manager);
 
 				this.session = session;
 				this.pattern = pattern;
@@ -127,10 +156,10 @@ namespace Frida {
 		}
 
 		private class ClearGLogPatternsTask : AsyncTask<void> {
-			private Zed.AgentSession session;
+			private weak Zed.AgentSession session;
 
-			public ClearGLogPatternsTask (SessionManager parent, Zed.AgentSession session) {
-				base (parent);
+			public ClearGLogPatternsTask (SessionManager manager, Zed.AgentSession session) {
+				base (manager);
 
 				this.session = session;
 			}
@@ -141,11 +170,11 @@ namespace Frida {
 		}
 
 		private class SetGMainWatchdogEnabledTask : AsyncTask<void> {
-			private Zed.AgentSession session;
+			private weak Zed.AgentSession session;
 			private bool enable;
 
-			public SetGMainWatchdogEnabledTask (SessionManager parent, Zed.AgentSession session, bool enable) {
-				base (parent);
+			public SetGMainWatchdogEnabledTask (SessionManager manager, Zed.AgentSession session, bool enable) {
+				base (manager);
 
 				this.session = session;
 				this.enable = enable;
@@ -158,7 +187,7 @@ namespace Frida {
 	}
 
 	private abstract class AsyncTask<T> : GLib.Object {
-		public SessionManager parent {
+		public weak SessionManager manager {
 			get;
 			construct;
 		}
@@ -170,8 +199,8 @@ namespace Frida {
 		private T result;
 		private Error error;
 
-		public AsyncTask (SessionManager parent) {
-			GLib.Object (parent: parent);
+		public AsyncTask (SessionManager manager) {
+			GLib.Object (manager: manager);
 		}
 
 		public T wait_for_completion () throws Error {
@@ -180,7 +209,7 @@ namespace Frida {
 				do_perform_operation ();
 				return false;
 			});
-			source.attach (parent.main_context);
+			source.attach (manager.main_context);
 
 			mutex.lock ();
 			while (!completed)
