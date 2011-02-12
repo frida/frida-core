@@ -11,15 +11,26 @@ namespace Frida {
 		private Zed.HostSessionProvider local_provider;
 		private Zed.HostSession local_session;
 
-		private Gee.HashMap<uint, weak Session> session_by_pid = new Gee.HashMap<uint, weak Session> ();
+		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 
 		public SessionManager (MainContext main_context) {
 			this.main_context = main_context;
 		}
 
+		public override void dispose () {
+			try {
+				(create<CloseTask> () as CloseTask).start_and_wait_for_completion ();
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			base.dispose ();
+		}
+
 		public Session obtain_session_for (uint pid) throws Error {
-			var attach = new ObtainSessionTask (this, pid);
-			return attach.wait_for_completion ();
+			var task = create<ObtainSessionTask> () as ObtainSessionTask;
+			task.pid = pid;
+			return task.start_and_wait_for_completion ();
 		}
 
 		public void _release_session (Session session) {
@@ -27,14 +38,30 @@ namespace Frida {
 			assert (session_did_exist);
 		}
 
-		private class ObtainSessionTask : AsyncTask<Session> {
-			private uint pid;
+		private Object create<T> () {
+			return Object.new (typeof (T), manager: this);
+		}
 
-			public ObtainSessionTask (SessionManager manager, uint pid) {
-				base (manager);
-
-				this.pid = pid;
+		private class CloseTask : AsyncTask<void> {
+			protected override void validate_operation () throws Error {
 			}
+
+			protected override async void perform_operation () throws Error {
+				var service = manager.service;
+				if (service == null)
+					return;
+				yield service.stop ();
+				manager.service = null;
+
+				manager.local_provider = null;
+				manager.local_session = null;
+
+				manager.session_by_pid = null;
+			}
+		}
+
+		private class ObtainSessionTask : ManagerTask<Session> {
+			public uint pid;
 
 			protected override async Session perform_operation () throws Error {
 				var session = manager.session_by_pid[pid];
@@ -48,6 +75,13 @@ namespace Frida {
 				}
 
 				return session;
+			}
+		}
+
+		private abstract class ManagerTask<T> : AsyncTask<T> {
+			protected override void validate_operation () throws Error {
+				if (manager.service == null)
+					throw new IOError.FAILED ("invalid operation (manager is closed)");
 			}
 		}
 
@@ -79,7 +113,7 @@ namespace Frida {
 	}
 
 	public class Session : Object {
-		private unowned SessionManager manager;
+		private weak SessionManager manager;
 
 		public uint pid {
 			get;
@@ -97,36 +131,43 @@ namespace Frida {
 			session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
 		}
 
-		~Session () {
-			var task = new CloseTask (manager, this);
-			task.wait_for_completion ();
+		public void close () {
+			try {
+				(create<CloseTask> () as CloseTask).start_and_wait_for_completion ();
+			} catch (Error e) {
+				assert_not_reached ();
+			}
 		}
 
 		public void add_glog_pattern (string pattern, uint levels) throws Error {
-			var task = new AddGLogPatternTask (manager, session, pattern, levels);
-			task.wait_for_completion ();
+			var task = create<AddGLogPatternTask> () as AddGLogPatternTask;
+			task.pattern = pattern;
+			task.levels = levels;
+			task.start_and_wait_for_completion ();
 		}
 
 		public void clear_glog_patterns () throws Error {
-			var task = new ClearGLogPatternsTask (manager, session);
-			task.wait_for_completion ();
+			(create<ClearGLogPatternsTask> () as ClearGLogPatternsTask).start_and_wait_for_completion ();
 		}
 
 		public void set_gmain_watchdog_enabled (bool enable) throws Error {
-			var task = new SetGMainWatchdogEnabledTask (manager, session, enable);
-			task.wait_for_completion ();
+			var task = create<SetGMainWatchdogEnabledTask> () as SetGMainWatchdogEnabledTask;
+			task.enable = enable;
+			task.start_and_wait_for_completion ();
 		}
 
-		private class CloseTask : AsyncTask<void> {
-			private weak Session parent;
+		private Object create<T> () {
+			return Object.new (typeof (T), manager: manager, parent: this);
+		}
 
-			public CloseTask (SessionManager manager, Session parent) {
-				base (manager);
-
-				this.parent = parent;
+		private class CloseTask : SessionTask<void> {
+			protected override void validate_operation () throws Error {
 			}
 
 			protected override async void perform_operation () throws Error {
+				if (parent.session == null)
+					return;
+
 				try {
 					yield parent.session.close ();
 				} catch (IOError ignored_error) {
@@ -137,56 +178,43 @@ namespace Frida {
 			}
 		}
 
-		private class AddGLogPatternTask : AsyncTask<void> {
-			private weak Zed.AgentSession session;
-			private string pattern;
-			private uint levels;
-
-			public AddGLogPatternTask (SessionManager manager, Zed.AgentSession session, string pattern, uint levels) {
-				base (manager);
-
-				this.session = session;
-				this.pattern = pattern;
-				this.levels = levels;
-			}
+		private class AddGLogPatternTask : SessionTask<void> {
+			public string pattern;
+			public uint levels;
 
 			protected override async void perform_operation () throws Error {
-				yield session.add_glog_pattern (pattern, levels);
+				yield parent.session.add_glog_pattern (pattern, levels);
 			}
 		}
 
-		private class ClearGLogPatternsTask : AsyncTask<void> {
-			private weak Zed.AgentSession session;
-
-			public ClearGLogPatternsTask (SessionManager manager, Zed.AgentSession session) {
-				base (manager);
-
-				this.session = session;
-			}
-
+		private class ClearGLogPatternsTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
-				yield session.clear_glog_patterns ();
+				yield parent.session.clear_glog_patterns ();
 			}
 		}
 
-		private class SetGMainWatchdogEnabledTask : AsyncTask<void> {
-			private weak Zed.AgentSession session;
-			private bool enable;
-
-			public SetGMainWatchdogEnabledTask (SessionManager manager, Zed.AgentSession session, bool enable) {
-				base (manager);
-
-				this.session = session;
-				this.enable = enable;
-			}
+		private class SetGMainWatchdogEnabledTask : SessionTask<void> {
+			public bool enable;
 
 			protected override async void perform_operation () throws Error {
-				yield session.set_gmain_watchdog_enabled (enable);
+				yield parent.session.set_gmain_watchdog_enabled (enable);
+			}
+		}
+
+		private abstract class SessionTask<T> : AsyncTask<T> {
+			public weak Session parent {
+				get;
+				construct;
+			}
+
+			protected override void validate_operation () throws Error {
+				if (parent.session == null)
+					throw new IOError.FAILED ("invalid operation (session is closed)");
 			}
 		}
 	}
 
-	private abstract class AsyncTask<T> : GLib.Object {
+	private abstract class AsyncTask<T> : Object {
 		public weak SessionManager manager {
 			get;
 			construct;
@@ -199,11 +227,7 @@ namespace Frida {
 		private T result;
 		private Error error;
 
-		public AsyncTask (SessionManager manager) {
-			GLib.Object (manager: manager);
-		}
-
-		public T wait_for_completion () throws Error {
+		public T start_and_wait_for_completion () throws Error {
 			var source = new IdleSource ();
 			source.set_callback (() => {
 				do_perform_operation ();
@@ -224,6 +248,7 @@ namespace Frida {
 
 		private async void do_perform_operation () {
 			try {
+				validate_operation ();
 				result = yield perform_operation ();
 			} catch (Error e) {
 				error = new IOError.FAILED (e.message);
@@ -235,6 +260,7 @@ namespace Frida {
 			mutex.unlock ();
 		}
 
+		protected abstract void validate_operation () throws Error;
 		protected abstract async T perform_operation () throws Error;
 	}
 }
