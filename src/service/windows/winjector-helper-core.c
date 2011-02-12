@@ -135,7 +135,6 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   details.ipc_server_address = ipc_server_address;
   details.process_handle = NULL;
 
-#if 0
   if (!file_exists_and_is_readable (details.dll_path))
   {
     g_set_error (error,
@@ -145,7 +144,6 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
         dll_path);
     goto beach;
   }
-#endif
 
   desired_access = 
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
@@ -475,7 +473,6 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   GumX86Writer cw;
   HMODULE kmod;
   const guint data_alignment = 4;
-  const gchar * loadlibrary_failed_label = "loadlibrary_failed";
 
   gum_init_with_features ((GumFeatureFlags) (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
 
@@ -501,8 +498,6 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, load_library_impl),
       1,
       GUM_ARG_REGISTER, GUM_REG_XCX);
-  gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
-  gum_x86_writer_put_jz_label (&cw, loadlibrary_failed_label, GUM_UNLIKELY);
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
 
   /* xax = GetProcAddress (xsi, xbx->zed_agent_main_string) */
@@ -561,9 +556,6 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 #endif
 
   gum_x86_writer_put_ret (&cw);
-
-  gum_x86_writer_put_label (&cw, loadlibrary_failed_label);
-  gum_x86_writer_put_int3 (&cw);
 
   gum_x86_writer_flush (&cw);
   code_size = gum_x86_writer_offset (&cw);
@@ -636,7 +628,6 @@ cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * det
   }
 }
 
-#if 0
 static gboolean
 file_exists_and_is_readable (const WCHAR * filename)
 {
@@ -649,7 +640,6 @@ file_exists_and_is_readable (const WCHAR * filename)
   CloseHandle (file);
   return TRUE;
 }
-#endif
 
 static void
 set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error)
