@@ -39,7 +39,7 @@ namespace Zed.Agent {
 			unowned va_list args = (va_list) context.get_nth_argument (3);
 
 			if (log_domain == null)
-				return;
+				log_domain = "Default";
 
 			bool has_match = false;
 			foreach (var mp in match_patterns) {
