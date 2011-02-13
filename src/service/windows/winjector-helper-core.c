@@ -7,6 +7,13 @@
 #include <tlhelp32.h>
 #include <strsafe.h>
 
+#define CHECK_OS_RESULT(n1, cmp, n2, op) \
+  if (!((n1) cmp (n2))) \
+  { \
+    failed_operation = op; \
+    goto handle_os_error; \
+  }
+
 typedef struct _InjectionDetails InjectionDetails;
 typedef struct _RemoteWorkerContext RemoteWorkerContext;
 typedef struct _TrickContext TrickContext;
@@ -73,6 +80,9 @@ static void trick_thread_into_spawning_worker_thread (HANDLE process_handle, HAN
 static gboolean initialize_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details, GError ** error);
 static void cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details);
 
+static gboolean remote_worker_context_has_resolved_all_kernel32_functions (const RemoteWorkerContext * rwc);
+static gboolean remote_worker_context_collect_kernel32_export (const gchar * name, gpointer address, gpointer user_data);
+
 static gboolean file_exists_and_is_readable (const WCHAR * filename);
 static void set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error);
 static void set_trick_thread_error_from_os_error (const gchar * func_name, GError ** error);
@@ -125,6 +135,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     const gchar * ipc_server_address, GError ** error)
 {
   gboolean success = FALSE;
+  const gchar * failed_operation;
   HANDLE waitable_remote_thread_handle = NULL;
   InjectionDetails details;
   DWORD desired_access;
@@ -137,14 +148,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   details.process_handle = NULL;
 
   if (!file_exists_and_is_readable (details.dll_path))
-  {
-    g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_FAILED,
-        "Specified DLL path '%s' does not exist or cannot be opened",
-        dll_path);
-    goto beach;
-  }
+    goto file_does_not_exist;
 
   desired_access = 
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
@@ -155,7 +159,56 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     desired_access |= PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION;
 
   details.process_handle = OpenProcess (desired_access, FALSE, process_id);
-  if (details.process_handle == NULL)
+  CHECK_OS_RESULT (details.process_handle, !=, NULL, "OpenProcess");
+
+  if (!initialize_remote_worker_context (&rwc, &details, error))
+    goto beach;
+  rwc_initialized = TRUE;
+
+  if (enable_stealth_mode)
+  {
+    thread_handle = try_to_grab_a_thread_in (process_id, error);
+    if (*error != NULL)
+      goto beach;
+    else if (thread_handle == NULL)
+      goto no_usable_thread_found;
+
+    trick_thread_into_spawning_worker_thread (details.process_handle, thread_handle, &rwc, error);
+
+    ResumeThread (thread_handle);
+  }
+  else
+  {
+    thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint), rwc.argument, 0, NULL);
+    CHECK_OS_RESULT (thread_handle, !=, NULL, "CreateRemoteThread");
+
+    waitable_remote_thread_handle = thread_handle;
+    thread_handle = NULL;
+  }
+
+  success = TRUE;
+
+  goto beach;
+
+  /* ERRORS */
+file_does_not_exist:
+  {
+    g_set_error (error,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_FAILED,
+        "specified DLL path '%s' does not exist or cannot be opened",
+        dll_path);
+    goto beach;
+  }
+no_usable_thread_found:
+  {
+    g_set_error (error,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_FAILED,
+        "no usable thread found in pid=%u", process_id);
+    goto beach;
+  }
+handle_os_error:
   {
     DWORD os_error;
     gint code;
@@ -168,66 +221,26 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
       code = ZED_WINJECTOR_ERROR_FAILED;
 
     g_set_error (error, ZED_WINJECTOR_ERROR, code,
-        "OpenProcess(pid=%u) failed: %d",
-        process_id, os_error);
+        "%s(pid=%u) failed: %d",
+        failed_operation, process_id, os_error);
     goto beach;
   }
-
-  if (!initialize_remote_worker_context (&rwc, &details, error))
-    goto beach;
-  rwc_initialized = TRUE;
-
-  if (enable_stealth_mode)
-  {
-    thread_handle = try_to_grab_a_thread_in (process_id, error);
-    if (*error != NULL)
-      goto beach;
-
-    if (thread_handle == NULL)
-    {
-      g_set_error (error,
-          ZED_WINJECTOR_ERROR,
-          ZED_WINJECTOR_ERROR_FAILED,
-          "No usable thread found in pid=%ld", process_id);
-      goto beach;
-    }
-
-    trick_thread_into_spawning_worker_thread (details.process_handle, thread_handle, &rwc, error);
-
-    ResumeThread (thread_handle);
-  }
-  else
-  {
-    thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint), rwc.argument, 0, NULL);
-    if (thread_handle == NULL)
-    {
-      g_set_error (error,
-          ZED_WINJECTOR_ERROR,
-          ZED_WINJECTOR_ERROR_FAILED,
-          "CreateRemoteThread(pid=%u) failed: %d",
-          process_id, (gint) GetLastError ());
-      goto beach;
-    }
-
-    waitable_remote_thread_handle = thread_handle;
-    thread_handle = NULL;
-  }
-
-  success = TRUE;
 
 beach:
-  if (!success && rwc_initialized)
-    cleanup_remote_worker_context (&rwc, &details);
+  {
+    if (!success && rwc_initialized)
+      cleanup_remote_worker_context (&rwc, &details);
 
-  if (thread_handle != NULL)
-    CloseHandle (thread_handle);
+    if (thread_handle != NULL)
+      CloseHandle (thread_handle);
 
-  if (details.process_handle != NULL)
-    CloseHandle (details.process_handle);
+    if (details.process_handle != NULL)
+      CloseHandle (details.process_handle);
 
-  g_free ((gpointer) details.dll_path);
+    g_free ((gpointer) details.dll_path);
 
-  return waitable_remote_thread_handle;
+    return waitable_remote_thread_handle;
+  }
 }
 
 static HANDLE
@@ -477,8 +490,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gpointer code;
   guint code_size;
   GumX86Writer cw;
-  HMODULE kmod;
-  const guint data_alignment = 4;
+  const gsize data_alignment = 4;
   const gchar * loadlibrary_failed_label = "loadlibrary_failed";
 
   gum_init_with_features ((GumFeatureFlags) (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
@@ -575,12 +587,9 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 
   memset (rwc, 0, sizeof (RemoteWorkerContext));
 
-  kmod = GetModuleHandleW (L"kernel32.dll");
-
-  rwc->load_library_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "LoadLibraryW"));
-  rwc->get_proc_address_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "GetProcAddress"));
-  rwc->free_library_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "FreeLibrary"));
-  rwc->virtual_free_impl = GUM_FUNCPTR_TO_POINTER (GetProcAddress (kmod, "VirtualFree"));
+  gum_module_enumerate_exports ("kernel32.dll", remote_worker_context_collect_kernel32_export, rwc);
+  if (!remote_worker_context_has_resolved_all_kernel32_functions (rwc))
+    goto failed_to_resolve_kernel32_functions;
 
   StringCbCopyA (rwc->zed_agent_main_string, sizeof (rwc->zed_agent_main_string), "zed_agent_main");
 
@@ -604,6 +613,14 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   return TRUE;
 
   /* ERRORS */
+failed_to_resolve_kernel32_functions:
+  {
+    g_set_error (error,
+        ZED_WINJECTOR_ERROR,
+        ZED_WINJECTOR_ERROR_FAILED,
+        "failed to resolve needed kernel32 functions");
+    goto error_common;
+  }
 virtual_alloc_failed:
   {
     g_set_error (error,
@@ -638,6 +655,30 @@ cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * det
     VirtualFreeEx (details->process_handle, rwc->entrypoint, 0, MEM_RELEASE);
     rwc->entrypoint = NULL;
   }
+}
+
+static gboolean
+remote_worker_context_has_resolved_all_kernel32_functions (const RemoteWorkerContext * rwc)
+{
+  return (rwc->load_library_impl != NULL) && (rwc->get_proc_address_impl != NULL) &&
+      (rwc->free_library_impl != NULL) && (rwc->virtual_free_impl != NULL);
+}
+
+static gboolean
+remote_worker_context_collect_kernel32_export (const gchar * name, gpointer address, gpointer user_data)
+{
+  RemoteWorkerContext * rwc = (RemoteWorkerContext *) user_data;
+
+  if (strcmp (name, "LoadLibraryW") == 0)
+    rwc->load_library_impl = address;
+  else if (strcmp (name, "GetProcAddress") == 0)
+    rwc->get_proc_address_impl = address;
+  else if (strcmp (name, "FreeLibrary") == 0)
+    rwc->free_library_impl = address;
+  else if (strcmp (name, "VirtualFree") == 0)
+    rwc->virtual_free_impl = address;
+
+  return TRUE;
 }
 
 static gboolean
