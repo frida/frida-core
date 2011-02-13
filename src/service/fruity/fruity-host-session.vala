@@ -206,7 +206,7 @@ namespace Zed {
 			Fruity.Client client = null;
 
 			bool connected = false;
-			for (int i = 0; !connected; i++) {
+			for (int i = 1; !connected; i++) {
 				client = yield backend.create_client ();
 				yield client.establish ();
 
@@ -214,8 +214,8 @@ namespace Zed {
 					yield client.connect_to_port (device_id, id.handle);
 					connected = true;
 				} catch (IOError client_error) {
-					if (i != 10 - 1) {
-						var source = new TimeoutSource (200);
+					if (i != 40) {
+						var source = new TimeoutSource (50);
 						source.set_callback (() => {
 							obtain_agent_session.callback ();
 							return false;

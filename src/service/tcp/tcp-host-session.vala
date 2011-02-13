@@ -75,8 +75,8 @@ namespace Zed {
 				try {
 					connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 				} catch (Error connect_error) {
-					if (i != 10) {
-						var source = new TimeoutSource (200);
+					if (i != 40) {
+						var source = new TimeoutSource (50);
 						source.set_callback (() => {
 							obtain_agent_session.callback ();
 							return false;

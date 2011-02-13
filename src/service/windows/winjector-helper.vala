@@ -170,8 +170,8 @@ namespace Winjector {
 		}
 
 		private async void inject (uint32 target_pid, string filename, string ipc_server_address) throws WinjectorError {
-			for (int i = 1; thread_handle_by_pid.has_key (target_pid) && i != 10; i++) {
-				Timeout.add (200, () => {
+			for (int i = 0; thread_handle_by_pid.has_key (target_pid) && i != 40; i++) {
+				Timeout.add (50, () => {
 					inject.callback ();
 					return false;
 				});
