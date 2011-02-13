@@ -26,8 +26,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <RandomizedBaseAddress>false</RandomizedBaseAddress>
-      <FixedBaseAddress>true</FixedBaseAddress>
       <ImportLibrary>$(IntDir)$(ProjectName).lib</ImportLibrary>
     </Link>
   </ItemDefinitionGroup>
