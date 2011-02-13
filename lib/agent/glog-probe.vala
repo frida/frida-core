@@ -7,6 +7,10 @@ namespace Zed.Agent {
 
 		private MatchPattern[] match_patterns = new MatchPattern[0];
 
+		~GLogProbe () {
+			detach_if_attached ();
+		}
+
 		public void add (string pattern, uint levels) throws IOError {
 			lock (match_patterns) {
 				match_patterns += new MatchPattern (pattern, levels);

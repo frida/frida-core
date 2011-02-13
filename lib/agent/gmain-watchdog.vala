@@ -5,6 +5,11 @@ namespace Zed.Agent {
 
 		private Gee.HashMap<void *, TimerSource> source_by_main_context = new Gee.HashMap<void *, TimerSource> ();
 
+		~GMainWatchdog () {
+			if (is_enabled)
+				interceptor.detach_listener (this);
+		}
+
 		public void set_enabled (bool enable) throws IOError {
 			if (enable) {
 				if (is_enabled)
