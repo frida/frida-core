@@ -12,6 +12,7 @@ namespace Frida {
 		private Zed.HostSession local_session;
 
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
+		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 
 		public SessionManager (MainContext main_context) {
 			this.main_context = main_context;
@@ -36,6 +37,14 @@ namespace Frida {
 		public void _release_session (Session session) {
 			var session_did_exist = session_by_pid.unset (session.pid);
 			assert (session_did_exist);
+
+			uint handle = 0;
+			foreach (var pair in session_by_handle) {
+				if (pair.value == session)
+					handle = pair.key;
+			}
+			assert (handle != 0);
+			session_by_handle.unset (handle);
 		}
 
 		private Object create<T> () {
@@ -52,14 +61,16 @@ namespace Frida {
 					return;
 
 				foreach (var session in parent.session_by_pid.values.to_array ())
-					yield session._do_close ();
-				parent.session_by_pid = null;
+					yield session._do_close (true);
 
 				yield service.stop ();
 				parent.service = null;
 
 				parent.local_provider = null;
 				parent.local_session = null;
+
+				parent.session_by_pid = null;
+				parent.session_by_handle = null;
 			}
 		}
 
@@ -75,6 +86,7 @@ namespace Frida {
 					var agent_session = yield parent.local_provider.obtain_agent_session (agent_session_id);
 					session = new Session (parent, pid, agent_session);
 					parent.session_by_pid[pid] = session;
+					parent.session_by_handle[agent_session_id.handle] = session;
 				}
 
 				return session;
@@ -112,11 +124,18 @@ namespace Frida {
 					timeout.attach (MainContext.get_thread_default ());
 					yield;
 				}
+				local_provider.agent_session_closed.connect (on_agent_session_closed);
 
 				local_session = yield local_provider.create ();
 			}
 
 			return local_session;
+		}
+
+		private void on_agent_session_closed (Zed.AgentSessionId id, Error? error) {
+			var session = session_by_handle[id.handle];
+			if (session != null)
+				session._do_close (false);
 		}
 	}
 
@@ -132,6 +151,7 @@ namespace Frida {
 
 		private MainContext main_context;
 
+		public signal void closed ();
 		public signal void glog_message (string domain, uint level, string message);
 
 		public Session (SessionManager manager, uint pid, Zed.AgentSession session) {
@@ -177,22 +197,26 @@ namespace Frida {
 			}
 
 			protected override async void perform_operation () throws Error {
-				yield parent._do_close ();
+				yield parent._do_close (true);
 			}
 		}
 
-		public async void _do_close () {
+		public async void _do_close (bool may_block) {
 			if (manager == null)
 				return;
 
-			try {
-				yield session.close ();
-			} catch (IOError ignored_error) {
+			manager._release_session (this);
+			manager = null;
+
+			if (may_block) {
+				try {
+					yield session.close ();
+				} catch (IOError ignored_error) {
+				}
 			}
 			session = null;
 
-			manager._release_session (this);
-			manager = null;
+			closed ();
 		}
 
 		private class AddGLogPatternTask : SessionTask<void> {
