@@ -207,8 +207,12 @@ namespace Zed.Agent {
 			glog_probe.clear ();
 		}
 
-		public async void set_gmain_watchdog_enabled (bool enable) throws IOError {
-			gmain_watchdog.set_enabled (enable);
+		public async void enable_gmain_watchdog (double max_duration) throws IOError {
+			gmain_watchdog.enable (max_duration);
+		}
+
+		public async void disable_gmain_watchdog () throws IOError {
+			gmain_watchdog.disable ();
 		}
 
 		public void run () throws Error {

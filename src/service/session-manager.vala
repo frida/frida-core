@@ -182,10 +182,14 @@ namespace Frida {
 			(create<ClearGLogPatternsTask> () as ClearGLogPatternsTask).start_and_wait_for_completion ();
 		}
 
-		public void set_gmain_watchdog_enabled (bool enable) throws Error {
-			var task = create<SetGMainWatchdogEnabledTask> () as SetGMainWatchdogEnabledTask;
-			task.enable = enable;
+		public void enable_gmain_watchdog (double max_duration) throws Error {
+			var task = create<EnableGMainWatchdogTask> () as EnableGMainWatchdogTask;
+			task.max_duration = max_duration;
 			task.start_and_wait_for_completion ();
+		}
+
+		public void disable_gmain_watchdog () throws Error {
+			(create<DisableGMainWatchdogTask> () as DisableGMainWatchdogTask).start_and_wait_for_completion ();
 		}
 
 		private Object create<T> () {
@@ -234,11 +238,17 @@ namespace Frida {
 			}
 		}
 
-		private class SetGMainWatchdogEnabledTask : SessionTask<void> {
-			public bool enable;
+		private class EnableGMainWatchdogTask : SessionTask<void> {
+			public double max_duration;
 
 			protected override async void perform_operation () throws Error {
-				yield parent.session.set_gmain_watchdog_enabled (enable);
+				yield parent.session.enable_gmain_watchdog (max_duration);
+			}
+		}
+
+		private class DisableGMainWatchdogTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.session.disable_gmain_watchdog ();
 			}
 		}
 

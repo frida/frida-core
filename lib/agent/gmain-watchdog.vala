@@ -2,6 +2,7 @@ namespace Zed.Agent {
 	public class GMainWatchdog : Object, Gum.InvocationListener {
 		private Gum.Interceptor interceptor = Gum.Interceptor.obtain ();
 		private bool is_enabled = false;
+		private double max_duration = 0.0;
 
 		private Gee.HashMap<void *, TimerSource> source_by_main_context = new Gee.HashMap<void *, TimerSource> ();
 
@@ -10,37 +11,41 @@ namespace Zed.Agent {
 				interceptor.detach_listener (this);
 		}
 
-		public void set_enabled (bool enable) throws IOError {
-			if (enable) {
-				if (is_enabled)
-					throw new IOError.FAILED ("already enabled");
+		public void enable (double max_duration) throws IOError {
+			if (is_enabled)
+				throw new IOError.FAILED ("already enabled");
 
-				string glib_module_name = null;
-				Gum.Process.enumerate_modules ((name, address, path) => {
-					if (name.down ().str ("glib-2.0") != null) {
-						glib_module_name = name;
-						return false;
-					}
+			string glib_module_name = null;
+			Gum.Process.enumerate_modules ((name, address, path) => {
+				if (name.down ().str ("glib-2.0") != null) {
+					glib_module_name = name;
+					return false;
+				}
 
-					return true;
-				});
+				return true;
+			});
 
-				if (glib_module_name == null)
-					throw new IOError.FAILED ("glib library not loaded");
+			if (glib_module_name == null)
+				throw new IOError.FAILED ("glib library not loaded");
 
-				var function_address = Gum.Module.find_export_by_name (glib_module_name, "g_main_context_dispatch");
-				if (function_address == null)
-					throw new IOError.FAILED ("g_main_context_dispatch not found");
+			var function_address = Gum.Module.find_export_by_name (glib_module_name, "g_main_context_dispatch");
+			if (function_address == null)
+				throw new IOError.FAILED ("g_main_context_dispatch not found");
 
-				interceptor.attach_listener (function_address, this);
-				is_enabled = true;
-			} else {
-				if (!is_enabled)
-					throw new IOError.FAILED ("not enabled");
-				interceptor.detach_listener (this);
-				source_by_main_context.clear ();
-				is_enabled = false;
-			}
+			this.is_enabled = true;
+			this.max_duration = max_duration;
+
+			interceptor.attach_listener (function_address, this);
+		}
+
+		public void disable () throws IOError {
+			if (!is_enabled)
+				throw new IOError.FAILED ("not enabled");
+			interceptor.detach_listener (this);
+			source_by_main_context.clear ();
+
+			this.is_enabled = false;
+			this.max_duration = 0.0;
 		}
 
 		private struct DispatchInvocation {
@@ -56,7 +61,7 @@ namespace Zed.Agent {
 			lock (source_by_main_context) {
 				ts = source_by_main_context[main_context];
 				if (ts == null) {
-					ts = new TimerSource ();
+					ts = new TimerSource (this);
 					ts.source.attach (MainContext.default ());
 					source_by_main_context[main_context] = ts;
 				}
@@ -74,6 +79,12 @@ namespace Zed.Agent {
 		}
 
 		private class TimerSource : Object {
+			public weak GMainWatchdog parent {
+				get { return _parent; }
+				construct { _parent = value; }
+			}
+			private weak GMainWatchdog _parent;
+
 			public Source source {
 				get;
 				private set;
@@ -82,7 +93,10 @@ namespace Zed.Agent {
 
 			private Timer timer = new Timer ();
 			private bool active = false;
-			private double max_duration = 0.500;
+
+			public TimerSource (GMainWatchdog parent) {
+				Object (parent: parent);
+			}
 
 			construct {
 				funcs.prepare = do_prepare;
@@ -127,7 +141,7 @@ namespace Zed.Agent {
 
 			private int compute_remaining_milliseconds () {
 				lock (source) {
-					var remaining = (int) ((max_duration - timer.elapsed ()) * 1000.0);
+					var remaining = (int) ((_parent.max_duration - timer.elapsed ()) * 1000.0);
 					if (remaining < 0)
 						return 0;
 					return remaining;
