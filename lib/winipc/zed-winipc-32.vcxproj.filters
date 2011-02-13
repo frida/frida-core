@@ -16,6 +16,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
+    <Filter Include="Header Files\generated">
+      <UniqueIdentifier>{5640f7ba-46e4-4025-bfd1-71e2f9599e6e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="wait-handle-source.c">
@@ -24,13 +27,16 @@
     <ClCompile Include="$(IntDir)proxy.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="proxy-backend.c">
+    <ClCompile Include="proxy-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="wait-handle-source.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(IntDir)zed-winipc.h">
+      <Filter>Header Files\generated</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

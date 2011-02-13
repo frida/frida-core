@@ -1,7 +1,5 @@
 #include "zed-winipc.h"
 
-#include "wait-handle-source.h"
-
 #include <windows.h>
 
 #define PIPE_BUFSIZE (1024 * 1024)
@@ -290,7 +288,7 @@ _win_ipc_proxy_wait_for_operation (WinIpcProxy * self, WinIpcPipeOperation * op,
       (GDestroyNotify) win_ipc_proxy_wait_context_free);
 
   wait_handle = win_ipc_pipe_operation_get_wait_handle (op);
-  ctx->wait_source = win_ipc_wait_handle_source_new (wait_handle);
+  ctx->wait_source = win_ipc_wait_handle_source_create (wait_handle, FALSE);
   g_source_set_callback (ctx->wait_source, win_ipc_proxy_wait_satisfied,
       res, NULL);
   g_source_attach (ctx->wait_source, g_main_context_get_thread_default ());

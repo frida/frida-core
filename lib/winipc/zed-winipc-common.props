@@ -13,7 +13,7 @@ echo &gt; "$(IntDir)valacode.stamp"
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="wait-handle-source.h" />
+    <ClInclude Include="$(IntDir)zed-winipc.h" />
   </ItemGroup>
 
   <ItemGroup>

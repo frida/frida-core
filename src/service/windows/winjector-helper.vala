@@ -67,9 +67,8 @@ namespace Winjector {
 			parent.register_query_async_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, this);
 
 			helper32 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("32"));
-			if (System.is_x64 ()) {
+			if (System.is_x64 ())
 				helper64 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("64"));
-			}
 		}
 
 		public int run () {
@@ -145,14 +144,14 @@ namespace Winjector {
 		private static extern void stop_services (void * context);
 	}
 
-	public abstract class Service : Object {
+	public abstract class Service : Object, WinIpc.QueryAsyncHandler {
 		protected WinIpc.ClientProxy manager;
+
+		private Gee.HashMap<uint32, void *> thread_handle_by_pid = new Gee.HashMap<uint32, void *> ();
 
 		public Service () {
 			manager = new WinIpc.ClientProxy (derive_svcname_for_self ());
-			manager.register_query_sync_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, (arg) => {
-				return WinjectorIpc.marshal_inject (arg, inject);
-			});
+			manager.register_query_async_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, this);
 
 			Idle.add (() => {
 				establish ();
@@ -162,16 +161,58 @@ namespace Winjector {
 
 		public abstract void run ();
 
-		private void inject (uint32 target_pid, string filename, string ipc_server_address) throws WinjectorError {
-			Process.inject (target_pid, filename, ipc_server_address);
-		}
-
 		protected async void establish () {
 			try {
 				yield manager.establish ();
 			} catch (WinIpc.ProxyError e) {
 				/* REVISIT: might be worthwhile reporting an error here */
 			}
+		}
+
+		private async void inject (uint32 target_pid, string filename, string ipc_server_address) throws WinjectorError {
+			for (int i = 1; thread_handle_by_pid.has_key (target_pid) && i != 10; i++) {
+				Timeout.add (200, () => {
+					inject.callback ();
+					return false;
+				});
+				yield;
+			}
+
+			if (thread_handle_by_pid.has_key (target_pid))
+				throw new WinjectorError.FAILED ("timed out while waiting for existing agent to unload");
+
+			var waitable_thread_handle = Process.inject (target_pid, filename, ipc_server_address);
+			if (waitable_thread_handle != null) {
+				thread_handle_by_pid[target_pid] = waitable_thread_handle;
+
+				var source = WinIpc.WaitHandleSource.create (waitable_thread_handle, true);
+				source.set_callback (() => {
+					thread_handle_by_pid.unset (target_pid);
+					return false;
+				});
+				source.attach (MainContext.default ());
+			}
+		}
+
+		public async Variant? handle_query (string id, Variant? argument) {
+			uint32 target_pid;
+			string filename_template;
+			string ipc_server_address;
+			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename_template, out ipc_server_address);
+
+			bool success = true;
+			uint32 error_code = 0;
+			string error_message = "";
+
+			try {
+				yield inject (target_pid, filename_template, ipc_server_address);
+			} catch (WinjectorError e) {
+				success = false;
+				error_code = e.code;
+				error_message = e.message;
+			}
+
+			return new Variant (WinjectorIpc.INJECT_RESPONSE, success, error_code, error_message);
 		}
 
 		public static extern string derive_basename ();
@@ -210,31 +251,6 @@ namespace Winjector {
 
 	namespace Process {
 		public static extern bool is_x64 (uint32 process_id);
-		public static extern void inject (uint32 process_id, string dll_path, string ipc_server_address) throws WinjectorError;
-	}
-}
-
-namespace Zed.WinjectorIpc {
-	private delegate void InjectFunc (uint32 target_pid, string filename_template, string ipc_server_address) throws WinjectorError;
-
-	private Variant? marshal_inject (Variant? arg, InjectFunc func) {
-		uint32 target_pid;
-		string filename_template;
-		string ipc_server_address;
-		arg.get (INJECT_SIGNATURE, out target_pid, out filename_template, out ipc_server_address);
-
-		bool success = true;
-		uint32 error_code = 0;
-		string error_message = "";
-
-		try {
-			func (target_pid, filename_template, ipc_server_address);
-		} catch (WinjectorError e) {
-			success = false;
-			error_code = e.code;
-			error_message = e.message;
-		}
-
-		return new Variant (INJECT_RESPONSE, success, error_code, error_message);
+		public static extern void * inject (uint32 process_id, string dll_path, string ipc_server_address) throws WinjectorError;
 	}
 }

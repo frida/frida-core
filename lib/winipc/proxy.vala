@@ -512,6 +512,14 @@ namespace WinIpc {
 
 	public delegate void NotifySyncHandler (Variant? argument);
 
+	namespace WaitHandleSource {
+		public static Source create (void * handle, bool owns_handle) {
+			return wait_handle_source_new (handle, owns_handle);
+		}
+	}
+
+	private extern Source wait_handle_source_new (void * handle, bool owns_handle);
+
 	namespace MaybeVariant {
 		private Variant wrap (Variant? val) {
 			Variant variant = null;
