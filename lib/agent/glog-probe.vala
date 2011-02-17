@@ -1,11 +1,13 @@
 namespace Zed.Agent {
 	public class GLogProbe : Object, Gum.InvocationListener {
-		public signal void message (string domain, uint level, string message);
+		public signal void message (uint64 timestamp, string domain, uint level, string message);
 
 		private Gum.Interceptor interceptor = Gum.Interceptor.obtain ();
 		private bool is_attached = false;
 
 		private MatchPattern[] match_patterns = new MatchPattern[0];
+
+		private Stopwatch stopwatch;
 
 		~GLogProbe () {
 			detach_if_attached ();
@@ -42,18 +44,29 @@ namespace Zed.Agent {
 				log_domain = "Default";
 
 			bool has_match = false;
-			foreach (var mp in match_patterns) {
-				if (mp.spec.match_string (log_domain)) {
-					has_match = true;
-					break;
+			lock (match_patterns) {
+				foreach (var mp in match_patterns) {
+					if (mp.spec.match_string (log_domain)) {
+						has_match = true;
+						break;
+					}
 				}
 			}
 			if (!has_match)
 				return;
 
+			uint64 timestamp = 0;
+
+			lock (stopwatch) {
+				if (stopwatch == null)
+					stopwatch = new Stopwatch ();
+				else
+					timestamp = stopwatch.elapsed ();
+			}
+
 			var log_message = format.vprintf (args);
 			Idle.add (() => {
-				message (log_domain, log_level, log_message);
+				message (timestamp, log_domain, log_level, log_message);
 				return false;
 			});
 		}

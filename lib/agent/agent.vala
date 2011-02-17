@@ -26,7 +26,7 @@ namespace Zed.Agent {
 			memory_monitor_engine.memory_read_detected.connect ((from, address, module_name) => this.memory_read_detected (from, address, module_name));
 #endif
 			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
-			glog_probe.message.connect ((domain, level, message) => this.glog_message (domain, level, message));
+			glog_probe.message.connect ((timestamp, domain, level, message) => this.glog_message (timestamp, domain, level, message));
 		}
 
 		public async void close () throws IOError {

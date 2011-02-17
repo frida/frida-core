@@ -160,7 +160,7 @@ namespace Frida {
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
 		public signal void closed ();
-		public signal void glog_message (string domain, uint level, string message);
+		public signal void glog_message (uint64 timestamp, string domain, uint level, string message);
 
 		public Session (SessionManager manager, uint pid, Zed.AgentSession agent_session) {
 			this.manager = manager;
@@ -169,7 +169,7 @@ namespace Frida {
 			this.main_context = manager.main_context;
 
 			internal_session.message_from_script.connect (on_message_from_script);
-			internal_session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
+			internal_session.glog_message.connect ((timestamp, domain, level, message) => glog_message (timestamp, domain, level, message));
 		}
 
 		public void close () {

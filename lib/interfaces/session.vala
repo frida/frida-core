@@ -39,7 +39,7 @@ namespace Zed {
 
 		public abstract async void add_glog_pattern (string pattern, uint levels) throws IOError;
 		public abstract async void clear_glog_patterns () throws IOError;
-		public signal void glog_message (string domain, uint level, string message);
+		public signal void glog_message (uint64 timestamp, string domain, uint level, string message);
 
 		public abstract async void enable_gmain_watchdog (double max_duration) throws IOError;
 		public abstract async void disable_gmain_watchdog () throws IOError;
