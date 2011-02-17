@@ -136,7 +136,8 @@ namespace Zed.AgentTest {
 
 			AgentScriptInfo script;
 			try {
-				script = yield session.attach_script_to ("send_int32 (arg0)\nsend_narrow_string (arg1)", (uint64) target_function);
+				script = yield session.compile_script ("send_int32 (arg0)\nsend_narrow_string (arg1)");
+				yield session.attach_script_to (script.sid, (uint64) target_function);
 			} catch (IOError attach_error) {
 				assert_not_reached ();
 			}
@@ -144,7 +145,7 @@ namespace Zed.AgentTest {
 			target_function (1337, "Frida rocks");
 
 			var msg = yield h.wait_for_message ();
-			assert (msg.sender_id == script.id);
+			assert (msg.sender_id.handle == script.sid.handle);
 			assert (msg.content.print (false) == "(1337, 'Frida rocks')");
 
 			yield h.unload_agent ();
@@ -236,7 +237,7 @@ namespace Zed.AgentTest {
 				assert_not_reached ();
 			}
 
-			session.message_from_script.connect ((script_id, msg) => message_queue.add (new ScriptMessage (script_id, msg)));
+			session.message_from_script.connect ((sid, msg) => message_queue.add (new ScriptMessage (sid, msg)));
 
 			return session;
 		}
@@ -277,7 +278,7 @@ namespace Zed.AgentTest {
 		}
 
 		public class ScriptMessage {
-			public uint sender_id {
+			public AgentScriptId sender_id {
 				get;
 				private set;
 			}
@@ -287,7 +288,7 @@ namespace Zed.AgentTest {
 				private set;
 			}
 
-			public ScriptMessage (uint sender_id, Variant content) {
+			public ScriptMessage (AgentScriptId sender_id, Variant content) {
 				this.sender_id = sender_id;
 				this.content = content;
 			}

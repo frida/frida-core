@@ -147,20 +147,29 @@ namespace Frida {
 			private set;
 		}
 
-		private Zed.AgentSession session;
+		public Zed.AgentSession internal_session {
+			get;
+			private set;
+		}
 
-		private MainContext main_context;
+		public MainContext main_context {
+			get;
+			private set;
+		}
+
+		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
 		public signal void closed ();
 		public signal void glog_message (string domain, uint level, string message);
 
-		public Session (SessionManager manager, uint pid, Zed.AgentSession session) {
+		public Session (SessionManager manager, uint pid, Zed.AgentSession agent_session) {
 			this.manager = manager;
 			this.pid = pid;
-			this.session = session;
+			this.internal_session = agent_session;
 			this.main_context = manager.main_context;
 
-			session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
+			internal_session.message_from_script.connect (on_message_from_script);
+			internal_session.glog_message.connect ((domain, level, message) => glog_message (domain, level, message));
 		}
 
 		public void close () {
@@ -169,6 +178,36 @@ namespace Frida {
 			} catch (Error e) {
 				assert_not_reached ();
 			}
+		}
+
+		public Script compile_script (string text) throws Error {
+			var task = create<CompileScriptTask> () as CompileScriptTask;
+			task.text = text;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private void on_message_from_script (Zed.AgentScriptId sid, Variant msg) {
+			var script = script_by_id[sid.handle];
+			if (script != null)
+				script.message (msg);
+		}
+
+		public void _release_script (Zed.AgentScriptId sid) {
+			var script_did_exist = script_by_id.unset (sid.handle);
+			assert (script_did_exist);
+		}
+
+		public uint64 resolve_module_base (string module_name) throws Error {
+			var task = create<ResolveModuleBaseTask> () as ResolveModuleBaseTask;
+			task.module_name = module_name;
+			return task.start_and_wait_for_completion ();
+		}
+
+		public uint64 resolve_module_export (string module_name, string symbol_name) throws Error {
+			var task = create<ResolveModuleExportTask> () as ResolveModuleExportTask;
+			task.module_name = module_name;
+			task.symbol_name = symbol_name;
+			return task.start_and_wait_for_completion ();
 		}
 
 		public void add_glog_pattern (string pattern, uint levels) throws Error {
@@ -212,15 +251,46 @@ namespace Frida {
 			manager._release_session (this);
 			manager = null;
 
+			foreach (var script in script_by_id.values.to_array ())
+				yield script._do_destroy (may_block);
+
 			if (may_block) {
 				try {
-					yield session.close ();
+					yield internal_session.close ();
 				} catch (IOError ignored_error) {
 				}
 			}
-			session = null;
+			internal_session = null;
 
 			closed ();
+		}
+
+		private class CompileScriptTask : SessionTask<Script> {
+			public string text;
+
+			protected override async Script perform_operation () throws Error {
+				var info = yield parent.internal_session.compile_script (text);
+				var script = new Script (parent, info);
+				parent.script_by_id[info.sid.handle] = script;
+				return script;
+			}
+		}
+
+		private class ResolveModuleBaseTask : SessionTask<uint64> {
+			public string module_name;
+
+			protected override async uint64 perform_operation () throws Error {
+				return yield parent.internal_session.resolve_module_base (module_name);
+			}
+		}
+
+		private class ResolveModuleExportTask : SessionTask<uint64> {
+			public string module_name;
+			public string symbol_name;
+
+			protected override async uint64 perform_operation () throws Error {
+				return yield parent.internal_session.resolve_module_export (module_name, symbol_name);
+			}
 		}
 
 		private class AddGLogPatternTask : SessionTask<void> {
@@ -228,13 +298,13 @@ namespace Frida {
 			public uint levels;
 
 			protected override async void perform_operation () throws Error {
-				yield parent.session.add_glog_pattern (pattern, levels);
+				yield parent.internal_session.add_glog_pattern (pattern, levels);
 			}
 		}
 
 		private class ClearGLogPatternsTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
-				yield parent.session.clear_glog_patterns ();
+				yield parent.internal_session.clear_glog_patterns ();
 			}
 		}
 
@@ -242,13 +312,13 @@ namespace Frida {
 			public double max_duration;
 
 			protected override async void perform_operation () throws Error {
-				yield parent.session.enable_gmain_watchdog (max_duration);
+				yield parent.internal_session.enable_gmain_watchdog (max_duration);
 			}
 		}
 
 		private class DisableGMainWatchdogTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
-				yield parent.session.disable_gmain_watchdog ();
+				yield parent.internal_session.disable_gmain_watchdog ();
 			}
 		}
 
@@ -261,6 +331,78 @@ namespace Frida {
 			protected override void validate_operation () throws Error {
 				if (parent.manager == null)
 					throw new IOError.FAILED ("invalid operation (session is closed)");
+			}
+		}
+	}
+
+	public class Script : Object {
+		private weak Session session;
+
+		private Zed.AgentScriptInfo info;
+
+		private MainContext main_context;
+
+		public signal void message (Variant msg);
+
+		public Script (Session session, Zed.AgentScriptInfo info) {
+			this.session = session;
+			this.info = info;
+			this.main_context = session.main_context;
+		}
+
+		public void destroy () throws Error {
+			(create<DestroyTask> () as DestroyTask).start_and_wait_for_completion ();
+		}
+
+		public void attach_to (uint64 address) throws Error {
+			var task = create<AttachToTask> () as AttachToTask;
+			task.address = address;
+			task.start_and_wait_for_completion ();
+		}
+
+		private Object create<T> () {
+			return Object.new (typeof (T), main_context: main_context, parent: this);
+		}
+
+		private class DestroyTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error {
+				parent._do_destroy (true);
+			}
+		}
+
+		public async void _do_destroy (bool may_block) {
+			var s = session;
+			session = null;
+
+			var sid = info.sid;
+
+			s._release_script (sid);
+
+			if (may_block) {
+				try {
+					yield s.internal_session.destroy_script (sid);
+				} catch (IOError ignored_error) {
+				}
+			}
+		}
+
+		private class AttachToTask : ScriptTask<void> {
+			public uint64 address;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.session.internal_session.attach_script_to (parent.info.sid, address);
+			}
+		}
+
+		private abstract class ScriptTask<T> : AsyncTask<T> {
+			public weak Script parent {
+				get;
+				construct;
+			}
+
+			protected override void validate_operation () throws Error {
+				if (parent.session == null)
+					throw new IOError.FAILED ("invalid operation (script is destroyed)");
 			}
 		}
 	}

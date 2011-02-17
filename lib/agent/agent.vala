@@ -71,6 +71,14 @@ namespace Zed.Agent {
 			});
 		}
 
+		public async uint64 resolve_module_base (string module_name) throws IOError {
+			return (uint64) Gum.Module.find_base_address (module_name);
+		}
+
+		public async uint64 resolve_module_export (string module_name, string symbol_name) throws IOError {
+			return (uint64) Gum.Module.find_export_by_name (module_name, symbol_name);
+		}
+
 		public async AgentModuleInfo[] query_modules () throws IOError {
 			var module_list = new Gee.ArrayList<AgentModuleInfo?> ();
 			Gum.Process.enumerate_modules ((name, address, path) => {
@@ -165,18 +173,22 @@ namespace Zed.Agent {
 			throw new IOError.FAILED ("not implemented");
 		}
 
-		public async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError {
-			var instance = script_engine.attach_script_to (script_text, address);
+		public async AgentScriptInfo compile_script (string script_text) throws IOError {
+			var instance = script_engine.compile_script (script_text);
 			var script = instance.script;
-			return AgentScriptInfo (instance.id, (uint64) script.get_code_address (), script.get_code_size ());
+			return AgentScriptInfo (instance.sid, (uint64) script.get_code_address (), script.get_code_size ());
 		}
 
-		public async void detach_script (uint script_id) throws IOError {
-			script_engine.detach_script (script_id);
+		public async void destroy_script (AgentScriptId sid) throws IOError {
+			script_engine.destroy_script (sid);
 		}
 
-		public async void redirect_script_messages_to (uint script_id, string folder, uint keep_last_n) throws IOError {
-			script_engine.redirect_script_messages_to (script_id, folder, keep_last_n);
+		public async void attach_script_to (AgentScriptId sid, uint64 address) throws IOError {
+			script_engine.attach_script_to (sid, address);
+		}
+
+		public async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {
+			script_engine.redirect_script_messages_to (sid, folder, keep_last_n);
 		}
 
 		public async void set_monitor_enabled (string module_name, bool enable) throws IOError {

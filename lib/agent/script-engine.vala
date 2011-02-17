@@ -2,7 +2,7 @@ using Gee;
 
 namespace Zed.Agent {
 	public class ScriptEngine : Object {
-		public signal void message_from_script (uint script_id, Variant msg);
+		public signal void message_from_script (AgentScriptId sid, Variant msg);
 
 		private Gum.Interceptor interceptor;
 
@@ -23,14 +23,28 @@ namespace Zed.Agent {
 			instance_by_id.clear ();
 		}
 
-		/* FIXME: Gum.Script is piggy-backing on IOError for now */
-
-		public ScriptInstance attach_script_to (string script_text, uint64 address) throws IOError {
-			uint script_id = ++last_script_id;
-
+		public ScriptInstance compile_script (string script_text) throws IOError {
 			var script = Gum.Script.from_string (script_text);
-			script.set_message_handler ((script, msg) => on_message_from_script (script_id, msg));
-			var instance = new ScriptInstance (script);
+			var sid = AgentScriptId (++last_script_id);
+			script.set_message_handler ((script, msg) => on_message_from_script (sid, msg));
+
+			var instance = new ScriptInstance (sid, script);
+			instance_by_id[sid.handle] = instance;
+
+			return instance;
+		}
+
+		public async void destroy_script (AgentScriptId sid) throws IOError {
+			ScriptInstance instance;
+			if (!instance_by_id.unset (sid.handle, out instance))
+				throw new IOError.FAILED ("invalid script id");
+			interceptor.detach_listener (instance);
+		}
+
+		public void attach_script_to (AgentScriptId sid, uint64 address) throws IOError {
+			var instance = instance_by_id[sid.handle];
+			if (instance == null)
+				throw new IOError.FAILED ("invalid script id");
 
 			var ret = interceptor.attach_listener ((void *) address, instance, null);
 			switch (ret) {
@@ -41,40 +55,28 @@ namespace Zed.Agent {
 				case Gum.AttachReturn.ALREADY_ATTACHED:
 					throw new IOError.NOT_SUPPORTED ("Gum.Interceptor reports listener is already attached");
 			}
-
-			instance.id = script_id;
-			instance_by_id[script_id] = instance;
-
-			return instance;
 		}
 
-		public void detach_script (uint script_id) throws IOError {
-			ScriptInstance instance;
-			if (!instance_by_id.unset (script_id, out instance))
-				throw new IOError.FAILED ("invalid script id");
-			interceptor.detach_listener (instance);
-		}
-
-		public void redirect_script_messages_to (uint script_id, string folder, uint keep_last_n) throws IOError {
-			ScriptInstance instance = instance_by_id[script_id];
+		public void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {
+			ScriptInstance instance = instance_by_id[sid.handle];
 			if (instance == null)
 				throw new IOError.FAILED ("invalid script id");
 			instance.redirect_future_messages_to (folder, keep_last_n);
 		}
 
-		private void on_message_from_script (uint script_id, Variant msg) {
+		private void on_message_from_script (AgentScriptId sid, Variant msg) {
 			Idle.add (() => {
-				var instance = instance_by_id[script_id];
+				var instance = instance_by_id[sid.handle];
 				if (!instance.handle_message (msg))
-					this.message_from_script (script_id, msg);
+					this.message_from_script (sid, msg);
 				return false;
 			});
 		}
 
 		public class ScriptInstance : Object, Gum.InvocationListener {
-			public uint id {
+			public AgentScriptId sid {
 				get;
-				set;
+				construct;
 			}
 
 			public Gum.Script script {
@@ -94,8 +96,8 @@ namespace Zed.Agent {
 
 			private uint last_sequence_number = 1;
 
-			public ScriptInstance (Gum.Script script) {
-				Object (script: script);
+			public ScriptInstance (AgentScriptId sid, Gum.Script script) {
+				Object (sid: sid, script: script);
 			}
 
 			public void on_enter (Gum.InvocationContext ctx) {
@@ -136,7 +138,7 @@ namespace Zed.Agent {
 			}
 
 			private string path_for_seqno (uint seqno) {
-				return Path.build_filename (redirect_folder, "script_%u_%07u.dat".printf (id, seqno));
+				return Path.build_filename (redirect_folder, "script_%u_%07u.dat".printf (sid.handle, seqno));
 			}
 		}
 	}

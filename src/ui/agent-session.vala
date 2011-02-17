@@ -956,10 +956,11 @@ namespace Zed {
 
 			try {
 				if (function_count == 1) {
-					var script = yield session.attach_script_to (script_text, address);
+					var script = yield session.compile_script (script_text);
+					yield session.attach_script_to (script.sid, address);
 					print_to_console (("compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
 						"x").printf (script.code_size, script.code_address));
-					print_to_console ("attached with id %u".printf (script.id));
+					print_to_console ("attached with id %u".printf (script.sid.handle));
 				} else {
 					uint8[] bytes = yield session.read_memory (address, (uint) (function_count * sizeof (uint32)));
 					unowned uint32 * function_address = (uint32 *) bytes;
@@ -971,12 +972,13 @@ namespace Zed {
 						var message = "function[%u] <0x%08x> => ".printf (function_index, function_address[function_index]);
 
 						try {
-							var cur_script = yield session.attach_script_to (script_text, function_address[function_index]);
+							var cur_script = yield session.compile_script (script_text);
+							yield session.attach_script_to (cur_script.sid, function_address[function_index]);
 							if (first_script_id == 0)
-								first_script_id = cur_script.id;
+								first_script_id = cur_script.sid.handle;
 
-							vtable_by_script_id[cur_script.id] = vtable;
-							vtable.offset_by_script_id[cur_script.id] = function_index;
+							vtable_by_script_id[cur_script.sid.handle] = vtable;
+							vtable.offset_by_script_id[cur_script.sid.handle] = function_index;
 
 							message += "OK";
 						} catch (IOError attach_error) {
@@ -1017,10 +1019,10 @@ namespace Zed {
 			try {
 				var vtable = vtable_by_script_id[id];
 				if (vtable == null) {
-					yield session.detach_script (id);
+					yield session.destroy_script (AgentScriptId (id));
 				} else {
 					foreach (var script_id in vtable.offset_by_script_id.keys) {
-						yield session.detach_script (script_id);
+						yield session.destroy_script (AgentScriptId (script_id));
 
 						vtable_by_script_id.unset (script_id);
 					}
@@ -1064,19 +1066,19 @@ namespace Zed {
 			}
 
 			try {
-				yield session.redirect_script_messages_to (id, folder, keep_last_n);
+				yield session.redirect_script_messages_to (AgentScriptId (id), folder, keep_last_n);
 				print_to_console ("output from script %u is now redirected to '%s'".printf (id, folder));
 			} catch (IOError detach_error) {
 				print_to_console ("ERROR: " + detach_error.message);
 			}
 		}
 
-		private void on_message_from_script (uint script_id, Variant msg) {
-			var vtable = vtable_by_script_id[script_id];
+		private void on_message_from_script (AgentScriptId sid, Variant msg) {
+			var vtable = vtable_by_script_id[sid.handle];
 			if (vtable == null) {
-				print_to_console ("[script %u: %s]".printf (script_id, msg.print (false)));
+				print_to_console ("[script %u: %s]".printf (sid.handle, msg.print (false)));
 			} else {
-				var offset = vtable.offset_by_script_id[script_id];
+				var offset = vtable.offset_by_script_id[sid.handle];
 				print_to_console ("[script %u [%u]: %s]".printf (vtable.id, offset, msg.print (false)));
 			}
 		}

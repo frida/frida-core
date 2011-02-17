@@ -10,6 +10,8 @@ namespace Zed {
 	public interface AgentSession : Object {
 		public abstract async void close () throws IOError;
 
+		public abstract async uint64 resolve_module_base (string module_name) throws IOError;
+		public abstract async uint64 resolve_module_export (string module_name, string symbol_name) throws IOError;
 		public abstract async AgentModuleInfo[] query_modules () throws IOError;
 		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
 		public abstract async uint64[] scan_memory_for_pattern (MemoryProtection required_protection, string pattern) throws IOError;
@@ -22,10 +24,11 @@ namespace Zed {
 		public signal void new_batch_of_clues (AgentClue[] clues);
 		public signal void investigation_complete ();
 
-		public abstract async AgentScriptInfo attach_script_to (string script_text, uint64 address) throws IOError;
-		public abstract async void detach_script (uint script_id) throws IOError;
-		public abstract async void redirect_script_messages_to (uint script_id, string folder, uint keep_last_n) throws IOError;
-		public signal void message_from_script (uint script_id, Variant msg);
+		public abstract async AgentScriptInfo compile_script (string script_text) throws IOError;
+		public abstract async void destroy_script (AgentScriptId sid) throws IOError;
+		public abstract async void attach_script_to (AgentScriptId sid, uint64 address) throws IOError;
+		public abstract async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError;
+		public signal void message_from_script (AgentScriptId sid, Variant msg);
 
 		public abstract async void set_monitor_enabled (string module_name, bool enable) throws IOError;
 		public signal void memory_read_detected (uint64 from, uint64 address, string module_name);
@@ -175,8 +178,19 @@ namespace Zed {
 		}
 	}
 
+	public struct AgentScriptId {
+		public uint handle {
+			get;
+			private set;
+		}
+
+		public AgentScriptId (uint handle) {
+			this.handle = handle;
+		}
+	}
+
 	public struct AgentScriptInfo {
-		public uint id {
+		public AgentScriptId sid {
 			get;
 			private set;
 		}
@@ -191,8 +205,8 @@ namespace Zed {
 			private set;
 		}
 
-		public AgentScriptInfo (uint id, uint64 code_address, uint32 code_size) {
-			this.id = id;
+		public AgentScriptInfo (AgentScriptId sid, uint64 code_address, uint32 code_size) {
+			this.sid = sid;
 			this.code_address = code_address;
 			this.code_size = code_size;
 		}
