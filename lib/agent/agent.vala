@@ -201,7 +201,11 @@ namespace Zed.Agent {
 			}
 
 			var closure = new Gum.Closure (Gum.CallingConvention.CAPI, (Gum.ClosureTarget) address, args);
+
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.unignore_current_thread ();
 			closure.invoke ();
+			interceptor.ignore_current_thread ();
 		}
 
 		public async void set_monitor_enabled (string module_name, bool enable) throws IOError {
