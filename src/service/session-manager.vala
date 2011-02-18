@@ -214,7 +214,8 @@ namespace Frida {
 			var task = create<ScanModuleForCodePatternTask> () as ScanModuleForCodePatternTask;
 			task.module_name = module_name;
 			task.pattern = pattern;
-			return task.start_and_wait_for_completion ();
+			task.start_and_wait_for_completion ();
+			return task.matches;
 		}
 
 		public void invoke_function (uint64 address, string arguments) throws Error {
@@ -307,12 +308,14 @@ namespace Frida {
 			}
 		}
 
-		private class ScanModuleForCodePatternTask : SessionTask<uint64[]> {
+		private class ScanModuleForCodePatternTask : SessionTask<void> {
 			public string module_name;
 			public string pattern;
 
-			protected override async uint64[] perform_operation () throws Error {
-				return yield parent.internal_session.scan_module_for_code_pattern (module_name, pattern);
+			public uint64[] matches;
+
+			protected override async void perform_operation () throws Error {
+				matches = yield parent.internal_session.scan_module_for_code_pattern (module_name, pattern);
 			}
 		}
 
