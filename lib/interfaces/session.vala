@@ -30,6 +30,8 @@ namespace Zed {
 		public abstract async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError;
 		public signal void message_from_script (AgentScriptId sid, Variant msg);
 
+		public abstract async void invoke_function (uint64 address, string arguments) throws IOError;
+
 		public abstract async void set_monitor_enabled (string module_name, bool enable) throws IOError;
 		public signal void memory_read_detected (uint64 from, uint64 address, string module_name);
 

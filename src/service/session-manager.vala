@@ -210,6 +210,13 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
+		public void invoke_function (uint64 address, string arguments) throws Error {
+			var task = create<InvokeFunctionTask> () as InvokeFunctionTask;
+			task.address = address;
+			task.arguments = arguments;
+			task.start_and_wait_for_completion ();
+		}
+
 		public void add_glog_pattern (string pattern, uint levels) throws Error {
 			var task = create<AddGLogPatternTask> () as AddGLogPatternTask;
 			task.pattern = pattern;
@@ -290,6 +297,15 @@ namespace Frida {
 
 			protected override async uint64 perform_operation () throws Error {
 				return yield parent.internal_session.resolve_module_export (module_name, symbol_name);
+			}
+		}
+
+		private class InvokeFunctionTask : SessionTask<void> {
+			public uint64 address;
+			public string arguments;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.internal_session.invoke_function (address, arguments);
 			}
 		}
 

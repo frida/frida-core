@@ -191,6 +191,19 @@ namespace Zed.Agent {
 			script_engine.redirect_script_messages_to (sid, folder, keep_last_n);
 		}
 
+		public async void invoke_function (uint64 address, string arguments) throws IOError {
+			Variant args;
+
+			try {
+				args = Variant.parse (null, arguments);
+			} catch (VariantParseError e) {
+				throw new IOError.FAILED (e.message);
+			}
+
+			var closure = new Gum.Closure (Gum.CallingConvention.CAPI, (Gum.ClosureTarget) address, args);
+			closure.invoke ();
+		}
+
 		public async void set_monitor_enabled (string module_name, bool enable) throws IOError {
 #if WINDOWS
 			memory_monitor_engine.set_enabled (module_name, enable);
