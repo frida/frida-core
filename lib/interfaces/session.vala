@@ -45,6 +45,10 @@ namespace Zed {
 
 		public abstract async void enable_gmain_watchdog (double max_duration) throws IOError;
 		public abstract async void disable_gmain_watchdog () throws IOError;
+
+		public abstract async void enable_gst_monitor () throws IOError;
+		public abstract async void disable_gst_monitor () throws IOError;
+		public signal void gst_pad_stats (GstPadStats[] stats);
 	}
 
 	public struct HostProcessInfo {
@@ -234,6 +238,23 @@ namespace Zed {
 			this.address = address;
 			this.reference_count = reference_count;
 			this.type_name = type_name;
+		}
+	}
+
+	public struct GstPadStats {
+		public string pad_name {
+			get;
+			private set;
+		}
+
+		public double buffers_per_second {
+			get;
+			private set;
+		}
+
+		public GstPadStats (string pad_name, double buffers_per_second) {
+			this.pad_name = pad_name;
+			this.buffers_per_second = buffers_per_second;
 		}
 	}
 

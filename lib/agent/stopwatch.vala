@@ -4,11 +4,15 @@ namespace Zed.Agent {
 		protected uint64 freq;
 
 		public Stopwatch () {
-			start ();
+			initialize ();
+			restart ();
 		}
 
-		private extern void start ();
+		private extern void initialize ();
 
-		public extern uint64 elapsed ();
+		public extern void restart ();
+
+		public extern double elapsed ();
+		public extern uint64 elapsed_nanoseconds ();
 	}
 }

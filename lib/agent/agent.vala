@@ -14,8 +14,9 @@ namespace Zed.Agent {
 		private MemoryMonitorEngine memory_monitor_engine = new MemoryMonitorEngine ();
 #endif
 		private ScriptEngine script_engine = new ScriptEngine ();
-		private GMainWatchdog gmain_watchdog = new GMainWatchdog ();
 		private GLogProbe glog_probe = new GLogProbe ();
+		private GMainWatchdog gmain_watchdog = new GMainWatchdog ();
+		private GstMonitor gst_monitor = new GstMonitor ();
 
 		public AgentServer (string listen_address) {
 			Object (listen_address: listen_address);
@@ -27,6 +28,7 @@ namespace Zed.Agent {
 #endif
 			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
 			glog_probe.message.connect ((timestamp, domain, level, message) => this.glog_message (timestamp, domain, level, message));
+			gst_monitor.pad_stats.connect ((stats) => this.gst_pad_stats (stats));
 		}
 
 		public async void close () throws IOError {
@@ -242,6 +244,14 @@ namespace Zed.Agent {
 
 		public async void disable_gmain_watchdog () throws IOError {
 			gmain_watchdog.disable ();
+		}
+
+		public async void enable_gst_monitor () throws IOError {
+			gst_monitor.enable ();
+		}
+
+		public async void disable_gst_monitor () throws IOError {
+			gst_monitor.disable ();
 		}
 
 		public void run () throws Error {

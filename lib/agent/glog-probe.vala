@@ -61,7 +61,7 @@ namespace Zed.Agent {
 				if (stopwatch == null)
 					stopwatch = new Stopwatch ();
 				else
-					timestamp = stopwatch.elapsed ();
+					timestamp = stopwatch.elapsed_nanoseconds ();
 			}
 
 			var log_message = format.vprintf (args);

@@ -48,6 +48,12 @@
     <ClCompile Include="$(IntDir)stopwatch.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="stopwatch-windows.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)gst-monitor.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="agent.vala">
@@ -71,6 +77,9 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="stopwatch.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="gst-monitor.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>

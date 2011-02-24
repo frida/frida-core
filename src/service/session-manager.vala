@@ -161,6 +161,7 @@ namespace Frida {
 
 		public signal void closed ();
 		public signal void glog_message (uint64 timestamp, string domain, uint level, string message);
+		public signal void gst_pad_stats (Zed.GstPadStats[] stats);
 
 		public Session (SessionManager manager, uint pid, Zed.AgentSession agent_session) {
 			this.manager = manager;
@@ -170,6 +171,7 @@ namespace Frida {
 
 			internal_session.message_from_script.connect (on_message_from_script);
 			internal_session.glog_message.connect ((timestamp, domain, level, message) => glog_message (timestamp, domain, level, message));
+			internal_session.gst_pad_stats.connect ((stats) => gst_pad_stats (stats));
 		}
 
 		public void close () {
@@ -244,6 +246,14 @@ namespace Frida {
 
 		public void disable_gmain_watchdog () throws Error {
 			(create<DisableGMainWatchdogTask> () as DisableGMainWatchdogTask).start_and_wait_for_completion ();
+		}
+
+		public void enable_gst_monitor () throws Error {
+			(create<EnableGstMonitorTask> () as EnableGstMonitorTask).start_and_wait_for_completion ();
+		}
+
+		public void disable_gst_monitor () throws Error {
+			(create<DisableGstMonitorTask> () as DisableGstMonitorTask).start_and_wait_for_completion ();
 		}
 
 		private Object create<T> () {
@@ -354,6 +364,18 @@ namespace Frida {
 		private class DisableGMainWatchdogTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
 				yield parent.internal_session.disable_gmain_watchdog ();
+			}
+		}
+
+		private class EnableGstMonitorTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.internal_session.enable_gst_monitor ();
+			}
+		}
+
+		private class DisableGstMonitorTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.internal_session.disable_gst_monitor ();
 			}
 		}
 
