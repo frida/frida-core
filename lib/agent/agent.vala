@@ -44,6 +44,11 @@ namespace Zed.Agent {
 				script_engine = null;
 			}
 
+			if (gst_monitor != null) {
+				gst_monitor.shutdown ();
+				gst_monitor = null;
+			}
+
 			Timeout.add (100, () => {
 				close_connections_and_schedule_shutdown ();
 				return false;
