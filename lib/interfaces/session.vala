@@ -252,9 +252,15 @@ namespace Zed {
 			private set;
 		}
 
-		public GstPadStats (string pad_name, double buffers_per_second) {
+		public string timing_history {
+			get;
+			private set;
+		}
+
+		public GstPadStats (string pad_name, double buffers_per_second, string timing_history) {
 			this.pad_name = pad_name;
 			this.buffers_per_second = buffers_per_second;
+			this.timing_history = timing_history;
 		}
 	}
 
