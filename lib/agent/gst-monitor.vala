@@ -21,11 +21,17 @@ namespace Zed.Agent {
 		[CCode (has_target = false)]
 		private delegate GstObject * ElementGetClockFunc (GstObject element);
 		[CCode (has_target = false)]
+		private delegate uint64 BaseSinkGetLatencyFunc (GstObject base_sink);
+		[CCode (has_target = false)]
+		private delegate uint64 BaseSinkGetRenderDelayFunc (GstObject base_sink);
+		[CCode (has_target = false)]
 		private delegate uint64 ClockGetTimeFunc (GstObject clock);
 		private ObjectUnrefFunc object_unref;
 		private ElementGetBaseTimeFunc element_get_base_time;
 		private ElementGetClockFunc element_get_clock;
 		private ClockGetTimeFunc clock_get_time;
+		private BaseSinkGetLatencyFunc base_sink_get_latency;
+		private BaseSinkGetRenderDelayFunc base_sink_get_render_delay;
 
 		private GstBaseSinkClass * base_audio_sink_klass;
 		private GstBaseSinkClass * video_sink_klass;
@@ -34,7 +40,8 @@ namespace Zed.Agent {
 		private Gee.HashMap<void *, SinkInfo> sink_info_by_address = new Gee.HashMap<void *, SinkInfo> ();
 		private SinkInfo[] monitored_sinks = new SinkInfo[0];
 		private uint timeout_id = 0;
-		private Stopwatch stopwatch = null;
+		private Stopwatch session_watch = null;
+		private Stopwatch period_watch = null;
 
 		~GstMonitor () {
 			shutdown ();
@@ -56,6 +63,7 @@ namespace Zed.Agent {
 
 			string gobj_module_name = null;
 			string core_module_name = null;
+			string base_module_name = null;
 			string audio_module_name = null;
 			string video_module_name = null;
 			string clutter_gst_module_name = null;
@@ -65,6 +73,8 @@ namespace Zed.Agent {
 					gobj_module_name = name;
 				else if (name_lc.str ("gstreamer-0.10") != null)
 					core_module_name = name;
+				else if (name_lc.str ("gstbase-0.10") != null)
+					base_module_name = name;
 				else if (name_lc.str ("gstaudio-0.10") != null)
 					audio_module_name = name;
 				else if (name_lc.str ("gstvideo-0.10") != null)
@@ -75,7 +85,7 @@ namespace Zed.Agent {
 				return true;
 			});
 
-			if (gobj_module_name == null || core_module_name == null)
+			if (gobj_module_name == null || core_module_name == null || base_module_name == null)
 				throw new IOError.FAILED ("GStreamer library not loaded");
 
 			type_class_ref = (TypeClassRefFunc) Gum.Module.find_export_by_name (gobj_module_name, "g_type_class_ref");
@@ -89,6 +99,13 @@ namespace Zed.Agent {
 			clock_get_time = (ClockGetTimeFunc) Gum.Module.find_export_by_name (core_module_name, "gst_clock_get_time");
 			if (object_unref == null || element_get_base_time == null || element_get_clock == null || clock_get_time == null)
 				throw new IOError.FAILED ("core function not found");
+
+			base_sink_get_latency = (BaseSinkGetLatencyFunc) Gum.Module.find_export_by_name (base_module_name, "gst_base_sink_get_latency");
+			base_sink_get_render_delay = (BaseSinkGetRenderDelayFunc) Gum.Module.find_export_by_name (base_module_name, "gst_base_sink_get_render_delay");
+			if (base_sink_get_latency == null || base_sink_get_render_delay == null)
+				throw new IOError.FAILED ("core function not found");
+
+			session_watch = new Stopwatch ();
 
 			if (audio_module_name != null) {
 				var base_audio_sink_get_type = (GetTypeFunc) Gum.Module.find_export_by_name (audio_module_name, "gst_base_audio_sink_get_type");
@@ -157,7 +174,8 @@ namespace Zed.Agent {
 				source.destroy ();
 			timeout_id = 0;
 
-			stopwatch = null;
+			session_watch = null;
+			period_watch = null;
 
 			is_enabled = false;
 		}
@@ -165,6 +183,8 @@ namespace Zed.Agent {
 		public void on_enter (Gum.InvocationContext context) {
 			GstObject * sink = (GstObject *) context.get_nth_argument (0);
 			GstBuffer * buffer = (GstBuffer *) context.get_nth_argument (1);
+
+			var elapsed = session_watch.elapsed_nanoseconds ();
 
 			var clock = element_get_clock (sink);
 			var time = clock_get_time (clock);
@@ -174,6 +194,9 @@ namespace Zed.Agent {
 			uint64 runningtime = 0;
 			if (time >= basetime)
 				runningtime = time - basetime;
+
+			var latency = base_sink_get_latency (sink);
+			var render_delay = base_sink_get_render_delay (sink);
 
 			lock (sink_info_by_address) {
 				var info = sink_info_by_address[sink];
@@ -191,11 +214,17 @@ namespace Zed.Agent {
 					"%" + uint64.FORMAT_MODIFIER + "u" +
 					"\t%" + uint64.FORMAT_MODIFIER + "u" +
 					"\t%" + uint64.FORMAT_MODIFIER + "u" +
+					"\t%" + uint64.FORMAT_MODIFIER + "u" +
+					"\t%" + uint64.FORMAT_MODIFIER + "u" +
+					"\t%" + uint64.FORMAT_MODIFIER + "u" +
 					"\t%" + uint64.FORMAT_MODIFIER + "u\n",
+					elapsed,
 					info.total_buffer_count,
 					buffer->offset,
 					runningtime,
-					buffer->timestamp);
+					buffer->timestamp,
+					latency,
+					render_delay);
 			}
 		}
 
@@ -203,13 +232,13 @@ namespace Zed.Agent {
 		}
 
 		public bool handle_tick () {
-			if (stopwatch == null) {
+			if (period_watch == null) {
 				lock (sink_info_by_address) {
 					foreach (var info in monitored_sinks)
 						info.period_buffer_count = 0;
 				}
 
-				stopwatch = new Stopwatch ();
+				period_watch = new Stopwatch ();
 
 				return true;
 			}
@@ -217,7 +246,7 @@ namespace Zed.Agent {
 			var result = new GstPadStats[0];
 
 			lock (sink_info_by_address) {
-				double elapsed = stopwatch.elapsed ();
+				double elapsed = period_watch.elapsed ();
 
 				foreach (var info in monitored_sinks) {
 					result += GstPadStats (info.name, (double) info.period_buffer_count / elapsed, info.period_timing_history.str);
@@ -226,7 +255,7 @@ namespace Zed.Agent {
 				}
 			}
 
-			stopwatch.restart ();
+			period_watch.restart ();
 
 			if (result.length > 0)
 				pad_stats (result);
