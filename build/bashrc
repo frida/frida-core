@@ -112,7 +112,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export LD="/usr/bin/ld"
       ;;
     ios)
-      export IOS_SDKVER="4.2"
+      export IOS_SDKVER="4.3"
       export IOS_MINVER="4.0"
       export IOS_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
       export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${IOS_SDKVER}.sdk"
