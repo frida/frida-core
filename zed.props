@@ -15,7 +15,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib;$(IntDir)..\gum-32;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>atk-1.0.lib;cairo.lib;clutter-gtk-0.90.lib;clutter-win32-1.0.lib;crypto.lib;dnsapi.lib;gdiplus.lib;gdk-win32-2.0.lib;gdk_pixbuf-2.0.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;gtk-win32-2.0.lib;imm32.lib;intl.lib;msimg32.lib;mx-1.0.lib;opengl32.lib;pango-1.0.lib;pangocairo-1.0.lib;pangowin32-1.0.lib;pixman-1.lib;psapi.lib;shlwapi.lib;ssl.lib;usp10.lib;winmm.lib;wocky.lib;ws2_32.lib;xml2.lib;z.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>atk-1.0.lib;cairo.lib;clutter-gtk-0.90.lib;clutter-win32-1.0.lib;crypto.lib;dnsapi.lib;gdiplus.lib;gdk-win32-2.0.lib;gdk_pixbuf-2.0.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;gtk-win32-2.0.lib;imm32.lib;intl.lib;msimg32.lib;mx-1.0.lib;opengl32.lib;pango-1.0.lib;pangocairo-1.0.lib;pangowin32-1.0.lib;pixman-1.lib;psapi.lib;shlwapi.lib;ssl.lib;usp10.lib;v8_base.lib;v8_snapshot.lib;winmm.lib;wocky.lib;ws2_32.lib;xml2.lib;z.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <PropertyGroup Label="Configuration">
