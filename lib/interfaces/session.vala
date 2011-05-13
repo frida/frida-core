@@ -24,11 +24,10 @@ namespace Zed {
 		public signal void new_batch_of_clues (AgentClue[] clues);
 		public signal void investigation_complete ();
 
-		public abstract async AgentScriptInfo compile_script (string script_text) throws IOError;
+		public abstract async AgentScriptId compile_and_load_script (string script_text) throws IOError;
 		public abstract async void destroy_script (AgentScriptId sid) throws IOError;
-		public abstract async void attach_script_to (AgentScriptId sid, uint64 address) throws IOError;
 		public abstract async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError;
-		public signal void message_from_script (AgentScriptId sid, Variant msg);
+		public signal void message_from_script (AgentScriptId sid, string msg);
 
 		public abstract async void invoke_function (uint64 address, string arguments) throws IOError;
 
@@ -192,29 +191,6 @@ namespace Zed {
 
 		public AgentScriptId (uint handle) {
 			this.handle = handle;
-		}
-	}
-
-	public struct AgentScriptInfo {
-		public AgentScriptId sid {
-			get;
-			private set;
-		}
-
-		public uint64 code_address {
-			get;
-			private set;
-		}
-
-		public uint32 code_size {
-			get;
-			private set;
-		}
-
-		public AgentScriptInfo (AgentScriptId sid, uint64 code_address, uint32 code_size) {
-			this.sid = sid;
-			this.code_address = code_address;
-			this.code_size = code_size;
 		}
 	}
 

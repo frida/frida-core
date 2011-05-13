@@ -182,13 +182,13 @@ namespace Frida {
 			}
 		}
 
-		public Script compile_script (string text) throws Error {
-			var task = create<CompileScriptTask> () as CompileScriptTask;
+		public Script compile_and_load_script (string text) throws Error {
+			var task = create<CompileAndLoadScriptTask> () as CompileAndLoadScriptTask;
 			task.text = text;
 			return task.start_and_wait_for_completion ();
 		}
 
-		private void on_message_from_script (Zed.AgentScriptId sid, Variant msg) {
+		private void on_message_from_script (Zed.AgentScriptId sid, string msg) {
 			var script = script_by_id[sid.handle];
 			if (script != null)
 				script.message (msg);
@@ -290,13 +290,13 @@ namespace Frida {
 			closed ();
 		}
 
-		private class CompileScriptTask : SessionTask<Script> {
+		private class CompileAndLoadScriptTask : SessionTask<Script> {
 			public string text;
 
 			protected override async Script perform_operation () throws Error {
-				var info = yield parent.internal_session.compile_script (text);
-				var script = new Script (parent, info);
-				parent.script_by_id[info.sid.handle] = script;
+				var sid = yield parent.internal_session.compile_and_load_script (text);
+				var script = new Script (parent, sid);
+				parent.script_by_id[sid.handle] = script;
 				return script;
 			}
 		}
@@ -395,26 +395,20 @@ namespace Frida {
 	public class Script : Object {
 		private weak Session session;
 
-		private Zed.AgentScriptInfo info;
+		private Zed.AgentScriptId script_id;
 
 		private MainContext main_context;
 
-		public signal void message (Variant msg);
+		public signal void message (string msg);
 
-		public Script (Session session, Zed.AgentScriptInfo info) {
+		public Script (Session session, Zed.AgentScriptId script_id) {
 			this.session = session;
-			this.info = info;
+			this.script_id = script_id;
 			this.main_context = session.main_context;
 		}
 
 		public void destroy () throws Error {
 			(create<DestroyTask> () as DestroyTask).start_and_wait_for_completion ();
-		}
-
-		public void attach_to (uint64 address) throws Error {
-			var task = create<AttachToTask> () as AttachToTask;
-			task.address = address;
-			task.start_and_wait_for_completion ();
 		}
 
 		private Object create<T> () {
@@ -431,7 +425,7 @@ namespace Frida {
 			var s = session;
 			session = null;
 
-			var sid = info.sid;
+			var sid = script_id;
 
 			s._release_script (sid);
 
@@ -440,14 +434,6 @@ namespace Frida {
 					yield s.internal_session.destroy_script (sid);
 				} catch (IOError ignored_error) {
 				}
-			}
-		}
-
-		private class AttachToTask : ScriptTask<void> {
-			public uint64 address;
-
-			protected override async void perform_operation () throws Error {
-				yield parent.session.internal_session.attach_script_to (parent.info.sid, address);
 			}
 		}
 
