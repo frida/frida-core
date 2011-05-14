@@ -182,8 +182,8 @@ namespace Frida {
 			}
 		}
 
-		public Script compile_and_load_script (string text) throws Error {
-			var task = create<CompileAndLoadScriptTask> () as CompileAndLoadScriptTask;
+		public Script load_script (string text) throws Error {
+			var task = create<LoadScriptTask> () as LoadScriptTask;
 			task.text = text;
 			return task.start_and_wait_for_completion ();
 		}
@@ -277,7 +277,7 @@ namespace Frida {
 			manager = null;
 
 			foreach (var script in script_by_id.values.to_array ())
-				yield script._do_destroy (may_block);
+				yield script._do_unload (may_block);
 
 			if (may_block) {
 				try {
@@ -290,11 +290,11 @@ namespace Frida {
 			closed ();
 		}
 
-		private class CompileAndLoadScriptTask : SessionTask<Script> {
+		private class LoadScriptTask : SessionTask<Script> {
 			public string text;
 
 			protected override async Script perform_operation () throws Error {
-				var sid = yield parent.internal_session.compile_and_load_script (text);
+				var sid = yield parent.internal_session.load_script (text);
 				var script = new Script (parent, sid);
 				parent.script_by_id[sid.handle] = script;
 				return script;
@@ -407,21 +407,21 @@ namespace Frida {
 			this.main_context = session.main_context;
 		}
 
-		public void destroy () throws Error {
-			(create<DestroyTask> () as DestroyTask).start_and_wait_for_completion ();
+		public void unload () throws Error {
+			(create<UnloadTask> () as UnloadTask).start_and_wait_for_completion ();
 		}
 
 		private Object create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
-		private class DestroyTask : ScriptTask<void> {
+		private class UnloadTask : ScriptTask<void> {
 			protected override async void perform_operation () throws Error {
-				parent._do_destroy (true);
+				parent._do_unload (true);
 			}
 		}
 
-		public async void _do_destroy (bool may_block) {
+		public async void _do_unload (bool may_block) {
 			var s = session;
 			session = null;
 
@@ -431,7 +431,7 @@ namespace Frida {
 
 			if (may_block) {
 				try {
-					yield s.internal_session.destroy_script (sid);
+					yield s.internal_session.unload_script (sid);
 				} catch (IOError ignored_error) {
 				}
 			}

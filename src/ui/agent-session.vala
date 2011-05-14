@@ -598,11 +598,11 @@ namespace Zed {
 				case "write":
 					yield handle_write_command (args);
 					break;
-				case "attach":
-					yield handle_attach_command (args);
+				case "load":
+					yield handle_load_command (args);
 					break;
-				case "detach":
-					yield handle_detach_command (args);
+				case "unload":
+					yield handle_unload_command (args);
 					break;
 				case "redirect":
 					yield handle_redirect_command (args);
@@ -889,45 +889,17 @@ namespace Zed {
 			}
 		}
 
-		private void print_attach_usage () {
-			print_to_console ("Usage: attach script to <address-specifier>");
+		private void print_load_usage () {
+			print_to_console ("Usage: load script");
 		}
 
-		private async void handle_attach_command (string[] args) {
-			if (args.length < 3 || args[0] != "script" || args[1] != "to") {
-				print_attach_usage ();
+		private async void handle_load_command (string[] args) {
+			if (args.length != 1 || args[0] != "script") {
+				print_load_usage ();
 				return;
 			}
 
-			int function_count = 1;
-
-			try {
-				var raw_argument = args[args.length - 1];
-
-				var re = new Regex ("^(.*)\\[(\\d+)\\]$");
-				MatchInfo match_info;
-				if (re.match (raw_argument, 0, out match_info)) {
-					assert (match_info.get_match_count () == 3);
-					args[args.length - 1] = match_info.fetch (1);
-					function_count = match_info.fetch (2).to_int ();
-				}
-			} catch (RegexError re_error) {
-				assert_not_reached ();
-			}
-
-			uint64 address;
-
-			try {
-				var address_args = args[2:args.length];
-				address = yield resolve_address_specifier_arguments (address_args);
-			} catch (IOError resolve_error) {
-				print_to_console ("ERROR: " + resolve_error.message);
-				print_to_console ("");
-				print_attach_usage ();
-				return;
-			}
-
-			var filename = FileOpenDialog.ask_for_filename ("Choose script to attach");
+			var filename = FileOpenDialog.ask_for_filename ("Choose script to load");
 			if (filename == null) {
 				print_to_console ("error: no filename specified");
 				return;
@@ -955,82 +927,34 @@ namespace Zed {
 			}
 
 			try {
-				if (function_count == 1) {
-					var script = yield session.compile_script (script_text);
-					yield session.attach_script_to (script.sid, address);
-					print_to_console (("compiled to %u bytes of code at 0x%08" + uint64.FORMAT_MODIFIER +
-						"x").printf (script.code_size, script.code_address));
-					print_to_console ("attached with id %u".printf (script.sid.handle));
-				} else {
-					uint8[] bytes = yield session.read_memory (address, (uint) (function_count * sizeof (uint32)));
-					unowned uint32 * function_address = (uint32 *) bytes;
-
-					var vtable = new MonitoredVTable ();
-					uint first_script_id = 0;
-
-					for (uint function_index = 0; function_index != function_count; function_index++) {
-						var message = "function[%u] <0x%08x> => ".printf (function_index, function_address[function_index]);
-
-						try {
-							var cur_script = yield session.compile_script (script_text);
-							yield session.attach_script_to (cur_script.sid, function_address[function_index]);
-							if (first_script_id == 0)
-								first_script_id = cur_script.sid.handle;
-
-							vtable_by_script_id[cur_script.sid.handle] = vtable;
-							vtable.offset_by_script_id[cur_script.sid.handle] = function_index;
-
-							message += "OK";
-						} catch (IOError attach_error) {
-							message += "failed (%s)".printf (attach_error.message);
-						}
-
-						print_to_console (message);
-					}
-
-					vtable.id = first_script_id;
-
-					if (first_script_id != 0)
-						print_to_console ("attached with id %u".printf (first_script_id));
-					else
-						print_to_console ("could not attach to any of the specified functions");
-				}
+				var script_id = yield session.load_script (script_text);
+				print_to_console ("script loaded with id %u".printf (script_id.handle));
 			} catch (IOError any_error) {
 				print_to_console ("ERROR: " + any_error.message);
 			}
 		}
 
-		private void print_detach_usage () {
-			print_to_console ("Usage: detach script <script-id>");
+		private void print_unload_usage () {
+			print_to_console ("Usage: unload script <script-id>");
 		}
 
-		private async void handle_detach_command (string[] args) {
+		private async void handle_unload_command (string[] args) {
 			if (args.length != 2 || args[0] != "script") {
-				print_detach_usage ();
+				print_unload_usage ();
 				return;
 			}
 
 			int id = args[1].to_int ();
 			if (id <= 0) {
-				print_detach_usage ();
+				print_unload_usage ();
 				return;
 			}
 
 			try {
-				var vtable = vtable_by_script_id[id];
-				if (vtable == null) {
-					yield session.destroy_script (AgentScriptId (id));
-				} else {
-					foreach (var script_id in vtable.offset_by_script_id.keys) {
-						yield session.destroy_script (AgentScriptId (script_id));
-
-						vtable_by_script_id.unset (script_id);
-					}
-				}
-
-				print_to_console ("script detached");
-			} catch (IOError detach_error) {
-				print_to_console ("ERROR: " + detach_error.message);
+				yield session.unload_script (AgentScriptId (id));
+				print_to_console ("script unloaded");
+			} catch (IOError unload_error) {
+				print_to_console ("ERROR: " + unload_error.message);
 			}
 		}
 
@@ -1068,19 +992,13 @@ namespace Zed {
 			try {
 				yield session.redirect_script_messages_to (AgentScriptId (id), folder, keep_last_n);
 				print_to_console ("output from script %u is now redirected to '%s'".printf (id, folder));
-			} catch (IOError detach_error) {
-				print_to_console ("ERROR: " + detach_error.message);
+			} catch (IOError redirect_error) {
+				print_to_console ("ERROR: " + redirect_error.message);
 			}
 		}
 
-		private void on_message_from_script (AgentScriptId sid, Variant msg) {
-			var vtable = vtable_by_script_id[sid.handle];
-			if (vtable == null) {
-				print_to_console ("[script %u: %s]".printf (sid.handle, msg.print (false)));
-			} else {
-				var offset = vtable.offset_by_script_id[sid.handle];
-				print_to_console ("[script %u [%u]: %s]".printf (vtable.id, offset, msg.print (false)));
-			}
+		private void on_message_from_script (AgentScriptId sid, string msg) {
+			print_to_console ("[script %u: %s]".printf (sid.handle, msg));
 		}
 
 		private void print_monitor_usage () {
@@ -1104,8 +1022,8 @@ namespace Zed {
 			try {
 				yield session.set_monitor_enabled (module_name, enable);
 				print_to_console ("monitor %s for %s".printf (enable ? "enabled" : "disabled", module_name));
-			} catch (IOError detach_error) {
-				print_to_console ("ERROR: " + detach_error.message);
+			} catch (IOError enable_error) {
+				print_to_console ("ERROR: " + enable_error.message);
 			}
 		}
 
@@ -1418,13 +1336,6 @@ namespace Zed {
 
 		/* TODO: move this to a Service later */
 		public extern string disassemble (uint64 pc, uint8[] bytes, out uint instruction_length);
-
-		private Gee.HashMap<uint, MonitoredVTable> vtable_by_script_id = new Gee.HashMap<uint, MonitoredVTable> ();
-
-		private class MonitoredVTable {
-			public uint id;
-			public Gee.HashMap<uint, uint> offset_by_script_id = new Gee.HashMap<uint, uint> ();
-		}
 	}
 
 	public class Investigation : Object {
