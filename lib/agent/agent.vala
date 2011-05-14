@@ -180,13 +180,13 @@ namespace Zed.Agent {
 			throw new IOError.FAILED ("not implemented");
 		}
 
-		public async AgentScriptId compile_and_load_script (string script_text) throws IOError {
-			var instance = script_engine.compile_and_load_script (script_text);
+		public async AgentScriptId load_script (string script_text) throws IOError {
+			var instance = script_engine.load_script (script_text);
 			return instance.sid;
 		}
 
-		public async void destroy_script (AgentScriptId sid) throws IOError {
-			script_engine.destroy_script (sid);
+		public async void unload_script (AgentScriptId sid) throws IOError {
+			script_engine.unload_script (sid);
 		}
 
 		public async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {

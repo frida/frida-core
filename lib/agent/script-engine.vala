@@ -17,7 +17,7 @@ namespace Zed.Agent {
 			instance_by_id.clear ();
 		}
 
-		public ScriptInstance compile_and_load_script (string script_text) throws IOError {
+		public ScriptInstance load_script (string script_text) throws IOError {
 			var script = Gum.Script.from_string (script_text);
 			var sid = AgentScriptId (++last_script_id);
 			script.set_message_handler ((script, msg) => on_message_from_script (sid, msg));
@@ -30,7 +30,7 @@ namespace Zed.Agent {
 			return instance;
 		}
 
-		public async void destroy_script (AgentScriptId sid) throws IOError {
+		public async void unload_script (AgentScriptId sid) throws IOError {
 			ScriptInstance instance;
 			if (!instance_by_id.unset (sid.handle, out instance))
 				throw new IOError.FAILED ("invalid script id");

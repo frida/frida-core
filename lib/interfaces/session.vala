@@ -24,8 +24,8 @@ namespace Zed {
 		public signal void new_batch_of_clues (AgentClue[] clues);
 		public signal void investigation_complete ();
 
-		public abstract async AgentScriptId compile_and_load_script (string script_text) throws IOError;
-		public abstract async void destroy_script (AgentScriptId sid) throws IOError;
+		public abstract async AgentScriptId load_script (string script_text) throws IOError;
+		public abstract async void unload_script (AgentScriptId sid) throws IOError;
 		public abstract async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError;
 		public signal void message_from_script (AgentScriptId sid, string msg);
 
