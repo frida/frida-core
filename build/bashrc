@@ -174,11 +174,17 @@ export VALAC
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
 toolchain_version=20110118
-if [ "$FRIDA_TARGET" = "android" ]; then
-  sdk_version=20110118
-else
-  sdk_version=20101003
-fi
+case $FRIDA_TARGET in
+  android)
+    sdk_version=20110118
+    ;;
+  ios)
+    sdk_version=20110514
+    ;;
+  *)
+    sdk_version=20101003
+    ;;
+esac
 
 if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
   echo "Downloading and deploying toolchain..."
