@@ -22,8 +22,8 @@ namespace Zed.AgentTest {
 		});
 #endif
 
-		GLib.Test.add_func ("/Agent/Script/attach-and-receive-messages", () => {
-			var h = new Harness ((h) => Script.attach_and_receive_messages (h as Harness));
+		GLib.Test.add_func ("/Agent/Script/load-and-receive-messages", () => {
+			var h = new Harness ((h) => Script.load_and_receive_messages (h as Harness));
 			h.run ();
 		});
 	}
@@ -131,13 +131,17 @@ namespace Zed.AgentTest {
 
 	namespace Script {
 
-		private static async void attach_and_receive_messages (Harness h) {
+		private static async void load_and_receive_messages (Harness h) {
 			var session = yield h.load_agent ();
 
-			AgentScriptInfo script;
+			AgentScriptId sid;
 			try {
-				script = yield session.compile_script ("send_int32 (arg0)\nsend_narrow_string (arg1)");
-				yield session.attach_script_to (script.sid, (uint64) target_function);
+				sid = yield session.load_script (
+					("Interceptor.attach (0x%" + size_t.FORMAT_MODIFIER + "x, {" +
+					 "  onEnter: function(args) {" +
+					 "    send({ first_argument: args[0], second_argument: Memory.readUtf8String(args[1]) });" +
+					 "  }" +
+					 "});").printf ((size_t) target_function));
 			} catch (IOError attach_error) {
 				assert_not_reached ();
 			}
@@ -145,8 +149,8 @@ namespace Zed.AgentTest {
 			target_function (1337, "Frida rocks");
 
 			var msg = yield h.wait_for_message ();
-			assert (msg.sender_id.handle == script.sid.handle);
-			assert (msg.content.print (false) == "(1337, 'Frida rocks')");
+			assert (msg.sender_id.handle == sid.handle);
+			assert (msg.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
 
 			yield h.unload_agent ();
 
@@ -283,12 +287,12 @@ namespace Zed.AgentTest {
 				private set;
 			}
 
-			public Variant content {
+			public string content {
 				get;
 				private set;
 			}
 
-			public ScriptMessage (AgentScriptId sender_id, Variant content) {
+			public ScriptMessage (AgentScriptId sender_id, string content) {
 				this.sender_id = sender_id;
 				this.content = content;
 			}
