@@ -6,9 +6,12 @@ TESTS = zed-tests
 endif
 endif
 
-noinst_PROGRAMS = zed-tests inject-victim
-
-noinst_LTLIBRARIES = libinject-attacker.la
+noinst_PROGRAMS = \
+	zed-tests \
+	inject-victim
+noinst_LTLIBRARIES = \
+	libzed-tests-glue.la \
+	libinject-attacker.la
 
 platform_tests = $(NULL)
 
@@ -28,11 +31,13 @@ zed_tests_SOURCES = \
 	test-agent.vala \
 	test-host-session.vala \
 	async-harness.vala \
-	process.vala \
-	process-unix.c
+	process.vala
+zed_tests_CFLAGS = \
+	-w
 zed_tests_LDFLAGS = \
 	$(ZED_LDFLAGS)
 zed_tests_LDADD = \
+	$(builddir)/libzed-tests-glue.la \
 	$(top_builddir)/src/libzed-core.la \
 	$(ZED_LIBS)
 zed_tests_VALAFLAGS = \
@@ -47,6 +52,9 @@ zed_tests_VALAFLAGS = \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
+
+libzed_tests_glue_la_SOURCES = \
+	process-unix.c
 
 inject_victim_SOURCES = \
 	inject-victim.vala
