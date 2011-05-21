@@ -22,14 +22,8 @@ zed_cli_LDADD = \
 	$(ZED_LIBS) \
 	$(ZED_CLI_LIBS)
 zed_cli_VALAFLAGS = \
-	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_builddir)/data \
-	--vapidir=$(top_builddir)/lib/interfaces \
 	--vapidir=$(builddir) \
-	--pkg=config \
-	--pkg=zed-core \
 	--pkg=zed-cli \
-	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_CLI_PACKAGES@ \
 	@ZED_VALAFLAGS@
@@ -106,9 +100,10 @@ libzed_cli_la_VALAFLAGS = \
 	--library=zed-cli \
 	--header=zed-cli.h \
 	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_builddir)/data \
 	--vapidir=$(top_builddir)/lib/interfaces \
+	--vapidir=$(builddir) \
 	--pkg=config \
+	--pkg=zed-core \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_CLI_PACKAGES@ \
