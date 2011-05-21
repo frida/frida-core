@@ -16,7 +16,7 @@ public class Zed.Application : Object {
 		main_loop.run ();
 	}
 
-	private async void stop () {
+	public async void stop () {
 		yield host_session_service.stop ();
 		main_loop.quit ();
 	}
