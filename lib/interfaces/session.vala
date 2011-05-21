@@ -10,44 +10,10 @@ namespace Zed {
 	public interface AgentSession : Object {
 		public abstract async void close () throws IOError;
 
-		public abstract async uint64 resolve_module_base (string module_name) throws IOError;
-		public abstract async uint64 resolve_module_export (string module_name, string symbol_name) throws IOError;
-		public abstract async AgentModuleInfo[] query_modules () throws IOError;
-		public abstract async AgentFunctionInfo[] query_module_functions (string module_name) throws IOError;
-		public abstract async uint64[] scan_memory_for_pattern (MemoryProtection required_protection, string pattern) throws IOError;
-		public abstract async uint64[] scan_module_for_code_pattern (string module_name, string pattern) throws IOError;
-		public abstract async uint8[] read_memory (uint64 address, uint size) throws IOError;
-		public abstract async void write_memory (uint64 address, uint8[] bytes) throws IOError;
-
-		public abstract async void start_investigation (AgentTriggerInfo start_trigger, AgentTriggerInfo stop_trigger) throws IOError;
-		public abstract async void stop_investigation () throws IOError;
-		public signal void new_batch_of_clues (AgentClue[] clues);
-		public signal void investigation_complete ();
-
 		public abstract async AgentScriptId load_script (string script_text) throws IOError;
 		public abstract async void unload_script (AgentScriptId sid) throws IOError;
 		public abstract async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError;
 		public signal void message_from_script (AgentScriptId sid, string msg);
-
-		public abstract async void invoke_function (uint64 address, string arguments) throws IOError;
-
-		public abstract async void set_monitor_enabled (string module_name, bool enable) throws IOError;
-		public signal void memory_read_detected (uint64 from, uint64 address, string module_name);
-
-		public abstract async void begin_instance_trace () throws IOError;
-		public abstract async void end_instance_trace () throws IOError;
-		public abstract async AgentInstanceInfo[] peek_instances () throws IOError;
-
-		public abstract async void add_glog_pattern (string pattern, uint levels) throws IOError;
-		public abstract async void clear_glog_patterns () throws IOError;
-		public signal void glog_message (uint64 timestamp, string domain, uint level, string message);
-
-		public abstract async void enable_gmain_watchdog (double max_duration) throws IOError;
-		public abstract async void disable_gmain_watchdog () throws IOError;
-
-		public abstract async void enable_gst_monitor () throws IOError;
-		public abstract async void disable_gst_monitor () throws IOError;
-		public signal void gst_pad_stats (GstPadStats[] stats);
 	}
 
 	public struct HostProcessInfo {
@@ -90,99 +56,6 @@ namespace Zed {
 		}
 	}
 
-	public struct AgentModuleInfo {
-		public string name {
-			get;
-			private set;
-		}
-
-		public string uid {
-			get;
-			private set;
-		}
-
-		public uint64 size {
-			get;
-			private set;
-		}
-
-		public uint64 address {
-			get;
-			private set;
-		}
-
-		public AgentModuleInfo (string name, string uid, uint64 size, uint64 address) {
-			this.name = name;
-			this.uid = uid;
-			this.size = size;
-			this.address = address;
-		}
-	}
-
-	public struct AgentFunctionInfo {
-		public string name {
-			get;
-			private set;
-		}
-
-		public uint64 address {
-			get;
-			private set;
-		}
-
-		public AgentFunctionInfo (string name, uint64 address) {
-			this.name = name;
-			this.address = address;
-		}
-	}
-
-	[Flags]
-	public enum MemoryProtection {
-		READ	= 1 << 0,
-		WRITE	= 1 << 1,
-		EXECUTE	= 1 << 2
-	}
-
-	public struct AgentTriggerInfo {
-		public string module_name {
-			get;
-			private set;
-		}
-
-		public string function_name {
-			get;
-			private set;
-		}
-
-		public AgentTriggerInfo (string module_name, string function_name) {
-			this.module_name = module_name;
-			this.function_name = function_name;
-		}
-	}
-
-	public struct AgentClue {
-		public int depth {
-			get;
-			private set;
-		}
-
-		public uint64 location {
-			get;
-			private set;
-		}
-
-		public uint64 target {
-			get;
-			private set;
-		}
-
-		public AgentClue (int depth, uint64 location, uint64 target) {
-			this.depth = depth;
-			this.location = location;
-			this.target = target;
-		}
-	}
-
 	public struct AgentScriptId {
 		public uint handle {
 			get;
@@ -191,52 +64,6 @@ namespace Zed {
 
 		public AgentScriptId (uint handle) {
 			this.handle = handle;
-		}
-	}
-
-	public struct AgentInstanceInfo {
-		public uint64 address {
-			get;
-			private set;
-		}
-
-		public uint reference_count {
-			get;
-			private set;
-		}
-
-		public string type_name {
-			get;
-			private set;
-		}
-
-		public AgentInstanceInfo (uint64 address, uint reference_count, string type_name) {
-			this.address = address;
-			this.reference_count = reference_count;
-			this.type_name = type_name;
-		}
-	}
-
-	public struct GstPadStats {
-		public string pad_name {
-			get;
-			private set;
-		}
-
-		public double buffers_per_second {
-			get;
-			private set;
-		}
-
-		public string timing_history {
-			get;
-			private set;
-		}
-
-		public GstPadStats (string pad_name, double buffers_per_second, string timing_history) {
-			this.pad_name = pad_name;
-			this.buffers_per_second = buffers_per_second;
-			this.timing_history = timing_history;
 		}
 	}
 
