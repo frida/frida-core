@@ -3,12 +3,7 @@ lib_LTLIBRARIES = libzed-agent.la
 libzed_agent_la_SOURCES = \
 	agent.vala \
 	agent-glue.c \
-	glog-probe.vala \
-	gmain-watchdog.vala \
-	gst-monitor.vala \
-	script-engine.vala \
-	stopwatch.vala \
-	stopwatch-posix.c
+	script-engine.vala
 libzed_agent_la_LIBADD = \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la \
 	$(ZED_LIBS)
