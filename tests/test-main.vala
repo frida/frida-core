@@ -17,13 +17,8 @@ namespace Zed.Test {
 		Zed.FruitjectorTest.add_tests ();
 #endif
 
-		Zed.CodeServiceTest.add_tests ();
 		Zed.AgentTest.add_tests ();
 		Zed.HostSessionTest.add_tests ();
-
-#if WINDOWS
-		Zed.HexViewTest.add_tests ();
-#endif
 
 		GLib.Test.run ();
 
