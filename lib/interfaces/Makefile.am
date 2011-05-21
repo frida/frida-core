@@ -9,4 +9,5 @@ libzed_interfaces_la_VALAFLAGS = \
 	@ZED_PACKAGES@
 
 AM_CPPFLAGS = \
-	$(ZED_CFLAGS)
+	$(ZED_CFLAGS) \
+	-w
