@@ -1,16 +1,16 @@
 ACLOCAL_AMFLAGS = -I m4
 
-client_subdirs =
+cli_subdirs =
 
-if ENABLE_GUI
-client_subdirs += \
+if ENABLE_CLI
+cli_subdirs += \
 	tools \
 	data
 endif
 
 SUBDIRS = \
 	lib \
-	$(client_subdirs) \
+	$(cli_subdirs) \
 	src \
 	tests
 

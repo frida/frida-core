@@ -1,5 +1,5 @@
 AC_INIT([zed], [0.1])
-AC_CONFIG_SRCDIR([src/zed-core.vala])
+AC_CONFIG_SRCDIR([src/zed-cli.vala])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CANONICAL_SYSTEM
