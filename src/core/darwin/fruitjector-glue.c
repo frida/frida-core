@@ -3,7 +3,11 @@
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <gum/arch-arm/gumthumbwriter.h>
+#ifdef HAVE_ARM
+# include <gum/arch-arm/gumthumbwriter.h>
+#else
+# include <gum/arch-x86/gumx86writer.h>
+#endif
 #include <gum/gum.h>
 #include <mach/mach.h>
 
@@ -88,17 +92,13 @@ typedef struct _ZedEmitContext ZedEmitContext;
 struct _ZedEmitContext
 {
   guint8 * code;
+#ifdef HAVE_ARM
   GumThumbWriter tw;
+#endif
 };
 
 static void zed_emit_mach_stub_code (guint8 * code);
 static void zed_emit_pthread_stub_code (guint8 * code);
-
-static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
-static void zed_emit_clear_newstyle_bit_in_pthread_self (ZedEmitContext * ctx);
-static void zed_emit_pthread_start_call (ZedEmitContext * ctx);
-static void zed_emit_push_ctx_value (guint field_offset, GumThumbWriter * tw);
-static void zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
 
 static gboolean zed_fill_agent_context (ZedAgentContext * ctx, const char * dylib_path, const char * data_string,
     vm_address_t remote_payload_base, GError ** error);
@@ -184,7 +184,15 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
   ZedAgentContext agent_ctx;
+#ifdef HAVE_ARM
   arm_thread_state_t state;
+  mach_msg_type_number_t state_count = ARM_THREAD_STATE_COUNT;
+  thread_state_flavor_t state_flavor = ARM_THREAD_STATE;
+#else
+  x86_thread_state_t state;
+  mach_msg_type_number_t state_count = x86_THREAD_STATE_COUNT;
+  thread_state_flavor_t state_flavor = x86_THREAD_STATE;
+#endif
   dispatch_source_t source;
 
   instance = zed_injection_instance_new (self, self->last_id++);
@@ -215,15 +223,16 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   ret = vm_protect (task, payload_address + ZED_CODE_OFFSET, ZED_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
+#ifdef HAVE_ARM
   state.__r[7] = payload_address + ZED_DATA_OFFSET;
 
   state.__sp = payload_address + ZED_STACK_TOP_OFFSET;
   state.__lr = 0xcafebabe;
   state.__pc = payload_address + ZED_MACH_CODE_OFFSET;
   state.__cpsr = ZED_PSR_THUMB;
+#endif
 
-  ret = thread_create_running (task, ARM_THREAD_STATE, (thread_state_t) &state, ARM_THREAD_STATE_COUNT,
-      &instance->thread);
+  ret = thread_create_running (task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
   CHECK_MACH_RESULT (ret, ==, 0, "thread_create_running");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_id), GUINT_TO_POINTER (instance->id), instance);
@@ -313,6 +322,14 @@ beach:
     return result;
   }
 }
+
+#ifdef HAVE_ARM
+
+static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
+static void zed_emit_clear_newstyle_bit_in_pthread_self (ZedEmitContext * ctx);
+static void zed_emit_pthread_start_call (ZedEmitContext * ctx);
+static void zed_emit_push_ctx_value (guint field_offset, GumThumbWriter * tw);
+static void zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
 
 static void
 zed_emit_mach_stub_code (guint8 * code)
@@ -442,3 +459,17 @@ zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWri
   gum_thumb_writer_put_add_reg_reg_reg (tw, reg, GUM_AREG_R7, GUM_AREG_R6);
   gum_thumb_writer_put_ldr_reg_reg (tw, reg, reg);
 }
+
+#else /* HAVE_ARM */
+
+static void
+zed_emit_mach_stub_code (guint8 * code)
+{
+}
+
+static void
+zed_emit_pthread_stub_code (guint8 * code)
+{
+}
+
+#endif /* !HAVE_ARM */
