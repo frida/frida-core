@@ -1,14 +1,15 @@
 #include "zed-core.h"
 
-#import <UIKit/UIKit.h>
-
 #include <dlfcn.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
 
+#ifdef HAVE_IOS
+
+# import <UIKit/UIKit.h>
+
 typedef struct _ZedSpringboardApi ZedSpringboardApi;
-typedef struct _ZedIconPair ZedIconPair;
 
 struct _ZedSpringboardApi
 {
@@ -19,25 +20,35 @@ struct _ZedSpringboardApi
   NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifier) (NSString * identifier);
 };
 
+static void extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon);
+static void init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height);
+
+static ZedSpringboardApi * zed_springboard_api = NULL;
+
+#else
+# import <Foundation/Foundation.h>
+#endif
+
+typedef struct _ZedIconPair ZedIconPair;
+
 struct _ZedIconPair
 {
   ZedImageData small_icon;
   ZedImageData large_icon;
 };
 
-static void extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon);
-static void init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height);
-
 static void zed_icon_pair_free (ZedIconPair * pair);
 
-static ZedSpringboardApi * zed_springboard_api = NULL;
 static GHashTable * icon_pair_by_identifier = NULL;
 
 static void
 zed_system_init (void)
 {
+#ifdef HAVE_IOS
   if (zed_springboard_api == NULL)
+#endif
   {
+#ifdef HAVE_IOS
     ZedSpringboardApi * api;
 
     api = g_new (ZedSpringboardApi, 1);
@@ -55,6 +66,7 @@ zed_system_init (void)
     g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
 
     zed_springboard_api = api;
+#endif
 
     icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) zed_icon_pair_free);
   }
@@ -91,11 +103,11 @@ zed_system_enumerate_processes (int * result_length1)
   {
     struct kinfo_proc * e = &entries[i];
     ZedHostProcessInfo * info = &result[i];
-    NSString * identifier;
 
     info->_pid = e->kp_proc.p_pid;
 
-    identifier = zed_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
+#ifdef HAVE_IOS
+    NSString * identifier = zed_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
     if (identifier != nil)
     {
       NSString * app_name;
@@ -109,6 +121,7 @@ zed_system_enumerate_processes (int * result_length1)
       [identifier release];
     }
     else
+#endif
     {
       info->_name = g_strdup (e->kp_proc.p_comm);
 
@@ -129,6 +142,8 @@ zed_system_kill (guint pid)
 {
   killpg (getpgid (pid), SIGTERM);
 }
+
+#ifdef HAVE_IOS
 
 static void
 extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon)
@@ -217,6 +232,8 @@ init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint t
   CGColorSpaceRelease (colorspace);
   g_free (pixel_buf);
 }
+
+#endif /* HAVE_IOS */
 
 static void
 zed_icon_pair_free (ZedIconPair * pair)
