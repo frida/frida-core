@@ -74,12 +74,11 @@ endif
 
 libzed_core_la_SOURCES = \
 	$(srcdir)/core/system.vala \
-	$(srcdir)/core/code-service.vala \
 	$(srcdir)/core/host-session-service.vala \
-	$(srcdir)/core/storage-backend.vala \
-	$(srcdir)/core/storage-backend-glue.c \
 	$(backend_sources) \
 	$(srcdir)/core/tcp/tcp-host-session.vala
+libzed_core_la_CFLAGS = \
+	-w
 libzed_core_la_LIBADD = \
 	$(builddir)/libzed-core-glue.la \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la
