@@ -4,8 +4,7 @@ cli_subdirs =
 
 if ENABLE_CLI
 cli_subdirs += \
-	tools \
-	data
+	tools
 endif
 
 SUBDIRS = \
