@@ -88,6 +88,12 @@ if [[ "x$HAVE_IOS" = "xyes" ]]; then
 fi
 AC_SUBST(ZED_VALAFLAGS)
 
+AC_ARG_ENABLE(cli, [AC_HELP_STRING([--enable-cli], [build CLI [default=yes]])],, [enable_cli=yes])
+if test "x$enable_cli" = "xyes"; then
+  AC_DEFINE(HAVE_CLI, 1, [Define to 1 if CLI is built.])
+fi
+AM_CONDITIONAL(ENABLE_CLI, [test "x$enable_cli" = "xyes"])
+
 AC_ARG_ENABLE(gui, [AC_HELP_STRING([--enable-gui], [build GUI [default=no]])],, [enable_gui=no])
 if test "x$enable_gui" = "xyes"; then
   AC_DEFINE(HAVE_GUI, 1, [Define to 1 if GUI is built.])
@@ -113,6 +119,15 @@ AC_SUBST(ZED_CFLAGS)
 AC_SUBST(ZED_LDFLAGS)
 AC_SUBST(ZED_LIBS)
 AC_SUBST(ZED_PACKAGES)
+
+if test "x$enable_cli" = "xyes"; then
+	pkg_modules="v8"
+	ZED_GUI_PACKAGES="--pkg readline"
+	PKG_CHECK_MODULES(ZED_CLI, [$pkg_modules])
+	AC_SUBST(ZED_CLI_CFLAGS)
+	AC_SUBST(ZED_CLI_LIBS)
+	AC_SUBST(ZED_CLI_PACKAGES)
+fi
 
 if test "x$enable_gui" = "xyes"; then
 	GTK_VERSION=2.16.0

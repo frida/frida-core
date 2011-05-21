@@ -1,6 +1,11 @@
 programs =
 libraries = libzed-core.la libzed-core-glue.la
 
+if ENABLE_CLI
+programs += zed-cli
+libraries += libzed-cli.la libzed-cli-glue.la
+endif
+
 if ENABLE_GUI
 programs += zed
 libraries += libzed-gui.la
@@ -12,6 +17,27 @@ endif
 
 bin_PROGRAMS = $(programs)
 noinst_LTLIBRARIES = $(libraries)
+
+zed_cli_SOURCES = \
+	$(srcdir)/zed-cli.vala
+zed_cli_LDFLAGS = \
+	$(ZED_LDFLAGS)
+zed_cli_LDADD = \
+	$(builddir)/libzed-cli.la \
+	$(ZED_LIBS) \
+	$(ZED_CLI_LIBS)
+zed_cli_VALAFLAGS = \
+	--vapidir=$(top_srcdir)/vapi \
+	--vapidir=$(top_builddir)/data \
+	--vapidir=$(top_builddir)/lib/interfaces \
+	--vapidir=$(builddir) \
+	--pkg=config \
+	--pkg=zed-core \
+	--pkg=zed-cli \
+	--pkg=zed-interfaces \
+	@ZED_PACKAGES@ \
+	@ZED_CLI_PACKAGES@ \
+	@ZED_VALAFLAGS@
 
 zed_SOURCES = \
 	$(srcdir)/zed-gui.vala
@@ -100,6 +126,26 @@ libzed_core_la_VALAFLAGS = \
 libzed_core_glue_la_SOURCES = \
 	$(glue_sources)
 
+libzed_cli_la_SOURCES = \
+	$(srcdir)/cli/application.vala
+libzed_cli_la_LIBADD = \
+	$(builddir)/libzed-core.la
+libzed_cli_la_VALAFLAGS = \
+	--vapi=zed-cli.vapi \
+	--library=zed-cli \
+	--header=zed-cli.h \
+	--vapidir=$(top_srcdir)/vapi \
+	--vapidir=$(top_builddir)/data \
+	--vapidir=$(top_builddir)/lib/interfaces \
+	--pkg=config \
+	--pkg=zed-interfaces \
+	@ZED_PACKAGES@ \
+	@ZED_CLI_PACKAGES@ \
+	@ZED_VALAFLAGS@
+
+libzed_cli_glue_la_SOURCES = \
+	$(srcdir)/cli/application-glue.c
+
 libzed_gui_la_SOURCES = \
 	$(srcdir)/configuration.vala \
 	$(srcdir)/protocol/jid.vala \
@@ -117,7 +163,7 @@ libzed_gui_la_SOURCES = \
 	$(srcdir)/gui/process-info-label.vala \
 	$(srcdir)/gui/process-selector.vala \
 	$(srcdir)/gui/root.vala \
-	$(srcdir)/gui/workspace.vala \
+	$(srcdir)/gui/workspace.vala
 libzed_gui_la_LIBADD = \
 	$(builddir)/libzed-core.la
 libzed_gui_la_VALAFLAGS = \
