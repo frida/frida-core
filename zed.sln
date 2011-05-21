@@ -35,7 +35,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-64", "lib\agent\z
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\libgum\bindings\gumpp\gumpp.vcxproj", "{BB098FCF-D570-43FF-BB10-985189B2E1AB}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-ui", "zed-ui.vcxproj", "{BBF6C968-7E08-48D2-A456-F9ED879D3A99}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-gui", "zed-gui.vcxproj", "{BBF6C968-7E08-48D2-A456-F9ED879D3A99}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cloud-spy", "bindings\cloud-spy\cloud-spy.vcxproj", "{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}"
 EndProject

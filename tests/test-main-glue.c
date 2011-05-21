@@ -4,7 +4,7 @@
 
 #include <gio/gio.h>
 #include <gum/gum.h>
-#ifdef HAVE_CLIENT
+#ifdef HAVE_GUI
 #include <clutter/clutter.h>
 #endif
 
@@ -43,7 +43,7 @@ zed_test_environment_init (int * args_length1, char *** args)
   g_type_init ();
   g_test_init (args_length1, args, NULL);
   gum_init ();
-#ifdef HAVE_CLIENT
+#ifdef HAVE_GUI
   clutter_init (args_length1, args);
 #endif
 }

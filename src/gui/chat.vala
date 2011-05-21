@@ -36,7 +36,7 @@ namespace Zed {
 		public Chat () {
 			try {
 				var builder = new Gtk.Builder ();
-				var blob = Zed.Data.Ui.get_chat_ui_blob ();
+				var blob = Zed.Data.Gtk.get_chat_ui_blob ();
 				builder.add_from_string ((string) blob.data, blob.size);
 
 				hbox = builder.get_object ("root_hbox") as Gtk.HBox;

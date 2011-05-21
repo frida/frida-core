@@ -2,7 +2,7 @@ ACLOCAL_AMFLAGS = -I m4
 
 client_subdirs =
 
-if ENABLE_CLIENT
+if ENABLE_GUI
 client_subdirs += \
 	tools \
 	data

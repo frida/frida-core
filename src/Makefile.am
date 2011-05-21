@@ -1,9 +1,9 @@
 programs =
 libraries = libzed-core.la libzed-core-glue.la
 
-if ENABLE_CLIENT
+if ENABLE_GUI
 programs += zed
-libraries += libzed-ui.la
+libraries += libzed-gui.la
 endif
 
 if ENABLE_SERVER
@@ -14,13 +14,13 @@ bin_PROGRAMS = $(programs)
 noinst_LTLIBRARIES = $(libraries)
 
 zed_SOURCES = \
-	$(srcdir)/zed-ui.vala
+	$(srcdir)/zed-gui.vala
 zed_LDFLAGS = \
 	$(ZED_LDFLAGS)
 zed_LDADD = \
-	$(builddir)/libzed-ui.la \
+	$(builddir)/libzed-gui.la \
 	$(ZED_LIBS) \
-	$(ZED_CLIENT_LIBS)
+	$(ZED_GUI_LIBS)
 zed_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/data \
@@ -28,11 +28,11 @@ zed_VALAFLAGS = \
 	--vapidir=$(builddir) \
 	--pkg=config \
 	--pkg=zed-core \
-	--pkg=zed-ui \
+	--pkg=zed-gui \
 	--pkg=zed-data-mx \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
-	@ZED_CLIENT_PACKAGES@ \
+	@ZED_GUI_PACKAGES@ \
 	@ZED_VALAFLAGS@
 
 zed_server_SOURCES = \
@@ -51,7 +51,7 @@ zed_server_VALAFLAGS = \
 	--pkg=zed-core \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
-	@ZED_CLIENT_PACKAGES@ \
+	@ZED_GUI_PACKAGES@ \
 	@ZED_VALAFLAGS@
 
 backend_sources = $(NULL)
@@ -100,39 +100,39 @@ libzed_core_la_VALAFLAGS = \
 libzed_core_glue_la_SOURCES = \
 	$(glue_sources)
 
-libzed_ui_la_SOURCES = \
+libzed_gui_la_SOURCES = \
 	$(srcdir)/configuration.vala \
 	$(srcdir)/protocol/jid.vala \
 	$(srcdir)/service/base-service.vala \
 	$(srcdir)/service/muc-service.vala \
 	$(srcdir)/service/xmpp-client.vala \
 	\
-	$(srcdir)/ui/agent-session.vala \
-	$(srcdir)/ui/agent-session-glue.c \
-	$(srcdir)/ui/chat.vala \
-	$(srcdir)/ui/function-selector.vala \
-	$(srcdir)/ui/host-session.vala \
-	$(srcdir)/ui/image-factory.vala \
-	$(srcdir)/ui/login.vala \
-	$(srcdir)/ui/process-info-label.vala \
-	$(srcdir)/ui/process-selector.vala \
-	$(srcdir)/ui/root.vala \
-	$(srcdir)/ui/workspace.vala \
-libzed_ui_la_LIBADD = \
+	$(srcdir)/gui/agent-session.vala \
+	$(srcdir)/gui/agent-session-glue.c \
+	$(srcdir)/gui/chat.vala \
+	$(srcdir)/gui/function-selector.vala \
+	$(srcdir)/gui/host-session.vala \
+	$(srcdir)/gui/image-factory.vala \
+	$(srcdir)/gui/login.vala \
+	$(srcdir)/gui/process-info-label.vala \
+	$(srcdir)/gui/process-selector.vala \
+	$(srcdir)/gui/root.vala \
+	$(srcdir)/gui/workspace.vala \
+libzed_gui_la_LIBADD = \
 	$(builddir)/libzed-core.la
-libzed_ui_la_VALAFLAGS = \
-	--vapi=zed-ui.vapi \
-	--library=zed-ui \
-	--header=zed-ui.h \
+libzed_gui_la_VALAFLAGS = \
+	--vapi=zed-gui.vapi \
+	--library=zed-gui \
+	--header=zed-gui.h \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/data \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--pkg=config \
-	--pkg=zed-data-ui \
+	--pkg=zed-data-gui \
 	--pkg=zed-data-images \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
-	@ZED_CLIENT_PACKAGES@ \
+	@ZED_GUI_PACKAGES@ \
 	@ZED_VALAFLAGS@
 
 AM_CPPFLAGS = \
@@ -141,7 +141,7 @@ AM_CPPFLAGS = \
 	-I $(top_builddir)/lib/interfaces \
 	-I $(top_builddir)/ext/libgum/ext/udis86 \
 	$(ZED_CFLAGS) \
-	$(ZED_CLIENT_CFLAGS) \
+	$(ZED_GUI_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
 

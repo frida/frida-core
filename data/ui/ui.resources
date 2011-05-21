@@ -1,5 +1,0 @@
-[resource-compiler]
-namespace = Zed.Data.Ui
-
-[root]
-inputs = .*\\.ui

@@ -32,7 +32,7 @@ namespace Zed {
 		public Workspace () {
 			try {
 				var builder = new Gtk.Builder ();
-				var blob = Zed.Data.Ui.get_workspace_ui_blob ();
+				var blob = Zed.Data.Gtk.get_workspace_ui_blob ();
 				builder.add_from_string ((string) blob.data, blob.size);
 
 				ui_manager = builder.get_object ("uimanager1") as Gtk.UIManager;

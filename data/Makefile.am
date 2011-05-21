@@ -1,7 +1,7 @@
 CLEANFILES = \
-	zed-data-ui.c \
-	zed-data-ui.h \
-	zed-data-ui.vapi \
+	zed-data-gtk.c \
+	zed-data-gtk.h \
+	zed-data-gtk.vapi \
 	zed-data-images.c \
 	zed-data-images.h \
 	zed-data-images.vapi \
@@ -12,7 +12,7 @@ CLEANFILES = \
 noinst_LTLIBRARIES = libzed-data.la
 
 libzed_data_la_SOURCES = \
-	$(builddir)/zed-data-ui.c \
+	$(builddir)/zed-data-gtk.c \
 	$(builddir)/zed-data-images.c \
 	$(builddir)/zed-data-mx.c \
 	$(NULL)

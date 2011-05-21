@@ -113,7 +113,7 @@
     <ClCompile Include="src\winmain.c" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="zed-ui.vcxproj">
+    <ProjectReference Include="zed-gui.vcxproj">
       <Project>{bbf6c968-7e08-48d2-a456-f9ed879d3a99}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>

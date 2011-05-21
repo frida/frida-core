@@ -88,11 +88,11 @@ if [[ "x$HAVE_IOS" = "xyes" ]]; then
 fi
 AC_SUBST(ZED_VALAFLAGS)
 
-AC_ARG_ENABLE(client, [AC_HELP_STRING([--enable-client], [build client [default=yes]])],, [enable_client=yes])
-if test "x$enable_client" = "xyes"; then
-  AC_DEFINE(HAVE_CLIENT, 1, [Define to 1 if client is built.])
+AC_ARG_ENABLE(gui, [AC_HELP_STRING([--enable-gui], [build GUI [default=no]])],, [enable_gui=no])
+if test "x$enable_gui" = "xyes"; then
+  AC_DEFINE(HAVE_GUI, 1, [Define to 1 if GUI is built.])
 fi
-AM_CONDITIONAL(ENABLE_CLIENT, [test "x$enable_client" = "xyes"])
+AM_CONDITIONAL(ENABLE_GUI, [test "x$enable_gui" = "xyes"])
 
 AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=no]])],, [enable_server=no])
 if test "x$enable_server" = "xyes"; then
@@ -114,14 +114,14 @@ AC_SUBST(ZED_LDFLAGS)
 AC_SUBST(ZED_LIBS)
 AC_SUBST(ZED_PACKAGES)
 
-if test "x$enable_client" = "xyes"; then
+if test "x$enable_gui" = "xyes"; then
 	GTK_VERSION=2.16.0
 	pkg_modules="gtk+-2.0 >= $GTK_VERSION, clutter-1.0 >= 1.4.0, clutter-gtk-0.90, mx-1.0, mx-gtk-1.0, wocky-0.0"
-	ZED_CLIENT_PACKAGES="--pkg gtk+-2.0 --pkg=cogl-1.0 --pkg=clutter-1.0 --pkg=clutter-gtk-0.90 --pkg=mx-1.0 --pkg=mx-gtk-1.0 --pkg wocky-0.0"
-	PKG_CHECK_MODULES(ZED_CLIENT, [$pkg_modules])
-	AC_SUBST(ZED_CLIENT_CFLAGS)
-	AC_SUBST(ZED_CLIENT_LIBS)
-	AC_SUBST(ZED_CLIENT_PACKAGES)
+	ZED_GUI_PACKAGES="--pkg gtk+-2.0 --pkg=cogl-1.0 --pkg=clutter-1.0 --pkg=clutter-gtk-0.90 --pkg=mx-1.0 --pkg=mx-gtk-1.0 --pkg wocky-0.0"
+	PKG_CHECK_MODULES(ZED_GUI, [$pkg_modules])
+	AC_SUBST(ZED_GUI_CFLAGS)
+	AC_SUBST(ZED_GUI_LIBS)
+	AC_SUBST(ZED_GUI_PACKAGES)
 fi
 
 AC_CHECK_HEADERS([sys/user.h])

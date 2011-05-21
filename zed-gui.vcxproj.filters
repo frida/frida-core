@@ -19,16 +19,16 @@
     <Filter Include="Source Files\generated\data">
       <UniqueIdentifier>{a468be99-7d70-40d6-8edc-d8105f0a8995}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\ui">
+    <Filter Include="Source Files\generated\gui">
       <UniqueIdentifier>{c08d753c-6946-4284-a9fe-0058b1e0d6e7}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\ui">
+    <Filter Include="Source Files\gui">
       <UniqueIdentifier>{92f9c76d-08d7-45cf-9155-9cdbcf05c67d}</UniqueIdentifier>
     </Filter>
     <Filter Include="Resource Files\images">
       <UniqueIdentifier>{17f0590f-b383-4e2e-8227-68a868340102}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Resource Files\ui">
+    <Filter Include="Resource Files\gtk">
       <UniqueIdentifier>{b8b8271f-9110-4685-94fa-60069f7c76f2}</UniqueIdentifier>
     </Filter>
     <Filter Include="Resource Files\mx">
@@ -39,51 +39,51 @@
     <ClCompile Include="$(IntDir)data\zed-data-images.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-ui.c">
+    <ClCompile Include="$(IntDir)data\zed-data-gtk.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\zed-data-mx.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\agent-session.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\agent-session.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\chat.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\chat.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\function-selector.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\function-selector.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\host-session.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\host-session.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\image-factory.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\image-factory.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\login.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\login.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\process-selector.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\process-selector.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\process-info-label.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\process-info-label.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\root.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\root.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\ui\workspace.c">
-      <Filter>Source Files\generated\ui</Filter>
+    <ClCompile Include="$(IntDir)src\gui\workspace.c">
+      <Filter>Source Files\generated\gui</Filter>
     </ClCompile>
-    <ClCompile Include="src\ui\agent-session-glue.c">
-      <Filter>Source Files\ui</Filter>
+    <ClCompile Include="src\gui\agent-session-glue.c">
+      <Filter>Source Files\gui</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\zed-ui.c">
+    <ClCompile Include="$(IntDir)src\zed-gui.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)zed-ui.h">
+    <ClInclude Include="$(IntDir)zed-gui.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -94,61 +94,61 @@
     <CustomBuild Include="data\mx\mx.resources">
       <Filter>Resource Files\mx</Filter>
     </CustomBuild>
-    <CustomBuild Include="data\ui\ui.resources">
-      <Filter>Resource Files\ui</Filter>
+    <CustomBuild Include="data\gtk\gtk.resources">
+      <Filter>Resource Files\gtk</Filter>
     </CustomBuild>
     <CustomBuild Include="data\images\images.resources">
       <Filter>Resource Files\images</Filter>
     </CustomBuild>
-    <CustomBuild Include="src\zed-ui.vala">
+    <CustomBuild Include="src\zed-gui.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <None Include="data\ui\workspace.ui">
-      <Filter>Resource Files\ui</Filter>
+    <None Include="data\gtk\workspace.ui">
+      <Filter>Resource Files\gtk</Filter>
     </None>
-    <None Include="data\ui\login.ui">
-      <Filter>Resource Files\ui</Filter>
+    <None Include="data\gtk\login.ui">
+      <Filter>Resource Files\gtk</Filter>
     </None>
-    <None Include="data\ui\host-session.ui">
-      <Filter>Resource Files\ui</Filter>
+    <None Include="data\gtk\host-session.ui">
+      <Filter>Resource Files\gtk</Filter>
     </None>
-    <None Include="data\ui\chat.ui">
-      <Filter>Resource Files\ui</Filter>
+    <None Include="data\gtk\chat.ui">
+      <Filter>Resource Files\gtk</Filter>
     </None>
-    <None Include="data\ui\agent-session.ui">
-      <Filter>Resource Files\ui</Filter>
+    <None Include="data\gtk\agent-session.ui">
+      <Filter>Resource Files\gtk</Filter>
     </None>
-    <None Include="src\ui\agent-session.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\agent-session.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\chat.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\chat.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\function-selector.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\function-selector.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\host-session.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\host-session.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\login.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\login.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\process-info-label.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\process-info-label.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\process-selector.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\process-selector.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\root.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\root.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\workspace.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\workspace.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
-    <None Include="src\ui\image-factory.vala">
-      <Filter>Source Files\ui</Filter>
+    <None Include="src\gui\image-factory.vala">
+      <Filter>Source Files\gui</Filter>
     </None>
   </ItemGroup>
 </Project>
