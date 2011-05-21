@@ -8,13 +8,10 @@
     <Filter Include="Source Files\generated">
       <UniqueIdentifier>{5871a71e-92fa-44a7-847f-91d4ad19deb0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\protocol">
-      <UniqueIdentifier>{4415871d-d47f-4fa8-adba-891ff9d5fecf}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\generated\service">
+    <Filter Include="Source Files\generated\core">
       <UniqueIdentifier>{eef66507-e4a8-4117-87d0-a5b24833ddba}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\service">
+    <Filter Include="Source Files\core">
       <UniqueIdentifier>{b6dfc63e-558b-4086-bdb4-0478fe64c3be}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files">
@@ -25,16 +22,16 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
-    <Filter Include="Source Files\service\windows">
+    <Filter Include="Source Files\core\windows">
       <UniqueIdentifier>{28f8e0ab-f994-4a5b-b62b-edcdcb9d0c34}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\service\windows">
+    <Filter Include="Source Files\generated\core\windows">
       <UniqueIdentifier>{21f538e1-a14f-441b-9e2e-7303c1465c5b}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\service\fruity">
+    <Filter Include="Source Files\core\fruity">
       <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25619}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\service\fruity">
+    <Filter Include="Source Files\generated\core\fruity">
       <UniqueIdentifier>{2d5a13f8-9bcb-4d70-9f8a-9597707fc771}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\lib">
@@ -55,10 +52,10 @@
     <Filter Include="Source Files\generated\data">
       <UniqueIdentifier>{e441c3c0-5949-44e4-8617-0483732946e8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\service\tcp">
+    <Filter Include="Source Files\generated\core\tcp">
       <UniqueIdentifier>{620f3726-c7dd-4d6f-8f54-ad08f2ff594a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\service\tcp">
+    <Filter Include="Source Files\core\tcp">
       <UniqueIdentifier>{d4552ab5-00ec-4394-bf75-666ac4f869a1}</UniqueIdentifier>
     </Filter>
     <Filter Include="Resource Files\winjector">
@@ -69,100 +66,58 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="src\service\base-service.vala">
-      <Filter>Source Files\service</Filter>
+    <None Include="src\core\host-session-service.vala">
+      <Filter>Source Files\core</Filter>
     </None>
-    <None Include="src\service\muc-service.vala">
-      <Filter>Source Files\service</Filter>
+    <None Include="src\core\windows\winjector.vala">
+      <Filter>Source Files\core\windows</Filter>
     </None>
-    <None Include="src\service\xmpp-client.vala">
-      <Filter>Source Files\service</Filter>
+    <None Include="src\core\fruity\fruity-host-session.vala">
+      <Filter>Source Files\core\fruity</Filter>
     </None>
-    <None Include="src\service\storage-backend.vala">
-      <Filter>Source Files\service</Filter>
-    </None>
-    <None Include="src\service\code-service.vala">
-      <Filter>Source Files\service</Filter>
-    </None>
-    <None Include="src\service\host-session-service.vala">
-      <Filter>Source Files\service</Filter>
-    </None>
-    <None Include="src\service\windows\winjector.vala">
-      <Filter>Source Files\service\windows</Filter>
-    </None>
-    <None Include="src\service\fruity\fruity-host-session.vala">
-      <Filter>Source Files\service\fruity</Filter>
-    </None>
-    <None Include="src\service\windows\windows-host-session.vala">
-      <Filter>Source Files\service\windows</Filter>
+    <None Include="src\core\windows\windows-host-session.vala">
+      <Filter>Source Files\core\windows</Filter>
     </None>
     <None Include="lib\interfaces\session.vala">
       <Filter>Source Files\lib\interfaces</Filter>
     </None>
-    <None Include="src\service\tcp\tcp-host-session.vala">
-      <Filter>Source Files\service\tcp</Filter>
+    <None Include="src\core\tcp\tcp-host-session.vala">
+      <Filter>Source Files\core\tcp</Filter>
     </None>
-    <None Include="src\service\fruity\fruity-client.vala">
-      <Filter>Source Files\service\fruity</Filter>
+    <None Include="src\core\fruity\fruity-client.vala">
+      <Filter>Source Files\core\fruity</Filter>
     </None>
-    <None Include="src\service\fruity\fruity-property-list.vala">
-      <Filter>Source Files\service\fruity</Filter>
+    <None Include="src\core\fruity\fruity-property-list.vala">
+      <Filter>Source Files\core\fruity</Filter>
     </None>
-    <None Include="src\configuration.vala">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="src\service\session-manager.vala">
-      <Filter>Source Files\service</Filter>
+    <None Include="src\core\session-manager.vala">
+      <Filter>Source Files\core</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)src\configuration.c">
-      <Filter>Source Files\generated</Filter>
+    <ClCompile Include="$(IntDir)src\core\host-session-service.c">
+      <Filter>Source Files\generated\core</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\protocol\jid.c">
-      <Filter>Source Files\generated\protocol</Filter>
+    <ClCompile Include="$(IntDir)src\core\windows\winjector-error.c">
+      <Filter>Source Files\generated\core\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\base-service.c">
-      <Filter>Source Files\generated\service</Filter>
+    <ClCompile Include="$(IntDir)src\core\windows\winjector-ipc.c">
+      <Filter>Source Files\generated\core\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\muc-service.c">
-      <Filter>Source Files\generated\service</Filter>
+    <ClCompile Include="$(IntDir)src\core\windows\winjector.c">
+      <Filter>Source Files\generated\core\windows</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\storage-backend-glue.c">
-      <Filter>Source Files\service</Filter>
+    <ClCompile Include="src\core\windows\windows-host-session-glue.c">
+      <Filter>Source Files\core\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\storage-backend.c">
-      <Filter>Source Files\generated\service</Filter>
+    <ClCompile Include="$(IntDir)src\core\fruity\fruity-host-session.c">
+      <Filter>Source Files\generated\core\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\code-service.c">
-      <Filter>Source Files\generated\service</Filter>
+    <ClCompile Include="$(IntDir)src\core\windows\windows-host-session.c">
+      <Filter>Source Files\generated\core\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\host-session-service.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\windows\winjector-error.c">
-      <Filter>Source Files\generated\service\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\windows\winjector-ipc.c">
-      <Filter>Source Files\generated\service\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\windows\winjector.c">
-      <Filter>Source Files\generated\service\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="src\service\windows\windows-host-session-glue.c">
-      <Filter>Source Files\service\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\fruity\fruity-host-session.c">
-      <Filter>Source Files\generated\service\fruity</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\windows\windows-host-session.c">
-      <Filter>Source Files\generated\service\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\system.c">
-      <Filter>Source Files\generated\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\xmpp-client.c">
-      <Filter>Source Files\generated\service</Filter>
+    <ClCompile Include="$(IntDir)src\core\system.c">
+      <Filter>Source Files\generated\core</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)lib\interfaces\session.c">
       <Filter>Source Files\generated\lib\interfaces</Filter>
@@ -173,32 +128,29 @@
     <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\fruity\fruity-host-session-glue.c">
-      <Filter>Source Files\service\fruity</Filter>
+    <ClCompile Include="src\core\fruity\fruity-host-session-glue.c">
+      <Filter>Source Files\core\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\windows-icon-helpers.c">
-      <Filter>Source Files\service</Filter>
+    <ClCompile Include="src\core\windows-icon-helpers.c">
+      <Filter>Source Files\core</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\windows\winjector-glue.c">
-      <Filter>Source Files\service\windows</Filter>
+    <ClCompile Include="src\core\windows\winjector-glue.c">
+      <Filter>Source Files\core\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\tcp\tcp-host-session.c">
-      <Filter>Source Files\generated\service\tcp</Filter>
+    <ClCompile Include="$(IntDir)src\core\tcp\tcp-host-session.c">
+      <Filter>Source Files\generated\core\tcp</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\fruity\fruity-client.c">
-      <Filter>Source Files\generated\service\fruity</Filter>
+    <ClCompile Include="$(IntDir)src\core\fruity\fruity-client.c">
+      <Filter>Source Files\generated\core\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\fruity\fruity-property-list.c">
-      <Filter>Source Files\generated\service\fruity</Filter>
+    <ClCompile Include="$(IntDir)src\core\fruity\fruity-property-list.c">
+      <Filter>Source Files\generated\core\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\zed-core.c">
-      <Filter>Source Files\generated</Filter>
+    <ClCompile Include="src\core\system-windows.c">
+      <Filter>Source Files\core</Filter>
     </ClCompile>
-    <ClCompile Include="src\service\system-windows.c">
-      <Filter>Source Files\service</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\service\session-manager.c">
-      <Filter>Source Files\generated\service</Filter>
+    <ClCompile Include="$(IntDir)src\core\session-manager.c">
+      <Filter>Source Files\generated\core</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -208,16 +160,13 @@
     <CustomBuild Include="data\agent\agent.resources">
       <Filter>Resource Files\agent</Filter>
     </CustomBuild>
-    <CustomBuild Include="src\zed-core.vala">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)zed-core.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
-    <ClInclude Include="src\service\windows-icon-helpers.h">
-      <Filter>Source Files\service</Filter>
+    <ClInclude Include="src\core\windows-icon-helpers.h">
+      <Filter>Source Files\core</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

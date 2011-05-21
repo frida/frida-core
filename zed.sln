@@ -9,8 +9,6 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-core", "zed-core.vcxpro
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-tests", "tests\zed-tests.vcxproj", "{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed", "zed.vcxproj", "{59DAD744-083F-4ED4-885E-BA66531B85E5}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "resource-compiler", "tools\resource-compiler.vcxproj", "{81B3E411-8676-41EB-84C6-1E5307F0C5FF}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sdk", "ext\sdk.vcxproj", "{4AFCE7C4-6D9A-4663-B43C-D2E518486910}"
@@ -34,8 +32,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-agent-64", "lib\agent\zed-agent-64.vcxproj", "{D873638D-AA0D-4252-9334-456557A65D95}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\libgum\bindings\gumpp\gumpp.vcxproj", "{BB098FCF-D570-43FF-BB10-985189B2E1AB}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-gui", "zed-gui.vcxproj", "{BBF6C968-7E08-48D2-A456-F9ED879D3A99}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cloud-spy", "bindings\cloud-spy\cloud-spy.vcxproj", "{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}"
 EndProject
@@ -67,14 +63,6 @@ Global
 		{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}.Release|Win32.Build.0 = Release|Win32
 		{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}.Release|x64.ActiveCfg = Release|x64
 		{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}.Release|x64.Build.0 = Release|x64
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|Win32.ActiveCfg = Debug|Win32
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|Win32.Build.0 = Debug|Win32
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|x64.ActiveCfg = Debug|x64
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Debug|x64.Build.0 = Debug|x64
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|Win32.ActiveCfg = Release|Win32
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|Win32.Build.0 = Release|Win32
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|x64.ActiveCfg = Release|x64
-		{59DAD744-083F-4ED4-885E-BA66531B85E5}.Release|x64.Build.0 = Release|x64
 		{81B3E411-8676-41EB-84C6-1E5307F0C5FF}.Debug|Win32.ActiveCfg = Debug|Win32
 		{81B3E411-8676-41EB-84C6-1E5307F0C5FF}.Debug|Win32.Build.0 = Debug|Win32
 		{81B3E411-8676-41EB-84C6-1E5307F0C5FF}.Debug|x64.ActiveCfg = Debug|x64
@@ -171,14 +159,6 @@ Global
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|Win32.Build.0 = Release|Win32
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|x64.ActiveCfg = Release|x64
 		{BB098FCF-D570-43FF-BB10-985189B2E1AB}.Release|x64.Build.0 = Release|x64
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|Win32.ActiveCfg = Debug|Win32
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|Win32.Build.0 = Debug|Win32
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|x64.ActiveCfg = Debug|x64
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Debug|x64.Build.0 = Debug|x64
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|Win32.ActiveCfg = Release|Win32
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|Win32.Build.0 = Release|Win32
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.ActiveCfg = Release|x64
-		{BBF6C968-7E08-48D2-A456-F9ED879D3A99}.Release|x64.Build.0 = Release|x64
 		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|Win32.ActiveCfg = Debug|Win32
 		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|Win32.Build.0 = Debug|Win32
 		{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}.Debug|x64.ActiveCfg = Debug|x64

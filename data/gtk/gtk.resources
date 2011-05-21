@@ -1,5 +1,0 @@
-[resource-compiler]
-namespace = Zed.Data.Gtk
-
-[root]
-inputs = .*\\.ui

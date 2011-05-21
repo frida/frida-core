@@ -94,12 +94,6 @@ if test "x$enable_cli" = "xyes"; then
 fi
 AM_CONDITIONAL(ENABLE_CLI, [test "x$enable_cli" = "xyes"])
 
-AC_ARG_ENABLE(gui, [AC_HELP_STRING([--enable-gui], [build GUI [default=no]])],, [enable_gui=no])
-if test "x$enable_gui" = "xyes"; then
-  AC_DEFINE(HAVE_GUI, 1, [Define to 1 if GUI is built.])
-fi
-AM_CONDITIONAL(ENABLE_GUI, [test "x$enable_gui" = "xyes"])
-
 AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=no]])],, [enable_server=no])
 if test "x$enable_server" = "xyes"; then
   AC_DEFINE(HAVE_SERVER, 1, [Define to 1 if server is built.])
@@ -111,10 +105,6 @@ pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.
 ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gee-1.0 --pkg gum-1.0"
 PKG_CHECK_MODULES(ZED, [$pkg_modules])
 
-if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
-  ZED_LDFLAGS="$ZED_LDFLAGS -Wl,-framework -Wl,CoreGraphics -Wl,-framework,Foundation -Wl,-framework -Wl,UIKit"
-fi
-
 AC_SUBST(ZED_CFLAGS)
 AC_SUBST(ZED_LDFLAGS)
 AC_SUBST(ZED_LIBS)
@@ -122,21 +112,11 @@ AC_SUBST(ZED_PACKAGES)
 
 if test "x$enable_cli" = "xyes"; then
 	pkg_modules="v8"
-	ZED_GUI_PACKAGES="--pkg readline"
+	ZED_CLI_PACKAGES="--pkg readline"
 	PKG_CHECK_MODULES(ZED_CLI, [$pkg_modules])
 	AC_SUBST(ZED_CLI_CFLAGS)
 	AC_SUBST(ZED_CLI_LIBS)
 	AC_SUBST(ZED_CLI_PACKAGES)
-fi
-
-if test "x$enable_gui" = "xyes"; then
-	GTK_VERSION=2.16.0
-	pkg_modules="gtk+-2.0 >= $GTK_VERSION, clutter-1.0 >= 1.4.0, clutter-gtk-0.90, mx-1.0, mx-gtk-1.0, wocky-0.0"
-	ZED_GUI_PACKAGES="--pkg gtk+-2.0 --pkg=cogl-1.0 --pkg=clutter-1.0 --pkg=clutter-gtk-0.90 --pkg=mx-1.0 --pkg=mx-gtk-1.0 --pkg wocky-0.0"
-	PKG_CHECK_MODULES(ZED_GUI, [$pkg_modules])
-	AC_SUBST(ZED_GUI_CFLAGS)
-	AC_SUBST(ZED_GUI_LIBS)
-	AC_SUBST(ZED_GUI_PACKAGES)
 fi
 
 AC_CHECK_HEADERS([sys/user.h])

@@ -27,9 +27,6 @@
     <None Include="test-winjector.vala">
       <Filter>Tests</Filter>
     </None>
-    <None Include="test-code-service.vala">
-      <Filter>Tests</Filter>
-    </None>
     <None Include="test-host-session.vala">
       <Filter>Tests</Filter>
     </None>
@@ -59,9 +56,6 @@
     <ClCompile Include="$(IntDir)process.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)test-code-service.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)test-host-session.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
@@ -72,9 +66,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)async-harness.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)test-hex-view.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)test-system.c">

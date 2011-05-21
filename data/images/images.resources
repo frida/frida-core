@@ -1,5 +1,0 @@
-[resource-compiler]
-namespace = Zed.Data.Image
-
-[root]
-inputs = .*\\.png

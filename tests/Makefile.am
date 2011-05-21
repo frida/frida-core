@@ -25,7 +25,6 @@ zed_tests_SOURCES = \
 	test-main-glue.c \
 	test-system.vala \
 	$(platform_tests) \
-	test-code-service.vala \
 	test-agent.vala \
 	test-host-session.vala \
 	async-harness.vala \
