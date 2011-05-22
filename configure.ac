@@ -105,6 +105,10 @@ pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.
 ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg gum-1.0"
 PKG_CHECK_MODULES(ZED, [$pkg_modules])
 
+if [[ "x$HAVE_IOS" = "xyes" ]]; then
+  ZED_LDFLAGS="$ZED_LDFLAGS -Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
+fi
+
 AC_SUBST(ZED_CFLAGS)
 AC_SUBST(ZED_LDFLAGS)
 AC_SUBST(ZED_LIBS)
