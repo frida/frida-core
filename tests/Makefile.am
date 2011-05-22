@@ -10,6 +10,7 @@ noinst_PROGRAMS = \
 	zed-tests \
 	inject-victim
 noinst_LTLIBRARIES = \
+	libzed-tests.la \
 	libzed-tests-glue.la \
 	libinject-attacker.la
 
@@ -24,23 +25,35 @@ platform_tests += test-fruitjector.vala
 endif
 
 zed_tests_SOURCES = \
-	test-main.vala \
-	test-main-glue.c \
+	test-main.vala
+zed_tests_LDADD = \
+	$(builddir)/libzed-tests.la \
+	$(ZED_LIBS)
+zed_tests_LDFLAGS = \
+	$(ZED_LDFLAGS)
+zed_tests_VALAFLAGS = \
+	--vapidir=$(builddir) \
+	--vapidir=$(top_builddir)/lib/interfaces \
+	--vapidir=$(top_builddir)/src \
+	--pkg=zed-core \
+	--pkg=zed-interfaces \
+	--pkg=zed-tests \
+	@ZED_PACKAGES@ \
+	@ZED_VALAFLAGS@
+
+libzed_tests_la_SOURCES = \
 	test-system.vala \
 	$(platform_tests) \
 	test-agent.vala \
 	test-host-session.vala \
 	async-harness.vala \
 	process.vala
-zed_tests_CFLAGS = \
+libzed_tests_la_CFLAGS = \
 	-w
-zed_tests_LDFLAGS = \
-	$(ZED_LDFLAGS)
-zed_tests_LDADD = \
+libzed_tests_la_LIBADD = \
 	$(builddir)/libzed-tests-glue.la \
-	$(top_builddir)/src/libzed-core.la \
-	$(ZED_LIBS)
-zed_tests_VALAFLAGS = \
+	$(top_builddir)/src/libzed-core.la
+libzed_tests_la_VALAFLAGS = \
 	--vapi=zed-tests.vapi \
 	--library=zed-tests \
 	--header=zed-tests.h \
@@ -54,7 +67,8 @@ zed_tests_VALAFLAGS = \
 	@ZED_VALAFLAGS@
 
 libzed_tests_glue_la_SOURCES = \
-	process-unix.c
+	process-unix.c \
+	test-main-glue.c
 
 inject_victim_SOURCES = \
 	inject-victim.vala
