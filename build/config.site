@@ -50,7 +50,6 @@ case "$PACKAGE_TARNAME" in
 
     case $FRIDA_TARGET in
       android|ps3)
-        enable_proxy_libintl=yes
         ac_cv_func_posix_getgrgid_r=no
         ac_cv_func_posix_getpwuid_r=no
         ;;
@@ -60,10 +59,16 @@ case "$PACKAGE_TARNAME" in
         ;;
     esac
 
+    case $FRIDA_TARGET in
+      osx|ios|android|ps3)
+        enable_proxy_libintl=yes
+        ;;
+    esac
+
     CFLAGS="$CFLAGS -I$FRIDA_PREFIX/include"
     LDFLAGS="$LDFLAGS -L$FRIDA_PREFIX/lib"
   ;;
-  'libgee')
+  'libffi'|'vala'|'libgee')
     enable_shared=no
     enable_static=yes
   ;;
