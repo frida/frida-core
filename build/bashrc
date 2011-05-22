@@ -157,7 +157,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
 
   case $FRIDA_TARGET in
     osx|ios)
-      export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names"
+      export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names -Wl,-no_compact_unwind"
       ;;
   esac
 else
