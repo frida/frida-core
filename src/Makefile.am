@@ -30,6 +30,8 @@ zed_cli_VALAFLAGS = \
 
 zed_server_SOURCES = \
 	$(srcdir)/zed-server.vala
+zed_server_CFLAGS = \
+	-w
 zed_server_LDFLAGS = \
 	$(ZED_LDFLAGS)
 zed_server_LDADD = \
