@@ -168,8 +168,15 @@ namespace Zed.Fruity {
 
 			var client = new SocketClient ();
 
+			SocketConnectable connectable;
+#if WINDOWS
+			connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), USBMUX_SERVER_PORT);
+#else
+			connectable = new UnixSocketAddress ("/var/run/usbmuxd");
+#endif
+
 			try {
-				connection = yield client.connect_to_host_async ("127.0.0.1", USBMUX_SERVER_PORT);
+				connection = yield client.connect_async (connectable);
 				input = connection.get_input_stream ();
 				output = connection.get_output_stream ();
 

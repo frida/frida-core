@@ -10,18 +10,6 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
-#if WINDOWS
-
-		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
-			var h = new Harness ((h) => Windows.backend (h as Harness));
-			h.run ();
-		});
-
-		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
-			var h = new Harness ((h) => Fruity.backend (h as Harness));
-			h.run ();
-		});
-
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
 		});
@@ -30,6 +18,16 @@ namespace Zed.HostSessionTest {
 			Fruity.PropertyList.to_xml_yields_complete_document ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
+			var h = new Harness ((h) => Fruity.backend (h as Harness));
+			h.run ();
+		});
+
+#if WINDOWS
+		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
+			var h = new Harness ((h) => Windows.backend (h as Harness));
+			h.run ();
+		});
 #endif
 	}
 
@@ -115,7 +113,6 @@ namespace Zed.HostSessionTest {
 	}
 
 #if WINDOWS
-
 	namespace Windows {
 
 		private static async void backend (Harness h) {
@@ -154,6 +151,7 @@ namespace Zed.HostSessionTest {
 		}
 
 	}
+#endif
 
 	namespace Fruity {
 
@@ -171,6 +169,7 @@ namespace Zed.HostSessionTest {
 			yield h.wait_for_provider ();
 			var prov = h.first_provider ();
 
+#if WINDOWS
 			assert (prov.name != "Apple Mobile Device"); /* should manage to extract a user-defined name */
 
 			var icon = prov.icon;
@@ -178,6 +177,7 @@ namespace Zed.HostSessionTest {
 			assert (icon.width == 16 && icon.height == 16);
 			assert (icon.rowstride == icon.width * 4);
 			assert (icon.pixels.length > 0);
+#endif
 
 			try {
 				var session = yield prov.create ();
@@ -281,8 +281,6 @@ namespace Zed.HostSessionTest {
 		}
 
 	}
-
-#endif
 
 	public class Harness : Zed.Test.AsyncHarness {
 		public HostSessionService service {

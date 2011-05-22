@@ -128,7 +128,7 @@
     <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
-    <ClCompile Include="src\core\fruity\fruity-host-session-glue.c">
+    <ClCompile Include="src\core\fruity\fruity-host-session-windows.c">
       <Filter>Source Files\core\fruity</Filter>
     </ClCompile>
     <ClCompile Include="src\core\windows-icon-helpers.c">

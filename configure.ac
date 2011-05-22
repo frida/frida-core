@@ -101,8 +101,8 @@ fi
 AM_CONDITIONAL(ENABLE_SERVER, [test "x$enable_server" = "xyes"])
 
 GLIB_VERSION=2.26.0
-pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
-ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gee-1.0 --pkg gum-1.0"
+pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
+ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg gum-1.0"
 PKG_CHECK_MODULES(ZED, [$pkg_modules])
 
 AC_SUBST(ZED_CFLAGS)

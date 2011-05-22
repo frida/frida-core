@@ -60,10 +60,14 @@ endif
 if OS_DARWIN
 backend_sources += \
 	$(srcdir)/core/darwin/darwin-host-session.vala \
-	$(srcdir)/core/darwin/fruitjector.vala
+	$(srcdir)/core/darwin/fruitjector.vala \
+	$(srcdir)/core/fruity/fruity-client.vala \
+	$(srcdir)/core/fruity/fruity-host-session.vala \
+	$(srcdir)/core/fruity/fruity-property-list.vala
 glue_sources += \
 	$(srcdir)/core/system-darwin.m \
-	$(srcdir)/core/darwin/fruitjector-glue.c
+	$(srcdir)/core/darwin/fruitjector-glue.c \
+	$(srcdir)/core/fruity/fruity-host-session-darwin.m
 endif
 
 libzed_core_la_SOURCES = \

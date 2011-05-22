@@ -8,8 +8,8 @@ namespace Zed {
 		public HostSessionService.with_default_backends () {
 #if WINDOWS
 			add_backend (new WindowsHostSessionBackend ());
-			add_backend (new FruityHostSessionBackend ());
 #endif
+			add_backend (new FruityHostSessionBackend ());
 			add_backend (new TcpHostSessionBackend ());
 		}
 
