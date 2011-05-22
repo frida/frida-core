@@ -290,8 +290,8 @@ namespace Zed.HostSessionTest {
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
-		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
-			base (func);
+		public Harness (owned Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base ((owned) func);
 		}
 
 		construct {

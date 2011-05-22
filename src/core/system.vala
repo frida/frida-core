@@ -16,7 +16,7 @@ namespace Zed {
 				current_main_context = MainContext.get_thread_default ();
 
 				try {
-					Thread.create (enumerate_processes_worker, false);
+					Thread.create<void> (enumerate_processes_worker, false);
 				} catch (ThreadError e) {
 					error (e.message);
 				}
@@ -27,7 +27,7 @@ namespace Zed {
 			return request.result;
 		}
 
-		private void * enumerate_processes_worker () {
+		private void enumerate_processes_worker () {
 			var processes = System.enumerate_processes ();
 
 			var source = new IdleSource ();
@@ -42,8 +42,6 @@ namespace Zed {
 				return false;
 			});
 			source.attach (current_main_context);
-
-			return null;
 		}
 
 		private class EnumerateRequest {
@@ -55,8 +53,8 @@ namespace Zed {
 				private set;
 			}
 
-			public EnumerateRequest (CompletionHandler handler) {
-				this.handler = handler;
+			public EnumerateRequest (owned CompletionHandler handler) {
+				this.handler = (owned) handler;
 			}
 
 			public void complete (HostProcessInfo[] processes) {

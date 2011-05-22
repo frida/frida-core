@@ -117,7 +117,7 @@ namespace Zed.Fruity {
 
 		protected async int query_with_plist (PropertyList plist, bool is_mode_switch_request = false) throws IOError {
 			var xml = plist.to_xml ();
-			var size = xml.size ();
+			var size = xml.length;
 			var body = new uint8[size];
 			Memory.copy (body, xml, size);
 			var result = yield query (MessageType.PROPERTY_LIST, body, is_mode_switch_request);
@@ -298,32 +298,41 @@ namespace Zed.Fruity {
 		}
 
 		private async void write_message (uint8[] blob) throws IOError {
-			yield write (blob, blob.length);
+			yield write (blob);
 		}
 
 		private async void read (void * buffer, size_t count) throws IOError {
 			try {
-				uint8 * p = buffer;
+				uint8 * dst = buffer;
 				size_t remaining = count;
-				do {
-					ssize_t len = yield input.read_async (p, remaining);
-					p += len;
+				while (remaining != 0) {
+					uint8[] slice = new uint8[remaining];
+					ssize_t len = yield input.read_async (slice);
+					Memory.copy (dst, slice, len);
+
+					dst += len;
 					remaining -= len;
-				} while (remaining != 0);
+				}
 			} catch (Error e) {
 				throw new IOError.FAILED (e.message);
 			}
 		}
 
-		private async void write (void * buffer, size_t count) throws IOError {
+		private async void write (uint8[] buffer) throws IOError {
 			try {
-				uint8 * p = buffer;
-				size_t remaining = count;
-				do {
-					ssize_t len = yield output.write_async (p, remaining);
-					p += len;
+				size_t remaining = buffer.length;
+
+				ssize_t len = yield output.write_async (buffer);
+				remaining -= len;
+
+				size_t offset = 0;
+				while (remaining != 0) {
+					uint8[] slice = buffer[offset:buffer.length];
+					len = yield output.write_async (slice);
+
+					offset += len;
 					remaining -= len;
-				} while (remaining != 0);
+				}
 			} catch (Error e) {
 				throw new IOError.FAILED (e.message);
 			}
@@ -378,9 +387,9 @@ namespace Zed.Fruity {
 				private set;
 			}
 
-			public PendingResponse (uint32 tag, CompletionHandler handler) {
+			public PendingResponse (uint32 tag, owned CompletionHandler handler) {
 				this.tag = tag;
-				this.handler = handler;
+				this.handler = (owned) handler;
 			}
 
 			public void complete (int result) {

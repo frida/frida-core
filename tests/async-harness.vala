@@ -7,8 +7,8 @@ namespace Zed.Test {
 		private MainLoop main_loop;
 		private TimeoutSource timeout_source;
 
-		public AsyncHarness (TestSequenceFunc func) {
-			test_sequence = func;
+		public AsyncHarness (owned TestSequenceFunc func) {
+			test_sequence = (owned) func;
 		}
 
 		public void run () {

@@ -53,14 +53,14 @@ namespace Zed.AgentTest {
 		private delegate void AgentMainFunc (string data_string);
 		private AgentMainFunc main_impl;
 		private string listen_address = "tcp:host=127.0.0.1,port=42042";
-		private unowned Thread main_thread;
+		private unowned Thread<bool> main_thread;
 		private DBusConnection connection;
 		private AgentSession session;
 
 		private Gee.LinkedList<ScriptMessage> message_queue = new Gee.LinkedList<ScriptMessage> ();
 
-		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
-			base (func);
+		public Harness (owned Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base ((owned) func);
 		}
 
 		public async AgentSession load_agent () {
@@ -91,7 +91,7 @@ namespace Zed.AgentTest {
 			main_impl = (AgentMainFunc) main_func_symbol;
 
 			try {
-				main_thread = Thread.create (agent_main_worker, true);
+				main_thread = Thread.create<bool> (agent_main_worker, true);
 			} catch (ThreadError thread_error) {
 				assert_not_reached ();
 			}
@@ -138,7 +138,7 @@ namespace Zed.AgentTest {
 			try {
 				yield connection.close ();
 				connection = null;
-			} catch (IOError conn_error) {
+			} catch (Error conn_error) {
 				assert_not_reached ();
 			}
 
@@ -178,9 +178,9 @@ namespace Zed.AgentTest {
 			}
 		}
 
-		private void * agent_main_worker () {
+		private bool agent_main_worker () {
 			main_impl (listen_address);
-			return null;
+			return true;
 		}
 	}
 }

@@ -60,8 +60,8 @@ class Vala.ResourceCompiler {
 		var vapi_file = File.new_for_commandline_arg (output_basename + ".vapi");
 		var cheader_file = File.new_for_commandline_arg (output_basename + ".h");
 		var csource_file = File.new_for_commandline_arg (output_basename + ".c");
-		MemoryOutputStream vapi_content = new MemoryOutputStream (null, 0, realloc, free);
-		MemoryOutputStream cheader_content = new MemoryOutputStream (null, 0, realloc, free);
+		MemoryOutputStream vapi_content = new MemoryOutputStream (null, realloc, free);
+		MemoryOutputStream cheader_content = new MemoryOutputStream (null, realloc, free);
 
 		DataOutputStream vapi = new DataOutputStream (vapi_content);
 		DataOutputStream cheader = new DataOutputStream (cheader_content);
@@ -240,7 +240,7 @@ class Vala.ResourceCompiler {
 		int line_offset = 0;
 
 		while (true) {
-			size_t bytes_read = input_stream.read (input_buf, input_buf.length);
+			size_t bytes_read = input_stream.read (input_buf);
 			if (bytes_read == 0)
 				break;
 
@@ -277,9 +277,10 @@ class Vala.ResourceCompiler {
 			var existing_size = (size_t) info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
 
 			if (existing_size == new_content.get_data_size ()) {
-				var existing_content = new MemoryOutputStream (malloc (existing_size), existing_size, null, free);
+				uint8[] existing_content_data = new uint8[existing_size];
+				var existing_content = new MemoryOutputStream (existing_content_data, null, free);
 				size_t bytes_read;
-				if (input.read_all (existing_content.get_data (), existing_size, out bytes_read) && bytes_read == existing_size)
+				if (input.read_all (existing_content.get_data (), out bytes_read) && bytes_read == existing_size)
 					different = Memory.cmp (existing_content.get_data (), new_content.get_data (), existing_size) != 0;
 			}
 		} catch (Error e) {
@@ -289,7 +290,7 @@ class Vala.ResourceCompiler {
 			return;
 
 		var output = file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
-		output.write_all (new_content.get_data (), new_content.get_data_size ());
+		output.write_all (new_content.get_data ());
 	}
 
 	private string c_namespace_from_vala (string vala_ns) {

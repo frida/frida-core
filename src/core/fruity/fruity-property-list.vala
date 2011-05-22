@@ -172,7 +172,7 @@ namespace Zed.Fruity {
 						result.set_string (val);
 					} else if (type == "integer") {
 						result = Value (typeof (int));
-						result.set_int (val.to_int ());
+						result.set_int (int.parse (val));
 					}
 
 					return result;
