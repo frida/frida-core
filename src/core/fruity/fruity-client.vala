@@ -135,7 +135,9 @@ namespace Zed.Fruity {
 			private set;
 		}
 		private InputStream input;
+		private Cancellable input_cancellable = new Cancellable ();
 		private OutputStream output;
+		private Cancellable output_cancellable = new Cancellable ();
 
 		protected bool is_processing_messages;
 		private uint last_tag;
@@ -197,9 +199,22 @@ namespace Zed.Fruity {
 				throw new IOError.FAILED ("not processing messages");
 			is_processing_messages = false;
 
+			input_cancellable.cancel ();
+			output_cancellable.cancel ();
+
+			var source = new IdleSource ();
+			source.set_priority (Priority.LOW);
+			source.set_callback (() => {
+				close.callback ();
+				return false;
+			});
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
 			try {
 				var conn = this.connection;
-				yield conn.close_async (Priority.DEFAULT);
+				if (conn != null)
+					yield conn.close_async (Priority.DEFAULT);
 			} catch (Error e) {
 			}
 			connection = null;
@@ -307,7 +322,7 @@ namespace Zed.Fruity {
 				size_t remaining = count;
 				while (remaining != 0) {
 					uint8[] slice = new uint8[remaining];
-					ssize_t len = yield input.read_async (slice);
+					ssize_t len = yield input.read_async (slice, Priority.DEFAULT, input_cancellable);
 					Memory.copy (dst, slice, len);
 
 					dst += len;
@@ -328,7 +343,7 @@ namespace Zed.Fruity {
 				size_t offset = 0;
 				while (remaining != 0) {
 					uint8[] slice = buffer[offset:buffer.length];
-					len = yield output.write_async (slice);
+					len = yield output.write_async (slice, Priority.DEFAULT, output_cancellable);
 
 					offset += len;
 					remaining -= len;
