@@ -164,7 +164,7 @@ else
   export FRIDA_SDKROOT=
 fi
 
-VALAC="${FRIDA_TOOLROOT}/bin/valac-0.10 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.10/vapi\" "
+VALAC="${FRIDA_TOOLROOT}/bin/valac-0.14 --vapidir=\"${FRIDA_TOOLROOT}/share/vala-0.14/vapi\""
 if [ $FRIDA_ENVIRONMENT = normal ]; then
   VALAC="$VALAC --vapidir=\"${FRIDA_SDKROOT}/share/vala/vapi\" --vapidir=\"${FRIDA_PREFIX}/share/vala/vapi\""
 fi
@@ -173,7 +173,15 @@ export VALAC
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
-toolchain_version=20110118
+case $FRIDA_TARGET in
+  osx|ios)
+    toolchain_version=20110524
+    ;;
+  *)
+    toolchain_version=20110118
+    ;;
+esac
+
 case $FRIDA_TARGET in
   android)
     sdk_version=20110118
