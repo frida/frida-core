@@ -33,18 +33,8 @@ namespace Zed {
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		public async void close () {
-			foreach (var entry in entries) {
-				try {
-					yield entry.connection.close ();
-				} catch (Error first_close_error) {
-				}
-
-				/* FIXME: close again to make sure things are shut down, needs further investigation */
-				try {
-					yield entry.connection.close ();
-				} catch (Error second_close_error) {
-				}
-			}
+			foreach (var entry in entries)
+				yield entry.close ();
 			entries.clear ();
 		}
 
@@ -142,6 +132,16 @@ namespace Zed {
 				this.id = id;
 				this.connection = connection;
 				this.proxy = proxy;
+			}
+
+			public async void close () {
+				proxy = null;
+
+				try {
+					yield connection.close ();
+				} catch (Error conn_error) {
+				}
+				connection = null;
 			}
 		}
 	}

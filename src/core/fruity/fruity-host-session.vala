@@ -160,23 +160,8 @@ namespace Zed {
 		}
 
 		public async void close () {
-			foreach (var entry in entries) {
-				try {
-					yield entry.connection.close ();
-				} catch (Error first_close_error) {
-				}
-
-				/* FIXME: close again to make sure things are shut down, needs further investigation */
-				try {
-					yield entry.connection.close ();
-				} catch (Error second_close_error) {
-				}
-
-				try {
-					yield entry.client.close ();
-				} catch (IOError client_error) {
-				}
-			}
+			foreach (var entry in entries)
+				yield entry.close ();
 			entries.clear ();
 		}
 
@@ -296,6 +281,22 @@ namespace Zed {
 				this.client = client;
 				this.connection = connection;
 				this.proxy = proxy;
+			}
+
+			public async void close () {
+				proxy = null;
+
+				try {
+					yield connection.close ();
+				} catch (Error conn_error) {
+				}
+				connection = null;
+
+				try {
+					yield client.close ();
+				} catch (IOError client_error) {
+				}
+				client = null;
 			}
 		}
 	}
