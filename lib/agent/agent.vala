@@ -45,13 +45,7 @@ namespace Zed.Agent {
 
 				try {
 					yield connection.close ();
-				} catch (Error first_close_error) {
-				}
-
-				/* FIXME: close again to make sure things are shut down, needs further investigation */
-				try {
-					yield connection.close ();
-				} catch (Error second_close_error) {
+				} catch (Error close_error) {
 				}
 			}
 			connections.clear ();
