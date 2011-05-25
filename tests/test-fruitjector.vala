@@ -13,25 +13,13 @@ namespace Zed.FruitjectorTest {
 			rat.inject ("inject-attacker.dylib", "");
 			rat.wait_for_uninject ();
 
-			try {
-				string log_of_first_injection;
-				logfile.load_contents (null, out log_of_first_injection);
-				assert (log_of_first_injection == ">m<");
-			} catch (Error first_load_error) {
-				assert_not_reached ();
-			}
+			assert (content_of (logfile) == ">m<");
 
 			var requested_exit_code = 43;
 			rat.inject ("inject-attacker.dylib", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
-			try {
-				string log_of_second_injection;
-				logfile.load_contents (null, out log_of_second_injection);
-				assert (log_of_second_injection == ">m<>m<");
-			} catch (Error second_load_error) {
-				assert_not_reached ();
-			}
+			assert (content_of (logfile) == ">m<>m<");
 
 			var exit_code = rat.wait_for_process_to_exit ();
 			assert (exit_code == requested_exit_code);
@@ -42,6 +30,17 @@ namespace Zed.FruitjectorTest {
 				assert_not_reached ();
 			}
 		});
+	}
+
+	private static string content_of (File file) {
+		try {
+			uint8[] contents;
+			file.load_contents (null, out contents);
+			unowned string str = (string) contents;
+			return str;
+		} catch (Error load_error) {
+			assert_not_reached ();
+		}
 	}
 
 	private class LabRat {
