@@ -25,7 +25,7 @@ platform_tests += test-fruitjector.vala
 endif
 
 zed_tests_SOURCES = \
-	test-main.vala
+	main.vala
 zed_tests_LDADD = \
 	$(builddir)/libzed-tests.la \
 	$(ZED_LIBS)
@@ -46,6 +46,7 @@ libzed_tests_la_SOURCES = \
 	$(platform_tests) \
 	test-agent.vala \
 	test-host-session.vala \
+	runner.vala \
 	async-harness.vala \
 	process.vala
 libzed_tests_la_CFLAGS = \
@@ -68,7 +69,7 @@ libzed_tests_la_VALAFLAGS = \
 
 libzed_tests_glue_la_SOURCES = \
 	process-unix.c \
-	test-main-glue.c
+	runner-glue.c
 
 inject_victim_SOURCES = \
 	inject-victim.vala

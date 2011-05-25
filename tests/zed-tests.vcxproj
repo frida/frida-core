@@ -174,15 +174,16 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="test-main.vala">
+    <CustomBuild Include="main.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
 	test-agent.vala				^
 	test-host-session.vala			^
-	test-main.vala				^
 	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
+	main.vala				^
+	runner.vala				^
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
@@ -207,16 +208,17 @@
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
 	test-agent.vala				^
 	test-host-session.vala			^
-	test-main.vala				^
 	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
+	main.vala				^
+	runner.vala				^
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
@@ -241,16 +243,17 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
 	test-agent.vala				^
 	test-host-session.vala			^
-	test-main.vala				^
 	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
+	main.vala				^
+	runner.vala				^
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
@@ -275,16 +278,17 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
 	test-agent.vala				^
 	test-host-session.vala			^
-	test-main.vala				^
 	test-system.vala				^
 	test-winipc.vala				^
 	test-winjector.vala				^
+	main.vala				^
+	runner.vala				^
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
@@ -309,9 +313,10 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-main.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
+    <None Include="runner.vala" />
     <None Include="async-harness.vala" />
     <None Include="process.vala" />
     <None Include="test-agent.vala" />
@@ -327,12 +332,6 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="$(IntDir)test-host-session.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)test-main.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
@@ -356,6 +355,18 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
+    <ClCompile Include="$(IntDir)main.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)runner.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="$(IntDir)async-harness.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
@@ -369,7 +380,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="process-windows.c" />
-    <ClCompile Include="test-main-glue.c" />
+    <ClCompile Include="runner-glue.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,6 +1,6 @@
 namespace Zed.Test {
 
-	public static void main (string[] args) {
+	public static void run (string[] args) {
 		Environment.init (ref args);
 
 		Zed.SystemTest.add_tests ();
