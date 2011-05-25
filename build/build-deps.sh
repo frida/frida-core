@@ -4,10 +4,8 @@ set -x
 
 BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 
-#REPO_BASE_URL="git@gitorious.org:frida"
-#REPO_SUFFIX=".git"
-REPO_BASE_URL="/Users/oleavr/src/frida-deps"
-REPO_SUFFIX=""
+REPO_BASE_URL="git@gitorious.org:frida"
+REPO_SUFFIX=".git"
 
 function build_toolchain ()
 {
