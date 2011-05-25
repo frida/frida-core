@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -x
+
 BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 
 #REPO_BASE_URL="git@gitorious.org:frida"
@@ -49,6 +51,7 @@ function make_toolchain_package ()
   pushd "$FRIDA_PREFIX" >/dev/null || exit 1
   tar c \
       bin/gdbus* \
+      bin/glib-compile-schemas \
       bin/glib-genmarshal \
       bin/glib-mkenums \
       bin/vala* \
@@ -70,18 +73,43 @@ function build_sdk ()
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" >/dev/null || exit 1
 
-  build_module glib "$REPO_BASE_URL/glib.git"
-  build_module libgee "$REPO_BASE_URL/libgee.git"
+  case $FRIDA_TARGET in
+    osx)
+      subdir="x86_64-apple-darwin10.7.4"
+    ;;
+    ios)
+      subdir="arm-apple-darwin"
+    ;;
+  esac
+  build_module libffi "$subdir"
+  build_module glib
+  build_module libgee
 
   popd >/dev/null
 }
 
 function make_sdk_package ()
 {
-  target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
+  local previous_sdk="$1"
+  local target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
 
-  rm -rf "$BUILDROOT/sdk-$FRIDA_TARGET"
-  mkdir "$BUILDROOT/sdk-$FRIDA_TARGET"
+  local sdkname="sdk-$FRIDA_TARGET"
+  local sdkdir="$BUILDROOT/$sdkname"
+  pushd "$BUILDROOT" >/dev/null || exit 1
+  rm -rf "$sdkname"
+  tar jxf "$previous_sdk" || exit 1
+  mv "$sdkname" "sdk-old"
+  mkdir "$sdkname"
+  pushd "sdk-old" >/dev/null || exit 1
+  tar c \
+      include/v8* \
+      lib/libv8*.a \
+      lib/pkgconfig/v8.pc \
+      | tar -C "$sdkdir" -x - || exit 1
+  popd >/dev/null
+  rm -rf "sdk-old"
+  popd >/dev/null
+
   pushd "$FRIDA_PREFIX" >/dev/null || exit 1
   tar c \
       include \
@@ -92,14 +120,14 @@ function make_sdk_package ()
       share/aclocal \
       share/glib-2.0/schemas \
       share/vala \
-      | tar -C "$BUILDROOT/sdk-$FRIDA_TARGET" -x - || exit 1
+      | tar -C "$sdkdir" -x - || exit 1
   popd >/dev/null
 
   pushd "$BUILDROOT" >/dev/null || exit 1
-  tar cfj "$target_filename" sdk-$FRIDA_TARGET || exit 1
+  tar cfj "$target_filename" "$sdkname" || exit 1
   popd >/dev/null
 
-  rm -rf "$BUILDROOT/sdk-$FRIDA_TARGET"
+  rm -rf "$sdkdir"
 }
 
 function build_module ()
@@ -115,7 +143,7 @@ function build_module ()
     if [ -n "$2" ]; then
       pushd "$2" >/dev/null || exit 1
     fi
-    make || exit 1
+    make -j8 || exit 1
     make install || exit 1
     [ -n "$2" ] && popd &>/dev/null
     popd >/dev/null
@@ -156,9 +184,14 @@ case $1 in
     make_toolchain_package "$previous_toolchain"
   ;;
   sdk)
+    previous_sdk=$2
+    if [ -z "$previous_sdk" ]; then
+      echo "usage: $0 sdk previous-sdk.tar.bz2"
+      exit 1
+    fi
     build_sdk
     apply_fixups
-    make_sdk_package
+    make_sdk_package "$previous_sdk"
   ;;
 esac
 
