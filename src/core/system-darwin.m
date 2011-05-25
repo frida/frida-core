@@ -96,7 +96,7 @@ zed_system_enumerate_processes (int * result_length1)
   g_assert_cmpint (err, !=, -1);
   count = length / sizeof (struct kinfo_proc);
 
-  result = g_new (ZedHostProcessInfo, count);
+  result = g_new0 (ZedHostProcessInfo, count);
   *result_length1 = count;
 
   for (i = 0; i != count; i++)
