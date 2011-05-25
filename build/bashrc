@@ -175,7 +175,7 @@ export VALAC
 
 case $FRIDA_TARGET in
   osx|ios)
-    toolchain_version=20110524
+    toolchain_version=20110525
     ;;
   *)
     toolchain_version=20110118
@@ -186,8 +186,8 @@ case $FRIDA_TARGET in
   android)
     sdk_version=20110118
     ;;
-  ios)
-    sdk_version=20110514
+  osx|ios)
+    sdk_version=20110525
     ;;
   *)
     sdk_version=20101003
