@@ -42,6 +42,8 @@ fi
 
 case "$PACKAGE_TARNAME" in
   'glib')
+    enable_tests=no
+
     enable_shared=no
     enable_static=yes
 
@@ -52,17 +54,23 @@ case "$PACKAGE_TARNAME" in
       android|ps3)
         ac_cv_func_posix_getgrgid_r=no
         ac_cv_func_posix_getpwuid_r=no
-        ;;
+      ;;
       *)
         ac_cv_func_posix_getgrgid_r=yes
         ac_cv_func_posix_getpwuid_r=yes
-        ;;
+      ;;
+    esac
+
+    case $FRIDA_TARGET in
+      osx|ios)
+        glib_cv_have_qsort_r=no
+      ;;
     esac
 
     case $FRIDA_TARGET in
       osx|ios|android|ps3)
         enable_proxy_libintl=yes
-        ;;
+      ;;
     esac
 
     CFLAGS="$CFLAGS -I$FRIDA_PREFIX/include"
