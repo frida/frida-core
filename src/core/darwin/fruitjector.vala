@@ -23,6 +23,11 @@ public class Zed.Fruitjector : Object {
 	}
 
 	public async uint inject (ulong pid, string dylib_path, string data_string) throws IOError {
+		var dylib = File.new_for_path (dylib_path);
+		if (!dylib.query_exists ())
+			throw new IOError.NOT_FOUND ("specified dylib path '" + dylib_path + "' does not exist or cannot be opened");
+		if (dylib.query_file_type (FileQueryInfoFlags.NONE) != FileType.REGULAR)
+			throw new IOError.NOT_REGULAR_FILE ("specified dylib path '" + dylib_path + "' is not a regular file");
 		return _do_inject (pid, dylib_path, data_string);
 	}
 
