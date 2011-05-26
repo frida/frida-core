@@ -13,7 +13,7 @@ namespace Zed.Test {
 		public unowned string filename {
 			get {
 				if (_filename == null) {
-					_filename = ProcessBackend.filename_of (handle);
+					_filename = ProcessBackend.filename_of (handle).replace ("/./", "/");
 				}
 
 				return _filename;
