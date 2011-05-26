@@ -342,7 +342,6 @@ static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
 static void zed_emit_pthread_setup (ZedEmitContext * ctx);
 static void zed_emit_pthread_create_and_join (ZedEmitContext * ctx);
 static void zed_emit_thread_terminate (ZedEmitContext * ctx);
-static void zed_emit_push_ctx_value (guint field_offset, GumThumbWriter * tw);
 static void zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
 
 static void
