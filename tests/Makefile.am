@@ -68,6 +68,7 @@ libzed_tests_la_VALAFLAGS = \
 	@ZED_VALAFLAGS@
 
 libzed_tests_glue_la_SOURCES = \
+	test-agent-glue.c \
 	process-unix.c \
 	runner-glue.c
 

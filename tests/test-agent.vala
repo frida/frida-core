@@ -7,8 +7,6 @@ namespace Zed.AgentTest {
 	}
 
 	namespace Script {
-		public int dummy_global_to_trick_optimizer = 0;
-
 		private static async void load_and_receive_messages (Harness h) {
 			var session = yield h.load_agent ();
 
@@ -35,16 +33,7 @@ namespace Zed.AgentTest {
 			h.done ();
 		}
 
-		public static uint target_function (int level, string message) {
-			var bogus_result = 0;
-
-			for (var i = 0; i != 42; i++)
-				bogus_result += i;
-
-			dummy_global_to_trick_optimizer += bogus_result;
-
-			return bogus_result;
-		}
+		public extern static uint target_function (int level, string message);
 	}
 
 	private class Harness : Zed.Test.AsyncHarness {
