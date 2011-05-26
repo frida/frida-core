@@ -61,14 +61,16 @@ namespace Zed.AgentTest {
 			else
 				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-64", "zed-agent-64.dll");
 #else
-			var frida_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
+			string shlib_extension;
 #if DARWIN
-			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.dylib");
+			shlib_extension = "dylib";
 #else
-			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent.so");
-			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
-				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", ".libs", "libzed-agent.so");
+			shlib_extension = "so";
 #endif
+			var frida_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
+			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent." + shlib_extension);
+			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
+				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", ".libs", "libzed-agent." + shlib_extension);
 #endif
 
 			module = GLib.Module.open (agent_filename, 0);
