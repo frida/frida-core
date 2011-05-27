@@ -8,7 +8,8 @@ namespace Zed.Agent {
 		private MainLoop main_loop = new MainLoop ();
 		private DBusServer server;
 		private bool closing = false;
-		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
+		private Gee.ArrayList<DBusConnection> active_connections = new Gee.ArrayList<DBusConnection> ();
+		private Gee.ArrayList<DBusConnection> dead_connections = new Gee.ArrayList<DBusConnection> ();
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 		private ScriptEngine script_engine = new ScriptEngine ();
 
@@ -40,15 +41,8 @@ namespace Zed.Agent {
 		}
 
 		private async void close_connections_and_schedule_shutdown () {
-			foreach (var connection in connections.to_array ()) {
-				unregister (connection);
-
-				try {
-					yield connection.close ();
-				} catch (Error close_error) {
-				}
-			}
-			connections.clear ();
+			yield reap_dead_connections ();
+			yield close_active_connections ();
 
 			Timeout.add (100, () => {
 				main_loop.quit ();
@@ -84,7 +78,7 @@ namespace Zed.Agent {
 					return false;
 				}
 
-				connections.add (connection);
+				active_connections.add (connection);
 				return true;
 			});
 
@@ -101,9 +95,40 @@ namespace Zed.Agent {
 
 			unregister (connection);
 
-			connections.remove (connection);
-			if (connections.is_empty)
+			active_connections.remove (connection);
+			dead_connections.add (connection);
+			if (active_connections.is_empty)
 				close ();
+			else
+				reap_dead_connections ();
+		}
+
+		private async void close_active_connections () {
+			while (active_connections.size != 0) {
+				var connections = active_connections.to_array ();
+				active_connections.clear ();
+				foreach (var connection in connections) {
+					unregister (connection);
+
+					try {
+						yield connection.close ();
+					} catch (Error e) {
+					}
+				}
+			}
+		}
+
+		private async void reap_dead_connections () {
+			while (dead_connections.size != 0) {
+				var connections = dead_connections.to_array ();
+				dead_connections.clear ();
+				foreach (var connection in connections) {
+					try {
+						yield connection.close ();
+					} catch (Error e) {
+					}
+				}
+			}
 		}
 
 		private async void unregister (DBusConnection connection) {
