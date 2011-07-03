@@ -4,18 +4,19 @@
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
     <OutDir>$(SolutionDir)bin\$(PlatformName)-$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)obj\$(PlatformName)-$(Configuration)\$(ProjectName)\</IntDir>
+    <ValaCompiler>$(SolutionDir)ext\toolchain\bin\valac-0.14.exe</ValaCompiler>
+    <ValaFlags>--vapidir="$(SolutionDir)vapi" --vapidir="$(SolutionDir)ext\libgum\vapi" --vapidir="$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\share\vala\vapi"</ValaFlags>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\mx-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\clutter-gtk-0.90;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\clutter-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\lib\gtk-2.0\include;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gtk-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gdk-pixbuf-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\atk-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\pango-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\cairo;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk\$(Platform)-$(Configuration)\include;$(SolutionDir)ext\libgum;$(SolutionDir)ext\libgum\libs;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\libgum;$(SolutionDir)ext\libgum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.10rc9\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4244;4305;4715;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-
       <PreprocessorDefinitions>WIN32;_WINDOWS;WINVER=0x0501;_WIN32_WINNT=0x0501;GUM_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(SolutionDir)ext\sdk\$(PlatformName)-$(ConfigurationName)\lib;$(IntDir)..\gum-32;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>atk-1.0.lib;cairo.lib;clutter-gtk-0.90.lib;clutter-win32-1.0.lib;crypto.lib;dnsapi.lib;gdiplus.lib;gdk-win32-2.0.lib;gdk_pixbuf-2.0.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;gtk-win32-2.0.lib;imm32.lib;intl.lib;msimg32.lib;mx-1.0.lib;opengl32.lib;pango-1.0.lib;pangocairo-1.0.lib;pangowin32-1.0.lib;pixman-1.lib;psapi.lib;shlwapi.lib;ssl.lib;usp10.lib;v8_base.lib;v8_snapshot.lib;winmm.lib;wocky.lib;ws2_32.lib;xml2.lib;z.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\gum-32;$(IntDir)..\gum-64;$(SolutionDir)ext\sdk-windows\$(PlatformName)-$(ConfigurationName)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ffi.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <PropertyGroup Label="Configuration">

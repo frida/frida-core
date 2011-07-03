@@ -4,18 +4,13 @@
   <ItemGroup>
     <CustomBuild Include="agent.vala">
       <Message>Compiling vala code</Message>
-      <Command>"$(SolutionDir)ext\sdk\vala\valac.exe" agent.vala glog-probe.vala gmain-watchdog.vala gst-monitor.vala memory-monitor-engine.vala script-engine.vala stopwatch.vala ..\..\lib\interfaces\session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=zed-agent --header=$(IntDir)zed-agent.h --vapidir="$(SolutionDir)ext\sdk\vala\vapi" --vapidir="$(SolutionDir)ext\libgum\vapi" --pkg=glib-2.0 --pkg=gio-2.0 --pkg=gee-1.0 --pkg=gum-1.0 || exit 1
+      <Command>"$(ValaCompiler)" agent.vala script-engine.vala ..\..\lib\interfaces\session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=zed-agent --header=$(IntDir)zed-agent.h $(ValaFlags) --pkg=glib-2.0 --pkg=gio-2.0 --pkg=gee-1.0 --pkg=gum-1.0 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs>$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)glog-probe.vala;$(ProjectDir)gmain-watchdog.vala;$(ProjectDir)gst-monitor.vala;$(ProjectDir)memory-monitor-engine.vala;$(ProjectDir)script-engine.vala;$(ProjectDir)stopwatch.vala;$(SolutionDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)script-engine.vala;$(SolutionDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
-    <None Include="glog-probe.vala" />
-    <None Include="gmain-watchdog.vala" />
-    <None Include="gst-monitor.vala" />
-    <None Include="memory-monitor-engine.vala" />
     <None Include="script-engine.vala" />
-    <None Include="stopwatch.vala" />
     <None Include="$(SolutionDir)lib\interfaces\session.vala" />
   </ItemGroup>
 
@@ -27,43 +22,12 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="agent-glue.c" />
-    <ClCompile Include="$(IntDir)glog-probe.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)gmain-watchdog.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)gst-monitor.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)memory-monitor-engine.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
     <ClCompile Include="$(IntDir)script-engine.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
-    <ClCompile Include="$(IntDir)stopwatch.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="stopwatch-windows.c" />
     <ClCompile Include="$(IntDir)session.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>

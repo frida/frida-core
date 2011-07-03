@@ -11,11 +11,11 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-tests", "tests\zed-test
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "resource-compiler", "tools\resource-compiler.vcxproj", "{81B3E411-8676-41EB-84C6-1E5307F0C5FF}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sdk", "ext\sdk.vcxproj", "{4AFCE7C4-6D9A-4663-B43C-D2E518486910}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "builddeps", "ext\builddeps.vcxproj", "{4AFCE7C4-6D9A-4663-B43C-D2E518486910}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winjector-helper-32", "src\service\windows\winjector-helper-32.vcxproj", "{E0AC03F2-F077-4BA7-88DD-BBE95B4E4EF0}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winjector-helper-32", "src\core\windows\winjector-helper-32.vcxproj", "{E0AC03F2-F077-4BA7-88DD-BBE95B4E4EF0}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winjector-helper-64", "src\service\windows\winjector-helper-64.vcxproj", "{037E8466-F87B-486D-B6AD-FECB5740CE2C}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winjector-helper-64", "src\core\windows\winjector-helper-64.vcxproj", "{037E8466-F87B-486D-B6AD-FECB5740CE2C}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-winipc-32", "lib\winipc\zed-winipc-32.vcxproj", "{AB1784E5-24CE-4CFC-A6C3-1E2C092B8CDC}"
 EndProject

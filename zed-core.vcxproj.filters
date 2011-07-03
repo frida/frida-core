@@ -66,9 +66,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="src\core\host-session-service.vala">
-      <Filter>Source Files\core</Filter>
-    </None>
     <None Include="src\core\windows\winjector.vala">
       <Filter>Source Files\core\windows</Filter>
     </None>
@@ -159,6 +156,9 @@
     </CustomBuild>
     <CustomBuild Include="data\agent\agent.resources">
       <Filter>Resource Files\agent</Filter>
+    </CustomBuild>
+    <CustomBuild Include="src\core\host-session-service.vala">
+      <Filter>Source Files\core</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>

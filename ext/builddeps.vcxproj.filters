@@ -15,7 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="sdkurl.txt">
+    <CustomBuild Include="sdk.txt">
+      <Filter>Resource Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="toolchain.txt">
       <Filter>Resource Files</Filter>
     </CustomBuild>
   </ItemGroup>

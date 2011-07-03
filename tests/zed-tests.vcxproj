@@ -176,7 +176,7 @@
   <ItemGroup>
     <CustomBuild Include="main.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)"			^
 	test-agent.vala				^
 	test-host-session.vala			^
 	test-system.vala				^
@@ -190,12 +190,10 @@
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(SolutionDir)vapi"			^
-	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
-	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	$(ValaFlags)				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
@@ -208,10 +206,10 @@
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)"			^
 	test-agent.vala				^
 	test-host-session.vala			^
 	test-system.vala				^
@@ -225,12 +223,10 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(SolutionDir)vapi"			^
-	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
-	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	$(ValaFlags)				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
@@ -243,10 +239,10 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)"			^
 	test-agent.vala				^
 	test-host-session.vala			^
 	test-system.vala				^
@@ -260,12 +256,10 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(SolutionDir)vapi"			^
-	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
-	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	$(ValaFlags)				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
@@ -278,10 +272,10 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(SolutionDir)ext\sdk\vala\valac.exe"			^
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)"			^
 	test-agent.vala				^
 	test-host-session.vala			^
 	test-system.vala				^
@@ -295,12 +289,10 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(SolutionDir)vapi"			^
-	--vapidir="$(SolutionDir)ext\sdk\vala\vapi"	^
-	--vapidir="$(SolutionDir)ext\libgum\vapi"		^
 	--vapidir="$(IntDir)..\zed-core"			^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
+	$(ValaFlags)				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gtk+-2.0				^
@@ -313,7 +305,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)ext\sdk\vala\valac.exe;$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winipc.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
     <None Include="runner.vala" />
