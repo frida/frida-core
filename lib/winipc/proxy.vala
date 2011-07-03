@@ -120,10 +120,10 @@ namespace WinIpc {
 			closed (false);
 		}
 
-		public uint register_query_sync_handler (string id, string? argument_type, QuerySyncHandler sync_handler) {
+		public uint register_query_sync_handler (string id, string? argument_type, owned QuerySyncHandler sync_handler) {
 			assert (!query_handlers.has_key (id));
 			var handler = new QueryHandler (id, new VariantTypeSpec (argument_type));
-			handler.sync_handler = sync_handler;
+			handler.sync_handler = (owned) sync_handler;
 			handler.tag = last_handler_id++;
 			query_handlers[id] = handler;
 			return handler.tag;
@@ -152,8 +152,8 @@ namespace WinIpc {
 				query_handlers.unset (matching_id);
 		}
 
-		public uint add_notify_handler (string id, string? argument_type, NotifySyncHandler sync_handler) {
-			var handler = new NotifyHandler (id, sync_handler, new VariantTypeSpec (argument_type));
+		public uint add_notify_handler (string id, string? argument_type, owned NotifySyncHandler sync_handler) {
+			var handler = new NotifyHandler (id, (owned) sync_handler, new VariantTypeSpec (argument_type));
 			handler.tag = last_handler_id++;
 			notify_handlers.add (handler);
 			return handler.tag;
@@ -351,15 +351,9 @@ namespace WinIpc {
 			private string id;
 			private VariantTypeSpec argument_spec;
 
-			public QuerySyncHandler sync_handler {
-				get;
-				set;
-			}
+			public QuerySyncHandler sync_handler;
 
-			public QueryAsyncHandler async_handler {
-				get;
-				set;
-			}
+			public QueryAsyncHandler async_handler;
 
 			public uint tag {
 				get;
@@ -377,9 +371,8 @@ namespace WinIpc {
 					return false;
 				}
 
-				QuerySyncHandler handler = sync_handler; /* FIXME: workaround for Vala compiler bug */
-				if (handler != null)
-					response_value = handler (argument);
+				if (sync_handler != null)
+					response_value = sync_handler (argument);
 				else
 					response_value = yield async_handler.handle_query (id, argument);
 
@@ -401,9 +394,9 @@ namespace WinIpc {
 				set;
 			}
 
-			public NotifyHandler (string id, NotifySyncHandler sync_handler, VariantTypeSpec argument_spec) {
+			public NotifyHandler (string id, owned NotifySyncHandler sync_handler, VariantTypeSpec argument_spec) {
 				this.id = id;
-				this.sync_handler = sync_handler;
+				this.sync_handler = (owned) sync_handler;
 				this.argument_spec = argument_spec;
 			}
 
@@ -455,9 +448,9 @@ namespace WinIpc {
 				private set;
 			}
 
-			public PendingResponse (uint32 id, CompletionHandler handler) {
+			public PendingResponse (uint32 id, owned CompletionHandler handler) {
 				this.id = id;
-				this.handler = handler;
+				this.handler = (owned) handler;
 			}
 
 			public void complete (bool success, Variant? response_value) {

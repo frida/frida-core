@@ -95,7 +95,7 @@ class Vala.ResourceCompiler {
 			"{\n" +
 			"  const gchar * name;\n" +
 			"  gconstpointer data;\n" +
-			"  guint size;\n" +
+			"  guint data_length1;\n" +
 			"};\n" +
 			"\n").printf (incguard_name, incguard_name, blob_ctype, blob_ctype, blob_ctype),
 			null);
@@ -199,7 +199,7 @@ class Vala.ResourceCompiler {
 					"\n" +
 					"  needle.name = name;\n" +
 					"  needle.data = NULL;\n" +
-					"  needle.size = 0;\n" +
+					"  needle.data_length1 = 0;\n" +
 					"\n" +
 					"  return bsearch (&needle, " + blob_list_identifier + ", G_N_ELEMENTS (" + blob_list_identifier + "), sizeof (" + blob_ctype + "), " + compare_func_identifier + ");\n" +
 					"}\n",
@@ -213,13 +213,11 @@ class Vala.ResourceCompiler {
 			"\n" +
 			"	public struct Blob {\n" +
 			"		public unowned string name;\n" +
-			"		public void * data;\n" +
-			"		public uint size;\n" +
+			"		public unowned uint8[] data;\n" +
 			"\n" +
-			"		public Blob (string name, void * data, uint size) {\n" +
+			"		public Blob (string name, uint8[] data) {\n" +
 			"			this.name = name;\n" +
 			"			this.data = data;\n" +
-			"			this.size = size;\n" +
 			"		}\n" +
 			"	}\n" +
 			"\n" +

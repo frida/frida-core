@@ -143,7 +143,7 @@ namespace Zed {
 
 				if (obtain_requests.size == 0) {
 					try {
-						Thread.create (obtain_worker, false);
+						Thread.create<bool> (obtain_worker, false);
 					} catch (ThreadError e) {
 						error (e.message);
 					}
@@ -156,7 +156,7 @@ namespace Zed {
 				return request.get_result ();
 			}
 
-			private void * obtain_worker () {
+			private bool obtain_worker () {
 				Helper instance = null;
 				WinjectorError error = null;
 
@@ -176,7 +176,7 @@ namespace Zed {
 				});
 				source.attach (main_context);
 
-				return null;
+				return error == null;
 			}
 
 			private async void complete_obtain (Helper? instance, WinjectorError? error) {
@@ -206,8 +206,8 @@ namespace Zed {
 				private Helper helper;
 				private WinjectorError error;
 
-				public ObtainRequest (CompletionHandler handler) {
-					this.handler = handler;
+				public ObtainRequest (owned CompletionHandler handler) {
+					this.handler = (owned) handler;
 				}
 
 				public void complete (Helper? helper, WinjectorError? error) {
@@ -242,11 +242,11 @@ namespace Zed {
 			public ResourceStore () throws WinjectorError {
 				var blob32 = Zed.Data.Winjector.get_winjector_helper_32_exe_blob ();
 				helper32 = new TemporaryFile.from_stream ("zed-winjector-helper-32.exe",
-					new MemoryInputStream.from_data (blob32.data, blob32.size, null),
+					new MemoryInputStream.from_data (blob32.data, null),
 					tempdir);
 				var blob64 = Zed.Data.Winjector.get_winjector_helper_64_exe_blob ();
 				helper64 = new TemporaryFile.from_stream ("zed-winjector-helper-64.exe",
-					new MemoryInputStream.from_data (blob64.data, blob64.size, null),
+					new MemoryInputStream.from_data (blob64.data, null),
 					tempdir);
 			}
 
@@ -311,12 +311,13 @@ namespace Zed {
 					var buf = new uint8[buf_size];
 
 					while (true) {
-						var bytes_read = istream.read (buf, buf_size, null);
+						var bytes_read = istream.read (buf);
 						if (bytes_read == 0)
 							break;
+						buf.resize ((int) bytes_read);
 
 						size_t bytes_written;
-						ostream.write_all (buf, bytes_read, out bytes_written, null);
+						ostream.write_all (buf, out bytes_written);
 					}
 
 					ostream.close (null);

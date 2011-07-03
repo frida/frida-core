@@ -7,6 +7,9 @@ zed_agent_test_script_target_function (gint level, const gchar * message)
 {
   guint bogus_result = 0, i;
 
+  (void) level;
+  (void) message;
+
   for (i = 0; i != 42; i++)
     bogus_result += i;
 

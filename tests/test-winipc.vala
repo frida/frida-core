@@ -584,8 +584,8 @@ namespace Zed.WinIpcTest {
 		private CloseEvent server_close_event;
 		private CloseEvent client_close_event;
 
-		public Harness (Zed.Test.AsyncHarness.TestSequenceFunc func) {
-			base (func);
+		public Harness (owned Zed.Test.AsyncHarness.TestSequenceFunc func) {
+			base ((owned) func);
 		}
 
 		construct {

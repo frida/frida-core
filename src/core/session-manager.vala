@@ -39,9 +39,9 @@ namespace Frida {
 			assert (session_did_exist);
 
 			uint handle = 0;
-			foreach (var pair in session_by_handle) {
-				if (pair.value == session)
-					handle = pair.key;
+			foreach (var entry in session_by_handle.entries) {
+				if (entry.value == session)
+					handle = entry.key;
 			}
 			assert (handle != 0);
 			session_by_handle.unset (handle);
@@ -160,8 +160,6 @@ namespace Frida {
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
 		public signal void closed ();
-		public signal void glog_message (uint64 timestamp, string domain, uint level, string message);
-		public signal void gst_pad_stats (Zed.GstPadStats[] stats);
 
 		public Session (SessionManager manager, uint pid, Zed.AgentSession agent_session) {
 			this.manager = manager;
@@ -170,8 +168,6 @@ namespace Frida {
 			this.main_context = manager.main_context;
 
 			internal_session.message_from_script.connect (on_message_from_script);
-			internal_session.glog_message.connect ((timestamp, domain, level, message) => glog_message (timestamp, domain, level, message));
-			internal_session.gst_pad_stats.connect ((stats) => gst_pad_stats (stats));
 		}
 
 		public void close () {
@@ -197,63 +193,6 @@ namespace Frida {
 		public void _release_script (Zed.AgentScriptId sid) {
 			var script_did_exist = script_by_id.unset (sid.handle);
 			assert (script_did_exist);
-		}
-
-		public uint64 resolve_module_base (string module_name) throws Error {
-			var task = create<ResolveModuleBaseTask> () as ResolveModuleBaseTask;
-			task.module_name = module_name;
-			return task.start_and_wait_for_completion ();
-		}
-
-		public uint64 resolve_module_export (string module_name, string symbol_name) throws Error {
-			var task = create<ResolveModuleExportTask> () as ResolveModuleExportTask;
-			task.module_name = module_name;
-			task.symbol_name = symbol_name;
-			return task.start_and_wait_for_completion ();
-		}
-
-		public uint64[] scan_module_for_code_pattern (string module_name, string pattern) throws Error {
-			var task = create<ScanModuleForCodePatternTask> () as ScanModuleForCodePatternTask;
-			task.module_name = module_name;
-			task.pattern = pattern;
-			task.start_and_wait_for_completion ();
-			return task.matches;
-		}
-
-		public void invoke_function (uint64 address, string arguments) throws Error {
-			var task = create<InvokeFunctionTask> () as InvokeFunctionTask;
-			task.address = address;
-			task.arguments = arguments;
-			task.start_and_wait_for_completion ();
-		}
-
-		public void add_glog_pattern (string pattern, uint levels) throws Error {
-			var task = create<AddGLogPatternTask> () as AddGLogPatternTask;
-			task.pattern = pattern;
-			task.levels = levels;
-			task.start_and_wait_for_completion ();
-		}
-
-		public void clear_glog_patterns () throws Error {
-			(create<ClearGLogPatternsTask> () as ClearGLogPatternsTask).start_and_wait_for_completion ();
-		}
-
-		public void enable_gmain_watchdog (double max_duration) throws Error {
-			var task = create<EnableGMainWatchdogTask> () as EnableGMainWatchdogTask;
-			task.max_duration = max_duration;
-			task.start_and_wait_for_completion ();
-		}
-
-		public void disable_gmain_watchdog () throws Error {
-			(create<DisableGMainWatchdogTask> () as DisableGMainWatchdogTask).start_and_wait_for_completion ();
-		}
-
-		public void enable_gst_monitor () throws Error {
-			(create<EnableGstMonitorTask> () as EnableGstMonitorTask).start_and_wait_for_completion ();
-		}
-
-		public void disable_gst_monitor () throws Error {
-			(create<DisableGstMonitorTask> () as DisableGstMonitorTask).start_and_wait_for_completion ();
 		}
 
 		private Object create<T> () {
@@ -298,84 +237,6 @@ namespace Frida {
 				var script = new Script (parent, sid);
 				parent.script_by_id[sid.handle] = script;
 				return script;
-			}
-		}
-
-		private class ResolveModuleBaseTask : SessionTask<uint64> {
-			public string module_name;
-
-			protected override async uint64 perform_operation () throws Error {
-				return yield parent.internal_session.resolve_module_base (module_name);
-			}
-		}
-
-		private class ResolveModuleExportTask : SessionTask<uint64> {
-			public string module_name;
-			public string symbol_name;
-
-			protected override async uint64 perform_operation () throws Error {
-				return yield parent.internal_session.resolve_module_export (module_name, symbol_name);
-			}
-		}
-
-		private class ScanModuleForCodePatternTask : SessionTask<void> {
-			public string module_name;
-			public string pattern;
-
-			public uint64[] matches;
-
-			protected override async void perform_operation () throws Error {
-				matches = yield parent.internal_session.scan_module_for_code_pattern (module_name, pattern);
-			}
-		}
-
-		private class InvokeFunctionTask : SessionTask<void> {
-			public uint64 address;
-			public string arguments;
-
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.invoke_function (address, arguments);
-			}
-		}
-
-		private class AddGLogPatternTask : SessionTask<void> {
-			public string pattern;
-			public uint levels;
-
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.add_glog_pattern (pattern, levels);
-			}
-		}
-
-		private class ClearGLogPatternsTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.clear_glog_patterns ();
-			}
-		}
-
-		private class EnableGMainWatchdogTask : SessionTask<void> {
-			public double max_duration;
-
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.enable_gmain_watchdog (max_duration);
-			}
-		}
-
-		private class DisableGMainWatchdogTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.disable_gmain_watchdog ();
-			}
-		}
-
-		private class EnableGstMonitorTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.enable_gst_monitor ();
-			}
-		}
-
-		private class DisableGstMonitorTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error {
-				yield parent.internal_session.disable_gst_monitor ();
 			}
 		}
 

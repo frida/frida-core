@@ -78,8 +78,8 @@ namespace Zed {
 			var blob32 = Zed.Data.Agent.get_zed_agent_32_dll_blob ();
 			var blob64 = Zed.Data.Agent.get_zed_agent_64_dll_blob ();
 			agent_desc = new AgentDescriptor ("zed-agent-%u.dll",
-				new MemoryInputStream.from_data (blob32.data, blob32.size, null),
-				new MemoryInputStream.from_data (blob64.data, blob64.size, null));
+				new MemoryInputStream.from_data (blob32.data, null),
+				new MemoryInputStream.from_data (blob64.data, null));
 		}
 
 		public async void close () {
