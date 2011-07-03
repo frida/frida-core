@@ -289,8 +289,11 @@ class Vala.ResourceCompiler {
 		if (!different)
 			return;
 
+		var blob_size = new_content.data_size;
+		uint8[] blob = new uint8[blob_size];
+		Memory.copy(blob, new_content.data, blob_size);
 		var output = file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
-		output.write_all (new_content.get_data ());
+		output.write_all (blob);
 	}
 
 	private string c_namespace_from_vala (string vala_ns) {
