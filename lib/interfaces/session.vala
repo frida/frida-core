@@ -10,8 +10,9 @@ namespace Zed {
 	public interface AgentSession : Object {
 		public abstract async void close () throws IOError;
 
-		public abstract async AgentScriptId load_script (string script_text) throws IOError;
-		public abstract async void unload_script (AgentScriptId sid) throws IOError;
+		public abstract async AgentScriptId create_script (string source) throws IOError;
+		public abstract async void destroy_script (AgentScriptId sid) throws IOError;
+		public abstract async void load_script (AgentScriptId sid) throws IOError;
 		public abstract async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError;
 		public signal void message_from_script (AgentScriptId sid, string msg);
 	}

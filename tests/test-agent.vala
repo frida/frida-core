@@ -12,12 +12,13 @@ namespace Zed.AgentTest {
 
 			AgentScriptId sid;
 			try {
-				sid = yield session.load_script (
+				sid = yield session.create_script (
 					("Interceptor.attach (0x%" + size_t.FORMAT_MODIFIER + "x, {" +
 					 "  onEnter: function(args) {" +
 					 "    send({ first_argument: args[0], second_argument: Memory.readUtf8String(args[1]) });" +
 					 "  }" +
 					 "});").printf ((size_t) target_function));
+				yield session.load_script (sid);
 			} catch (IOError attach_error) {
 				assert_not_reached ();
 			}

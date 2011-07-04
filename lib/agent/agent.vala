@@ -50,13 +50,17 @@ namespace Zed.Agent {
 			});
 		}
 
-		public async AgentScriptId load_script (string script_text) throws IOError {
-			var instance = script_engine.load_script (script_text);
+		public async AgentScriptId create_script (string source) throws IOError {
+			var instance = script_engine.create_script (source);
 			return instance.sid;
 		}
 
-		public async void unload_script (AgentScriptId sid) throws IOError {
-			script_engine.unload_script (sid);
+		public async void destroy_script (AgentScriptId sid) throws IOError {
+			script_engine.destroy_script (sid);
+		}
+
+		public async void load_script (AgentScriptId sid) throws IOError {
+			script_engine.load_script (sid);
 		}
 
 		public async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {
