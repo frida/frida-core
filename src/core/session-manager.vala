@@ -178,9 +178,9 @@ namespace Frida {
 			}
 		}
 
-		public Script create_script (string text) throws Error {
+		public Script create_script (string source) throws Error {
 			var task = create<CreateScriptTask> () as CreateScriptTask;
-			task.text = text;
+			task.source = source;
 			return task.start_and_wait_for_completion ();
 		}
 
@@ -230,10 +230,10 @@ namespace Frida {
 		}
 
 		private class CreateScriptTask : SessionTask<Script> {
-			public string text;
+			public string source;
 
 			protected override async Script perform_operation () throws Error {
-				var sid = yield parent.internal_session.create_script (text);
+				var sid = yield parent.internal_session.create_script (source);
 				var script = new Script (parent, sid);
 				parent.script_by_id[sid.handle] = script;
 				return script;
@@ -276,6 +276,12 @@ namespace Frida {
 			(create<UnloadTask> () as UnloadTask).start_and_wait_for_completion ();
 		}
 
+		public void post_message (string msg) throws Error {
+			var task = create<PostMessageTask> () as PostMessageTask;
+			task.msg = msg;
+			task.start_and_wait_for_completion ();
+		}
+
 		private Object create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
@@ -289,6 +295,14 @@ namespace Frida {
 		private class UnloadTask : ScriptTask<void> {
 			protected override async void perform_operation () throws Error {
 				yield parent._do_unload (true);
+			}
+		}
+
+		private class PostMessageTask : ScriptTask<void> {
+			public string msg;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.session.internal_session.post_message_to_script (parent.script_id, msg);
 			}
 		}
 

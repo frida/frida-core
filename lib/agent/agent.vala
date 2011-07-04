@@ -63,6 +63,10 @@ namespace Zed.Agent {
 			script_engine.load_script (sid);
 		}
 
+		public async void post_message_to_script (AgentScriptId sid, string msg) throws IOError {
+			script_engine.post_message_to_script (sid, msg);
+		}
+
 		public async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {
 			script_engine.redirect_script_messages_to (sid, folder, keep_last_n);
 		}

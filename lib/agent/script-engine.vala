@@ -28,18 +28,25 @@ namespace Zed.Agent {
 			return instance;
 		}
 
-		public async void destroy_script (AgentScriptId sid) throws IOError {
+		public void destroy_script (AgentScriptId sid) throws IOError {
 			ScriptInstance instance;
 			if (!instance_by_id.unset (sid.handle, out instance))
 				throw new IOError.FAILED ("invalid script id");
 			instance.script.unload ();
 		}
 
-		public async void load_script (AgentScriptId sid) throws IOError {
+		public void load_script (AgentScriptId sid) throws IOError {
 			var instance = instance_by_id[sid.handle];
 			if (instance == null)
 				throw new IOError.FAILED ("invalid script id");
 			instance.script.load ();
+		}
+
+		public void post_message_to_script (AgentScriptId sid, string msg) throws IOError {
+			var instance = instance_by_id[sid.handle];
+			if (instance == null)
+				throw new IOError.FAILED ("invalid script id");
+			instance.script.post_message (msg);
 		}
 
 		public void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {
