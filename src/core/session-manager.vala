@@ -7,7 +7,8 @@ namespace Frida {
 			private set;
 		}
 
-		private Zed.HostSessionService service = new Zed.HostSessionService.with_local_backend_only ();
+		private bool closed = false;
+		private Zed.HostSessionService service;
 		private Zed.HostSessionProvider local_provider;
 		private Zed.HostSession local_session;
 
@@ -56,6 +57,10 @@ namespace Frida {
 			}
 
 			protected override async void perform_operation () throws Error {
+				if (parent.closed)
+					return;
+				parent.closed = true;
+
 				var service = parent.service;
 				if (service == null)
 					return;
@@ -100,7 +105,7 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.service == null)
+				if (parent.closed)
 					throw new IOError.FAILED ("invalid operation (manager is closed)");
 			}
 		}
