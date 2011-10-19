@@ -52,8 +52,8 @@ AM_CONDITIONAL(OS_LINUX, test "x$HAVE_LINUX" = "xyes")
 AM_CONDITIONAL(OS_DARWIN, test "x$HAVE_DARWIN" = "xyes")
 
 case $host_os in
-  darwin10\.*) HAVE_OSX=yes     ;;
-  *-android*)  HAVE_ANDROID=yes ;;
+  darwin10\.*|darwin11\.*) HAVE_OSX=yes     ;;
+  *-android*)              HAVE_ANDROID=yes ;;
   *)				;;
 esac
 if [[ "x$HAVE_OSX" = "xyes" ]]; then
@@ -118,6 +118,7 @@ if test "x$enable_cli" = "xyes"; then
 	pkg_modules="v8"
 	ZED_CLI_PACKAGES="--pkg readline"
 	PKG_CHECK_MODULES(ZED_CLI, [$pkg_modules])
+	ZED_CLI_LIBS="$ZED_CLI_LIBS -lreadline"
 	AC_SUBST(ZED_CLI_CFLAGS)
 	AC_SUBST(ZED_CLI_LIBS)
 	AC_SUBST(ZED_CLI_PACKAGES)
