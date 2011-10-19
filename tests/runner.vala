@@ -13,7 +13,7 @@ namespace Zed.Test {
 		Zed.WinjectorTest.add_tests ();
 #elif LINUX
 		Zed.LinjectorTest.add_tests ();
-#elif IOS
+#elif DARWIN
 		Zed.FruitjectorTest.add_tests ();
 #endif
 

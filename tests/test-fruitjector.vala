@@ -1,14 +1,16 @@
 namespace Zed.FruitjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Fruitjector/inject", () => {
-			var logfile = File.new_for_path (Path.build_filename (Config.PKGTESTDIR, "inject-attacker.log"));
+			var tests_dir = Path.get_dirname (Zed.Test.Process.current.filename);
+
+			var logfile = File.new_for_path (Path.build_filename (tests_dir, "inject-attacker.log"));
 
 			try {
 				logfile.delete ();
 			} catch (Error delete_error) {
 			}
 
-			var rat = new LabRat ("inject-victim");
+			var rat = new LabRat (tests_dir, "inject-victim", logfile.get_path ());
 
 			rat.inject ("inject-attacker.dylib", "");
 			rat.wait_for_uninject ();
@@ -39,6 +41,7 @@ namespace Zed.FruitjectorTest {
 			unowned string str = (string) contents;
 			return str;
 		} catch (Error load_error) {
+			stderr.printf ("%s: %s\n", file.get_path (), load_error.message);
 			assert_not_reached ();
 		}
 	}
@@ -53,12 +56,14 @@ namespace Zed.FruitjectorTest {
 		private string rat_directory;
 		private Fruitjector injector;
 
-		public LabRat (string name) {
+		public LabRat (string dir, string name, string logfile) {
 			main_context = new MainContext ();
 			main_context.push_thread_default ();
 
-			rat_directory = Config.PKGTESTDIR;
+			rat_directory = dir;
 			var rat_file = Path.build_filename (rat_directory, name);
+
+			Environment.set_variable ("ZED_LABRAT_LOGFILE", logfile, true);
 
 			try {
 				process = Zed.Test.Process.start (rat_file);
@@ -89,6 +94,9 @@ namespace Zed.FruitjectorTest {
 
 			try {
 				var dylib = Path.build_filename (rat_directory, name);
+				if (!FileUtils.test (dylib, FileTest.EXISTS))
+					dylib = Path.build_filename (rat_directory, ".libs", "lib" + name);
+				assert (FileUtils.test (dylib, FileTest.EXISTS));
 				yield injector.inject (process.id, dylib, data_string);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);

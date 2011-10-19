@@ -16,7 +16,7 @@
 #define ZED_PAGE_SIZE           (4096)
 #define ZED_STACK_GUARD_SIZE    ZED_PAGE_SIZE
 #define ZED_STACK_SIZE          (32 * 1024)
-#define ZED_PTHREAD_DATA_SIZE   ZED_PAGE_SIZE
+#define ZED_PTHREAD_DATA_SIZE   (2 * ZED_PAGE_SIZE)
 #define ZED_CODE_OFFSET         (0)
 #define ZED_MACH_CODE_OFFSET    (0)
 #define ZED_PTHREAD_CODE_OFFSET (512)
@@ -28,7 +28,7 @@
 
 #define ZED_PAYLOAD_SIZE        (ZED_THREAD_SELF_OFFSET + ZED_PTHREAD_DATA_SIZE)
 
-#define ZED_PSR_THUMB              (0x20)
+#define ZED_PSR_THUMB           (0x20)
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
@@ -101,11 +101,19 @@ struct _ZedEmitContext
   guint8 * code;
 #ifdef HAVE_ARM
   GumThumbWriter tw;
+#else
+  GumX86Writer cw;
 #endif
 };
 
 static void zed_emit_mach_stub_code (guint8 * code);
 static void zed_emit_pthread_stub_code (guint8 * code);
+
+static void zed_emit_pthread_setup (ZedEmitContext * ctx);
+static void zed_emit_pthread_create_and_join (ZedEmitContext * ctx);
+static void zed_emit_thread_terminate (ZedEmitContext * ctx);
+
+static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
 
 static gboolean zed_fill_agent_context (ZedAgentContext * ctx, const char * dylib_path, const char * data_string,
     vm_address_t remote_payload_base, GError ** error);
@@ -128,6 +136,7 @@ _zed_fruitjector_destroy_context (ZedFruitjector * self)
   ZedFruitContext * ctx = self->context;
 
   dispatch_release (ctx->dispatch_queue);
+
   g_free (ctx);
 }
 
@@ -199,6 +208,9 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   x86_thread_state_t state;
   mach_msg_type_number_t state_count = x86_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = x86_THREAD_STATE;
+#if GLIB_SIZEOF_VOID_P == 8
+  x86_thread_state64_t * ts;
+#endif
 #endif
   dispatch_source_t source;
 
@@ -233,13 +245,23 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   ret = vm_protect (task, payload_address + ZED_CODE_OFFSET, ZED_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
-#ifdef HAVE_ARM
+  bzero (&state, sizeof (state));
+#if defined(HAVE_ARM)
   state.__r[7] = payload_address + ZED_DATA_OFFSET;
 
   state.__sp = payload_address + ZED_STACK_TOP_OFFSET;
   state.__lr = 0xcafebabe;
   state.__pc = payload_address + ZED_MACH_CODE_OFFSET;
   state.__cpsr = ZED_PSR_THUMB;
+#elif GLIB_SIZEOF_VOID_P == 8
+  state.tsh.flavor = x86_THREAD_STATE64;
+  state.tsh.count = x86_THREAD_STATE64_COUNT;
+  ts = &state.uts.ts64;
+
+  ts->__rbp = payload_address + ZED_DATA_OFFSET;
+
+  ts->__rsp = payload_address + ZED_STACK_TOP_OFFSET;
+  ts->__rip = payload_address + ZED_MACH_CODE_OFFSET;
 #endif
 
   ret = thread_create_running (task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
@@ -260,7 +282,7 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %d", failed_operation, errno);
+        "%s failed: %s (%d)", failed_operation, mach_error_string (errno), errno);
     goto error_epilogue;
   }
 
@@ -291,7 +313,11 @@ zed_fill_agent_context (ZedAgentContext * ctx, const char * dylib_path, const ch
   ctx->thread_self_data = (gpointer) (remote_payload_base + ZED_THREAD_SELF_OFFSET);
 
   ZED_CTX_ASSIGN_FUNCTION (pthread_create);
+#ifdef HAVE_ARM
   ctx->pthread_create_start_routine = (gpointer) (remote_payload_base + ZED_PTHREAD_CODE_OFFSET + 1);
+#else
+  ctx->pthread_create_start_routine = (gpointer) (remote_payload_base + ZED_PTHREAD_CODE_OFFSET);
+#endif
   ctx->pthread_create_arg = (gpointer) (remote_payload_base + ZED_DATA_OFFSET);
 
   ZED_CTX_ASSIGN_FUNCTION (pthread_join);
@@ -338,10 +364,6 @@ beach:
 
 #ifdef HAVE_ARM
 
-static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
-static void zed_emit_pthread_setup (ZedEmitContext * ctx);
-static void zed_emit_pthread_create_and_join (ZedEmitContext * ctx);
-static void zed_emit_thread_terminate (ZedEmitContext * ctx);
 static void zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
 
 static void
@@ -464,11 +486,111 @@ zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWri
 static void
 zed_emit_mach_stub_code (guint8 * code)
 {
+  ZedEmitContext ctx;
+
+  ctx.code = code;
+  gum_x86_writer_init (&ctx.cw, ctx.code);
+
+  zed_emit_pthread_setup (&ctx);
+  zed_emit_pthread_create_and_join (&ctx);
+  zed_emit_thread_terminate (&ctx);
+  gum_x86_writer_put_int3 (&ctx.cw);
+
+  gum_x86_writer_free (&ctx.cw);
 }
 
 static void
 zed_emit_pthread_stub_code (guint8 * code)
 {
+  ZedEmitContext ctx;
+
+  ctx.code = code;
+  gum_x86_writer_init (&ctx.cw, ctx.code);
+
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBP);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBX);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XAX); /* padding */
+  gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBP, GUM_REG_XDI);
+  zed_emit_pthread_stub_body (&ctx);
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XAX); /* padding */
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBX);
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBP);
+  gum_x86_writer_put_ret (&ctx.cw);
+
+  gum_x86_writer_free (&ctx.cw);
 }
+
+#define ZED_EMIT_LOAD(reg, field) \
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_##reg, GUM_REG_XBP, G_STRUCT_OFFSET (ZedAgentContext, field))
+#define ZED_EMIT_MOVE(dstreg, srcreg) \
+    gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_##dstreg, GUM_REG_##srcreg)
+#define ZED_EMIT_CALL(fun, ...) \
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBP, G_STRUCT_OFFSET (ZedAgentContext, fun), __VA_ARGS__)
+
+static void
+zed_emit_pthread_stub_body (ZedEmitContext * ctx)
+{
+  ZED_EMIT_LOAD (XAX, dylib_path);
+  ZED_EMIT_LOAD (XDX, dlopen_mode);
+  ZED_EMIT_CALL (dlopen_impl, 2,
+      GUM_ARG_REGISTER, GUM_REG_XAX,
+      GUM_ARG_REGISTER, GUM_REG_XDX);
+  ZED_EMIT_MOVE (XBX, XAX);
+
+  ZED_EMIT_LOAD (XAX, entrypoint_name);
+  ZED_EMIT_CALL (dlsym_impl, 2,
+      GUM_ARG_REGISTER, GUM_REG_XBX,
+      GUM_ARG_REGISTER, GUM_REG_XAX);
+
+  ZED_EMIT_LOAD (XDX, data_string);
+  gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
+      GUM_CALL_CAPI, GUM_REG_XAX, 1,
+      GUM_ARG_REGISTER, GUM_REG_XDX);
+
+  ZED_EMIT_CALL (dlclose_impl, 1,
+      GUM_ARG_REGISTER, GUM_REG_XBX);
+}
+
+static void
+zed_emit_pthread_setup (ZedEmitContext * ctx)
+{
+  ZED_EMIT_LOAD (XAX, thread_self_data);
+  ZED_EMIT_CALL (_pthread_set_self_impl, 1, GUM_ARG_REGISTER, GUM_REG_XAX);
+
+  ZED_EMIT_LOAD (XAX, thread_self_data);
+  ZED_EMIT_CALL (cthread_set_self_impl, 1, GUM_ARG_REGISTER, GUM_REG_XAX);
+}
+
+static void
+zed_emit_pthread_create_and_join (ZedEmitContext * ctx)
+{
+  gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XAX, GUM_REG_XSP);
+  ZED_EMIT_LOAD (XDX, pthread_create_start_routine);
+  ZED_EMIT_LOAD (XCX, pthread_create_arg);
+  ZED_EMIT_CALL (pthread_create_impl, 4,
+      GUM_ARG_REGISTER, GUM_REG_XAX,
+      GUM_ARG_POINTER, NULL,
+      GUM_ARG_REGISTER, GUM_REG_XDX,
+      GUM_ARG_REGISTER, GUM_REG_XCX);
+
+  gum_x86_writer_put_pop_reg (&ctx->cw, GUM_REG_XAX);
+  gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
+  ZED_EMIT_CALL (pthread_join_impl, 2,
+      GUM_ARG_REGISTER, GUM_REG_XAX,
+      GUM_ARG_POINTER, NULL);
+}
+
+static void
+zed_emit_thread_terminate (ZedEmitContext * ctx)
+{
+  ZED_EMIT_CALL (mach_thread_self_impl, 0);
+  ZED_EMIT_CALL (thread_terminate_impl, 1,
+      GUM_ARG_REGISTER, GUM_REG_XAX);
+}
+
+#undef ZED_EMIT_LOAD
+#undef ZED_EMIT_MOVE
+#undef ZED_EMIT_CALL
 
 #endif /* !HAVE_ARM */

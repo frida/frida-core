@@ -20,7 +20,7 @@ if OS_LINUX
 platform_tests += test-linjector.vala
 endif
 
-if OS_IOS
+if OS_DARWIN
 platform_tests += test-fruitjector.vala
 endif
 
@@ -40,6 +40,10 @@ zed_tests_VALAFLAGS = \
 	--pkg=zed-tests \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
+if OS_OSX
+zed_tests_LDFLAGS += \
+	-sectcreate __TEXT __info_plist "$(srcdir)/zed-tests.plist"
+endif
 
 libzed_tests_la_SOURCES = \
 	test-system.vala \
@@ -92,6 +96,11 @@ AM_CPPFLAGS = \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\" \
 	-DPKGTESTDIR=\""$(prefix)/tests"\"
+
+if OS_OSX
+all-local: zed-tests
+	codesign -f -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$<"
+endif
 
 if OS_IOS
 all-local: zed-tests
