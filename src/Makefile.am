@@ -99,6 +99,8 @@ libzed_core_glue_la_SOURCES = \
 
 libzed_cli_la_SOURCES = \
 	$(srcdir)/cli/application.vala
+libzed_cli_la_CFLAGS = \
+	-w
 libzed_cli_la_LIBADD = \
 	$(builddir)/libzed-core.la
 libzed_cli_la_VALAFLAGS = \
