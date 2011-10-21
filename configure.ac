@@ -83,6 +83,9 @@ fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   ZED_VALAFLAGS="$ZED_VALAFLAGS -D DARWIN"
 fi
+if [[ "x$HAVE_OSX" = "xyes" ]]; then
+  ZED_VALAFLAGS="$ZED_VALAFLAGS -D OSX"
+fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
   ZED_VALAFLAGS="$ZED_VALAFLAGS -D IOS"
 fi
