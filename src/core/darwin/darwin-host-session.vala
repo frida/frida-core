@@ -1,19 +1,79 @@
-public class Zed.DarwinHostSession : Object, HostSession {
-	private Fruitjector injector = new Fruitjector ();
+namespace Zed {
+	public class DarwinHostSessionBackend : Object, HostSessionBackend {
+		private DarwinHostSessionProvider local_provider;
 
-	private const uint SERVER_LISTEN_PORT = 27042;
-	private uint last_agent_port = SERVER_LISTEN_PORT + 1;
+		public async void start () {
+			assert (local_provider == null);
+			local_provider = new DarwinHostSessionProvider ();
+			provider_available (local_provider);
+		}
 
-	public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
-		return System.enumerate_processes ();
+		public async void stop () {
+			assert (local_provider != null);
+			provider_unavailable (local_provider);
+			yield local_provider.close ();
+			local_provider = null;
+		}
 	}
 
-	public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
-		var agent_path = Path.build_filename (Config.PKGLIBDIR, "zed-agent.dylib");
-		var port = last_agent_port++;
-		var listen_address = "tcp:host=127.0.0.1,port=%u".printf (port);
-		injector.inject (pid, agent_path, listen_address);
+	public class DarwinHostSessionProvider : Object, HostSessionProvider {
+		public string name {
+			get { return "Local System"; }
+		}
 
-		return Zed.AgentSessionId (port);
+		public ImageData? icon {
+			get { return null; }
+		}
+
+		public HostSessionProviderKind kind {
+			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
+		}
+
+		private DarwinHostSession host_session;
+
+		public async void close () {
+			if (host_session != null)
+				yield host_session.close ();
+			host_session = null;
+		}
+
+		public async HostSession create () throws IOError {
+			if (host_session != null)
+				throw new IOError.FAILED ("may only create one HostSession");
+			host_session = new DarwinHostSession ();
+			host_session.agent_session_closed.connect ((id, error) => this.agent_session_closed (id, error));
+			return host_session;
+		}
+
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+			if (host_session == null)
+				throw new IOError.FAILED ("no such id");
+			return yield host_session.obtain_agent_session (id);
+		}
+	}
+
+	public class DarwinHostSession : BaseDBusHostSession, HostSession {
+		private Fruitjector injector = new Fruitjector ();
+
+		public override async void close () {
+			yield base.close ();
+
+			while (injector.any_still_injected ()) {
+				injector.uninjected.connect ((id) => close.callback ());
+				yield;
+			}
+
+			injector = null;
+		}
+
+		public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
+			return System.enumerate_processes ();
+		}
+
+		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
+			var session = allocate_session ();
+			yield injector.inject (pid, Path.build_filename (Config.PKGLIBDIR, "zed-agent.dylib"), session.listen_address);
+			return session.id;
+		}
 	}
 }

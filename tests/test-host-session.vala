@@ -23,6 +23,13 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
+#if DARWIN
+		GLib.Test.add_func ("/HostSession/Darwin/backend", () => {
+			var h = new Harness ((h) => Darwin.backend (h as Harness));
+			h.run ();
+		});
+#endif
+
 #if WINDOWS
 		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
 			var h = new Harness ((h) => Windows.backend (h as Harness));
@@ -111,6 +118,42 @@ namespace Zed.HostSessionTest {
 		}
 
 	}
+
+#if DARWIN
+	namespace Darwin {
+
+		private static async void backend (Harness h) {
+			var backend = new DarwinHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			assert (prov.name == "Local System");
+			assert (prov.icon == null);
+
+			try {
+				var session = yield prov.create ();
+				var processes = yield session.enumerate_processes ();
+				assert (processes.length > 0);
+
+				if (GLib.Test.verbose ()) {
+					foreach (var process in processes)
+						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
+				}
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+
+			h.done ();
+		}
+
+	}
+#endif
 
 #if WINDOWS
 	namespace Windows {

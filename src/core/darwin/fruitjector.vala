@@ -31,6 +31,10 @@ public class Zed.Fruitjector : Object {
 		return _do_inject (pid, dylib_path, data_string);
 	}
 
+	public bool any_still_injected () {
+		return !instance_by_id.is_empty;
+	}
+
 	public bool is_still_injected (uint id) {
 		return instance_by_id.has_key (id);
 	}
