@@ -27,6 +27,10 @@ zed_cli_VALAFLAGS = \
 	@ZED_PACKAGES@ \
 	@ZED_CLI_PACKAGES@ \
 	@ZED_VALAFLAGS@
+if OS_OSX
+zed_cli_LDFLAGS += \
+	-sectcreate __TEXT __info_plist "$(srcdir)/zed-cli.plist"
+endif
 
 zed_server_SOURCES = \
 	$(srcdir)/zed-server.vala
@@ -128,6 +132,13 @@ AM_CPPFLAGS = \
 	$(ZED_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
+
+if ENABLE_CLI
+if OS_OSX
+all-local: zed-cli
+	codesign -f -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$<"
+endif
+endif
 
 if ENABLE_SERVER
 if OS_IOS
