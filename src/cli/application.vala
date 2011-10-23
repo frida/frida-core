@@ -96,11 +96,15 @@ public class Zed.Application : Object {
 				var id = int.parse (args[1]);
 				var pid = int.parse (args[2]);
 				string script;
-				try {
-					FileUtils.get_contents (args[3], out script);
-				} catch (FileError e) {
-					stderr.printf ("ERROR: %s\n", e.message);
-					continue;
+				if (args[3].has_suffix(".js")) {
+					try {
+						FileUtils.get_contents (args[3], out script);
+					} catch (FileError e) {
+						stderr.printf ("ERROR: %s\n", e.message);
+						continue;
+					}
+				} else {
+					script = args[3];
 				}
 				Idle.add (() => {
 					var provider = provider_by_id[id];
