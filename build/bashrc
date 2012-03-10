@@ -174,7 +174,7 @@ export VALAC
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
 case $FRIDA_TARGET in
-  osx|ios)
+  osx|ios|android)
     toolchain_version=20110525
     ;;
   *)
