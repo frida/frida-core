@@ -22,8 +22,8 @@ case $FRIDA_TARGET in
   linux)
     ;;
   android)
-    if [ -z "$ANDROID_TOOLCHAIN_ROOT" ]; then
-      echo "ERROR: ANDROID_TOOLCHAIN_ROOT must be set"
+    if [ -z "$ANDROID_NDK_ROOT" ]; then
+      echo "ERROR: ANDROID_NDK_ROOT must be set"
       exit 1
     fi
     ;;
@@ -58,9 +58,8 @@ case $FRIDA_TARGET in
     export PATH="${FRIDA_TOOLROOT}/bin:${FRIDA_PREFIX}/bin:${PATH}"
     ;;
   android)
-    export ANDROID_SYSROOT="${ANDROID_TOOLCHAIN_ROOT}/sysroot"
-
-    export PATH="${FRIDA_TOOLROOT}/bin:${ANDROID_TOOLCHAIN_ROOT}/bin:${PATH}"
+    export ANDROID_SYSROOT="${ANDROID_NDK_ROOT}/platforms/android-8/arch-arm"
+    export PATH="${FRIDA_TOOLROOT}/bin:$(echo ${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-*/prebuilt/darwin-x86/bin):${PATH}"
     export CLICOLOR=1
     ;;
   ps3)
