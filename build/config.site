@@ -62,7 +62,7 @@ case "$PACKAGE_TARNAME" in
     esac
 
     case $FRIDA_TARGET in
-      osx|ios)
+      osx|ios|android)
         glib_cv_have_qsort_r=no
       ;;
     esac
