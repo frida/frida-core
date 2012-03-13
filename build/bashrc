@@ -183,7 +183,7 @@ esac
 
 case $FRIDA_TARGET in
   android)
-    sdk_version=20110118
+    sdk_version=20120313
     ;;
   osx|ios)
     sdk_version=20110525
