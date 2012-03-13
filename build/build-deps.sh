@@ -78,6 +78,9 @@ function build_sdk ()
     ios)
       subdir="arm-apple-darwin"
     ;;
+    android)
+      subdir="arm-unknown-linux-androideabi"
+    ;;
   esac
   build_module libffi "$subdir"
   build_module glib
