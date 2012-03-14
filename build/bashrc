@@ -86,6 +86,7 @@ export CXX=""
 export OBJC=""
 export LD=""
 export CFLAGS=""
+export CXXFLAGS=""
 export LDFLAGS=""
 
 if [ $FRIDA_ENVIRONMENT = normal ]; then
@@ -95,14 +96,18 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export LDFLAGS="-Wl,--gc-sections"
       ;;
     android)
-#CXXFLAGS="-frtti"
-
       export CFLAGS="--sysroot=${ANDROID_SYSROOT} \
--ffunction-sections -funwind-tables -DANDROID \
--D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ -D__ARM_ARCH_5E__ -D__ARM_ARCH_5TE__ \
+-ffunction-sections -fno-short-enums \
+-DANDROID -D__ARM_ARCH_5__ -D__ARM_ARCH_5T__ -D__ARM_ARCH_5E__ -D__ARM_ARCH_5TE__ \
+-DUSE_STLPORT=1 -D_STLP_USE_PTR_SPECIALIZATIONS=1 \
 -Wno-psabi -march=armv5te -mtune=xscale -msoft-float \
--I${FRIDA_SDKROOT}/include"
-      export LDFLAGS="--sysroot=${ANDROID_SYSROOT} -L${FRIDA_SDKROOT}/lib"
+-I${FRIDA_SDKROOT}/include \
+-I${ANDROID_NDK_ROOT}/sources/cxx-stl/stlport/stlport"
+      export CXXFLAGS="-fno-rtti -fno-exceptions -funwind-tables"
+      export LDFLAGS="-L${FRIDA_SDKROOT}/lib \
+--sysroot=${ANDROID_SYSROOT} \
+-L${ANDROID_NDK_ROOT}/sources/cxx-stl/stlport/libs/armeabi-v7a \
+-lstlport_static -lm -lstdc++"
       ;;
     osx)
       export CC="/usr/bin/llvm-gcc-4.2"
@@ -133,7 +138,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
   export LDFLAGS="$LDFLAGS -no-undefined"
 
   export CFLAGS="-fPIC $CFLAGS"
-  export CXXFLAGS="$CFLAGS"
+  export CXXFLAGS="$CFLAGS $CXXFLAGS"
   export OBJCFLAGS="$CFLAGS"
   export CPPFLAGS="$CFLAGS"
 
