@@ -15,6 +15,10 @@ case $FRIDA_TARGET in
 
     ac_tool_prefix="arm-linux-androideabi-"
   ;;
+  osx32)
+    host_alias="i686-apple-darwin"
+    cross_compiling=yes
+  ;;
   ios)
     host_alias="arm-apple-darwin"
     cross_compiling=yes

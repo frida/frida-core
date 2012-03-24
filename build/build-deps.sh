@@ -13,8 +13,17 @@ function expand_target()
     linux)
       echo x86_64-unknown-linux-gnu
     ;;
-    osx32|osx64)
-      echo x86_64-apple-darwin10.7.4
+    android)
+      echo arm-unknown-linux-androideabi
+    ;;
+    osx32)
+      echo i686-apple-darwin
+    ;;
+    osx64)
+      echo x86_64-apple-darwin11.3.0
+    ;;
+    ios)
+      echo arm-apple-darwin
     ;;
   esac
 }
@@ -83,47 +92,23 @@ function build_sdk ()
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" >/dev/null || exit 1
 
-  case $FRIDA_TARGET in
-    osx32)
-      subdir="x86_32-apple-darwin10.7.4"
-    ;;
-    osx64)
-      subdir="x86_64-apple-darwin10.7.4"
-    ;;
-    ios)
-      subdir="arm-apple-darwin"
-    ;;
-    android)
-      subdir="arm-unknown-linux-androideabi"
-    ;;
-  esac
-  build_module libffi "$subdir"
+  build_module libffi $(expand_target $FRIDA_TARGET)
   build_module glib
   build_module libgee
+  build_v8
 
   popd >/dev/null
 }
 
 function make_sdk_package ()
 {
-  local previous_sdk="$1"
   local target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
 
   local sdkname="sdk-$FRIDA_TARGET"
   local sdkdir="$BUILDROOT/$sdkname"
   pushd "$BUILDROOT" >/dev/null || exit 1
   rm -rf "$sdkname"
-  tar jxf "$previous_sdk" || exit 1
-  mv "$sdkname" "sdk-old"
   mkdir "$sdkname"
-  pushd "sdk-old" >/dev/null || exit 1
-  tar c \
-      include/v8* \
-      lib/libv8*.a \
-      lib/pkgconfig/v8.pc \
-      | tar -C "$sdkdir" -x - || exit 1
-  popd >/dev/null
-  rm -rf "sdk-old"
   popd >/dev/null
 
   pushd "$FRIDA_PREFIX" >/dev/null || exit 1
@@ -166,6 +151,54 @@ function build_module ()
   fi
 }
 
+function build_v8 ()
+{
+  if [ ! -d v8 ]; then
+    git clone "${REPO_BASE_URL}/v8${REPO_SUFFIX}" || exit 1
+    pushd v8 >/dev/null || exit 1
+    svn co -r r1255 http://gyp.googlecode.com/svn/trunk build/gyp
+
+    case $FRIDA_TARGET in
+      osx32)
+        target=ia32.release
+        flags="-f make-mac -D host_os=mac"
+      ;;
+      osx64)
+        target=x64.release
+        flags="-f make-mac -D host_os=mac"
+      ;;
+      *)
+        echo "FIXME"
+        exit 1
+      ;;
+    esac
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" CFLAGS="" CXXFLAGS="" LDFLAGS="" bash -c "make $target GYPFLAGS=\"$flags\" V=1" || exit 1
+
+    install -d $FRIDA_PREFIX/include
+    install -m 644 include/* $FRIDA_PREFIX/include
+
+    install -d $FRIDA_PREFIX/lib
+    install -m 644 out/$target/libv8_base.a $FRIDA_PREFIX/lib
+    install -m 644 out/$target/libv8_snapshot.a $FRIDA_PREFIX/lib
+
+    install -d $FRIDA_PREFIX/lib/pkgconfig
+    cat > $FRIDA_PREFIX/lib/pkgconfig/v8.pc << EOF
+prefix=\${frida_sdk_prefix}
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: V8
+Description: V8 JavaScript Engine
+Version: 3.9.18
+Libs: -L\${libdir} -lv8_base -lv8_snapshot
+Cflags: -I\${includedir}
+EOF
+
+    popd >/dev/null
+  fi
+}
+
 function apply_fixups ()
 {
   for file in $(find "$FRIDA_PREFIX" -type f); do
@@ -200,11 +233,6 @@ case $1 in
     make_toolchain_package "$previous_toolchain"
   ;;
   sdk)
-    previous_sdk=$2
-    if [ -z "$previous_sdk" ]; then
-      echo "usage: $0 sdk previous-sdk.tar.bz2"
-      exit 1
-    fi
     build_sdk
     apply_fixups
     make_sdk_package "$previous_sdk"

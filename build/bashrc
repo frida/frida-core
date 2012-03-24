@@ -194,7 +194,10 @@ case $FRIDA_TARGET in
   android)
     sdk_version=20120313
     ;;
-  osx32|osx64|ios)
+  osx32|osx64)
+    sdk_version=20120324
+    ;;
+  ios)
     sdk_version=20110525
     ;;
   *)
