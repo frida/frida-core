@@ -156,7 +156,13 @@ function build_v8 ()
   if [ ! -d v8 ]; then
     git clone "${REPO_BASE_URL}/v8${REPO_SUFFIX}" || exit 1
     pushd v8 >/dev/null || exit 1
+
     svn co -r r1255 http://gyp.googlecode.com/svn/trunk build/gyp
+    case $FRIDA_TARGET in
+      osx64)
+        sed -i "" "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
+      ;;
+    esac
 
     case $FRIDA_TARGET in
       osx32)
