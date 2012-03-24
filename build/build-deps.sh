@@ -7,12 +7,24 @@ BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 REPO_BASE_URL="git@gitorious.org:frida"
 REPO_SUFFIX=".git"
 
+function expand_target()
+{
+  case $1 in
+    linux)
+      echo x86_64-unknown-linux-gnu
+    ;;
+    osx32|osx64)
+      echo x86_64-apple-darwin10.7.4
+    ;;
+  esac
+}
+
 function build_toolchain ()
 {
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" >/dev/null || exit 1
 
-  build_module libffi "x86_64-apple-darwin10.7.4"
+  build_module libffi $(expand_target $FRIDA_TARGET)
   build_module glib
   build_module vala
 
@@ -55,7 +67,7 @@ function make_toolchain_package ()
       bin/vala* \
       share/aclocal/vala* \
       share/vala* \
-      | tar -C "$tooldir" -x - || exit 1
+      | tar -C "$tooldir" -xf - || exit 1
   strip -Sx "$tooldir/bin/"*
   popd >/dev/null
 

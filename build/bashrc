@@ -123,6 +123,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
           export CFLAGS="-m64"
           ;;
       esac
+      export LDFLAGS="$LDFLAGS -no-undefined"
       ;;
     ios)
       export IOS_SDKVER="5.0"
@@ -136,15 +137,16 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export LD="${IOS_DEVROOT}/usr/bin/ld"
 
       export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
-      export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7"
+      export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7 -no-undefined"
       ;;
+    
     ps3)
       export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
       export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/target/lib"
       ;;
   esac
 
-  export LDFLAGS="$LDFLAGS -no-undefined"
+  export LDFLAGS="$LDFLAGS"
 
   export CFLAGS="-fPIC $CFLAGS"
   export CXXFLAGS="$CFLAGS $CXXFLAGS"
@@ -186,14 +188,7 @@ export VALAC
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
-case $FRIDA_TARGET in
-  osx32|osx64|ios|android)
-    toolchain_version=20110525
-    ;;
-  *)
-    toolchain_version=20110118
-    ;;
-esac
+toolchain_version=20110525
 
 case $FRIDA_TARGET in
   android)
