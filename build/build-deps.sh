@@ -72,7 +72,10 @@ function build_sdk ()
   pushd "$BUILDROOT" >/dev/null || exit 1
 
   case $FRIDA_TARGET in
-    osx)
+    osx32)
+      subdir="x86_32-apple-darwin10.7.4"
+    ;;
+    osx64)
       subdir="x86_64-apple-darwin10.7.4"
     ;;
     ios)

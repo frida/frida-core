@@ -27,7 +27,7 @@ case $FRIDA_TARGET in
       exit 1
     fi
     ;;
-  osx)
+  osx32|osx64)
     ;;
   ios)
     if [ -z "$IOS_CERTID" -o -z "$IOS_IPADDR" ]; then
@@ -41,7 +41,7 @@ case $FRIDA_TARGET in
     fi
     ;;
   *)
-    echo "Invalid FRIDA_TARGET, must be either linux, android, osx, ios or ps3"
+    echo "Invalid FRIDA_TARGET, must be either linux, android, osx32, osx64, ios or ps3"
     exit 1
     ;;
 esac
@@ -109,11 +109,20 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
 -L${ANDROID_NDK_ROOT}/sources/cxx-stl/stlport/libs/armeabi-v7a \
 -lstlport_static -lm -lstdc++"
       ;;
-    osx)
+    osx32|osx64)
       export CC="/usr/bin/llvm-gcc-4.2"
       export CXX="/usr/bin/llvm-g++-4.2"
       export OBJC="/usr/bin/llvm-gcc-4.2"
       export LD="/usr/bin/ld"
+
+      case $FRIDA_TARGET in
+        osx32)
+          export CFLAGS="-m32"
+          ;;
+        osx64)
+          export CFLAGS="-m64"
+          ;;
+      esac
       ;;
     ios)
       export IOS_SDKVER="5.0"
@@ -160,7 +169,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
   export PKG_CONFIG_PATH
 
   case $FRIDA_TARGET in
-    osx|ios)
+    osx32|osx64|ios)
       export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names -Wl,-no_compact_unwind"
       ;;
   esac
@@ -178,7 +187,7 @@ export VALAC
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
 case $FRIDA_TARGET in
-  osx|ios|android)
+  osx32|osx64|ios|android)
     toolchain_version=20110525
     ;;
   *)
@@ -190,7 +199,7 @@ case $FRIDA_TARGET in
   android)
     sdk_version=20120313
     ;;
-  osx|ios)
+  osx32|osx64|ios)
     sdk_version=20110525
     ;;
   *)
