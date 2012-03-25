@@ -9,6 +9,20 @@ frida_warning_flags="-Wall"
 frida_flags="-Os -pipe -gdwarf-2 -g3"
 
 case $FRIDA_TARGET in
+  linux-x86_32)
+    host_alias="i686-linux-gnu"
+    cross_compiling=yes
+  ;;
+  linux-x86_64)
+    host_alias="x86_64-linux-gnu"
+    cross_compiling=no
+  ;;
+  linux-arm)
+    host_alias="arm-linux-gnueabi"
+    cross_compiling=yes
+
+    ac_tool_prefix="arm-linux-gnueabi-"
+  ;;
   android)
     host_alias="arm-linux-androideabi"
     cross_compiling=yes
@@ -66,13 +80,16 @@ case "$PACKAGE_TARNAME" in
     esac
 
     case $FRIDA_TARGET in
+      linux-*)
+        glib_cv_have_qsort_r=yes
+      ;;
       osx32|osx64|ios|android)
         glib_cv_have_qsort_r=no
       ;;
     esac
 
     case $FRIDA_TARGET in
-      osx32|osx64|ios|android|ps3)
+      linux-*|osx32|osx64|ios|android|ps3)
         enable_proxy_libintl=yes
       ;;
     esac

@@ -92,6 +92,7 @@ function build_sdk ()
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" >/dev/null || exit 1
 
+  [ "${FRIDA_TARGET}" = "linux-arm" ] && build_module zlib
   build_module libffi $(expand_target $FRIDA_TARGET)
   build_module glib
   build_module libgee
@@ -121,7 +122,7 @@ function make_sdk_package ()
       share/aclocal \
       share/glib-2.0/schemas \
       share/vala \
-      | tar -C "$sdkdir" -x - || exit 1
+      | tar -C "$sdkdir" -xf - || exit 1
   popd >/dev/null
 
   pushd "$BUILDROOT" >/dev/null || exit 1
@@ -136,7 +137,12 @@ function build_module ()
   if [ ! -d "$1" ]; then
     git clone "${REPO_BASE_URL}/${1}${REPO_SUFFIX}" || exit 1
     pushd "$1" >/dev/null || exit 1
-    if [ -f "autogen.sh" ]; then
+    if [ "$1" = "zlib" ]; then
+      (
+        source $CONFIG_SITE
+        CC=${ac_tool_prefix}gcc ./configure --static --prefix=${FRIDA_PREFIX}
+      )
+    elif [ -f "autogen.sh" ]; then
       ./autogen.sh || exit 1
     else
       ./configure || exit 1
@@ -151,6 +157,16 @@ function build_module ()
   fi
 }
 
+function build_v8_generic ()
+{
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" CFLAGS="" CXXFLAGS="" LDFLAGS="" make $target GYPFLAGS="$flags" V=1
+}
+
+function build_v8_linux_arm ()
+{
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" CC=arm-linux-gnueabi-gcc CXX=arm-linux-gnueabi-g++ LINK=arm-linux-gnueabi-g++ CFLAGS="" CXXFLAGS="" LDFLAGS="" make arm.release V=1
+}
+
 function build_v8 ()
 {
   if [ ! -d v8 ]; then
@@ -159,26 +175,35 @@ function build_v8 ()
 
     svn co -r r1255 http://gyp.googlecode.com/svn/trunk build/gyp
     case $FRIDA_TARGET in
+      linux-arm)
+      ;;
       osx64)
         sed -i "" "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
       ;;
     esac
 
-    case $FRIDA_TARGET in
-      osx32)
-        target=ia32.release
-        flags="-f make-mac -D host_os=mac"
-      ;;
-      osx64)
-        target=x64.release
-        flags="-f make-mac -D host_os=mac"
-      ;;
-      *)
-        echo "FIXME"
-        exit 1
-      ;;
-    esac
-    PATH="/usr/bin:/bin:/usr/sbin:/sbin" CFLAGS="" CXXFLAGS="" LDFLAGS="" bash -c "make $target GYPFLAGS=\"$flags\" V=1" || exit 1
+    if [ "$FRIDA_TARGET" = "linux-arm" ]; then
+      build_v8_linux_arm
+      find out -name "*.target-arm.mk" -exec sed -i "s,-m32,,g" {} \;
+      build_v8_linux_arm || exit 1
+      target=arm.release/obj.target/tools/gyp
+    else
+      case $FRIDA_TARGET in
+        osx32)
+          target=ia32.release
+          flags="-f make-mac -D host_os=mac"
+        ;;
+        osx64)
+          target=x64.release
+          flags="-f make-mac -D host_os=mac"
+        ;;
+        *)
+          echo "FIXME"
+          exit 1
+        ;;
+      esac
+      build_v8_generic || exit 1
+    fi
 
     install -d $FRIDA_PREFIX/include
     install -m 644 include/* $FRIDA_PREFIX/include
