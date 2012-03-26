@@ -141,7 +141,6 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
       export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7 -no-undefined"
       ;;
-    
     ps3)
       export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
       export LDFLAGS="-L${PS3DEV}/host/ppu/lib -L${PSL1GHT}/target/lib"
