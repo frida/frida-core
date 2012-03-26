@@ -208,8 +208,11 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   x86_thread_state_t state;
   mach_msg_type_number_t state_count = x86_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = x86_THREAD_STATE;
+  /* FIXME: use runtime-detection of target process here */
 #if GLIB_SIZEOF_VOID_P == 8
   x86_thread_state64_t * ts;
+#else
+  x86_thread_state32_t * ts;
 #endif
 #endif
   dispatch_source_t source;
@@ -253,7 +256,8 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   state.__lr = 0xcafebabe;
   state.__pc = payload_address + ZED_MACH_CODE_OFFSET;
   state.__cpsr = ZED_PSR_THUMB;
-#elif GLIB_SIZEOF_VOID_P == 8
+#else
+# if GLIB_SIZEOF_VOID_P == 8
   state.tsh.flavor = x86_THREAD_STATE64;
   state.tsh.count = x86_THREAD_STATE64_COUNT;
   ts = &state.uts.ts64;
@@ -262,6 +266,16 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
 
   ts->__rsp = payload_address + ZED_STACK_TOP_OFFSET;
   ts->__rip = payload_address + ZED_MACH_CODE_OFFSET;
+# else
+  state.tsh.flavor = x86_THREAD_STATE32;
+  state.tsh.count = x86_THREAD_STATE32_COUNT;
+  ts = &state.uts.ts32;
+
+  ts->__ebp = payload_address + ZED_DATA_OFFSET;
+
+  ts->__esp = payload_address + ZED_STACK_TOP_OFFSET;
+  ts->__eip = payload_address + ZED_MACH_CODE_OFFSET;
+# endif
 #endif
 
   ret = thread_create_running (task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
@@ -509,10 +523,23 @@ zed_emit_pthread_stub_code (guint8 * code)
 
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBP);
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBX);
+
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XAX); /* padding */
-  gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBP, GUM_REG_XDI);
+
+  if (ctx.cw.target_cpu == GUM_CPU_IA32)
+  {
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx.cw, GUM_REG_XBP,
+        GUM_REG_XSP, 16);
+  }
+  else
+  {
+    gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBP, GUM_REG_XDI);
+  }
+
   zed_emit_pthread_stub_body (&ctx);
+
   gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XAX); /* padding */
+
   gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBX);
   gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBP);
   gum_x86_writer_put_ret (&ctx.cw);
@@ -530,6 +557,9 @@ zed_emit_pthread_stub_code (guint8 * code)
 static void
 zed_emit_pthread_stub_body (ZedEmitContext * ctx)
 {
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
+
   ZED_EMIT_LOAD (XAX, dylib_path);
   ZED_EMIT_LOAD (XDX, dlopen_mode);
   ZED_EMIT_CALL (dlopen_impl, 2,
@@ -542,6 +572,9 @@ zed_emit_pthread_stub_body (ZedEmitContext * ctx)
       GUM_ARG_REGISTER, GUM_REG_XBX,
       GUM_ARG_REGISTER, GUM_REG_XAX);
 
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
+
   ZED_EMIT_LOAD (XDX, data_string);
   gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
       GUM_CALL_CAPI, GUM_REG_XAX, 1,
@@ -549,6 +582,9 @@ zed_emit_pthread_stub_body (ZedEmitContext * ctx)
 
   ZED_EMIT_CALL (dlclose_impl, 1,
       GUM_ARG_REGISTER, GUM_REG_XBX);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
 }
 
 static void
