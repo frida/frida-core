@@ -15,6 +15,10 @@ namespace Zed {
 			add_local_backends ();
 		}
 
+		public HostSessionService.with_tcp_backend_only () {
+			add_backend (new TcpHostSessionBackend ());
+		}
+
 		private void add_local_backends () {
 #if DARWIN
 			add_backend (new DarwinHostSessionBackend ());
