@@ -97,8 +97,17 @@ namespace Zed.FruitjectorTest {
 				if (!FileUtils.test (dylib, FileTest.EXISTS))
 					dylib = Path.build_filename (rat_directory, ".libs", "lib" + name);
 				assert (FileUtils.test (dylib, FileTest.EXISTS));
-				yield injector.inject (process.id, dylib, data_string);
-			} catch (IOError e) {
+
+				AgentDescriptor desc;
+
+				try {
+					desc = new AgentDescriptor(name, File.new_for_path (dylib).read (null));
+				} catch (Error io_error) {
+					assert_not_reached ();
+				}
+
+				yield injector.inject (process.id, desc, data_string);
+			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}

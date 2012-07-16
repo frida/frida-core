@@ -34,8 +34,6 @@ namespace Zed {
 				agents[desc.name] = agent;
 			}
 
-			debug ("inject(%d, \"%s\", \"%s\")!\n", (int) pid, agent.file.get_path (), data_string);
-
 			return _do_inject (pid, agent.file.get_path (), data_string);
 		}
 
