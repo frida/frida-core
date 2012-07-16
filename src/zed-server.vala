@@ -5,6 +5,9 @@ namespace Zed {
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
+		private MainLoop loop;
+		private uint shutdown_timeout = 0;
+
 		private const uint LISTEN_PORT = 27042;
 
 		construct {
@@ -30,12 +33,18 @@ namespace Zed {
 				}
 
 				connections.add (connection);
+
+				if (connections.size == 1)
+					cancel_shutdown ();
+
 				return true;
 			});
 
 			server.start ();
 
-			var loop = new MainLoop ();
+			schedule_shutdown ();
+
+			loop = new MainLoop ();
 			loop.run ();
 
 			server.stop ();
@@ -47,12 +56,30 @@ namespace Zed {
 				return;
 			unregister (connection);
 			connections.remove (connection);
+
+			if (connections.is_empty)
+				schedule_shutdown ();
 		}
 
 		private async void unregister (DBusConnection connection) {
 			uint registration_id;
 			if (registration_id_by_connection.unset (connection, out registration_id))
 				connection.unregister_object (registration_id);
+		}
+
+		private void schedule_shutdown () {
+			cancel_shutdown ();
+			shutdown_timeout = Timeout.add (3000, () => {
+				loop.quit ();
+				return false;
+			});
+		}
+
+		private void cancel_shutdown () {
+			if (shutdown_timeout != 0) {
+				Source.remove (shutdown_timeout);
+				shutdown_timeout = 0;
+			}
 		}
 	}
 
