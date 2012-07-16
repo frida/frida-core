@@ -11,8 +11,7 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AM_MAINTAINER_MODE
 
-AC_PROG_CC
-AC_PROG_CC_STDC
+AC_PROG_CXX
 AC_PROG_OBJC
 AM_PROG_VALAC([0.10.0])
 AC_PROG_LIBTOOL
@@ -108,7 +107,7 @@ if test "x$enable_cli" = "xyes"; then
 fi
 AM_CONDITIONAL(ENABLE_CLI, [test "x$enable_cli" = "xyes"])
 
-AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=no]])],, [enable_server=no])
+AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=yes]])],, [enable_server=yes])
 if test "x$enable_server" = "xyes"; then
   AC_DEFINE(HAVE_SERVER, 1, [Define to 1 if server is built.])
 fi
@@ -142,12 +141,14 @@ AC_CHECK_HEADERS([sys/user.h])
 
 AC_CONFIG_FILES([
 	Makefile
+	tools/Makefile
 	lib/Makefile
 	lib/interfaces/Makefile
 	lib/agent/Makefile
-	tools/Makefile
-	data/Makefile
 	src/Makefile
+	data/Makefile
+	bindings/Makefile
+	bindings/cloud-spy/Makefile
 	tests/Makefile
 ])
 AC_OUTPUT

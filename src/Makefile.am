@@ -51,6 +51,10 @@ zed_server_VALAFLAGS = \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
+if OS_OSX
+zed_server_LDFLAGS += \
+	-sectcreate __TEXT __info_plist "$(srcdir)/zed-server.plist"
+endif
 
 backend_sources = $(NULL)
 glue_sources = $(NULL)
@@ -85,7 +89,8 @@ libzed_core_la_CFLAGS = \
 	-w
 libzed_core_la_LIBADD = \
 	$(builddir)/libzed-core-glue.la \
-	$(top_builddir)/lib/interfaces/libzed-interfaces.la
+	$(top_builddir)/lib/interfaces/libzed-interfaces.la \
+	$(top_builddir)/data/libzed-data.la
 libzed_core_la_VALAFLAGS = \
 	--vapi=zed-core.vapi \
 	--library=zed-core \
@@ -95,6 +100,7 @@ libzed_core_la_VALAFLAGS = \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--pkg=config \
 	--pkg=zed-interfaces \
+	--pkg=zed-data-agent \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
 
@@ -133,16 +139,32 @@ AM_CPPFLAGS = \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
 
+
+if ENABLE_CLI
+if ENABLE_SERVER
+all-local: zed-cli zed-server
+else
+all-local: zed-cli
+endif
+else
+if ENABLE_SERVER
+all-local: zed-server
+else
+all-local:
+endif
+endif
 if ENABLE_CLI
 if OS_OSX
-all-local: zed-cli
-	codesign -f -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$<"
+	codesign -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$(builddir)/zed-cli" || true
 endif
 endif
-
 if ENABLE_SERVER
+if OS_OSX
+	codesign -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$(builddir)/zed-server" || true
+endif
 if OS_IOS
-all-local: zed-server
 	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-server.xcent" "$<"
 endif
 endif
+	@true
+

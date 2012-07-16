@@ -1,16 +1,11 @@
 ACLOCAL_AMFLAGS = -I m4
 
-cli_subdirs =
-
-if ENABLE_CLI
-cli_subdirs += \
-	tools
-endif
-
 SUBDIRS = \
+	tools \
 	lib \
-	$(cli_subdirs) \
+	data \
 	src \
+	bindings \
 	tests
 
 if OS_ANDROID
