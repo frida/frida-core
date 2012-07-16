@@ -39,12 +39,33 @@ namespace Zed {
 		}
 
 		public async HostSession create () throws IOError {
-			DBusConnection connection;
-			try {
-				connection = yield DBusConnection.new_for_address (LISTEN_ADDRESS_TEMPLATE.printf (27042), DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
+			DBusConnection connection = null;
+			IOError error = null;
+			for (int i = 1; connection == null && error == null; i++) {
+				try {
+					connection = yield DBusConnection.new_for_address (LISTEN_ADDRESS_TEMPLATE.printf (27042), DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				} catch (Error e) {
+					var refused = new IOError.CONNECTION_REFUSED ("Connection refused");
+					if (e.domain == refused.domain && e.code == refused.code) {
+						if (i != 3 * 20) {
+							var source = new TimeoutSource (50);
+							source.set_callback (() => {
+								create.callback ();
+								return false;
+							});
+							source.attach (MainContext.get_thread_default ());
+							yield;
+						} else {
+							error = new IOError.TIMED_OUT ("timed out");
+						}
+					} else {
+						error = new IOError.FAILED (e.message);
+					}
+				}
 			}
+
+			if (error != null)
+				throw error;
 
 			HostSession session = connection.get_proxy_sync (null, ObjectPath.HOST_SESSION);
 
