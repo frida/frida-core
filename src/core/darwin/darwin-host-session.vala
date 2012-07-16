@@ -54,6 +54,12 @@ namespace Zed {
 
 	public class DarwinHostSession : BaseDBusHostSession, HostSession {
 		private Fruitjector injector = new Fruitjector ();
+		private AgentDescriptor agent_desc;
+
+		construct {
+			var blob = Zed.Data.Agent.get_libzed_agent_dylib_blob ();
+			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
+		}
 
 		public override async void close () {
 			yield base.close ();
@@ -72,7 +78,7 @@ namespace Zed {
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
 			var session = allocate_session ();
-			yield injector.inject (pid, Path.build_filename (Config.PKGLIBDIR, "zed-agent.dylib"), session.listen_address);
+			yield injector.inject (pid, agent_desc, session.listen_address);
 			return session.id;
 		}
 	}

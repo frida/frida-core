@@ -1,59 +1,140 @@
-public class Zed.Fruitjector : Object {
-	public signal void uninjected (uint id);
+using Gee;
 
-	/* these should be private, but must be accessible to glue code */
-	private MainContext main_context;
-	public void * context;
-	public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
-	public uint last_id;
+namespace Zed {
+	public class Fruitjector : Object {
+		public signal void uninjected (uint id);
 
-	construct {
-		main_context = MainContext.get_thread_default ();
+		private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
 
-		context = null;
-		last_id++;
+		/* these should be private, but must be accessible to glue code */
+		private MainContext main_context;
+		public void * context;
+		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
+		public uint last_id;
 
-		_create_context ();
+		construct {
+			main_context = MainContext.get_thread_default ();
+
+			context = null;
+			last_id++;
+
+			_create_context ();
+		}
+
+		~Fruitjector () {
+			foreach (var instance in instance_by_id.values)
+				_free_instance (instance);
+			_destroy_context ();
+		}
+
+		public async uint inject (ulong pid, AgentDescriptor desc, string data_string) throws IOError {
+			var agent = agents[desc.name];
+			if (agent == null) {
+				agent = new TemporaryFile.from_stream(desc.name, desc.dylib);
+				agents[desc.name] = agent;
+			}
+
+			debug ("inject(%d, \"%s\", \"%s\")!\n", (int) pid, agent.file.get_path (), data_string);
+
+			return _do_inject (pid, agent.file.get_path (), data_string);
+		}
+
+		public bool any_still_injected () {
+			return !instance_by_id.is_empty;
+		}
+
+		public bool is_still_injected (uint id) {
+			return instance_by_id.has_key (id);
+		}
+
+		public void _on_instance_dead (uint id) {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				void * instance;
+				bool instance_id_found = instance_by_id.unset (id, out instance);
+				assert (instance_id_found);
+				_free_instance (instance);
+				uninjected (id);
+				return false;
+			});
+			source.attach (main_context);
+		}
+
+		public extern void _create_context ();
+		public extern void _destroy_context ();
+		public extern void _free_instance (void * instance);
+		public extern uint _do_inject (ulong pid, string dylib_path, string data_string) throws IOError;
+
+		protected class TemporaryFile {
+			public File file {
+				get;
+				private set;
+			}
+
+			public TemporaryFile.from_stream (string name, InputStream istream) throws IOError {
+				this.file = File.new_for_path (Path.build_filename (Environment.get_tmp_dir (), "zed-%p-%u-%s".printf (this, Random.next_int (), name)));
+
+				try {
+					var ostream = file.create (FileCreateFlags.NONE, null);
+
+					var buf_size = 128 * 1024;
+					var buf = new uint8[buf_size];
+
+					while (true) {
+						var bytes_read = istream.read (buf);
+						if (bytes_read == 0)
+							break;
+						buf.resize ((int) bytes_read);
+
+						size_t bytes_written;
+						ostream.write_all (buf, out bytes_written);
+					}
+
+					ostream.close (null);
+				} catch (Error e) {
+					throw new IOError.FAILED (e.message);
+				}
+			}
+
+			~TemporaryFile () {
+				try {
+					file.delete (null);
+				} catch (Error e) {
+				}
+			}
+		}
 	}
 
-	~Fruitjector () {
-		foreach (var instance in instance_by_id.values)
-			_free_instance (instance);
-		_destroy_context ();
-	}
+	public class AgentDescriptor : Object {
+		public string name {
+			get;
+			construct;
+		}
 
-	public async uint inject (ulong pid, string dylib_path, string data_string) throws IOError {
-		var dylib = File.new_for_path (dylib_path);
-		if (!dylib.query_exists ())
-			throw new IOError.NOT_FOUND ("specified dylib path '" + dylib_path + "' does not exist or cannot be opened");
-		if (dylib.query_file_type (FileQueryInfoFlags.NONE) != FileType.REGULAR)
-			throw new IOError.NOT_REGULAR_FILE ("specified dylib path '" + dylib_path + "' is not a regular file");
-		return _do_inject (pid, dylib_path, data_string);
-	}
+		public InputStream dylib {
+			get {
+				reset_stream (_dylib);
+				return _dylib;
+			}
 
-	public bool any_still_injected () {
-		return !instance_by_id.is_empty;
-	}
+			construct {
+				_dylib = value;
+			}
+		}
+		private InputStream _dylib;
 
-	public bool is_still_injected (uint id) {
-		return instance_by_id.has_key (id);
-	}
+		public AgentDescriptor (string name, InputStream dylib) {
+			Object (name: name, dylib: dylib);
 
-	public void _on_instance_dead (uint id) {
-		var source = new IdleSource ();
-		source.set_callback (() => {
-			void * instance;
-			bool instance_id_found = instance_by_id.unset (id, out instance);
-			assert (instance_id_found);
-			_free_instance (instance);
-			uninjected (id);
-			return false;
-		});
-		source.attach (main_context);
-	}
+			assert (dylib is Seekable);
+		}
 
-	public extern void _create_context ();
-	public extern void _destroy_context ();
-	public extern void _free_instance (void * instance);
-	public extern uint _do_inject (ulong pid, string dylib_path, string data_string) throws IOError;
+		private void reset_stream (InputStream stream) {
+			try {
+				(stream as Seekable).seek (0, SeekType.SET);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+	}
 }
