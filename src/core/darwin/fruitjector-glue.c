@@ -9,6 +9,7 @@
 # include <gum/arch-x86/gumx86writer.h>
 #endif
 #include <gum/gum.h>
+#include <sys/sysctl.h>
 #include <mach/mach.h>
 
 #define ZED_AGENT_ENTRYPOINT_NAME "zed_agent_main"
@@ -106,8 +107,10 @@ struct _ZedEmitContext
 #endif
 };
 
-static void zed_emit_mach_stub_code (guint8 * code);
-static void zed_emit_pthread_stub_code (guint8 * code);
+static gboolean zed_cpu_type_from_pid (gulong pid, GumCpuType * cpu_type);
+
+static void zed_emit_mach_stub_code (guint8 * code, GumCpuType cpu_type);
+static void zed_emit_pthread_stub_code (guint8 * code, GumCpuType cpu_type);
 
 static void zed_emit_pthread_setup (ZedEmitContext * ctx);
 static void zed_emit_pthread_create_and_join (ZedEmitContext * ctx);
@@ -193,6 +196,7 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
 {
   ZedFruitContext * ctx = self->context;
   ZedInjectionInstance * instance;
+  GumCpuType cpu_type;
   const gchar * failed_operation;
   mach_port_name_t task = 0;
   kern_return_t ret;
@@ -208,16 +212,13 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   x86_thread_state_t state;
   mach_msg_type_number_t state_count = x86_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = x86_THREAD_STATE;
-  /* FIXME: use runtime-detection of target process here */
-#if GLIB_SIZEOF_VOID_P == 8
-  x86_thread_state64_t * ts;
-#else
-  x86_thread_state32_t * ts;
-#endif
 #endif
   dispatch_source_t source;
 
   instance = zed_injection_instance_new (self, self->last_id++);
+
+  if (!zed_cpu_type_from_pid (pid, &cpu_type))
+    goto handle_mach_error;
 
   ret = task_for_pid (mach_task_self (), pid, &task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
@@ -230,12 +231,12 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   ret = vm_protect (task, payload_address + ZED_STACK_GUARD_OFFSET, ZED_STACK_GUARD_SIZE, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
-  zed_emit_mach_stub_code (mach_stub_code);
+  zed_emit_mach_stub_code (mach_stub_code, cpu_type);
   ret = vm_write (task, payload_address + ZED_MACH_CODE_OFFSET,
       (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(mach_stub_code)");
 
-  zed_emit_pthread_stub_code (pthread_stub_code);
+  zed_emit_pthread_stub_code (pthread_stub_code, cpu_type);
   ret = vm_write (task, payload_address + ZED_PTHREAD_CODE_OFFSET,
       (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(pthread_stub_code)");
@@ -257,25 +258,34 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   state.__pc = payload_address + ZED_MACH_CODE_OFFSET;
   state.__cpsr = ZED_PSR_THUMB;
 #else
-# if GLIB_SIZEOF_VOID_P == 8
-  state.tsh.flavor = x86_THREAD_STATE64;
-  state.tsh.count = x86_THREAD_STATE64_COUNT;
-  ts = &state.uts.ts64;
+  if (cpu_type == GUM_CPU_AMD64)
+  {
+    x86_thread_state64_t * ts;
 
-  ts->__rbp = payload_address + ZED_DATA_OFFSET;
+    state.tsh.flavor = x86_THREAD_STATE64;
+    state.tsh.count = x86_THREAD_STATE64_COUNT;
 
-  ts->__rsp = payload_address + ZED_STACK_TOP_OFFSET;
-  ts->__rip = payload_address + ZED_MACH_CODE_OFFSET;
-# else
-  state.tsh.flavor = x86_THREAD_STATE32;
-  state.tsh.count = x86_THREAD_STATE32_COUNT;
-  ts = &state.uts.ts32;
+    ts = &state.uts.ts64;
 
-  ts->__ebp = payload_address + ZED_DATA_OFFSET;
+    ts->__rbp = payload_address + ZED_DATA_OFFSET;
 
-  ts->__esp = payload_address + ZED_STACK_TOP_OFFSET;
-  ts->__eip = payload_address + ZED_MACH_CODE_OFFSET;
-# endif
+    ts->__rsp = payload_address + ZED_STACK_TOP_OFFSET;
+    ts->__rip = payload_address + ZED_MACH_CODE_OFFSET;
+  }
+  else
+  {
+    x86_thread_state32_t * ts;
+
+    state.tsh.flavor = x86_THREAD_STATE32;
+    state.tsh.count = x86_THREAD_STATE32_COUNT;
+
+    ts = &state.uts.ts32;
+
+    ts->__ebp = payload_address + ZED_DATA_OFFSET;
+
+    ts->__esp = payload_address + ZED_STACK_TOP_OFFSET;
+    ts->__eip = payload_address + ZED_MACH_CODE_OFFSET;
+  }
 #endif
 
   ret = thread_create_running (task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
@@ -376,12 +386,34 @@ beach:
   }
 }
 
+static gboolean
+zed_cpu_type_from_pid (gulong pid, GumCpuType * cpu_type)
+{
+#ifdef HAVE_ARM
+  return GUM_CPU_ARM;
+#else
+  int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  struct kinfo_proc kp;
+  size_t bufsize = sizeof (kp);
+  int err;
+
+  memset (&kp, 0, sizeof (kp));
+
+  err = sysctl (mib, G_N_ELEMENTS (mib), &kp, &bufsize, NULL, 0);
+  if (err != 0)
+    return FALSE;
+
+  *cpu_type = (kp.kp_proc.p_flag & P_LP64) ? GUM_CPU_AMD64 : GUM_CPU_IA32;
+  return TRUE;
+#endif
+}
+
 #ifdef HAVE_ARM
 
 static void zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
 
 static void
-zed_emit_mach_stub_code (guint8 * code)
+zed_emit_mach_stub_code (guint8 * code, GumCpuType cpu_type)
 {
   ZedEmitContext ctx;
 
@@ -396,7 +428,7 @@ zed_emit_mach_stub_code (guint8 * code)
 }
 
 static void
-zed_emit_pthread_stub_code (guint8 * code)
+zed_emit_pthread_stub_code (guint8 * code, GumCpuType cpu_type)
 {
   ZedEmitContext ctx;
 
@@ -498,12 +530,13 @@ zed_emit_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWri
 #else /* HAVE_ARM */
 
 static void
-zed_emit_mach_stub_code (guint8 * code)
+zed_emit_mach_stub_code (guint8 * code, GumCpuType cpu_type)
 {
   ZedEmitContext ctx;
 
   ctx.code = code;
   gum_x86_writer_init (&ctx.cw, ctx.code);
+  gum_x86_writer_set_target_cpu (&ctx.cw, cpu_type);
 
   zed_emit_pthread_setup (&ctx);
   zed_emit_pthread_create_and_join (&ctx);
@@ -514,12 +547,13 @@ zed_emit_mach_stub_code (guint8 * code)
 }
 
 static void
-zed_emit_pthread_stub_code (guint8 * code)
+zed_emit_pthread_stub_code (guint8 * code, GumCpuType cpu_type)
 {
   ZedEmitContext ctx;
 
   ctx.code = code;
   gum_x86_writer_init (&ctx.cw, ctx.code);
+  gum_x86_writer_set_target_cpu (&ctx.cw, cpu_type);
 
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBP);
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBX);
