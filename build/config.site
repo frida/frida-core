@@ -101,6 +101,13 @@ case "$PACKAGE_TARNAME" in
     enable_shared=no
     enable_static=yes
   ;;
+  'json-glib')
+    enable_shared=no
+    enable_static=yes
+    # FIXME: add these to GLib's .pc
+    CFLAGS="$CFLAGS -I$FRIDA_SDKROOT/include"
+    LDFLAGS="$LDFLAGS -L$FRIDA_SDKROOT/lib"
+  ;;
   'libgum')
     if [ "$FRIDA_TARGET" = "android" ]; then
       LDFLAGS="$LDFLAGS -lz"

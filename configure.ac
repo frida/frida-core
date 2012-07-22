@@ -137,6 +137,15 @@ if test "x$enable_cli" = "xyes"; then
 	AC_SUBST(ZED_CLI_PACKAGES)
 fi
 
+pkg_modules="json-glib-1.0"
+ZED_PACKAGES="--pkg json-glib-1.0"
+PKG_CHECK_MODULES(CLOUD_SPY, [$pkg_modules])
+
+AC_SUBST(CLOUD_SPY_CFLAGS)
+AC_SUBST(CLOUD_SPY_LDFLAGS)
+AC_SUBST(CLOUD_SPY_LIBS)
+AC_SUBST(CLOUD_SPY_PACKAGES)
+
 AC_CHECK_HEADERS([sys/user.h])
 
 AC_CONFIG_FILES([
