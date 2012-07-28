@@ -163,7 +163,7 @@ if OS_OSX
 	codesign -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$(builddir)/zed-server" || true
 endif
 if OS_IOS
-	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-server.xcent" "$<"
+	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-server.xcent" "$<" || true
 endif
 endif
 	@true

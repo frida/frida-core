@@ -99,10 +99,10 @@ AM_CPPFLAGS = \
 
 if OS_OSX
 all-local: zed-tests
-	codesign -f -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$<"
+	codesign -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$<" || true
 endif
 
 if OS_IOS
 all-local: zed-tests
-	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-tests.xcent" "$<"
+	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-tests.xcent" "$<" || true
 endif
