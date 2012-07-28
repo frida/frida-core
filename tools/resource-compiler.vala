@@ -1,10 +1,12 @@
 class Vala.ResourceCompiler {
+	private static bool enable_asm = false;
 	private static string config_filename;
 	private static string output_basename;
 	[CCode (array_length = false, array_null_terminated = true)]
 	private static string[] input_filenames;
 
 	private const OptionEntry[] options = {
+		{ "enable-asm", 0, 0, OptionArg.NONE, ref enable_asm, "Enable assembly output to speed up build", null },
 		{ "config-filename", 'c', 0, OptionArg.FILENAME, ref config_filename, "Read configuration from CONFIGFILE", "CONFIGFILE" },
 		{ "output-basename", 'o', 0, OptionArg.FILENAME, ref output_basename, "Place output in BASENAME", "BASENAME" },
 		{ "", 0, 0, OptionArg.FILENAME_ARRAY, ref input_filenames, null, "FILE..." },
@@ -60,12 +62,16 @@ class Vala.ResourceCompiler {
 		var vapi_file = File.new_for_commandline_arg (output_basename + ".vapi");
 		var cheader_file = File.new_for_commandline_arg (output_basename + ".h");
 		var csource_file = File.new_for_commandline_arg (output_basename + ".c");
+		var asm_blob_file = File.new_for_commandline_arg (output_basename + "-blob.S");
 		MemoryOutputStream vapi_content = new MemoryOutputStream (null, realloc, free);
 		MemoryOutputStream cheader_content = new MemoryOutputStream (null, realloc, free);
 
 		DataOutputStream vapi = new DataOutputStream (vapi_content);
 		DataOutputStream cheader = new DataOutputStream (cheader_content);
 		DataOutputStream csource = new DataOutputStream (csource_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION));
+		DataOutputStream asource = null;
+		if (enable_asm)
+			asource = new DataOutputStream (asm_blob_file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION));
 
 		var incguard_name = "__" + output_namespace.up ().replace (".", "_") + "_H__";
 		var blob_ctype = output_namespace.replace (".", "") + "Blob";
@@ -126,10 +132,15 @@ class Vala.ResourceCompiler {
 				null);
 		}
 
+		if (enable_asm)
+			asource.put_string (".const\n");
+
 		foreach (var category in categories) {
 			bool is_root_category = (category.name == "root");
 			var category_identifier = identifier_from_filename (category.name);
 			var identifier_by_index = new Gee.ArrayList<string> ();
+			var blob_identifier_by_index = new Gee.ArrayList<string> ();
+			var size_by_index = new Gee.ArrayList<uint64?> ();
 			int file_count = category.files.size;
 
 			foreach (string input_filename in category.files) {
@@ -141,10 +152,26 @@ class Vala.ResourceCompiler {
 				var file_size = input_info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
 
 				identifier_by_index.add (identifier);
+				size_by_index.add (file_size);
 
-				csource.put_string ("static const unsigned char " + identifier + "[" + file_size.to_string () + " + 1] =\n{\n");
-				serialize_to_c_array (file_input_stream, csource);
-				csource.put_string ("\n};\n\n");
+				if (enable_asm) {
+					var blob_identifier = "_" + namespace_cprefix + "_" + identifier;
+					blob_identifier_by_index.add (blob_identifier);
+
+					csource.put_string ("extern const unsigned char " + blob_identifier + "[];\n\n");
+
+					asource.put_string (".align 4\n");
+					asource.put_string (".globl _" + blob_identifier + "\n");
+					asource.put_string ("_" + blob_identifier + ":\n");
+					asource.put_string (".incbin \"" + input_file.get_path () + "\"\n");
+					asource.put_string (".byte 0\n");
+				} else {
+					blob_identifier_by_index.add (identifier);
+
+					csource.put_string ("static const unsigned char " + identifier + "[" + file_size.to_string () + " + 1] =\n{\n");
+					serialize_to_c_array (file_input_stream, csource);
+					csource.put_string ("\n};\n\n");
+				}
 			}
 
 			var blob_list_identifier = category_identifier + "_blobs";
@@ -152,8 +179,13 @@ class Vala.ResourceCompiler {
 			csource.put_string ("static const " + blob_ctype + " " + blob_list_identifier + "[" + category.files.size.to_string () + "] =\n{");
 			for (int file_index = 0; file_index != file_count; file_index++) {
 				var filename = Path.get_basename (category.files[file_index]);
-				var identifier = identifier_by_index[file_index];
-				csource.put_string ("\n  { \"%s\", %s, sizeof (%s) - 1 },".printf (filename, identifier, identifier));
+				var blob_identifier = blob_identifier_by_index[file_index];
+				var size = size_by_index[file_index];
+				if (enable_asm) {
+					csource.put_string ("\n  { \"%s\", %s, %s },".printf (filename, blob_identifier, size.to_string ()));
+				} else {
+					csource.put_string ("\n  { \"%s\", %s, sizeof (%s) - 1 },".printf (filename, blob_identifier, blob_identifier));
+				}
 			}
 			csource.put_string ("\n};\n\n");
 
