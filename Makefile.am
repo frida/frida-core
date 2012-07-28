@@ -1,11 +1,17 @@
 ACLOCAL_AMFLAGS = -I m4
 
+extras =
+
+if ENABLE_BINDINGS
+extras += bindings
+endif
+
 SUBDIRS = \
 	tools \
 	lib \
 	data \
 	src \
-	bindings \
+	$(extras) \
 	tests
 
 if OS_ANDROID

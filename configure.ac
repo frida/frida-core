@@ -113,6 +113,9 @@ if test "x$enable_server" = "xyes"; then
 fi
 AM_CONDITIONAL(ENABLE_SERVER, [test "x$enable_server" = "xyes"])
 
+AC_ARG_ENABLE(bindings, [AC_HELP_STRING([--enable-bindings], [build bindings [default=yes]])],, [enable_bindings=yes])
+AM_CONDITIONAL(ENABLE_BINDINGS, [test "x$enable_bindings" = "xyes"])
+
 GLIB_VERSION=2.26.0
 pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
 ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg gum-1.0"
@@ -137,14 +140,13 @@ if test "x$enable_cli" = "xyes"; then
 	AC_SUBST(ZED_CLI_PACKAGES)
 fi
 
-pkg_modules="json-glib-1.0"
-ZED_PACKAGES="--pkg json-glib-1.0"
-PKG_CHECK_MODULES(CLOUD_SPY, [$pkg_modules])
-
-AC_SUBST(CLOUD_SPY_CFLAGS)
-AC_SUBST(CLOUD_SPY_LDFLAGS)
-AC_SUBST(CLOUD_SPY_LIBS)
-AC_SUBST(CLOUD_SPY_PACKAGES)
+if test "x$enable_bindings" = "xyes"; then
+  PKG_CHECK_MODULES(CLOUD_SPY, ["json-glib-1.0"])
+  AC_SUBST(CLOUD_SPY_CFLAGS)
+  AC_SUBST(CLOUD_SPY_LDFLAGS)
+  AC_SUBST(CLOUD_SPY_LIBS)
+  AC_SUBST(CLOUD_SPY_PACKAGES)
+fi
 
 AC_CHECK_HEADERS([sys/user.h])
 
