@@ -47,7 +47,7 @@ namespace Zed {
 				} catch (Error e) {
 					var refused = new IOError.CONNECTION_REFUSED ("Connection refused");
 					if (e.domain == refused.domain && e.code == refused.code) {
-						if (i != 3 * 20) {
+						if (i != 2 * 20) {
 							var source = new TimeoutSource (50);
 							source.set_callback (() => {
 								create.callback ();
