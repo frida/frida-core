@@ -1,14 +1,14 @@
 namespace Zed {
+	private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+
 	public class Application : Object {
-		private HostSession host_session;
+		private BaseDBusHostSession host_session;
 		private DBusServer server;
 		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
 		private MainLoop loop;
 		private uint shutdown_timeout = 0;
-
-		private const uint LISTEN_PORT = 27042;
 
 		construct {
 #if WINDOWS
@@ -19,13 +19,16 @@ namespace Zed {
 #endif
 		}
 
-		public void run () throws Error {
-			server = new DBusServer.sync ("tcp:host=127.0.0.1,port=%u".printf (LISTEN_PORT), DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+		public void run (string address) throws Error {
+			server = new DBusServer.sync (address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
+				if (server == null)
+					return false;
+
 				connection.closed.connect (on_connection_closed);
 
 				try {
-					var registration_id = connection.register_object (Zed.ObjectPath.HOST_SESSION, host_session);
+					var registration_id = connection.register_object (Zed.ObjectPath.HOST_SESSION, host_session as HostSession);
 					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
@@ -46,8 +49,6 @@ namespace Zed {
 
 			loop = new MainLoop ();
 			loop.run ();
-
-			server.stop ();
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -70,7 +71,9 @@ namespace Zed {
 		private void schedule_shutdown () {
 			cancel_shutdown ();
 			shutdown_timeout = Timeout.add (3000, () => {
-				loop.quit ();
+				server.stop ();
+				server = null;
+				perform_shutdown ();
 				return false;
 			});
 		}
@@ -81,15 +84,32 @@ namespace Zed {
 				shutdown_timeout = 0;
 			}
 		}
+
+		private async void perform_shutdown () {
+			yield host_session.close ();
+			host_session = null;
+
+			loop.quit ();
+		}
 	}
 
 	public static int main (string[] args) {
 		var app = new Application ();
 
+		string address;
+		if (args.length == 1) {
+			address = DEFAULT_LISTEN_ADDRESS;
+		} else if (args.length == 2) {
+			address = args[1];
+		} else {
+			printerr ("usage: %s [<address>]\n", args[0]);
+			return 1;
+		}
+
 		try {
-			app.run ();
+			app.run (address);
 		} catch (Error e) {
-			printerr ("error: %s\n", e.message);
+			printerr ("ERROR: %s\n", e.message);
 			return 1;
 		}
 
