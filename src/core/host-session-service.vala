@@ -100,7 +100,25 @@ namespace Zed {
 		}
 
 		protected Session allocate_session () {
+			bool found_available = false;
+			var loopback = new InetAddress.loopback (SocketFamily.IPV4);
+			var address_in_use = new IOError.ADDRESS_IN_USE ("");
+			while (!found_available) {
+				try {
+					var socket = new Socket (SocketFamily.IPV4, SocketType.STREAM, SocketProtocol.TCP);
+					socket.bind (new InetSocketAddress (loopback, (uint16) last_agent_port), false);
+					socket.close ();
+					found_available = true;
+				} catch (Error e) {
+					if (e.code == address_in_use.code)
+						last_agent_port++;
+					else
+						found_available = true;
+				}
+			}
+
 			var port = last_agent_port++;
+
 			return new Session (AgentSessionId (port), LISTEN_ADDRESS_TEMPLATE.printf (port));
 		}
 
@@ -113,7 +131,7 @@ namespace Zed {
 				try {
 					connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 				} catch (Error connect_error) {
-					if (i != 40) {
+					if (i != 2 * 20) {
 						var source = new TimeoutSource (50);
 						source.set_callback (() => {
 							obtain_agent_session.callback ();
