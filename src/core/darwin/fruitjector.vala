@@ -22,6 +22,8 @@ namespace Zed {
 		}
 
 		~Fruitjector () {
+			foreach (var tempfile in agents.values)
+				tempfile.destroy ();
 			foreach (var instance in instance_by_id.values)
 				_free_instance (instance);
 			_destroy_context ();
@@ -30,7 +32,7 @@ namespace Zed {
 		public async uint inject (ulong pid, AgentDescriptor desc, string data_string) throws IOError {
 			var agent = agents[desc.name];
 			if (agent == null) {
-				agent = new TemporaryFile.from_stream(desc.name, desc.dylib);
+				agent = new TemporaryFile.from_stream (desc.name, desc.dylib);
 				agents[desc.name] = agent;
 			}
 
@@ -95,6 +97,10 @@ namespace Zed {
 			}
 
 			~TemporaryFile () {
+				destroy ();
+			}
+
+			public void destroy () {
 				try {
 					file.delete (null);
 				} catch (Error e) {
