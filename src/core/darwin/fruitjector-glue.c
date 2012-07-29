@@ -9,10 +9,13 @@
 # include <gum/arch-x86/gumx86writer.h>
 #endif
 #include <gum/gum.h>
+#include <gum/gumdarwin.h>
 #include <sys/sysctl.h>
 #include <mach/mach.h>
 
 #define ZED_AGENT_ENTRYPOINT_NAME "zed_agent_main"
+
+#define ZED_SYSTEM_LIBC         "/usr/lib/libSystem.B.dylib"
 
 #define ZED_PAGE_SIZE           (4096)
 #define ZED_STACK_GUARD_SIZE    ZED_PAGE_SIZE
@@ -37,15 +40,10 @@
     failed_operation = op; \
     goto handle_mach_error; \
   }
-#define CHECK_DL_RESULT(n1, cmp, n2, op) \
-  if (!(n1 cmp n2)) \
-  { \
-    failed_operation = op; \
-    goto handle_dl_error; \
-  }
 
 typedef struct _ZedFruitContext ZedFruitContext;
 typedef struct _ZedInjectionInstance ZedInjectionInstance;
+typedef struct _ZedAgentDetails ZedAgentDetails;
 typedef struct _ZedAgentContext ZedAgentContext;
 
 struct _ZedFruitContext
@@ -63,32 +61,41 @@ struct _ZedInjectionInstance
   dispatch_source_t thread_monitor_source;
 };
 
+struct _ZedAgentDetails
+{
+  gulong pid;
+  const char * dylib_path;
+  const char * data_string;
+  GumCpuType cpu_type;
+  mach_port_name_t task;
+};
+
 struct _ZedAgentContext
 {
-  gpointer _pthread_set_self_impl;
-  gpointer cthread_set_self_impl;
-  gpointer thread_self_data;
+  GumAddress _pthread_set_self_impl;
+  GumAddress cthread_set_self_impl;
+  GumAddress thread_self_data;
 
-  gpointer pthread_create_impl;
-  gpointer pthread_create_start_routine;
-  gpointer pthread_create_arg;
+  GumAddress pthread_create_impl;
+  GumAddress pthread_create_start_routine;
+  GumAddress pthread_create_arg;
 
-  gpointer pthread_join_impl;
+  GumAddress pthread_join_impl;
 
-  gpointer thread_terminate_impl;
+  GumAddress thread_terminate_impl;
 
-  gpointer mach_thread_self_impl;
+  GumAddress mach_thread_self_impl;
 
-  gpointer dlopen_impl;
+  GumAddress dlopen_impl;
   int dlopen_mode;
 
-  gpointer dlsym_impl;
-  gchar * entrypoint_name;
-  gchar * data_string;
+  GumAddress dlsym_impl;
+  GumAddress entrypoint_name;
+  GumAddress data_string;
 
-  gpointer dlclose_impl;
+  GumAddress dlclose_impl;
 
-  gchar * dylib_path;
+  GumAddress dylib_path;
 
   gchar entrypoint_name_data[32];
   gchar data_string_data[256];
@@ -96,6 +103,7 @@ struct _ZedAgentContext
 };
 
 typedef struct _ZedEmitContext ZedEmitContext;
+typedef struct _ZedFillContext ZedFillContext;
 
 struct _ZedEmitContext
 {
@@ -107,6 +115,24 @@ struct _ZedEmitContext
 #endif
 };
 
+struct _ZedFillContext
+{
+  ZedAgentContext * agent;
+  guint remaining;
+};
+
+static gboolean zed_fill_agent_context (ZedAgentContext * ctx,
+    const ZedAgentDetails * details, vm_address_t remote_payload_base,
+    GError ** error);
+static gboolean zed_fill_agent_context_functions (ZedAgentContext * ctx,
+    const ZedAgentDetails * details, GError ** error);
+static gboolean zed_fill_agent_context_functions_the_easy_way (
+    ZedAgentContext * ctx, const ZedAgentDetails * details, GError ** error);
+static gboolean zed_fill_agent_context_functions_the_hard_way (
+    ZedAgentContext * ctx, const ZedAgentDetails * details, GError ** error);
+static gboolean zed_fill_function_if_matching (const gchar * name,
+    GumAddress address, gpointer user_data);
+
 static gboolean zed_cpu_type_from_pid (gulong pid, GumCpuType * cpu_type);
 
 static void zed_emit_mach_stub_code (guint8 * code, GumCpuType cpu_type);
@@ -117,9 +143,6 @@ static void zed_emit_pthread_create_and_join (ZedEmitContext * ctx);
 static void zed_emit_thread_terminate (ZedEmitContext * ctx);
 
 static void zed_emit_pthread_stub_body (ZedEmitContext * ctx);
-
-static gboolean zed_fill_agent_context (ZedAgentContext * ctx, const char * dylib_path, const char * data_string,
-    vm_address_t remote_payload_base, GError ** error);
 
 void
 _zed_fruitjector_create_context (ZedFruitjector * self)
@@ -196,9 +219,8 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
 {
   ZedFruitContext * ctx = self->context;
   ZedInjectionInstance * instance;
-  GumCpuType cpu_type;
+  ZedAgentDetails details = { 0, };
   const gchar * failed_operation;
-  mach_port_name_t task = 0;
   kern_return_t ret;
   vm_address_t payload_address = (vm_address_t) NULL;
   guint8 mach_stub_code[512] = { 0, };
@@ -217,36 +239,40 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
 
   instance = zed_injection_instance_new (self, self->last_id++);
 
-  if (!zed_cpu_type_from_pid (pid, &cpu_type))
+  details.pid = pid;
+  details.dylib_path = dylib_path;
+  details.data_string = data_string;
+
+  if (!zed_cpu_type_from_pid (pid, &details.cpu_type))
     goto handle_mach_error;
 
-  ret = task_for_pid (mach_task_self (), pid, &task);
+  ret = task_for_pid (mach_task_self (), pid, &details.task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
-  instance->task = task;
+  instance->task = details.task;
 
-  ret = vm_allocate (task, &payload_address, ZED_PAYLOAD_SIZE, TRUE);
+  ret = vm_allocate (details.task, &payload_address, ZED_PAYLOAD_SIZE, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
   instance->payload_address = payload_address;
 
-  ret = vm_protect (task, payload_address + ZED_STACK_GUARD_OFFSET, ZED_STACK_GUARD_SIZE, FALSE, VM_PROT_NONE);
+  ret = vm_protect (details.task, payload_address + ZED_STACK_GUARD_OFFSET, ZED_STACK_GUARD_SIZE, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
-  zed_emit_mach_stub_code (mach_stub_code, cpu_type);
-  ret = vm_write (task, payload_address + ZED_MACH_CODE_OFFSET,
+  zed_emit_mach_stub_code (mach_stub_code, details.cpu_type);
+  ret = vm_write (details.task, payload_address + ZED_MACH_CODE_OFFSET,
       (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(mach_stub_code)");
 
-  zed_emit_pthread_stub_code (pthread_stub_code, cpu_type);
-  ret = vm_write (task, payload_address + ZED_PTHREAD_CODE_OFFSET,
+  zed_emit_pthread_stub_code (pthread_stub_code, details.cpu_type);
+  ret = vm_write (details.task, payload_address + ZED_PTHREAD_CODE_OFFSET,
       (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(pthread_stub_code)");
 
-  if (!zed_fill_agent_context (&agent_ctx, dylib_path, data_string, payload_address, error))
+  if (!zed_fill_agent_context (&agent_ctx, &details, payload_address, error))
     goto error_epilogue;
-  ret = vm_write (task, payload_address + ZED_DATA_OFFSET, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
+  ret = vm_write (details.task, payload_address + ZED_DATA_OFFSET, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
   CHECK_MACH_RESULT (ret, ==, 0, "vm_write(data)");
 
-  ret = vm_protect (task, payload_address + ZED_CODE_OFFSET, ZED_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  ret = vm_protect (details.task, payload_address + ZED_CODE_OFFSET, ZED_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
   bzero (&state, sizeof (state));
@@ -258,7 +284,7 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   state.__pc = payload_address + ZED_MACH_CODE_OFFSET;
   state.__cpsr = ZED_PSR_THUMB;
 #else
-  if (cpu_type == GUM_CPU_AMD64)
+  if (details.cpu_type == GUM_CPU_AMD64)
   {
     x86_thread_state64_t * ts;
 
@@ -288,7 +314,7 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   }
 #endif
 
-  ret = thread_create_running (task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
+  ret = thread_create_running (details.task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
   CHECK_MACH_RESULT (ret, ==, 0, "thread_create_running");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_id), GUINT_TO_POINTER (instance->id), instance);
@@ -317,55 +343,82 @@ error_epilogue:
   }
 }
 
-#define ZED_CTX_ASSIGN_FUNCTION(field) \
-  ctx->field##_impl = dlsym (syslib_handle, G_STRINGIFY (field)); \
-  CHECK_DL_RESULT (ctx->field##_impl, !=, NULL, "dlsym(\"" G_STRINGIFY (field) "\")")
-
 static gboolean
-zed_fill_agent_context (ZedAgentContext * ctx, const char * dylib_path, const char * data_string,
+zed_fill_agent_context (ZedAgentContext * ctx, const ZedAgentDetails * details,
     vm_address_t remote_payload_base, GError ** error)
 {
+  if (!zed_fill_agent_context_functions (ctx, details, error))
+    return FALSE;
+
+  ctx->thread_self_data = remote_payload_base + ZED_THREAD_SELF_OFFSET;
+
+#ifdef HAVE_ARM
+  ctx->pthread_create_start_routine = remote_payload_base + ZED_PTHREAD_CODE_OFFSET + 1;
+#else
+  ctx->pthread_create_start_routine = remote_payload_base + ZED_PTHREAD_CODE_OFFSET;
+#endif
+  ctx->pthread_create_arg = remote_payload_base + ZED_DATA_OFFSET;
+
+  ctx->dylib_path = remote_payload_base + ZED_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZedAgentContext, dylib_path_data);
+  strcpy (ctx->dylib_path_data, details->dylib_path);
+  ctx->dlopen_mode = RTLD_LAZY;
+
+  ctx->entrypoint_name = remote_payload_base + ZED_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZedAgentContext, entrypoint_name_data);
+  strcpy (ctx->entrypoint_name_data, ZED_AGENT_ENTRYPOINT_NAME);
+  ctx->data_string = remote_payload_base + ZED_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZedAgentContext, data_string_data);
+  g_assert_cmpint (strlen (details->data_string), <, sizeof (ctx->data_string_data));
+  strcpy (ctx->data_string_data, details->data_string);
+
+  return TRUE;
+}
+
+static gboolean
+zed_fill_agent_context_functions (ZedAgentContext * ctx, const ZedAgentDetails * details, GError ** error)
+{
+  GumCpuType own_cpu_type;
+  if (!zed_cpu_type_from_pid (getpid (), &own_cpu_type))
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to get CPU type of self");
+    return FALSE;
+  }
+
+  if (details->cpu_type == own_cpu_type)
+    return zed_fill_agent_context_functions_the_easy_way (ctx, details, error);
+  else
+    return zed_fill_agent_context_functions_the_hard_way (ctx, details, error);
+}
+
+#define ZED_CTX_ASSIGN_FUNCTION(field) \
+  ctx->field##_impl = GUM_ADDRESS (dlsym (syslib_handle, G_STRINGIFY (field))); \
+  CHECK_DL_RESULT (ctx->field##_impl, !=, 0, "dlsym(\"" G_STRINGIFY (field) "\")")
+#define CHECK_DL_RESULT(n1, cmp, n2, op) \
+  if (!(n1 cmp n2)) \
+  { \
+    failed_operation = op; \
+    goto handle_dl_error; \
+  }
+
+static gboolean
+zed_fill_agent_context_functions_the_easy_way (ZedAgentContext * ctx, const ZedAgentDetails * details, GError ** error)
+{
   gboolean result = FALSE;
-  void * syslib_handle = NULL;
+  void * syslib_handle;
   const gchar * failed_operation;
 
-  syslib_handle = dlopen ("/usr/lib/libSystem.B.dylib", RTLD_LAZY | RTLD_GLOBAL);
+  syslib_handle = dlopen (ZED_SYSTEM_LIBC, RTLD_LAZY | RTLD_GLOBAL);
   CHECK_DL_RESULT (syslib_handle, !=, NULL, "dlopen");
 
   ZED_CTX_ASSIGN_FUNCTION (_pthread_set_self);
   ZED_CTX_ASSIGN_FUNCTION (cthread_set_self);
-  ctx->thread_self_data = (gpointer) (remote_payload_base + ZED_THREAD_SELF_OFFSET);
-
   ZED_CTX_ASSIGN_FUNCTION (pthread_create);
-#ifdef HAVE_ARM
-  ctx->pthread_create_start_routine = (gpointer) (remote_payload_base + ZED_PTHREAD_CODE_OFFSET + 1);
-#else
-  ctx->pthread_create_start_routine = (gpointer) (remote_payload_base + ZED_PTHREAD_CODE_OFFSET);
-#endif
-  ctx->pthread_create_arg = (gpointer) (remote_payload_base + ZED_DATA_OFFSET);
-
   ZED_CTX_ASSIGN_FUNCTION (pthread_join);
-
   ZED_CTX_ASSIGN_FUNCTION (thread_terminate);
-
   ZED_CTX_ASSIGN_FUNCTION (mach_thread_self);
-
   ZED_CTX_ASSIGN_FUNCTION (dlopen);
-  CHECK_DL_RESULT (ctx->dlopen_impl, !=, NULL, "dlsym(\"dlopen\")");
-  ctx->dylib_path = (gchar *) (remote_payload_base + ZED_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZedAgentContext, dylib_path_data));
-  strcpy (ctx->dylib_path_data, dylib_path);
-  ctx->dlopen_mode = RTLD_LAZY;
-
   ZED_CTX_ASSIGN_FUNCTION (dlsym);
-  ctx->entrypoint_name = (gchar *) (remote_payload_base + ZED_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZedAgentContext, entrypoint_name_data));
-  strcpy (ctx->entrypoint_name_data, ZED_AGENT_ENTRYPOINT_NAME);
-  ctx->data_string = (gchar *) (remote_payload_base + ZED_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZedAgentContext, data_string_data));
-  g_assert_cmpint (strlen (data_string), <, sizeof (ctx->data_string_data));
-  strcpy (ctx->data_string_data, data_string);
-
   ZED_CTX_ASSIGN_FUNCTION (dlclose);
 
   result = TRUE;
@@ -384,6 +437,53 @@ beach:
       dlclose (syslib_handle);
     return result;
   }
+}
+
+static gboolean
+zed_fill_agent_context_functions_the_hard_way (ZedAgentContext * ctx, const ZedAgentDetails * details, GError ** error)
+{
+  ZedFillContext fill_ctx;
+
+  fill_ctx.agent = ctx;
+  fill_ctx.remaining = 9;
+  gum_darwin_enumerate_exports (details->task, ZED_SYSTEM_LIBC, zed_fill_function_if_matching, &fill_ctx);
+
+  if (fill_ctx.remaining > 0)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "failed to resolve one or more functions");
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+#define ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING(field) \
+  if (strcmp (name, G_STRINGIFY (field)) == 0) \
+  { \
+    ctx->agent->field##_impl = address; \
+    ctx->remaining--; \
+    return ctx->remaining != 0; \
+  }
+
+static gboolean
+zed_fill_function_if_matching (const gchar * name,
+                               GumAddress address,
+                               gpointer user_data)
+{
+  ZedFillContext * ctx = user_data;
+
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (_pthread_set_self);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (cthread_set_self);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (pthread_create);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (pthread_join);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (thread_terminate);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (mach_thread_self);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlopen);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlsym);
+  ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlclose);
+
+  return TRUE;
 }
 
 static gboolean

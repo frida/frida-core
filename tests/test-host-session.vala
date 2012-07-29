@@ -36,6 +36,11 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 #endif
+
+		GLib.Test.add_func ("/HostSession/Manual/cross-arch", () => {
+			var h = new Harness ((h) => Manual.cross_arch (h as Harness));
+			h.run ();
+		});
 	}
 
 	namespace Service {
@@ -148,7 +153,6 @@ namespace Zed.HostSessionTest {
 
 			yield h.service.stop ();
 			h.service.remove_backend (backend);
-
 			h.done ();
 		}
 
@@ -321,6 +325,49 @@ namespace Zed.HostSessionTest {
 				assert (actual_xml == expected_xml);
 			}
 
+		}
+
+	}
+
+	namespace Manual {
+
+		private static async void cross_arch (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode with target application running> ");
+				h.done ();
+				return;
+			}
+
+			uint pid;
+
+			try {
+				string pgrep_output;
+				Process.spawn_sync (null, new string[] { "/usr/bin/pgrep", "Safari" }, null, 0, null, out pgrep_output, null, null);
+				pid = (uint) int.parse (pgrep_output);
+			} catch (SpawnError spawn_error) {
+				stderr.printf ("ERROR: %s\n", spawn_error.message);
+				assert_not_reached ();
+			}
+
+			var backend = new DarwinHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			var prov = h.first_provider ();
+
+			try {
+				var host_session = yield prov.create ();
+				var id = yield host_session.attach_to (pid);
+				yield prov.obtain_agent_session (id);
+			} catch (IOError e) {
+				stderr.printf ("ERROR: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+
+			h.done ();
 		}
 
 	}

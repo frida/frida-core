@@ -101,7 +101,7 @@ namespace Zed.FruitjectorTest {
 				AgentDescriptor desc;
 
 				try {
-					desc = new AgentDescriptor(name, File.new_for_path (dylib).read (null));
+					desc = new AgentDescriptor (name, File.new_for_path (dylib).read (null));
 				} catch (Error io_error) {
 					assert_not_reached ();
 				}
