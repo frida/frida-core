@@ -29,8 +29,19 @@ namespace Zed {
 			get { return HostSessionProviderKind.REMOTE_SYSTEM; }
 		}
 
-		private const string LISTEN_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
+		private const string DEFAULT_SERVER_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+		private const string AGENT_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
+
+		private string server_address;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
+
+		public TcpHostSessionProvider () {
+			server_address = DEFAULT_SERVER_ADDRESS;
+		}
+
+		public TcpHostSessionProvider.for_address (string address) {
+			server_address = address;
+		}
 
 		public async void close () {
 			foreach (var entry in entries)
@@ -43,7 +54,7 @@ namespace Zed {
 			IOError error = null;
 			for (int i = 1; connection == null && error == null; i++) {
 				try {
-					connection = yield DBusConnection.new_for_address (LISTEN_ADDRESS_TEMPLATE.printf (27042), DBusConnectionFlags.AUTHENTICATION_CLIENT);
+					connection = yield DBusConnection.new_for_address (server_address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 				} catch (Error e) {
 					var refused = new IOError.CONNECTION_REFUSED ("Connection refused");
 					if (e.domain == refused.domain && e.code == refused.code) {
@@ -78,7 +89,7 @@ namespace Zed {
 		}
 
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
-			var address = LISTEN_ADDRESS_TEMPLATE.printf (id.handle);
+			var address = AGENT_ADDRESS_TEMPLATE.printf (id.handle);
 
 			DBusConnection connection = null;
 
