@@ -32,7 +32,7 @@ namespace Zed.HostSessionTest {
 		});
 
 		GLib.Test.add_func ("/HostSession/Darwin/Manual/cross-arch", () => {
-			var h = new Harness ((h) => Manual.cross_arch (h as Harness));
+			var h = new Harness ((h) => Darwin.Manual.cross_arch (h as Harness));
 			h.run ();
 		});
 #endif
