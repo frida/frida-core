@@ -20,11 +20,13 @@ namespace Zed {
 		}
 
 		private void add_local_backends () {
+#if HAVE_LOCAL_BACKENDS
 #if DARWIN
 			add_backend (new DarwinHostSessionBackend ());
 #endif
 #if WINDOWS
 			add_backend (new WindowsHostSessionBackend ());
+#endif
 #endif
 		}
 

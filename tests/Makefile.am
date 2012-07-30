@@ -21,7 +21,9 @@ platform_tests += test-linjector.vala
 endif
 
 if OS_DARWIN
+if ENABLE_LOCAL_BACKENDS
 platform_tests += test-fruitjector.vala
+endif
 endif
 
 zed_tests_SOURCES = \

@@ -1,3 +1,5 @@
+if ENABLE_LOCAL_BACKENDS
+
 if OS_LINUX
 soext := .so
 endif
@@ -34,3 +36,5 @@ zed-data-agent.c: $(AGENT)
 			-c "$(srcdir)/agent/agent.resources" \
 			-o "$(builddir)/zed-data-agent" \
 			$(AGENT)
+
+endif

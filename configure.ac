@@ -84,7 +84,16 @@ if [[ "x$HAVE_IOS" = "xyes" ]]; then
 fi
 AM_CONDITIONAL(OS_IOS, test "x$HAVE_IOS" = "xyes")
 
+AC_ARG_ENABLE(local_backends, [AC_HELP_STRING([--enable-local-backends], [enable local backends [default=yes]])],, [enable_local_backends=yes])
+if test "x$enable_local_backends" = "xyes"; then
+  AC_DEFINE(HAVE_LOCAL_BACKENDS, 1, [Define to 1 if local backends are available.])
+fi
+AM_CONDITIONAL(ENABLE_LOCAL_BACKENDS, [test "x$enable_local_backends" = "xyes"])
+
 ZED_VALAFLAGS=
+if test "x$enable_local_backends" = "xyes"; then
+  ZED_VALAFLAGS="$ZED_VALAFLAGS -D HAVE_LOCAL_BACKENDS"
+fi
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
   ZED_VALAFLAGS="$ZED_VALAFLAGS -D LINUX"
 fi
@@ -109,6 +118,15 @@ fi
 AM_CONDITIONAL(ENABLE_CLI, [test "x$enable_cli" = "xyes"])
 
 AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=yes]])],, [enable_server=yes])
+if test "x$enable_server" = "xyes" && test "x$enable_local_backends" = "xno"; then
+  AC_MSG_NOTICE([
+
+*********************************************************************
+*** Server will not be built because local backends are disabled. ***
+*********************************************************************
+])
+  enable_server=no
+fi
 if test "x$enable_server" = "xyes"; then
   AC_DEFINE(HAVE_SERVER, 1, [Define to 1 if server is built.])
 fi

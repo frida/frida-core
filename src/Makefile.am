@@ -57,6 +57,8 @@ zed_server_LDFLAGS += \
 endif
 
 backend_sources = $(NULL)
+backend_libadd = $(NULL)
+backend_valaflags = $(NULL)
 glue_sources = $(NULL)
 
 if OS_LINUX
@@ -68,16 +70,30 @@ glue_sources += \
 endif
 
 if OS_DARWIN
+
+if ENABLE_LOCAL_BACKENDS
 backend_sources += \
 	$(srcdir)/core/darwin/darwin-host-session.vala \
-	$(srcdir)/core/darwin/fruitjector.vala \
+	$(srcdir)/core/darwin/fruitjector.vala
+glue_sources += \
+	$(srcdir)/core/system-darwin.m \
+	$(srcdir)/core/darwin/fruitjector-glue.c
+endif
+
+backend_sources += \
 	$(srcdir)/core/fruity/fruity-client.vala \
 	$(srcdir)/core/fruity/fruity-host-session.vala \
 	$(srcdir)/core/fruity/fruity-property-list.vala
 glue_sources += \
-	$(srcdir)/core/system-darwin.m \
-	$(srcdir)/core/darwin/fruitjector-glue.c \
 	$(srcdir)/core/fruity/fruity-host-session-darwin.m
+
+endif
+
+if ENABLE_LOCAL_BACKENDS
+backend_libadd += \
+	$(top_builddir)/data/libzed-data.la
+backend_valaflags += \
+	--pkg=zed-data-agent
 endif
 
 libzed_core_la_SOURCES = \
@@ -90,7 +106,7 @@ libzed_core_la_CFLAGS = \
 libzed_core_la_LIBADD = \
 	$(builddir)/libzed-core-glue.la \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la \
-	$(top_builddir)/data/libzed-data.la
+	$(backend_libadd)
 libzed_core_la_VALAFLAGS = \
 	--vapi=zed-core.vapi \
 	--library=zed-core \
@@ -100,7 +116,7 @@ libzed_core_la_VALAFLAGS = \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--pkg=config \
 	--pkg=zed-interfaces \
-	--pkg=zed-data-agent \
+	$(backend_valaflags) \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
 
