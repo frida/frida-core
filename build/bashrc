@@ -30,6 +30,9 @@ case $FRIDA_TARGET in
     fi
     ;;
   osx32|osx64)
+    if [ -z "$OSX_CERTID" ]; then
+      echo "WARNING: OSX_CERTID should be set"
+    fi
     ;;
   ios)
     if [ -z "$IOS_CERTID" -o -z "$IOS_IPADDR" ]; then

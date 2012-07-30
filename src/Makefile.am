@@ -171,12 +171,12 @@ endif
 endif
 if ENABLE_CLI
 if OS_OSX
-	codesign -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$(builddir)/zed-cli" || true
+	codesign -s "$$OSX_CERTID" -i "com.tillitech.ZedCli" "$(builddir)/zed-cli" || true
 endif
 endif
 if ENABLE_SERVER
 if OS_OSX
-	codesign -s "org.boblycat.Frida" -i "org.boblycat.Frida" "$(builddir)/zed-server" || true
+	codesign -s "$$OSX_CERTID" -i "com.tillitech.ZedServer" "$(builddir)/zed-server" || true
 endif
 if OS_IOS
 	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-server.xcent" "$<" || true
