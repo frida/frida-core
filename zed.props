@@ -9,14 +9,14 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\libgum;$(SolutionDir)ext\libgum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.10rc9\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\libgum;$(SolutionDir)ext\libgum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.10rc9\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4244;4305;4715;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>WIN32;_WINDOWS;WINVER=0x0501;_WIN32_WINNT=0x0501;GUM_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(IntDir)..\gum-32;$(IntDir)..\gum-64;$(SolutionDir)ext\sdk-windows\$(PlatformName)-$(ConfigurationName)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ffi.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ffi.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;json-glib-1.0.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <PropertyGroup Label="Configuration">
