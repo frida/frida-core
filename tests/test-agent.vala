@@ -25,9 +25,9 @@ namespace Zed.AgentTest {
 
 			target_function (1337, "Frida rocks");
 
-			var msg = yield h.wait_for_message ();
-			assert (msg.sender_id.handle == sid.handle);
-			assert (msg.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
+			var message = yield h.wait_for_message ();
+			assert (message.sender_id.handle == sid.handle);
+			assert (message.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
 
 			yield h.unload_agent ();
 
@@ -113,7 +113,7 @@ namespace Zed.AgentTest {
 				assert_not_reached ();
 			}
 
-			session.message_from_script.connect ((sid, msg) => message_queue.add (new ScriptMessage (sid, msg)));
+			session.message_from_script.connect ((sid, message, data) => message_queue.add (new ScriptMessage (sid, message)));
 
 			return session;
 		}
@@ -141,16 +141,16 @@ namespace Zed.AgentTest {
 		}
 
 		public async ScriptMessage wait_for_message () {
-			ScriptMessage msg = null;
+			ScriptMessage message = null;
 
 			do {
-				msg = message_queue.poll ();
-				if (msg == null)
+				message = message_queue.poll ();
+				if (message == null)
 					yield process_events ();
 			}
-			while (msg == null);
+			while (message == null);
 
-			return msg;
+			return message;
 		}
 
 		public class ScriptMessage {

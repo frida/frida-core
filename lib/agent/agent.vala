@@ -18,7 +18,7 @@ namespace Zed.Agent {
 		}
 
 		construct {
-			script_engine.message_from_script.connect ((script_id, msg) => this.message_from_script (script_id, msg));
+			script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 		}
 
 		public async void close () throws IOError {
@@ -63,12 +63,8 @@ namespace Zed.Agent {
 			script_engine.load_script (sid);
 		}
 
-		public async void post_message_to_script (AgentScriptId sid, string msg) throws IOError {
-			script_engine.post_message_to_script (sid, msg);
-		}
-
-		public async void redirect_script_messages_to (AgentScriptId sid, string folder, uint keep_last_n) throws IOError {
-			script_engine.redirect_script_messages_to (sid, folder, keep_last_n);
+		public async void post_message_to_script (AgentScriptId sid, string message) throws IOError {
+			script_engine.post_message_to_script (sid, message);
 		}
 
 		public void run () throws Error {
