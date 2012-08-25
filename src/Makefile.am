@@ -27,7 +27,7 @@ zed_cli_VALAFLAGS = \
 	@ZED_PACKAGES@ \
 	@ZED_CLI_PACKAGES@ \
 	@ZED_VALAFLAGS@
-if OS_OSX
+if OS_MAC
 zed_cli_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/zed-cli.plist"
 endif
@@ -51,7 +51,7 @@ zed_server_VALAFLAGS = \
 	--pkg=zed-interfaces \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
-if OS_OSX
+if OS_MAC
 zed_server_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/zed-server.plist"
 endif
@@ -170,13 +170,13 @@ all-local:
 endif
 endif
 if ENABLE_CLI
-if OS_OSX
-	codesign -s "$$OSX_CERTID" -i "com.tillitech.ZedCli" "$(builddir)/zed-cli" || true
+if OS_MAC
+	codesign -s "$$MAC_CERTID" -i "com.tillitech.ZedCli" "$(builddir)/zed-cli" || true
 endif
 endif
 if ENABLE_SERVER
-if OS_OSX
-	codesign -s "$$OSX_CERTID" -i "com.tillitech.ZedServer" "$(builddir)/zed-server" || true
+if OS_MAC
+	codesign -s "$$MAC_CERTID" -i "com.tillitech.ZedServer" "$(builddir)/zed-server" || true
 endif
 if OS_IOS
 	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-server.xcent" "$<" || true

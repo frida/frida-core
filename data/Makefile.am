@@ -3,10 +3,7 @@ if ENABLE_LOCAL_BACKENDS
 if OS_LINUX
 soext := .so
 endif
-if OS_OSX
-soext := .dylib
-endif
-if OS_IOS
+if OS_DARWIN
 soext := .dylib
 endif
 

@@ -30,8 +30,8 @@ case $FRIDA_TARGET in
     fi
     ;;
   mac32|mac64)
-    if [ -z "$OSX_CERTID" ]; then
-      echo "WARNING: OSX_CERTID should be set"
+    if [ -z "$MAC_CERTID" ]; then
+      echo "WARNING: MAC_CERTID should be set"
     fi
     ;;
   ios)

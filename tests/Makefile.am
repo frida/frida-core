@@ -42,7 +42,7 @@ zed_tests_VALAFLAGS = \
 	--pkg=zed-tests \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
-if OS_OSX
+if OS_MAC
 zed_tests_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/zed-tests.plist"
 endif
@@ -99,9 +99,9 @@ AM_CPPFLAGS = \
 	-DPKGLIBDIR=\""$(pkglibdir)"\" \
 	-DPKGTESTDIR=\""$(prefix)/tests"\"
 
-if OS_OSX
+if OS_MAC
 all-local: zed-tests
-	codesign -s "$$OSX_CERTID" -i "com.tillitech.ZedTests" "$<" || true
+	codesign -s "$$MAC_CERTID" -i "com.tillitech.ZedTests" "$<" || true
 endif
 
 if OS_IOS
