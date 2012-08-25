@@ -11,7 +11,7 @@ case $build_os in
     download_command="curl -sS"
     tar_stdin="-"
 
-    build_os=osx
+    build_os=mac
     ;;
   *)
     echo "Could not determine build OS"
@@ -29,7 +29,7 @@ case $FRIDA_TARGET in
       exit 1
     fi
     ;;
-  osx32|osx64)
+  mac32|mac64)
     if [ -z "$OSX_CERTID" ]; then
       echo "WARNING: OSX_CERTID should be set"
     fi
@@ -46,7 +46,7 @@ case $FRIDA_TARGET in
     fi
     ;;
   *)
-    echo "Invalid FRIDA_TARGET, must be either linux-x86_32, linux-x86_64, linux-arm, android, osx32, osx64, ios or ps3"
+    echo "Invalid FRIDA_TARGET, must be either linux-x86_32, linux-x86_64, linux-arm, android, mac32, mac64, ios or ps3"
     exit 1
     ;;
 esac
@@ -114,17 +114,17 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
 -L${ANDROID_NDK_ROOT}/sources/cxx-stl/stlport/libs/armeabi-v7a \
 -lstlport_static -lm -lstdc++"
       ;;
-    osx32|osx64)
+    mac32|mac64)
       export CC="/usr/bin/llvm-gcc-4.2"
       export CXX="/usr/bin/llvm-g++-4.2"
       export OBJC="/usr/bin/llvm-gcc-4.2"
       export LD="/usr/bin/ld"
 
       case $FRIDA_TARGET in
-        osx32)
+        mac32)
           export CFLAGS="-m32"
           ;;
-        osx64)
+        mac64)
           export CFLAGS="-m64"
           ;;
       esac
@@ -175,7 +175,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
   export PKG_CONFIG_PATH
 
   case $FRIDA_TARGET in
-    osx32|osx64|ios)
+    mac32|mac64|ios)
       export LDFLAGS="$LDFLAGS -Wl,-dead_strip -Wl,-headerpad_max_install_names -Wl,-no_compact_unwind"
       ;;
   esac
@@ -198,7 +198,7 @@ case $FRIDA_TARGET in
   android)
     sdk_version=20120313
     ;;
-  linux-*|osx32|osx64)
+  linux-*|mac32|mac64)
     sdk_version=20120324
     ;;
   ios)

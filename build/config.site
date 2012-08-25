@@ -29,7 +29,7 @@ case $FRIDA_TARGET in
 
     ac_tool_prefix="arm-linux-androideabi-"
   ;;
-  osx32)
+  mac32)
     host_alias="i686-apple-darwin"
     cross_compiling=yes
   ;;
@@ -83,13 +83,13 @@ case "$PACKAGE_TARNAME" in
       linux-*)
         glib_cv_have_qsort_r=yes
       ;;
-      osx32|osx64|ios|android)
+      mac32|mac64|ios|android)
         glib_cv_have_qsort_r=no
       ;;
     esac
 
     case $FRIDA_TARGET in
-      linux-*|osx32|osx64|ios|android|ps3)
+      linux-*|mac32|mac64|ios|android|ps3)
         enable_proxy_libintl=yes
       ;;
     esac

@@ -16,10 +16,10 @@ function expand_target()
     android)
       echo arm-unknown-linux-androideabi
     ;;
-    osx32)
+    mac32)
       echo i686-apple-darwin
     ;;
-    osx64)
+    mac64)
       echo x86_64-apple-darwin11.3.0
     ;;
     ios)
@@ -177,7 +177,7 @@ function build_v8 ()
     case $FRIDA_TARGET in
       linux-arm)
       ;;
-      osx64)
+      mac64)
         sed -i "" "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
       ;;
     esac
@@ -189,11 +189,11 @@ function build_v8 ()
       target=arm.release/obj.target/tools/gyp
     else
       case $FRIDA_TARGET in
-        osx32)
+        mac32)
           target=ia32.release
           flags="-f make-mac -D host_os=mac"
         ;;
-        osx64)
+        mac64)
           target=x64.release
           flags="-f make-mac -D host_os=mac"
         ;;
