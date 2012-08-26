@@ -131,18 +131,20 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export LDFLAGS="$LDFLAGS -no-undefined"
       ;;
     ios)
-      export IOS_SDKVER="5.0"
-      export IOS_MINVER="5.0"
-      export IOS_DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
-      export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${IOS_SDKVER}.sdk"
+      ios_sdkver="5.1"
+      ios_sdk="iphoneos$ios_sdkver"
+      ios_minver="5.0"
 
-      export CC="${IOS_DEVROOT}/usr/bin/llvm-gcc-4.2"
-      export CXX="${IOS_DEVROOT}/usr/bin/llvm-g++-4.2"
-      export OBJC="${IOS_DEVROOT}/usr/bin/llvm-gcc-4.2"
-      export LD="${IOS_DEVROOT}/usr/bin/ld"
+      export CC="$(xcrun --sdk $ios_sdk -f llvm-gcc-4.2)"
+      export CXX="$(xcrun --sdk $ios_sdk -f llvm-g++-4.2)"
+      export OBJC="$(xcrun --sdk $ios_sdk -f llvm-gcc-4.2)"
+      export LD="$(dirname $CC)/ld"
 
-      export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${IOS_MINVER} -arch armv7"
-      export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${IOS_MINVER} -arch armv7 -no-undefined"
+      export IOS_DEVROOT="$(dirname $(dirname $(dirname $CC)))"
+      export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${ios_sdkver}.sdk"
+
+      export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${ios_minver} -arch armv7"
+      export LDFLAGS="-isysroot ${IOS_SDKROOT} -Wl,-iphoneos_version_min,${ios_minver} -arch armv7 -no-undefined"
       ;;
     ps3)
       export CFLAGS="-isystem ${PS3DEV}/host/ppu/include -isystem ${PSL1GHT}/target/include"
