@@ -10,6 +10,8 @@ namespace Zed.AgentTest {
 		private static async void load_and_receive_messages (Harness h) {
 			var session = yield h.load_agent ();
 
+			unowned TargetFunc func = (TargetFunc) target_function;
+
 			AgentScriptId sid;
 			try {
 				sid = yield session.create_script (
@@ -17,13 +19,13 @@ namespace Zed.AgentTest {
 					 "  onEnter: function(args) {" +
 					 "    send({ first_argument: args[0], second_argument: Memory.readUtf8String(args[1]) });" +
 					 "  }" +
-					 "});").printf ((size_t) target_function));
+					 "});").printf ((size_t) func));
 				yield session.load_script (sid);
 			} catch (IOError attach_error) {
 				assert_not_reached ();
 			}
 
-			target_function (1337, "Frida rocks");
+			func (1337, "Frida rocks");
 
 			var message = yield h.wait_for_message ();
 			assert (message.sender_id.handle == sid.handle);
@@ -33,6 +35,9 @@ namespace Zed.AgentTest {
 
 			h.done ();
 		}
+
+		[CCode (has_target=false)]
+		private delegate void TargetFunc (int level, string message);
 
 		public extern static uint target_function (int level, string message);
 	}
