@@ -1,1 +1,1 @@
-http://frida-ire.googlecode.com/files/sdk-windows-20120801.exe
+http://frida-ire.googlecode.com/files/sdk-windows-20120826.exe
