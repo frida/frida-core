@@ -159,7 +159,7 @@ function build_module ()
 
 function build_v8_generic ()
 {
-  PATH="/usr/bin:/bin:/usr/sbin:/sbin" CFLAGS="" CXXFLAGS="" LDFLAGS="" make $target GYPFLAGS="$flags" V=1
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" LD="$CXX" CFLAGS="" CXXFLAGS="" LDFLAGS="" make $target GYPFLAGS="$flags" V=1
 }
 
 function build_v8_linux_arm ()
@@ -221,7 +221,7 @@ includedir=\${prefix}/include
 
 Name: V8
 Description: V8 JavaScript Engine
-Version: 3.9.18
+Version: 3.13.3.1
 Libs: -L\${libdir} -lv8_base -lv8_snapshot
 Cflags: -I\${includedir}
 EOF
@@ -266,7 +266,7 @@ case $1 in
   sdk)
     build_sdk
     apply_fixups
-    make_sdk_package "$previous_sdk"
+    make_sdk_package
   ;;
 esac
 
