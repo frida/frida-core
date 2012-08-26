@@ -1,12 +1,13 @@
 if ENABLE_LOCAL_BACKENDS
 
+RESOURCE_COMPILER := $(top_builddir)/tools/resource-compiler
+
 if OS_LINUX
 soext := .so
 endif
 if OS_DARWIN
 soext := .dylib
 endif
-
 AGENT := $(top_builddir)/lib/agent/.libs/libzed-agent$(soext)
 
 CLEANFILES = \
@@ -28,7 +29,7 @@ AM_CPPFLAGS = \
 
 zed-data-agent.c: $(AGENT)
 	$(AM_V_GEN) \
-		"$(top_builddir)/tools/resource-compiler" \
+		"$(RESOURCE_COMPILER)" \
 			--enable-asm \
 			-c "$(srcdir)/agent/agent.resources" \
 			-o "$(builddir)/zed-data-agent" \
