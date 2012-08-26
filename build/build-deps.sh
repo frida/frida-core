@@ -159,7 +159,7 @@ function build_module ()
 
 function build_v8_generic ()
 {
-  PATH="/usr/bin:/bin:/usr/sbin:/sbin" LD="$CXX" CFLAGS="" CXXFLAGS="" LDFLAGS="" make $target GYPFLAGS="$flags" V=1
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" LD="$CXX" make $target GYPFLAGS="$flags" V=1
 }
 
 function build_v8_linux_arm ()
@@ -196,6 +196,10 @@ function build_v8 ()
         mac64)
           target=x64.release
           flags="-f make-mac -D host_os=mac"
+        ;;
+        ios)
+          target=arm.release
+          flags="-f make-mac -D host_os=mac -D v8_can_use_unaligned_accesses=true -D v8_can_use_vfp2_instructions=true -D v8_can_use_vfp3_instructions=true"
         ;;
         *)
           echo "FIXME"
