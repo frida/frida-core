@@ -159,7 +159,7 @@ function build_module ()
 
 function build_v8_generic ()
 {
-  PATH="/usr/bin:/bin:/usr/sbin:/sbin" LD="$CXX" make $target GYPFLAGS="$flags" V=1
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" MACOSX_DEPLOYMENT_TARGET="" LD="$CXX" make $target GYPFLAGS="$flags" V=1
 }
 
 function build_v8_linux_arm ()
@@ -173,7 +173,6 @@ function build_v8 ()
     git clone "${REPO_BASE_URL}/v8${REPO_SUFFIX}" || exit 1
     pushd v8 >/dev/null || exit 1
 
-    svn co -r r1255 http://gyp.googlecode.com/svn/trunk build/gyp
     case $FRIDA_TARGET in
       linux-arm)
       ;;
@@ -182,6 +181,7 @@ function build_v8 ()
       ;;
     esac
 
+    flavor=v8_snapshot
     if [ "$FRIDA_TARGET" = "linux-arm" ]; then
       build_v8_linux_arm
       find out -name "*.target-arm.mk" -exec sed -i "s,-m32,,g" {} \;
@@ -199,7 +199,8 @@ function build_v8 ()
         ;;
         ios)
           target=arm.release
-          flags="-f make-mac -D host_os=mac -D v8_can_use_unaligned_accesses=true -D v8_can_use_vfp2_instructions=true -D v8_can_use_vfp3_instructions=true"
+          flags="-f make-mac -D host_os=mac"
+          flavor=v8_nosnapshot
         ;;
         *)
           echo "FIXME"
@@ -214,7 +215,7 @@ function build_v8 ()
 
     install -d $FRIDA_PREFIX/lib
     install -m 644 out/$target/libv8_base.a $FRIDA_PREFIX/lib
-    install -m 644 out/$target/libv8_snapshot.a $FRIDA_PREFIX/lib
+    install -m 644 out/$target/lib${flavor}.a $FRIDA_PREFIX/lib
 
     install -d $FRIDA_PREFIX/lib/pkgconfig
     cat > $FRIDA_PREFIX/lib/pkgconfig/v8.pc << EOF
@@ -226,7 +227,7 @@ includedir=\${prefix}/include
 Name: V8
 Description: V8 JavaScript Engine
 Version: 3.13.3.1
-Libs: -L\${libdir} -lv8_base -lv8_snapshot
+Libs: -L\${libdir} -lv8_base -l${flavor}
 Cflags: -I\${includedir}
 EOF
 
