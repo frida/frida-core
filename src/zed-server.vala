@@ -1,6 +1,4 @@
 namespace Zed {
-	private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
-
 	public class Application : Object {
 		private BaseDBusHostSession host_session;
 		private DBusServer server;
@@ -8,7 +6,8 @@ namespace Zed {
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
 		private MainLoop loop;
-		private uint shutdown_timeout = 0;
+		private int timeout;
+		private uint shutdown_source = 0;
 
 		construct {
 #if WINDOWS
@@ -19,7 +18,9 @@ namespace Zed {
 #endif
 		}
 
-		public void run (string address) throws Error {
+		public void run (string address, int timeout) throws Error {
+			this.timeout = timeout;
+
 			server = new DBusServer.sync (address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
 				if (server == null)
@@ -70,18 +71,20 @@ namespace Zed {
 
 		private void schedule_shutdown () {
 			cancel_shutdown ();
-			shutdown_timeout = Timeout.add (3000, () => {
-				server.stop ();
-				server = null;
-				perform_shutdown ();
-				return false;
-			});
+			if (timeout > 0) {
+				shutdown_source = Timeout.add (timeout, () => {
+					server.stop ();
+					server = null;
+					perform_shutdown ();
+					return false;
+				});
+			}
 		}
 
 		private void cancel_shutdown () {
-			if (shutdown_timeout != 0) {
-				Source.remove (shutdown_timeout);
-				shutdown_timeout = 0;
+			if (shutdown_source != 0) {
+				Source.remove (shutdown_source);
+				shutdown_source = 0;
 			}
 		}
 
@@ -91,28 +94,44 @@ namespace Zed {
 
 			loop.quit ();
 		}
-	}
 
-	public static int main (string[] args) {
-		var app = new Application ();
+		private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+		[CCode (array_length = false, array_null_terminated = true)]
+		private static string[] listen_addresses;
+		private static int idle_timeout = 3000;
 
-		string address;
-		if (args.length == 1) {
-			address = DEFAULT_LISTEN_ADDRESS;
-		} else if (args.length == 2) {
-			address = args[1];
-		} else {
-			printerr ("usage: %s [<address>]\n", args[0]);
-			return 1;
+		static const OptionEntry[] options = {
+			{ "timeout", 't', 0, OptionArg.INT, ref idle_timeout, "Set idle timeout to TIMEOUT milliseconds", "TIMEOUT" },
+			{ "", 0, 0, OptionArg.STRING_ARRAY, ref listen_addresses, null, "[LISTEN_ADDRESS]" },
+			{ null }
+		};
+
+		private static int main (string[] args) {
+			try {
+				var ctx = new OptionContext ("- zed-server");
+				ctx.set_help_enabled (true);
+				ctx.add_main_entries (options, null);
+				ctx.parse (ref args);
+			} catch (OptionError e) {
+				stdout.printf ("%s\n", e.message);
+				stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
+				return 1;
+			}
+
+			var listen_address = DEFAULT_LISTEN_ADDRESS;
+			if (listen_addresses.length > 0)
+				listen_address = listen_addresses[0];
+
+			var app = new Application ();
+
+			try {
+				app.run (listen_address, idle_timeout);
+			} catch (Error e) {
+				printerr ("ERROR: %s\n", e.message);
+				return 1;
+			}
+
+			return 0;
 		}
-
-		try {
-			app.run (address);
-		} catch (Error e) {
-			printerr ("ERROR: %s\n", e.message);
-			return 1;
-		}
-
-		return 0;
 	}
 }
