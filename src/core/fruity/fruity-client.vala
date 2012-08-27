@@ -323,6 +323,8 @@ namespace Zed.Fruity {
 				while (remaining != 0) {
 					uint8[] slice = new uint8[remaining];
 					ssize_t len = yield input.read_async (slice, Priority.DEFAULT, input_cancellable);
+					if (len == 0)
+						throw new IOError.CLOSED ("socket closed");
 					Memory.copy (dst, slice, len);
 
 					dst += len;
