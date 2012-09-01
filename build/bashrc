@@ -97,6 +97,10 @@ export LDFLAGS=""
 if [ $FRIDA_ENVIRONMENT = normal ]; then
   case $FRIDA_TARGET in
     linux-*)
+      export CC="/usr/bin/gcc-4.6"
+      export CXX="/usr/bin/g++-4.6"
+      export LD="/usr/bin/ld"
+
       export CFLAGS="-ffunction-sections -fdata-sections"
       export LDFLAGS="-Wl,--gc-sections"
       ;;
