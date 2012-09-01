@@ -7,11 +7,20 @@ BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 REPO_BASE_URL="git@gitorious.org:frida"
 REPO_SUFFIX=".git"
 
+if [ "$(uname)" = "Linux" ]; then
+  SED_INPLACE="-s ''"
+else
+  SED_INPLACE="-s"
+fi
+
 function expand_target()
 {
   case $1 in
-    linux)
-      echo x86_64-unknown-linux-gnu
+    linux-x86_32)
+      echo i686-pc-linux-gnu
+    ;;
+    linux-x86_64)
+      echo x86_64-pc-linux-gnu
     ;;
     android)
       echo arm-unknown-linux-androideabi
@@ -103,7 +112,7 @@ function build_sdk ()
 
 function make_sdk_package ()
 {
-  local target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
+  local target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m26').tar.bz2"
 
   local sdkname="sdk-$FRIDA_TARGET"
   local sdkdir="$BUILDROOT/$sdkname"
@@ -173,22 +182,26 @@ function build_v8 ()
     git clone "${REPO_BASE_URL}/v8${REPO_SUFFIX}" || exit 1
     pushd v8 >/dev/null || exit 1
 
-    case $FRIDA_TARGET in
-      linux-arm)
-      ;;
-      mac64)
-        sed -i "" "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
-      ;;
-    esac
+    if [ "$FRIDA_TARGET" = "mac64" ]; then
+      sed $SED_INPLACE "" "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
+    fi
 
     flavor=v8_snapshot
     if [ "$FRIDA_TARGET" = "linux-arm" ]; then
       build_v8_linux_arm
-      find out -name "*.target-arm.mk" -exec sed -i "s,-m32,,g" {} \;
+      find out -name "*.target-arm.mk" -exec sed $SED_INPLACE "s,-m32,,g" {} \;
       build_v8_linux_arm || exit 1
       target=arm.release/obj.target/tools/gyp
     else
       case $FRIDA_TARGET in
+        linux-x86_32)
+          target=ia32.release
+          flags="-f make-linux -D host_os=linux"
+        ;;
+        linux-x86_64)
+          target=x64.release
+          flags="-f make-linux -D host_os=linux"
+        ;;
         mac32)
           target=ia32.release
           flags="-f make-mac -D host_os=mac"
@@ -242,9 +255,9 @@ function apply_fixups ()
       if echo "$file" | grep -Eq "\.la$"; then
         newname="$file.frida.in"
         mv "$file" "$newname"
-        sed -i "" -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
+        sed $SED_INPLACE "" -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
       elif echo "$file" | grep -Eq "\.pc$"; then
-        sed -i "" -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
+        sed $SED_INPLACE "" -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
       fi
     fi
   done
