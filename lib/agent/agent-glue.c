@@ -53,3 +53,45 @@ zed_agent_environment_deinit (void)
   g_thread_deinit ();
   g_mem_deinit ();
 }
+
+typedef struct _ZedAutoInterceptContext ZedAutoInterceptContext;
+
+struct _ZedAutoInterceptContext
+{
+  GumInterceptor * interceptor;
+  GThreadFunc thread_func;
+  gpointer thread_data;
+};
+
+static gpointer zed_agent_auto_ignorer_thread_create_proxy (gpointer data);
+
+void
+zed_agent_auto_ignorer_intercept_thread_creation (ZedAgentAutoIgnorer * self,
+    GumInvocationContext * ic)
+{
+  ZedAutoInterceptContext * ctx;
+
+  ctx = g_slice_new (ZedAutoInterceptContext);
+  ctx->interceptor = g_object_ref (self->interceptor);
+  ctx->thread_func = gum_invocation_context_get_nth_argument (ic, 0);
+  ctx->thread_data = gum_invocation_context_get_nth_argument (ic, 1);
+  gum_invocation_context_replace_nth_argument (ic, 0,
+      zed_agent_auto_ignorer_thread_create_proxy);
+  gum_invocation_context_replace_nth_argument (ic, 1, ctx);
+}
+
+static gpointer
+zed_agent_auto_ignorer_thread_create_proxy (gpointer data)
+{
+  ZedAutoInterceptContext * ctx = data;
+  gpointer result;
+
+  gum_interceptor_ignore_current_thread (ctx->interceptor);
+  result = ctx->thread_func (ctx->thread_data);
+  gum_interceptor_unignore_current_thread (ctx->interceptor);
+
+  g_object_unref (ctx->interceptor);
+  g_slice_free (ZedAutoInterceptContext, ctx);
+
+  return result;
+}

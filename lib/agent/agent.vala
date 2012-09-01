@@ -142,6 +142,31 @@ namespace Zed.Agent {
 		}
 	}
 
+	public class AutoIgnorer : Object, Gum.InvocationListener {
+		protected Gum.Interceptor interceptor;
+
+		public AutoIgnorer (Gum.Interceptor interceptor) {
+			this.interceptor = interceptor;
+		}
+
+		public void enable () {
+			interceptor.attach_listener ((void *) Thread.create_full, this);
+		}
+
+		public void disable () {
+			interceptor.detach_listener (this);
+		}
+
+		private void on_enter (Gum.InvocationContext context) {
+			intercept_thread_creation (context);
+		}
+
+		private void on_leave (Gum.InvocationContext context) {
+		}
+
+		private extern void intercept_thread_creation (Gum.InvocationContext context);
+	}
+
 	public void main (string listen_address) {
 		Environment.init ();
 		run_server_listening_on (listen_address);
@@ -152,6 +177,9 @@ namespace Zed.Agent {
 		var interceptor = Gum.Interceptor.obtain ();
 		interceptor.ignore_current_thread ();
 
+		var ignorer = new AutoIgnorer (interceptor);
+		ignorer.enable ();
+
 		var server = new AgentServer (listen_address);
 
 		try {
@@ -160,6 +188,7 @@ namespace Zed.Agent {
 			printerr ("error: %s\n", e.message);
 		}
 
+		ignorer.disable ();
 		interceptor.unignore_current_thread ();
 	}
 
