@@ -73,10 +73,11 @@ zed_agent_auto_ignorer_intercept_thread_creation (ZedAgentAutoIgnorer * self,
 
   ctx = g_slice_new (ZedAutoInterceptContext);
   ctx->interceptor = g_object_ref (self->interceptor);
-  ctx->thread_func = gum_invocation_context_get_nth_argument (ic, 0);
+  ctx->thread_func = GUM_POINTER_TO_FUNCPTR (GThreadFunc,
+      gum_invocation_context_get_nth_argument (ic, 0));
   ctx->thread_data = gum_invocation_context_get_nth_argument (ic, 1);
   gum_invocation_context_replace_nth_argument (ic, 0,
-      zed_agent_auto_ignorer_thread_create_proxy);
+      GUM_FUNCPTR_TO_POINTER (zed_agent_auto_ignorer_thread_create_proxy));
   gum_invocation_context_replace_nth_argument (ic, 1, ctx);
 }
 
