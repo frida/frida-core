@@ -106,5 +106,6 @@ endif
 
 if OS_IOS
 all-local: zed-tests
-	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-tests.xcent" "$<" || true
+	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-tests.xcent" "zed-tests" || true
+	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/inject-victim.xcent" "inject-victim" || true
 endif
