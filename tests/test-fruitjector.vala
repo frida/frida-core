@@ -12,13 +12,13 @@ namespace Zed.FruitjectorTest {
 
 			var rat = new LabRat (tests_dir, "inject-victim", logfile.get_path ());
 
-			rat.inject ("inject-attacker.dylib", "");
+			rat.inject ("libinject-attacker.dylib", "");
 			rat.wait_for_uninject ();
 
 			assert (content_of (logfile) == ">m<");
 
 			var requested_exit_code = 43;
-			rat.inject ("inject-attacker.dylib", requested_exit_code.to_string ());
+			rat.inject ("libinject-attacker.dylib", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
 			assert (content_of (logfile) == ">m<>m<");
@@ -95,7 +95,7 @@ namespace Zed.FruitjectorTest {
 			try {
 				var dylib = Path.build_filename (rat_directory, name);
 				if (!FileUtils.test (dylib, FileTest.EXISTS))
-					dylib = Path.build_filename (rat_directory, ".libs", "lib" + name);
+					dylib = Path.build_filename (rat_directory, ".libs", name);
 				assert (FileUtils.test (dylib, FileTest.EXISTS));
 
 				AgentDescriptor desc;
