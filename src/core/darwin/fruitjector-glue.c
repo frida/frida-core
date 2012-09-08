@@ -490,7 +490,8 @@ static gboolean
 zed_cpu_type_from_pid (gulong pid, GumCpuType * cpu_type)
 {
 #ifdef HAVE_ARM
-  return GUM_CPU_ARM;
+  *cpu_type = GUM_CPU_ARM;
+  return TRUE;
 #else
   int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
   struct kinfo_proc kp;
