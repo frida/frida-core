@@ -10,6 +10,7 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
+#if !LINUX
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
 		});
@@ -22,6 +23,7 @@ namespace Zed.HostSessionTest {
 			var h = new Harness ((h) => Fruity.backend (h as Harness));
 			h.run ();
 		});
+#endif
 
 #if HAVE_LOCAL_BACKENDS
 
@@ -252,6 +254,7 @@ namespace Zed.HostSessionTest {
 
 #endif
 
+#if !LINUX
 	namespace Fruity {
 
 		private static async void backend (Harness h) {
@@ -380,6 +383,7 @@ namespace Zed.HostSessionTest {
 		}
 
 	}
+#endif
 
 	public class Harness : Zed.Test.AsyncHarness {
 		public HostSessionService service {

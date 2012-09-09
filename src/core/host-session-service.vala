@@ -7,7 +7,9 @@ namespace Zed {
 
 		public HostSessionService.with_default_backends () {
 			add_local_backends ();
+#if !LINUX
 			add_backend (new FruityHostSessionBackend ());
+#endif
 			add_backend (new TcpHostSessionBackend ());
 		}
 
