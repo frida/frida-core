@@ -1,43 +1,27 @@
 namespace Zed.LinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Linjector/inject", () => {
-			File logfile;
+			var tests_dir = Path.get_dirname (Zed.Test.Process.current.filename);
 
-			try {
-				logfile = File.new_for_path (Path.build_filename (Path.get_dirname (FileUtils.read_link ("/proc/self/exe")), "inject-attacker.log"));
-			} catch (FileError file_error) {
-				assert_not_reached ();
-			}
+			var logfile = File.new_for_path (Path.build_filename (tests_dir, "inject-attacker.log"));
 
 			try {
 				logfile.delete ();
 			} catch (Error delete_error) {
 			}
 
-			var rat = new LabRat ("inject-victim");
+			var rat = new LabRat (tests_dir, "inject-victim", logfile.get_path ());
 
-			rat.inject ("inject-attacker.so", "");
+			rat.inject ("libinject-attacker.so", "");
 			rat.wait_for_uninject ();
 
-			try {
-				string log_of_first_injection;
-				logfile.load_contents (null, out log_of_first_injection);
-				assert (log_of_first_injection == ">m<");
-			} catch (Error first_load_error) {
-				assert_not_reached ();
-			}
+			assert (content_of (logfile) == ">m<");
 
 			var requested_exit_code = 43;
-			rat.inject ("inject-attacker.so", requested_exit_code.to_string ());
+			rat.inject ("libinject-attacker.so", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
-			try {
-				string log_of_second_injection;
-				logfile.load_contents (null, out log_of_second_injection);
-				assert (log_of_second_injection == ">m<>m<");
-			} catch (Error second_load_error) {
-				assert_not_reached ();
-			}
+			assert (content_of (logfile) == ">m<>m<");
 
 			var exit_code = rat.wait_for_process_to_exit ();
 			assert (exit_code == requested_exit_code);
@@ -50,6 +34,18 @@ namespace Zed.LinjectorTest {
 		});
 	}
 
+	private static string content_of (File file) {
+		try {
+			uint8[] contents;
+			file.load_contents (null, out contents);
+			unowned string str = (string) contents;
+			return str;
+		} catch (Error load_error) {
+			stderr.printf ("%s: %s\n", file.get_path (), load_error.message);
+			assert_not_reached ();
+		}
+	}
+
 	private class LabRat {
 		public Zed.Test.Process process {
 			get;
@@ -60,12 +56,14 @@ namespace Zed.LinjectorTest {
 		private string rat_directory;
 		private Linjector injector;
 
-		public LabRat (string name) {
+		public LabRat (string dir, string name, string logfile) {
 			main_context = new MainContext ();
 			main_context.push_thread_default ();
 
-			rat_directory = Path.get_dirname (Zed.Test.Process.current.filename);
+			rat_directory = dir;
 			var rat_file = Path.build_filename (rat_directory, name);
+
+			Environment.set_variable ("ZED_LABRAT_LOGFILE", logfile, true);
 
 			try {
 				process = Zed.Test.Process.start (rat_file);
@@ -95,11 +93,21 @@ namespace Zed.LinjectorTest {
 				injector = new Linjector ();
 
 			try {
-				var so = Path.build_filename (rat_directory, name);
-				if (!FileUtils.test (so, FileTest.EXISTS))
-					so = Path.build_filename (rat_directory, ".libs", "lib" + name);
-				yield injector.inject (process.id, so, data_string);
-			} catch (IOError e) {
+				var sofile = Path.build_filename (rat_directory, name);
+				if (!FileUtils.test (sofile, FileTest.EXISTS))
+					sofile = Path.build_filename (rat_directory, ".libs", name);
+				assert (FileUtils.test (sofile, FileTest.EXISTS));
+
+				AgentDescriptor desc;
+
+				try {
+					desc = new AgentDescriptor (name, File.new_for_path (sofile).read (null));
+				} catch (Error io_error) {
+					assert_not_reached ();
+				}
+
+				yield injector.inject (process.id, desc, data_string);
+			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
