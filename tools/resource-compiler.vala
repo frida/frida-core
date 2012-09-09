@@ -132,9 +132,6 @@ class Vala.ResourceCompiler {
 				null);
 		}
 
-		if (enable_asm)
-			asource.put_string (".const\n");
-
 		foreach (var category in categories) {
 			bool is_root_category = (category.name == "root");
 			var category_identifier = identifier_from_filename (category.name);
