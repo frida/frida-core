@@ -191,7 +191,7 @@ function build_v8 ()
       build_v8_linux_arm
       find out -name "*.target-arm.mk" -exec sed $SED_INPLACE "s,-m32,,g" {} \;
       build_v8_linux_arm || exit 1
-      target=arm.release/obj.target/tools/gyp
+      target=arm.release
     else
       case $FRIDA_TARGET in
         linux-x86_32)
@@ -223,12 +223,21 @@ function build_v8 ()
       build_v8_generic || exit 1
     fi
 
+    case $FRIDA_TARGET in
+      linux-*)
+        outdir=out/$target/obj.target/tools/gyp
+      ;;
+      *)
+        outdir=out/$target
+      ;;
+    esac
+
     install -d $FRIDA_PREFIX/include
     install -m 644 include/* $FRIDA_PREFIX/include
 
     install -d $FRIDA_PREFIX/lib
-    install -m 644 out/$target/libv8_base.a $FRIDA_PREFIX/lib
-    install -m 644 out/$target/lib${flavor}.a $FRIDA_PREFIX/lib
+    install -m 644 $outdir/libv8_base.a $FRIDA_PREFIX/lib
+    install -m 644 $outdir/lib${flavor}.a $FRIDA_PREFIX/lib
 
     install -d $FRIDA_PREFIX/lib/pkgconfig
     cat > $FRIDA_PREFIX/lib/pkgconfig/v8.pc << EOF
