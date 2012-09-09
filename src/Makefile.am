@@ -122,6 +122,8 @@ libzed_core_la_VALAFLAGS = \
 
 libzed_core_glue_la_SOURCES = \
 	$(glue_sources)
+libzed_core_glue_la_LIBTOOLFLAGS = \
+	--tag=CC
 
 libzed_cli_la_SOURCES = \
 	$(srcdir)/cli/application.vala
