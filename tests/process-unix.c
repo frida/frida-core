@@ -73,11 +73,6 @@ zed_test_process_backend_do_start (const char * filename,
     return;
   }
 
-#ifdef HAVE_LINUX
-  /* FIXME: should ensure child is in an initialized state */
-  g_usleep (G_USEC_PER_SEC / 20);
-#endif
-
   *handle = GSIZE_TO_POINTER (pid);
   *id = pid;
 }

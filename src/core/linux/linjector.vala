@@ -8,17 +8,11 @@ namespace Zed {
 
 		/* these should be private, but must be accessible to glue code */
 		private MainContext main_context;
-		public void * context;
 		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
-		public uint last_id;
+		public uint last_id = 1;
 
 		construct {
 			main_context = MainContext.get_thread_default ();
-
-			context = null;
-			last_id++;
-
-			_create_context ();
 		}
 
 		~Linjector () {
@@ -26,7 +20,6 @@ namespace Zed {
 				tempfile.destroy ();
 			foreach (var instance in instance_by_id.values)
 				_free_instance (instance);
-			_destroy_context ();
 		}
 
 		public async uint inject (ulong pid, AgentDescriptor desc, string data_string) throws IOError {
@@ -36,7 +29,48 @@ namespace Zed {
 				agents[desc.name] = agent;
 			}
 
-			return _do_inject (pid, agent.file.get_path (), data_string);
+			var id = _do_inject (pid, agent.file.get_path (), data_string);
+
+			var fifo = _get_fifo_for_instance (instance_by_id[id]);
+			var buf = new uint8[1];
+			var size = yield fifo.read_async (buf);
+			if (size == 0) {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					_on_uninject (id);
+					return false;
+				});
+				source.attach (main_context);
+			} else {
+				_monitor_instance (id);
+			}
+
+			return id;
+		}
+
+		private async void _monitor_instance (uint id) {
+			var fifo = _get_fifo_for_instance (instance_by_id[id]);
+			while (true) {
+				var buf = new uint8[1];
+				try {
+					var size = yield fifo.read_async (buf);
+					if (size == 0) {
+						_on_uninject (id);
+						return;
+					}
+				} catch (IOError e) {
+					_on_uninject (id);
+					return;
+				}
+			}
+		}
+
+		private void _on_uninject (uint id) {
+			void * instance;
+			bool found = instance_by_id.unset (id, out instance);
+			assert (found);
+			_free_instance (instance);
+			uninjected (id);
 		}
 
 		public bool any_still_injected () {
@@ -47,23 +81,9 @@ namespace Zed {
 			return instance_by_id.has_key (id);
 		}
 
-		public void _on_instance_dead (uint id) {
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				void * instance;
-				bool instance_id_found = instance_by_id.unset (id, out instance);
-				assert (instance_id_found);
-				_free_instance (instance);
-				uninjected (id);
-				return false;
-			});
-			source.attach (main_context);
-		}
-
-		public extern void _create_context ();
-		public extern void _destroy_context ();
+		public extern InputStream _get_fifo_for_instance (void * instance);
 		public extern void _free_instance (void * instance);
-		public extern uint _do_inject (ulong pid, string sofile_path, string data_string) throws IOError;
+		public extern uint _do_inject (ulong pid, string so_path, string data_string) throws IOError;
 
 		protected class TemporaryFile {
 			public File file {
