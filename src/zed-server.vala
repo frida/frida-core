@@ -10,11 +10,14 @@ namespace Zed {
 		private uint shutdown_source = 0;
 
 		construct {
-#if WINDOWS
-			host_session = new WindowsHostSession ();
+#if LINUX
+			host_session = new LinuxHostSession ();
 #endif
 #if DARWIN
 			host_session = new DarwinHostSession ();
+#endif
+#if WINDOWS
+			host_session = new WindowsHostSession ();
 #endif
 		}
 

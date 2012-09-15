@@ -62,11 +62,16 @@ backend_valaflags = $(NULL)
 glue_sources = $(NULL)
 
 if OS_LINUX
+
+if ENABLE_LOCAL_BACKENDS
 backend_sources += \
+	$(srcdir)/core/linux/linux-host-session.vala \
 	$(srcdir)/core/linux/linjector.vala
 glue_sources += \
 	$(srcdir)/core/system-linux.c \
 	$(srcdir)/core/linux/linjector-glue.c
+endif
+
 endif
 
 if OS_DARWIN
