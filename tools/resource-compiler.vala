@@ -132,6 +132,11 @@ class Vala.ResourceCompiler {
 				null);
 		}
 
+#if DARWIN
+		if (enable_asm)
+			asource.put_string (".const\n");
+#endif
+
 		foreach (var category in categories) {
 			bool is_root_category = (category.name == "root");
 			var category_identifier = identifier_from_filename (category.name);
@@ -152,14 +157,19 @@ class Vala.ResourceCompiler {
 				size_by_index.add (file_size);
 
 				if (enable_asm) {
+#if DARWIN
+					var asm_identifier_prefix = "_";
+#else
+					var asm_identifier_prefix = "";
+#endif
 					var blob_identifier = "_" + namespace_cprefix + "_" + identifier;
 					blob_identifier_by_index.add (blob_identifier);
 
 					csource.put_string ("extern const unsigned char " + blob_identifier + "[];\n\n");
 
 					asource.put_string (".align 4\n");
-					asource.put_string (".globl _" + blob_identifier + "\n");
-					asource.put_string ("_" + blob_identifier + ":\n");
+					asource.put_string (".globl " + asm_identifier_prefix + blob_identifier + "\n");
+					asource.put_string (asm_identifier_prefix + blob_identifier + ":\n");
 					asource.put_string (".incbin \"" + input_file.get_path () + "\"\n");
 					asource.put_string (".byte 0\n");
 				} else {
