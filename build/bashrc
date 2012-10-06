@@ -227,3 +227,12 @@ for template in $(find ${FRIDA_TOOLROOT} ${FRIDA_SDKROOT} -name "*.frida.in"); d
   cp -a "$template" "$target"
   sed -e "s,@FRIDA_TOOLROOT@,${FRIDA_TOOLROOT},g" -e "s,@FRIDA_SDKROOT@,${FRIDA_SDKROOT},g" "$template" > "$target"
 done
+
+# Workaround for bug in Vala 0.14 compiler
+
+unset LC_MESSAGES
+unset LC_CTYPE
+unset LC_COLLATE
+unset LC_TIME
+unset LC_NUMERIC
+
