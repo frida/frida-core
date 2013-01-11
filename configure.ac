@@ -82,7 +82,16 @@ AM_CONDITIONAL(OS_ANDROID, test "x$HAVE_ANDROID" = "xyes")
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
   AC_DEFINE(HAVE_IOS, 1, [Define to 1 if OS is iOS.])
 fi
+
 AM_CONDITIONAL(OS_IOS, test "x$HAVE_IOS" = "xyes")
+
+AM_PATH_PYTHON([2.7],, [:])
+if [[ "x$PYTHON" != "x:" ]] ; then
+	PYTHON_PREFIX=$($PYTHON -c 'import sys; print sys.prefix')
+	PYTHON_EXEC_PREFIX=$($PYTHON -c 'import sys; print sys.exec_prefix')
+	PYTHON_CFLAGS="-I${PYTHON_PREFIX}/include/python${PYTHON_VERSION}/ -I${PYTHON_EXEC_PREFIX}/include/python${PYTHON_VERSION}/"
+fi
+AM_CONDITIONAL([HAVE_PYTHON], [test "$PYTHON" != :])
 
 AC_ARG_ENABLE(local_backends, [AC_HELP_STRING([--enable-local-backends], [enable local backends [default=yes]])],, [enable_local_backends=yes])
 if test "x$enable_local_backends" = "xyes"; then
