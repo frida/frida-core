@@ -90,8 +90,10 @@ if [[ "x$PYTHON" != "x:" ]] ; then
 	PYTHON_PREFIX=$($PYTHON -c 'import sys; print sys.prefix')
 	PYTHON_EXEC_PREFIX=$($PYTHON -c 'import sys; print sys.exec_prefix')
 	PYTHON_CFLAGS="-I${PYTHON_PREFIX}/include/python${PYTHON_VERSION}/ -I${PYTHON_EXEC_PREFIX}/include/python${PYTHON_VERSION}/"
+  AC_SUBST(PYTHON_CFLAGS)
 fi
 AM_CONDITIONAL([HAVE_PYTHON], [test "$PYTHON" != :])
+
 
 AC_ARG_ENABLE(local_backends, [AC_HELP_STRING([--enable-local-backends], [enable local backends [default=yes]])],, [enable_local_backends=yes])
 if test "x$enable_local_backends" = "xyes"; then
@@ -191,6 +193,7 @@ AC_CONFIG_FILES([
 	data/Makefile
 	bindings/Makefile
 	bindings/cloud-spy/Makefile
+	bindings/pyfrida/Makefile
 	tests/Makefile
 ])
 AC_OUTPUT
