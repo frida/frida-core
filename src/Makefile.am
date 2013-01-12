@@ -102,7 +102,6 @@ backend_valaflags += \
 endif
 
 libzed_core_la_SOURCES = \
-	$(srcdir)/core/session-manager.vala \
 	$(srcdir)/core/system.vala \
 	$(srcdir)/core/host-session-service.vala \
 	$(backend_sources) \
