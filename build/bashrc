@@ -135,7 +135,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export LDFLAGS="$LDFLAGS -no-undefined"
       ;;
     ios)
-      ios_sdkver="5.1"
+      ios_sdkver="6.0"
       ios_sdk="iphoneos$ios_sdkver"
       ios_minver="5.0"
 
