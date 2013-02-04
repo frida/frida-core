@@ -1,6 +1,10 @@
 if ENABLE_LOCAL_BACKENDS
 
+if ARCH_ARM
+RESOURCE_COMPILER := $(top_srcdir)/build/toolchain/bin/resource-compiler
+else
 RESOURCE_COMPILER := $(top_builddir)/tools/resource-compiler
+endif
 
 if OS_LINUX
 soext := .so
