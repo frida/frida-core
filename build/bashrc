@@ -135,16 +135,16 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export LDFLAGS="$LDFLAGS -no-undefined"
       ;;
     ios)
-      ios_sdkver="6.0"
+      ios_sdkver="6.1"
       ios_sdk="iphoneos$ios_sdkver"
-      ios_minver="5.0"
+      ios_minver="6.0"
 
-      export CC="$(xcrun --sdk $ios_sdk -f llvm-gcc-4.2)"
-      export CXX="$(xcrun --sdk $ios_sdk -f llvm-g++-4.2)"
-      export OBJC="$(xcrun --sdk $ios_sdk -f llvm-gcc-4.2)"
-      export LD="$(dirname $CC)/ld"
+      export CC="$(xcrun --sdk $ios_sdk -f clang)"
+      export CXX="$(xcrun --sdk $ios_sdk -f clang++)"
+      export OBJC="$(xcrun --sdk $ios_sdk -f clang)"
+      export LD="$(xcrun --sdk $ios_sdk -f ld)"
 
-      export IOS_DEVROOT="$(dirname $(dirname $(dirname $CC)))"
+      export IOS_DEVROOT="$(dirname $(dirname $(dirname $(xcrun --sdk iphoneos6.1 -f iphoneos-optimize))))"
       export IOS_SDKROOT="${IOS_DEVROOT}/SDKs/iPhoneOS${ios_sdkver}.sdk"
 
       export CFLAGS="-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${ios_minver} -arch armv7"
