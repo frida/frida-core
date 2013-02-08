@@ -119,9 +119,9 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
 -lstlport_static -lm -lstdc++"
       ;;
     mac32|mac64)
-      export CC="/usr/bin/llvm-gcc-4.2"
-      export CXX="/usr/bin/llvm-g++-4.2"
-      export OBJC="/usr/bin/llvm-gcc-4.2"
+      export CC="/usr/bin/clang"
+      export CXX="/usr/bin/clang++"
+      export OBJC="/usr/bin/clang"
       export LD="/usr/bin/ld"
 
       case $FRIDA_TARGET in
