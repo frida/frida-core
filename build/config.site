@@ -97,16 +97,9 @@ case "$PACKAGE_TARNAME" in
     CFLAGS="$CFLAGS -I$FRIDA_PREFIX/include"
     LDFLAGS="$LDFLAGS -L$FRIDA_PREFIX/lib"
   ;;
-  'libffi'|'vala'|'libgee')
+  'libffi'|'vala'|'libgee'|'json-glib')
     enable_shared=no
     enable_static=yes
-  ;;
-  'json-glib')
-    enable_shared=no
-    enable_static=yes
-    # FIXME: add these to GLib's .pc
-    CFLAGS="$CFLAGS -I$FRIDA_SDKROOT/include"
-    LDFLAGS="$LDFLAGS -L$FRIDA_SDKROOT/lib"
   ;;
   'libgum')
     if [ "$FRIDA_TARGET" = "android" ]; then
