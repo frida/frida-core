@@ -7,10 +7,10 @@ BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 REPO_BASE_URL="git@gitorious.org:frida"
 REPO_SUFFIX=".git"
 
-if [ "$(uname)" = "Linux" ]; then
-  SED_INPLACE="-s ''"
+if [ "$(uname)" = "Darwin" ]; then
+  SED_INPLACE="-i ''"
 else
-  SED_INPLACE="-s"
+  SED_INPLACE="-i"
 fi
 
 function expand_target()
@@ -29,7 +29,7 @@ function expand_target()
       echo i686-apple-darwin
     ;;
     mac64)
-      echo x86_64-apple-darwin11.3.0
+      echo x86_64-apple-darwin12.2.1
     ;;
     ios)
       echo arm-apple-darwin
@@ -105,6 +105,7 @@ function build_sdk ()
   build_module libffi $(expand_target $FRIDA_TARGET)
   build_module glib
   build_module libgee
+  build_module json-glib
   build_v8
 
   popd >/dev/null
@@ -112,7 +113,7 @@ function build_sdk ()
 
 function make_sdk_package ()
 {
-  local target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m26').tar.bz2"
+  local target_filename="$FRIDA_BUILD/sdk-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
 
   local sdkname="sdk-$FRIDA_TARGET"
   local sdkdir="$BUILDROOT/$sdkname"
@@ -151,6 +152,8 @@ function build_module ()
         source $CONFIG_SITE
         CC=${ac_tool_prefix}gcc ./configure --static --prefix=${FRIDA_PREFIX}
       )
+    elif [ "$1" = "libffi" -a "$FRIDA_TARGET" = "ios" ]; then
+      CC="${IOS_DEVROOT}/usr/bin/llvm-gcc-4.2" ./configure || exit 1
     elif [ -f "autogen.sh" ]; then
       ./autogen.sh || exit 1
     else
@@ -159,10 +162,15 @@ function build_module ()
     if [ -n "$2" ]; then
       pushd "$2" >/dev/null || exit 1
     fi
-    make -j8 || exit 1
+    if [ "$1" = "json-glib" ]; then
+      make -j8 GLIB_GENMARSHAL=glib-genmarshal GLIB_MKENUMS=glib-mkenums || exit 1
+    else
+      make -j8 || exit 1
+    fi
     make install || exit 1
     [ -n "$2" ] && popd &>/dev/null
     popd >/dev/null
+    rm -f "${FRIDA_PREFIX}/config.cache"
   fi
 }
 
@@ -183,13 +191,13 @@ function build_v8 ()
     pushd v8 >/dev/null || exit 1
 
     if [ "$FRIDA_TARGET" = "mac64" ]; then
-      sed $SED_INPLACE "" "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
+      sed $SED_INPLACE -e "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
     fi
 
     flavor=v8_snapshot
     if [ "$FRIDA_TARGET" = "linux-arm" ]; then
       build_v8_linux_arm
-      find out -name "*.target-arm.mk" -exec sed $SED_INPLACE "s,-m32,,g" {} \;
+      find out -name "*.target-arm.mk" -exec sed $SED_INPLACE -e "s,-m32,,g" {} \;
       build_v8_linux_arm || exit 1
       target=arm.release
     else
@@ -264,9 +272,9 @@ function apply_fixups ()
       if echo "$file" | grep -Eq "\.la$"; then
         newname="$file.frida.in"
         mv "$file" "$newname"
-        sed $SED_INPLACE "" -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
+        sed $SED_INPLACE -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
       elif echo "$file" | grep -Eq "\.pc$"; then
-        sed $SED_INPLACE "" -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
+        sed $SED_INPLACE -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
       fi
     fi
   done
