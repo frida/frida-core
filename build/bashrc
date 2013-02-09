@@ -122,7 +122,7 @@ if [ $FRIDA_ENVIRONMENT = normal ]; then
       export CC="/usr/bin/clang"
       export CXX="/usr/bin/clang++"
       export OBJC="/usr/bin/clang"
-      export LD="/usr/bin/ld"
+      export LD="/usr/bin/clang"
 
       case $FRIDA_TARGET in
         mac32)
