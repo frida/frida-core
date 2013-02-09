@@ -4,6 +4,11 @@ namespace Zed.AgentTest {
 			var h = new Harness ((h) => Script.load_and_receive_messages (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/Agent/Script/performance", () => {
+			var h = new Harness ((h) => Script.performance (h as Harness));
+			h.run ();
+		});
 	}
 
 	namespace Script {
@@ -30,6 +35,53 @@ namespace Zed.AgentTest {
 			var message = yield h.wait_for_message ();
 			assert (message.sender_id.handle == sid.handle);
 			assert (message.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
+
+			yield h.unload_agent ();
+
+			h.done ();
+		}
+
+		private static async void performance (Harness h) {
+			var session = yield h.load_agent ();
+
+			var size = 4096;
+			var buf = new uint8[size];
+
+			AgentScriptId sid;
+			try {
+				sid = yield session.create_script (
+					("var buf = Memory.readByteArray(0x%" + size_t.FORMAT_MODIFIER + "x, %d);" +
+					 "var startTime = new Date();" +
+					 "var sendNext = function sendNext() {" +
+					 "  send({}, buf);" +
+					 "  if (new Date().getTime() - startTime.getTime() <= 1000) {" +
+					 "    setTimeout(sendNext, 0);" +
+					 "  } else {" +
+					 "    send(null);" +
+					 "  }" +
+					 "};" +
+					 "sendNext();"
+					).printf ((size_t) buf, size));
+				yield session.load_script (sid);
+			} catch (IOError attach_error) {
+				assert_not_reached ();
+			}
+
+			var firstMessage = yield h.wait_for_message ();
+			assert (firstMessage.content == "{\"type\":\"send\",\"payload\":{}}");
+
+			var timer = new Timer ();
+			int count = 0;
+			while (true) {
+				var message = yield h.wait_for_message ();
+				count++;
+				if (message.content != "{\"type\":\"send\",\"payload\":{}}") {
+					assert (message.content == "{\"type\":\"send\",\"payload\":null}");
+					break;
+				}
+			}
+
+			stdout.printf ("<got %d bytes or %d messages in %f seconds> ", count * size, count, timer.elapsed ());
 
 			yield h.unload_agent ();
 
@@ -157,6 +209,12 @@ namespace Zed.AgentTest {
 
 			return message;
 		}
+
+		/*
+		protected override uint provide_timeout () {
+			return 120;
+		}
+		*/
 
 		public class ScriptMessage {
 			public AgentScriptId sender_id {
