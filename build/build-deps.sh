@@ -179,6 +179,11 @@ function build_v8_generic ()
   PATH="/usr/bin:/bin:/usr/sbin:/sbin" MACOSX_DEPLOYMENT_TARGET="" LD="$CXX" make $target GYPFLAGS="$flags" V=1
 }
 
+function build_v8_ios ()
+{
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" MACOSX_DEPLOYMENT_TARGET="" CC="${IOS_DEVROOT}/usr/bin/llvm-gcc-4.2" CXX="${IOS_DEVROOT}/usr/bin/llvm-g++-4.2" OBJC="${IOS_DEVROOT}/usr/bin/llvm-gcc-4.2" LD="${IOS_DEVROOT}/usr/bin/llvm-g++-4.2" make $target GYPFLAGS="$flags" V=1
+}
+
 function build_v8_linux_arm ()
 {
   PATH="/usr/bin:/bin:/usr/sbin:/sbin" CC=arm-linux-gnueabi-gcc CXX=arm-linux-gnueabi-g++ LINK=arm-linux-gnueabi-g++ CFLAGS="" CXXFLAGS="" LDFLAGS="" make arm.release V=1
@@ -228,7 +233,11 @@ function build_v8 ()
           exit 1
         ;;
       esac
-      build_v8_generic || exit 1
+      if [ "$FRIDA_TARGET" = "ios" ]; then
+        build_v8_ios || exit 1
+      else
+        build_v8_generic || exit 1
+      fi
     fi
 
     case $FRIDA_TARGET in
