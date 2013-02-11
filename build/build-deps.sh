@@ -130,8 +130,8 @@ function make_sdk_package ()
       lib/glib-2.0 \
       lib/libffi* \
       lib/pkgconfig \
-      lib/arm* \
-      lib/x86* \
+      $(find lib -type d -name "arm*" -maxdepth 1) \
+      $(find lib -type d -name "x86*" -maxdepth 1) \
       share/aclocal \
       share/glib-2.0/schemas \
       share/vala \
