@@ -130,6 +130,7 @@ function make_sdk_package ()
       lib/glib-2.0 \
       lib/libffi* \
       lib/pkgconfig \
+      lib/x86* \
       share/aclocal \
       share/glib-2.0/schemas \
       share/vala \
