@@ -128,6 +128,7 @@ function make_sdk_package ()
       lib/*.a \
       lib/*.la.frida.in \
       lib/glib-2.0 \
+      lib/libffi* \
       lib/pkgconfig \
       share/aclocal \
       share/glib-2.0/schemas \
