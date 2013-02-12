@@ -20,9 +20,9 @@ namespace Zed.AgentTest {
 			AgentScriptId sid;
 			try {
 				sid = yield session.create_script (
-					("Interceptor.attach (0x%" + size_t.FORMAT_MODIFIER + "x, {" +
+					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter: function(args) {" +
-					 "    send({ first_argument: args[0], second_argument: Memory.readUtf8String(args[1]) });" +
+					 "    send({ first_argument: args[0].toInt32(), second_argument: Memory.readUtf8String(args[1]) });" +
 					 "  }" +
 					 "});").printf ((size_t) func));
 				yield session.load_script (sid);
@@ -50,7 +50,7 @@ namespace Zed.AgentTest {
 			AgentScriptId sid;
 			try {
 				sid = yield session.create_script (
-					("var buf = Memory.readByteArray(0x%" + size_t.FORMAT_MODIFIER + "x, %d);" +
+					("var buf = Memory.readByteArray(ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), %d);" +
 					 "var startTime = new Date();" +
 					 "var sendNext = function sendNext() {" +
 					 "  send({}, buf);" +
