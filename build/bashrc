@@ -204,7 +204,7 @@ case $FRIDA_TARGET in
     sdk_version=20120313
     ;;
   linux-*|mac32|mac64|ios)
-    sdk_version=20130211
+    sdk_version=20130212
     ;;
   *)
     sdk_version=20101003
