@@ -7,11 +7,14 @@ BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 REPO_BASE_URL="git@gitorious.org:frida"
 REPO_SUFFIX=".git"
 
-if [ "$(uname)" = "Darwin" ]; then
-  SED_INPLACE="-i ''"
-else
-  SED_INPLACE="-i"
-fi
+function sed_inplace()
+{
+  if [ "$(uname)" = "Darwin" ]; then
+    sed -i "" $*
+  else
+    sed -i $*
+  fi
+}
 
 function expand_target()
 {
@@ -123,6 +126,9 @@ function make_sdk_package ()
   popd >/dev/null
 
   pushd "$FRIDA_PREFIX" >/dev/null || exit 1
+  if [ "$FRIDA_TARGET" = "ios" ]; then
+    cp /System/Library/Frameworks/Kernel.framework/Versions/A/Headers/mach/mach_vm.h include/frida_mach_vm.h
+  fi
   tar c \
       include \
       lib/*.a \
@@ -130,8 +136,6 @@ function make_sdk_package ()
       lib/glib-2.0 \
       lib/libffi* \
       lib/pkgconfig \
-      $(find lib -type d -name "arm*" -maxdepth 1) \
-      $(find lib -type d -name "x86*" -maxdepth 1) \
       share/aclocal \
       share/glib-2.0/schemas \
       share/vala \
@@ -199,13 +203,13 @@ function build_v8 ()
     pushd v8 >/dev/null || exit 1
 
     if [ "$FRIDA_TARGET" = "mac64" ]; then
-      sed $SED_INPLACE -e "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
+      sed_inplace -e "s,\['i386'\]),['x86_64']),g" build/gyp/pylib/gyp/xcode_emulation.py
     fi
 
     flavor=v8_snapshot
     if [ "$FRIDA_TARGET" = "linux-arm" ]; then
       build_v8_linux_arm
-      find out -name "*.target-arm.mk" -exec sed $SED_INPLACE -e "s,-m32,,g" {} \;
+      find out -name "*.target-arm.mk" -exec sed -i -e "s,-m32,,g" {} \;
       build_v8_linux_arm || exit 1
       target=arm.release
     else
@@ -284,9 +288,9 @@ function apply_fixups ()
       if echo "$file" | grep -Eq "\.la$"; then
         newname="$file.frida.in"
         mv "$file" "$newname"
-        sed $SED_INPLACE -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
+        sed_inplace -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
       elif echo "$file" | grep -Eq "\.pc$"; then
-        sed $SED_INPLACE -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
+        sed_inplace -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
       fi
     fi
   done
