@@ -60,6 +60,7 @@ fi
 
 case "$PACKAGE_TARNAME" in
   'glib')
+    enable_dtrace=no
     enable_tests=no
 
     enable_shared=no
