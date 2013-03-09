@@ -81,9 +81,7 @@ libzed_tests_glue_la_SOURCES = \
 	runner-glue.c
 
 inject_victim_SOURCES = \
-	inject-victim.vala
-inject_victim_LDADD = \
-	$(ZED_LIBS)
+	inject-victim.c
 
 libinject_attacker_la_SOURCES = \
 	inject-attacker.c
