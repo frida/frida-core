@@ -58,23 +58,32 @@ void
 zed_test_process_backend_do_start (const char * filename,
     void ** handle, gulong * id, GError ** error)
 {
-  pid_t pid;
-
-  pid = vfork ();
-  if (pid == 0)
+  const gchar * override = g_getenv ("ZED_TARGET_PID");
+  if (override != NULL)
   {
-    execl (filename, filename, NULL);
-    _exit (1);
+    *id = atoi (override);
+    *handle = GSIZE_TO_POINTER (*id);
   }
-  else if (pid < 0)
+  else
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "vfork failed: %d", errno);
-    return;
-  }
+    pid_t pid;
 
-  *handle = GSIZE_TO_POINTER (pid);
-  *id = pid;
+    pid = vfork ();
+    if (pid == 0)
+    {
+      execl (filename, filename, NULL);
+      _exit (1);
+    }
+    else if (pid < 0)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+          "vfork failed: %d", errno);
+      return;
+    }
+
+    *handle = GSIZE_TO_POINTER (pid);
+    *id = pid;
+  }
 }
 
 int
