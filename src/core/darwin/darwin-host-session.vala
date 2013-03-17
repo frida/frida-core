@@ -53,10 +53,17 @@ namespace Zed {
 	}
 
 	public class DarwinHostSession : BaseDBusHostSession, HostSession {
+		private MainContext main_context;
+		public void * context;
+		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
+
 		private Fruitjector injector = new Fruitjector ();
 		private AgentDescriptor agent_desc;
 
 		construct {
+			main_context = MainContext.get_thread_default ();
+			_create_context ();
+
 			var blob = Zed.Data.Agent.get_libzed_agent_dylib_blob ();
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
@@ -77,11 +84,11 @@ namespace Zed {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			return _spawn (path, argv, envp);
+			return _do_spawn (path, argv, envp);
 		}
 
 		public async void resume (uint pid) throws IOError {
-			_resume (pid);
+			_do_resume (pid);
 		}
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
@@ -90,7 +97,22 @@ namespace Zed {
 			return session.id;
 		}
 
-		public static extern uint _spawn (string path, string[] argv, string[] envp) throws IOError;
-		public static extern void _resume (uint pid) throws IOError;
+		public void _on_instance_dead (uint pid) {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				void * instance;
+				bool instance_id_found = instance_by_pid.unset (pid, out instance);
+				assert (instance_id_found);
+				_free_instance (instance);
+				return false;
+			});
+			source.attach (main_context);
+		}
+
+		public extern void _create_context ();
+		public extern void _destroy_context ();
+		public extern void _free_instance (void * instance);
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
+		public extern void _do_resume (uint pid) throws IOError;
 	}
 }
