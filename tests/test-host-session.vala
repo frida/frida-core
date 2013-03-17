@@ -186,10 +186,25 @@ namespace Zed.HostSessionTest {
 				string[] argv = {};
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
-				var sid = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (sid);
-				/* TODO: hook the sleep function here */
+				var session_id = yield host_session.attach_to (pid);
+				var session = yield prov.obtain_agent_session (session_id);
+				string received_message = null;
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					received_message = message;
+					spawn.callback ();
+				});
+				var script_id = yield session.create_script (
+					"Interceptor.attach (Module.findExportByName('libSystem.B.dylib', 'sleep'), {" +
+					"  onEnter: function(args) {" +
+					"    send({ seconds: args[0].toInt32() });" +
+					"  }" +
+					"});");
+				yield session.load_script (script_id);
 				yield host_session.resume (pid);
+				yield;
+				session.disconnect (message_handler);
+				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
+				yield host_session.kill (pid);
 			} catch (IOError e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();

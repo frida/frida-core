@@ -53,6 +53,9 @@ namespace Zed {
 	}
 
 	public class DarwinHostSession : BaseDBusHostSession, HostSession {
+		public signal void child_dead (uint pid);
+		public signal void child_ready (uint pid);
+
 		private MainContext main_context;
 		public void * context;
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
@@ -84,11 +87,41 @@ namespace Zed {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			return _do_spawn (path, argv, envp);
+			string error = null;
+
+			uint child_pid = _do_spawn (path, argv, envp);
+			var death_handler = child_dead.connect ((pid) => {
+				if (pid == child_pid) {
+					error = "child died prematurely";
+					spawn.callback ();
+				}
+			});
+			var ready_handler = child_ready.connect ((pid) => {
+				if (pid == child_pid) {
+					spawn.callback ();
+				}
+			});
+			yield;
+			disconnect (death_handler);
+			disconnect (ready_handler);
+
+			if (error != null)
+				throw new IOError.FAILED (error);
+
+			return child_pid;
 		}
 
 		public async void resume (uint pid) throws IOError {
-			_do_resume (pid);
+			void * instance;
+			bool instance_found = instance_by_pid.unset (pid, out instance);
+			if (!instance_found)
+				throw new IOError.FAILED ("no such pid");
+			_resume_instance (instance);
+			_free_instance (instance);
+		}
+
+		public async void kill (uint pid) throws IOError {
+			System.kill (pid);
 		}
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
@@ -101,9 +134,19 @@ namespace Zed {
 			var source = new IdleSource ();
 			source.set_callback (() => {
 				void * instance;
-				bool instance_id_found = instance_by_pid.unset (pid, out instance);
-				assert (instance_id_found);
+				bool instance_found = instance_by_pid.unset (pid, out instance);
+				assert (instance_found);
 				_free_instance (instance);
+				child_dead (pid);
+				return false;
+			});
+			source.attach (main_context);
+		}
+
+		public void _on_instance_ready (uint pid) {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				child_ready (pid);
 				return false;
 			});
 			source.attach (main_context);
@@ -111,8 +154,8 @@ namespace Zed {
 
 		public extern void _create_context ();
 		public extern void _destroy_context ();
-		public extern void _free_instance (void * instance);
 		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
-		public extern void _do_resume (uint pid) throws IOError;
+		public extern void _resume_instance (void * instance);
+		public extern void _free_instance (void * instance);
 	}
 }

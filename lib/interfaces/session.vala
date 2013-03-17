@@ -5,6 +5,7 @@ namespace Zed {
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws IOError;
 		public abstract async void resume (uint pid) throws IOError;
+		public abstract async void kill (uint pid) throws IOError;
 		public abstract async AgentSessionId attach_to (uint pid) throws IOError;
 	}
 

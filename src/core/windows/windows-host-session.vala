@@ -107,6 +107,10 @@ namespace Zed {
 			throw new IOError.FAILED ("not yet implemented in the Windows backend");
 		}
 
+		public async void kill (uint pid) throws IOError {
+			throw new IOError.FAILED ("not yet implemented in the Windows backend");
+		}
+
 		public async AgentSessionId attach_to (uint pid) throws IOError {
 			try {
 				var session = allocate_session ();
