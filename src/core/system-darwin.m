@@ -140,7 +140,7 @@ zed_system_enumerate_processes (int * result_length1)
 void
 zed_system_kill (guint pid)
 {
-  killpg (getpgid (pid), SIGTERM);
+  kill (pid, SIGKILL);
 }
 
 #ifdef HAVE_IOS
@@ -242,4 +242,3 @@ zed_icon_pair_free (ZedIconPair * pair)
   zed_image_data_destroy (&pair->large_icon);
   g_free (pair);
 }
-
