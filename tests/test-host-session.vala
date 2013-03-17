@@ -33,6 +33,11 @@ namespace Zed.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/spawn", () => {
+			var h = new Harness ((h) => Darwin.spawn (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Darwin/Manual/cross-arch", () => {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch (h as Harness));
 			h.run ();
@@ -157,6 +162,36 @@ namespace Zed.HostSessionTest {
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
 			} catch (IOError e) {
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+			h.done ();
+		}
+
+		private static async void spawn (Harness h) {
+			var backend = new DarwinHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			try {
+				var host_session = yield prov.create ();
+
+				var tests_dir = Path.get_dirname (Zed.Test.Process.current.filename);
+				var victim_path = Path.build_filename (tests_dir, "inject-victim");
+				string[] argv = {};
+				string[] envp = {};
+				var pid = yield host_session.spawn (victim_path, argv, envp);
+				var sid = yield host_session.attach_to (pid);
+				var session = yield prov.obtain_agent_session (sid);
+				/* TODO: hook the sleep function here */
+				yield host_session.resume (pid);
+			} catch (IOError e) {
+				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 

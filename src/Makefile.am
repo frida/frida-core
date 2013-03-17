@@ -82,6 +82,7 @@ backend_sources += \
 	$(srcdir)/core/darwin/fruitjector.vala
 glue_sources += \
 	$(srcdir)/core/system-darwin.m \
+	$(srcdir)/core/darwin/darwin-host-session-glue.c \
 	$(srcdir)/core/darwin/fruitjector-glue.c
 endif
 
@@ -190,4 +191,3 @@ if OS_IOS
 endif
 endif
 	@true
-

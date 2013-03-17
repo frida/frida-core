@@ -99,6 +99,14 @@ namespace Zed {
 			return processes;
 		}
 
+		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			throw new IOError.FAILED ("not yet implemented in the Windows backend");
+		}
+
+		public async void resume (uint pid) throws IOError {
+			throw new IOError.FAILED ("not yet implemented in the Windows backend");
+		}
+
 		public async AgentSessionId attach_to (uint pid) throws IOError {
 			try {
 				var session = allocate_session ();

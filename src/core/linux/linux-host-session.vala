@@ -76,6 +76,14 @@ namespace Zed {
 			return System.enumerate_processes ();
 		}
 
+		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			throw new IOError.FAILED ("not yet implemented in the Linux backend");
+		}
+
+		public async void resume (uint pid) throws IOError {
+			throw new IOError.FAILED ("not yet implemented in the Linux backend");
+		}
+
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
 			var session = allocate_session ();
 			yield injector.inject (pid, agent_desc, session.listen_address);

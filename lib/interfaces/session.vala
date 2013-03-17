@@ -3,6 +3,8 @@ namespace Zed {
 	public interface HostSession : Object {
 		public abstract async HostProcessInfo[] enumerate_processes () throws IOError;
 
+		public abstract async uint spawn (string path, string[] argv, string[] envp) throws IOError;
+		public abstract async void resume (uint pid) throws IOError;
 		public abstract async AgentSessionId attach_to (uint pid) throws IOError;
 	}
 

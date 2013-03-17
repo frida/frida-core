@@ -76,10 +76,21 @@ namespace Zed {
 			return System.enumerate_processes ();
 		}
 
+		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			return _spawn (path, argv, envp);
+		}
+
+		public async void resume (uint pid) throws IOError {
+			_resume (pid);
+		}
+
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
 			var session = allocate_session ();
 			yield injector.inject (pid, agent_desc, session.listen_address);
 			return session.id;
 		}
+
+		public static extern uint _spawn (string path, string[] argv, string[] envp) throws IOError;
+		public static extern void _resume (uint pid) throws IOError;
 	}
 }
