@@ -10,14 +10,10 @@ namespace Zed {
 		private MainContext main_context;
 		public void * context;
 		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
-		public uint last_id;
+		public uint last_id = 1;
 
 		construct {
 			main_context = MainContext.get_thread_default ();
-
-			context = null;
-			last_id++;
-
 			_create_context ();
 		}
 

@@ -10,7 +10,6 @@
 #endif
 #include <gum/gum.h>
 #include <gum/gumdarwin.h>
-#include <sys/sysctl.h>
 #include <mach/mach.h>
 
 #define ZED_AGENT_ENTRYPOINT_NAME "zed_agent_main"
@@ -133,8 +132,6 @@ static gboolean zed_fill_agent_context_functions_the_hard_way (
 static gboolean zed_fill_function_if_matching (const gchar * name,
     GumAddress address, gpointer user_data);
 
-static gboolean zed_cpu_type_from_pid (gulong pid, GumCpuType * cpu_type, GError ** error);
-
 static void zed_emit_mach_stub_code (guint8 * code, GumCpuType cpu_type);
 static void zed_emit_pthread_stub_code (guint8 * code, GumCpuType cpu_type);
 
@@ -149,7 +146,7 @@ _zed_fruitjector_create_context (ZedFruitjector * self)
 {
   ZedFruitContext * ctx;
 
-  ctx = g_new0 (ZedFruitContext, 1);
+  ctx = g_slice_new (ZedFruitContext);
   ctx->dispatch_queue = dispatch_queue_create (
       "org.boblycat.frida.fruitjector.queue", NULL);
 
@@ -163,7 +160,7 @@ _zed_fruitjector_destroy_context (ZedFruitjector * self)
 
   dispatch_release (ctx->dispatch_queue);
 
-  g_free (ctx);
+  g_slice_free (ZedFruitContext, ctx);
 }
 
 static ZedInjectionInstance *
@@ -171,7 +168,7 @@ zed_injection_instance_new (ZedFruitjector * fruitjector, guint id)
 {
   ZedInjectionInstance * instance;
 
-  instance = g_new (ZedInjectionInstance, 1);
+  instance = g_slice_new (ZedInjectionInstance);
   instance->fruitjector = g_object_ref (fruitjector);
   instance->id = id;
   instance->task = MACH_PORT_NULL;
@@ -196,7 +193,7 @@ zed_injection_instance_free (ZedInjectionInstance * instance)
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
   g_object_unref (instance->fruitjector);
-  g_free (instance);
+  g_slice_free (ZedInjectionInstance, instance);
 }
 
 static void
@@ -243,8 +240,8 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
   details.dylib_path = dylib_path;
   details.data_string = data_string;
 
-  if (!zed_cpu_type_from_pid (pid, &details.cpu_type, error))
-    goto error_epilogue;
+  if (!gum_darwin_cpu_type_from_pid (pid, &details.cpu_type))
+    goto handle_cpu_type_error;
 
   ret = task_for_pid (mach_task_self (), pid, &details.task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
@@ -329,6 +326,12 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid,
 
   return instance->id;
 
+handle_cpu_type_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe cpu type");
+    goto error_epilogue;
+  }
+
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -379,8 +382,11 @@ static gboolean
 zed_fill_agent_context_functions (ZedAgentContext * ctx, const ZedAgentDetails * details, GError ** error)
 {
   GumCpuType own_cpu_type;
-  if (!zed_cpu_type_from_pid (getpid (), &own_cpu_type, error))
+  if (!gum_darwin_cpu_type_from_pid (getpid (), &own_cpu_type))
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe cpu type");
     return FALSE;
+  }
 
   if (details->cpu_type == own_cpu_type)
     return zed_fill_agent_context_functions_the_easy_way (ctx, details, error);
@@ -481,32 +487,6 @@ zed_fill_function_if_matching (const gchar * name,
   ZED_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlclose);
 
   return TRUE;
-}
-
-static gboolean
-zed_cpu_type_from_pid (gulong pid, GumCpuType * cpu_type, GError ** error)
-{
-#ifdef HAVE_ARM
-  *cpu_type = GUM_CPU_ARM;
-  return TRUE;
-#else
-  int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
-  struct kinfo_proc kp;
-  size_t bufsize = sizeof (kp);
-  int err;
-
-  memset (&kp, 0, sizeof (kp));
-
-  err = sysctl (mib, G_N_ELEMENTS (mib), &kp, &bufsize, NULL, 0);
-  if (err != 0)
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to get CPU type: %s", mach_error_string (errno));
-    return FALSE;
-  }
-
-  *cpu_type = (kp.kp_proc.p_flag & P_LP64) ? GUM_CPU_AMD64 : GUM_CPU_IA32;
-  return TRUE;
-#endif
 }
 
 #ifdef HAVE_ARM
