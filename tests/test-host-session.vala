@@ -183,7 +183,7 @@ namespace Zed.HostSessionTest {
 
 				var tests_dir = Path.get_dirname (Zed.Test.Process.current.filename);
 				var victim_path = Path.build_filename (tests_dir, "inject-victim");
-				string[] argv = {};
+				string[] argv = { victim_path };
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
 				var session_id = yield host_session.attach_to (pid);
