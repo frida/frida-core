@@ -106,7 +106,7 @@ namespace Zed {
 			entries.clear ();
 		}
 
-		protected async AgentSessionId allocate_session (IOStream stream) throws IOError {
+		protected async AgentSessionId allocate_session (Object transport, IOStream stream) throws IOError {
 			DBusConnection connection = null;
 			try {
 				connection = yield DBusConnection.new_for_stream (stream, null, DBusConnectionFlags.NONE);
@@ -134,7 +134,7 @@ namespace Zed {
 			var port = last_agent_port++;
 			AgentSessionId id = AgentSessionId (port);
 
-			var entry = new Entry (id, connection, session);
+			var entry = new Entry (id, transport, connection, session);
 			entries.add (entry);
 			connection.closed.connect (on_connection_closed);
 
@@ -180,6 +180,11 @@ namespace Zed {
 				private set;
 			}
 
+			public Object transport {
+				get;
+				private set;
+			}
+
 			public DBusConnection agent_connection {
 				get;
 				private set;
@@ -194,8 +199,9 @@ namespace Zed {
 			private Gee.ArrayList<DBusConnection> client_connections = new Gee.ArrayList<DBusConnection> ();
 			private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
-			public Entry (AgentSessionId id, DBusConnection agent_connection, AgentSession agent_session) {
+			public Entry (AgentSessionId id, Object transport, DBusConnection agent_connection, AgentSession agent_session) {
 				this.id = id;
+				this.transport = transport;
 				this.agent_connection = agent_connection;
 				this.agent_session = agent_session;
 			}

@@ -61,7 +61,8 @@ libzed_tests_la_CFLAGS = \
 	-w
 libzed_tests_la_LIBADD = \
 	$(builddir)/libzed-tests-glue.la \
-	$(top_builddir)/src/libzed-core.la
+	$(top_builddir)/src/libzed-core.la \
+	$(top_builddir)/lib/pipe/libzed-pipe.la
 libzed_tests_la_VALAFLAGS = \
 	--vapi=zed-tests.vapi \
 	--library=zed-tests \
@@ -90,7 +91,6 @@ libinject_attacker_la_SOURCES = \
 libinject_attacker_la_LDFLAGS = \
 	-rpath /nowhere
 libinject_attacker_la_LIBADD = \
-	$(top_builddir)/lib/pipe/libzed-pipe.la \
 	$(ZED_LIBS)
 
 AM_CPPFLAGS = \

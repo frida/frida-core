@@ -25,14 +25,14 @@ namespace Zed {
 			_destroy_context ();
 		}
 
-		public async Instance inject (ulong pid, AgentDescriptor desc) throws IOError {
+		public async uint inject (ulong pid, AgentDescriptor desc, string data_string) throws IOError {
 			var agent = agents[desc.name];
 			if (agent == null) {
 				agent = new TemporaryFile.from_stream (desc.name, desc.dylib);
 				agents[desc.name] = agent;
 			}
 
-			return _do_inject (pid, agent.file.get_path ());
+			return _do_inject (pid, agent.file.get_path (), data_string);
 		}
 
 		public bool any_still_injected () {
@@ -59,17 +59,7 @@ namespace Zed {
 		public extern void _create_context ();
 		public extern void _destroy_context ();
 		public extern void _free_instance (void * instance);
-		public extern Instance _do_inject (ulong pid, string dylib_path) throws IOError;
-
-		public class Instance {
-			public uint id;
-			public string pipe_address;
-
-			public Instance (uint id, string pipe_address) {
-				this.id = id;
-				this.pipe_address = pipe_address;
-			}
-		}
+		public extern uint _do_inject (ulong pid, string dylib_path, string data_string) throws IOError;
 
 		protected class TemporaryFile {
 			public File file {

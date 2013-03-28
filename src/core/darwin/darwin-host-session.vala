@@ -125,8 +125,9 @@ namespace Zed {
 		}
 
 		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
-			var instance = yield injector.inject (pid, agent_desc);
-			return yield allocate_session (new Pipe (instance.pipe_address));
+			var transport = new PipeTransport.with_pid (pid);
+			yield injector.inject (pid, agent_desc, transport.remote_address);
+			return yield allocate_session (transport, new Pipe (transport.local_address));
 		}
 
 		public void _on_instance_dead (uint pid) {

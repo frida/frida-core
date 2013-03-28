@@ -3,7 +3,6 @@
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <stdio.h>
 #ifdef HAVE_ARM
 # include <gum/arch-arm/gumthumbwriter.h>
 #else
@@ -56,10 +55,6 @@ struct _ZedInjectionInstance
   ZedFruitjector * fruitjector;
   guint id;
   mach_port_t task;
-  mach_port_name_t local_rx;
-  mach_port_name_t local_tx;
-  mach_port_name_t remote_rx;
-  mach_port_name_t remote_tx;
   vm_address_t payload_address;
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
@@ -69,8 +64,7 @@ struct _ZedAgentDetails
 {
   gulong pid;
   const char * dylib_path;
-  gchar local_pipe_address[64];
-  gchar remote_pipe_address[64];
+  const char * data_string;
   GumCpuType cpu_type;
   mach_port_name_t task;
 };
@@ -96,14 +90,14 @@ struct _ZedAgentContext
 
   GumAddress dlsym_impl;
   GumAddress entrypoint_name;
-  GumAddress pipe_address;
+  GumAddress data_string;
 
   GumAddress dlclose_impl;
 
   GumAddress dylib_path;
 
   gchar entrypoint_name_data[32];
-  gchar pipe_address_data[64];
+  gchar data_string_data[256];
   gchar dylib_path_data[256];
 };
 
@@ -178,10 +172,6 @@ zed_injection_instance_new (ZedFruitjector * fruitjector, guint id)
   instance->fruitjector = g_object_ref (fruitjector);
   instance->id = id;
   instance->task = MACH_PORT_NULL;
-  instance->local_rx = MACH_PORT_NULL;
-  instance->local_tx = MACH_PORT_NULL;
-  instance->remote_rx = MACH_PORT_NULL;
-  instance->remote_tx = MACH_PORT_NULL;
   instance->payload_address = 0;
   instance->thread = MACH_PORT_NULL;
   instance->thread_monitor_source = NULL;
@@ -200,14 +190,6 @@ zed_injection_instance_free (ZedInjectionInstance * instance)
     mach_port_deallocate (self_task, instance->thread);
   if (instance->payload_address != 0)
     vm_deallocate (instance->task, instance->payload_address, ZED_PAYLOAD_SIZE);
-  if (instance->remote_tx != MACH_PORT_NULL)
-    mach_port_mod_refs (instance->task, instance->remote_tx, MACH_PORT_RIGHT_SEND, -1);
-  if (instance->local_tx != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, instance->local_tx, MACH_PORT_RIGHT_SEND, -1);
-  if (instance->remote_rx != MACH_PORT_NULL)
-    mach_port_mod_refs (instance->task, instance->remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
-  if (instance->local_rx != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, instance->local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
   g_object_unref (instance->fruitjector);
@@ -228,15 +210,14 @@ _zed_fruitjector_free_instance (ZedFruitjector * self, void * instance)
   zed_injection_instance_free (instance);
 }
 
-ZedFruitjectorInstance *
-_zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid, const gchar * dylib_path, GError ** error)
+guint
+_zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid, const gchar * dylib_path, const char * data_string, GError ** error)
 {
   ZedFruitContext * ctx = self->context;
   ZedInjectionInstance * instance;
   ZedAgentDetails details = { 0, };
   const gchar * failed_operation;
   kern_return_t ret;
-  mach_msg_type_name_t acquired_type;
   vm_address_t payload_address = (vm_address_t) NULL;
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
@@ -256,6 +237,7 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid, const gchar * dyl
 
   details.pid = pid;
   details.dylib_path = dylib_path;
+  details.data_string = data_string;
 
   if (!gum_darwin_cpu_type_from_pid (pid, &details.cpu_type))
     goto handle_cpu_type_error;
@@ -263,27 +245,6 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid, const gchar * dyl
   ret = task_for_pid (mach_task_self (), pid, &details.task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
   instance->task = details.task;
-
-  ret = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &instance->local_rx);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate local_rx");
-
-  ret = mach_port_allocate (details.task, MACH_PORT_RIGHT_RECEIVE, &instance->remote_rx);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate remote_rx");
-
-  ret = mach_port_extract_right (details.task, instance->remote_rx, MACH_MSG_TYPE_MAKE_SEND, &instance->local_tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right local_tx");
-
-  instance->remote_tx = 0x1336;
-  do
-  {
-    instance->remote_tx++;
-    ret = mach_port_insert_right (details.task, instance->remote_tx, instance->local_rx, MACH_MSG_TYPE_MAKE_SEND);
-  }
-  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && instance->remote_tx < 0x1336 + 10000);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
-
-  sprintf (details.local_pipe_address, "pipe:rx=%d,tx=%d", instance->local_rx, instance->local_tx);
-  sprintf (details.remote_pipe_address, "pipe:rx=%d,tx=%d", instance->remote_rx, instance->remote_tx);
 
   ret = vm_allocate (details.task, &payload_address, ZED_PAYLOAD_SIZE, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
@@ -362,7 +323,7 @@ _zed_fruitjector_do_inject (ZedFruitjector * self, gulong pid, const gchar * dyl
       zed_injection_instance_handle_event);
   dispatch_resume (source);
 
-  return zed_fruitjector_instance_new (instance->id, details.local_pipe_address);
+  return instance->id;
 
 handle_cpu_type_error:
   {
@@ -417,9 +378,10 @@ zed_fill_agent_context (ZedAgentContext * ctx, const ZedAgentDetails * details,
   ctx->entrypoint_name = remote_payload_base + ZED_DATA_OFFSET +
       G_STRUCT_OFFSET (ZedAgentContext, entrypoint_name_data);
   strcpy (ctx->entrypoint_name_data, ZED_AGENT_ENTRYPOINT_NAME);
-  ctx->pipe_address = remote_payload_base + ZED_DATA_OFFSET +
-      G_STRUCT_OFFSET (ZedAgentContext, pipe_address_data);
-  strcpy (ctx->pipe_address_data, details->remote_pipe_address);
+  ctx->data_string = remote_payload_base + ZED_DATA_OFFSET +
+      G_STRUCT_OFFSET (ZedAgentContext, data_string_data);
+  g_assert_cmpint (strlen (details->data_string), <, sizeof (ctx->data_string_data));
+  strcpy (ctx->data_string_data, details->data_string);
 
   return TRUE;
 }
@@ -594,7 +556,7 @@ zed_emit_pthread_stub_body (ZedEmitContext * ctx)
   ZED_EMIT_CALL (R3);
   ZED_EMIT_MOVE (R5, R0);
 
-  ZED_EMIT_LOAD (R0, pipe_address);
+  ZED_EMIT_LOAD (R0, data_string);
   ZED_EMIT_CALL (R5);
 
   ZED_EMIT_MOVE (R0, R4);
@@ -736,7 +698,7 @@ zed_emit_pthread_stub_body (ZedEmitContext * ctx)
   if (ctx->cw.target_cpu == GUM_CPU_IA32)
     gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
-  ZED_EMIT_LOAD (XDX, pipe_address);
+  ZED_EMIT_LOAD (XDX, data_string);
   gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
       GUM_CALL_CAPI, GUM_REG_XAX, 1,
       GUM_ARG_REGISTER, GUM_REG_XDX);

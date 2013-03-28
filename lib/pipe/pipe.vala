@@ -1,5 +1,5 @@
 namespace Zed {
-	public class PipeTransport {
+	public class PipeTransport : Object {
 		public string local_address;
 		public string remote_address;
 

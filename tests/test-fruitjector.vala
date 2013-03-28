@@ -12,24 +12,13 @@ namespace Zed.FruitjectorTest {
 
 			var rat = new LabRat (tests_dir, "inject-victim", logfile.get_path ());
 
-			var no_exit_code = 0xff;
-			var pipe = rat.inject ("libinject-attacker.dylib");
-			try {
-				new DataOutputStream (pipe.output_stream).put_byte (no_exit_code);
-			} catch (IOError e) {
-				assert_not_reached ();
-			}
+			rat.inject ("libinject-attacker.dylib", "");
 			rat.wait_for_uninject ();
 
 			assert (content_of (logfile) == ">m<");
 
 			var requested_exit_code = 43;
-			pipe = rat.inject ("libinject-attacker.dylib");
-			try {
-				new DataOutputStream (pipe.output_stream).put_byte (requested_exit_code);
-			} catch (IOError e) {
-				assert_not_reached ();
-			}
+			rat.inject ("libinject-attacker.dylib", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
 			assert (content_of (logfile) == ">m<>m<");
@@ -66,7 +55,6 @@ namespace Zed.FruitjectorTest {
 		private MainContext main_context;
 		private string rat_directory;
 		private Fruitjector injector;
-		private Pipe inject_result;
 
 		public LabRat (string dir, string name, string logfile) {
 			main_context = new MainContext ();
@@ -89,22 +77,18 @@ namespace Zed.FruitjectorTest {
 			main_context.pop_thread_default ();
 		}
 
-		public Pipe inject (string name) {
-			inject_result = null;
-
+		public void inject (string name, string data_string) {
 			var loop = new MainLoop (main_context);
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				do_injection (name, loop);
+				do_injection (name, data_string, loop);
 				return false;
 			});
 			source.attach (main_context);
 			loop.run ();
-
-			return inject_result;
 		}
 
-		private async void do_injection (string name, MainLoop loop) {
+		private async void do_injection (string name, string data_string, MainLoop loop) {
 			if (injector == null)
 				injector = new Fruitjector ();
 
@@ -122,8 +106,7 @@ namespace Zed.FruitjectorTest {
 					assert_not_reached ();
 				}
 
-				var instance = yield injector.inject (process.id, desc);
-				inject_result = new Pipe (instance.pipe_address);
+				yield injector.inject (process.id, desc, data_string);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
