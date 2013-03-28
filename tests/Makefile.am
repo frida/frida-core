@@ -68,10 +68,12 @@ libzed_tests_la_VALAFLAGS = \
 	--header=zed-tests.h \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/lib/interfaces \
+	--vapidir=$(top_builddir)/lib/pipe \
 	--vapidir=$(top_builddir)/src \
 	--pkg=config \
 	--pkg=zed-core \
 	--pkg=zed-interfaces \
+	--pkg=zed-pipe \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
 
@@ -88,11 +90,13 @@ libinject_attacker_la_SOURCES = \
 libinject_attacker_la_LDFLAGS = \
 	-rpath /nowhere
 libinject_attacker_la_LIBADD = \
+	$(top_builddir)/lib/pipe/libzed-pipe.la \
 	$(ZED_LIBS)
 
 AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_builddir)/lib/interfaces \
+	-I $(top_builddir)/lib/pipe \
 	-I $(top_builddir)/src \
 	$(ZED_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \

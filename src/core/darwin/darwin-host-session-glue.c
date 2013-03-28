@@ -198,13 +198,13 @@ _zed_darwin_host_session_do_spawn (ZedDarwinHostSession * self, const gchar * pa
 
   msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, MACH_MSG_TYPE_MAKE_SEND_ONCE);
   msg.header.msgh_size = sizeof (msg);
-  name = 0x1233;
+  name = 0x1336;
   do
   {
     name++;
     ret = mach_port_insert_right (task, name, instance->server_port, MACH_MSG_TYPE_MAKE_SEND_ONCE);
   }
-  while (ret == KERN_NAME_EXISTS);
+  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && name < 0x1336 + 10000);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right");
   msg.header.msgh_remote_port = name;
   msg.header.msgh_local_port = MACH_PORT_NULL; /* filled in by the sync code */
@@ -311,9 +311,9 @@ zed_spawn_instance_free (ZedSpawnInstance * instance)
   if (instance->server_recv_source != NULL)
     dispatch_release (instance->server_recv_source);
   if (instance->reply_port != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, instance->reply_port);
+    mach_port_mod_refs (self_task, instance->reply_port, MACH_PORT_RIGHT_SEND_ONCE, -1);
   if (instance->server_port != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, instance->server_port);
+    mach_port_mod_refs (self_task, instance->server_port, MACH_PORT_RIGHT_RECEIVE, -1);
 
   g_free (instance->overwritten_code);
 

@@ -101,12 +101,20 @@ namespace Zed {
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		public virtual async void close () {
-			foreach (var entry in entries)
+			foreach (var entry in entries.slice (0, entries.size))
 				yield entry.close ();
 			entries.clear ();
 		}
 
-		protected Session allocate_session () {
+		protected async AgentSessionId allocate_session (IOStream stream) throws IOError {
+			DBusConnection connection = null;
+			try {
+				connection = yield DBusConnection.new_for_stream (stream, null, DBusConnectionFlags.NONE);
+			} catch (Error agent_error) {
+				throw new IOError.FAILED (agent_error.message);
+			}
+			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
+
 			bool found_available = false;
 			var loopback = new InetAddress.loopback (SocketFamily.IPV4);
 			var address_in_use = new IOError.ADDRESS_IN_USE ("");
@@ -116,63 +124,45 @@ namespace Zed {
 					socket.bind (new InetSocketAddress (loopback, (uint16) last_agent_port), false);
 					socket.close ();
 					found_available = true;
-				} catch (Error e) {
-					if (e.code == address_in_use.code)
+				} catch (Error probe_error) {
+					if (probe_error.code == address_in_use.code)
 						last_agent_port++;
 					else
 						found_available = true;
 				}
 			}
-
 			var port = last_agent_port++;
-
-			return new Session (AgentSessionId (port), LISTEN_ADDRESS_TEMPLATE.printf (port));
-		}
-
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
-			var address = LISTEN_ADDRESS_TEMPLATE.printf (id.handle);
-
-			DBusConnection connection = null;
-
-			for (int i = 1; connection == null; i++) {
-				try {
-					connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-				} catch (Error connect_error) {
-					if (i != 2 * 20) {
-						var source = new TimeoutSource (50);
-						source.set_callback (() => {
-							obtain_agent_session.callback ();
-							return false;
-						});
-						source.attach (MainContext.get_thread_default ());
-						yield;
-					} else {
-						break;
-					}
-				}
-			}
-
-			if (connection == null)
-				throw new IOError.TIMED_OUT ("timed out");
-
-			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
+			AgentSessionId id = AgentSessionId (port);
 
 			var entry = new Entry (id, connection, session);
 			entries.add (entry);
-
 			connection.closed.connect (on_connection_closed);
 
-			return session;
+			try {
+				entry.serve (LISTEN_ADDRESS_TEMPLATE.printf (port));
+			} catch (Error serve_error) {
+				try {
+					yield connection.close ();
+				} catch (Error cleanup_error) {
+				}
+				throw new IOError.FAILED (serve_error.message);
+			}
+
+			return AgentSessionId (port);
+		}
+
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+			foreach (var entry in entries) {
+				if (entry.id.handle == id.handle)
+					return entry.agent_session;
+			}
+			throw new IOError.NOT_FOUND ("no such session");
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			bool closed_by_us = (!remote_peer_vanished && error == null);
-			if (closed_by_us)
-				return;
-
 			Entry entry_to_remove = null;
 			foreach (var entry in entries) {
-				if (entry.connection == connection) {
+				if (entry.agent_connection == connection) {
 					entry_to_remove = entry;
 					break;
 				}
@@ -184,46 +174,81 @@ namespace Zed {
 			agent_session_closed (entry_to_remove.id, error);
 		}
 
-		protected class Session {
-			public AgentSessionId id;
-			public string listen_address;
-
-			public Session (AgentSessionId id, string listen_address) {
-				this.id = id;
-				this.listen_address = listen_address;
-			}
-		}
-
 		private class Entry : Object {
 			public AgentSessionId id {
 				get;
 				private set;
 			}
 
-			public DBusConnection connection {
+			public DBusConnection agent_connection {
 				get;
 				private set;
 			}
 
-			public Object proxy {
+			public AgentSession agent_session {
 				get;
 				private set;
 			}
 
-			public Entry (AgentSessionId id, DBusConnection connection, Object proxy) {
+			private DBusServer server;
+			private Gee.ArrayList<DBusConnection> client_connections = new Gee.ArrayList<DBusConnection> ();
+			private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
+
+			public Entry (AgentSessionId id, DBusConnection agent_connection, AgentSession agent_session) {
 				this.id = id;
-				this.connection = connection;
-				this.proxy = proxy;
+				this.agent_connection = agent_connection;
+				this.agent_session = agent_session;
 			}
 
 			public async void close () {
-				proxy = null;
+				if (server != null) {
+					server.stop ();
+					server = null;
+				}
+
+				foreach (var connection in client_connections.slice (0, client_connections.size)) {
+					try {
+						yield connection.close ();
+					} catch (Error client_conn_error) {
+					}
+				}
+				client_connections.clear ();
+				registration_id_by_connection.clear ();
+
+				agent_session = null;
 
 				try {
-					yield connection.close ();
-				} catch (Error conn_error) {
+					yield agent_connection.close ();
+				} catch (Error agent_conn_error) {
 				}
-				connection = null;
+				agent_connection = null;
+			}
+
+			public void serve (string listen_address) throws Error {
+				server = new DBusServer.sync (listen_address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server.new_connection.connect ((connection) => {
+					connection.closed.connect (on_client_connection_closed);
+
+					try {
+						var registration_id = connection.register_object (Zed.ObjectPath.AGENT_SESSION, agent_session);
+						registration_id_by_connection[connection] = registration_id;
+					} catch (IOError e) {
+						printerr ("failed to register object: %s\n", e.message);
+						close ();
+						return false;
+					}
+
+					client_connections.add (connection);
+					return true;
+				});
+				server.start ();
+			}
+
+			private void on_client_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+				uint registration_id;
+				if (registration_id_by_connection.unset (connection, out registration_id))
+					connection.unregister_object (registration_id);
+				client_connections.remove (connection);
 			}
 		}
 	}

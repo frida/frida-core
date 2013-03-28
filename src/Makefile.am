@@ -112,6 +112,7 @@ libzed_core_la_CFLAGS = \
 libzed_core_la_LIBADD = \
 	$(builddir)/libzed-core-glue.la \
 	$(top_builddir)/lib/interfaces/libzed-interfaces.la \
+	$(top_builddir)/lib/pipe/libzed-pipe.la \
 	$(backend_libadd)
 libzed_core_la_VALAFLAGS = \
 	--vapi=zed-core.vapi \
@@ -120,8 +121,10 @@ libzed_core_la_VALAFLAGS = \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/data \
 	--vapidir=$(top_builddir)/lib/interfaces \
+	--vapidir=$(top_builddir)/lib/pipe \
 	--pkg=config \
 	--pkg=zed-interfaces \
+	--pkg=zed-pipe \
 	$(backend_valaflags) \
 	@ZED_PACKAGES@ \
 	@ZED_VALAFLAGS@
@@ -158,6 +161,7 @@ AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_builddir)/data \
 	-I $(top_builddir)/lib/interfaces \
+	-I $(top_builddir)/lib/pipe \
 	-I $(top_builddir)/ext/libgum/ext/udis86 \
 	$(ZED_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
