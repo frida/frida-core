@@ -78,7 +78,7 @@ namespace Zed {
 			}
 
 			public TemporaryFile.from_stream (string name, InputStream istream) throws IOError {
-				this.file = File.new_for_path (Path.build_filename (Environment.get_tmp_dir (), "zed-%p-%u-%s".printf (this, Random.next_int (), name)));
+				this.file = File.new_for_path (Path.build_filename (_get_tmp_dir (), "zed-%p-%u-%s".printf (this, Random.next_int (), name)));
 
 				try {
 					var ostream = file.create (FileCreateFlags.NONE, null);
@@ -112,6 +112,8 @@ namespace Zed {
 				} catch (Error e) {
 				}
 			}
+
+			public static extern string _get_tmp_dir ();
 		}
 	}
 

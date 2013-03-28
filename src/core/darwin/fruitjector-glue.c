@@ -384,6 +384,15 @@ error_epilogue:
   }
 }
 
+gchar *
+_zed_fruitjector_temporary_file_get_tmp_dir (void)
+{
+  if (geteuid () == 0)
+    return g_strdup ("/private/var/root");
+  else
+    return g_strdup (g_get_tmp_dir ());
+}
+
 static gboolean
 zed_fill_agent_context (ZedAgentContext * ctx, const ZedAgentDetails * details,
     vm_address_t remote_payload_base, GError ** error)
