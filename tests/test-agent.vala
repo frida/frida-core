@@ -99,7 +99,7 @@ namespace Zed.AgentTest {
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data_string);
 		private AgentMainFunc main_impl;
-		private string listen_address = "tcp:host=127.0.0.1,port=42042";
+		private PipeTransport transport;
 		private unowned Thread<bool> main_thread;
 		private DBusConnection connection;
 		private AgentSession session;
@@ -140,29 +140,23 @@ namespace Zed.AgentTest {
 			main_impl = (AgentMainFunc) main_func_symbol;
 
 			try {
+				transport = new PipeTransport.with_pid (Zed.Test.Process.current.id);
+			} catch (IOError transport_error) {
+				printerr ("failed to create transport: %s\n", transport_error.message);
+				assert_not_reached ();
+			}
+
+			try {
 				main_thread = Thread.create<bool> (agent_main_worker, true);
 			} catch (ThreadError thread_error) {
 				assert_not_reached ();
 			}
 
-			for (int i = 0; connection == null; i++) {
-				try {
-					connection = yield DBusConnection.new_for_address (listen_address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-				} catch (Error conn_error) {
-					if (i != 10 - 1) {
-						var timeout = new TimeoutSource (20);
-						timeout.set_callback (() => {
-							load_agent.callback ();
-							return false;
-						});
-						timeout.attach (main_context);
-						yield;
-					} else {
-						break;
-					}
-				}
+			try {
+				connection = yield DBusConnection.new_for_stream (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
+			} catch (Error connection_error) {
+				assert_not_reached ();
 			}
-			assert (connection != null);
 
 			try {
 				session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
@@ -181,15 +175,14 @@ namespace Zed.AgentTest {
 			} catch (IOError session_error) {
 				assert_not_reached ();
 			}
-
 			session = null;
 
 			try {
 				yield connection.close ();
-				connection = null;
-			} catch (Error conn_error) {
+			} catch (Error connection_error) {
 				assert_not_reached ();
 			}
+			connection = null;
 
 			main_thread.join ();
 			main_thread = null;
@@ -234,7 +227,7 @@ namespace Zed.AgentTest {
 		}
 
 		private bool agent_main_worker () {
-			main_impl (listen_address);
+			main_impl (transport.remote_address);
 			return true;
 		}
 	}
