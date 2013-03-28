@@ -373,7 +373,7 @@ handle_cpu_type_error:
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %s (%d)", failed_operation, mach_error_string (errno), errno);
+        "%s failed: %s (%d)", failed_operation, mach_error_string (ret), ret);
     goto error_epilogue;
   }
 
