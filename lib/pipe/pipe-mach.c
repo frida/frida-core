@@ -223,10 +223,13 @@ _zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buf
 
   if (backend->rx_buffer == NULL)
   {
-    gulong handler_id;
+    gulong handler_id = 0;
     gulong msg_size;
 
-    handler_id = g_cancellable_connect (cancellable, G_CALLBACK (zed_pipe_input_stream_on_cancel), self, NULL);
+    if (cancellable != NULL)
+    {
+      handler_id = g_cancellable_connect (cancellable, G_CALLBACK (zed_pipe_input_stream_on_cancel), self, NULL);
+    }
 
     msg_size = sizeof (mach_msg_empty_rcv_t);
     msg = g_realloc (NULL, msg_size);
@@ -241,7 +244,10 @@ _zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buf
     }
     while (ret == MACH_RCV_TOO_LARGE);
 
-    g_cancellable_disconnect (cancellable, handler_id);
+    if (cancellable != NULL)
+    {
+      g_cancellable_disconnect (cancellable, handler_id);
+    }
 
     if (ret != 0)
       goto handle_error;
@@ -257,7 +263,7 @@ _zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buf
       g_free (msg);
     }
 
-    if (g_cancellable_set_error_if_cancelled (cancellable, error))
+    if (cancellable != NULL && g_cancellable_set_error_if_cancelled (cancellable, error))
       goto handle_cancel;
   }
 
