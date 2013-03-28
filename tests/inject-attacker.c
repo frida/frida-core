@@ -18,12 +18,12 @@ on_unload (void)
 }
 
 void
-zed_agent_main (const char * data)
+zed_agent_main (const char * data_string)
 {
   append_to_log ('m');
 
-  if (strlen (data) > 0)
-    exit (atoi (data));
+  if (strlen (data_string) > 0)
+    exit (atoi (data_string));
 }
 
 static void
