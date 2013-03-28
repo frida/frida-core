@@ -191,6 +191,7 @@ AC_CONFIG_FILES([
 	tools/Makefile
 	lib/Makefile
 	lib/interfaces/Makefile
+	lib/pipe/Makefile
 	lib/agent/Makefile
 	src/Makefile
 	data/Makefile

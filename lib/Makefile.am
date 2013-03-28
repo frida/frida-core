@@ -1,1 +1,1 @@
-SUBDIRS = interfaces agent
+SUBDIRS = interfaces pipe agent
