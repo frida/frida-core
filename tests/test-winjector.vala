@@ -1,19 +1,27 @@
 namespace Zed.WinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Winjector/inject/x86", () => {
-			var rat = new LabRat ("winvictim-busy32");
-			rat.inject ("winattacker%u.dll", "12345");
-			long exitcode = rat.wait_for_process_to_exit ();
-			rat.close ();
-			assert (exitcode == 12345);
+			try {
+				var rat = new LabRat ("winvictim-busy32");
+				rat.inject ("winattacker%u.dll", "12345");
+				long exitcode = rat.wait_for_process_to_exit ();
+				rat.close ();
+				assert (exitcode == 12345);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 		});
 
 		GLib.Test.add_func ("/Winjector/inject/x64", () => {
-			var rat = new LabRat ("winvictim-busy64");
-			rat.inject ("winattacker%u.dll", "54321");
-			long exitcode = rat.wait_for_process_to_exit ();
-			rat.close ();
-			assert (exitcode == 54321);
+			try {
+				var rat = new LabRat ("winvictim-busy64");
+				rat.inject ("winattacker%u.dll", "54321");
+				long exitcode = rat.wait_for_process_to_exit ();
+				rat.close ();
+				assert (exitcode == 54321);
+			} catch (IOError e) {
+				printerr ("(skipping; requires a 64 bit system) ");
+			}
 		});
 	}
 
@@ -31,21 +39,15 @@ namespace Zed.WinjectorTest {
 		private string rat_directory;
 		private Winjector injector;
 
-		public LabRat (string name) {
+		public LabRat (string name) throws IOError {
 			Object (name: name);
-		}
 
-		construct {
 			var self_filename = Zed.Test.Process.current.filename;
 			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename)))),
 				"tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			try {
-				process = Zed.Test.Process.start (rat_file);
-			} catch (IOError e) {
-				assert_not_reached ();
-			}
+			process = Zed.Test.Process.start (rat_file);
 		}
 
 		public void inject (string name, string data_string) {
