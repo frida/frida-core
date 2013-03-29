@@ -83,7 +83,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-32;$(IntDir)..\zed-winipc-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -100,7 +100,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-64;$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -117,7 +117,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-32;$(IntDir)..\zed-winipc-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -134,7 +134,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-64;$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -192,6 +192,8 @@
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(IntDir)..\zed-core"			^
+	--vapidir="$(IntDir)..\zed-pipe-32"		^
+	--vapidir="$(IntDir)..\zed-pipe-64"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	$(ValaFlags)				^
@@ -200,6 +202,7 @@
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
 	--pkg=zed-core				^
+	--pkg=zed-pipe				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -222,6 +225,8 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(IntDir)..\zed-core"			^
+	--vapidir="$(IntDir)..\zed-pipe-32"		^
+	--vapidir="$(IntDir)..\zed-pipe-64"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	$(ValaFlags)				^
@@ -230,6 +235,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
 	--pkg=zed-core				^
+	--pkg=zed-pipe				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -252,6 +258,8 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(IntDir)..\zed-core"			^
+	--vapidir="$(IntDir)..\zed-pipe-32"		^
+	--vapidir="$(IntDir)..\zed-pipe-64"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	$(ValaFlags)				^
@@ -260,6 +268,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
 	--pkg=zed-core				^
+	--pkg=zed-pipe				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -282,6 +291,8 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--directory=$(IntDir)				^
 	--header=$(IntDir)zed-tests.h			^
 	--vapidir="$(IntDir)..\zed-core"			^
+	--vapidir="$(IntDir)..\zed-pipe-32"		^
+	--vapidir="$(IntDir)..\zed-pipe-64"		^
 	--vapidir="$(IntDir)..\zed-winipc-32"		^
 	--vapidir="$(IntDir)..\zed-winipc-64"		^
 	$(ValaFlags)				^
@@ -290,6 +301,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
 	--pkg=zed-core				^
+	--pkg=zed-pipe				^
 	--pkg=zed-winipc || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>

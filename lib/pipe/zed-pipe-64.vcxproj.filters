@@ -14,40 +14,28 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
     <Filter Include="Source Files\generated">
-      <UniqueIdentifier>{ae68f2cc-7b74-44ad-addd-3d447d9b2a4e}</UniqueIdentifier>
+      <UniqueIdentifier>{6c15c760-cd5b-41c4-ad64-83283571aeaf}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\lib">
-      <UniqueIdentifier>{9d376d37-3924-44bb-b054-ac689458f9f7}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\lib\interfaces">
-      <UniqueIdentifier>{ef409369-4cbc-4307-91ab-1ae4dcf1198f}</UniqueIdentifier>
+    <Filter Include="Header Files\generated">
+      <UniqueIdentifier>{984e0fc8-e24c-4868-a432-6dd66cc7db4d}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="agent-glue.c">
+    <ClCompile Include="pipe-windows.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)agent.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)script-engine.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)session.c">
+    <ClCompile Include="$(IntDir)pipe.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="agent.vala">
+    <CustomBuild Include="pipe.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <None Include="script-engine.vala">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="$(SolutionDir)lib\interfaces\session.vala">
-      <Filter>Source Files\lib\interfaces</Filter>
-    </None>
+    <ClInclude Include="$(IntDir)zed-pipe.h">
+      <Filter>Header Files\generated</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

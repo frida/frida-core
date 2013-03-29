@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemGroup>
+    <CustomBuild Include="pipe.vala">
+      <Message>Compiling vala code</Message>
+      <Command>"$(ValaCompiler)" pipe.vala --ccode --directory=$(IntDir) --library=zed-pipe --header=$(IntDir)zed-pipe.h $(ValaFlags) --pkg=gio-2.0 || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <AdditionalInputs>$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
+      <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+    </CustomBuild>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="$(IntDir)zed-pipe.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="pipe-windows.c" />
+    <ClCompile Include="$(IntDir)pipe.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+  </ItemGroup>
+
+</Project>

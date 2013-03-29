@@ -83,38 +83,38 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-32;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-pipe-32.lib;zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-32;$(IntDir)..\zed-winipc-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-32;$(IntDir)..\zed-winipc-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-pipe-32.lib;zed-winipc-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-32;$(IntDir)..\zed-winipc-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-64;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-pipe-64.lib;zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-64;$(IntDir)..\zed-winipc-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-64;$(IntDir)..\zed-winipc-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-winipc-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zed-pipe-64.lib;zed-winipc-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-64;$(IntDir)..\zed-winipc-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -184,7 +184,7 @@ REM. &gt; "$(IntDir)data\winjector.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-error.vala;$(ProjectDir)src\core\windows\winjector-ipc.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -192,7 +192,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-error.vala;$(ProjectDir)src\core\windows\winjector-ipc.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -200,7 +200,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-error.vala;$(ProjectDir)src\core\windows\winjector-ipc.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -208,7 +208,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector-error.vala src/core/windows/winjector-ipc.vala src/core/windows/winjector.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)..\zed-winipc-32" --vapidir="$(IntDir)..\zed-winipc-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-winipc --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-error.vala;$(ProjectDir)src\core\windows\winjector-ipc.vala;%(AdditionalInputs)</AdditionalInputs>

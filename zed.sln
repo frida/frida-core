@@ -41,6 +41,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "frida-clr", "bindings\frida
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "pyfrida", "bindings\pyfrida\pyfrida.vcxproj", "{7409F45B-E10E-48AA-9E68-94C113995D4A}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-pipe-32", "lib\pipe\zed-pipe-32.vcxproj", "{4C39C3CF-13E5-4346-B6AE-F73013105936}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zed-pipe-64", "lib\pipe\zed-pipe-64.vcxproj", "{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -193,6 +197,22 @@ Global
 		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|Win32.Build.0 = Release|Win32
 		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|x64.ActiveCfg = Release|x64
 		{7409F45B-E10E-48AA-9E68-94C113995D4A}.Release|x64.Build.0 = Release|x64
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Debug|Win32.ActiveCfg = Debug|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Debug|Win32.Build.0 = Debug|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Debug|x64.ActiveCfg = Debug|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Debug|x64.Build.0 = Debug|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Release|Win32.ActiveCfg = Release|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Release|Win32.Build.0 = Release|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Release|x64.ActiveCfg = Release|Win32
+		{4C39C3CF-13E5-4346-B6AE-F73013105936}.Release|x64.Build.0 = Release|Win32
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Debug|Win32.ActiveCfg = Debug|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Debug|Win32.Build.0 = Debug|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Debug|x64.ActiveCfg = Debug|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Debug|x64.Build.0 = Debug|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Release|Win32.ActiveCfg = Release|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Release|Win32.Build.0 = Release|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Release|x64.ActiveCfg = Release|x64
+		{D50F460F-9C4D-42EB-A8C4-48C0C46CFAAF}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
