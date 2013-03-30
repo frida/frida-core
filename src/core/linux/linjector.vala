@@ -22,7 +22,7 @@ namespace Zed {
 				_free_instance (instance);
 		}
 
-		public async uint inject (ulong pid, AgentDescriptor desc, string data_string) throws IOError {
+		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
 			var agent = agents[desc.name];
 			if (agent == null) {
 				agent = new TemporaryFile.from_stream (desc.name, desc.sofile);
@@ -83,7 +83,7 @@ namespace Zed {
 
 		public extern InputStream _get_fifo_for_instance (void * instance);
 		public extern void _free_instance (void * instance);
-		public extern uint _do_inject (ulong pid, string so_path, string data_string) throws IOError;
+		public extern uint _do_inject (uint pid, string so_path, string data_string) throws IOError;
 
 		protected class TemporaryFile {
 			public File file {

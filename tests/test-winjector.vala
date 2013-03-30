@@ -105,7 +105,7 @@ namespace Zed.WinjectorTest {
 
 			try {
 				yield injector.inject ((uint32) process.id, desc, data_string);
-			} catch (WinjectorError e) {
+			} catch (IOError e) {
 				inject_error = e.message;
 			}
 

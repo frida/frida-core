@@ -21,9 +21,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="test-winipc.vala">
-      <Filter>Tests</Filter>
-    </None>
     <None Include="test-winjector.vala">
       <Filter>Tests</Filter>
     </None>
@@ -44,9 +41,6 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)test-winipc.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
     <ClCompile Include="$(IntDir)test-winjector.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>

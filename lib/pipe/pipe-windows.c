@@ -46,7 +46,7 @@ static gboolean zed_pipe_backend_await (ZedPipeBackend * self, HANDLE complete, 
 static void zed_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
 
 void *
-_zed_pipe_transport_create_backend (gulong pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   ZedPipeTransportBackend * backend;
   gchar * name;

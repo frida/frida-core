@@ -67,7 +67,7 @@ namespace Zed.Agent {
 
 		private async void setup_connection () {
 			try {
-				connection = yield DBusConnection.new_for_stream (new Pipe (pipe_address), null, DBusConnectionFlags.NONE);
+				connection = yield DBusConnection.new_for_stream (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 			} catch (Error error) {
 				printerr ("failed to create connection: %s\n", error.message);
 				return;
@@ -76,6 +76,7 @@ namespace Zed.Agent {
 			try {
 				Zed.AgentSession session = this;
 				registration_id = connection.register_object (Zed.ObjectPath.AGENT_SESSION, session);
+				connection.start_message_processing ();
 			} catch (IOError io_error) {
 				printerr ("failed to register object: %s\n", io_error.message);
 				close ();

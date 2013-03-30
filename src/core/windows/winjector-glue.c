@@ -7,7 +7,7 @@
 #include <strsafe.h>
 
 gboolean
-zed_winjector_helper_is_process_still_running (void * handle)
+zed_winjector_helper_instance_is_process_still_running (void * handle)
 {
   DWORD exit_code;
 
@@ -18,7 +18,7 @@ zed_winjector_helper_is_process_still_running (void * handle)
 }
 
 void
-zed_winjector_helper_close_process_handle (void * handle)
+zed_winjector_helper_instance_close_process_handle (void * handle)
 {
   g_assert (handle != NULL);
   CloseHandle (handle);
@@ -108,8 +108,8 @@ zed_winjector_temporary_file_execute (
     process_handle = NULL;
 
     g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_EXECUTE_FAILED,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
         "ShellExecuteExW failed: %d", GetLastError ());
   }
 

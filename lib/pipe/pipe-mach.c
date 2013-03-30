@@ -48,7 +48,7 @@ static void zed_pipe_backend_on_tx_port_dead (void * context);
 static void zed_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
 
 void *
-_zed_pipe_transport_create_backend (gulong pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   ZedPipeTransportBackend * backend;
   const gchar * failed_operation;

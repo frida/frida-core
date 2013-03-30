@@ -7,10 +7,6 @@ namespace Zed.Test {
 		Zed.SystemTest.add_tests ();
 #endif
 
-#if WINDOWS
-		Zed.WinIpcTest.add_tests ();
-#endif
-
 #if HAVE_LOCAL_BACKENDS
 #if WINDOWS
 		Zed.WinjectorTest.add_tests ();

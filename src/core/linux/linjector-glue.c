@@ -182,7 +182,7 @@ _zed_linjector_free_instance (ZedLinjector * self, void * instance)
 }
 
 guint
-_zed_linjector_do_inject (ZedLinjector * self, gulong pid, const char * so_path, const char * data_string,
+_zed_linjector_do_inject (ZedLinjector * self, guint pid, const char * so_path, const char * data_string,
     GError ** error)
 {
   ZedInjectionInstance * instance;

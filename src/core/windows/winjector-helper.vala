@@ -39,7 +39,7 @@ namespace Winjector {
 		SERVICE
 	}
 
-	public class Manager : Object, WinIpc.QueryAsyncHandler {
+	public class Manager : Object, WinjectorHelper {
 		public string parent_address {
 			get;
 			construct;
@@ -49,94 +49,102 @@ namespace Winjector {
 		private int run_result = 0;
 		private bool stopping = false;
 
-		private WinIpc.ClientProxy parent;
-		private WinIpc.ServerProxy helper32;
-		private WinIpc.ServerProxy helper64;
+		private DBusConnection connection;
+		private uint registration_id;
+		private HelperService helper32;
+		private HelperService helper64;
+		private void * context;
 
 		public Manager (string parent_address) {
 			Object (parent_address: parent_address);
 		}
 
-		construct {
-			parent = new WinIpc.ClientProxy (parent_address);
-			parent.closed.connect ((remote_peer_vanished) => {
-				if (remote_peer_vanished)
-					stop ();
-			});
-			parent.add_notify_handler ("Stop", "", (arg) => stop ());
-			parent.register_query_async_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, this);
-
-			helper32 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("32"));
-			if (System.is_x64 ())
-				helper64 = new WinIpc.ServerProxy (Service.derive_svcname_for_suffix ("64"));
-		}
-
 		public int run () {
-			var ctx = start_services (Service.derive_basename ());
-
 			Idle.add (() => {
-				establish ();
+				start ();
 				return false;
 			});
-			loop.run ();
 
-			stop_services (ctx);
+			loop.run ();
 
 			return run_result;
 		}
 
-		private void stop () {
-			if (stopping)
-				return;
-			stopping = true;
-
-			if (System.is_x64 ())
-				helper64.emit ("Stop");
-			helper32.emit ("Stop");
-
-			// HACK: give child processes some time to shut down
-			Timeout.add (100, () => {
-				loop.quit ();
-				return false;
-			});
-		}
-
-		private async void establish () {
+		private async void start () {
 			try {
-				yield helper32.establish ();
+				helper32 = new HelperService (Service.derive_svcname_for_suffix ("32"));
 				if (System.is_x64 ())
-					yield helper64.establish ();
-				yield parent.establish ();
-			} catch (WinIpc.ProxyError e) {
-				stderr.printf ("establish failed: %s\n", e.message);
+					helper64 = new HelperService (Service.derive_svcname_for_suffix ("64"));
+
+				context = start_services (Service.derive_basename ());
+
+				yield helper32.start ();
+				if (System.is_x64 ())
+					yield helper64.start ();
+
+				connection = yield DBusConnection.new_for_stream (new Pipe (parent_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection.closed.connect (on_connection_closed);
+				WinjectorHelper helper = this;
+				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+				connection.start_message_processing ();
+			} catch (Error e) {
+				stderr.printf ("start failed: %s\n", e.message);
 				run_result = 1;
 				loop.quit ();
 			}
 		}
 
-		private async Variant? handle_query (string id, Variant? argument) {
-			uint32 target_pid;
-			string filename_template;
-			string ipc_server_address;
-			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename_template, out ipc_server_address);
+		public async void stop () throws IOError {
+			if (stopping)
+				throw new IOError.FAILED ("already stopping");
+			stopping = true;
 
-			WinIpc.Proxy helper;
-			string filename;
-			if (Process.is_x64 (target_pid)) {
-				helper = helper64;
-				filename = filename_template.printf (64);
-			} else {
-				helper = helper32;
-				filename = filename_template.printf (32);
+			if (System.is_x64 ())
+				yield helper64.proxy.stop ();
+			yield helper32.proxy.stop ();
+
+			// HACK: give child processes some time to shut down
+			Timeout.add (100, () => {
+				if (context != null)
+					stop_services (context);
+				loop.quit ();
+				return false;
+			});
+		}
+
+		public async void inject (uint pid, string filename_template, string data_string) throws IOError {
+			if (Process.is_x64 (pid))
+				yield helper64.proxy.inject (pid, filename_template.printf (64), data_string);
+			else
+				yield helper32.proxy.inject (pid, filename_template.printf (32), data_string);
+		}
+
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			stop ();
+		}
+
+		private class HelperService {
+			public WinjectorHelper proxy {
+				get;
+				private set;
 			}
 
-			var helper_argument = new Variant (WinjectorIpc.INJECT_SIGNATURE, target_pid, filename, ipc_server_address);
+			private string name;
+			private Pipe pipe;
+			private DBusConnection connection;
 
-			try {
-				return yield helper.query (id, helper_argument);
-			} catch (WinIpc.ProxyError e) {
-				var failed = new WinjectorError.FAILED (e.message);
-				return new Variant (WinjectorIpc.INJECT_RESPONSE, false, failed.code, failed.message);
+			public HelperService (string name) throws IOError {
+				this.name = name;
+				this.pipe = new Pipe ("pipe:role=server,name=" + name);
+			}
+
+			public async void start () throws IOError {
+				try {
+					connection = yield DBusConnection.new_for_stream (pipe, null, DBusConnectionFlags.NONE);
+				} catch (Error e) {
+					throw new IOError.FAILED (e.message);
+				}
+				proxy = connection.get_proxy_sync (null, WinjectorObjectPath.HELPER);
 			}
 		}
 
@@ -144,33 +152,44 @@ namespace Winjector {
 		private static extern void stop_services (void * context);
 	}
 
-	public abstract class Service : Object, WinIpc.QueryAsyncHandler {
-		protected WinIpc.ClientProxy manager;
+	public abstract class Service : Object, WinjectorHelper {
+		private DBusConnection connection;
+		private uint registration_id;
 
 		private Gee.HashMap<uint32, void *> thread_handle_by_pid = new Gee.HashMap<uint32, void *> ();
 
 		public Service () {
-			manager = new WinIpc.ClientProxy (derive_svcname_for_self ());
-			manager.register_query_async_handler ("Inject", WinjectorIpc.INJECT_SIGNATURE, this);
-
 			Idle.add (() => {
-				establish ();
+				start ();
 				return false;
 			});
 		}
 
 		public abstract void run ();
 
-		protected async void establish () {
+		protected abstract void shutdown ();
+
+		private async void start () {
 			try {
-				yield manager.establish ();
-			} catch (WinIpc.ProxyError e) {
-				/* REVISIT: might be worthwhile reporting an error here */
+				connection = yield DBusConnection.new_for_stream (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				WinjectorHelper helper = this;
+				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+				connection.start_message_processing ();
+			} catch (Error e) {
+				stderr.printf ("start failed: %s\n", e.message);
+				shutdown ();
 			}
 		}
 
-		private async void inject (uint32 target_pid, string filename, string ipc_server_address) throws WinjectorError {
-			for (int i = 0; thread_handle_by_pid.has_key (target_pid) && i != 40; i++) {
+		public async void stop () throws IOError {
+			Timeout.add (100, () => {
+				shutdown ();
+				return false;
+			});
+		}
+
+		public async void inject (uint pid, string filename, string data_string) throws IOError {
+			for (int i = 0; thread_handle_by_pid.has_key (pid) && i != 40; i++) {
 				Timeout.add (50, () => {
 					inject.callback ();
 					return false;
@@ -178,41 +197,20 @@ namespace Winjector {
 				yield;
 			}
 
-			if (thread_handle_by_pid.has_key (target_pid))
-				throw new WinjectorError.FAILED ("timed out while waiting for existing agent to unload");
+			if (thread_handle_by_pid.has_key (pid))
+				throw new IOError.TIMED_OUT ("timed out while waiting for existing agent to unload");
 
-			var waitable_thread_handle = Process.inject (target_pid, filename, ipc_server_address);
+			var waitable_thread_handle = Process.inject (pid, filename, data_string);
 			if (waitable_thread_handle != null) {
-				thread_handle_by_pid[target_pid] = waitable_thread_handle;
+				thread_handle_by_pid[pid] = waitable_thread_handle;
 
-				var source = WinIpc.WaitHandleSource.create (waitable_thread_handle, true);
+				var source = WaitHandleSource.create (waitable_thread_handle, true);
 				source.set_callback (() => {
-					thread_handle_by_pid.unset (target_pid);
+					thread_handle_by_pid.unset (pid);
 					return false;
 				});
 				source.attach (MainContext.default ());
 			}
-		}
-
-		public async Variant? handle_query (string id, Variant? argument) {
-			uint32 target_pid;
-			string filename_template;
-			string ipc_server_address;
-			argument.get (WinjectorIpc.INJECT_SIGNATURE, out target_pid, out filename_template, out ipc_server_address);
-
-			bool success = true;
-			uint32 error_code = 0;
-			string error_message = "";
-
-			try {
-				yield inject (target_pid, filename_template, ipc_server_address);
-			} catch (WinjectorError e) {
-				success = false;
-				error_code = e.code;
-				error_message = e.message;
-			}
-
-			return new Variant (WinjectorIpc.INJECT_RESPONSE, success, error_code, error_message);
 		}
 
 		public static extern string derive_basename ();
@@ -225,21 +223,24 @@ namespace Winjector {
 		private MainLoop loop;
 
 		public override void run () {
-			manager.add_notify_handler ("Stop", "", (arg) => {
-				Idle.add (() => {
-					loop.quit ();
-					return false;
-				});
-			});
-
 			loop = new MainLoop ();
 			loop.run ();
+		}
+
+		public override void shutdown () {
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
 		}
 	}
 
 	public class ManagedService : Service {
 		public override void run () {
 			enter_dispatcher_and_main_loop ();
+		}
+
+		public override void shutdown () {
 		}
 
 		private static extern void enter_dispatcher_and_main_loop ();
@@ -251,6 +252,14 @@ namespace Winjector {
 
 	namespace Process {
 		public static extern bool is_x64 (uint32 process_id);
-		public static extern void * inject (uint32 process_id, string dll_path, string ipc_server_address) throws WinjectorError;
+		public static extern void * inject (uint32 process_id, string dll_path, string ipc_server_address) throws IOError;
 	}
+
+	namespace WaitHandleSource {
+		public static Source create (void * handle, bool owns_handle) {
+			return wait_handle_source_new (handle, owns_handle);
+		}
+	}
+
+	private extern Source wait_handle_source_new (void * handle, bool owns_handle);
 }

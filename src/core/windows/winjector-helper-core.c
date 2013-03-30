@@ -22,7 +22,7 @@ struct _InjectionDetails
 {
   HANDLE process_handle;
   const WCHAR * dll_path;
-  const gchar * ipc_server_address;
+  const gchar * data_string;
 };
 
 struct _RemoteWorkerContext
@@ -34,7 +34,7 @@ struct _RemoteWorkerContext
 
   WCHAR dll_path[MAX_PATH + 1];
   gchar zed_agent_main_string[14 + 1];
-  gchar ipc_server_address[MAX_PATH + 1];
+  gchar data_string[MAX_PATH + 1];
 
   gpointer entrypoint;
   gpointer argument;
@@ -132,7 +132,7 @@ error:
 
 void *
 winjector_process_inject (guint32 process_id, const char * dll_path,
-    const gchar * ipc_server_address, GError ** error)
+    const gchar * data_string, GError ** error)
 {
   gboolean success = FALSE;
   const gchar * failed_operation;
@@ -144,7 +144,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   RemoteWorkerContext rwc;
 
   details.dll_path = (WCHAR *) g_utf8_to_utf16 (dll_path, -1, NULL, NULL, NULL);
-  details.ipc_server_address = ipc_server_address;
+  details.data_string = data_string;
   details.process_handle = NULL;
 
   if (!file_exists_and_is_readable (details.dll_path))
@@ -194,8 +194,8 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
 file_does_not_exist:
   {
     g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_FAILED,
+        G_IO_ERROR,
+        G_IO_ERROR_NOT_FOUND,
         "specified DLL path '%s' does not exist or cannot be opened",
         dll_path);
     goto beach;
@@ -203,8 +203,8 @@ file_does_not_exist:
 no_usable_thread_found:
   {
     g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_FAILED,
+        G_IO_ERROR,
+        G_IO_ERROR_NOT_FOUND,
         "no usable thread found in pid=%u", process_id);
     goto beach;
   }
@@ -216,11 +216,11 @@ handle_os_error:
     os_error = GetLastError ();
 
     if (os_error == ERROR_ACCESS_DENIED)
-      code = ZED_WINJECTOR_ERROR_ACCESS_DENIED;
+      code = G_IO_ERROR_PERMISSION_DENIED;
     else
-      code = ZED_WINJECTOR_ERROR_FAILED;
+      code = G_IO_ERROR_FAILED;
 
-    g_set_error (error, ZED_WINJECTOR_ERROR, code,
+    g_set_error (error, G_IO_ERROR, code,
         "%s(pid=%u) failed: %d",
         failed_operation, process_id, os_error);
     goto beach;
@@ -529,8 +529,8 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       GUM_ARG_REGISTER, GUM_REG_XSI,
       GUM_ARG_REGISTER, GUM_REG_XDX);
 
-  /* xax (xbx->ipc_server_address) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, ipc_server_address));
+  /* xax (xbx->data_string) */
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, data_string));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
       GUM_ARG_REGISTER, GUM_REG_XCX);
@@ -594,7 +594,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   StringCbCopyA (rwc->zed_agent_main_string, sizeof (rwc->zed_agent_main_string), "zed_agent_main");
 
   StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
-  StringCbCopyA (rwc->ipc_server_address, sizeof (rwc->ipc_server_address), details->ipc_server_address);
+  StringCbCopyA (rwc->data_string, sizeof (rwc->data_string), details->data_string);
 
   rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL,
       code_size + data_alignment + sizeof (RemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
@@ -616,16 +616,16 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 failed_to_resolve_kernel32_functions:
   {
     g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_FAILED,
+        G_IO_ERROR,
+        G_IO_ERROR_NOT_FOUND,
         "failed to resolve needed kernel32 functions");
     goto error_common;
   }
 virtual_alloc_failed:
   {
     g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_FAILED,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
         "VirtualAlloc failed: %d",
         (gint) GetLastError ());
     goto error_common;
@@ -633,8 +633,8 @@ virtual_alloc_failed:
 write_process_memory_failed:
   {
     g_set_error (error,
-        ZED_WINJECTOR_ERROR,
-        ZED_WINJECTOR_ERROR_FAILED,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
         "WriteProcessMemory failed: %d",
         (gint) GetLastError ());
     goto error_common;
@@ -699,8 +699,8 @@ static void
 set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error)
 {
   g_set_error (error,
-      ZED_WINJECTOR_ERROR,
-      ZED_WINJECTOR_ERROR_FAILED,
+      G_IO_ERROR,
+      G_IO_ERROR_FAILED,
       "%s failed while trying to grab thread: %d",
       func_name, GetLastError ());
 }
@@ -709,8 +709,8 @@ static void
 set_trick_thread_error_from_os_error (const gchar * func_name, GError ** error)
 {
   g_set_error (error,
-      ZED_WINJECTOR_ERROR,
-      ZED_WINJECTOR_ERROR_FAILED,
+      G_IO_ERROR,
+      G_IO_ERROR_FAILED,
       "%s failed while trying to trick thread: %d",
       func_name, GetLastError ());
 }

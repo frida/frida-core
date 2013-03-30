@@ -16,7 +16,7 @@ namespace Zed {
 			elevated_resource_store = null;
 		}
 
-		public async void inject (uint32 target_pid, AgentDescriptor desc, string data_string, Cancellable? cancellable = null) throws WinjectorError {
+		public async void inject (uint pid, AgentDescriptor desc, string data_string, Cancellable? cancellable = null) throws IOError {
 			if (normal_resource_store == null) {
 				normal_resource_store = new ResourceStore ();
 				normal_helper_factory.resource_store = normal_resource_store;
@@ -28,10 +28,10 @@ namespace Zed {
 
 			var normal_helper = yield normal_helper_factory.obtain ();
 			try {
-				yield normal_helper.inject (target_pid, filename, data_string, cancellable);
+				yield normal_helper.inject (pid, filename, data_string, cancellable);
 				injected = true;
-			} catch (WinjectorError inject_error) {
-				var permission_error = new WinjectorError.ACCESS_DENIED ("");
+			} catch (IOError inject_error) {
+				var permission_error = new IOError.PERMISSION_DENIED ("");
 				if (inject_error.code != permission_error.code)
 					throw inject_error;
 			}
@@ -45,48 +45,53 @@ namespace Zed {
 				filename = elevated_resource_store.ensure_copy_of (desc);
 
 				var elevated_helper = yield elevated_helper_factory.obtain ();
-				yield elevated_helper.inject (target_pid, filename, data_string, cancellable);
+				yield elevated_helper.inject (pid, filename, data_string, cancellable);
 			}
 		}
 
-		private class Helper {
+		private class HelperInstance {
 			private TemporaryFile helper32;
 			private TemporaryFile helper64;
-			private WinIpc.ServerProxy manager_proxy;
-			private void * manager_process;
+			private PipeTransport transport;
+			private Pipe pipe;
+			private DBusConnection connection;
+			private WinjectorHelper proxy;
+			private void * process;
 
 			private const uint ESTABLISH_TIMEOUT_MSEC = 30 * 1000;
 
-			public Helper (TemporaryFile helper32, TemporaryFile helper64, WinIpc.ServerProxy manager_proxy, void * manager_process) {
+			public HelperInstance (TemporaryFile helper32, TemporaryFile helper64, PipeTransport transport, Pipe pipe, void * process) {
 				this.helper32 = helper32;
 				this.helper64 = helper64;
-				this.manager_proxy = manager_proxy;
-				this.manager_process = manager_process;
+				this.transport = transport;
+				this.pipe = pipe;
+				this.process = process;
 			}
 
-			~Helper () {
-				if (manager_process != null)
-					close_process_handle (manager_process);
+			~HelperInstance () {
+				if (process != null)
+					close_process_handle (process);
 			}
 
-			public async void open () throws WinjectorError {
+			public async void open () throws IOError {
 				try {
-					yield manager_proxy.establish (ESTABLISH_TIMEOUT_MSEC);
-				} catch (WinIpc.ProxyError e) {
-					throw new WinjectorError.EXECUTE_FAILED (e.message);
+					connection = yield DBusConnection.new_for_stream (pipe, null, DBusConnectionFlags.NONE);
+				} catch (Error e) {
+					throw new IOError.FAILED (e.message);
 				}
+				proxy = connection.get_proxy_sync (null, WinjectorObjectPath.HELPER);
 			}
 
 			public async void close () {
 				try {
-					yield manager_proxy.emit ("Stop");
-				} catch (WinIpc.ProxyError e) {
+					yield proxy.stop ();
+				} catch (IOError e) {
 				}
 
-				if (is_process_still_running (manager_process)) {
+				if (is_process_still_running (process)) {
 					var source = new TimeoutSource (50);
 					source.set_callback (() => {
-						if (is_process_still_running (manager_process))
+						if (is_process_still_running (process))
 							return true; /* wait and try again */
 						close.callback ();
 						return false;
@@ -95,12 +100,12 @@ namespace Zed {
 					yield;
 				}
 
-				close_process_handle (manager_process);
-				manager_process = null;
+				close_process_handle (process);
+				process = null;
 			}
 
-			public async void inject (uint32 target_pid, string filename_template, string ipc_server_address, Cancellable? cancellable) throws WinjectorError {
-				yield WinjectorIpc.invoke_inject (target_pid, filename_template, ipc_server_address, manager_proxy);
+			public async void inject (uint pid, string filename_template, string data_string, Cancellable? cancellable) throws IOError {
+				yield proxy.inject (pid, filename_template, data_string);
 			}
 
 			private static extern bool is_process_still_running (void * handle);
@@ -115,7 +120,7 @@ namespace Zed {
 		private class HelperFactory {
 			private PrivilegeLevel level;
 			private MainContext main_context;
-			private Helper helper;
+			private HelperInstance helper;
 			private ArrayList<ObtainRequest> obtain_requests = new ArrayList<ObtainRequest> ();
 
 			public ResourceStore resource_store {
@@ -137,7 +142,7 @@ namespace Zed {
 				resource_store = null;
 			}
 
-			public async Helper obtain () throws WinjectorError {
+			public async HelperInstance obtain () throws IOError {
 				if (helper != null)
 					return helper;
 
@@ -157,15 +162,15 @@ namespace Zed {
 			}
 
 			private bool obtain_worker () {
-				Helper instance = null;
-				WinjectorError error = null;
+				HelperInstance instance = null;
+				IOError error = null;
 
 				try {
-					var manager_proxy = new WinIpc.ServerProxy ();
-					void * manager_process = resource_store.helper32.execute ("MANAGER " + manager_proxy.address, level);
-
-					instance = new Helper (resource_store.helper32, resource_store.helper64, manager_proxy, manager_process);
-				} catch (WinjectorError e) {
+					var transport = new PipeTransport.with_pid (0);
+					var pipe = new Pipe (transport.local_address);
+					void * process = resource_store.helper32.execute ("MANAGER " + transport.remote_address, level);
+					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, pipe, process);
+				} catch (IOError e) {
 					error = e;
 				}
 
@@ -179,14 +184,14 @@ namespace Zed {
 				return error == null;
 			}
 
-			private async void complete_obtain (Helper? instance, WinjectorError? error) {
-				Helper completed_instance = instance;
-				WinjectorError completed_error = error;
+			private async void complete_obtain (HelperInstance? instance, IOError? error) {
+				HelperInstance completed_instance = instance;
+				IOError completed_error = error;
 
 				if (instance != null) {
 					try {
 						yield instance.open ();
-					} catch (WinjectorError e) {
+					} catch (IOError e) {
 						completed_instance = null;
 						completed_error = e;
 					}
@@ -203,20 +208,20 @@ namespace Zed {
 				public delegate void CompletionHandler ();
 				private CompletionHandler handler;
 
-				private Helper helper;
-				private WinjectorError error;
+				private HelperInstance helper;
+				private IOError error;
 
 				public ObtainRequest (owned CompletionHandler handler) {
 					this.handler = (owned) handler;
 				}
 
-				public void complete (Helper? helper, WinjectorError? error) {
+				public void complete (HelperInstance? helper, IOError? error) {
 					this.helper = helper;
 					this.error = error;
 					handler ();
 				}
 
-				public Helper get_result () throws WinjectorError {
+				public HelperInstance get_result () throws IOError {
 					if (helper == null)
 						throw error;
 					return helper;
@@ -239,7 +244,7 @@ namespace Zed {
 
 			private HashMap<string, TemporaryAgent> agents = new HashMap<string, TemporaryAgent> ();
 
-			public ResourceStore () throws WinjectorError {
+			public ResourceStore () throws IOError {
 				var blob32 = Zed.Data.Winjector.get_winjector_helper_32_exe_blob ();
 				helper32 = new TemporaryFile.from_stream ("zed-winjector-helper-32.exe",
 					new MemoryInputStream.from_data (blob32.data, null),
@@ -250,7 +255,7 @@ namespace Zed {
 					tempdir);
 			}
 
-			public string ensure_copy_of (AgentDescriptor desc) throws WinjectorError {
+			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
 				var temp_agent = agents[desc.name_template];
 				if (temp_agent == null) {
 					temp_agent = new TemporaryAgent (desc, tempdir);
@@ -270,7 +275,7 @@ namespace Zed {
 			private TemporaryFile dll32;
 			private TemporaryFile dll64;
 
-			public TemporaryAgent (AgentDescriptor desc, TemporaryDirectory tempdir) throws WinjectorError {
+			public TemporaryAgent (AgentDescriptor desc, TemporaryDirectory tempdir) throws IOError {
 				filename_template = Path.build_filename (tempdir.path, desc.name_template);
 
 				dll32 = new TemporaryFile.from_stream (desc.name_template.printf (32), desc.dll32, tempdir);
@@ -300,7 +305,7 @@ namespace Zed {
 			protected File file;
 			private TemporaryDirectory directory;
 
-			public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory directory) throws WinjectorError {
+			public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory directory) throws IOError {
 				this.file = File.new_for_path (Path.build_filename (directory.path, name));
 				this.directory = directory;
 
@@ -322,7 +327,7 @@ namespace Zed {
 
 					ostream.close (null);
 				} catch (Error e) {
-					throw new WinjectorError.FAILED (e.message);
+					throw new IOError.FAILED (e.message);
 				}
 			}
 
@@ -338,7 +343,7 @@ namespace Zed {
 				}
 			}
 
-			public extern void * execute (string parameters, PrivilegeLevel level) throws WinjectorError;
+			public extern void * execute (string parameters, PrivilegeLevel level) throws IOError;
 		}
 	}
 
@@ -385,30 +390,6 @@ namespace Zed {
 			} catch (Error e) {
 				assert_not_reached ();
 			}
-		}
-	}
-}
-
-namespace Zed.WinjectorIpc {
-	private async void invoke_inject (uint32 target_pid, string filename_template, string ipc_server_address, WinIpc.Proxy proxy) throws WinjectorError {
-		Variant response;
-
-		try {
-			response = yield proxy.query ("Inject", new Variant (INJECT_SIGNATURE, target_pid, filename_template, ipc_server_address), INJECT_RESPONSE);
-		} catch (WinIpc.ProxyError e) {
-			throw new WinjectorError.FAILED (e.message);
-		}
-
-		bool success;
-		uint error_code;
-		string error_message;
-		response.get (INJECT_RESPONSE, out success, out error_code, out error_message);
-		if (!success) {
-			var permission_error = new WinjectorError.ACCESS_DENIED (error_message);
-			if (error_code == permission_error.code)
-				throw permission_error;
-			else
-				throw new WinjectorError.FAILED (error_message);
 		}
 	}
 }

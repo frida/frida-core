@@ -12,7 +12,7 @@ namespace Zed {
 
 		public void * _backend;
 
-		public PipeTransport.with_pid (ulong pid) throws IOError {
+		public PipeTransport.with_pid (uint pid) throws IOError {
 			string local_address, remote_address;
 			var backend = _create_backend (pid, out local_address, out remote_address);
 			Object (local_address: local_address, remote_address: remote_address);
@@ -23,7 +23,7 @@ namespace Zed {
 			_destroy_backend (_backend);
 		}
 
-		public static extern void * _create_backend (ulong pid, out string local_address, out string remote_address) throws IOError;
+		public static extern void * _create_backend (uint pid, out string local_address, out string remote_address) throws IOError;
 		public static extern void _destroy_backend (void * backend);
 	}
 

@@ -53,7 +53,7 @@
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -61,7 +61,7 @@
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-winipc-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\zed-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -73,8 +73,8 @@
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\lib\winipc\zed-winipc-64.vcxproj">
-      <Project>{90b16d19-1102-4aed-8452-f8dfbf59ea52}</Project>
+    <ProjectReference Include="..\..\..\lib\pipe\zed-pipe-64.vcxproj">
+      <Project>{d50f460f-9c4d-42eb-a8c4-48c0c46cfaaf}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
       <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>

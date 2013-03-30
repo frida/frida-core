@@ -16,7 +16,7 @@ zed_system_enumerate_processes (int * result_length1)
 
   while ((proc_name = g_dir_read_name (proc_dir)) != NULL)
   {
-    gulong pid;
+    guint pid;
     gchar * tmp = NULL;
     gchar * name;
     ZedHostProcessInfo * process_info;
