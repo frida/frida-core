@@ -5,7 +5,7 @@ namespace Zed.Test {
 			construct;
 		}
 
-		public ulong id {
+		public uint id {
 			get;
 			construct;
 		}
@@ -27,13 +27,13 @@ namespace Zed.Test {
 			}
 		}
 
-		private Process (void * handle, ulong id) {
+		private Process (void * handle, uint id) {
 			Object (handle: handle, id: id);
 		}
 
 		public static Process start (string filename) throws IOError {
 			void * handle;
-			ulong id;
+			uint id;
 			ProcessBackend.do_start (filename, out handle, out id);
 			return new Process (handle, id);
 		}
@@ -45,9 +45,9 @@ namespace Zed.Test {
 
 	namespace ProcessBackend {
 		private extern void * self_handle ();
-		private extern ulong self_id ();
+		private extern uint self_id ();
 		private extern string filename_of (void * handle);
-		private extern void do_start (string filename, out void * handle, out ulong id) throws IOError;
+		private extern void do_start (string filename, out void * handle, out uint id) throws IOError;
 		private extern int do_join (void * handle, uint timeout_msec) throws IOError;
 	}
 }

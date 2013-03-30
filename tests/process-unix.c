@@ -48,7 +48,7 @@ zed_test_process_backend_self_handle (void)
   return &zed_magic_self_handle;
 }
 
-gulong
+guint
 zed_test_process_backend_self_id (void)
 {
   return getpid ();
@@ -56,7 +56,7 @@ zed_test_process_backend_self_id (void)
 
 void
 zed_test_process_backend_do_start (const char * filename,
-    void ** handle, gulong * id, GError ** error)
+    void ** handle, guint * id, GError ** error)
 {
   const gchar * override = g_getenv ("ZED_TARGET_PID");
   if (override != NULL)

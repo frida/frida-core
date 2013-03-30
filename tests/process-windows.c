@@ -19,7 +19,7 @@ zed_test_process_backend_self_handle (void)
   return GetCurrentProcess ();
 }
 
-gulong
+guint
 zed_test_process_backend_self_id (void)
 {
   return GetCurrentProcessId ();
@@ -27,7 +27,7 @@ zed_test_process_backend_self_id (void)
 
 void
 zed_test_process_backend_do_start (const char * filename,
-    void ** handle, gulong * id, GError ** error)
+    void ** handle, guint * id, GError ** error)
 {
   LPWSTR filename_utf16;
   STARTUPINFOW startup_info = { 0, };
