@@ -126,7 +126,7 @@ _zed_pipe_create_backend (const gchar * address, GError ** error)
 
   backend = g_slice_new (ZedPipeBackend);
   backend->dispatch_queue = dispatch_queue_create ("org.boblycat.frida.pipe.queue", NULL);
-  assigned = sscanf (zed_pipe_get_address (self), "pipe:rx=%d,tx=%d", &rx, &tx);
+  assigned = sscanf (address, "pipe:rx=%d,tx=%d", &rx, &tx);
   g_assert_cmpint (assigned, ==, 2);
   backend->rx_port = rx;
   backend->tx_port = tx;
@@ -179,7 +179,7 @@ zed_pipe_backend_close_ports (ZedPipeBackend * self, GError ** error)
 
   if (self->rx_port != MACH_PORT_NULL)
   {
-    ret_rx = mach_port_mod_refs (self_task, self->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    ret_rx = mach_port_mod_refs (mach_task_self (), self->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
     self->rx_port = MACH_PORT_NULL;
   }
 
