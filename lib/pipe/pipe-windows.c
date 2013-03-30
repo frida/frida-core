@@ -1,8 +1,16 @@
 #include "zed-pipe.h"
 
 #include <windows.h>
+#include <aclapi.h>
 
 #define PIPE_BUFSIZE (1024 * 1024)
+
+#define CHECK_WINAPI_RESULT(n1, cmp, n2, op) \
+  if (!(n1 cmp n2)) \
+  { \
+    failed_operation = op; \
+    goto handle_winapi_error; \
+  }
 
 typedef struct _ZedPipeTransportBackend ZedPipeTransportBackend;
 typedef struct _ZedPipeBackend ZedPipeBackend;
@@ -304,10 +312,47 @@ beach:
 static HANDLE
 zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error)
 {
-  HANDLE result;
+  HANDLE result = INVALID_HANDLE_VALUE;
+  BOOL success;
+  DWORD res;
+  const gchar * failed_operation;
   WCHAR * path;
+  SID_IDENTIFIER_AUTHORITY world_auth = SECURITY_WORLD_SID_AUTHORITY;
+  PSID everyone_sid = NULL;
+  EXPLICIT_ACCESSW ea;
+  PACL acl = NULL;
+  PSECURITY_DESCRIPTOR sd = NULL;
+  SECURITY_ATTRIBUTES sa;
 
   path = zed_pipe_path_from_name (name);
+
+  success = AllocateAndInitializeSid (&world_auth, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &everyone_sid);
+  CHECK_WINAPI_RESULT (success, !=, FALSE, "AllocateAndInitializeSid");
+
+  ZeroMemory (&ea, sizeof (ea));
+  ea.grfAccessPermissions = GENERIC_READ | GENERIC_WRITE;
+  ea.grfAccessMode = SET_ACCESS;
+  ea.grfInheritance = NO_INHERITANCE;
+  ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+  ea.Trustee.ptstrName  = (LPWSTR) everyone_sid;
+
+  res = SetEntriesInAclW (1, &ea, NULL, &acl);
+  CHECK_WINAPI_RESULT (res, ==, ERROR_SUCCESS, "SetEntriesInAcl");
+
+  sd = LocalAlloc (LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
+  CHECK_WINAPI_RESULT (sd, !=, NULL, "LocalAlloc");
+
+  success = InitializeSecurityDescriptor (sd, SECURITY_DESCRIPTOR_REVISION);
+  CHECK_WINAPI_RESULT (success, !=, FALSE, "InitializeSecurityDescriptor");
+
+  success = SetSecurityDescriptorDacl (sd, TRUE, acl, FALSE);
+  CHECK_WINAPI_RESULT (success, !=, FALSE, "SetSecurityDescriptorDacl");
+
+  sa.nLength = sizeof (sa);
+  sa.lpSecurityDescriptor = sd;
+  sa.bInheritHandle = FALSE;
+
   if (role == ZED_PIPE_SERVER)
   {
     result = CreateNamedPipeW (path,
@@ -320,28 +365,46 @@ zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error)
         PIPE_BUFSIZE,
         PIPE_BUFSIZE,
         0,
-        NULL);
+        &sa);
+    CHECK_WINAPI_RESULT (result, !=, INVALID_HANDLE_VALUE, "CreateNamedPipe");
   }
   else
   {
     result = CreateFileW (path,
         GENERIC_READ | GENERIC_WRITE,
         0,
-        NULL,
+        &sa,
         OPEN_EXISTING,
         FILE_FLAG_OVERLAPPED,
         NULL);
+    CHECK_WINAPI_RESULT (result, !=, INVALID_HANDLE_VALUE, "CreateFile");
   }
-  if (result == INVALID_HANDLE_VALUE)
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-      "failed to %s pipe: 0x%08x",
-      role == ZED_PIPE_SERVER ? "create" : "open",
-      GetLastError ());
-  }
-  g_free (path);
 
-  return result;
+  goto beach;
+
+handle_winapi_error:
+  {
+    DWORD last_error = GetLastError ();
+    g_set_error (error,
+        G_IO_ERROR,
+        last_error == ERROR_FILE_NOT_FOUND ? G_IO_ERROR_NOT_FOUND : G_IO_ERROR_FAILED,
+        "%s failed: 0x%08x", failed_operation, last_error);
+    goto beach;
+  }
+
+beach:
+  {
+    if (sd != NULL)
+      LocalFree (sd);
+    if (acl != NULL)
+      LocalFree (acl);
+    if (everyone_sid != NULL)
+      FreeSid (everyone_sid);
+
+    g_free (path);
+
+    return result;
+  }
 }
 
 static gchar *
