@@ -42,14 +42,13 @@ struct _ZedPipeMessage
   guint8 payload[0];
 };
 
-static void zed_pipe_demonitor (ZedPipe * self);
-static void zed_pipe_on_tx_port_dead (void * context);
-static gboolean zed_pipe_on_tx_port_dead_idle (gpointer user_data);
+static void zed_pipe_backend_demonitor (ZedPipeBackend * backend);
+static void zed_pipe_backend_on_tx_port_dead (void * context);
 
 static void zed_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
 
-void
-_zed_pipe_transport_create_backend (ZedPipeTransport * self, gulong pid, GError ** error)
+void *
+_zed_pipe_transport_create_backend (gulong pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   ZedPipeTransportBackend * backend;
   const gchar * failed_operation;
@@ -62,7 +61,6 @@ _zed_pipe_transport_create_backend (ZedPipeTransport * self, gulong pid, GError 
   backend->local_tx = MACH_PORT_NULL;
   backend->remote_rx = MACH_PORT_NULL;
   backend->remote_tx = MACH_PORT_NULL;
-  self->_backend = backend;
 
   ret = task_for_pid (mach_task_self (), pid, &backend->task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
@@ -85,23 +83,24 @@ _zed_pipe_transport_create_backend (ZedPipeTransport * self, gulong pid, GError 
   while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && backend->remote_tx < backend->local_rx + 10000);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
 
-  self->local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->local_rx, backend->local_tx);
-  self->remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->remote_rx, backend->remote_tx);
+  *local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->local_rx, backend->local_tx);
+  *remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->remote_rx, backend->remote_tx);
 
-  return;
+  return backend;
 
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
         "%s failed: %s (%d)", failed_operation, mach_error_string (ret), ret);
-    _zed_pipe_transport_destroy_backend (self);
+    _zed_pipe_transport_destroy_backend (backend);
+    return NULL;
   }
 }
 
 void
-_zed_pipe_transport_destroy_backend (ZedPipeTransport * self)
+_zed_pipe_transport_destroy_backend (void * b)
 {
-  ZedPipeTransportBackend * backend = self->_backend;
+  ZedPipeTransportBackend * backend = (ZedPipeTransportBackend *) b;
   task_t self_task = mach_task_self ();
 
   if (backend->remote_tx != MACH_PORT_NULL)
@@ -118,8 +117,8 @@ _zed_pipe_transport_destroy_backend (ZedPipeTransport * self)
   g_slice_free (ZedPipeTransportBackend, backend);
 }
 
-void
-_zed_pipe_create_backend (ZedPipe * self)
+void *
+_zed_pipe_create_backend (const gchar * address, GError ** error)
 {
   ZedPipeBackend * backend;
   int rx, tx, assigned;
@@ -137,19 +136,19 @@ _zed_pipe_create_backend (ZedPipe * self)
 
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, backend->tx_port, DISPATCH_MACH_SEND_DEAD, backend->dispatch_queue);
   backend->monitor_source = source;
-  dispatch_set_context (source, self);
-  dispatch_source_set_event_handler_f (source, zed_pipe_on_tx_port_dead);
+  dispatch_set_context (source, backend);
+  dispatch_source_set_event_handler_f (source, zed_pipe_backend_on_tx_port_dead);
   dispatch_resume (source);
 
-  self->_backend = backend;
+  return backend;
 }
 
 void
-_zed_pipe_destroy_backend (ZedPipe * self)
+_zed_pipe_destroy_backend (void * b)
 {
-  ZedPipeBackend * backend = self->_backend;
+  ZedPipeBackend * backend = (ZedPipeBackend *) b;
 
-  zed_pipe_demonitor (self);
+  zed_pipe_backend_demonitor (backend);
 
   g_free (backend->rx_buffer);
   dispatch_release (backend->dispatch_queue);
@@ -158,28 +157,32 @@ _zed_pipe_destroy_backend (ZedPipe * self)
 }
 
 static void
-zed_pipe_demonitor (ZedPipe * self)
+zed_pipe_backend_demonitor (ZedPipeBackend * self)
 {
-  ZedPipeBackend * backend = self->_backend;
-
-  if (backend->monitor_source != NULL)
+  if (self->monitor_source != NULL)
   {
-    dispatch_release (backend->monitor_source);
-    backend->monitor_source = NULL;
+    dispatch_release (self->monitor_source);
+    self->monitor_source = NULL;
   }
 }
 
-gboolean
-_zed_pipe_close (ZedPipe * self, GError ** error)
+static gboolean
+zed_pipe_backend_close_ports (ZedPipeBackend * self, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
-  task_t self_task = mach_task_self ();
-  kern_return_t ret_tx, ret_rx, ret;
+  kern_return_t ret_tx = 0, ret_rx = 0, ret;
 
-  zed_pipe_demonitor (self);
+  if (self->tx_port != MACH_PORT_NULL)
+  {
+    ret_tx = mach_port_mod_refs (mach_task_self (), self->tx_port, MACH_PORT_RIGHT_SEND, -1);
+    self->tx_port = MACH_PORT_NULL;
+  }
 
-  ret_tx = mach_port_mod_refs (self_task, backend->tx_port, MACH_PORT_RIGHT_SEND, -1);
-  ret_rx = mach_port_mod_refs (self_task, backend->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
+  if (self->rx_port != MACH_PORT_NULL)
+  {
+    ret_rx = mach_port_mod_refs (self_task, self->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    self->rx_port = MACH_PORT_NULL;
+  }
+
   ret = ret_tx != 0 ? ret_tx : ret_rx;
   if (ret != 0)
   {
@@ -191,26 +194,22 @@ _zed_pipe_close (ZedPipe * self, GError ** error)
   return TRUE;
 }
 
-static void
-zed_pipe_on_tx_port_dead (void * context)
+gboolean
+_zed_pipe_close (ZedPipe * self, GError ** error)
 {
-  ZedPipe * pipe = context;
-  GSource * source;
+  ZedPipeBackend * backend = self->_backend;
 
-  source = g_idle_source_new ();
-  g_source_set_callback (source, zed_pipe_on_tx_port_dead_idle, g_object_ref (pipe), g_object_unref);
-  g_source_attach (source, pipe->_main_context);
-  g_source_unref (source);
+  zed_pipe_backend_demonitor (backend);
+
+  return zed_pipe_backend_close_ports (backend, error);
 }
 
-static gboolean
-zed_pipe_on_tx_port_dead_idle (gpointer user_data)
+static void
+zed_pipe_backend_on_tx_port_dead (void * context)
 {
-  ZedPipe * pipe = user_data;
+  ZedPipeBackend * backend = context;
 
-  g_io_stream_close (G_IO_STREAM (pipe), NULL, NULL);
-
-  return FALSE;
+  zed_pipe_backend_close_ports (backend, NULL);
 }
 
 gssize

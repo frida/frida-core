@@ -113,12 +113,13 @@ namespace Zed {
 
 		public async AgentSessionId attach_to (uint pid) throws IOError {
 			var transport = new PipeTransport.with_pid (pid);
+			var stream = new Pipe (transport.local_address);
 			try {
 				yield winjector.inject (pid, agent_desc, transport.remote_address, null);
 			} catch (WinjectorError e) {
 				throw new IOError.FAILED (e.message);
 			}
-			return yield allocate_session (transport, new Pipe (transport.local_address));
+			return yield allocate_session (transport, stream);
 		}
 	}
 }

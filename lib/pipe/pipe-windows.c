@@ -6,97 +6,205 @@
 
 typedef struct _ZedPipeTransportBackend ZedPipeTransportBackend;
 typedef struct _ZedPipeBackend ZedPipeBackend;
+typedef enum _ZedPipeRole ZedPipeRole;
 
 struct _ZedPipeTransportBackend
-{
-  HANDLE pipe;
-};
-
-struct _ZedPipeBackend
 {
   gboolean placeholder;
 };
 
+struct _ZedPipeBackend
+{
+  ZedPipeRole role;
+  HANDLE pipe;
+  gboolean connected;
+  HANDLE read_complete;
+  HANDLE read_cancel;
+  HANDLE write_complete;
+  HANDLE write_cancel;
+};
+
+enum _ZedPipeRole
+{
+  ZED_PIPE_SERVER = 1,
+  ZED_PIPE_CLIENT
+};
+
+static HANDLE zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error);
 static gchar * zed_pipe_generate_name (void);
 static WCHAR * zed_pipe_path_from_name (const gchar * name);
 
-void
-_zed_pipe_transport_create_backend (ZedPipeTransport * self, gulong pid, GError ** error)
+static gboolean zed_pipe_backend_await (ZedPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
+static void zed_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
+
+void *
+_zed_pipe_transport_create_backend (gulong pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   ZedPipeTransportBackend * backend;
   gchar * name;
-  WCHAR * path;
 
   (void) pid;
+  (void) error;
 
   backend = g_slice_new0 (ZedPipeTransportBackend);
-  self->_backend = backend;
 
   name = zed_pipe_generate_name ();
-  path = zed_pipe_path_from_name (name);
 
-  backend->pipe = CreateNamedPipeW (path,
-      PIPE_ACCESS_DUPLEX |
-      FILE_FLAG_OVERLAPPED,
-      PIPE_TYPE_BYTE |
-      PIPE_READMODE_BYTE |
-      PIPE_WAIT,
-      1,
-      PIPE_BUFSIZE,
-      PIPE_BUFSIZE,
-      0,
-      NULL);
-  if (backend->pipe == INVALID_HANDLE_VALUE)
-    goto handle_create_error;
+  *local_address = g_strdup_printf ("pipe:role=server,name=%s", name);
+  *remote_address = g_strdup_printf ("pipe:role=client,name=%s", name);
 
-  self->local_address = g_strdup_printf ("pipe:role=server,name=%s", name);
-  self->remote_address = g_strdup_printf ("pipe:role=client,name=%s", name);
+  g_free (name);
 
-  goto beach;
-
-handle_create_error:
-  {
-    _zed_pipe_transport_destroy_backend (self);
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "CreateNamedPipe failed: 0x%08x", GetLastError ());
-    goto beach;
-  }
-
-beach:
-  {
-    g_free (path);
-    g_free (name);
-    return;
-  }
+  return backend;
 }
 
 void
-_zed_pipe_transport_destroy_backend (ZedPipeTransport * self)
+_zed_pipe_transport_destroy_backend (void * b)
 {
-  ZedPipeTransportBackend * backend = (ZedPipeTransportBackend *) self->_backend;
-
-  if (backend->pipe != INVALID_HANDLE_VALUE)
-    CloseHandle (backend->pipe);
+  ZedPipeTransportBackend * backend = (ZedPipeTransportBackend *) b;
 
   g_slice_free (ZedPipeTransportBackend, backend);
 }
 
-void
-_zed_pipe_create_backend (ZedPipe * self)
+void *
+_zed_pipe_create_backend (const gchar * address, GError ** error)
 {
   ZedPipeBackend * backend;
+  const gchar * role, * name;
 
-  backend = g_slice_new (ZedPipeBackend);
+  backend = g_slice_new0 (ZedPipeBackend);
 
-  self->_backend = backend;
+  role = strstr (address, "role=") + 5;
+  backend->role = role[0] == 's' ? ZED_PIPE_SERVER : ZED_PIPE_CLIENT;
+  name = strstr (address, "name=") + 5;
+  backend->pipe = zed_pipe_open (name, backend->role, error);
+  if (backend->pipe != INVALID_HANDLE_VALUE)
+  {
+    backend->read_complete = CreateEvent (NULL, TRUE, FALSE, NULL);
+    backend->read_cancel = CreateEvent (NULL, TRUE, FALSE, NULL);
+    backend->write_complete = CreateEvent (NULL, TRUE, FALSE, NULL);
+    backend->write_cancel = CreateEvent (NULL, TRUE, FALSE, NULL);
+  }
+  else
+  {
+    _zed_pipe_destroy_backend (backend);
+    backend = NULL;
+  }
+
+  return backend;
 }
 
 void
-_zed_pipe_destroy_backend (ZedPipe * self)
+_zed_pipe_destroy_backend (void * b)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
+  ZedPipeBackend * backend = (ZedPipeBackend *) b;
+
+  if (backend->read_complete != NULL)
+    CloseHandle (backend->read_complete);
+  if (backend->read_cancel != NULL)
+    CloseHandle (backend->read_cancel);
+  if (backend->write_complete != NULL)
+    CloseHandle (backend->write_complete);
+  if (backend->write_cancel != NULL)
+    CloseHandle (backend->write_cancel);
+
+  if (backend->pipe != INVALID_HANDLE_VALUE)
+    CloseHandle (backend->pipe);
 
   g_slice_free (ZedPipeBackend, backend);
+}
+
+static gboolean
+zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, GError ** error)
+{
+  gboolean success = FALSE;
+  HANDLE connect, cancel;
+  OVERLAPPED overlapped = { 0, };
+  BOOL ret, last_error;
+  DWORD bytes_transferred;
+
+  if (backend->connected)
+  {
+    return TRUE;
+  }
+  else if (backend->role == ZED_PIPE_CLIENT)
+  {
+    backend->connected = TRUE;
+    return TRUE;
+  }
+
+  connect = CreateEvent (NULL, TRUE, FALSE, NULL);
+  cancel = CreateEvent (NULL, TRUE, FALSE, NULL);
+  overlapped.hEvent = connect;
+
+  ret = ConnectNamedPipe (backend->pipe, &overlapped);
+  last_error = GetLastError ();
+  if (!ret && last_error != ERROR_IO_PENDING && last_error != ERROR_PIPE_CONNECTED)
+    goto handle_error;
+
+  if (last_error == ERROR_IO_PENDING)
+  {
+    if (!zed_pipe_backend_await (backend, connect, cancel, cancellable, error))
+      goto beach;
+
+    if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
+      goto handle_error;
+  }
+
+  backend->connected = TRUE;
+  success = TRUE;
+  goto beach;
+
+handle_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "ConnectNamedPipe failed: 0x%08x", last_error);
+    goto beach;
+  }
+beach:
+  {
+    CloseHandle (connect);
+    CloseHandle (cancel);
+    return success;
+  }
+}
+
+static gboolean
+zed_pipe_backend_await (ZedPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error)
+{
+  gulong handler_id = 0;
+  HANDLE events[2];
+
+  if (cancellable != NULL)
+  {
+    handler_id = g_cancellable_connect (cancellable, G_CALLBACK (zed_pipe_backend_on_cancel), cancel, NULL);
+  }
+
+  events[0] = complete;
+  events[1] = cancel;
+  WaitForMultipleObjects (G_N_ELEMENTS (events), events, FALSE, INFINITE);
+
+  if (cancellable != NULL)
+  {
+    g_cancellable_disconnect (cancellable, handler_id);
+    if (g_cancellable_set_error_if_cancelled (cancellable, error))
+    {
+      CancelIo (self->pipe);
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+static void
+zed_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
+{
+  HANDLE cancel = (HANDLE) user_data;
+
+  (void) cancellable;
+
+  SetEvent (cancel);
 }
 
 gboolean
@@ -104,21 +212,136 @@ _zed_pipe_close (ZedPipe * self, GError ** error)
 {
   ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
 
+  if (!CloseHandle (backend->pipe))
+    goto handle_error;
+  backend->pipe = INVALID_HANDLE_VALUE;
   return TRUE;
+
+handle_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "CloseHandle failed: 0x%08x", GetLastError ());
+    return FALSE;
+  }
 }
 
 gssize
 _zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented");
-  return 0;
+  ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
+  gssize result = 0;
+  OVERLAPPED overlapped = { 0, };
+  BOOL ret;
+  DWORD bytes_transferred;
+
+  if (!zed_pipe_backend_connect (backend, cancellable, error))
+    goto beach;
+
+  overlapped.hEvent = backend->read_complete;
+  ret = ReadFile (backend->pipe, buffer, buffer_length, NULL, &overlapped);
+  if (!ret && GetLastError () != ERROR_IO_PENDING)
+    goto handle_error;
+
+  if (!zed_pipe_backend_await (backend, backend->read_complete, backend->read_cancel, cancellable, error))
+    goto beach;
+
+  if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
+    goto handle_error;
+
+  result = bytes_transferred;
+  goto beach;
+
+handle_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "ReadFile failed: 0x%08x", GetLastError ());
+    goto beach;
+  }
+beach:
+  {
+    return result;
+  }
 }
 
 gssize
 _zed_pipe_output_stream_write (ZedPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented");
-  return 0;
+  ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
+  gssize result = 0;
+  OVERLAPPED overlapped = { 0, };
+  BOOL ret;
+  DWORD bytes_transferred;
+
+  if (!zed_pipe_backend_connect (backend, cancellable, error))
+    goto beach;
+
+  overlapped.hEvent = backend->write_complete;
+  ret = WriteFile (backend->pipe, buffer, buffer_length, NULL, &overlapped);
+  if (!ret && GetLastError () != ERROR_IO_PENDING)
+    goto handle_error;
+
+  if (!zed_pipe_backend_await (backend, backend->write_complete, backend->write_cancel, cancellable, error))
+    goto beach;
+
+  if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
+    goto handle_error;
+
+  result = bytes_transferred;
+  goto beach;
+
+handle_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "WriteFile failed: 0x%08x", GetLastError ());
+    goto beach;
+  }
+beach:
+  {
+    return result;
+  }
+}
+
+static HANDLE
+zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error)
+{
+  HANDLE result;
+  WCHAR * path;
+
+  path = zed_pipe_path_from_name (name);
+  if (role == ZED_PIPE_SERVER)
+  {
+    result = CreateNamedPipeW (path,
+        PIPE_ACCESS_DUPLEX |
+        FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE |
+        PIPE_READMODE_BYTE |
+        PIPE_WAIT,
+        1,
+        PIPE_BUFSIZE,
+        PIPE_BUFSIZE,
+        0,
+        NULL);
+  }
+  else
+  {
+    result = CreateFileW (path,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_OVERLAPPED,
+        NULL);
+  }
+  if (result == INVALID_HANDLE_VALUE)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+      "failed to %s pipe: 0x%08x",
+      role == ZED_PIPE_SERVER ? "create" : "open",
+      GetLastError ());
+  }
+  g_free (path);
+
+  return result;
 }
 
 static gchar *
