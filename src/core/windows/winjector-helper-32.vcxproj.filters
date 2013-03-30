@@ -32,11 +32,11 @@
     <ClCompile Include="winjector-helper-core.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)winjector-types.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="winjector-wait-handle-source.c">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)winjector-types.c">
+      <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -45,6 +45,8 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <None Include="winjector-types.vala" />
+    <None Include="winjector-types.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
