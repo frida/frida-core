@@ -87,8 +87,6 @@ static gboolean file_exists_and_is_readable (const WCHAR * filename);
 static void set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error);
 static void set_trick_thread_error_from_os_error (const gchar * func_name, GError ** error);
 
-static const gboolean enable_stealth_mode = FALSE;
-
 gboolean
 winjector_system_is_x64 (void)
 {
@@ -138,7 +136,8 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   const gchar * failed_operation;
   HANDLE waitable_remote_thread_handle = NULL;
   InjectionDetails details;
-  DWORD desired_access;
+  gboolean enable_stealth_mode = FALSE;
+  DWORD our_session_id, target_session_id, desired_access;
   HANDLE thread_handle = NULL;
   gboolean rwc_initialized = FALSE;
   RemoteWorkerContext rwc;
@@ -149,6 +148,13 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
 
   if (!file_exists_and_is_readable (details.dll_path))
     goto file_does_not_exist;
+
+  if (ProcessIdToSessionId (GetCurrentProcessId (), &our_session_id) &&
+      ProcessIdToSessionId (process_id, &target_session_id) &&
+      target_session_id != our_session_id)
+  {
+    enable_stealth_mode = TRUE;
+  }
 
   desired_access = 
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
