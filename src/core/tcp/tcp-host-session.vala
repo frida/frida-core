@@ -91,28 +91,12 @@ namespace Zed {
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
 			var address = AGENT_ADDRESS_TEMPLATE.printf (id.handle);
 
-			DBusConnection connection = null;
-
-			for (int i = 1; connection == null; i++) {
-				try {
-					connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-				} catch (Error connect_error) {
-					if (i != 40) {
-						var source = new TimeoutSource (50);
-						source.set_callback (() => {
-							obtain_agent_session.callback ();
-							return false;
-						});
-						source.attach (MainContext.get_thread_default ());
-						yield;
-					} else {
-						break;
-					}
-				}
+			DBusConnection connection;
+			try {
+				connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+			} catch (Error connection_error) {
+				throw new IOError.FAILED (connection_error.message);
 			}
-
-			if (connection == null)
-				throw new IOError.TIMED_OUT ("timed out");
 
 			AgentSession session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
 
@@ -178,3 +162,4 @@ namespace Zed {
 		}
 	}
 }
+
