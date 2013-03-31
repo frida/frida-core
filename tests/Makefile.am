@@ -1,3 +1,5 @@
+SUBDIRS = pipe
+
 if OS_ANDROID
 else
 if OS_IOS

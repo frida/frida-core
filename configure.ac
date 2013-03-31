@@ -199,5 +199,6 @@ AC_CONFIG_FILES([
 	bindings/cloud-spy/Makefile
 	bindings/pyfrida/Makefile
 	tests/Makefile
+	tests/pipe/Makefile
 ])
 AC_OUTPUT
