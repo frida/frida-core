@@ -107,13 +107,28 @@ namespace Zed {
 		}
 
 		protected async AgentSessionId allocate_session (Object transport, IOStream stream) throws IOError {
-			DBusConnection connection = null;
+			var cancellable = new Cancellable ();
+			var cancelled = new IOError.CANCELLED ("");
+			var timeout_source = new TimeoutSource (2000);
+			timeout_source.set_callback (() => {
+				cancellable.cancel ();
+				return false;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
+
+			DBusConnection connection;
+			AgentSession session;
 			try {
-				connection = yield DBusConnection.new_for_stream (stream, null, DBusConnectionFlags.NONE);
-			} catch (Error agent_error) {
-				throw new IOError.FAILED (agent_error.message);
+				connection = yield DBusConnection.new_for_stream (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
+			} catch (Error e) {
+				if (e is IOError && e.code == cancelled.code)
+					throw new IOError.TIMED_OUT ("timed out");
+				else
+					throw new IOError.FAILED (e.message);
 			}
-			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
+			if (cancellable.is_cancelled ())
+				throw new IOError.TIMED_OUT ("timed out");
 
 			bool found_available = false;
 			var loopback = new InetAddress.loopback (SocketFamily.IPV4);
@@ -147,6 +162,8 @@ namespace Zed {
 				}
 				throw new IOError.FAILED (serve_error.message);
 			}
+
+			timeout_source.destroy ();
 
 			return AgentSessionId (port);
 		}
