@@ -182,7 +182,7 @@ namespace Winjector {
 		}
 
 		public async void stop () throws IOError {
-			Timeout.add (100, () => {
+			Timeout.add (20, () => {
 				shutdown ();
 				return false;
 			});

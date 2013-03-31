@@ -27,7 +27,7 @@ namespace Zed.Agent {
 			script_engine.shutdown ();
 			script_engine = null;
 
-			Timeout.add (100, () => {
+			Timeout.add (10, () => {
 				teardown_connection_and_schedule_shutdown ();
 				return false;
 			});
@@ -36,7 +36,7 @@ namespace Zed.Agent {
 		private async void teardown_connection_and_schedule_shutdown () {
 			yield teardown_connection ();
 
-			Timeout.add (100, () => {
+			Timeout.add (10, () => {
 				main_loop.quit ();
 				return false;
 			});

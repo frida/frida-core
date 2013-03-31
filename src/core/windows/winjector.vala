@@ -102,6 +102,15 @@ namespace Zed {
 
 				close_process_handle (process);
 				process = null;
+
+				/* HACK: give it a bit more time */
+				var delay = new TimeoutSource (20);
+				delay.set_callback (() => {
+					close.callback ();
+					return false;
+				});
+				delay.attach (MainContext.get_thread_default ());
+				yield;
 			}
 
 			public async void inject (uint pid, string filename_template, string data_string, Cancellable? cancellable) throws IOError {
@@ -255,6 +264,12 @@ namespace Zed {
 					tempdir);
 			}
 
+			~ResourceStore () {
+				foreach (var tempfile in agents.values)
+					tempfile.destroy ();
+				tempdir.destroy ();
+			}
+
 			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
 				var temp_agent = agents[desc.name_template];
 				if (temp_agent == null) {
@@ -281,6 +296,21 @@ namespace Zed {
 				dll32 = new TemporaryFile.from_stream (desc.name_template.printf (32), desc.dll32, tempdir);
 				dll64 = new TemporaryFile.from_stream (desc.name_template.printf (64), desc.dll64, tempdir);
 			}
+
+			~TemporaryAgent () {
+				destroy ();
+			}
+
+			public void destroy () {
+				if (dll32 != null) {
+					dll32.destroy ();
+					dll32 = null;
+				}
+				if (dll64 != null) {
+					dll64.destroy ();
+					dll64 = null;
+				}
+			}
 		}
 
 		protected class TemporaryDirectory {
@@ -294,6 +324,10 @@ namespace Zed {
 			}
 
 			~TemporaryDirectory () {
+				destroy ();
+			}
+
+			public void destroy () {
 				destroy_tempdir (path);
 			}
 
@@ -337,10 +371,18 @@ namespace Zed {
 			}
 
 			~TemporaryFile () {
-				try {
-					file.delete (null);
-				} catch (Error e) {
+				destroy ();
+			}
+
+			public void destroy () {
+				if (file != null) {
+					try {
+						file.delete (null);
+					} catch (Error e) {
+					}
+					file = null;
 				}
+				directory = null;
 			}
 
 			public extern void * execute (string parameters, PrivilegeLevel level) throws IOError;
