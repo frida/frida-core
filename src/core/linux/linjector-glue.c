@@ -85,6 +85,8 @@ struct _ZedCodeChunk
 
 struct _ZedTrampolineData
 {
+  gchar pthread_so[32];
+  gchar pthread_create[32];
   gchar fifo_path[256];
   gchar so_path[256];
   gchar entrypoint_name[32];
@@ -115,7 +117,6 @@ static gboolean zed_remote_exec (pid_t pid, gpointer remote_address, gpointer re
 static gboolean zed_wait_for_child_signal (pid_t pid, int signal);
 
 static gpointer zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
-static gpointer zed_resolve_remote_pthread_function (int remote_pid, const gchar * function_name);
 
 static gpointer zed_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name);
 static gpointer zed_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
@@ -249,6 +250,8 @@ zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params
   func (params, GUM_ADDRESS (params->remote_address), &code);
 
   data = (ZedTrampolineData *) (code.bytes + ZED_REMOTE_DATA_OFFSET);
+  strcpy (data->pthread_so, "libpthread.so.0");
+  strcpy (data->pthread_create, "pthread_create");
   strcpy (data->fifo_path, params->fifo_path);
   strcpy (data->so_path, params->so_path);
   strcpy (data->entrypoint_name, "zed_agent_main");
@@ -277,17 +280,38 @@ static void
 zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
 {
   GumX86Writer cw;
-  const guint worker_offset = 64;
+  const guint worker_offset = 128;
 
   gum_x86_writer_init (&cw, code->cur);
+
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_pthread_function (params->pid, "pthread_create")));
+      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      2,
+      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (pthread_so),
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (ZED_RTLD_DLOPEN | RTLD_LAZY));
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      2,
+      GUM_ARG_REGISTER, GUM_REG_XBP,
+      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (pthread_create));
+
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       4,
       GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (worker_thread),
       GUM_ARG_POINTER, NULL,
       GUM_ARG_POINTER, remote_address + worker_offset,
       GUM_ARG_POINTER, NULL);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XBP);
+
   gum_x86_writer_put_int3 (&cw);
   gum_x86_writer_flush (&cw);
   g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, worker_offset);
@@ -663,12 +687,6 @@ static gpointer
 zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name)
 {
   return zed_resolve_remote_library_function (remote_pid, "libc", function_name);
-}
-
-static gpointer
-zed_resolve_remote_pthread_function (int remote_pid, const gchar * function_name)
-{
-  return zed_resolve_remote_library_function (remote_pid, "libpthread", function_name);
 }
 
 static gpointer
