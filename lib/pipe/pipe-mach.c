@@ -80,7 +80,7 @@ _zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** 
     backend->remote_tx++;
     ret = mach_port_insert_right (backend->task, backend->remote_tx, backend->local_rx, MACH_MSG_TYPE_MAKE_SEND);
   }
-  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && backend->remote_tx < backend->local_rx + 10000);
+  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && backend->remote_tx < 0xffffffff);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
 
   *local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->local_rx, backend->local_tx);
