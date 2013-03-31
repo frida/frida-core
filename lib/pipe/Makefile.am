@@ -15,7 +15,7 @@ libzed_pipe_la_VALAFLAGS = \
 if OS_DARWIN
 libzed_pipe_glue_la_SOURCES = pipe-mach.c
 else
-libzed_pipe_glue_la_SOURCES = pipe-unix.c
+libzed_pipe_glue_la_SOURCES = pipe-posix.c
 endif
 
 AM_CPPFLAGS = \
