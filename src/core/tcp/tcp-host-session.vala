@@ -78,7 +78,7 @@ namespace Zed {
 			if (error != null)
 				throw error;
 
-			HostSession session = connection.get_proxy_sync (null, ObjectPath.HOST_SESSION);
+			HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
 
 			var entry = new Entry (0, connection, session);
 			entries.add (entry);
@@ -114,7 +114,7 @@ namespace Zed {
 			if (connection == null)
 				throw new IOError.TIMED_OUT ("timed out");
 
-			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
+			AgentSession session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
 
 			var entry = new Entry (id.handle, connection, session);
 			entries.add (entry);
@@ -178,4 +178,3 @@ namespace Zed {
 		}
 	}
 }
-

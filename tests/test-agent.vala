@@ -154,13 +154,8 @@ namespace Zed.AgentTest {
 
 			try {
 				connection = yield DBusConnection.new_for_stream (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
-			} catch (Error connection_error) {
-				assert_not_reached ();
-			}
-
-			try {
-				session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
-			} catch (Error get_proxy_error) {
+				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
+			} catch (Error dbus_error) {
 				assert_not_reached ();
 			}
 

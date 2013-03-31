@@ -144,7 +144,7 @@ namespace Winjector {
 				} catch (Error e) {
 					throw new IOError.FAILED (e.message);
 				}
-				proxy = connection.get_proxy_sync (null, WinjectorObjectPath.HELPER);
+				proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
 			}
 		}
 

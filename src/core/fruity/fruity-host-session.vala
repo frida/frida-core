@@ -177,7 +177,7 @@ namespace Zed {
 				throw new IOError.FAILED (e.message);
 			}
 
-			HostSession session = connection.get_proxy_sync (null, ObjectPath.HOST_SESSION);
+			HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
 
 			var entry = new Entry (0, client, connection, session);
 			entries.add (entry);
@@ -223,7 +223,7 @@ namespace Zed {
 				throw new IOError.FAILED (dbus_error.message);
 			}
 
-			AgentSession session = connection.get_proxy_sync (null, ObjectPath.AGENT_SESSION);
+			AgentSession session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
 
 			var entry = new Entry (id.handle, client, connection, session);
 			entries.add (entry);
