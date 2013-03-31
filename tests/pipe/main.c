@@ -8,7 +8,6 @@ main (int argc, char * argv[])
   ZedPipe * pipe;
   gchar c;
   GError * error = NULL;
-  gssize ret;
 
   g_thread_init_with_errorcheck_mutexes (NULL);
   g_type_init ();
@@ -35,8 +34,13 @@ main (int argc, char * argv[])
     {
       while (TRUE)
       {
-        ret = g_input_stream_read (g_io_stream_get_input_stream (G_IO_STREAM (pipe)), &c, sizeof (c), NULL, &error);
-        if (error != NULL)
+        ssize_t ret = g_input_stream_read (g_io_stream_get_input_stream (G_IO_STREAM (pipe)), &c, sizeof (c), NULL, &error);
+        if (ret == 0)
+        {
+          g_printerr ("g_input_stream_read: EOF\n");
+          break;
+        }
+        else if (error != NULL)
         {
           g_printerr ("g_input_stream_read failed: %s\n", error->message);
           break;
@@ -49,7 +53,7 @@ main (int argc, char * argv[])
       while (TRUE)
       {
         c = 'A' + g_random_int_range (0, 26);
-        ret = g_output_stream_write (g_io_stream_get_output_stream (G_IO_STREAM (pipe)), &c, sizeof (c), NULL, &error);
+        g_output_stream_write (g_io_stream_get_output_stream (G_IO_STREAM (pipe)), &c, sizeof (c), NULL, &error);
         if (error != NULL)
         {
           g_printerr ("g_output_stream_write failed: %s\n", error->message);
