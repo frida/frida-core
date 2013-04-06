@@ -115,7 +115,7 @@ AM_CPPFLAGS = \
 	-I $(top_builddir)/data \
 	-I $(top_builddir)/lib/interfaces \
 	-I $(top_builddir)/lib/pipe \
-	-I $(top_builddir)/ext/libgum/ext/udis86 \
+	-I $(top_builddir)/ext/gum/ext/udis86 \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"

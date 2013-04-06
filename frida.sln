@@ -17,17 +17,17 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winjector-helper-32", "src\
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "winjector-helper-64", "src\core\windows\winjector-helper-64.vcxproj", "{037E8466-F87B-486D-B6AD-FECB5740CE2C}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-32", "ext\libgum\gum-32.vcxproj", "{B31C7D42-54B6-49BB-B30C-11745C48B062}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-32", "ext\gum\gum-32.vcxproj", "{B31C7D42-54B6-49BB-B30C-11745C48B062}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-64", "ext\libgum\gum-64.vcxproj", "{DC30A450-95BC-4476-A2F9-45100562424E}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-64", "ext\gum\gum-64.vcxproj", "{DC30A450-95BC-4476-A2F9-45100562424E}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-tests", "ext\libgum\tests\gum-tests.vcxproj", "{B6CA6DE9-B48B-47C0-B738-87DC3C06655F}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gum-tests", "ext\gum\tests\gum-tests.vcxproj", "{B6CA6DE9-B48B-47C0-B738-87DC3C06655F}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "frida-agent-32", "lib\agent\frida-agent-32.vcxproj", "{F4F9AF1C-3111-4563-8066-8FAE8CBEFBDC}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "frida-agent-64", "lib\agent\frida-agent-64.vcxproj", "{D873638D-AA0D-4252-9334-456557A65D95}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\libgum\bindings\gumpp\gumpp.vcxproj", "{BB098FCF-D570-43FF-BB10-985189B2E1AB}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gumpp", "ext\gum\bindings\gumpp\gumpp.vcxproj", "{BB098FCF-D570-43FF-BB10-985189B2E1AB}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cloud-spy", "bindings\cloud-spy\cloud-spy.vcxproj", "{99C17854-578D-49E7-BB80-AEBE4B5D3BA6}"
 EndProject

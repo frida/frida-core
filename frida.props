@@ -5,11 +5,11 @@
     <OutDir>$(SolutionDir)bin\$(PlatformName)-$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)obj\$(PlatformName)-$(Configuration)\$(ProjectName)\</IntDir>
     <ValaCompiler>$(SolutionDir)ext\toolchain\bin\valac-0.14.exe</ValaCompiler>
-    <ValaFlags>--vapidir="$(SolutionDir)vapi" --vapidir="$(SolutionDir)ext\libgum\vapi" --vapidir="$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\share\vala\vapi"</ValaFlags>
+    <ValaFlags>--vapidir="$(SolutionDir)vapi" --vapidir="$(SolutionDir)ext\gum\vapi" --vapidir="$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\share\vala\vapi"</ValaFlags>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\libgum;$(SolutionDir)ext\libgum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.12\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir);$(SolutionDir)ext\gum;$(SolutionDir)ext\gum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.12\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4244;4305;4715;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>WIN32;_WINDOWS;WINVER=0x0501;_WIN32_WINNT=0x0501;GUM_STATIC;FFI_BUILDING;%(PreprocessorDefinitions)</PreprocessorDefinitions>

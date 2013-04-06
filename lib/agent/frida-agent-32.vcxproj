@@ -67,7 +67,7 @@
   </ItemDefinitionGroup>
   <Import Project="frida-agent-common.props" />
   <ItemGroup>
-    <ProjectReference Include="..\..\ext\libgum\gum-32.vcxproj">
+    <ProjectReference Include="..\..\ext\gum\gum-32.vcxproj">
       <Project>{b31c7d42-54b6-49bb-b30c-11745c48b062}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>

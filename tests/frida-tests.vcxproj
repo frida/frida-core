@@ -91,7 +91,7 @@
       <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -108,7 +108,7 @@
       <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -125,7 +125,7 @@
       <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -142,7 +142,7 @@
       <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\libgum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>

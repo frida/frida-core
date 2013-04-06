@@ -102,7 +102,7 @@ case "$PACKAGE_TARNAME" in
     enable_shared=no
     enable_static=yes
   ;;
-  'libgum')
+  'gum')
     if [ "$FRIDA_TARGET" = "android" ]; then
       LDFLAGS="$LDFLAGS -lz"
     fi

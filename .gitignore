@@ -30,7 +30,7 @@
 /configure
 /data/Makefile.in
 /depcomp
-/ext/libgum/
+/ext/gum/
 /install-sh
 /lib/Makefile.in
 /lib/agent/Makefile.in
