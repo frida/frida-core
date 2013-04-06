@@ -27,7 +27,7 @@ esac
 
 function sed_inplace ()
 {
-  if [ "$build_os" = "mac" ]; then
+  if [ "${build_os}" = "mac" ]; then
     sed -i "" $*
   else
     sed -i $*
@@ -86,7 +86,7 @@ function build_toolchain ()
 
 function make_toolchain_package ()
 {
-  local target_filename="$FRIDA_BUILD/toolchain-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
+  local target_filename="$FRIDA_BUILD/toolchain-${build_os}-$(date '+%Y%m%d').tar.bz2"
 
   local tooldir="$BUILDROOT/toolchain"
   rm -rf "$tooldir"
