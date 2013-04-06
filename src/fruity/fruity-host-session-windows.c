@@ -1,6 +1,6 @@
 #include "frida-core.h"
 
-#include "windows-icon-helpers.h"
+#include "../windows/icon-helpers.h"
 
 #include <setupapi.h>
 #include <devguid.h>

@@ -1,4 +1,4 @@
-#include "windows-icon-helpers.h"
+#include "icon-helpers.h"
 
 #include <psapi.h>
 #include <shellapi.h>

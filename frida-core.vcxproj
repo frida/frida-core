@@ -349,7 +349,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
     </ClCompile>
     <ClCompile Include="src\core\system-windows.c" />
-    <ClCompile Include="src\core\windows-icon-helpers.c">
+    <ClCompile Include="src\core\windows\icon-helpers.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\</ObjectFileName>
@@ -404,7 +404,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-core.h" />
-    <ClInclude Include="src\core\windows-icon-helpers.h" />
+    <ClInclude Include="src\core\windows\icon-helpers.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

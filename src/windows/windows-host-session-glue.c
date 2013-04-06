@@ -2,7 +2,7 @@
 
 #include "frida-core.h"
 
-#include "windows-icon-helpers.h"
+#include "icon-helpers.h"
 
 #include <shellapi.h>
 #include <shlobj.h>

@@ -44,7 +44,7 @@ backend_sources += \
 	$(srcdir)/linux/linux-host-session.vala \
 	$(srcdir)/linux/linjector.vala
 glue_sources += \
-	$(srcdir)/system-linux.c \
+	$(srcdir)/linux/system-linux.c \
 	$(srcdir)/linux/linjector-glue.c
 endif
 
@@ -57,7 +57,7 @@ backend_sources += \
 	$(srcdir)/darwin/darwin-host-session.vala \
 	$(srcdir)/darwin/fruitjector.vala
 glue_sources += \
-	$(srcdir)/system-darwin.m \
+	$(srcdir)/darwin/system-darwin.m \
 	$(srcdir)/darwin/darwin-host-session-glue.c \
 	$(srcdir)/darwin/fruitjector-glue.c
 endif

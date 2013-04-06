@@ -128,7 +128,7 @@
     <ClCompile Include="src\core\fruity\fruity-host-session-windows.c">
       <Filter>Source Files\core\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="src\core\windows-icon-helpers.c">
+    <ClCompile Include="src\core\windows\icon-helpers.c">
       <Filter>Source Files\core</Filter>
     </ClCompile>
     <ClCompile Include="src\core\windows\winjector-glue.c">
@@ -165,7 +165,7 @@
     <ClInclude Include="$(IntDir)frida-core.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\windows-icon-helpers.h">
+    <ClInclude Include="src\core\windows\icon-helpers.h">
       <Filter>Source Files\core</Filter>
     </ClInclude>
   </ItemGroup>
