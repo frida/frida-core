@@ -7,16 +7,34 @@ BUILDROOT="$FRIDA_BUILD/tmp-$FRIDA_TARGET"
 REPO_BASE_URL="git@gitorious.org:frida"
 REPO_SUFFIX=".git"
 
-function sed_inplace()
+build_os=$(uname -s | tr '[A-Z]' '[a-z]')
+
+case $build_os in
+  linux)
+    download_command="wget -O - -nv"
+    tar_stdin=""
+    ;;
+  darwin)
+    download_command="curl -sS"
+    tar_stdin="-"
+
+    build_os=mac
+    ;;
+  *)
+    echo "Could not determine build OS"
+    exit 1
+esac
+
+function sed_inplace ()
 {
-  if [ "$(uname)" = "Darwin" ]; then
+  if [ "$build_os" = "mac" ]; then
     sed -i "" $*
   else
     sed -i $*
   fi
 }
 
-function expand_target()
+function expand_target ()
 {
   case $1 in
     linux-x86_32)
@@ -45,6 +63,16 @@ function build_toolchain ()
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" >/dev/null || exit 1
 
+  build_tarball http://ftp.gnu.org/gnu/m4/m4-1.4.16.tar.gz
+  build_tarball http://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz
+  build_tarball http://ftp.gnu.org/gnu/automake/automake-1.13.1.tar.gz
+  pushd "$FRIDA_PREFIX/bin" >/dev/null || exit 1
+  rm aclocal
+  ln -s aclocal-1.13 aclocal
+  rm automake
+  ln -s automake-1.13 automake
+  popd >/dev/null
+  build_tarball http://gnuftp.uib.no/libtool/libtool-2.4.2.tar.gz
   build_module libffi $(expand_target $FRIDA_TARGET)
   build_module glib
   build_module vala
@@ -54,42 +82,22 @@ function build_toolchain ()
 
 function make_toolchain_package ()
 {
-  local previous_toolchain="$1"
   local target_filename="$FRIDA_BUILD/toolchain-$FRIDA_TARGET-$(date '+%Y%m%d').tar.bz2"
 
   local tooldir="$BUILDROOT/toolchain"
-
-  pushd "$BUILDROOT" >/dev/null || exit 1
-  rm -rf toolchain
-  tar jxf "$previous_toolchain" || exit 1
-  popd >/dev/null
-
-  pushd "$tooldir" >/dev/null || exit 1
-  rm -f \
-      bin/gdbus* \
-      bin/gio-* \
-      bin/glib-* \
-      bin/gobject-* \
-      bin/gsettings \
-      bin/gtester* \
-      bin/vala* \
-      share/aclocal/vala*
-  rm -rf \
-      share/glib-2.0 \
-      share/vala*
-  popd >/dev/null
+  rm -rf "$tooldir"
+  mkdir "$tooldir"
 
   pushd "$FRIDA_PREFIX" >/dev/null || exit 1
-  tar c \
-      bin/gdbus* \
-      bin/glib-compile-schemas \
-      bin/glib-genmarshal \
-      bin/glib-mkenums \
-      bin/vala* \
-      share/aclocal/vala* \
-      share/vala* \
-      | tar -C "$tooldir" -xf - || exit 1
-  strip -Sx "$tooldir/bin/"*
+  tar \
+      -c \
+      --exclude include \
+      --exclude lib \
+      --exclude share/doc \
+      --exclude share/emacs \
+      --exclude share/info \
+      --exclude share/man \
+      . | tar -C "$tooldir" -xf - || exit 1
   popd >/dev/null
 
   pushd "$BUILDROOT" >/dev/null || exit 1
@@ -147,6 +155,22 @@ function make_sdk_package ()
   popd >/dev/null
 
   rm -rf "$sdkdir"
+}
+
+function build_tarball ()
+{
+  url=$1
+  name=$(basename $url | sed -e 's,\.tar\.gz$,,')
+  if [ ! -d "$name" ]; then
+    echo "Building $name"
+    ${download_command} $url | tar -xz ${tar_stdin} || exit 1
+    pushd "$name" >/dev/null || exit 1
+    ./configure || exit 1
+    make -j8 || exit 1
+    make install || exit 1
+    popd >/dev/null
+    rm -f "${FRIDA_PREFIX}/config.cache"
+  fi
 }
 
 function build_module ()
@@ -285,11 +309,11 @@ function apply_fixups ()
 {
   for file in $(find "$FRIDA_PREFIX" -type f); do
     if grep -q "$FRIDA_PREFIX" $file; then
-      if echo "$file" | grep -Eq "\.la$"; then
+      if echo "$file" | grep -Eq "\\.la$|\\.pm$|aclocal.*|autoconf|autoheader|autom4te.*|automake.*|autoreconf|autoscan|autoupdate|ifnames|libtoolize"; then
         newname="$file.frida.in"
         mv "$file" "$newname"
         sed_inplace -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
-      elif echo "$file" | grep -Eq "\.pc$"; then
+      elif echo "$file" | grep -Eq "\\.pc$"; then
         sed_inplace -e "s,$FRIDA_PREFIX,\${frida_sdk_prefix},g" "$file"
       fi
     fi
@@ -305,14 +329,9 @@ case $1 in
     mkdir -p "$FRIDA_PREFIX/share/aclocal"
   ;;
   toolchain)
-    previous_toolchain=$2
-    if [ -z "$previous_toolchain" ]; then
-      echo "usage: $0 toolchain previous-toolchain.tar.bz2"
-      exit 1
-    fi
     build_toolchain
     apply_fixups
-    make_toolchain_package "$previous_toolchain"
+    make_toolchain_package
   ;;
   sdk)
     build_sdk
@@ -322,4 +341,3 @@ case $1 in
 esac
 
 echo "All done."
-
