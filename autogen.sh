@@ -27,6 +27,4 @@ result=$?
 
 popd &>/dev/null
 
-[ $result -ne 0 ] && exit $result
-
-./configure $*
+exit $result
