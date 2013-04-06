@@ -63,6 +63,8 @@ function build_toolchain ()
   mkdir -p "$BUILDROOT" || exit 1
   pushd "$BUILDROOT" >/dev/null || exit 1
 
+  export PATH="$FRIDA_PREFIX/bin":$PATH
+
   build_tarball http://ftp.gnu.org/gnu/m4/m4-1.4.16.tar.gz
   build_tarball http://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz
   build_tarball http://ftp.gnu.org/gnu/automake/automake-1.13.1.tar.gz
@@ -73,6 +75,7 @@ function build_toolchain ()
   ln -s automake-1.13 automake
   popd >/dev/null
   build_tarball http://gnuftp.uib.no/libtool/libtool-2.4.2.tar.gz
+  build_tarball http://pkgconfig.freedesktop.org/releases/pkg-config-0.28.tar.gz --with-internal-glib
   build_module libffi $(expand_target $FRIDA_TARGET)
   build_module glib
   build_module vala
@@ -160,12 +163,13 @@ function make_sdk_package ()
 function build_tarball ()
 {
   url=$1
+  shift
   name=$(basename $url | sed -e 's,\.tar\.gz$,,')
   if [ ! -d "$name" ]; then
     echo "Building $name"
     ${download_command} $url | tar -xz ${tar_stdin} || exit 1
     pushd "$name" >/dev/null || exit 1
-    ./configure || exit 1
+    ./configure $* || exit 1
     make -j8 || exit 1
     make install || exit 1
     popd >/dev/null
