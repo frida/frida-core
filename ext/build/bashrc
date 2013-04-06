@@ -79,7 +79,7 @@ case $FRIDA_TARGET in
     ;;
 esac
 
-local color=33
+color=33
 export PS1="\e[0;${color}m[\u@\h \w \e[m\e[1;${color}mfrida-${FRIDA_TARGET}\e[m\e[0;${color}m]\e[m\n\$ "
 
 export CC=""
