@@ -1,2 +1,2 @@
 [resource-compiler]
-namespace = Zed.Data.Winjector
+namespace = Frida.Data.Winjector

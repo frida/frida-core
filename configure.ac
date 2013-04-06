@@ -90,26 +90,26 @@ if test "x$enable_local_backends" = "xyes"; then
 fi
 AM_CONDITIONAL(ENABLE_LOCAL_BACKENDS, [test "x$enable_local_backends" = "xyes"])
 
-ZED_VALAFLAGS=
+FRIDA_VALAFLAGS=
 if test "x$enable_local_backends" = "xyes"; then
-  ZED_VALAFLAGS="$ZED_VALAFLAGS -D HAVE_LOCAL_BACKENDS"
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D HAVE_LOCAL_BACKENDS"
 fi
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
-  ZED_VALAFLAGS="$ZED_VALAFLAGS -D LINUX"
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D LINUX"
 fi
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
-  ZED_VALAFLAGS="$ZED_VALAFLAGS -D ANDROID"
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D ANDROID"
 fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
-  ZED_VALAFLAGS="$ZED_VALAFLAGS -D DARWIN"
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D DARWIN"
 fi
 if [[ "x$HAVE_MAC" = "xyes" ]]; then
-  ZED_VALAFLAGS="$ZED_VALAFLAGS -D MAC"
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D MAC"
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
-  ZED_VALAFLAGS="$ZED_VALAFLAGS -D IOS"
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D IOS"
 fi
-AC_SUBST(ZED_VALAFLAGS)
+AC_SUBST(FRIDA_VALAFLAGS)
 
 AC_ARG_ENABLE(server, [AC_HELP_STRING([--enable-server], [build server [default=yes]])],, [enable_server=yes])
 if test "x$enable_server" = "xyes" && test "x$enable_local_backends" = "xno"; then
@@ -128,20 +128,20 @@ AM_CONDITIONAL(ENABLE_SERVER, [test "x$enable_server" = "xyes"])
 
 GLIB_VERSION=2.26.0
 pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, gum-1.0"
-ZED_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg gum-1.0"
-PKG_CHECK_MODULES(ZED, [$pkg_modules])
+FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg gum-1.0"
+PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
 
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
-  ZED_LDFLAGS="$ZED_LDFLAGS -Wl,-framework -Wl,Foundation"
+  FRIDA_LDFLAGS="$FRIDA_LDFLAGS -Wl,-framework -Wl,Foundation"
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
-  ZED_LDFLAGS="$ZED_LDFLAGS -Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
+  FRIDA_LDFLAGS="$FRIDA_LDFLAGS -Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
 fi
 
-AC_SUBST(ZED_CFLAGS)
-AC_SUBST(ZED_LDFLAGS)
-AC_SUBST(ZED_LIBS)
-AC_SUBST(ZED_PACKAGES)
+AC_SUBST(FRIDA_CFLAGS)
+AC_SUBST(FRIDA_LDFLAGS)
+AC_SUBST(FRIDA_LIBS)
+AC_SUBST(FRIDA_PACKAGES)
 
 AC_CHECK_HEADERS([sys/user.h])
 
