@@ -29,7 +29,7 @@ frida_server_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 if OS_MAC
 frida_server_LDFLAGS += \
-	-sectcreate __TEXT __info_plist "$(srcdir)/frida-server.plist"
+	-sectcreate __TEXT __info_plist "$(srcdir)/server.plist"
 endif
 
 backend_sources = $(NULL)
