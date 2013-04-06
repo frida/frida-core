@@ -186,7 +186,7 @@ export VALAC="${FRIDA_TOOLROOT}/bin/valac-0.14 --vapidir=\"${FRIDA_TOOLROOT}/sha
 [ ! -d "${FRIDA_PREFIX}/share/aclocal}" ] && mkdir -p "${FRIDA_PREFIX}/share/aclocal"
 [ ! -d "${FRIDA_PREFIX}/lib}" ] && mkdir -p "${FRIDA_PREFIX}/lib"
 
-toolchain_version=20130209
+toolchain_version=20130406
 case $FRIDA_TARGET in
   android)
     sdk_version=20120313
@@ -204,7 +204,7 @@ esac
 
 if [ ! -d "${FRIDA_BUILD}/toolchain" ]; then
   echo "Downloading and deploying toolchain..."
-  ${download_command} "http://frida-ire.googlecode.com/files/toolchain-${build_os}-${toolchain_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj ${tar_stdin} || exit 1
+  ${download_command} "http://ospy.org/toolchain-${build_os}-${toolchain_version}.tar.bz2" | tar -C "${FRIDA_BUILD}" -xj ${tar_stdin} || exit 1
 fi
 
 if [ ! -d "${FRIDA_BUILD}/sdk-${FRIDA_TARGET}" ]; then
