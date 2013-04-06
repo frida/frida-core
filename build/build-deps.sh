@@ -50,7 +50,7 @@ function expand_target ()
       echo i686-apple-darwin
     ;;
     mac64)
-      echo x86_64-apple-darwin12.2.1
+      echo x86_64-apple-darwin12.3.0
     ;;
     ios)
       echo arm-apple-darwin
