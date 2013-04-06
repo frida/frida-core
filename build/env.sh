@@ -10,6 +10,6 @@ case $# in
     ;;
 esac
 
-cd $(dirname $0)/../../
+cd $(dirname $0)/../
 
-bash --rcfile ext/build/bashrc
+bash --rcfile build/bashrc
