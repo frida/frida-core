@@ -64,6 +64,7 @@ function build_toolchain ()
   pushd "$BUILDROOT" >/dev/null || exit 1
 
   export PATH="$FRIDA_PREFIX/bin":$PATH
+  export PKG_CONFIG="$FRIDA_PREFIX/bin/pkg-config"
 
   build_tarball http://ftp.gnu.org/gnu/m4/m4-1.4.16.tar.gz
   build_tarball http://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz
