@@ -83,7 +83,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -92,7 +92,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -101,7 +101,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -110,7 +110,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -180,44 +180,44 @@ REM. &gt; "$(IntDir)data\winjector.stamp"
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
     </CustomBuild>
-    <CustomBuild Include="src\core\host-session-service.vala">
+    <CustomBuild Include="src\host-session-service.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+mkdir "$(IntDir)src" 2&gt;NUL
+"$(ValaCompiler)" lib/interfaces/session.vala src/host-session-service.vala src/system.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\session-manager.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+mkdir "$(IntDir)src" 2&gt;NUL
+"$(ValaCompiler)" lib/interfaces/session.vala src/host-session-service.vala src/system.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\session-manager.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+mkdir "$(IntDir)src" 2&gt;NUL
+"$(ValaCompiler)" lib/interfaces/session.vala src/host-session-service.vala src/system.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\session-manager.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+mkdir "$(IntDir)src" 2&gt;NUL
+"$(ValaCompiler)" lib/interfaces/session.vala src/host-session-service.vala src/system.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\session-manager.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
     <None Include="lib\interfaces\session.vala" />
-    <None Include="src\core\fruity\fruity-client.vala" />
-    <None Include="src\core\fruity\fruity-host-session.vala" />
-    <None Include="src\core\fruity\fruity-property-list.vala" />
-    <None Include="src\core\tcp\tcp-host-session.vala" />
-    <None Include="src\core\windows\windows-host-session.vala" />
-    <None Include="src\core\windows\winjector.vala" />
-    <None Include="src\core\session-manager.vala" />
+    <None Include="src\fruity\fruity-client.vala" />
+    <None Include="src\fruity\fruity-host-session.vala" />
+    <None Include="src\fruity\fruity-property-list.vala" />
+    <None Include="src\tcp\tcp-host-session.vala" />
+    <None Include="src\windows\windows-host-session.vala" />
+    <None Include="src\windows\winjector.vala" />
+    <None Include="src\session-manager.vala" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)lib\interfaces\session.c">
@@ -230,105 +230,105 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)lib\interfaces\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)lib\interfaces\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\host-session-service.c">
+    <ClCompile Include="$(IntDir)src\host-session-service.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\session-manager.c">
+    <ClCompile Include="$(IntDir)src\session-manager.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\system.c">
+    <ClCompile Include="$(IntDir)src\system.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\fruity\fruity-client.c">
+    <ClCompile Include="$(IntDir)src\fruity\fruity-client.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\fruity\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\fruity\fruity-host-session.c">
+    <ClCompile Include="$(IntDir)src\fruity\fruity-host-session.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\fruity\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\fruity\fruity-property-list.c">
+    <ClCompile Include="$(IntDir)src\fruity\fruity-property-list.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\fruity\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\tcp\tcp-host-session.c">
+    <ClCompile Include="$(IntDir)src\tcp\tcp-host-session.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\tcp\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\tcp\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\tcp\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\tcp\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\tcp\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\tcp\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\tcp\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\tcp\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\windows\windows-host-session.c">
+    <ClCompile Include="$(IntDir)src\windows\windows-host-session.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\windows\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\windows\winjector.c">
+    <ClCompile Include="$(IntDir)src\windows\winjector.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\windows\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\core\windows\winjector-types.c">
+    <ClCompile Include="$(IntDir)src\windows\winjector-types.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\windows\</ObjectFileName>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-agent.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
@@ -342,30 +342,30 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="src\core\fruity\fruity-host-session-windows.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\fruity\</ObjectFileName>
+    <ClCompile Include="src\fruity\fruity-host-session-windows.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\fruity\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\fruity\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="src\core\system-windows.c" />
-    <ClCompile Include="src\core\windows\icon-helpers.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\</ObjectFileName>
+    <ClCompile Include="src\windows\system-windows.c" />
+    <ClCompile Include="src\windows\icon-helpers.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="src\core\windows\windows-host-session-glue.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\windows\</ObjectFileName>
+    <ClCompile Include="src\windows\windows-host-session-glue.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\windows\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="src\core\windows\winjector-glue.c">
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\windows\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\windows\</ObjectFileName>
+    <ClCompile Include="src\windows\winjector-glue.c">
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\windows\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\windows\</ObjectFileName>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -385,7 +385,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="src\core\windows\winjector-helper-32.vcxproj">
+    <ProjectReference Include="src\windows\winjector-helper-32.vcxproj">
       <Project>{e0ac03f2-f077-4ba7-88dd-bbe95b4e4ef0}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -393,7 +393,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="src\core\windows\winjector-helper-64.vcxproj">
+    <ProjectReference Include="src\windows\winjector-helper-64.vcxproj">
       <Project>{037e8466-f87b-486d-b6ad-fecb5740ce2c}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -404,7 +404,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-core.h" />
-    <ClInclude Include="src\core\windows\icon-helpers.h" />
+    <ClInclude Include="src\windows\icon-helpers.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
