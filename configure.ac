@@ -12,12 +12,14 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AM_MAINTAINER_MODE
 
+AM_PROG_CC_C_O
 AC_PROG_CXX
 AC_PROG_OBJC
 AM_PROG_AS
+AM_PROG_AR
 AM_PROG_VALAC([0.10.0])
-AC_PROG_LIBTOOL
 AC_PROG_INSTALL
+LT_INIT
 
 HAVE_I386=no
 HAVE_ARM=no
@@ -35,8 +37,8 @@ fi
 if [[ "$HAVE_ARM" = "yes" ]]; then
   AC_DEFINE(HAVE_ARM, 1, [Define to 1 if target is ARM based.])
 fi
-AM_CONDITIONAL(ARCH_I386, test "$HAVE_I386" = "yes")
-AM_CONDITIONAL(ARCH_ARM, test "$HAVE_ARM" = "yes")
+AM_CONDITIONAL(ARCH_I386, [test "$HAVE_I386" = "yes"])
+AM_CONDITIONAL(ARCH_ARM, [test "$HAVE_ARM" = "yes"])
 
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
@@ -49,8 +51,9 @@ fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   AC_DEFINE(HAVE_DARWIN, 1, [Define to 1 if OS is Darwin based.])
 fi
-AM_CONDITIONAL(OS_LINUX, test "x$HAVE_LINUX" = "xyes")
-AM_CONDITIONAL(OS_DARWIN, test "x$HAVE_DARWIN" = "xyes")
+echo "Linux=$HAVE_LINUX"
+AM_CONDITIONAL(OS_LINUX, [test "x$HAVE_LINUX" = "xyes"])
+AM_CONDITIONAL(OS_DARWIN, [test "x$HAVE_DARWIN" = "xyes"])
 
 case $host_os in
   darwin*)
@@ -74,17 +77,17 @@ esac
 if [[ "x$HAVE_MAC" = "xyes" ]]; then
   AC_DEFINE(HAVE_MAC, 1, [Define to 1 if OS is Mac.])
 fi
-AM_CONDITIONAL(OS_MAC, test "x$HAVE_MAC" = "xyes")
+AM_CONDITIONAL(OS_MAC, [test "x$HAVE_MAC" = "xyes"])
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
   AC_DEFINE(HAVE_ANDROID, 1, [Define to 1 if OS is Android based.])
 fi
-AM_CONDITIONAL(OS_ANDROID, test "x$HAVE_ANDROID" = "xyes")
+AM_CONDITIONAL(OS_ANDROID, [test "x$HAVE_ANDROID" = "xyes"])
 
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
   AC_DEFINE(HAVE_IOS, 1, [Define to 1 if OS is iOS.])
 fi
 
-AM_CONDITIONAL(OS_IOS, test "x$HAVE_IOS" = "xyes")
+AM_CONDITIONAL(OS_IOS, [test "x$HAVE_IOS" = "xyes"])
 
 AC_ARG_ENABLE(local_backends, [AC_HELP_STRING([--enable-local-backends], [enable local backends [default=yes]])],, [enable_local_backends=yes])
 if test "x$enable_local_backends" = "xyes"; then

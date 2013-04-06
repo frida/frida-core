@@ -8,10 +8,10 @@ SUBDIRS = \
 	tests
 
 if OS_ANDROID
-RPFX := /data/local/tmp
-MKDIR := busybox mkdir
-RM := busybox rm
-DEBUG_PORT := 5042
+RPFX = /data/local/tmp
+MKDIR = busybox mkdir
+RM = busybox rm
+DEBUG_PORT = 5042
 
 check: all
 	adb shell "${MKDIR} -p \"${RPFX}/tests/\" \"${RPFX}/lib/frida/\""
@@ -40,9 +40,9 @@ $(top_builddir)/tests/android-gdb.setup: $(top_builddir)/tests/frida-tests
 endif
 
 if OS_IOS
-RURL := root@${IOS_IPADDR}
-RPFX := ${prefix}
-RSYNC := rsync -Lz
+RURL = root@${IOS_IPADDR}
+RPFX = ${prefix}
+RSYNC = rsync -Lz
 
 deploy: all
 	ssh "${RURL}" "mkdir -p \"${RPFX}/sbin/\""

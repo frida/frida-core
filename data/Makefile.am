@@ -1,18 +1,18 @@
 if ENABLE_LOCAL_BACKENDS
 
 if ARCH_ARM
-RESOURCE_COMPILER := $(top_srcdir)/build/toolchain/bin/resource-compiler
+RESOURCE_COMPILER = $(top_srcdir)/build/toolchain/bin/resource-compiler
 else
-RESOURCE_COMPILER := $(top_builddir)/tools/resource-compiler
+RESOURCE_COMPILER = $(top_builddir)/tools/resource-compiler
 endif
 
 if OS_LINUX
-soext := .so
+soext = .so
 endif
 if OS_DARWIN
-soext := .dylib
+soext = .dylib
 endif
-AGENT := $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
+AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
 
 CLEANFILES = \
 	$(builddir)/frida-data-agent.vapi \
