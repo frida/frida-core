@@ -1,3 +1,4 @@
+#if LINUX
 using Gee;
 
 namespace Frida {
@@ -162,3 +163,4 @@ namespace Frida {
 		}
 	}
 }
+#endif

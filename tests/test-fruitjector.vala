@@ -1,3 +1,4 @@
+#if DARWIN
 namespace Frida.FruitjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Fruitjector/inject", () => {
@@ -152,3 +153,4 @@ namespace Frida.FruitjectorTest {
 		}
 	}
 }
+#endif

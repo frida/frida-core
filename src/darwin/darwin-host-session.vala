@@ -1,3 +1,4 @@
+#if DARWIN
 namespace Frida {
 	public class DarwinHostSessionBackend : Object, HostSessionBackend {
 		private DarwinHostSessionProvider local_provider;
@@ -160,3 +161,4 @@ namespace Frida {
 		public extern void _free_instance (void * instance);
 	}
 }
+#endif

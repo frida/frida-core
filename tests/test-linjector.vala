@@ -1,3 +1,4 @@
+#if LINUX
 namespace Frida.LinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Linjector/inject", () => {
@@ -152,3 +153,4 @@ namespace Frida.LinjectorTest {
 		}
 	}
 }
+#endif

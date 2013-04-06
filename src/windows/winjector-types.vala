@@ -1,3 +1,4 @@
+#if WINDOWS
 namespace Frida {
 	[DBus (name = "org.boblycat.frida.WinjectorHelper")]
 	public interface WinjectorHelper : Object {
@@ -9,3 +10,4 @@ namespace Frida {
 		public const string HELPER = "/org/boblycat/frida/WinjectorHelper";
 	}
 }
+#endif

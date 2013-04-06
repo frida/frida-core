@@ -78,6 +78,8 @@
 /src/fruity/fruity-host-session.c
 /src/fruity/fruity-property-list.c
 /src/host-session-service.c
+/src/linux/linjector.c
+/src/linux/linux-host-session.c
 /src/server.c
 /src/system.c
 /src/tcp/tcp-host-session.c
@@ -100,6 +102,7 @@
 /tests/test-agent.c
 /tests/test-fruitjector.c
 /tests/test-host-session.c
+/tests/test-linjector.c
 /tests/test-suite.log
 /tests/test-system.c
 /tools/Makefile

@@ -1,3 +1,4 @@
+#if WINDOWS
 namespace Frida.WinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Winjector/inject/x86", () => {
@@ -129,3 +130,4 @@ namespace Frida.WinjectorTest {
 		}
 	}
 }
+#endif

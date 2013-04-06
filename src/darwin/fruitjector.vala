@@ -1,3 +1,4 @@
+#if DARWIN
 using Gee;
 
 namespace Frida {
@@ -140,3 +141,4 @@ namespace Frida {
 		}
 	}
 }
+#endif

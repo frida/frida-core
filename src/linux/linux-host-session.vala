@@ -1,3 +1,4 @@
+#if LINUX
 namespace Frida {
 	public class LinuxHostSessionBackend : Object, HostSessionBackend {
 		private LinuxHostSessionProvider local_provider;
@@ -96,3 +97,4 @@ namespace Frida {
 		}
 	}
 }
+#endif

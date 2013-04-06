@@ -1,3 +1,4 @@
+#if WINDOWS
 using Gee;
 
 namespace Frida {
@@ -435,3 +436,4 @@ namespace Frida {
 		}
 	}
 }
+#endif
