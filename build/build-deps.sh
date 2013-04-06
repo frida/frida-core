@@ -314,7 +314,11 @@ function apply_fixups ()
 {
   for file in $(find "$FRIDA_PREFIX" -type f); do
     if grep -q "$FRIDA_PREFIX" $file; then
-      if echo "$file" | grep -Eq "\\.la$|\\.pm$|aclocal.*|autoconf|autoheader|autom4te.*|automake.*|autoreconf|autoscan|autoupdate|ifnames|libtoolize"; then
+      if echo "$file" | grep -Eq "\\.pm$|aclocal.*|autoconf|autoheader|autom4te.*|automake.*|autoreconf|autoscan|autoupdate|ifnames|libtoolize"; then
+        newname="$file.frida.in"
+        mv "$file" "$newname"
+        sed_inplace -e "s,$FRIDA_PREFIX,@FRIDA_TOOLROOT@,g" "$newname"
+      elif echo "$file" | grep -Eq "\\.la$"; then
         newname="$file.frida.in"
         mv "$file" "$newname"
         sed_inplace -e "s,$FRIDA_PREFIX,@FRIDA_SDKROOT@,g" "$newname"
