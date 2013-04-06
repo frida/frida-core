@@ -1,6 +1,6 @@
 using Gee;
 
-namespace Zed {
+namespace Frida {
 	public class Linjector : Object {
 		public signal void uninjected (uint id);
 
@@ -92,7 +92,7 @@ namespace Zed {
 			}
 
 			public TemporaryFile.from_stream (string name, InputStream istream) throws IOError {
-				this.file = File.new_for_path (Path.build_filename (Environment.get_tmp_dir (), "zed-%p-%u-%s".printf (this, Random.next_int (), name)));
+				this.file = File.new_for_path (Path.build_filename (Environment.get_tmp_dir (), "frida-%p-%u-%s".printf (this, Random.next_int (), name)));
 
 				try {
 					var ostream = file.create (FileCreateFlags.NONE, null);

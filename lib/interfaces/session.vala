@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	[DBus (name = "org.boblycat.frida.HostSession")]
 	public interface HostSession : Object {
 		public abstract async HostProcessInfo[] enumerate_processes () throws IOError;

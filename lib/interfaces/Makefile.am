@@ -1,13 +1,13 @@
-noinst_LTLIBRARIES = libzed-interfaces.la
+noinst_LTLIBRARIES = libfrida-interfaces.la
 
-libzed_interfaces_la_SOURCES = \
+libfrida_interfaces_la_SOURCES = \
 	session.vala
-libzed_interfaces_la_VALAFLAGS = \
-	--vapi=zed-interfaces.vapi \
-	--library=zed-interfaces \
-	--header=zed-interfaces.h \
-	@ZED_PACKAGES@
+libfrida_interfaces_la_VALAFLAGS = \
+	--vapi=frida-interfaces.vapi \
+	--library=frida-interfaces \
+	--header=frida-interfaces.h \
+	@FRIDA_PACKAGES@
 
 AM_CPPFLAGS = \
-	$(ZED_CFLAGS) \
+	$(FRIDA_CFLAGS) \
 	-w

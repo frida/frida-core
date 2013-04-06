@@ -1,23 +1,23 @@
-noinst_LTLIBRARIES = libzed-pipe.la libzed-pipe-glue.la
+noinst_LTLIBRARIES = libfrida-pipe.la libfrida-pipe-glue.la
 
-libzed_pipe_la_SOURCES = \
+libfrida_pipe_la_SOURCES = \
 	pipe.vala
-libzed_pipe_la_CFLAGS = \
+libfrida_pipe_la_CFLAGS = \
 	-w
-libzed_pipe_la_LIBADD = \
-	$(builddir)/libzed-pipe-glue.la \
-	$(ZED_LIBS)
-libzed_pipe_la_VALAFLAGS = \
-	--library=zed-pipe \
-	--header=zed-pipe.h \
-	@ZED_PACKAGES@
+libfrida_pipe_la_LIBADD = \
+	$(builddir)/libfrida-pipe-glue.la \
+	$(FRIDA_LIBS)
+libfrida_pipe_la_VALAFLAGS = \
+	--library=frida-pipe \
+	--header=frida-pipe.h \
+	@FRIDA_PACKAGES@
 
 if OS_DARWIN
-libzed_pipe_glue_la_SOURCES = pipe-mach.c
+libfrida_pipe_glue_la_SOURCES = pipe-mach.c
 else
-libzed_pipe_glue_la_SOURCES = pipe-posix.c
+libfrida_pipe_glue_la_SOURCES = pipe-posix.c
 endif
 
 AM_CPPFLAGS = \
-	$(ZED_CFLAGS) \
+	$(FRIDA_CFLAGS) \
 	-I $(top_builddir)/lib/interfaces

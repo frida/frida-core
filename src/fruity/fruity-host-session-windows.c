@@ -1,19 +1,19 @@
-#include "zed-core.h"
+#include "frida-core.h"
 
 #include "windows-icon-helpers.h"
 
 #include <setupapi.h>
 #include <devguid.h>
 
-typedef struct _ZedMobileDeviceInfo ZedMobileDeviceInfo;
-typedef struct _ZedImageDeviceInfo ZedImageDeviceInfo;
+typedef struct _ZedMobileDeviceInfo FridaMobileDeviceInfo;
+typedef struct _ZedImageDeviceInfo FridaImageDeviceInfo;
 
-typedef struct _ZedFindMobileDeviceContext ZedFindMobileDeviceContext;
-typedef struct _ZedFindImageDeviceContext ZedFindImageDeviceContext;
+typedef struct _ZedFindMobileDeviceContext FridaFindMobileDeviceContext;
+typedef struct _ZedFindImageDeviceContext FridaFindImageDeviceContext;
 
-typedef struct _ZedDeviceInfo ZedDeviceInfo;
+typedef struct _ZedDeviceInfo FridaDeviceInfo;
 
-typedef gboolean (* ZedEnumerateDeviceFunc) (const ZedDeviceInfo * device_info, gpointer user_data);
+typedef gboolean (* FridaEnumerateDeviceFunc) (const FridaDeviceInfo * device_info, gpointer user_data);
 
 struct _ZedMobileDeviceInfo
 {
@@ -29,13 +29,13 @@ struct _ZedImageDeviceInfo
 struct _ZedFindMobileDeviceContext
 {
   const WCHAR * udid;
-  ZedMobileDeviceInfo * mobile_device;
+  FridaMobileDeviceInfo * mobile_device;
 };
 
 struct _ZedFindImageDeviceContext
 {
   const WCHAR * location;
-  ZedImageDeviceInfo * image_device;
+  FridaImageDeviceInfo * image_device;
 };
 
 struct _ZedDeviceInfo
@@ -49,35 +49,35 @@ struct _ZedDeviceInfo
   PSP_DEVINFO_DATA device_info_data;
 };
 
-static ZedMobileDeviceInfo * find_mobile_device_by_udid (const WCHAR * udid);
-static ZedImageDeviceInfo * find_image_device_by_location (const WCHAR * location);
+static FridaMobileDeviceInfo * find_mobile_device_by_udid (const WCHAR * udid);
+static FridaImageDeviceInfo * find_image_device_by_location (const WCHAR * location);
 
-static gboolean compare_udid_and_create_mobile_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data);
-static gboolean compare_location_and_create_image_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data);
+static gboolean compare_udid_and_create_mobile_device_info_if_matching (const FridaDeviceInfo * device_info, gpointer user_data);
+static gboolean compare_location_and_create_image_device_info_if_matching (const FridaDeviceInfo * device_info, gpointer user_data);
 
-ZedMobileDeviceInfo * zed_mobile_device_info_new (WCHAR * location);
-void zed_mobile_device_info_free (ZedMobileDeviceInfo * mdev);
+FridaMobileDeviceInfo * frida_mobile_device_info_new (WCHAR * location);
+void frida_mobile_device_info_free (FridaMobileDeviceInfo * mdev);
 
-ZedImageDeviceInfo * zed_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url);
-void zed_image_device_info_free (ZedImageDeviceInfo * idev);
+FridaImageDeviceInfo * frida_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url);
+void frida_image_device_info_free (FridaImageDeviceInfo * idev);
 
-static void zed_foreach_usb_device (const GUID * guid, ZedEnumerateDeviceFunc func, gpointer user_data);
+static void frida_foreach_usb_device (const GUID * guid, FridaEnumerateDeviceFunc func, gpointer user_data);
 
-static WCHAR * zed_read_device_registry_string_property (HANDLE info_set, SP_DEVINFO_DATA * info_data, DWORD prop_id);
-static WCHAR * zed_read_registry_string (HKEY key, WCHAR * value_name);
-static WCHAR * zed_read_registry_multi_string (HKEY key, WCHAR * value_name);
-static gpointer zed_read_registry_value (HKEY key, WCHAR * value_name, DWORD expected_type);
+static WCHAR * frida_read_device_registry_string_property (HANDLE info_set, SP_DEVINFO_DATA * info_data, DWORD prop_id);
+static WCHAR * frida_read_registry_string (HKEY key, WCHAR * value_name);
+static WCHAR * frida_read_registry_multi_string (HKEY key, WCHAR * value_name);
+static gpointer frida_read_registry_value (HKEY key, WCHAR * value_name, DWORD expected_type);
 
 static GUID GUID_APPLE_USB = { 0xF0B32BE3, 0x6678, 0x4879, 0x92, 0x30, 0x0E4, 0x38, 0x45, 0xD8, 0x05, 0xEE };
 
 void
-_zed_fruity_host_session_provider_extract_details_for_device_with_udid (const char * udid, char ** name, ZedImageData ** icon, GError ** error)
+_frida_fruity_host_session_provider_extract_details_for_device_with_udid (const char * udid, char ** name, FridaImageData ** icon, GError ** error)
 {
   gboolean result = FALSE;
   WCHAR * udid_utf16 = NULL;
-  ZedMobileDeviceInfo * mdev = NULL;
-  ZedImageDeviceInfo * idev = NULL;
-  ZedImageData * idev_icon;
+  FridaMobileDeviceInfo * mdev = NULL;
+  FridaImageDeviceInfo * idev = NULL;
+  FridaImageData * idev_icon;
 
   udid_utf16 = (WCHAR *) g_utf8_to_utf16 (udid, -1, NULL, NULL, NULL);
 
@@ -89,7 +89,7 @@ _zed_fruity_host_session_provider_extract_details_for_device_with_udid (const ch
   if (idev == NULL)
     goto beach;
 
-  idev_icon = _zed_image_data_from_resource_url (idev->icon_url, ZED_ICON_SMALL);
+  idev_icon = _frida_image_data_from_resource_url (idev->icon_url, FRIDA_ICON_SMALL);
   if (idev_icon == NULL)
     goto beach;
 
@@ -101,41 +101,41 @@ beach:
   if (!result)
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Failed to extract details for device by UDID");
 
-  zed_image_device_info_free (idev);
-  zed_mobile_device_info_free (mdev);
+  frida_image_device_info_free (idev);
+  frida_mobile_device_info_free (mdev);
   g_free (udid_utf16);
 }
 
-static ZedMobileDeviceInfo *
+static FridaMobileDeviceInfo *
 find_mobile_device_by_udid (const WCHAR * udid)
 {
-  ZedFindMobileDeviceContext ctx;
+  FridaFindMobileDeviceContext ctx;
 
   ctx.udid = udid;
   ctx.mobile_device = NULL;
 
-  zed_foreach_usb_device (&GUID_APPLE_USB, compare_udid_and_create_mobile_device_info_if_matching, &ctx);
+  frida_foreach_usb_device (&GUID_APPLE_USB, compare_udid_and_create_mobile_device_info_if_matching, &ctx);
 
   return ctx.mobile_device;
 }
 
-static ZedImageDeviceInfo *
+static FridaImageDeviceInfo *
 find_image_device_by_location (const WCHAR * location)
 {
-  ZedFindImageDeviceContext ctx;
+  FridaFindImageDeviceContext ctx;
 
   ctx.location = location;
   ctx.image_device = NULL;
 
-  zed_foreach_usb_device (&GUID_DEVCLASS_IMAGE, compare_location_and_create_image_device_info_if_matching, &ctx);
+  frida_foreach_usb_device (&GUID_DEVCLASS_IMAGE, compare_location_and_create_image_device_info_if_matching, &ctx);
 
   return ctx.image_device;
 }
 
 static gboolean
-compare_udid_and_create_mobile_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data)
+compare_udid_and_create_mobile_device_info_if_matching (const FridaDeviceInfo * device_info, gpointer user_data)
 {
-  ZedFindMobileDeviceContext * ctx = (ZedFindMobileDeviceContext *) user_data;
+  FridaFindMobileDeviceContext * ctx = (FridaFindMobileDeviceContext *) user_data;
   WCHAR * udid, * location;
 
   udid = wcsrchr (device_info->instance_id, L'\\');
@@ -147,7 +147,7 @@ compare_udid_and_create_mobile_device_info_if_matching (const ZedDeviceInfo * de
     goto keep_looking;
 
   location = (WCHAR *) g_memdup (device_info->location, ((guint) wcslen (device_info->location) + 1) * sizeof (WCHAR));
-  ctx->mobile_device = zed_mobile_device_info_new (location);
+  ctx->mobile_device = frida_mobile_device_info_new (location);
 
   return FALSE;
 
@@ -156,9 +156,9 @@ keep_looking:
 }
 
 static gboolean
-compare_location_and_create_image_device_info_if_matching (const ZedDeviceInfo * device_info, gpointer user_data)
+compare_location_and_create_image_device_info_if_matching (const FridaDeviceInfo * device_info, gpointer user_data)
 {
-  ZedFindImageDeviceContext * ctx = (ZedFindImageDeviceContext *) user_data;
+  FridaFindImageDeviceContext * ctx = (FridaFindImageDeviceContext *) user_data;
   HKEY devkey = (HKEY) INVALID_HANDLE_VALUE;
   WCHAR * friendly_name = NULL;
   WCHAR * icon_url = NULL;
@@ -170,15 +170,15 @@ compare_location_and_create_image_device_info_if_matching (const ZedDeviceInfo *
   if (devkey == INVALID_HANDLE_VALUE)
     goto keep_looking;
 
-  friendly_name = zed_read_registry_string (devkey, L"FriendlyName");
+  friendly_name = frida_read_registry_string (devkey, L"FriendlyName");
   if (friendly_name == NULL)
     goto keep_looking;
 
-  icon_url = zed_read_registry_multi_string (devkey, L"Icons");
+  icon_url = frida_read_registry_multi_string (devkey, L"Icons");
   if (icon_url == NULL)
     goto keep_looking;
 
-  ctx->image_device = zed_image_device_info_new (friendly_name, icon_url);
+  ctx->image_device = frida_image_device_info_new (friendly_name, icon_url);
 
   RegCloseKey (devkey);
   return FALSE;
@@ -191,19 +191,19 @@ keep_looking:
   return TRUE;
 }
 
-ZedMobileDeviceInfo *
-zed_mobile_device_info_new (WCHAR * location)
+FridaMobileDeviceInfo *
+frida_mobile_device_info_new (WCHAR * location)
 {
-  ZedMobileDeviceInfo * mdev;
+  FridaMobileDeviceInfo * mdev;
 
-  mdev = g_new (ZedMobileDeviceInfo, 1);
+  mdev = g_new (FridaMobileDeviceInfo, 1);
   mdev->location = location;
 
   return mdev;
 }
 
 void
-zed_mobile_device_info_free (ZedMobileDeviceInfo * mdev)
+frida_mobile_device_info_free (FridaMobileDeviceInfo * mdev)
 {
   if (mdev == NULL)
     return;
@@ -212,12 +212,12 @@ zed_mobile_device_info_free (ZedMobileDeviceInfo * mdev)
   g_free (mdev);
 }
 
-ZedImageDeviceInfo *
-zed_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url)
+FridaImageDeviceInfo *
+frida_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url)
 {
-  ZedImageDeviceInfo * idev;
+  FridaImageDeviceInfo * idev;
 
-  idev = g_new (ZedImageDeviceInfo, 1);
+  idev = g_new (FridaImageDeviceInfo, 1);
   idev->friendly_name = friendly_name;
   idev->icon_url = icon_url;
 
@@ -225,7 +225,7 @@ zed_image_device_info_new (WCHAR * friendly_name, WCHAR * icon_url)
 }
 
 void
-zed_image_device_info_free (ZedImageDeviceInfo * idev)
+frida_image_device_info_free (FridaImageDeviceInfo * idev)
 {
   if (idev == NULL)
     return;
@@ -236,7 +236,7 @@ zed_image_device_info_free (ZedImageDeviceInfo * idev)
 }
 
 static void
-zed_foreach_usb_device (const GUID * guid, ZedEnumerateDeviceFunc func, gpointer user_data)
+frida_foreach_usb_device (const GUID * guid, FridaEnumerateDeviceFunc func, gpointer user_data)
 {
   HANDLE info_set;
   gboolean carry_on = TRUE;
@@ -253,7 +253,7 @@ zed_foreach_usb_device (const GUID * guid, ZedEnumerateDeviceFunc func, gpointer
     DWORD detail_size;
     SP_DEVICE_INTERFACE_DETAIL_DATA_W * detail_data = NULL;
     BOOL success;
-    ZedDeviceInfo device_info = { 0, };
+    FridaDeviceInfo device_info = { 0, };
     DWORD instance_id_size;
 
     iface_data.cbSize = sizeof (iface_data);
@@ -282,9 +282,9 @@ zed_foreach_usb_device (const GUID * guid, ZedEnumerateDeviceFunc func, gpointer
     if (!success)
       goto skip_device;
 
-    device_info.friendly_name = zed_read_device_registry_string_property (info_set, &info_data, SPDRP_FRIENDLYNAME);
+    device_info.friendly_name = frida_read_device_registry_string_property (info_set, &info_data, SPDRP_FRIENDLYNAME);
 
-    device_info.location = zed_read_device_registry_string_property (info_set, &info_data, SPDRP_LOCATION_INFORMATION);
+    device_info.location = frida_read_device_registry_string_property (info_set, &info_data, SPDRP_LOCATION_INFORMATION);
 
     device_info.device_info_set = info_set;
     device_info.device_info_data = &info_data;
@@ -305,7 +305,7 @@ beach:
 }
 
 static WCHAR *
-zed_read_device_registry_string_property (HANDLE info_set, SP_DEVINFO_DATA * info_data, DWORD prop_id)
+frida_read_device_registry_string_property (HANDLE info_set, SP_DEVINFO_DATA * info_data, DWORD prop_id)
 {
   gboolean success = FALSE;
   WCHAR * value_buffer = NULL;
@@ -333,19 +333,19 @@ beach:
 }
 
 static WCHAR *
-zed_read_registry_string (HKEY key, WCHAR * value_name)
+frida_read_registry_string (HKEY key, WCHAR * value_name)
 {
-  return (WCHAR *) zed_read_registry_value (key, value_name, REG_SZ);
+  return (WCHAR *) frida_read_registry_value (key, value_name, REG_SZ);
 }
 
 static WCHAR *
-zed_read_registry_multi_string (HKEY key, WCHAR * value_name)
+frida_read_registry_multi_string (HKEY key, WCHAR * value_name)
 {
-  return (WCHAR *) zed_read_registry_value (key, value_name, REG_MULTI_SZ);
+  return (WCHAR *) frida_read_registry_value (key, value_name, REG_MULTI_SZ);
 }
 
 static gpointer
-zed_read_registry_value (HKEY key, WCHAR * value_name, DWORD expected_type)
+frida_read_registry_value (HKEY key, WCHAR * value_name, DWORD expected_type)
 {
   gboolean success = FALSE;
   DWORD type;

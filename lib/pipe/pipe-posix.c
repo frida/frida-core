@@ -1,4 +1,4 @@
-#include "zed-pipe.h"
+#include "frida-pipe.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -18,9 +18,9 @@
     goto handle_posix_error; \
   }
 
-typedef struct _ZedPipeTransportBackend ZedPipeTransportBackend;
-typedef struct _ZedPipeBackend ZedPipeBackend;
-typedef guint ZedPipeRole;
+typedef struct _ZedPipeTransportBackend FridaPipeTransportBackend;
+typedef struct _ZedPipeBackend FridaPipeBackend;
+typedef guint FridaPipeRole;
 
 struct _ZedPipeTransportBackend
 {
@@ -31,7 +31,7 @@ struct _ZedPipeTransportBackend
 struct _ZedPipeBackend
 {
   GMutex * mutex;
-  ZedPipeRole role;
+  FridaPipeRole role;
   gchar * rx_name;
   gchar * tx_name;
   GInputStream * input;
@@ -41,26 +41,26 @@ struct _ZedPipeBackend
 
 enum _ZedPipeRole
 {
-  ZED_PIPE_SERVER = 1,
-  ZED_PIPE_CLIENT
+  FRIDA_PIPE_SERVER = 1,
+  FRIDA_PIPE_CLIENT
 };
 
-static gboolean zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, GError ** error);
-static void zed_pipe_fd_enable_blocking (int fd);
-static gchar * zed_pipe_generate_name (void);
+static gboolean frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error);
+static void frida_pipe_fd_enable_blocking (int fd);
+static gchar * frida_pipe_generate_name (void);
 
 void *
-_zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
-  ZedPipeTransportBackend * backend;
+  FridaPipeTransportBackend * backend;
   int ret;
   const gchar * failed_operation;
   mode_t saved_umask;
 
-  backend = g_slice_new (ZedPipeTransportBackend);
+  backend = g_slice_new (FridaPipeTransportBackend);
 
-  backend->local_name = zed_pipe_generate_name ();
-  backend->remote_name = zed_pipe_generate_name ();
+  backend->local_name = frida_pipe_generate_name ();
+  backend->remote_name = frida_pipe_generate_name ();
 
   saved_umask = umask (0);
 
@@ -81,7 +81,7 @@ handle_posix_error:
         G_IO_ERROR,
         G_IO_ERROR_FAILED,
         "%s failed: %s (%d)", failed_operation, strerror (errno), errno);
-    _zed_pipe_transport_destroy_backend (backend);
+    _frida_pipe_transport_destroy_backend (backend);
     backend = NULL;
     goto beach;
   }
@@ -94,9 +94,9 @@ beach:
 }
 
 void
-_zed_pipe_transport_destroy_backend (void * b)
+_frida_pipe_transport_destroy_backend (void * b)
 {
-  ZedPipeTransportBackend * backend = (ZedPipeTransportBackend *) b;
+  FridaPipeTransportBackend * backend = (FridaPipeTransportBackend *) b;
 
   unlink (backend->local_name);
   g_free (backend->local_name);
@@ -104,38 +104,38 @@ _zed_pipe_transport_destroy_backend (void * b)
   unlink (backend->remote_name);
   g_free (backend->remote_name);
 
-  g_slice_free (ZedPipeTransportBackend, backend);
+  g_slice_free (FridaPipeTransportBackend, backend);
 }
 
 void *
-_zed_pipe_create_backend (const gchar * address, GError ** error)
+_frida_pipe_create_backend (const gchar * address, GError ** error)
 {
-  ZedPipeBackend * backend;
+  FridaPipeBackend * backend;
   gchar ** tokens;
   int fd;
   const gchar * failed_operation;
 
-  backend = g_slice_new0 (ZedPipeBackend);
+  backend = g_slice_new0 (FridaPipeBackend);
 
   backend->mutex = g_mutex_new ();
 
   tokens = g_regex_split_simple ("^pipe:role=(.+?),rx=(.+?),tx=(.+?)$", address, 0, 0);
   g_assert_cmpuint (g_strv_length (tokens), ==, 5);
 
-  backend->role = strcmp (tokens[1], "server") == 0 ? ZED_PIPE_SERVER : ZED_PIPE_CLIENT;
+  backend->role = strcmp (tokens[1], "server") == 0 ? FRIDA_PIPE_SERVER : FRIDA_PIPE_CLIENT;
   backend->rx_name = g_strdup (tokens[2]);
   backend->tx_name = g_strdup (tokens[3]);
 
   fd = open (backend->rx_name, O_RDONLY | O_NONBLOCK);
   CHECK_POSIX_RESULT (fd, !=, -1, "open rx");
-  zed_pipe_fd_enable_blocking (fd);
+  frida_pipe_fd_enable_blocking (fd);
   backend->input = G_INPUT_STREAM (g_unix_input_stream_new (fd, TRUE));
 
-  if (backend->role == ZED_PIPE_CLIENT)
+  if (backend->role == FRIDA_PIPE_CLIENT)
   {
     fd = open (backend->tx_name, O_WRONLY | O_NONBLOCK);
     CHECK_POSIX_RESULT (fd, !=, -1, "open tx");
-    zed_pipe_fd_enable_blocking (fd);
+    frida_pipe_fd_enable_blocking (fd);
     backend->output = G_OUTPUT_STREAM (g_unix_output_stream_new (fd, TRUE));
     unlink (backend->tx_name);
   }
@@ -150,7 +150,7 @@ handle_posix_error:
         G_IO_ERROR,
         G_IO_ERROR_FAILED,
         "%s failed: %s (%d)", failed_operation, strerror (errno), errno);
-    _zed_pipe_destroy_backend (backend);
+    _frida_pipe_destroy_backend (backend);
     backend = NULL;
     goto beach;
   }
@@ -163,9 +163,9 @@ beach:
 }
 
 void
-_zed_pipe_destroy_backend (void * b)
+_frida_pipe_destroy_backend (void * b)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) b;
+  FridaPipeBackend * backend = (FridaPipeBackend *) b;
 
   if (backend->input != NULL)
     g_object_unref (backend->input);
@@ -177,13 +177,13 @@ _zed_pipe_destroy_backend (void * b)
 
   g_mutex_free (backend->mutex);
 
-  g_slice_free (ZedPipeBackend, backend);
+  g_slice_free (FridaPipeBackend, backend);
 }
 
 gboolean
-_zed_pipe_close (ZedPipe * self, GError ** error)
+_frida_pipe_close (FridaPipe * self, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
+  FridaPipeBackend * backend = self->_backend;
 
   if (!g_input_stream_close (backend->input, NULL, error))
     return FALSE;
@@ -195,29 +195,29 @@ _zed_pipe_close (ZedPipe * self, GError ** error)
 }
 
 gssize
-_zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+_frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
+  FridaPipeBackend * backend = self->_backend;
 
-  if (!zed_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_pipe_backend_connect (backend, cancellable, error))
     return 0;
 
   return g_input_stream_read (backend->input, buffer, buffer_length, cancellable, error);
 }
 
 gssize
-_zed_pipe_output_stream_write (ZedPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+_frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
+  FridaPipeBackend * backend = self->_backend;
 
-  if (!zed_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_pipe_backend_connect (backend, cancellable, error))
     return 0;
 
   return g_output_stream_write (backend->output, buffer, buffer_length, cancellable, error);
 }
 
 static gboolean
-zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, GError ** error)
+frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error)
 {
   gboolean connected, is_master;
   GPollFD cancel;
@@ -242,7 +242,7 @@ zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, 
       int fd = open (backend->tx_name, O_WRONLY | O_NONBLOCK);
       if (fd != -1)
       {
-        zed_pipe_fd_enable_blocking (fd);
+        frida_pipe_fd_enable_blocking (fd);
         g_mutex_lock (backend->mutex);
         backend->output = G_OUTPUT_STREAM (g_unix_output_stream_new (fd, TRUE));
         g_mutex_unlock (backend->mutex);
@@ -271,19 +271,19 @@ zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, 
 }
 
 static void
-zed_pipe_fd_enable_blocking (int fd)
+frida_pipe_fd_enable_blocking (int fd)
 {
   int flags = fcntl (fd, F_GETFL);
   fcntl (fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
 static gchar *
-zed_pipe_generate_name (void)
+frida_pipe_generate_name (void)
 {
   GString * s;
   guint i;
 
-  s = g_string_new ("/tmp/zed-");
+  s = g_string_new ("/tmp/frida-");
   for (i = 0; i != 16; i++)
     g_string_append_printf (s, "%02x", g_random_int_range (0, 255));
 

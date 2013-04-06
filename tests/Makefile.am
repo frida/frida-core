@@ -4,16 +4,16 @@ if OS_ANDROID
 else
 if OS_IOS
 else
-TESTS = zed-tests
+TESTS = frida-tests
 endif
 endif
 
 noinst_PROGRAMS = \
-	zed-tests \
+	frida-tests \
 	inject-victim
 noinst_LTLIBRARIES = \
-	libzed-tests.la \
-	libzed-tests-glue.la \
+	libfrida-tests.la \
+	libfrida-tests-glue.la \
 	libinject-attacker.la
 
 platform_tests = $(NULL)
@@ -30,28 +30,28 @@ platform_tests += test-fruitjector.vala
 endif
 endif
 
-zed_tests_SOURCES = \
+frida_tests_SOURCES = \
 	main.vala
-zed_tests_LDADD = \
-	$(builddir)/libzed-tests.la \
-	$(ZED_LIBS)
-zed_tests_LDFLAGS = \
-	$(ZED_LDFLAGS)
-zed_tests_VALAFLAGS = \
+frida_tests_LDADD = \
+	$(builddir)/libfrida-tests.la \
+	$(FRIDA_LIBS)
+frida_tests_LDFLAGS = \
+	$(FRIDA_LDFLAGS)
+frida_tests_VALAFLAGS = \
 	--vapidir=$(builddir) \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--vapidir=$(top_builddir)/src \
-	--pkg=zed-core \
-	--pkg=zed-interfaces \
-	--pkg=zed-tests \
-	@ZED_PACKAGES@ \
-	@ZED_VALAFLAGS@
+	--pkg=frida-core \
+	--pkg=frida-interfaces \
+	--pkg=frida-tests \
+	@FRIDA_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
 if OS_MAC
-zed_tests_LDFLAGS += \
-	-sectcreate __TEXT __info_plist "$(srcdir)/zed-tests.plist"
+frida_tests_LDFLAGS += \
+	-sectcreate __TEXT __info_plist "$(srcdir)/frida-tests.plist"
 endif
 
-libzed_tests_la_SOURCES = \
+libfrida_tests_la_SOURCES = \
 	test-system.vala \
 	$(platform_tests) \
 	test-agent.vala \
@@ -59,28 +59,28 @@ libzed_tests_la_SOURCES = \
 	runner.vala \
 	async-harness.vala \
 	process.vala
-libzed_tests_la_CFLAGS = \
+libfrida_tests_la_CFLAGS = \
 	-w
-libzed_tests_la_LIBADD = \
-	$(builddir)/libzed-tests-glue.la \
-	$(top_builddir)/src/libzed-core.la \
-	$(top_builddir)/lib/pipe/libzed-pipe.la
-libzed_tests_la_VALAFLAGS = \
-	--vapi=zed-tests.vapi \
-	--library=zed-tests \
-	--header=zed-tests.h \
+libfrida_tests_la_LIBADD = \
+	$(builddir)/libfrida-tests-glue.la \
+	$(top_builddir)/src/libfrida-core.la \
+	$(top_builddir)/lib/pipe/libfrida-pipe.la
+libfrida_tests_la_VALAFLAGS = \
+	--vapi=frida-tests.vapi \
+	--library=frida-tests \
+	--header=frida-tests.h \
 	--vapidir=$(top_srcdir)/vapi \
 	--vapidir=$(top_builddir)/lib/interfaces \
 	--vapidir=$(top_builddir)/lib/pipe \
 	--vapidir=$(top_builddir)/src \
 	--pkg=config \
-	--pkg=zed-core \
-	--pkg=zed-interfaces \
-	--pkg=zed-pipe \
-	@ZED_PACKAGES@ \
-	@ZED_VALAFLAGS@
+	--pkg=frida-core \
+	--pkg=frida-interfaces \
+	--pkg=frida-pipe \
+	@FRIDA_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
 
-libzed_tests_glue_la_SOURCES = \
+libfrida_tests_glue_la_SOURCES = \
 	test-agent-glue.c \
 	process-unix.c \
 	runner-glue.c
@@ -93,25 +93,25 @@ libinject_attacker_la_SOURCES = \
 libinject_attacker_la_LDFLAGS = \
 	-rpath /nowhere
 libinject_attacker_la_LIBADD = \
-	$(ZED_LIBS)
+	$(FRIDA_LIBS)
 
 AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_builddir)/lib/interfaces \
 	-I $(top_builddir)/lib/pipe \
 	-I $(top_builddir)/src \
-	$(ZED_CFLAGS) \
+	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\" \
 	-DPKGTESTDIR=\""$(prefix)/tests"\"
 
 if OS_MAC
-all-local: zed-tests
-	codesign -s "$$MAC_CERTID" -i "com.tillitech.ZedTests" "$<" || true
+all-local: frida-tests
+	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaTests" "$<" || true
 endif
 
 if OS_IOS
-all-local: zed-tests
-	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/zed-tests.xcent" "zed-tests" || true
+all-local: frida-tests
+	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/frida-tests.xcent" "frida-tests" || true
 	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/inject-victim.xcent" "inject-victim" || true
 endif

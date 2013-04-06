@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class Application : Object {
 		private BaseDBusHostSession host_session;
 		private DBusServer server;
@@ -32,7 +32,7 @@ namespace Zed {
 				connection.closed.connect (on_connection_closed);
 
 				try {
-					var registration_id = connection.register_object (Zed.ObjectPath.HOST_SESSION, host_session as HostSession);
+					var registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session as HostSession);
 					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
 					printerr ("failed to register object: %s\n", e.message);
@@ -111,7 +111,7 @@ namespace Zed {
 
 		private static int main (string[] args) {
 			try {
-				var ctx = new OptionContext ("- zed-server");
+				var ctx = new OptionContext ("- frida-server");
 				ctx.set_help_enabled (true);
 				ctx.add_main_entries (options, null);
 				ctx.parse (ref args);

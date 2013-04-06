@@ -1,2 +1,2 @@
 EXPORTS
-	zed_agent_main
+	frida_agent_main

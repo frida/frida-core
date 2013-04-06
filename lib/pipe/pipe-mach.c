@@ -1,4 +1,4 @@
-#include "zed-pipe.h"
+#include "frida-pipe.h"
 
 #include <stdio.h>
 #include <dispatch/dispatch.h>
@@ -11,9 +11,9 @@
     goto handle_mach_error; \
   }
 
-typedef struct _ZedPipeTransportBackend ZedPipeTransportBackend;
-typedef struct _ZedPipeBackend ZedPipeBackend;
-typedef struct _ZedPipeMessage ZedPipeMessage;
+typedef struct _ZedPipeTransportBackend FridaPipeTransportBackend;
+typedef struct _ZedPipeBackend FridaPipeBackend;
+typedef struct _ZedPipeMessage FridaPipeMessage;
 
 struct _ZedPipeTransportBackend
 {
@@ -42,20 +42,20 @@ struct _ZedPipeMessage
   guint8 payload[0];
 };
 
-static void zed_pipe_backend_demonitor (ZedPipeBackend * backend);
-static void zed_pipe_backend_on_tx_port_dead (void * context);
+static void frida_pipe_backend_demonitor (FridaPipeBackend * backend);
+static void frida_pipe_backend_on_tx_port_dead (void * context);
 
-static void zed_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
+static void frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
 
 void *
-_zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
-  ZedPipeTransportBackend * backend;
+  FridaPipeTransportBackend * backend;
   const gchar * failed_operation;
   kern_return_t ret;
   mach_msg_type_name_t acquired_type;
 
-  backend = g_slice_new (ZedPipeTransportBackend);
+  backend = g_slice_new (FridaPipeTransportBackend);
   backend->task = MACH_PORT_NULL;
   backend->local_rx = MACH_PORT_NULL;
   backend->local_tx = MACH_PORT_NULL;
@@ -92,15 +92,15 @@ handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
         "%s failed: %s (%d)", failed_operation, mach_error_string (ret), ret);
-    _zed_pipe_transport_destroy_backend (backend);
+    _frida_pipe_transport_destroy_backend (backend);
     return NULL;
   }
 }
 
 void
-_zed_pipe_transport_destroy_backend (void * b)
+_frida_pipe_transport_destroy_backend (void * b)
 {
-  ZedPipeTransportBackend * backend = (ZedPipeTransportBackend *) b;
+  FridaPipeTransportBackend * backend = (FridaPipeTransportBackend *) b;
   task_t self_task = mach_task_self ();
 
   if (backend->remote_tx != MACH_PORT_NULL)
@@ -114,17 +114,17 @@ _zed_pipe_transport_destroy_backend (void * b)
   if (backend->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, backend->task);
 
-  g_slice_free (ZedPipeTransportBackend, backend);
+  g_slice_free (FridaPipeTransportBackend, backend);
 }
 
 void *
-_zed_pipe_create_backend (const gchar * address, GError ** error)
+_frida_pipe_create_backend (const gchar * address, GError ** error)
 {
-  ZedPipeBackend * backend;
+  FridaPipeBackend * backend;
   int rx, tx, assigned;
   dispatch_source_t source;
 
-  backend = g_slice_new (ZedPipeBackend);
+  backend = g_slice_new (FridaPipeBackend);
   backend->dispatch_queue = dispatch_queue_create ("org.boblycat.frida.pipe.queue", NULL);
   assigned = sscanf (address, "pipe:rx=%d,tx=%d", &rx, &tx);
   g_assert_cmpint (assigned, ==, 2);
@@ -137,27 +137,27 @@ _zed_pipe_create_backend (const gchar * address, GError ** error)
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, backend->tx_port, DISPATCH_MACH_SEND_DEAD, backend->dispatch_queue);
   backend->monitor_source = source;
   dispatch_set_context (source, backend);
-  dispatch_source_set_event_handler_f (source, zed_pipe_backend_on_tx_port_dead);
+  dispatch_source_set_event_handler_f (source, frida_pipe_backend_on_tx_port_dead);
   dispatch_resume (source);
 
   return backend;
 }
 
 void
-_zed_pipe_destroy_backend (void * b)
+_frida_pipe_destroy_backend (void * b)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) b;
+  FridaPipeBackend * backend = (FridaPipeBackend *) b;
 
-  zed_pipe_backend_demonitor (backend);
+  frida_pipe_backend_demonitor (backend);
 
   g_free (backend->rx_buffer);
   dispatch_release (backend->dispatch_queue);
 
-  g_slice_free (ZedPipeBackend, backend);
+  g_slice_free (FridaPipeBackend, backend);
 }
 
 static void
-zed_pipe_backend_demonitor (ZedPipeBackend * self)
+frida_pipe_backend_demonitor (FridaPipeBackend * self)
 {
   if (self->monitor_source != NULL)
   {
@@ -167,7 +167,7 @@ zed_pipe_backend_demonitor (ZedPipeBackend * self)
 }
 
 static gboolean
-zed_pipe_backend_close_ports (ZedPipeBackend * self, GError ** error)
+frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
 {
   kern_return_t ret_tx = 0, ret_rx = 0, ret;
 
@@ -195,28 +195,28 @@ zed_pipe_backend_close_ports (ZedPipeBackend * self, GError ** error)
 }
 
 gboolean
-_zed_pipe_close (ZedPipe * self, GError ** error)
+_frida_pipe_close (FridaPipe * self, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
+  FridaPipeBackend * backend = self->_backend;
 
-  zed_pipe_backend_demonitor (backend);
+  frida_pipe_backend_demonitor (backend);
 
-  return zed_pipe_backend_close_ports (backend, error);
+  return frida_pipe_backend_close_ports (backend, error);
 }
 
 static void
-zed_pipe_backend_on_tx_port_dead (void * context)
+frida_pipe_backend_on_tx_port_dead (void * context)
 {
-  ZedPipeBackend * backend = context;
+  FridaPipeBackend * backend = context;
 
-  zed_pipe_backend_close_ports (backend, NULL);
+  frida_pipe_backend_close_ports (backend, NULL);
 }
 
 gssize
-_zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+_frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
-  ZedPipeMessage * msg = NULL;
+  FridaPipeBackend * backend = self->_backend;
+  FridaPipeMessage * msg = NULL;
   kern_return_t ret;
   gssize n;
 
@@ -227,7 +227,7 @@ _zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buf
 
     if (cancellable != NULL)
     {
-      handler_id = g_cancellable_connect (cancellable, G_CALLBACK (zed_pipe_input_stream_on_cancel), self, NULL);
+      handler_id = g_cancellable_connect (cancellable, G_CALLBACK (frida_pipe_input_stream_on_cancel), self, NULL);
     }
 
     msg_size = sizeof (mach_msg_empty_rcv_t);
@@ -295,11 +295,11 @@ handle_cancel:
 }
 
 static void
-zed_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data)
+frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data)
 {
-  ZedPipeInputStream * self = user_data;
-  ZedPipeBackend * backend = self->_backend;
-  ZedPipeMessage msg;
+  FridaPipeInputStream * self = user_data;
+  FridaPipeBackend * backend = self->_backend;
+  FridaPipeMessage msg;
 
   msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MAKE_SEND_ONCE, 0);
   msg.header.msgh_size = sizeof (msg);
@@ -312,14 +312,14 @@ zed_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data)
 }
 
 gssize
-_zed_pipe_output_stream_write (ZedPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+_frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  ZedPipeBackend * backend = self->_backend;
+  FridaPipeBackend * backend = self->_backend;
   guint msg_size;
-  ZedPipeMessage * msg;
+  FridaPipeMessage * msg;
   kern_return_t ret;
 
-  msg_size = (sizeof (ZedPipeMessage) + buffer_length + 3) & ~3;
+  msg_size = (sizeof (FridaPipeMessage) + buffer_length + 3) & ~3;
   msg = g_malloc (msg_size);
   msg->header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, 0);
   msg->header.msgh_size = msg_size;

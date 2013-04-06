@@ -1,4 +1,4 @@
-namespace Zed.WinjectorTest {
+namespace Frida.WinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Winjector/inject/x86", () => {
 			try {
@@ -31,7 +31,7 @@ namespace Zed.WinjectorTest {
 			construct;
 		}
 
-		public Zed.Test.Process process {
+		public Frida.Test.Process process {
 			get;
 			private set;
 		}
@@ -42,12 +42,12 @@ namespace Zed.WinjectorTest {
 		public LabRat (string name) throws IOError {
 			Object (name: name);
 
-			var self_filename = Zed.Test.Process.current.filename;
+			var self_filename = Frida.Test.Process.current.filename;
 			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename)))),
 				"tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			process = Zed.Test.Process.start (rat_file);
+			process = Frida.Test.Process.start (rat_file);
 		}
 
 		public void inject (string name, string data_string) {

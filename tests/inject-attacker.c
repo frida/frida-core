@@ -18,7 +18,7 @@ on_unload (void)
 }
 
 void
-zed_agent_main (const char * data_string)
+frida_agent_main (const char * data_string)
 {
   append_to_log ('m');
 
@@ -31,7 +31,7 @@ append_to_log (char c)
 {
   FILE *f;
 
-  f = fopen (getenv ("ZED_LABRAT_LOGFILE"), "ab");
+  f = fopen (getenv ("FRIDA_LABRAT_LOGFILE"), "ab");
   g_assert (f != NULL);
   fwrite (&c, 1, 1, f);
   fclose (f);

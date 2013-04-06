@@ -2,7 +2,7 @@
 #include <string.h>
 
 void
-zed_agent_main (const char * data_string)
+frida_agent_main (const char * data_string)
 {
   if (strlen (data_string) > 0)
   {

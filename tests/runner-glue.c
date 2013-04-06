@@ -1,6 +1,6 @@
 #define DEBUG_HEAP_LEAKS 0
 
-#include "zed-tests.h"
+#include "frida-tests.h"
 
 #include <gio/gio.h>
 #include <gum/gum.h>
@@ -13,7 +13,7 @@
 #endif
 
 void
-zed_test_environment_init (int * args_length1, char *** args)
+frida_test_environment_init (int * args_length1, char *** args)
 {
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   int tmp_flag;
@@ -43,7 +43,7 @@ zed_test_environment_init (int * args_length1, char *** args)
 }
 
 void
-zed_test_environment_deinit (void)
+frida_test_environment_deinit (void)
 {
   g_io_deinit ();
 

@@ -20,7 +20,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{B7DC9B02-A5FF-4AA1-B2A2-DC1653168D44}</ProjectGuid>
-    <RootNamespace>zed</RootNamespace>
+    <RootNamespace>frida</RootNamespace>
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -47,19 +47,19 @@
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
@@ -83,47 +83,47 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\zed-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\core;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)ext\libgum\ext\udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>zed-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\zed-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <CustomBuild Include="data\agent\agent.resources">
       <FileType>Document</FileType>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing Agent resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\agent.stamp</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing Agent resources</Message>
@@ -133,19 +133,19 @@
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Agent resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\agent.stamp</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\zed-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\zed-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\zed-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\zed-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\zed-agent-32\zed-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\zed-agent-64\zed-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\agent\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)obj\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)obj\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
     </CustomBuild>
@@ -164,19 +164,19 @@ REM. &gt; "$(IntDir)data\agent.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Winjector resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\winjector.stamp</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\zed-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\zed-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\zed-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\zed-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(SolutionDir)data\winjector\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)obj\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)obj\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
     </CustomBuild>
@@ -184,28 +184,28 @@ REM. &gt; "$(IntDir)data\winjector.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src\core" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=zed-core --header=$(IntDir)zed-core.h --symbols=$(IntDir)zed-core.symbols --vapidir="$(IntDir)..\zed-pipe-32" --vapidir="$(IntDir)..\zed-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=zed-pipe --pkg=zed-data-agent --pkg=zed-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/core/host-session-service.vala src/core/session-manager.vala src/core/system.vala src/core/fruity/fruity-client.vala src/core/fruity/fruity-host-session.vala src/core/fruity/fruity-property-list.vala src/core/tcp/tcp-host-session.vala src/core/windows/windows-host-session.vala src/core/windows/winjector.vala src/core/windows/winjector-types.vala -D WINDOWS -D HAVE_LOCAL_BACKENDS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\core\host-session-service.vala;$(ProjectDir)src\core\session-manager.vala;$(ProjectDir)src\core\system.vala;$(ProjectDir)src\core\fruity\fruity-client.vala;$(ProjectDir)src\core\fruity\fruity-host-session.vala;$(ProjectDir)src\core\fruity\fruity-property-list.vala;$(ProjectDir)src\core\tcp\tcp-host-session.vala;$(ProjectDir)src\core\windows\windows-host-session.vala;$(ProjectDir)src\core\windows\winjector.vala;$(ProjectDir)src\core\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
@@ -330,13 +330,13 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\core\windows\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\core\windows\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-agent.c">
+    <ClCompile Include="$(IntDir)data\frida-data-agent.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
+    <ClCompile Include="$(IntDir)data\frida-data-winjector.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)data\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)data\</ObjectFileName>
@@ -369,7 +369,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="lib\agent\zed-agent-32.vcxproj">
+    <ProjectReference Include="lib\agent\frida-agent-32.vcxproj">
       <Project>{b111ba27-807a-4b16-a4de-a33d7d6d7ce1}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -377,7 +377,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="lib\agent\zed-agent-64.vcxproj">
+    <ProjectReference Include="lib\agent\frida-agent-64.vcxproj">
       <Project>{3194ec55-c1e5-423d-820f-13d38409b9d0}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -403,7 +403,7 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)zed-core.h" />
+    <ClInclude Include="$(IntDir)frida-core.h" />
     <ClInclude Include="src\core\windows-icon-helpers.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

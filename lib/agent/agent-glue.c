@@ -1,6 +1,6 @@
 #define DEBUG_HEAP_LEAKS 0
 
-#include "zed-agent.h"
+#include "frida-agent.h"
 
 #include <gio/gio.h>
 #include <gum/gum.h>
@@ -10,7 +10,7 @@
 #endif
 
 void
-zed_agent_environment_init (void)
+frida_agent_environment_init (void)
 {
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   int tmp_flag;
@@ -44,7 +44,7 @@ zed_agent_environment_init (void)
 }
 
 void
-zed_agent_environment_deinit (void)
+frida_agent_environment_deinit (void)
 {
   g_io_deinit ();
 
@@ -54,7 +54,7 @@ zed_agent_environment_deinit (void)
   g_mem_deinit ();
 }
 
-typedef struct _ZedAutoInterceptContext ZedAutoInterceptContext;
+typedef struct _ZedAutoInterceptContext FridaAutoInterceptContext;
 
 struct _ZedAutoInterceptContext
 {
@@ -63,28 +63,28 @@ struct _ZedAutoInterceptContext
   gpointer thread_data;
 };
 
-static gpointer zed_agent_auto_ignorer_thread_create_proxy (gpointer data);
+static gpointer frida_agent_auto_ignorer_thread_create_proxy (gpointer data);
 
 void
-zed_agent_auto_ignorer_intercept_thread_creation (ZedAgentAutoIgnorer * self,
+frida_agent_auto_ignorer_intercept_thread_creation (FridaAgentAutoIgnorer * self,
     GumInvocationContext * ic)
 {
-  ZedAutoInterceptContext * ctx;
+  FridaAutoInterceptContext * ctx;
 
-  ctx = g_slice_new (ZedAutoInterceptContext);
+  ctx = g_slice_new (FridaAutoInterceptContext);
   ctx->interceptor = g_object_ref (self->interceptor);
   ctx->thread_func = GUM_POINTER_TO_FUNCPTR (GThreadFunc,
       gum_invocation_context_get_nth_argument (ic, 0));
   ctx->thread_data = gum_invocation_context_get_nth_argument (ic, 1);
   gum_invocation_context_replace_nth_argument (ic, 0,
-      GUM_FUNCPTR_TO_POINTER (zed_agent_auto_ignorer_thread_create_proxy));
+      GUM_FUNCPTR_TO_POINTER (frida_agent_auto_ignorer_thread_create_proxy));
   gum_invocation_context_replace_nth_argument (ic, 1, ctx);
 }
 
 static gpointer
-zed_agent_auto_ignorer_thread_create_proxy (gpointer data)
+frida_agent_auto_ignorer_thread_create_proxy (gpointer data)
 {
-  ZedAutoInterceptContext * ctx = data;
+  FridaAutoInterceptContext * ctx = data;
   gpointer result;
 
   gum_interceptor_ignore_current_thread (ctx->interceptor);
@@ -92,7 +92,7 @@ zed_agent_auto_ignorer_thread_create_proxy (gpointer data)
   gum_interceptor_unignore_current_thread (ctx->interceptor);
 
   g_object_unref (ctx->interceptor);
-  g_slice_free (ZedAutoInterceptContext, ctx);
+  g_slice_free (FridaAutoInterceptContext, ctx);
 
   return result;
 }

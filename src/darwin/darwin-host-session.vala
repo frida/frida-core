@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class DarwinHostSessionBackend : Object, HostSessionBackend {
 		private DarwinHostSessionProvider local_provider;
 
@@ -67,7 +67,7 @@ namespace Zed {
 			main_context = MainContext.get_thread_default ();
 			_create_context ();
 
-			var blob = Zed.Data.Agent.get_libzed_agent_dylib_blob ();
+			var blob = Frida.Data.Agent.get_libfrida_agent_dylib_blob ();
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
 
@@ -82,7 +82,7 @@ namespace Zed {
 			injector = null;
 		}
 
-		public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
+		public async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
 			return System.enumerate_processes ();
 		}
 
@@ -124,7 +124,7 @@ namespace Zed {
 			System.kill (pid);
 		}
 
-		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
+		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {
 			var transport = new PipeTransport.with_pid (pid);
 			var stream = new Pipe (transport.local_address);
 			yield injector.inject (pid, agent_desc, transport.remote_address);

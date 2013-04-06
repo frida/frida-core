@@ -1,6 +1,6 @@
-namespace Zed {
+namespace Frida {
 	namespace System {
-		public static extern Zed.HostProcessInfo[] enumerate_processes ();
+		public static extern Frida.HostProcessInfo[] enumerate_processes ();
 		public static extern void kill (uint pid);
 	}
 

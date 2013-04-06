@@ -1,4 +1,4 @@
-namespace Zed.Test {
+namespace Frida.Test {
 	public class Process : Object {
 		public void * handle {
 			get;

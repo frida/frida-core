@@ -12,31 +12,31 @@ endif
 if OS_DARWIN
 soext := .dylib
 endif
-AGENT := $(top_builddir)/lib/agent/.libs/libzed-agent$(soext)
+AGENT := $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
 
 CLEANFILES = \
-	$(builddir)/zed-data-agent.vapi \
-	$(builddir)/zed-data-agent.h \
-	$(builddir)/zed-data-agent.c \
-	$(builddir)/zed-data-agent-blob.S \
+	$(builddir)/frida-data-agent.vapi \
+	$(builddir)/frida-data-agent.h \
+	$(builddir)/frida-data-agent.c \
+	$(builddir)/frida-data-agent-blob.S \
 	$(NULL)
 
-noinst_LTLIBRARIES = libzed-data.la
+noinst_LTLIBRARIES = libfrida-data.la
 
-libzed_data_la_SOURCES = \
-	$(builddir)/zed-data-agent.c \
-	$(builddir)/zed-data-agent-blob.S \
+libfrida_data_la_SOURCES = \
+	$(builddir)/frida-data-agent.c \
+	$(builddir)/frida-data-agent-blob.S \
 	$(NULL)
 
 AM_CPPFLAGS = \
-	$(ZED_CFLAGS)
+	$(FRIDA_CFLAGS)
 
-zed-data-agent.c: $(AGENT)
+frida-data-agent.c: $(AGENT)
 	$(AM_V_GEN) \
 		"$(RESOURCE_COMPILER)" \
 			--enable-asm \
 			-c "$(srcdir)/agent/agent.resources" \
-			-o "$(builddir)/zed-data-agent" \
+			-o "$(builddir)/frida-data-agent" \
 			$(AGENT)
 
 endif

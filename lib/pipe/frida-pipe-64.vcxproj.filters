@@ -34,7 +34,7 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)zed-pipe.h">
+    <ClInclude Include="$(IntDir)frida-pipe.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
   </ItemGroup>

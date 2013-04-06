@@ -1,6 +1,6 @@
 using Gee;
 
-namespace Zed.Agent {
+namespace Frida.Agent {
 	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
 

@@ -119,10 +119,10 @@
     <ClCompile Include="$(IntDir)lib\interfaces\session.c">
       <Filter>Source Files\generated\lib\interfaces</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-agent.c">
+    <ClCompile Include="$(IntDir)data\frida-data-agent.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\zed-data-winjector.c">
+    <ClCompile Include="$(IntDir)data\frida-data-winjector.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="src\core\fruity\fruity-host-session-windows.c">
@@ -162,7 +162,7 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)zed-core.h">
+    <ClInclude Include="$(IntDir)frida-core.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
     <ClInclude Include="src\core\windows-icon-helpers.h">

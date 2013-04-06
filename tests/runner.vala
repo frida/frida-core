@@ -1,24 +1,24 @@
-namespace Zed.Test {
+namespace Frida.Test {
 
 	public static void run (string[] args) {
 		Environment.init (ref args);
 
 #if HAVE_LOCAL_BACKENDS
-		Zed.SystemTest.add_tests ();
+		Frida.SystemTest.add_tests ();
 #endif
 
 #if HAVE_LOCAL_BACKENDS
 #if WINDOWS
-		Zed.WinjectorTest.add_tests ();
+		Frida.WinjectorTest.add_tests ();
 #elif LINUX
-		Zed.LinjectorTest.add_tests ();
+		Frida.LinjectorTest.add_tests ();
 #elif DARWIN
-		Zed.FruitjectorTest.add_tests ();
+		Frida.FruitjectorTest.add_tests ();
 #endif
 #endif
 
-		Zed.AgentTest.add_tests ();
-		Zed.HostSessionTest.add_tests ();
+		Frida.AgentTest.add_tests ();
+		Frida.HostSessionTest.add_tests ();
 
 		GLib.Test.run ();
 

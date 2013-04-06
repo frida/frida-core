@@ -1,4 +1,4 @@
-namespace Zed.Fruity {
+namespace Frida.Fruity {
 	public class ClientV1 : Client {
 		public override uint protocol_version {
 			get { return 0; }

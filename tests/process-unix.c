@@ -1,4 +1,4 @@
-#include "zed-tests.h"
+#include "frida-tests.h"
 
 #include <errno.h>
 #include <sys/wait.h>
@@ -6,23 +6,23 @@
 # include <mach-o/dyld.h>
 #endif
 
-static int zed_magic_self_handle = -1;
+static int frida_magic_self_handle = -1;
 
 #ifdef HAVE_DARWIN
 
 char *
-zed_test_process_backend_filename_of (void * handle)
+frida_test_process_backend_filename_of (void * handle)
 {
   guint image_count, image_idx;
 
-  g_assert (handle == &zed_magic_self_handle);
+  g_assert (handle == &frida_magic_self_handle);
 
   image_count = _dyld_image_count ();
   for (image_idx = 0; image_idx != image_count; image_idx++)
   {
     const gchar * image_path = _dyld_get_image_name (image_idx);
 
-    if (g_str_has_suffix (image_path, "/zed-tests"))
+    if (g_str_has_suffix (image_path, "/frida-tests"))
       return g_strdup (image_path);
   }
 
@@ -33,9 +33,9 @@ zed_test_process_backend_filename_of (void * handle)
 #else
 
 char *
-zed_test_process_backend_filename_of (void * handle)
+frida_test_process_backend_filename_of (void * handle)
 {
-  g_assert (handle == &zed_magic_self_handle);
+  g_assert (handle == &frida_magic_self_handle);
 
   return g_file_read_link ("/proc/self/exe", NULL);
 }
@@ -43,22 +43,22 @@ zed_test_process_backend_filename_of (void * handle)
 #endif
 
 void *
-zed_test_process_backend_self_handle (void)
+frida_test_process_backend_self_handle (void)
 {
-  return &zed_magic_self_handle;
+  return &frida_magic_self_handle;
 }
 
 guint
-zed_test_process_backend_self_id (void)
+frida_test_process_backend_self_id (void)
 {
   return getpid ();
 }
 
 void
-zed_test_process_backend_do_start (const char * filename,
+frida_test_process_backend_do_start (const char * filename,
     void ** handle, guint * id, GError ** error)
 {
-  const gchar * override = g_getenv ("ZED_TARGET_PID");
+  const gchar * override = g_getenv ("FRIDA_TARGET_PID");
   if (override != NULL)
   {
     *id = atoi (override);
@@ -87,7 +87,7 @@ zed_test_process_backend_do_start (const char * filename,
 }
 
 int
-zed_test_process_backend_do_join (void * handle, guint timeout_msec,
+frida_test_process_backend_do_join (void * handle, guint timeout_msec,
     GError ** error)
 {
   int status = -1;

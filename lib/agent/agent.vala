@@ -1,4 +1,4 @@
-namespace Zed.Agent {
+namespace Frida.Agent {
 	public class AgentServer : Object, AgentSession {
 		public string pipe_address {
 			get;
@@ -74,8 +74,8 @@ namespace Zed.Agent {
 			}
 			connection.closed.connect (on_connection_closed);
 			try {
-				Zed.AgentSession session = this;
-				registration_id = connection.register_object (Zed.ObjectPath.AGENT_SESSION, session);
+				Frida.AgentSession session = this;
+				registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, session);
 				connection.start_message_processing ();
 			} catch (IOError io_error) {
 				printerr ("failed to register object: %s\n", io_error.message);

@@ -1,4 +1,4 @@
-#include "zed-core.h"
+#include "frida-core.h"
 
 #include <gio/gunixinputstream.h>
 #ifdef HAVE_I386
@@ -25,7 +25,7 @@
 #endif
 #include <sys/wait.h>
 
-#define ZED_RTLD_DLOPEN (0x80000000)
+#define FRIDA_RTLD_DLOPEN (0x80000000)
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
@@ -42,23 +42,23 @@
 #error Unsupported architecture
 #endif
 
-#define ZED_REMOTE_PAYLOAD_SIZE (8192)
-#define ZED_REMOTE_DATA_OFFSET (512)
-#define ZED_REMOTE_STACK_OFFSET (ZED_REMOTE_PAYLOAD_SIZE - 512)
-#define ZED_REMOTE_DATA_FIELD(n) \
-  GSIZE_TO_POINTER (remote_address + ZED_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (ZedTrampolineData, n))
+#define FRIDA_REMOTE_PAYLOAD_SIZE (8192)
+#define FRIDA_REMOTE_DATA_OFFSET (512)
+#define FRIDA_REMOTE_STACK_OFFSET (FRIDA_REMOTE_PAYLOAD_SIZE - 512)
+#define FRIDA_REMOTE_DATA_FIELD(n) \
+  GSIZE_TO_POINTER (remote_address + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
 
-typedef struct _ZedInjectionInstance ZedInjectionInstance;
-typedef struct _ZedInjectionParams ZedInjectionParams;
-typedef struct _ZedCodeChunk ZedCodeChunk;
-typedef struct _ZedTrampolineData ZedTrampolineData;
-typedef struct _ZedFindLandingStripContext ZedFindLandingStripContext;
+typedef struct _ZedInjectionInstance FridaInjectionInstance;
+typedef struct _ZedInjectionParams FridaInjectionParams;
+typedef struct _ZedCodeChunk FridaCodeChunk;
+typedef struct _ZedTrampolineData FridaTrampolineData;
+typedef struct _ZedFindLandingStripContext FridaFindLandingStripContext;
 
-typedef void (* ZedEmitFunc) (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
+typedef void (* FridaEmitFunc) (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
 struct _ZedInjectionInstance
 {
-  ZedLinjector * linjector;
+  FridaLinjector * linjector;
   guint id;
   pid_t pid;
   gchar * fifo_path;
@@ -101,37 +101,37 @@ struct _ZedFindLandingStripContext
   gpointer result;
 };
 
-static gboolean zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params, gpointer * result,
+static gboolean frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * params, gpointer * result,
     GError ** error);
 
-static void zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code);
+static void frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
-static gboolean zed_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error);
-static gboolean zed_detach_from_process (pid_t pid, const regs_t * saved_regs, GError ** error);
+static gboolean frida_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error);
+static gboolean frida_detach_from_process (pid_t pid, const regs_t * saved_regs, GError ** error);
 
-static gpointer zed_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
-static int zed_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error);
-static gboolean zed_remote_write (pid_t pid, gpointer remote_address, gconstpointer data, gsize size, GError ** error);
-static gboolean zed_remote_exec (pid_t pid, gpointer remote_address, gpointer remote_stack, gpointer * result, GError ** error);
+static gpointer frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
+static int frida_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error);
+static gboolean frida_remote_write (pid_t pid, gpointer remote_address, gconstpointer data, gsize size, GError ** error);
+static gboolean frida_remote_exec (pid_t pid, gpointer remote_address, gpointer remote_stack, gpointer * result, GError ** error);
 
-static gboolean zed_wait_for_child_signal (pid_t pid, int signal);
+static gboolean frida_wait_for_child_signal (pid_t pid, int signal);
 
-static gpointer zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
+static gpointer frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
 
-static gpointer zed_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name);
-static gpointer zed_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
+static gpointer frida_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name);
+static gpointer frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
 
-static gpointer zed_find_landing_strip (pid_t pid);
+static gpointer frida_find_landing_strip (pid_t pid);
 
-static gboolean zed_examine_range_for_landing_strip (const GumMemoryRange * range, GumPageProtection prot, gpointer user_data);
+static gboolean frida_examine_range_for_landing_strip (const GumMemoryRange * range, GumPageProtection prot, gpointer user_data);
 
-static ZedInjectionInstance *
-zed_injection_instance_new (ZedLinjector * linjector, guint id, pid_t pid)
+static FridaInjectionInstance *
+frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid)
 {
-  ZedInjectionInstance * instance;
+  FridaInjectionInstance * instance;
   int ret;
 
-  instance = g_slice_new0 (ZedInjectionInstance);
+  instance = g_slice_new0 (FridaInjectionInstance);
   instance->linjector = g_object_ref (linjector);
   instance->id = id;
   instance->pid = pid;
@@ -145,19 +145,19 @@ zed_injection_instance_new (ZedLinjector * linjector, guint id, pid_t pid)
 }
 
 static void
-zed_injection_instance_free (ZedInjectionInstance * instance)
+frida_injection_instance_free (FridaInjectionInstance * instance)
 {
   if (instance->remote_payload != NULL)
   {
     regs_t saved_regs;
     GError * error = NULL;
 
-    if (zed_attach_to_process (instance->pid, &saved_regs, &error))
+    if (frida_attach_to_process (instance->pid, &saved_regs, &error))
     {
-      zed_remote_dealloc (instance->pid, instance->remote_payload, ZED_REMOTE_PAYLOAD_SIZE, &error);
+      frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
       g_clear_error (&error);
 
-      zed_detach_from_process (instance->pid, &saved_regs, &error);
+      frida_detach_from_process (instance->pid, &saved_regs, &error);
     }
 
     g_clear_error (&error);
@@ -167,44 +167,44 @@ zed_injection_instance_free (ZedInjectionInstance * instance)
   unlink (instance->fifo_path);
   g_free (instance->fifo_path);
   g_object_unref (instance->linjector);
-  g_slice_free (ZedInjectionInstance, instance);
+  g_slice_free (FridaInjectionInstance, instance);
 }
 
 GInputStream *
-_zed_linjector_get_fifo_for_instance (ZedLinjector * self, void * instance)
+_frida_linjector_get_fifo_for_instance (FridaLinjector * self, void * instance)
 {
-  return g_unix_input_stream_new (((ZedInjectionInstance *) instance)->fifo, FALSE);
+  return g_unix_input_stream_new (((FridaInjectionInstance *) instance)->fifo, FALSE);
 }
 
 void
-_zed_linjector_free_instance (ZedLinjector * self, void * instance)
+_frida_linjector_free_instance (FridaLinjector * self, void * instance)
 {
-  zed_injection_instance_free (instance);
+  frida_injection_instance_free (instance);
 }
 
 guint
-_zed_linjector_do_inject (ZedLinjector * self, guint pid, const char * so_path, const char * data_string,
+_frida_linjector_do_inject (FridaLinjector * self, guint pid, const char * so_path, const char * data_string,
     GError ** error)
 {
-  ZedInjectionInstance * instance;
-  ZedInjectionParams params = { pid, so_path, data_string };
+  FridaInjectionInstance * instance;
+  FridaInjectionParams params = { pid, so_path, data_string };
   regs_t saved_regs;
 
-  instance = zed_injection_instance_new (self, self->last_id++, pid);
+  instance = frida_injection_instance_new (self, self->last_id++, pid);
 
-  if (!zed_attach_to_process (pid, &saved_regs, error))
+  if (!frida_attach_to_process (pid, &saved_regs, error))
     goto beach;
 
   params.fifo_path = instance->fifo_path;
-  params.remote_address = zed_remote_alloc (pid, ZED_REMOTE_PAYLOAD_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, error);
+  params.remote_address = frida_remote_alloc (pid, FRIDA_REMOTE_PAYLOAD_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, error);
   if (params.remote_address == NULL)
     goto beach;
   instance->remote_payload = params.remote_address;
 
-  if (!zed_emit_and_remote_execute (zed_emit_payload_code, &params, NULL, error))
+  if (!frida_emit_and_remote_execute (frida_emit_payload_code, &params, NULL, error))
     goto beach;
 
-  if (!zed_detach_from_process (pid, &saved_regs, error))
+  if (!frida_detach_from_process (pid, &saved_regs, error))
     goto beach;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_id), GUINT_TO_POINTER (instance->id), instance);
@@ -213,18 +213,18 @@ _zed_linjector_do_inject (ZedLinjector * self, guint pid, const char * so_path, 
 
 beach:
   {
-    zed_injection_instance_free (instance);
+    frida_injection_instance_free (instance);
     return 0;
   }
 }
 
 static gboolean
-zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params, gpointer * result,
+frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * params, gpointer * result,
     GError ** error)
 {
-  ZedCodeChunk code;
+  FridaCodeChunk code;
   guint padding = 0;
-  ZedTrampolineData * data;
+  FridaTrampolineData * data;
 
   code.cur = code.bytes;
   code.size = 0;
@@ -249,18 +249,18 @@ zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params
 
   func (params, GUM_ADDRESS (params->remote_address), &code);
 
-  data = (ZedTrampolineData *) (code.bytes + ZED_REMOTE_DATA_OFFSET);
+  data = (FridaTrampolineData *) (code.bytes + FRIDA_REMOTE_DATA_OFFSET);
   strcpy (data->pthread_so, "libpthread.so.0");
   strcpy (data->pthread_create, "pthread_create");
   strcpy (data->fifo_path, params->fifo_path);
   strcpy (data->so_path, params->so_path);
-  strcpy (data->entrypoint_name, "zed_agent_main");
+  strcpy (data->entrypoint_name, "frida_agent_main");
   strcpy (data->data_string, params->data_string);
 
-  if (!zed_remote_write (params->pid, params->remote_address, code.bytes, ZED_REMOTE_DATA_OFFSET + sizeof (ZedTrampolineData), error))
+  if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
 
-  if (!zed_remote_exec (params->pid, params->remote_address + padding, params->remote_address + ZED_REMOTE_STACK_OFFSET, result, error))
+  if (!frida_remote_exec (params->pid, params->remote_address + padding, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, error))
     return FALSE;
 
   return TRUE;
@@ -269,7 +269,7 @@ zed_emit_and_remote_execute (ZedEmitFunc func, const ZedInjectionParams * params
 #if defined (HAVE_I386)
 
 static void
-zed_x86_commit_code (GumX86Writer * cw, ZedCodeChunk * code)
+frida_x86_commit_code (GumX86Writer * cw, FridaCodeChunk * code)
 {
   gum_x86_writer_flush (cw);
   code->cur = gum_x86_writer_cur (cw);
@@ -277,7 +277,7 @@ zed_x86_commit_code (GumX86Writer * cw, ZedCodeChunk * code)
 }
 
 static void
-zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
+frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
   GumX86Writer cw;
   const guint worker_offset = 128;
@@ -285,29 +285,29 @@ zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_addr
   gum_x86_writer_init (&cw, code->cur);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (pthread_so),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (ZED_RTLD_DLOPEN | RTLD_LAZY));
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (pthread_so),
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
       GUM_ARG_REGISTER, GUM_REG_XBP,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (pthread_create));
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (pthread_create));
 
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       4,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (worker_thread),
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (worker_thread),
       GUM_ARG_POINTER, NULL,
       GUM_ARG_POINTER, remote_address + worker_offset,
       GUM_ARG_POINTER, NULL);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
       GUM_ARG_REGISTER, GUM_REG_XBP);
@@ -317,7 +317,7 @@ zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_addr
   g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, worker_offset);
   while (gum_x86_writer_offset (&cw) != worker_offset - code->size)
     gum_x86_writer_put_nop (&cw);
-  zed_x86_commit_code (&cw, code);
+  frida_x86_commit_code (&cw, code);
   gum_x86_writer_free (&cw);
 
   gum_x86_writer_init (&cw, code->cur);
@@ -326,49 +326,49 @@ zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_addr
   gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 2 * sizeof (gpointer));
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "open")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "open")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (fifo_path),
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (fifo_path),
       GUM_ARG_POINTER, GSIZE_TO_POINTER (O_WRONLY));
   gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XSP, 0, GUM_REG_XAX);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "write")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "write")));
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_XCX, GUM_REG_XSP, 0);
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       3,
       GUM_ARG_REGISTER, GUM_REG_XCX,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (entrypoint_name),
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_name),
       GUM_ARG_POINTER, GSIZE_TO_POINTER (1));
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (ZED_RTLD_DLOPEN | RTLD_LAZY));
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (so_path),
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "__libc_dlsym")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
       GUM_ARG_REGISTER, GUM_REG_XBP,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (entrypoint_name));
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
 
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
-      GUM_ARG_POINTER, ZED_REMOTE_DATA_FIELD (data_string));
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (data_string));
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "__libc_dlclose")));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
       GUM_ARG_REGISTER, GUM_REG_XBP);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      GUM_ADDRESS (zed_resolve_remote_libc_function (params->pid, "close")));
+      GUM_ADDRESS (frida_resolve_remote_libc_function (params->pid, "close")));
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_XCX, GUM_REG_XSP, 0);
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
@@ -378,14 +378,14 @@ zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_addr
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_ret (&cw);
 
-  zed_x86_commit_code (&cw, code);
+  frida_x86_commit_code (&cw, code);
   gum_x86_writer_free (&cw);
 }
 
 #elif defined (HAVE_ARM)
 
 static void
-zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_address, ZedCodeChunk * code)
+frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
   GumThumbWriter cw;
 
@@ -399,7 +399,7 @@ zed_emit_payload_code (const ZedInjectionParams * params, GumAddress remote_addr
 #endif
 
 static gboolean
-zed_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error)
+frida_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -408,7 +408,7 @@ zed_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error)
   ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
 
-  success = zed_wait_for_child_signal (pid, SIGSTOP);
+  success = frida_wait_for_child_signal (pid, SIGSTOP);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
@@ -424,7 +424,7 @@ handle_os_error:
 }
 
 static gboolean
-zed_detach_from_process (pid_t pid, const regs_t * saved_regs, GError ** error)
+frida_detach_from_process (pid_t pid, const regs_t * saved_regs, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -445,7 +445,7 @@ handle_os_error:
 }
 
 static gpointer
-zed_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
+frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -457,7 +457,7 @@ zed_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
 
   /* setup argument list for mmap and call it */
 #if defined (HAVE_I386)
-  regs.rip = GPOINTER_TO_SIZE (zed_resolve_remote_libc_function (pid, "mmap"));
+  regs.rip = GPOINTER_TO_SIZE (frida_resolve_remote_libc_function (pid, "mmap"));
 
   /* all six arguments in registers (SysV ABI) */
   regs.rdi = 0;
@@ -470,10 +470,10 @@ zed_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
   regs.rax = 1337;
 
   regs.rsp -= 8;
-  ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, zed_find_landing_strip (pid));
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, frida_find_landing_strip (pid));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_ARM)
-  regs.ARM_pc = GPOINTER_TO_SIZE (zed_resolve_remote_libc_function (pid, "mmap"));
+  regs.ARM_pc = GPOINTER_TO_SIZE (frida_resolve_remote_libc_function (pid, "mmap"));
 
   /* first four arguments in r0 - r3 */
   regs.ARM_r0 = 0;
@@ -493,7 +493,7 @@ zed_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
 
   /* return address on stack */
   regs.ARM_sp -= 4;
-  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, zed_find_landing_strip (pid));
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, frida_find_landing_strip (pid));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #endif
 
@@ -503,7 +503,7 @@ zed_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = zed_wait_for_child_signal (pid, SIGTRAP);
+  success = frida_wait_for_child_signal (pid, SIGTRAP);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
@@ -525,7 +525,7 @@ handle_os_error:
 }
 
 static int
-zed_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error)
+frida_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -537,7 +537,7 @@ zed_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error)
 
   /* setup argument list for munmap and call it */
 #if defined (HAVE_I386)
-  regs.rip = GPOINTER_TO_SIZE (zed_resolve_remote_libc_function (pid, "munmap"));
+  regs.rip = GPOINTER_TO_SIZE (frida_resolve_remote_libc_function (pid, "munmap"));
 
   regs.rdi = GPOINTER_TO_SIZE (address);
   regs.rsi = size;
@@ -545,16 +545,16 @@ zed_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error)
   regs.rax = 1337;
 
   regs.rsp -= 8;
-  ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, zed_find_landing_strip (pid));
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.rsp, frida_find_landing_strip (pid));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_ARM)
-  regs.ARM_pc = GPOINTER_TO_SIZE (zed_resolve_remote_libc_function (pid, "munmap"));
+  regs.ARM_pc = GPOINTER_TO_SIZE (frida_resolve_remote_libc_function (pid, "munmap"));
 
   regs.ARM_r0 = GPOINTER_TO_SIZE (address);
   regs.ARM_r1 = size;
 
   regs.ARM_sp -= 4;
-  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, zed_find_landing_strip (pid));
+  ret = ptrace (PTRACE_POKEDATA, pid, regs.ARM_sp, frida_find_landing_strip (pid));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #endif
 
@@ -564,7 +564,7 @@ zed_remote_dealloc (pid_t pid, gpointer address, size_t size, GError ** error)
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = zed_wait_for_child_signal (pid, SIGTRAP);
+  success = frida_wait_for_child_signal (pid, SIGTRAP);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
@@ -584,7 +584,7 @@ handle_os_error:
 }
 
 static gboolean
-zed_remote_write (pid_t pid, gpointer remote_address, gconstpointer data, gsize size, GError ** error)
+frida_remote_write (pid_t pid, gpointer remote_address, gconstpointer data, gsize size, GError ** error)
 {
   gsize * dst;
   const gsize * src;
@@ -625,7 +625,7 @@ handle_os_error:
 }
 
 static gboolean
-zed_remote_exec (pid_t pid, gpointer remote_address, gpointer remote_stack, gpointer * result, GError ** error)
+frida_remote_exec (pid_t pid, gpointer remote_address, gpointer remote_stack, gpointer * result, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -649,7 +649,7 @@ zed_remote_exec (pid_t pid, gpointer remote_address, gpointer remote_stack, gpoi
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = zed_wait_for_child_signal (pid, SIGTRAP);
+  success = frida_wait_for_child_signal (pid, SIGTRAP);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   if (result != NULL)
@@ -671,7 +671,7 @@ handle_os_error:
 }
 
 static gboolean
-zed_wait_for_child_signal (pid_t pid, int signal)
+frida_wait_for_child_signal (pid_t pid, int signal)
 {
   int status;
   pid_t res;
@@ -684,22 +684,22 @@ zed_wait_for_child_signal (pid_t pid, int signal)
 }
 
 static gpointer
-zed_resolve_remote_libc_function (int remote_pid, const gchar * function_name)
+frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name)
 {
-  return zed_resolve_remote_library_function (remote_pid, "libc", function_name);
+  return frida_resolve_remote_library_function (remote_pid, "libc", function_name);
 }
 
 static gpointer
-zed_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name)
+frida_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name)
 {
   gchar * local_library_path, * remote_library_path;
   gpointer local_base, remote_base, module;
   gpointer local_address, remote_address;
 
-  local_base = zed_find_library_base (getpid (), library_name, &local_library_path);
+  local_base = frida_find_library_base (getpid (), library_name, &local_library_path);
   g_assert (local_base != NULL);
 
-  remote_base = zed_find_library_base (remote_pid, library_name, &remote_library_path);
+  remote_base = frida_find_library_base (remote_pid, library_name, &remote_library_path);
   g_assert (remote_base != NULL);
 
   g_assert_cmpstr (local_library_path, ==, remote_library_path);
@@ -721,7 +721,7 @@ zed_resolve_remote_library_function (int remote_pid, const gchar * library_name,
 }
 
 static gpointer
-zed_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path)
+frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path)
 {
   gpointer result = NULL;
   gchar * maps_path;
@@ -780,22 +780,22 @@ zed_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_p
 }
 
 static gpointer
-zed_find_landing_strip (pid_t pid)
+frida_find_landing_strip (pid_t pid)
 {
-  ZedFindLandingStripContext ctx;
+  FridaFindLandingStripContext ctx;
 
   ctx.pid = pid;
   ctx.result = NULL;
 
-  gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, zed_examine_range_for_landing_strip, &ctx);
+  gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_landing_strip, &ctx);
 
   return ctx.result;
 }
 
 static gboolean
-zed_examine_range_for_landing_strip (const GumMemoryRange * range, GumPageProtection prot, gpointer user_data)
+frida_examine_range_for_landing_strip (const GumMemoryRange * range, GumPageProtection prot, gpointer user_data)
 {
-  ZedFindLandingStripContext * ctx = (ZedFindLandingStripContext *) user_data;
+  FridaFindLandingStripContext * ctx = (FridaFindLandingStripContext *) user_data;
   const gsize * cur, * end;
 
   cur = GSIZE_TO_POINTER (range->base_address);

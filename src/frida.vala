@@ -13,7 +13,7 @@ namespace Frida {
 		private uint last_device_id = 1;
 
 #if !LINUX
-		private Zed.FruityHostSessionBackend fruity;
+		private Frida.FruityHostSessionBackend fruity;
 #endif
 
 		public DeviceManager (MainContext main_context) {
@@ -80,7 +80,7 @@ namespace Frida {
 			devices.add (local);
 
 #if !LINUX
-			fruity = new Zed.FruityHostSessionBackend ();
+			fruity = new Frida.FruityHostSessionBackend ();
 			fruity.provider_available.connect ((provider) => {
 				var device = new RemoteDevice (this, last_device_id++, provider.name, provider.kind, provider);
 				devices.add (device);
@@ -130,7 +130,7 @@ namespace Frida {
 			private set;
 		}
 
-		public Zed.HostSessionProvider provider {
+		public Frida.HostSessionProvider provider {
 			get;
 			protected set;
 		}
@@ -143,29 +143,29 @@ namespace Frida {
 		private weak DeviceManager manager;
 		private bool is_closed = false;
 
-		protected Zed.HostSession host_session;
+		protected Frida.HostSession host_session;
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 
-		public Device (DeviceManager manager, uint id, string name, Zed.HostSessionProviderKind kind) {
+		public Device (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind) {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;
 			switch (kind) {
-				case Zed.HostSessionProviderKind.LOCAL_SYSTEM:
+				case Frida.HostSessionProviderKind.LOCAL_SYSTEM:
 					this.kind = "local";
 					break;
-				case Zed.HostSessionProviderKind.LOCAL_TETHER:
+				case Frida.HostSessionProviderKind.LOCAL_TETHER:
 					this.kind = "tether";
 					break;
-				case Zed.HostSessionProviderKind.REMOTE_SYSTEM:
+				case Frida.HostSessionProviderKind.REMOTE_SYSTEM:
 					this.kind = "remote";
 					break;
 			}
 			this.main_context = manager.main_context;
 		}
 
-		public Gee.List<Zed.HostProcessInfo?> enumerate_processes () throws Error {
+		public Gee.List<Frida.HostProcessInfo?> enumerate_processes () throws Error {
 			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
 		}
 
@@ -236,11 +236,11 @@ namespace Frida {
 			}
 		}
 
-		private class EnumerateTask : DeviceTask<Gee.List<Zed.HostProcessInfo?>> {
-			protected override async Gee.List<Zed.HostProcessInfo?> perform_operation () throws Error {
+		private class EnumerateTask : DeviceTask<Gee.List<Frida.HostProcessInfo?>> {
+			protected override async Gee.List<Frida.HostProcessInfo?> perform_operation () throws Error {
 				yield parent.ensure_host_session ();
 				var processes = yield parent.host_session.enumerate_processes ();
-				var result = new Gee.ArrayList<Zed.HostProcessInfo?> ();
+				var result = new Gee.ArrayList<Frida.HostProcessInfo?> ();
 				foreach (var process in processes) {
 					result.add(process);
 				}
@@ -302,7 +302,7 @@ namespace Frida {
 		protected abstract async void ensure_host_session () throws IOError;
 		protected abstract async void release_host_session ();
 
-		protected void on_agent_session_closed (Zed.AgentSessionId id, Error? error) {
+		protected void on_agent_session_closed (Frida.AgentSessionId id, Error? error) {
 			var session = session_by_handle[id.handle];
 			if (session != null)
 				session._do_close (false);
@@ -312,22 +312,22 @@ namespace Frida {
 	private class LocalDevice : Device {
 #if !WINDOWS
 		private Server server;
-		private Zed.TcpHostSessionProvider local_provider;
+		private Frida.TcpHostSessionProvider local_provider;
 #else
-		private Zed.WindowsHostSessionProvider local_provider;
+		private Frida.WindowsHostSessionProvider local_provider;
 #endif
 
 		public LocalDevice (DeviceManager manager, uint id) throws IOError {
-			base (manager, id, "Local System", Zed.HostSessionProviderKind.LOCAL_SYSTEM);
+			base (manager, id, "Local System", Frida.HostSessionProviderKind.LOCAL_SYSTEM);
 		}
 
 		protected override async void ensure_host_session () throws IOError {
 			if (host_session == null) {
 #if !WINDOWS
 				var s = new Server ();
-				var p = new Zed.TcpHostSessionProvider.for_address (s.address);
+				var p = new Frida.TcpHostSessionProvider.for_address (s.address);
 #else
-				var p = new Zed.WindowsHostSessionProvider ();
+				var p = new Frida.WindowsHostSessionProvider ();
 #endif
 				var hs = yield p.create ();
 
@@ -371,7 +371,7 @@ namespace Frida {
 			private const string SERVER_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
 
 			public Server () throws IOError {
-				var blob = PyFrida.Data.get_zed_server_blob ();
+				var blob = PyFrida.Data.get_frida_server_blob ();
 				executable = new TemporaryFile.from_stream ("server", new MemoryInputStream.from_data (blob.data, null));
 				try {
 					executable.file.set_attribute_uint32 (FILE_ATTRIBUTE_UNIX_MODE, 0755, FileQueryInfoFlags.NONE);
@@ -465,7 +465,7 @@ namespace Frida {
 	}
 
 	private class RemoteDevice : Device {
-		public RemoteDevice (DeviceManager manager, uint id, string name, Zed.HostSessionProviderKind kind, Zed.HostSessionProvider provider) {
+		public RemoteDevice (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind, Frida.HostSessionProvider provider) {
 			base (manager, id, name, kind);
 			this.provider = provider;
 			provider.agent_session_closed.connect (on_agent_session_closed);
@@ -493,7 +493,7 @@ namespace Frida {
 			private set;
 		}
 
-		public Zed.AgentSession internal_session {
+		public Frida.AgentSession internal_session {
 			get;
 			private set;
 		}
@@ -508,7 +508,7 @@ namespace Frida {
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
-		public Session (Device device, uint pid, Zed.AgentSession agent_session) {
+		public Session (Device device, uint pid, Frida.AgentSession agent_session) {
 			this.device = device;
 			this.pid = pid;
 			this.internal_session = agent_session;
@@ -531,13 +531,13 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private void on_message_from_script (Zed.AgentScriptId sid, string message, uint8[] data) {
+		private void on_message_from_script (Frida.AgentScriptId sid, string message, uint8[] data) {
 			var script = script_by_id[sid.handle];
 			if (script != null)
 				script.message (message, data);
 		}
 
-		public void _release_script (Zed.AgentScriptId sid) {
+		public void _release_script (Frida.AgentScriptId sid) {
 			var script_did_exist = script_by_id.unset (sid.handle);
 			assert (script_did_exist);
 		}
@@ -611,9 +611,9 @@ namespace Frida {
 		}
 
 		private weak Session session;
-		private Zed.AgentScriptId script_id;
+		private Frida.AgentScriptId script_id;
 
-		public Script (Session session, Zed.AgentScriptId script_id) {
+		public Script (Session session, Frida.AgentScriptId script_id) {
 			this.session = session;
 			this.script_id = script_id;
 			this.main_context = session.main_context;

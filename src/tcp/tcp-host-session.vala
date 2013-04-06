@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class TcpHostSessionBackend : Object, HostSessionBackend {
 		private TcpHostSessionProvider provider;
 

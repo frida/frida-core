@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	[DBus (name = "org.boblycat.frida.WinjectorHelper")]
 	public interface WinjectorHelper : Object {
 		public abstract async void stop () throws IOError;

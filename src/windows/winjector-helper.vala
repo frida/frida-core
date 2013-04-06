@@ -1,4 +1,4 @@
-using Zed;
+using Frida;
 
 namespace Winjector {
 	public int main (string[] args) {

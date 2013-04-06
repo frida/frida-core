@@ -109,7 +109,7 @@ case "$PACKAGE_TARNAME" in
     enable_maintainer_mode=yes
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
-  'zed')
+  'frida-core')
     enable_maintainer_mode=yes
     prefix="/Library/Frida"
     frida_flags="$frida_warning_flags $frida_flags"

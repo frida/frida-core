@@ -5,10 +5,10 @@ resource_compiler_SOURCES = \
 resource_compiler_CFLAGS = \
 	-w
 resource_compiler_LDADD = \
-	$(ZED_LIBS)
+	$(FRIDA_LIBS)
 resource_compiler_VALAFLAGS = \
-	@ZED_PACKAGES@ \
-	@ZED_VALAFLAGS@
+	@FRIDA_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
 
 AM_CPPFLAGS = \
-	$(ZED_CFLAGS)
+	$(FRIDA_CFLAGS)

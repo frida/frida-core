@@ -1,4 +1,4 @@
-namespace Zed.HostSessionTest {
+namespace Frida.HostSessionTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/HostSession/Service/provider-available", () => {
 			var h = new Harness ((h) => Service.provider_available (h as Harness));
@@ -181,7 +181,7 @@ namespace Zed.HostSessionTest {
 			try {
 				var host_session = yield prov.create ();
 
-				var tests_dir = Path.get_dirname (Zed.Test.Process.current.filename);
+				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 				var victim_path = Path.build_filename (tests_dir, "inject-victim");
 				string[] argv = { victim_path };
 				string[] envp = {};
@@ -379,7 +379,7 @@ namespace Zed.HostSessionTest {
 					"</dict>\n" +
 					"</plist>\n";
 				try {
-					var plist = new Zed.Fruity.PropertyList.from_xml (xml);
+					var plist = new Frida.Fruity.PropertyList.from_xml (xml);
 					var plist_keys = plist.get_keys ();
 					assert (plist_keys.length == 3);
 					assert (plist.get_int ("DeviceID") == 2);
@@ -399,11 +399,11 @@ namespace Zed.HostSessionTest {
 			}
 
 			private static void to_xml_yields_complete_document () {
-				var plist = new Zed.Fruity.PropertyList ();
+				var plist = new Frida.Fruity.PropertyList ();
 				plist.set_string ("MessageType", "Detached");
 				plist.set_int ("DeviceID", 2);
 
-				var proplist = new Zed.Fruity.PropertyList ();
+				var proplist = new Frida.Fruity.PropertyList ();
 				proplist.set_string ("ConnectionType", "USB");
 				proplist.set_int ("DeviceID", 2);
 				plist.set_plist ("Properties", proplist);
@@ -435,7 +435,7 @@ namespace Zed.HostSessionTest {
 	}
 #endif
 
-	public class Harness : Zed.Test.AsyncHarness {
+	public class Harness : Frida.Test.AsyncHarness {
 		public HostSessionService service {
 			get;
 			private set;
@@ -443,7 +443,7 @@ namespace Zed.HostSessionTest {
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
-		public Harness (owned Zed.Test.AsyncHarness.TestSequenceFunc func) {
+		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
 		}
 

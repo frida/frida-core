@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class WindowsHostSessionBackend : Object, HostSessionBackend {
 		private WindowsHostSessionProvider local_provider;
 
@@ -69,9 +69,9 @@ namespace Zed {
 		private AgentDescriptor agent_desc;
 
 		construct {
-			var blob32 = Zed.Data.Agent.get_zed_agent_32_dll_blob ();
-			var blob64 = Zed.Data.Agent.get_zed_agent_64_dll_blob ();
-			agent_desc = new AgentDescriptor ("zed-agent-%u.dll",
+			var blob32 = Frida.Data.Agent.get_frida_agent_32_dll_blob ();
+			var blob64 = Frida.Data.Agent.get_frida_agent_64_dll_blob ();
+			agent_desc = new AgentDescriptor ("frida-agent-%u.dll",
 				new MemoryInputStream.from_data (blob32.data, null),
 				new MemoryInputStream.from_data (blob64.data, null));
 		}

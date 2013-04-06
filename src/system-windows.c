@@ -1,4 +1,4 @@
-#include "zed-core.h"
+#include "frida-core.h"
 
 #include "windows-icon-helpers.h"
 
@@ -8,8 +8,8 @@
 
 static gboolean get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity);
 
-ZedHostProcessInfo *
-zed_system_enumerate_processes (int * result_length1)
+FridaHostProcessInfo *
+frida_system_enumerate_processes (int * result_length1)
 {
   GArray * processes;
   DWORD * pids = NULL;
@@ -17,7 +17,7 @@ zed_system_enumerate_processes (int * result_length1)
   DWORD bytes_returned;
   guint i;
 
-  processes = g_array_new (FALSE, FALSE, sizeof (ZedHostProcessInfo));
+  processes = g_array_new (FALSE, FALSE, sizeof (FridaHostProcessInfo));
 
   do
   {
@@ -41,23 +41,23 @@ zed_system_enumerate_processes (int * result_length1)
       if (get_process_filename (handle, name_utf16, name_length))
       {
         gchar * name, * tmp;
-        ZedHostProcessInfo * process_info;
-        ZedImageData * small_icon, * large_icon;
+        FridaHostProcessInfo * process_info;
+        FridaImageData * small_icon, * large_icon;
 
         name = g_utf16_to_utf8 ((gunichar2 *) name_utf16, -1, NULL, NULL, NULL);
         tmp = g_path_get_basename (name);
         g_free (name);
         name = tmp;
 
-        small_icon = _zed_image_data_from_process_or_file (pids[i], name_utf16, ZED_ICON_SMALL);
-        large_icon = _zed_image_data_from_process_or_file (pids[i], name_utf16, ZED_ICON_LARGE);
+        small_icon = _frida_image_data_from_process_or_file (pids[i], name_utf16, FRIDA_ICON_SMALL);
+        large_icon = _frida_image_data_from_process_or_file (pids[i], name_utf16, FRIDA_ICON_LARGE);
 
         g_array_set_size (processes, processes->len + 1);
-        process_info = &g_array_index (processes, ZedHostProcessInfo, processes->len - 1);
-        zed_host_process_info_init (process_info, pids[i], name, small_icon, large_icon);
+        process_info = &g_array_index (processes, FridaHostProcessInfo, processes->len - 1);
+        frida_host_process_info_init (process_info, pids[i], name, small_icon, large_icon);
 
-        zed_image_data_free (large_icon);
-        zed_image_data_free (small_icon);
+        frida_image_data_free (large_icon);
+        frida_image_data_free (small_icon);
 
         g_free (name);
       }
@@ -69,11 +69,11 @@ zed_system_enumerate_processes (int * result_length1)
   g_free (pids);
 
   *result_length1 = processes->len;
-  return (ZedHostProcessInfo *) g_array_free (processes, FALSE);
+  return (FridaHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
 void
-zed_system_kill (guint pid)
+frida_system_kill (guint pid)
 {
   (void) pid;
 

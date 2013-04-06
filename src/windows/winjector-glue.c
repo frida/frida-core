@@ -1,4 +1,4 @@
-#include "zed-core.h"
+#include "frida-core.h"
 
 #define VC_EXTRALEAN
 #include <windows.h>
@@ -7,7 +7,7 @@
 #include <strsafe.h>
 
 gboolean
-zed_winjector_helper_instance_is_process_still_running (void * handle)
+frida_winjector_helper_instance_is_process_still_running (void * handle)
 {
   DWORD exit_code;
 
@@ -18,14 +18,14 @@ zed_winjector_helper_instance_is_process_still_running (void * handle)
 }
 
 void
-zed_winjector_helper_instance_close_process_handle (void * handle)
+frida_winjector_helper_instance_close_process_handle (void * handle)
 {
   g_assert (handle != NULL);
   CloseHandle (handle);
 }
 
 char *
-zed_winjector_temporary_directory_create_tempdir (void)
+frida_winjector_temporary_directory_create_tempdir (void)
 {
   const guint max_chars = MAX_PATH;
   WCHAR * name;
@@ -38,7 +38,7 @@ zed_winjector_temporary_directory_create_tempdir (void)
     goto error;
   if (CoCreateGuid (&id) != S_OK)
     goto error;
-  StringCchCatW (name, max_chars, L"zed");
+  StringCchCatW (name, max_chars, L"frida");
   len = wcslen (name);
   StringFromGUID2 (&id, name + len, max_chars - len - 1);
   name[len] = L'-';
@@ -57,7 +57,7 @@ error:
 }
 
 void
-zed_winjector_temporary_directory_destroy_tempdir (const char * path)
+frida_winjector_temporary_directory_destroy_tempdir (const char * path)
 {
   WCHAR * path_utf16;
 
@@ -67,9 +67,9 @@ zed_winjector_temporary_directory_destroy_tempdir (const char * path)
 }
 
 void *
-zed_winjector_temporary_file_execute (
-    ZedWinjectorTemporaryFile * self, const char * parameters,
-    ZedWinjectorPrivilegeLevel level, GError ** error)
+frida_winjector_temporary_file_execute (
+    FridaWinjectorTemporaryFile * self, const char * parameters,
+    FridaWinjectorPrivilegeLevel level, GError ** error)
 {
   HANDLE process_handle;
   SHELLEXECUTEINFOW ei = { 0, };
@@ -83,7 +83,7 @@ zed_winjector_temporary_file_execute (
 
   ei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI
       | SEE_MASK_UNICODE | SEE_MASK_WAITFORINPUTIDLE;
-  if (level == ZED_WINJECTOR_PRIVILEGE_LEVEL_ELEVATED)
+  if (level == FRIDA_WINJECTOR_PRIVILEGE_LEVEL_ELEVATED)
     ei.lpVerb = L"runas";
   else
     ei.lpVerb = L"open";

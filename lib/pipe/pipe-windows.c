@@ -1,4 +1,4 @@
-#include "zed-pipe.h"
+#include "frida-pipe.h"
 
 #include <windows.h>
 #include <aclapi.h>
@@ -12,9 +12,9 @@
     goto handle_winapi_error; \
   }
 
-typedef struct _ZedPipeTransportBackend ZedPipeTransportBackend;
-typedef struct _ZedPipeBackend ZedPipeBackend;
-typedef enum _ZedPipeRole ZedPipeRole;
+typedef struct _ZedPipeTransportBackend FridaPipeTransportBackend;
+typedef struct _ZedPipeBackend FridaPipeBackend;
+typedef enum _ZedPipeRole FridaPipeRole;
 
 struct _ZedPipeTransportBackend
 {
@@ -23,7 +23,7 @@ struct _ZedPipeTransportBackend
 
 struct _ZedPipeBackend
 {
-  ZedPipeRole role;
+  FridaPipeRole role;
   HANDLE pipe;
   gboolean connected;
   HANDLE read_complete;
@@ -34,29 +34,29 @@ struct _ZedPipeBackend
 
 enum _ZedPipeRole
 {
-  ZED_PIPE_SERVER = 1,
-  ZED_PIPE_CLIENT
+  FRIDA_PIPE_SERVER = 1,
+  FRIDA_PIPE_CLIENT
 };
 
-static HANDLE zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error);
-static gchar * zed_pipe_generate_name (void);
-static WCHAR * zed_pipe_path_from_name (const gchar * name);
+static HANDLE frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error);
+static gchar * frida_pipe_generate_name (void);
+static WCHAR * frida_pipe_path_from_name (const gchar * name);
 
-static gboolean zed_pipe_backend_await (ZedPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
-static void zed_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
+static gboolean frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
+static void frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
 
 void *
-_zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
 {
-  ZedPipeTransportBackend * backend;
+  FridaPipeTransportBackend * backend;
   gchar * name;
 
   (void) pid;
   (void) error;
 
-  backend = g_slice_new0 (ZedPipeTransportBackend);
+  backend = g_slice_new0 (FridaPipeTransportBackend);
 
-  name = zed_pipe_generate_name ();
+  name = frida_pipe_generate_name ();
 
   *local_address = g_strdup_printf ("pipe:role=server,name=%s", name);
   *remote_address = g_strdup_printf ("pipe:role=client,name=%s", name);
@@ -67,25 +67,25 @@ _zed_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** 
 }
 
 void
-_zed_pipe_transport_destroy_backend (void * b)
+_frida_pipe_transport_destroy_backend (void * b)
 {
-  ZedPipeTransportBackend * backend = (ZedPipeTransportBackend *) b;
+  FridaPipeTransportBackend * backend = (FridaPipeTransportBackend *) b;
 
-  g_slice_free (ZedPipeTransportBackend, backend);
+  g_slice_free (FridaPipeTransportBackend, backend);
 }
 
 void *
-_zed_pipe_create_backend (const gchar * address, GError ** error)
+_frida_pipe_create_backend (const gchar * address, GError ** error)
 {
-  ZedPipeBackend * backend;
+  FridaPipeBackend * backend;
   const gchar * role, * name;
 
-  backend = g_slice_new0 (ZedPipeBackend);
+  backend = g_slice_new0 (FridaPipeBackend);
 
   role = strstr (address, "role=") + 5;
-  backend->role = role[0] == 's' ? ZED_PIPE_SERVER : ZED_PIPE_CLIENT;
+  backend->role = role[0] == 's' ? FRIDA_PIPE_SERVER : FRIDA_PIPE_CLIENT;
   name = strstr (address, "name=") + 5;
-  backend->pipe = zed_pipe_open (name, backend->role, error);
+  backend->pipe = frida_pipe_open (name, backend->role, error);
   if (backend->pipe != INVALID_HANDLE_VALUE)
   {
     backend->read_complete = CreateEvent (NULL, TRUE, FALSE, NULL);
@@ -95,7 +95,7 @@ _zed_pipe_create_backend (const gchar * address, GError ** error)
   }
   else
   {
-    _zed_pipe_destroy_backend (backend);
+    _frida_pipe_destroy_backend (backend);
     backend = NULL;
   }
 
@@ -103,9 +103,9 @@ _zed_pipe_create_backend (const gchar * address, GError ** error)
 }
 
 void
-_zed_pipe_destroy_backend (void * b)
+_frida_pipe_destroy_backend (void * b)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) b;
+  FridaPipeBackend * backend = (FridaPipeBackend *) b;
 
   if (backend->read_complete != NULL)
     CloseHandle (backend->read_complete);
@@ -119,11 +119,11 @@ _zed_pipe_destroy_backend (void * b)
   if (backend->pipe != INVALID_HANDLE_VALUE)
     CloseHandle (backend->pipe);
 
-  g_slice_free (ZedPipeBackend, backend);
+  g_slice_free (FridaPipeBackend, backend);
 }
 
 static gboolean
-zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, GError ** error)
+frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error)
 {
   gboolean success = FALSE;
   HANDLE connect, cancel;
@@ -135,7 +135,7 @@ zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, 
   {
     return TRUE;
   }
-  else if (backend->role == ZED_PIPE_CLIENT)
+  else if (backend->role == FRIDA_PIPE_CLIENT)
   {
     backend->connected = TRUE;
     return TRUE;
@@ -152,7 +152,7 @@ zed_pipe_backend_connect (ZedPipeBackend * backend, GCancellable * cancellable, 
 
   if (last_error == ERROR_IO_PENDING)
   {
-    if (!zed_pipe_backend_await (backend, connect, cancel, cancellable, error))
+    if (!frida_pipe_backend_await (backend, connect, cancel, cancellable, error))
       goto beach;
 
     if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
@@ -178,14 +178,14 @@ beach:
 }
 
 static gboolean
-zed_pipe_backend_await (ZedPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error)
+frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error)
 {
   gulong handler_id = 0;
   HANDLE events[2];
 
   if (cancellable != NULL)
   {
-    handler_id = g_cancellable_connect (cancellable, G_CALLBACK (zed_pipe_backend_on_cancel), cancel, NULL);
+    handler_id = g_cancellable_connect (cancellable, G_CALLBACK (frida_pipe_backend_on_cancel), cancel, NULL);
   }
 
   events[0] = complete;
@@ -206,7 +206,7 @@ zed_pipe_backend_await (ZedPipeBackend * self, HANDLE complete, HANDLE cancel, G
 }
 
 static void
-zed_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
+frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
 {
   HANDLE cancel = (HANDLE) user_data;
 
@@ -216,9 +216,9 @@ zed_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
 }
 
 gboolean
-_zed_pipe_close (ZedPipe * self, GError ** error)
+_frida_pipe_close (FridaPipe * self, GError ** error)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
+  FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
 
   if (!CloseHandle (backend->pipe))
     goto handle_error;
@@ -234,15 +234,15 @@ handle_error:
 }
 
 gssize
-_zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+_frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
+  FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
   gssize result = 0;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
   DWORD bytes_transferred;
 
-  if (!zed_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_pipe_backend_connect (backend, cancellable, error))
     goto beach;
 
   overlapped.hEvent = backend->read_complete;
@@ -250,7 +250,7 @@ _zed_pipe_input_stream_read (ZedPipeInputStream * self, guint8 * buffer, int buf
   if (!ret && GetLastError () != ERROR_IO_PENDING)
     goto handle_error;
 
-  if (!zed_pipe_backend_await (backend, backend->read_complete, backend->read_cancel, cancellable, error))
+  if (!frida_pipe_backend_await (backend, backend->read_complete, backend->read_cancel, cancellable, error))
     goto beach;
 
   if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
@@ -272,15 +272,15 @@ beach:
 }
 
 gssize
-_zed_pipe_output_stream_write (ZedPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+_frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
-  ZedPipeBackend * backend = (ZedPipeBackend *) self->_backend;
+  FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
   gssize result = 0;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
   DWORD bytes_transferred;
 
-  if (!zed_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_pipe_backend_connect (backend, cancellable, error))
     goto beach;
 
   overlapped.hEvent = backend->write_complete;
@@ -288,7 +288,7 @@ _zed_pipe_output_stream_write (ZedPipeOutputStream * self, guint8 * buffer, int 
   if (!ret && GetLastError () != ERROR_IO_PENDING)
     goto handle_error;
 
-  if (!zed_pipe_backend_await (backend, backend->write_complete, backend->write_cancel, cancellable, error))
+  if (!frida_pipe_backend_await (backend, backend->write_complete, backend->write_cancel, cancellable, error))
     goto beach;
 
   if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
@@ -310,7 +310,7 @@ beach:
 }
 
 static HANDLE
-zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error)
+frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
 {
   HANDLE result = INVALID_HANDLE_VALUE;
   BOOL success;
@@ -324,7 +324,7 @@ zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error)
   PSECURITY_DESCRIPTOR sd = NULL;
   SECURITY_ATTRIBUTES sa;
 
-  path = zed_pipe_path_from_name (name);
+  path = frida_pipe_path_from_name (name);
 
   success = AllocateAndInitializeSid (&world_auth, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &everyone_sid);
   CHECK_WINAPI_RESULT (success, !=, FALSE, "AllocateAndInitializeSid");
@@ -353,7 +353,7 @@ zed_pipe_open (const gchar * name, ZedPipeRole role, GError ** error)
   sa.lpSecurityDescriptor = sd;
   sa.bInheritHandle = FALSE;
 
-  if (role == ZED_PIPE_SERVER)
+  if (role == FRIDA_PIPE_SERVER)
   {
     result = CreateNamedPipeW (path,
         PIPE_ACCESS_DUPLEX |
@@ -408,12 +408,12 @@ beach:
 }
 
 static gchar *
-zed_pipe_generate_name (void)
+frida_pipe_generate_name (void)
 {
   GString * s;
   guint i;
 
-  s = g_string_new ("zed-");
+  s = g_string_new ("frida-");
   for (i = 0; i != 16; i++)
     g_string_append_printf (s, "%02x", g_random_int_range (0, 255));
 
@@ -421,7 +421,7 @@ zed_pipe_generate_name (void)
 }
 
 static WCHAR *
-zed_pipe_path_from_name (const gchar * name)
+frida_pipe_path_from_name (const gchar * name)
 {
   gchar * path_utf8;
   WCHAR * path;

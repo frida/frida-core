@@ -20,7 +20,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{BCCDA8EB-F0DF-4DD0-B233-7410079531AB}</ProjectGuid>
-    <RootNamespace>zed</RootNamespace>
+    <RootNamespace>frida</RootNamespace>
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -47,19 +47,19 @@
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)zed-$(Configuration).props" />
+    <Import Project="$(SolutionDir)frida-$(Configuration).props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
@@ -83,7 +83,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -100,7 +100,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -117,7 +117,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -134,7 +134,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\zed-core;$(IntDir)..\zed-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -150,7 +150,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="..\lib\agent\zed-agent-32.vcxproj">
+    <ProjectReference Include="..\lib\agent\frida-agent-32.vcxproj">
       <Project>{f4f9af1c-3111-4563-8066-8fae8cbefbdc}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -158,7 +158,7 @@
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\lib\agent\zed-agent-64.vcxproj">
+    <ProjectReference Include="..\lib\agent\frida-agent-64.vcxproj">
       <Project>{d873638d-aa0d-4252-9334-456557a65d95}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
@@ -166,7 +166,7 @@
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\zed-core.vcxproj">
+    <ProjectReference Include="..\frida-core.vcxproj">
       <Project>{b7dc9b02-a5ff-4aa1-b2a2-dc1653168d44}</Project>
       <Private>false</Private>
       <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
@@ -189,17 +189,17 @@
 	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
-	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(IntDir)..\zed-core"			^
-	--vapidir="$(IntDir)..\zed-pipe-32"		^
-	--vapidir="$(IntDir)..\zed-pipe-64"		^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"			^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	$(ValaFlags)				^
 	--pkg=gio-2.0				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
-	--pkg=zed-core				^
-	--pkg=zed-pipe || exit 1
+	--pkg=frida-core				^
+	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -218,17 +218,17 @@ echo &gt; "$(IntDir)valacode.stamp"
 	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
-	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(IntDir)..\zed-core"			^
-	--vapidir="$(IntDir)..\zed-pipe-32"		^
-	--vapidir="$(IntDir)..\zed-pipe-64"		^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"			^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	$(ValaFlags)				^
 	--pkg=gio-2.0				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
-	--pkg=zed-core				^
-	--pkg=zed-pipe || exit 1
+	--pkg=frida-core				^
+	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -247,17 +247,17 @@ echo &gt; "$(IntDir)valacode.stamp"
 	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
-	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(IntDir)..\zed-core"			^
-	--vapidir="$(IntDir)..\zed-pipe-32"		^
-	--vapidir="$(IntDir)..\zed-pipe-64"		^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"			^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	$(ValaFlags)				^
 	--pkg=gio-2.0				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
-	--pkg=zed-core				^
-	--pkg=zed-pipe || exit 1
+	--pkg=frida-core				^
+	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -276,17 +276,17 @@ echo &gt; "$(IntDir)valacode.stamp"
 	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
-	--header=$(IntDir)zed-tests.h			^
-	--vapidir="$(IntDir)..\zed-core"			^
-	--vapidir="$(IntDir)..\zed-pipe-32"		^
-	--vapidir="$(IntDir)..\zed-pipe-64"		^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"			^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	$(ValaFlags)				^
 	--pkg=gio-2.0				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-1.0				^
 	--pkg=gum-1.0				^
-	--pkg=zed-core				^
-	--pkg=zed-pipe || exit 1
+	--pkg=frida-core				^
+	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)test-agent.vala;$(ProjectDir)test-host-session.vala;$(ProjectDir)test-system.vala;$(ProjectDir)test-winjector.vala;$(ProjectDir)main.vala;$(ProjectDir)runner.vala;$(ProjectDir)async-harness.vala;$(ProjectDir)process.vala;%(AdditionalInputs)</AdditionalInputs>

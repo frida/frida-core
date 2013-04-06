@@ -1,6 +1,6 @@
 #define COBJMACROS 1
 
-#include "zed-core.h"
+#include "frida-core.h"
 
 #include "windows-icon-helpers.h"
 
@@ -12,10 +12,10 @@
 
 #define PARSE_STRING_MAX_LENGTH   (40 + 1)
 
-ZedImageData *
-_zed_windows_host_session_provider_extract_icon (GError ** error)
+FridaImageData *
+_frida_windows_host_session_provider_extract_icon (GError ** error)
 {
-  ZedImageData * result = NULL;
+  FridaImageData * result = NULL;
   OLECHAR my_computer_parse_string[PARSE_STRING_MAX_LENGTH];
   IShellFolder * desktop_folder = NULL;
   IEnumIDList * children = NULL;
@@ -48,7 +48,7 @@ _zed_windows_host_session_provider_extract_icon (GError ** error)
     if (SHGetFileInfoW ((LPCWSTR) child, 0, &file_info, sizeof (file_info), SHGFI_PIDL | SHGFI_ICON | SHGFI_SMALLICON | SHGFI_ADDOVERLAYS) == 0)
       goto next_child;
 
-    result = _zed_image_data_from_native_icon_handle (file_info.hIcon, ZED_ICON_SMALL);
+    result = _frida_image_data_from_native_icon_handle (file_info.hIcon, FRIDA_ICON_SMALL);
 
     DestroyIcon (file_info.hIcon);
 

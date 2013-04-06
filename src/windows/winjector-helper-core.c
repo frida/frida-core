@@ -33,7 +33,7 @@ struct _RemoteWorkerContext
   gpointer virtual_free_impl;
 
   WCHAR dll_path[MAX_PATH + 1];
-  gchar zed_agent_main_string[14 + 1];
+  gchar frida_agent_main_string[14 + 1];
   gchar data_string[MAX_PATH + 1];
 
   gpointer entrypoint;
@@ -527,9 +527,9 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_jcc_near_label (&cw, GUM_X86_JZ, loadlibrary_failed_label, GUM_UNLIKELY);
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
 
-  /* xax = GetProcAddress (xsi, xbx->zed_agent_main_string) */
+  /* xax = GetProcAddress (xsi, xbx->frida_agent_main_string) */
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, zed_agent_main_string));
+      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, frida_agent_main_string));
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_proc_address_impl),
       2,
       GUM_ARG_REGISTER, GUM_REG_XSI,
@@ -597,7 +597,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   if (!remote_worker_context_has_resolved_all_kernel32_functions (rwc))
     goto failed_to_resolve_kernel32_functions;
 
-  StringCbCopyA (rwc->zed_agent_main_string, sizeof (rwc->zed_agent_main_string), "zed_agent_main");
+  StringCbCopyA (rwc->frida_agent_main_string, sizeof (rwc->frida_agent_main_string), "frida_agent_main");
 
   StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
   StringCbCopyA (rwc->data_string, sizeof (rwc->data_string), details->data_string);

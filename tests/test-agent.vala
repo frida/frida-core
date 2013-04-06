@@ -1,4 +1,4 @@
-namespace Zed.AgentTest {
+namespace Frida.AgentTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Agent/Script/load-and-receive-messages", () => {
 			var h = new Harness ((h) => Script.load_and_receive_messages (h as Harness));
@@ -94,7 +94,7 @@ namespace Zed.AgentTest {
 		public extern static uint target_function (int level, string message);
 	}
 
-	private class Harness : Zed.Test.AsyncHarness {
+	private class Harness : Frida.Test.AsyncHarness {
 		private GLib.Module module;
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data_string);
@@ -106,18 +106,18 @@ namespace Zed.AgentTest {
 
 		private Gee.LinkedList<ScriptMessage> message_queue = new Gee.LinkedList<ScriptMessage> ();
 
-		public Harness (owned Zed.Test.AsyncHarness.TestSequenceFunc func) {
+		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
 		}
 
 		public async AgentSession load_agent () {
 			string agent_filename;
 #if WINDOWS
-			var intermediate_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
+			var intermediate_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
 			if (sizeof (void *) == 4)
-				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-32", "zed-agent-32.dll");
+				agent_filename = Path.build_filename (intermediate_root_dir, "frida-agent-32", "frida-agent-32.dll");
 			else
-				agent_filename = Path.build_filename (intermediate_root_dir, "zed-agent-64", "zed-agent-64.dll");
+				agent_filename = Path.build_filename (intermediate_root_dir, "frida-agent-64", "frida-agent-64.dll");
 #else
 			string shlib_extension;
 #if DARWIN
@@ -125,22 +125,22 @@ namespace Zed.AgentTest {
 #else
 			shlib_extension = "so";
 #endif
-			var frida_root_dir = Path.get_dirname (Path.get_dirname (Zed.Test.Process.current.filename));
-			agent_filename = Path.build_filename (frida_root_dir, "lib", "zed", "zed-agent." + shlib_extension);
+			var frida_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
+			agent_filename = Path.build_filename (frida_root_dir, "lib", "frida", "frida-agent." + shlib_extension);
 			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
-				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", ".libs", "libzed-agent." + shlib_extension);
+				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", ".libs", "libfrida-agent." + shlib_extension);
 #endif
 
 			module = GLib.Module.open (agent_filename, 0);
 			assert (module != null);
 
 			void * main_func_symbol;
-			var main_func_found = module.symbol ("zed_agent_main", out main_func_symbol);
+			var main_func_found = module.symbol ("frida_agent_main", out main_func_symbol);
 			assert (main_func_found);
 			main_impl = (AgentMainFunc) main_func_symbol;
 
 			try {
-				transport = new PipeTransport.with_pid (Zed.Test.Process.current.id);
+				transport = new PipeTransport.with_pid (Frida.Test.Process.current.id);
 			} catch (IOError transport_error) {
 				printerr ("failed to create transport: %s\n", transport_error.message);
 				assert_not_reached ();

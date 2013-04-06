@@ -1,11 +1,11 @@
-#include <zed-pipe.h>
+#include <frida-pipe.h>
 
 int
 main (int argc, char * argv[])
 {
-  ZedPipeTransport * transport = NULL;
+  FridaPipeTransport * transport = NULL;
   const gchar * address;
-  ZedPipe * pipe;
+  FridaPipe * pipe;
   gchar c;
   GError * error = NULL;
 
@@ -14,19 +14,19 @@ main (int argc, char * argv[])
 
   if (argc == 1)
   {
-    transport = zed_pipe_transport_new_with_pid (0, NULL);
-    address = zed_pipe_transport_get_local_address (transport);
-    g_print ("listening on '%s'\n", zed_pipe_transport_get_remote_address (transport));
+    transport = frida_pipe_transport_new_with_pid (0, NULL);
+    address = frida_pipe_transport_get_local_address (transport);
+    g_print ("listening on '%s'\n", frida_pipe_transport_get_remote_address (transport));
   }
   else
   {
     address = argv[1];
   }
 
-  pipe = zed_pipe_new (address, &error);
+  pipe = frida_pipe_new (address, &error);
   if (error != NULL)
   {
-    g_printerr ("zed_pipe_new failed: %s\n", error->message);
+    g_printerr ("frida_pipe_new failed: %s\n", error->message);
   }
   else
   {

@@ -1,7 +1,7 @@
-namespace Zed.LinjectorTest {
+namespace Frida.LinjectorTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Linjector/inject", () => {
-			var tests_dir = Path.get_dirname (Zed.Test.Process.current.filename);
+			var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 
 			var logfile = File.new_for_path (Path.build_filename (tests_dir, "inject-attacker.log"));
 
@@ -47,7 +47,7 @@ namespace Zed.LinjectorTest {
 	}
 
 	private class LabRat {
-		public Zed.Test.Process process {
+		public Frida.Test.Process process {
 			get;
 			private set;
 		}
@@ -63,10 +63,10 @@ namespace Zed.LinjectorTest {
 			rat_directory = dir;
 			var rat_file = Path.build_filename (rat_directory, name);
 
-			Environment.set_variable ("ZED_LABRAT_LOGFILE", logfile, true);
+			Environment.set_variable ("FRIDA_LABRAT_LOGFILE", logfile, true);
 
 			try {
-				process = Zed.Test.Process.start (rat_file);
+				process = Frida.Test.Process.start (rat_file);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();

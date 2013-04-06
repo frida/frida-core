@@ -1,4 +1,4 @@
-namespace Zed.Test {
+namespace Frida.Test {
 	public class AsyncHarness : Object {
 		public delegate void TestSequenceFunc (void * h);
 		private TestSequenceFunc test_sequence;

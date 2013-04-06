@@ -18,12 +18,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="src\zed-server.vala">
+    <CustomBuild Include="src\frida-server.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)src\zed-server.c">
+    <ClCompile Include="$(IntDir)src\frida-server.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>

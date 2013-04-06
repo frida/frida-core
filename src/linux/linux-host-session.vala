@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class LinuxHostSessionBackend : Object, HostSessionBackend {
 		private LinuxHostSessionProvider local_provider;
 
@@ -57,7 +57,7 @@ namespace Zed {
 		private AgentDescriptor agent_desc;
 
 		construct {
-			var blob = Zed.Data.Agent.get_libzed_agent_so_blob ();
+			var blob = Frida.Data.Agent.get_libfrida_agent_so_blob ();
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
 
@@ -72,7 +72,7 @@ namespace Zed {
 			injector = null;
 		}
 
-		public async Zed.HostProcessInfo[] enumerate_processes () throws IOError {
+		public async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
 			return System.enumerate_processes ();
 		}
 
@@ -88,7 +88,7 @@ namespace Zed {
 			throw new IOError.FAILED ("not yet implemented in the Linux backend");
 		}
 
-		public async Zed.AgentSessionId attach_to (uint pid) throws IOError {
+		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {
 			var transport = new PipeTransport.with_pid (pid);
 			var stream = new Pipe (transport.local_address);
 			yield injector.inject (pid, agent_desc, transport.remote_address);

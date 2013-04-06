@@ -1,10 +1,10 @@
-#include "zed-tests.h"
+#include "frida-tests.h"
 
 #include <windows.h>
 #include <psapi.h>
 
 char *
-zed_test_process_backend_filename_of (void * handle)
+frida_test_process_backend_filename_of (void * handle)
 {
   WCHAR filename_utf16[MAX_PATH + 1];
 
@@ -14,19 +14,19 @@ zed_test_process_backend_filename_of (void * handle)
 }
 
 void *
-zed_test_process_backend_self_handle (void)
+frida_test_process_backend_self_handle (void)
 {
   return GetCurrentProcess ();
 }
 
 guint
-zed_test_process_backend_self_id (void)
+frida_test_process_backend_self_id (void)
 {
   return GetCurrentProcessId ();
 }
 
 void
-zed_test_process_backend_do_start (const char * filename,
+frida_test_process_backend_do_start (const char * filename,
     void ** handle, guint * id, GError ** error)
 {
   LPWSTR filename_utf16;
@@ -59,7 +59,7 @@ zed_test_process_backend_do_start (const char * filename,
 }
 
 int
-zed_test_process_backend_do_join (void * handle, guint timeout_msec,
+frida_test_process_backend_do_join (void * handle, guint timeout_msec,
     GError ** error)
 {
   DWORD exit_code;

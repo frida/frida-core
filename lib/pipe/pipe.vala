@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class PipeTransport : Object {
 		public string local_address {
 			get;

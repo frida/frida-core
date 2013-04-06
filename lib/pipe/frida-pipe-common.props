@@ -4,7 +4,7 @@
   <ItemGroup>
     <CustomBuild Include="pipe.vala">
       <Message>Compiling vala code</Message>
-      <Command>"$(ValaCompiler)" pipe.vala --ccode --directory=$(IntDir) --library=zed-pipe --header=$(IntDir)zed-pipe.h $(ValaFlags) --pkg=gio-2.0 || exit 1
+      <Command>"$(ValaCompiler)" pipe.vala --ccode --directory=$(IntDir) --library=frida-pipe --header=$(IntDir)frida-pipe.h $(ValaFlags) --pkg=gio-2.0 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs>$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
@@ -13,7 +13,7 @@ echo &gt; "$(IntDir)valacode.stamp"
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="$(IntDir)zed-pipe.h" />
+    <ClInclude Include="$(IntDir)frida-pipe.h" />
   </ItemGroup>
 
   <ItemGroup>

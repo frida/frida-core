@@ -1,4 +1,4 @@
-#include "zed-core.h"
+#include "frida-core.h"
 
 #include <dlfcn.h>
 #include <signal.h>
@@ -9,7 +9,7 @@
 
 # import <UIKit/UIKit.h>
 
-typedef struct _ZedSpringboardApi ZedSpringboardApi;
+typedef struct _ZedSpringboardApi FridaSpringboardApi;
 
 struct _ZedSpringboardApi
 {
@@ -20,38 +20,38 @@ struct _ZedSpringboardApi
   NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifier) (NSString * identifier);
 };
 
-static void extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon);
-static void init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height);
+static void extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon);
+static void init_icon_from_ui_image_scaled_to (FridaImageData * icon, UIImage * image, guint target_width, guint target_height);
 
-static ZedSpringboardApi * zed_springboard_api = NULL;
+static FridaSpringboardApi * frida_springboard_api = NULL;
 
 #else
 # import <Foundation/Foundation.h>
 #endif
 
-typedef struct _ZedIconPair ZedIconPair;
+typedef struct _ZedIconPair FridaIconPair;
 
 struct _ZedIconPair
 {
-  ZedImageData small_icon;
-  ZedImageData large_icon;
+  FridaImageData small_icon;
+  FridaImageData large_icon;
 };
 
-static void zed_icon_pair_free (ZedIconPair * pair);
+static void frida_icon_pair_free (FridaIconPair * pair);
 
 static GHashTable * icon_pair_by_identifier = NULL;
 
 static void
-zed_system_init (void)
+frida_system_init (void)
 {
 #ifdef HAVE_IOS
-  if (zed_springboard_api == NULL)
+  if (frida_springboard_api == NULL)
 #endif
   {
 #ifdef HAVE_IOS
-    ZedSpringboardApi * api;
+    FridaSpringboardApi * api;
 
-    api = g_new (ZedSpringboardApi, 1);
+    api = g_new (FridaSpringboardApi, 1);
 
     api->module = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY | RTLD_GLOBAL);
     g_assert (api->module != NULL);
@@ -65,15 +65,15 @@ zed_system_init (void)
     api->SBSCopyIconImagePNGDataForDisplayIdentifier = dlsym (api->module, "SBSCopyIconImagePNGDataForDisplayIdentifier");
     g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
 
-    zed_springboard_api = api;
+    frida_springboard_api = api;
 #endif
 
-    icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) zed_icon_pair_free);
+    icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_icon_pair_free);
   }
 }
 
-ZedHostProcessInfo *
-zed_system_enumerate_processes (int * result_length1)
+FridaHostProcessInfo *
+frida_system_enumerate_processes (int * result_length1)
 {
   NSAutoreleasePool * pool;
   int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
@@ -81,9 +81,9 @@ zed_system_enumerate_processes (int * result_length1)
   size_t length;
   gint err;
   guint count, i;
-  ZedHostProcessInfo * result;
+  FridaHostProcessInfo * result;
 
-  zed_system_init ();
+  frida_system_init ();
 
   pool = [[NSAutoreleasePool alloc] init];
 
@@ -96,23 +96,23 @@ zed_system_enumerate_processes (int * result_length1)
   g_assert_cmpint (err, !=, -1);
   count = length / sizeof (struct kinfo_proc);
 
-  result = g_new0 (ZedHostProcessInfo, count);
+  result = g_new0 (FridaHostProcessInfo, count);
   *result_length1 = count;
 
   for (i = 0; i != count; i++)
   {
     struct kinfo_proc * e = &entries[i];
-    ZedHostProcessInfo * info = &result[i];
+    FridaHostProcessInfo * info = &result[i];
 
     info->_pid = e->kp_proc.p_pid;
 
 #ifdef HAVE_IOS
-    NSString * identifier = zed_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
+    NSString * identifier = frida_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
     if (identifier != nil)
     {
       NSString * app_name;
 
-      app_name = zed_springboard_api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+      app_name = frida_springboard_api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
       info->_name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
@@ -125,8 +125,8 @@ zed_system_enumerate_processes (int * result_length1)
     {
       info->_name = g_strdup (e->kp_proc.p_comm);
 
-      zed_image_data_init (&info->_small_icon, 0, 0, 0, "");
-      zed_image_data_init (&info->_large_icon, 0, 0, 0, "");
+      frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
+      frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
     }
   }
 
@@ -138,7 +138,7 @@ zed_system_enumerate_processes (int * result_length1)
 }
 
 void
-zed_system_kill (guint pid)
+frida_system_kill (guint pid)
 {
   kill (pid, SIGKILL);
 }
@@ -146,9 +146,9 @@ zed_system_kill (guint pid)
 #ifdef HAVE_IOS
 
 static void
-extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon, ZedImageData * large_icon)
+extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon)
 {
-  ZedIconPair * pair;
+  FridaIconPair * pair;
 
   pair = g_hash_table_lookup (icon_pair_by_identifier, [identifier UTF8String]);
   if (pair == NULL)
@@ -156,9 +156,9 @@ extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon,
     NSData * png_data;
     UIImage * image;
 
-    png_data = zed_springboard_api->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
+    png_data = frida_springboard_api->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
 
-    pair = g_new (ZedIconPair, 1);
+    pair = g_new (FridaIconPair, 1);
     image = [UIImage imageWithData: png_data];
     init_icon_from_ui_image_scaled_to (&pair->small_icon, image, 16, 16);
     init_icon_from_ui_image_scaled_to (&pair->large_icon, image, 32, 32);
@@ -167,12 +167,12 @@ extract_icons_from_identifier (NSString * identifier, ZedImageData * small_icon,
     [png_data release];
   }
 
-  zed_image_data_copy (&pair->small_icon, small_icon);
-  zed_image_data_copy (&pair->large_icon, large_icon);
+  frida_image_data_copy (&pair->small_icon, small_icon);
+  frida_image_data_copy (&pair->large_icon, large_icon);
 }
 
 static void
-init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint target_width, guint target_height)
+init_icon_from_ui_image_scaled_to (FridaImageData * icon, UIImage * image, guint target_width, guint target_height)
 {
   CGImageRef cgimage;
   CGSize full, scaled;
@@ -211,7 +211,7 @@ init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint t
    * HACK ALERT:
    *
    * CoreGraphics does not yet support non-premultiplied, so we make sure it multiplies with the same pixels as
-   * those usually rendered onto by the zed GUI... ICK!
+   * those usually rendered onto by the frida GUI... ICK!
    */
   pixels = (guint32 *) pixel_buf;
   for (i = 0; i != icon->_width * icon->_height; i++)
@@ -236,9 +236,9 @@ init_icon_from_ui_image_scaled_to (ZedImageData * icon, UIImage * image, guint t
 #endif /* HAVE_IOS */
 
 static void
-zed_icon_pair_free (ZedIconPair * pair)
+frida_icon_pair_free (FridaIconPair * pair)
 {
-  zed_image_data_destroy (&pair->small_icon);
-  zed_image_data_destroy (&pair->large_icon);
+  frida_image_data_destroy (&pair->small_icon);
+  frida_image_data_destroy (&pair->large_icon);
   g_free (pair);
 }

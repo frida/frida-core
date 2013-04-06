@@ -487,7 +487,7 @@ register_service (WinjectorServiceContext * self, const gchar * suffix)
   servicename_utf8 = g_strconcat (self->service_basename, suffix, NULL);
   servicename = g_utf8_to_utf16 (servicename_utf8, -1, NULL, NULL, NULL);
 
-  displayname_utf8 = g_strdup_printf ("Zed Winjector %s-bit helper (%s)",
+  displayname_utf8 = g_strdup_printf ("Frida Winjector %s-bit helper (%s)",
       suffix, servicename_utf8);
   displayname = g_utf8_to_utf16 (displayname_utf8, -1, NULL, NULL, NULL);
 

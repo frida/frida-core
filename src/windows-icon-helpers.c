@@ -17,28 +17,28 @@ struct _FindMainWindowCtx
 static HWND find_main_window_of_pid (DWORD pid);
 static BOOL CALLBACK inspect_window (HWND hwnd, LPARAM lparam);
 
-ZedImageData *
-_zed_image_data_from_process_or_file (DWORD pid, WCHAR * filename, ZedIconSize size)
+FridaImageData *
+_frida_image_data_from_process_or_file (DWORD pid, WCHAR * filename, FridaIconSize size)
 {
-  ZedImageData * icon;
+  FridaImageData * icon;
 
-  icon = _zed_image_data_from_process (pid, size);
+  icon = _frida_image_data_from_process (pid, size);
   if (icon == NULL)
-    icon = _zed_image_data_from_file (filename, size);
+    icon = _frida_image_data_from_file (filename, size);
 
   if (icon == NULL)
   {
-    icon = g_new (ZedImageData, 1);
-    zed_image_data_init (icon, 0, 0, 0, "");
+    icon = g_new (FridaImageData, 1);
+    frida_image_data_init (icon, 0, 0, 0, "");
   }
 
   return icon;
 }
 
-ZedImageData *
-_zed_image_data_from_process (DWORD pid, ZedIconSize size)
+FridaImageData *
+_frida_image_data_from_process (DWORD pid, FridaIconSize size)
 {
-  ZedImageData * result = NULL;
+  FridaImageData * result = NULL;
   HICON icon = NULL;
   HWND main_window;
 
@@ -50,7 +50,7 @@ _zed_image_data_from_process (DWORD pid, ZedIconSize size)
     flags = SMTO_ABORTIFHUNG | SMTO_BLOCK;
     timeout = 100;
 
-    if (size == ZED_ICON_SMALL)
+    if (size == FRIDA_ICON_SMALL)
     {
       SendMessageTimeout (main_window, WM_GETICON, ICON_SMALL2, 0,
           flags, timeout, (PDWORD_PTR) &icon);
@@ -64,7 +64,7 @@ _zed_image_data_from_process (DWORD pid, ZedIconSize size)
       if (icon == NULL)
         icon = (HICON) GetClassLongPtr (main_window, GCLP_HICONSM);
     }
-    else if (size == ZED_ICON_LARGE)
+    else if (size == FRIDA_ICON_LARGE)
     {
       SendMessageTimeout (main_window, WM_GETICON, ICON_BIG, 0,
           flags, timeout, (PDWORD_PTR) &icon);
@@ -85,40 +85,40 @@ _zed_image_data_from_process (DWORD pid, ZedIconSize size)
   }
 
   if (icon != NULL)
-    result = _zed_image_data_from_native_icon_handle (icon, size);
+    result = _frida_image_data_from_native_icon_handle (icon, size);
 
   return result;
 }
 
-ZedImageData *
-_zed_image_data_from_file (WCHAR * filename, ZedIconSize size)
+FridaImageData *
+_frida_image_data_from_file (WCHAR * filename, FridaIconSize size)
 {
-  ZedImageData * result = NULL;
+  FridaImageData * result = NULL;
   SHFILEINFO shfi = { 0, };
   UINT flags;
 
   flags = SHGFI_ICON;
-  if (size == ZED_ICON_SMALL)
+  if (size == FRIDA_ICON_SMALL)
     flags |= SHGFI_SMALLICON;
-  else if (size == ZED_ICON_LARGE)
+  else if (size == FRIDA_ICON_LARGE)
     flags |= SHGFI_LARGEICON;
   else
     g_assert_not_reached ();
 
   SHGetFileInfoW (filename, 0, &shfi, sizeof (shfi), flags);
   if (shfi.hIcon != NULL)
-    result = _zed_image_data_from_native_icon_handle (shfi.hIcon, size);
+    result = _frida_image_data_from_native_icon_handle (shfi.hIcon, size);
 
   return result;
 }
 
-ZedImageData *
-_zed_image_data_from_resource_url (WCHAR * resource_url, ZedIconSize size)
+FridaImageData *
+_frida_image_data_from_resource_url (WCHAR * resource_url, FridaIconSize size)
 {
   static gboolean api_initialized = FALSE;
   static Wow64DisableWow64FsRedirectionFunc Wow64DisableWow64FsRedirectionImpl = NULL;
   static Wow64RevertWow64FsRedirectionFunc Wow64RevertWow64FsRedirectionImpl = NULL;
-  ZedImageData * result = NULL;
+  FridaImageData * result = NULL;
   WCHAR * resource_file = NULL;
   DWORD resource_file_length;
   WCHAR * p;
@@ -158,7 +158,7 @@ _zed_image_data_from_resource_url (WCHAR * resource_url, ZedIconSize size)
   if (Wow64DisableWow64FsRedirectionImpl != NULL)
     Wow64DisableWow64FsRedirectionImpl (&old_redirection_value);
 
-  ret = ExtractIconExW (resource_file, resource_id, (size == ZED_ICON_LARGE) ? &icon : NULL, (size == ZED_ICON_SMALL) ? &icon : NULL, 1);
+  ret = ExtractIconExW (resource_file, resource_id, (size == FRIDA_ICON_LARGE) ? &icon : NULL, (size == FRIDA_ICON_SMALL) ? &icon : NULL, 1);
 
   if (Wow64RevertWow64FsRedirectionImpl != NULL)
     Wow64RevertWow64FsRedirectionImpl (old_redirection_value);
@@ -166,7 +166,7 @@ _zed_image_data_from_resource_url (WCHAR * resource_url, ZedIconSize size)
   if (ret != 1)
     goto beach;
 
-  result = _zed_image_data_from_native_icon_handle (icon, size);
+  result = _frida_image_data_from_native_icon_handle (icon, size);
 
 beach:
   if (icon != NULL)
@@ -176,10 +176,10 @@ beach:
   return result;
 }
 
-ZedImageData *
-_zed_image_data_from_native_icon_handle (HICON icon, ZedIconSize size)
+FridaImageData *
+_frida_image_data_from_native_icon_handle (HICON icon, FridaIconSize size)
 {
-  ZedImageData * result;
+  FridaImageData * result;
   HDC dc;
   gint width = -1, height = -1;
   BITMAPV5HEADER bi = { 0, };
@@ -191,12 +191,12 @@ _zed_image_data_from_native_icon_handle (HICON icon, ZedIconSize size)
 
   dc = CreateCompatibleDC (NULL);
 
-  if (size == ZED_ICON_SMALL)
+  if (size == FRIDA_ICON_SMALL)
   {
     width = GetSystemMetrics (SM_CXSMICON);
     height = GetSystemMetrics (SM_CYSMICON);
   }
-  else if (size == ZED_ICON_LARGE)
+  else if (size == FRIDA_ICON_LARGE)
   {
     width = GetSystemMetrics (SM_CXICON);
     height = GetSystemMetrics (SM_CYICON);
@@ -234,9 +234,9 @@ _zed_image_data_from_native_icon_handle (HICON icon, ZedIconSize size)
     data[i + 2] = hold;
   }
 
-  result = g_new (ZedImageData, 1);
+  result = g_new (FridaImageData, 1);
   data_base64 = g_base64_encode (data, rowstride * height);
-  zed_image_data_init (result, width, height, width * 4, data_base64);
+  frida_image_data_init (result, width, height, width * 4, data_base64);
   g_free (data_base64);
 
   DeleteObject (bm);

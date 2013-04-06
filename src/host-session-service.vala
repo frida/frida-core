@@ -1,4 +1,4 @@
-namespace Zed {
+namespace Frida {
 	public class HostSessionService : Object {
 		private Gee.ArrayList<HostSessionBackend> backends = new Gee.ArrayList<HostSessionBackend> ();
 
@@ -253,7 +253,7 @@ namespace Zed {
 					connection.closed.connect (on_client_connection_closed);
 
 					try {
-						var registration_id = connection.register_object (Zed.ObjectPath.AGENT_SESSION, agent_session);
+						var registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, agent_session);
 						registration_id_by_connection[connection] = registration_id;
 					} catch (IOError e) {
 						printerr ("failed to register object: %s\n", e.message);
