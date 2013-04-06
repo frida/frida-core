@@ -95,10 +95,13 @@ function make_toolchain_package ()
   pushd "$FRIDA_PREFIX" >/dev/null || exit 1
   tar \
       -c \
+      --exclude etc \
       --exclude include \
       --exclude lib \
+      --exclude share/devhelp \
       --exclude share/doc \
       --exclude share/emacs \
+      --exclude share/gdb \
       --exclude share/info \
       --exclude share/man \
       . | tar -C "$tooldir" -xf - || exit 1
