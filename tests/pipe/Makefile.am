@@ -5,5 +5,5 @@ pipe_test_LDADD = $(top_builddir)/lib/pipe/libfrida-pipe.la
 
 AM_CPPFLAGS = \
 	-include config.h \
-	-I $(top_builddir)/lib/pipe \
+	-I $(top_srcdir)/lib/pipe \
 	$(FRIDA_CFLAGS)

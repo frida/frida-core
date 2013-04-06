@@ -18,8 +18,8 @@ libfrida_agent_la_LDFLAGS = \
 libfrida_agent_la_VALAFLAGS = \
 	--library=frida-agent \
 	--header=frida-agent.h \
-	--vapidir=$(top_builddir)/lib/interfaces \
-	--vapidir=$(top_builddir)/lib/pipe \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--pkg frida-interfaces \
 	--pkg frida-pipe \
 	@FRIDA_PACKAGES@
@@ -29,8 +29,8 @@ libfrida_agent_glue_la_SOURCES = \
 
 AM_CPPFLAGS = \
 	$(FRIDA_CFLAGS) \
-	-I $(top_builddir)/lib/interfaces \
-	-I $(top_builddir)/lib/pipe
+	-I $(top_srcdir)/lib/interfaces \
+	-I $(top_srcdir)/lib/pipe
 
 install-exec-local: libfrida-agent.la
 	install -d "$(DESTDIR)$(libdir)/frida/"

@@ -38,9 +38,9 @@ frida_tests_LDADD = \
 frida_tests_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_tests_VALAFLAGS = \
-	--vapidir=$(builddir) \
-	--vapidir=$(top_builddir)/lib/interfaces \
-	--vapidir=$(top_builddir)/src \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_top_srcdir)/src \
+	--vapidir=$(abs_srcdir) \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
 	--pkg=frida-tests \
@@ -69,10 +69,10 @@ libfrida_tests_la_VALAFLAGS = \
 	--vapi=frida-tests.vapi \
 	--library=frida-tests \
 	--header=frida-tests.h \
-	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_builddir)/lib/interfaces \
-	--vapidir=$(top_builddir)/lib/pipe \
-	--vapidir=$(top_builddir)/src \
+	--vapidir=$(abs_top_srcdir)/vapi \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_top_srcdir)/lib/pipe \
+	--vapidir=$(abs_top_srcdir)/src \
 	--pkg=config \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
@@ -97,9 +97,9 @@ libinject_attacker_la_LIBADD = \
 
 AM_CPPFLAGS = \
 	-include config.h \
-	-I $(top_builddir)/lib/interfaces \
-	-I $(top_builddir)/lib/pipe \
-	-I $(top_builddir)/src \
+	-I $(top_srcdir)/lib/interfaces \
+	-I $(top_srcdir)/lib/pipe \
+	-I $(top_srcdir)/src \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\" \

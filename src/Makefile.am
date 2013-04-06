@@ -9,7 +9,7 @@ bin_PROGRAMS = $(programs)
 noinst_LTLIBRARIES = $(libraries)
 
 frida_server_SOURCES = \
-	$(srcdir)/server.vala
+	server.vala
 frida_server_CFLAGS = \
 	-w
 frida_server_LDFLAGS = \
@@ -18,10 +18,10 @@ frida_server_LDADD = \
 	$(builddir)/libfrida-core.la \
 	$(FRIDA_LIBS)
 frida_server_VALAFLAGS = \
-	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_builddir)/data \
-	--vapidir=$(top_builddir)/lib/interfaces \
-	--vapidir=$(builddir) \
+	--vapidir=$(abs_top_srcdir)/vapi \
+	--vapidir=$(abs_top_builddir)/data \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_srcdir) \
 	--pkg=config \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
@@ -41,11 +41,11 @@ if OS_LINUX
 
 if ENABLE_LOCAL_BACKENDS
 backend_sources += \
-	$(srcdir)/linux/linux-host-session.vala \
-	$(srcdir)/linux/linjector.vala
+	linux/linux-host-session.vala \
+	linux/linjector.vala
 glue_sources += \
-	$(srcdir)/linux/system-linux.c \
-	$(srcdir)/linux/linjector-glue.c
+	linux/system-linux.c \
+	linux/linjector-glue.c
 endif
 
 endif
@@ -54,20 +54,20 @@ if OS_DARWIN
 
 if ENABLE_LOCAL_BACKENDS
 backend_sources += \
-	$(srcdir)/darwin/darwin-host-session.vala \
-	$(srcdir)/darwin/fruitjector.vala
+	darwin/darwin-host-session.vala \
+	darwin/fruitjector.vala
 glue_sources += \
-	$(srcdir)/darwin/system-darwin.m \
-	$(srcdir)/darwin/darwin-host-session-glue.c \
-	$(srcdir)/darwin/fruitjector-glue.c
+	darwin/system-darwin.m \
+	darwin/darwin-host-session-glue.c \
+	darwin/fruitjector-glue.c
 endif
 
 backend_sources += \
-	$(srcdir)/fruity/fruity-client.vala \
-	$(srcdir)/fruity/fruity-host-session.vala \
-	$(srcdir)/fruity/fruity-property-list.vala
+	fruity/fruity-client.vala \
+	fruity/fruity-host-session.vala \
+	fruity/fruity-property-list.vala
 glue_sources += \
-	$(srcdir)/fruity/fruity-host-session-darwin.m
+	fruity/fruity-host-session-darwin.m
 
 endif
 
@@ -79,10 +79,10 @@ backend_valaflags += \
 endif
 
 libfrida_core_la_SOURCES = \
-	$(srcdir)/system.vala \
-	$(srcdir)/host-session-service.vala \
+	system.vala \
+	host-session-service.vala \
 	$(backend_sources) \
-	$(srcdir)/tcp/tcp-host-session.vala
+	tcp/tcp-host-session.vala
 libfrida_core_la_CFLAGS = \
 	-w
 libfrida_core_la_LIBADD = \
@@ -94,10 +94,10 @@ libfrida_core_la_VALAFLAGS = \
 	--vapi=frida-core.vapi \
 	--library=frida-core \
 	--header=frida-core.h \
-	--vapidir=$(top_srcdir)/vapi \
-	--vapidir=$(top_builddir)/data \
-	--vapidir=$(top_builddir)/lib/interfaces \
-	--vapidir=$(top_builddir)/lib/pipe \
+	--vapidir=$(abs_top_srcdir)/vapi \
+	--vapidir=$(abs_top_builddir)/data \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--pkg=config \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
@@ -113,13 +113,12 @@ libfrida_core_glue_la_LIBTOOLFLAGS = \
 AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_builddir)/data \
-	-I $(top_builddir)/lib/interfaces \
-	-I $(top_builddir)/lib/pipe \
-	-I $(top_builddir)/ext/gum/ext/udis86 \
+	-I $(top_srcdir)/lib/interfaces \
+	-I $(top_srcdir)/lib/pipe \
+	-I $(top_srcdir)/ext/gum/ext/udis86 \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
-
 
 if ENABLE_SERVER
 all-local: frida-server
