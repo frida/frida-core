@@ -9,9 +9,9 @@
 
 # import <UIKit/UIKit.h>
 
-typedef struct _ZedSpringboardApi FridaSpringboardApi;
+typedef struct _FridaSpringboardApi FridaSpringboardApi;
 
-struct _ZedSpringboardApi
+struct _FridaSpringboardApi
 {
   void * module;
 
@@ -29,9 +29,9 @@ static FridaSpringboardApi * frida_springboard_api = NULL;
 # import <Foundation/Foundation.h>
 #endif
 
-typedef struct _ZedIconPair FridaIconPair;
+typedef struct _FridaIconPair FridaIconPair;
 
-struct _ZedIconPair
+struct _FridaIconPair
 {
   FridaImageData small_icon;
   FridaImageData large_icon;

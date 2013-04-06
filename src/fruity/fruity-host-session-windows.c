@@ -5,40 +5,40 @@
 #include <setupapi.h>
 #include <devguid.h>
 
-typedef struct _ZedMobileDeviceInfo FridaMobileDeviceInfo;
-typedef struct _ZedImageDeviceInfo FridaImageDeviceInfo;
+typedef struct _FridaMobileDeviceInfo FridaMobileDeviceInfo;
+typedef struct _FridaImageDeviceInfo FridaImageDeviceInfo;
 
-typedef struct _ZedFindMobileDeviceContext FridaFindMobileDeviceContext;
-typedef struct _ZedFindImageDeviceContext FridaFindImageDeviceContext;
+typedef struct _FridaFindMobileDeviceContext FridaFindMobileDeviceContext;
+typedef struct _FridaFindImageDeviceContext FridaFindImageDeviceContext;
 
-typedef struct _ZedDeviceInfo FridaDeviceInfo;
+typedef struct _FridaDeviceInfo FridaDeviceInfo;
 
 typedef gboolean (* FridaEnumerateDeviceFunc) (const FridaDeviceInfo * device_info, gpointer user_data);
 
-struct _ZedMobileDeviceInfo
+struct _FridaMobileDeviceInfo
 {
   WCHAR * location;
 };
 
-struct _ZedImageDeviceInfo
+struct _FridaImageDeviceInfo
 {
   WCHAR * friendly_name;
   WCHAR * icon_url;
 };
 
-struct _ZedFindMobileDeviceContext
+struct _FridaFindMobileDeviceContext
 {
   const WCHAR * udid;
   FridaMobileDeviceInfo * mobile_device;
 };
 
-struct _ZedFindImageDeviceContext
+struct _FridaFindImageDeviceContext
 {
   const WCHAR * location;
   FridaImageDeviceInfo * image_device;
 };
 
-struct _ZedDeviceInfo
+struct _FridaDeviceInfo
 {
   WCHAR * device_path;
   WCHAR * instance_id;

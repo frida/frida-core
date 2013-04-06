@@ -48,15 +48,15 @@
 #define FRIDA_REMOTE_DATA_FIELD(n) \
   GSIZE_TO_POINTER (remote_address + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
 
-typedef struct _ZedInjectionInstance FridaInjectionInstance;
-typedef struct _ZedInjectionParams FridaInjectionParams;
-typedef struct _ZedCodeChunk FridaCodeChunk;
-typedef struct _ZedTrampolineData FridaTrampolineData;
-typedef struct _ZedFindLandingStripContext FridaFindLandingStripContext;
+typedef struct _FridaInjectionInstance FridaInjectionInstance;
+typedef struct _FridaInjectionParams FridaInjectionParams;
+typedef struct _FridaCodeChunk FridaCodeChunk;
+typedef struct _FridaTrampolineData FridaTrampolineData;
+typedef struct _FridaFindLandingStripContext FridaFindLandingStripContext;
 
 typedef void (* FridaEmitFunc) (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
-struct _ZedInjectionInstance
+struct _FridaInjectionInstance
 {
   FridaLinjector * linjector;
   guint id;
@@ -66,7 +66,7 @@ struct _ZedInjectionInstance
   gpointer remote_payload;
 };
 
-struct _ZedInjectionParams
+struct _FridaInjectionParams
 {
   pid_t pid;
   const char * so_path;
@@ -76,14 +76,14 @@ struct _ZedInjectionParams
   gpointer remote_address;
 };
 
-struct _ZedCodeChunk
+struct _FridaCodeChunk
 {
   guint8 * cur;
   gsize size;
   guint8 bytes[2048];
 };
 
-struct _ZedTrampolineData
+struct _FridaTrampolineData
 {
   gchar pthread_so[32];
   gchar pthread_create[32];
@@ -95,7 +95,7 @@ struct _ZedTrampolineData
   pthread_t worker_thread;
 };
 
-struct _ZedFindLandingStripContext
+struct _FridaFindLandingStripContext
 {
   pid_t pid;
   gpointer result;

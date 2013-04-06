@@ -18,17 +18,17 @@
     goto handle_posix_error; \
   }
 
-typedef struct _ZedPipeTransportBackend FridaPipeTransportBackend;
-typedef struct _ZedPipeBackend FridaPipeBackend;
+typedef struct _FridaPipeTransportBackend FridaPipeTransportBackend;
+typedef struct _FridaPipeBackend FridaPipeBackend;
 typedef guint FridaPipeRole;
 
-struct _ZedPipeTransportBackend
+struct _FridaPipeTransportBackend
 {
   gchar * local_name;
   gchar * remote_name;
 };
 
-struct _ZedPipeBackend
+struct _FridaPipeBackend
 {
   GMutex * mutex;
   FridaPipeRole role;
@@ -39,7 +39,7 @@ struct _ZedPipeBackend
   volatile gboolean connecting;
 };
 
-enum _ZedPipeRole
+enum _FridaPipeRole
 {
   FRIDA_PIPE_SERVER = 1,
   FRIDA_PIPE_CLIENT

@@ -11,11 +11,11 @@
     goto handle_mach_error; \
   }
 
-typedef struct _ZedPipeTransportBackend FridaPipeTransportBackend;
-typedef struct _ZedPipeBackend FridaPipeBackend;
-typedef struct _ZedPipeMessage FridaPipeMessage;
+typedef struct _FridaPipeTransportBackend FridaPipeTransportBackend;
+typedef struct _FridaPipeBackend FridaPipeBackend;
+typedef struct _FridaPipeMessage FridaPipeMessage;
 
-struct _ZedPipeTransportBackend
+struct _FridaPipeTransportBackend
 {
   mach_port_t task;
   mach_port_name_t local_rx;
@@ -24,7 +24,7 @@ struct _ZedPipeTransportBackend
   mach_port_name_t remote_tx;
 };
 
-struct _ZedPipeBackend
+struct _FridaPipeBackend
 {
   dispatch_queue_t dispatch_queue;
   mach_port_name_t rx_port;
@@ -35,7 +35,7 @@ struct _ZedPipeBackend
   dispatch_source_t monitor_source;
 };
 
-struct _ZedPipeMessage
+struct _FridaPipeMessage
 {
   mach_msg_header_t header;
   guint size;

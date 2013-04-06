@@ -28,19 +28,19 @@
     goto handle_mach_error; \
   }
 
-typedef struct _ZedDarwinHostContext FridaDarwinHostContext;
-typedef struct _ZedSpawnInstance FridaSpawnInstance;
-typedef struct _ZedSpawnMessageTx FridaSpawnMessageTx;
-typedef struct _ZedSpawnMessageRx FridaSpawnMessageRx;
-typedef struct _ZedRemoteApi FridaRemoteApi;
-typedef struct _ZedFillContext FridaFillContext;
+typedef struct _FridaDarwinHostContext FridaDarwinHostContext;
+typedef struct _FridaSpawnInstance FridaSpawnInstance;
+typedef struct _FridaSpawnMessageTx FridaSpawnMessageTx;
+typedef struct _FridaSpawnMessageRx FridaSpawnMessageRx;
+typedef struct _FridaRemoteApi FridaRemoteApi;
+typedef struct _FridaFillContext FridaFillContext;
 
-struct _ZedDarwinHostContext
+struct _FridaDarwinHostContext
 {
   dispatch_queue_t dispatch_queue;
 };
 
-struct _ZedSpawnInstance
+struct _FridaSpawnInstance
 {
   FridaDarwinHostSession * host_session;
   guint pid;
@@ -58,18 +58,18 @@ struct _ZedSpawnInstance
   dispatch_source_t server_recv_source;
 };
 
-struct _ZedSpawnMessageTx
+struct _FridaSpawnMessageTx
 {
   mach_msg_header_t header;
 };
 
-struct _ZedSpawnMessageRx
+struct _FridaSpawnMessageRx
 {
   mach_msg_header_t header;
   mach_msg_trailer_t trailer;
 };
 
-struct _ZedRemoteApi
+struct _FridaRemoteApi
 {
   GumAddress mach_task_self_impl;
   GumAddress mach_port_allocate_impl;
@@ -78,7 +78,7 @@ struct _ZedRemoteApi
   GumAddress abort_impl;
 };
 
-struct _ZedFillContext
+struct _FridaFillContext
 {
   FridaRemoteApi * api;
   guint remaining;

@@ -40,17 +40,17 @@
     goto handle_mach_error; \
   }
 
-typedef struct _ZedFruitContext FridaFruitContext;
-typedef struct _ZedInjectionInstance FridaInjectionInstance;
-typedef struct _ZedAgentDetails FridaAgentDetails;
-typedef struct _ZedAgentContext FridaAgentContext;
+typedef struct _FridaFruitContext FridaFruitContext;
+typedef struct _FridaInjectionInstance FridaInjectionInstance;
+typedef struct _FridaAgentDetails FridaAgentDetails;
+typedef struct _FridaAgentContext FridaAgentContext;
 
-struct _ZedFruitContext
+struct _FridaFruitContext
 {
   dispatch_queue_t dispatch_queue;
 };
 
-struct _ZedInjectionInstance
+struct _FridaInjectionInstance
 {
   FridaFruitjector * fruitjector;
   guint id;
@@ -60,7 +60,7 @@ struct _ZedInjectionInstance
   dispatch_source_t thread_monitor_source;
 };
 
-struct _ZedAgentDetails
+struct _FridaAgentDetails
 {
   guint pid;
   const char * dylib_path;
@@ -69,7 +69,7 @@ struct _ZedAgentDetails
   mach_port_name_t task;
 };
 
-struct _ZedAgentContext
+struct _FridaAgentContext
 {
   GumAddress _pthread_set_self_impl;
   GumAddress cthread_set_self_impl;
@@ -101,10 +101,10 @@ struct _ZedAgentContext
   gchar dylib_path_data[256];
 };
 
-typedef struct _ZedEmitContext FridaEmitContext;
-typedef struct _ZedFillContext FridaFillContext;
+typedef struct _FridaEmitContext FridaEmitContext;
+typedef struct _FridaFillContext FridaFillContext;
 
-struct _ZedEmitContext
+struct _FridaEmitContext
 {
   guint8 * code;
 #ifdef HAVE_ARM
@@ -114,7 +114,7 @@ struct _ZedEmitContext
 #endif
 };
 
-struct _ZedFillContext
+struct _FridaFillContext
 {
   FridaAgentContext * agent;
   guint remaining;

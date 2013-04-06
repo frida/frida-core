@@ -54,9 +54,9 @@ frida_agent_environment_deinit (void)
   g_mem_deinit ();
 }
 
-typedef struct _ZedAutoInterceptContext FridaAutoInterceptContext;
+typedef struct _FridaAutoInterceptContext FridaAutoInterceptContext;
 
-struct _ZedAutoInterceptContext
+struct _FridaAutoInterceptContext
 {
   GumInterceptor * interceptor;
   GThreadFunc thread_func;

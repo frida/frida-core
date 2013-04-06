@@ -1,5 +1,5 @@
-#ifndef __ZED_WINDOWS_ICON_HELPERS_H__
-#define __ZED_WINDOWS_ICON_HELPERS_H__
+#ifndef __FRIDA_WINDOWS_ICON_HELPERS_H__
+#define __FRIDA_WINDOWS_ICON_HELPERS_H__
 
 #include "frida-core.h"
 
@@ -7,9 +7,9 @@
 #include <windows.h>
 #undef VC_EXTRALEAN
 
-typedef enum _ZedIconSize FridaIconSize;
+typedef enum _FridaIconSize FridaIconSize;
 
-enum _ZedIconSize
+enum _FridaIconSize
 {
   FRIDA_ICON_SMALL,
   FRIDA_ICON_LARGE

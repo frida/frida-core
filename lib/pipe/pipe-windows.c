@@ -12,16 +12,16 @@
     goto handle_winapi_error; \
   }
 
-typedef struct _ZedPipeTransportBackend FridaPipeTransportBackend;
-typedef struct _ZedPipeBackend FridaPipeBackend;
-typedef enum _ZedPipeRole FridaPipeRole;
+typedef struct _FridaPipeTransportBackend FridaPipeTransportBackend;
+typedef struct _FridaPipeBackend FridaPipeBackend;
+typedef enum _FridaPipeRole FridaPipeRole;
 
-struct _ZedPipeTransportBackend
+struct _FridaPipeTransportBackend
 {
   gboolean placeholder;
 };
 
-struct _ZedPipeBackend
+struct _FridaPipeBackend
 {
   FridaPipeRole role;
   HANDLE pipe;
@@ -32,7 +32,7 @@ struct _ZedPipeBackend
   HANDLE write_cancel;
 };
 
-enum _ZedPipeRole
+enum _FridaPipeRole
 {
   FRIDA_PIPE_SERVER = 1,
   FRIDA_PIPE_CLIENT
