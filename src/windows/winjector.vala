@@ -17,7 +17,7 @@ namespace Frida {
 			elevated_resource_store = null;
 		}
 
-		public async void inject (uint pid, AgentDescriptor desc, string data_string, Cancellable? cancellable = null) throws IOError {
+		public async void inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
 			if (normal_resource_store == null) {
 				normal_resource_store = new ResourceStore ();
 				normal_helper_factory.resource_store = normal_resource_store;
@@ -29,7 +29,7 @@ namespace Frida {
 
 			var normal_helper = yield normal_helper_factory.obtain ();
 			try {
-				yield normal_helper.inject (pid, filename, data_string, cancellable);
+				yield normal_helper.inject (pid, filename, data_string);
 				injected = true;
 			} catch (IOError inject_error) {
 				var permission_error = new IOError.PERMISSION_DENIED ("");
@@ -46,7 +46,7 @@ namespace Frida {
 				filename = elevated_resource_store.ensure_copy_of (desc);
 
 				var elevated_helper = yield elevated_helper_factory.obtain ();
-				yield elevated_helper.inject (pid, filename, data_string, cancellable);
+				yield elevated_helper.inject (pid, filename, data_string);
 			}
 		}
 
@@ -114,7 +114,7 @@ namespace Frida {
 				yield;
 			}
 
-			public async void inject (uint pid, string filename_template, string data_string, Cancellable? cancellable) throws IOError {
+			public async void inject (uint pid, string filename_template, string data_string) throws IOError {
 				yield proxy.inject (pid, filename_template, data_string);
 			}
 

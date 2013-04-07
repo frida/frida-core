@@ -55,7 +55,8 @@ if OS_DARWIN
 if ENABLE_LOCAL_BACKENDS
 backend_sources += \
 	darwin/darwin-host-session.vala \
-	darwin/fruitjector.vala
+	darwin/fruitjector.vala \
+	darwin/fruitjector-types.vala
 glue_sources += \
 	darwin/system-darwin.m \
 	darwin/darwin-host-session-glue.c \
