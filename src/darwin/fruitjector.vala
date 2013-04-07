@@ -134,7 +134,8 @@ namespace Frida {
 						do_obtain.callback ();
 						return false;
 					});
-					string[] argv = { server.address };
+					timeout_source.attach (main_context);
+					string[] argv = { resource_store.helper.path, server.client_address };
 					spawn (resource_store.helper.path, argv);
 					yield;
 					server.disconnect (connection_handler);
