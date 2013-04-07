@@ -150,7 +150,7 @@ _frida_darwin_host_session_do_spawn (FridaDarwinHostSession * self, const gchar 
   posix_spawnattr_setsigmask (&attr, &signal_mask_set);
   posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED);
 
-  result = posix_spawn (&pid, path, 0, &attr, argv, envp);
+  result = posix_spawn (&pid, path, NULL, &attr, argv, envp);
 
   posix_spawnattr_destroy (&attr);
 
@@ -240,7 +240,7 @@ _frida_darwin_host_session_do_spawn (FridaDarwinHostSession * self, const gchar 
 handle_spawn_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "posix_spawn failed: %s (%d)", strerror (result), result);
+        "posix_spawn failed: %s (%d)", strerror (errno), errno);
     goto error_epilogue;
   }
 
