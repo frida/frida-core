@@ -74,6 +74,7 @@
 /src/frida-core.h
 /src/frida-core.vapi
 /src/frida-server
+/src/frida.c
 /src/fruity/fruity-client.c
 /src/fruity/fruity-host-session.c
 /src/fruity/fruity-property-list.c
