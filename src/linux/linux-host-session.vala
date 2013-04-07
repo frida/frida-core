@@ -86,7 +86,7 @@ namespace Frida {
 		}
 
 		public async void kill (uint pid) throws IOError {
-			throw new IOError.FAILED ("not yet implemented in the Linux backend");
+			System.kill (pid);
 		}
 
 		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {

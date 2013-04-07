@@ -52,7 +52,8 @@ frida_system_enumerate_processes (int * result_length1)
 void
 frida_system_kill (guint pid)
 {
-  (void) pid;
+  kill (pid, SIGKILL);
+}
 
   g_assert_not_reached ();
 }
