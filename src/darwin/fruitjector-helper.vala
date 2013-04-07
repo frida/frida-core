@@ -1,4 +1,6 @@
 #if DARWIN
+using Frida;
+
 namespace Fruitjector {
 	public int main (string[] args) {
 		var service = new Service ();
@@ -27,8 +29,8 @@ namespace Fruitjector {
 		private async void start () {
 			try {
 				connection = yield DBusConnection.new_for_stream (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
-				WinjectorHelper helper = this;
-				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+				FruitjectorHelper helper = this;
+				registration_id = connection.register_object (FruitjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
 			} catch (Error e) {
 				stderr.printf ("start failed: %s\n", e.message);

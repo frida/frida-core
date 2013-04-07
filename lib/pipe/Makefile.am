@@ -1,4 +1,6 @@
-noinst_LTLIBRARIES = libfrida-pipe.la libfrida-pipe-glue.la
+noinst_LTLIBRARIES = \
+	libfrida-pipe.la \
+	libfrida-pipe-glue.la
 
 libfrida_pipe_la_SOURCES = \
 	pipe.vala

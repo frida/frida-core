@@ -1,4 +1,6 @@
-noinst_LTLIBRARIES = libfrida-agent.la libfrida-agent-glue.la
+noinst_LTLIBRARIES = \
+	libfrida-agent.la \
+	libfrida-agent-glue.la
 
 libfrida_agent_la_SOURCES = \
 	agent.vala \

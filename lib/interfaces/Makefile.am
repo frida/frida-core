@@ -1,4 +1,5 @@
-noinst_LTLIBRARIES = libfrida-interfaces.la
+noinst_LTLIBRARIES = \
+	libfrida-interfaces.la
 
 libfrida_interfaces_la_SOURCES = \
 	session.vala

@@ -22,7 +22,6 @@ namespace Frida {
 		}
 
 		private void add_local_backends () {
-#if HAVE_LOCAL_BACKENDS
 #if LINUX
 			add_backend (new LinuxHostSessionBackend ());
 #endif
@@ -31,7 +30,6 @@ namespace Frida {
 #endif
 #if WINDOWS
 			add_backend (new WindowsHostSessionBackend ());
-#endif
 #endif
 		}
 

@@ -19,15 +19,11 @@ noinst_LTLIBRARIES = \
 platform_tests = $(NULL)
 
 if OS_LINUX
-if ENABLE_LOCAL_BACKENDS
 platform_tests += test-linjector.vala
-endif
 endif
 
 if OS_DARWIN
-if ENABLE_LOCAL_BACKENDS
 platform_tests += test-fruitjector.vala
-endif
 endif
 
 frida_tests_SOURCES = \
