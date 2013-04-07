@@ -51,7 +51,6 @@ fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   AC_DEFINE(HAVE_DARWIN, 1, [Define to 1 if OS is Darwin based.])
 fi
-echo "Linux=$HAVE_LINUX"
 AM_CONDITIONAL(OS_LINUX, [test "x$HAVE_LINUX" = "xyes"])
 AM_CONDITIONAL(OS_DARWIN, [test "x$HAVE_DARWIN" = "xyes"])
 
