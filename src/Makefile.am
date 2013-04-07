@@ -3,6 +3,7 @@ backend_libraries = $(NULL)
 backend_sources = $(NULL)
 backend_libadd = $(NULL)
 backend_valaflags = $(NULL)
+backend_cleanfiles = $(NULL)
 glue_sources = $(NULL)
 
 if OS_LINUX
@@ -12,10 +13,6 @@ backend_sources += \
 glue_sources += \
 	linux/system-linux.c \
 	linux/linjector-glue.c
-backend_libadd += \
-	$(builddir)/libfrida-data-agent.la
-backend_valaflags += \
-	--pkg=frida-data-agent
 endif
 
 if OS_DARWIN
@@ -30,14 +27,20 @@ backend_libadd += \
 	$(builddir)/libfruitjector-types.la \
 	$(builddir)/libfrida-data-fruitjector.la
 backend_valaflags += \
+	--pkg=fruitjector-types \
 	--pkg=frida-data-fruitjector
 
 backend_programs += \
 	frida-fruitjector-helper
 frida_fruitjector_helper_SOURCES = \
 	darwin/fruitjector-helper.vala
+frida_fruitjector_helper_CFLAGS = \
+	-w
+frida_fruitjector_helper_LDFLAGS = \
+	$(FRIDA_LDFLAGS)
 frida_fruitjector_helper_LDADD = \
-	$(builddir)/libfruitjector-types.la
+	$(builddir)/libfruitjector-types.la \
+	$(FRIDA_LIBS)
 frida_fruitjector_helper_VALAFLAGS = \
 	--header=fruitjector-helper.h \
 	--vapidir=$(abs_srcdir) \
@@ -49,6 +52,8 @@ backend_libraries += \
 	libfruitjector-types.la
 libfruitjector_types_la_SOURCES = \
 	darwin/fruitjector-types.vala
+libfruitjector_types_la_CFLAGS = \
+	-w
 libfruitjector_types_la_VALAFLAGS = \
 	--vapi=fruitjector-types.vapi \
 	--library=fruitjector-types \
@@ -69,6 +74,11 @@ frida-data-fruitjector.c: $(builddir)/frida-fruitjector-helper
 			-c "$(srcdir)/darwin/fruitjector.resources" \
 			-o "$(builddir)/frida-data-fruitjector" \
 			$(builddir)/frida-fruitjector-helper
+backend_cleanfiles += \
+	$(builddir)/frida-data-fruitjector.vapi \
+	$(builddir)/frida-data-fruitjector.h \
+	$(builddir)/frida-data-fruitjector.c \
+	$(builddir)/frida-data-fruitjector-blob.S
 
 backend_sources += \
 	fruity/fruity-client.vala \
@@ -99,6 +109,7 @@ libfrida_core_la_LIBADD = \
 	$(builddir)/libfrida-core-glue.la \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
+	$(builddir)/libfrida-data-agent.la \
 	$(backend_libadd)
 libfrida_core_la_VALAFLAGS = \
 	--vapi=frida-core.vapi \
@@ -107,9 +118,12 @@ libfrida_core_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/vapi \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
+	--vapidir=$(abs_srcdir) \
+	--vapidir=$(abs_builddir) \
 	--pkg=config \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
+	--pkg=frida-data-agent \
 	$(backend_valaflags) \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
@@ -174,18 +188,10 @@ soext = .dylib
 endif
 AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
 
-CLEANFILES = \
-	$(builddir)/frida-data-agent.vapi \
-	$(builddir)/frida-data-agent.h \
-	$(builddir)/frida-data-agent.c \
-	$(builddir)/frida-data-agent-blob.S \
-	$(NULL)
-
 libfrida_data_agent_la_SOURCES = \
 	$(builddir)/frida-data-agent.c \
 	$(builddir)/frida-data-agent-blob.S \
 	$(NULL)
-
 frida-data-agent.c: $(AGENT)
 	$(AM_V_GEN) \
 		"$(RESOURCE_COMPILER)" \
@@ -193,3 +199,11 @@ frida-data-agent.c: $(AGENT)
 			-c "$(srcdir)/agent.resources" \
 			-o "$(builddir)/frida-data-agent" \
 			$(AGENT)
+
+CLEANFILES = \
+	$(builddir)/frida-data-agent.vapi \
+	$(builddir)/frida-data-agent.h \
+	$(builddir)/frida-data-agent.c \
+	$(builddir)/frida-data-agent-blob.S \
+	$(backend_cleanfiles) \
+	$(NULL)

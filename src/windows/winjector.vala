@@ -59,8 +59,6 @@ namespace Frida {
 			private WinjectorHelper proxy;
 			private void * process;
 
-			private const uint ESTABLISH_TIMEOUT_MSEC = 30 * 1000;
-
 			public HelperInstance (TemporaryFile helper32, TemporaryFile helper64, PipeTransport transport, Pipe pipe, void * process) {
 				this.helper32 = helper32;
 				this.helper64 = helper64;

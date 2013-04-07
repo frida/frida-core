@@ -80,9 +80,14 @@ namespace Frida {
 			}
 		}
 
-		public TemporaryDirectory () {
-			this.file = File.new_for_path (create ());
+		public TemporaryDirectory () throws IOError {
+			this.file = File.new_for_path (Path.build_filename (get_system_tmp (), make_name ()));
 			this.remove_on_dispose = true;
+			try {
+				this.file.make_directory ();
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
 		}
 
 		protected TemporaryDirectory.with_file (File file, bool remove_on_dispose) {
@@ -103,8 +108,14 @@ namespace Frida {
 			}
 		}
 
+		private static string make_name () {
+			var builder = new StringBuilder ("frida-");
+			for (var i = 0; i != 16; i++)
+				builder.append_printf ("%02x", Random.int_range (0, 256));
+			return builder.str;
+		}
+
 		private static extern string get_system_tmp ();
-		private static extern string create ();
 	}
 
 	public class TemporaryFile {

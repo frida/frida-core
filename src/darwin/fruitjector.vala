@@ -5,99 +5,67 @@ namespace Frida {
 	public class Fruitjector : Object {
 		public signal void uninjected (uint id);
 
-		private ResourceStore normal_resource_store;
-		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
-
-		private ResourceStore elevated_resource_store;
-		private HelperFactory elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
+		private ResourceStore resource_store;
+		private HelperFactory helper_factory = new HelperFactory ();
+		private Gee.HashMap<uint, uint> pid_by_id = new Gee.HashMap<uint, uint> ();
 
 		public async void close () {
-			yield normal_helper_factory.close ();
-			yield elevated_helper_factory.close ();
+			yield helper_factory.close ();
 
-			normal_resource_store = null;
-			elevated_resource_store = null;
+			resource_store = null;
 		}
 
-		public async void inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
-			if (normal_resource_store == null) {
-				normal_resource_store = new ResourceStore ();
-				normal_helper_factory.resource_store = normal_resource_store;
+		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
+			if (resource_store == null) {
+				resource_store = new ResourceStore ();
+				helper_factory.resource_store = resource_store;
 			}
 
-			var filename = normal_resource_store.ensure_copy_of (desc);
+			var filename = resource_store.ensure_copy_of (desc);
+			var helper = yield helper_factory.obtain ();
+			var id = yield helper.inject (pid, filename, data_string);
+			pid_by_id[id] = pid;
 
-			bool injected = false;
+			return id;
+		}
 
-			var normal_helper = yield normal_helper_factory.obtain ();
-			try {
-				yield normal_helper.inject (pid, filename, data_string);
-				injected = true;
-			} catch (IOError inject_error) {
-				var permission_error = new IOError.PERMISSION_DENIED ("");
-				if (inject_error.code != permission_error.code)
-					throw inject_error;
-			}
+		public bool any_still_injected () {
+			return !pid_by_id.is_empty;
+		}
 
-			if (!injected) {
-				if (elevated_resource_store == null) {
-					elevated_resource_store = new ResourceStore ();
-					elevated_helper_factory.resource_store = elevated_resource_store;
-				}
-
-				filename = elevated_resource_store.ensure_copy_of (desc);
-
-				var elevated_helper = yield elevated_helper_factory.obtain ();
-				yield elevated_helper.inject (pid, filename, data_string);
-			}
+		public bool is_still_injected (uint id) {
+			return pid_by_id.has_key (id);
 		}
 
 		private class HelperInstance {
-			private TemporaryFile helper;
-			private PipeTransport transport;
-			private Pipe pipe;
 			private DBusConnection connection;
 			private FruitjectorHelper proxy;
-			private void * process;
 
-			private const uint ESTABLISH_TIMEOUT_MSEC = 30 * 1000;
-
-			public HelperInstance (TemporaryFile helper, PipeTransport transport, Pipe pipe, void * process) {
-				this.helper = helper;
-				this.transport = transport;
-				this.pipe = pipe;
-				this.process = process;
-			}
-
-			public async void open () throws IOError {
-				try {
-					connection = yield DBusConnection.new_for_stream (pipe, null, DBusConnectionFlags.NONE);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
-				}
-				proxy = yield connection.get_proxy (null, FruitjectorObjectPath.HELPER);
+			public HelperInstance (DBusConnection connection, FruitjectorHelper proxy) {
+				this.connection = connection;
+				this.proxy = proxy;
 			}
 
 			public async void close () {
 				try {
 					yield proxy.stop ();
-				} catch (IOError e) {
+				} catch (IOError proxy_error) {
+				}
+
+				try {
+					yield connection.close ();
+				} catch (Error connection_error) {
 				}
 			}
 
-			public async void inject (uint pid, string filename_template, string data_string) throws IOError {
-				yield proxy.inject (pid, filename_template, data_string);
+			public async uint inject (uint pid, string filename, string data_string) throws IOError {
+				return yield proxy.inject (pid, filename, data_string);
 			}
 		}
 
-		protected enum PrivilegeLevel {
-			NORMAL,
-			ELEVATED
-		}
-
 		private class HelperFactory {
-			private PrivilegeLevel level;
 			private MainContext main_context;
+			private DBusServer server;
 			private HelperInstance helper;
 			private ArrayList<ObtainRequest> obtain_requests = new ArrayList<ObtainRequest> ();
 
@@ -106,8 +74,7 @@ namespace Frida {
 				set;
 			}
 
-			public HelperFactory (PrivilegeLevel level) {
-				this.level = level;
+			public HelperFactory () {
 				this.main_context = MainContext.get_thread_default ();
 			}
 
@@ -115,6 +82,11 @@ namespace Frida {
 				if (helper != null) {
 					yield helper.close ();
 					helper = null;
+				}
+
+				if (server != null) {
+					server.stop ();
+					server = null;
 				}
 
 				resource_store = null;
@@ -125,11 +97,12 @@ namespace Frida {
 					return helper;
 
 				if (obtain_requests.size == 0) {
-					try {
-						Thread.create<bool> (obtain_worker, false);
-					} catch (ThreadError e) {
-						error (e.message);
-					}
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						do_obtain ();
+						return false;
+					});
+					source.attach (main_context);
 				}
 
 				var request = new ObtainRequest (() => obtain.callback ());
@@ -139,46 +112,53 @@ namespace Frida {
 				return request.get_result ();
 			}
 
-			private bool obtain_worker () {
+			private async void do_obtain () {
+				DBusConnection connection = null;
 				HelperInstance instance = null;
+				TimeoutSource timeout_source = null;
 				IOError error = null;
 
 				try {
-					var transport = new PipeTransport.with_pid (0);
-					var pipe = new Pipe (transport.local_address);
-					void * process = spawn (resource_store.helper.path, transport.remote_address, level);
-					instance = new HelperInstance (resource_store.helper, transport, pipe, process);
-				} catch (IOError e) {
-					error = e;
+					if (server == null) {
+						server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+						server.start ();
+					}
+					var connection_handler = server.new_connection.connect ((c) => {
+						connection = c;
+						do_obtain.callback ();
+						return true;
+					});
+					timeout_source = new TimeoutSource.seconds (2);
+					timeout_source.set_callback (() => {
+						error = new IOError.TIMED_OUT ("timed out");
+						do_obtain.callback ();
+						return false;
+					});
+					string[] argv = { server.address };
+					spawn (resource_store.helper.path, argv);
+					yield;
+					server.disconnect (connection_handler);
+
+					FruitjectorHelper proxy;
+					if (error == null) {
+						proxy = yield connection.get_proxy (null, FruitjectorObjectPath.HELPER);
+						instance = new HelperInstance (connection, proxy);
+					}
+					timeout_source.destroy ();
+				} catch (Error e) {
+					if (timeout_source != null)
+						timeout_source.destroy ();
+					error = new IOError.FAILED (e.message);
 				}
 
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					complete_obtain (instance, error);
-					return false;
-				});
-				source.attach (main_context);
-
-				return error == null;
+				complete_obtain (instance, error);
 			}
 
 			private async void complete_obtain (HelperInstance? instance, IOError? error) {
-				HelperInstance completed_instance = instance;
-				IOError completed_error = error;
-
-				if (instance != null) {
-					try {
-						yield instance.open ();
-					} catch (IOError e) {
-						completed_instance = null;
-						completed_error = e;
-					}
-				}
-
-				this.helper = completed_instance;
+				this.helper = instance;
 
 				foreach (var request in obtain_requests)
-					request.complete (completed_instance, completed_error);
+					request.complete (instance, error);
 				obtain_requests.clear ();
 			}
 
@@ -206,11 +186,14 @@ namespace Frida {
 				}
 			}
 
-			private static extern void * spawn (string path, string parameters, PrivilegeLevel level) throws IOError;
+			private static extern uint spawn (string path, string[] argv) throws IOError;
 		}
 
 		private class ResourceStore {
-			private TemporaryDirectory tempdir = new TemporaryDirectory ();
+			public TemporaryDirectory tempdir {
+				get;
+				private set;
+			}
 
 			public TemporaryFile helper {
 				get;
@@ -220,7 +203,8 @@ namespace Frida {
 			private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
 
 			public ResourceStore () throws IOError {
-				var blob = Frida.Data.Fruitjector.get_fruitjector_helper_blob ();
+				tempdir = new TemporaryDirectory ();
+				var blob = Frida.Data.Fruitjector.get_frida_fruitjector_helper_blob ();
 				helper = new TemporaryFile.from_stream ("frida-fruitjector-helper",
 					new MemoryInputStream.from_data (blob.data, null),
 					tempdir);
@@ -235,10 +219,10 @@ namespace Frida {
 			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
 				var temp_agent = agents[desc.name];
 				if (temp_agent == null) {
-					temp_agent = new TemporaryFile.from_stream (desc, tempdir);
+					temp_agent = new TemporaryFile.from_stream (desc.name, desc.dylib, tempdir);
 					agents[desc.name] = temp_agent;
 				}
-				return temp_agent.filename_template;
+				return temp_agent.path;
 			}
 		}
 	}

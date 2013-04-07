@@ -20,7 +20,7 @@ namespace Fruitjector {
 		private DBusConnection connection;
 		private uint registration_id;
 
-		public Manager (string parent_address) {
+		public Service (string parent_address) {
 			Object (parent_address: parent_address);
 		}
 
@@ -62,7 +62,8 @@ namespace Fruitjector {
 			});
 		}
 
-		public async void inject (uint pid, string filename, string data_string) throws IOError {
+		public async uint inject (uint pid, string filename, string data_string) throws IOError {
+			return 1337;
 		}
 	}
 }
