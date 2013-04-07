@@ -119,7 +119,7 @@ namespace Frida {
 	}
 
 	public class Device : Object {
-		public signal void closed ();
+		public signal void lost ();
 
 		public uint id {
 			get;
@@ -150,8 +150,8 @@ namespace Frida {
 		private bool is_closed = false;
 
 		protected Frida.HostSession host_session;
-		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
-		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
+		private Gee.HashMap<uint, Process> process_by_pid = new Gee.HashMap<uint, Process> ();
+		private Gee.HashMap<uint, Process> process_by_handle = new Gee.HashMap<uint, Process> ();
 
 		public Device (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind, Frida.HostSessionProvider provider) {
 			this.manager = manager;
@@ -236,30 +236,30 @@ namespace Frida {
 			}
 		}
 
-		public async Session attach (uint pid) throws Error {
-			var session = session_by_pid[pid];
-			if (session == null) {
+		public async Process attach (uint pid) throws Error {
+			var process = process_by_pid[pid];
+			if (process == null) {
 				yield ensure_host_session ();
 
 				var agent_session_id = yield host_session.attach_to (pid);
 				var agent_session = yield provider.obtain_agent_session (agent_session_id);
-				session = new Session (this, pid, agent_session);
-				session_by_pid[pid] = session;
-				session_by_handle[agent_session_id.handle] = session;
+				process = new Process (this, pid, agent_session);
+				process_by_pid[pid] = process;
+				process_by_handle[agent_session_id.handle] = process;
 			}
-			return session;
+			return process;
 		}
 
-		public Session attach_sync (uint pid) throws Error {
+		public Process attach_sync (uint pid) throws Error {
 			var task = create<AttachTask> () as AttachTask;
 			task.pid = pid;
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class AttachTask : DeviceTask<Session> {
+		private class AttachTask : DeviceTask<Process> {
 			public uint pid;
 
-			protected override async Session perform_operation () throws Error {
+			protected override async Process perform_operation () throws Error {
 				return yield parent.attach (pid);
 			}
 		}
@@ -271,32 +271,32 @@ namespace Frida {
 
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
 
-			foreach (var session in session_by_pid.values.to_array ())
-				yield session._do_close (may_block);
-			session_by_pid.clear ();
-			session_by_handle.clear ();
+			foreach (var process in process_by_pid.values.to_array ())
+				yield process._do_close (may_block);
+			process_by_pid.clear ();
+			process_by_handle.clear ();
 
 			host_session = null;
 
 			manager._release_device (this);
 			manager = null;
 
-			closed ();
+			lost ();
 		}
 
-		public void _release_session (Session session) {
-			var session_did_exist = session_by_pid.unset (session.pid);
-			assert (session_did_exist);
+		public void _release_process (Process process) {
+			var process_did_exist = process_by_pid.unset (process.pid);
+			assert (process_did_exist);
 
 			uint handle = 0;
-			foreach (var entry in session_by_handle.entries) {
-				if (entry.value == session) {
+			foreach (var entry in process_by_handle.entries) {
+				if (entry.value == process) {
 					handle = entry.key;
 					break;
 				}
 			}
 			assert (handle != 0);
-			session_by_handle.unset (handle);
+			process_by_handle.unset (handle);
 		}
 
 		private async void ensure_host_session () throws IOError {
@@ -306,9 +306,9 @@ namespace Frida {
 		}
 
 		protected void on_agent_session_closed (Frida.AgentSessionId id, Error? error) {
-			var session = session_by_handle[id.handle];
-			if (session != null)
-				session._do_close (false);
+			var process = process_by_handle[id.handle];
+			if (process != null)
+				process._do_close (false);
 		}
 
 		private Object create<T> () {
@@ -323,20 +323,20 @@ namespace Frida {
 
 			protected override void validate_operation () throws Error {
 				if (parent.is_closed)
-					throw new IOError.FAILED ("invalid operation (device is closed)");
+					throw new IOError.FAILED ("invalid operation (device is gone)");
 			}
 		}
 	}
 
-	public class Session : Object {
-		public signal void closed ();
+	public class Process : Object {
+		public signal void detached ();
 
 		public uint pid {
 			get;
 			private set;
 		}
 
-		public Frida.AgentSession internal_session {
+		public Frida.AgentSession session {
 			get;
 			private set;
 		}
@@ -351,38 +351,38 @@ namespace Frida {
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
-		public Session (Device device, uint pid, Frida.AgentSession agent_session) {
+		public Process (Device device, uint pid, Frida.AgentSession agent_session) {
 			this.device = device;
 			this.pid = pid;
-			this.internal_session = agent_session;
+			this.session = agent_session;
 			this.main_context = device.main_context;
 
-			internal_session.message_from_script.connect (on_message_from_script);
+			session.message_from_script.connect (on_message_from_script);
 		}
 
-		public async void close () {
+		public async void detach () {
 			yield _do_close (true);
 		}
 
-		public void close_sync () {
+		public void detach_sync () {
 			try {
-				(create<CloseTask> () as CloseTask).start_and_wait_for_completion ();
+				(create<DetachTask> () as DetachTask).start_and_wait_for_completion ();
 			} catch (Error e) {
 				assert_not_reached ();
 			}
 		}
 
-		private class CloseTask : SessionTask<void> {
+		private class DetachTask : ProcessTask<void> {
 			protected override void validate_operation () throws Error {
 			}
 
 			protected override async void perform_operation () throws Error {
-				yield parent.close ();
+				yield parent.detach ();
 			}
 		}
 
 		public async Script create_script (string source) throws Error {
-			var sid = yield internal_session.create_script (source);
+			var sid = yield session.create_script (source);
 			var script = new Script (this, sid);
 			script_by_id[sid.handle] = script;
 			return script;
@@ -394,7 +394,7 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class CreateScriptTask : SessionTask<Script> {
+		private class CreateScriptTask : ProcessTask<Script> {
 			public string source;
 
 			protected override async Script perform_operation () throws Error {
@@ -423,32 +423,32 @@ namespace Frida {
 
 			if (may_block) {
 				try {
-					yield internal_session.close ();
+					yield session.close ();
 				} catch (IOError ignored_error) {
 				}
 			}
-			internal_session.message_from_script.disconnect (on_message_from_script);
-			internal_session = null;
+			session.message_from_script.disconnect (on_message_from_script);
+			session = null;
 
-			device._release_session (this);
+			device._release_process (this);
 			device = null;
 
-			closed ();
+			detached ();
 		}
 
 		private Object create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
-		private abstract class SessionTask<T> : AsyncTask<T> {
-			public weak Session parent {
+		private abstract class ProcessTask<T> : AsyncTask<T> {
+			public weak Process parent {
 				get;
 				construct;
 			}
 
 			protected override void validate_operation () throws Error {
 				if (parent.is_closed)
-					throw new IOError.FAILED ("invalid operation (session is closed)");
+					throw new IOError.FAILED ("invalid operation (detached from process)");
 			}
 		}
 	}
@@ -461,17 +461,17 @@ namespace Frida {
 			private set;
 		}
 
-		private weak Session session;
+		private weak Process process;
 		private Frida.AgentScriptId script_id;
 
-		public Script (Session session, Frida.AgentScriptId script_id) {
-			this.session = session;
+		public Script (Process process, Frida.AgentScriptId script_id) {
+			this.process = process;
 			this.script_id = script_id;
-			this.main_context = session.main_context;
+			this.main_context = process.main_context;
 		}
 
 		public async void load () throws Error {
-			yield session.internal_session.load_script (script_id);
+			yield process.session.load_script (script_id);
 		}
 
 		public void load_sync () throws Error {
@@ -499,7 +499,7 @@ namespace Frida {
 		}
 
 		public async void post_message (string message) throws Error {
-			yield session.internal_session.post_message_to_script (script_id, message);
+			yield process.session.post_message_to_script (script_id, message);
 		}
 
 		public void post_message_sync (string message) throws Error {
@@ -517,16 +517,16 @@ namespace Frida {
 		}
 
 		public async void _do_unload (bool may_block) {
-			var s = session;
-			session = null;
+			var p = process;
+			process = null;
 
 			var sid = script_id;
 
-			s._release_script (sid);
+			p._release_script (sid);
 
 			if (may_block) {
 				try {
-					yield s.internal_session.destroy_script (sid);
+					yield p.session.destroy_script (sid);
 				} catch (IOError ignored_error) {
 				}
 			}
@@ -543,7 +543,7 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.session == null)
+				if (parent.process == null)
 					throw new IOError.FAILED ("invalid operation (script is destroyed)");
 			}
 		}
