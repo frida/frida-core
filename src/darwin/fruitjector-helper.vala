@@ -3,20 +3,36 @@ using Frida;
 
 namespace Fruitjector {
 	public int main (string[] args) {
-		var service = new Service ();
-		service.run ();
-		return 0;
+		var parent_address = args[1];
+		var service = new Service (parent_address);
+		return service.run ();
 	}
 
 	public class Service : Object, FruitjectorHelper {
-		private MainLoop loop;
+		public string parent_address {
+			get;
+			construct;
+		}
+
+		private MainLoop loop = new MainLoop ();
+		private int run_result = 0;
 
 		private DBusConnection connection;
 		private uint registration_id;
 
-		public void run () {
-			loop = new MainLoop ();
+		public Manager (string parent_address) {
+			Object (parent_address: parent_address);
+		}
+
+		public int run () {
+			Idle.add (() => {
+				start ();
+				return false;
+			});
+
 			loop.run ();
+
+			return run_result;
 		}
 
 		private void shutdown () {
@@ -28,12 +44,13 @@ namespace Fruitjector {
 
 		private async void start () {
 			try {
-				connection = yield DBusConnection.new_for_stream (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield DBusConnection.new_for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				FruitjectorHelper helper = this;
 				registration_id = connection.register_object (FruitjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
 			} catch (Error e) {
 				stderr.printf ("start failed: %s\n", e.message);
+				run_result = 1;
 				shutdown ();
 			}
 		}
