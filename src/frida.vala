@@ -9,23 +9,28 @@ namespace Frida {
 
 		private bool is_closed = false;
 
+		private HostSessionService service = null;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 		private uint last_device_id = 1;
-
-#if !LINUX
-		private Frida.FruityHostSessionBackend fruity;
-#endif
 
 		public DeviceManager (MainContext main_context) {
 			this.main_context = main_context;
 		}
 
 		public override void dispose () {
-			close ();
+			close_sync ();
 			base.dispose ();
 		}
 
-		public void close () {
+		public async void close () {
+			if (is_closed)
+				return;
+			is_closed = true;
+
+			yield _do_close ();
+		}
+
+		public void close_sync () {
 			try {
 				(create<CloseTask> () as CloseTask).start_and_wait_for_completion ();
 			} catch (Error e) {
@@ -33,31 +38,28 @@ namespace Frida {
 			}
 		}
 
-		public Gee.List<Device> enumerate_devices () throws Error {
-			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
-		}
-
-		private Object create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
-		}
-
 		private class CloseTask : ManagerTask<void> {
 			protected override void validate_operation () throws Error {
 			}
 
 			protected override async void perform_operation () throws Error {
-				if (parent.is_closed)
-					return;
-				parent.is_closed = true;
-
-				yield parent._do_close ();
+				yield parent.close ();
 			}
 		}
 
-		private async void _do_close () {
-			foreach (var device in devices.to_array ())
-				yield device._do_close (true);
-			devices = null;
+		public async Gee.List<Device> enumerate_devices () throws Error {
+			yield ensure_service ();
+			return devices.slice (0, devices.size);
+		}
+
+		public Gee.List<Device> enumerate_devices_sync () throws Error {
+			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
+		}
+
+		private class EnumerateTask : ManagerTask<Gee.List<Device>> {
+			protected override async Gee.List<Device> perform_operation () throws Error {
+				return yield parent.enumerate_devices ();
+			}
 		}
 
 		public void _release_device (Device device) {
@@ -65,28 +67,17 @@ namespace Frida {
 			assert (device_did_exist);
 		}
 
-		private class EnumerateTask : ManagerTask<Gee.List<Device>> {
-			protected override async Gee.List<Device> perform_operation () throws Error {
-				yield parent.ensure_devices ();
-				return parent.devices.slice (0, parent.devices.size);
-			}
-		}
-
-		private async void ensure_devices () throws IOError {
-			if (devices.size > 0)
+		private async void ensure_service () throws IOError {
+			if (service != null)
 				return;
 
-			var local = new LocalDevice (this, last_device_id++);
-			devices.add (local);
-
-#if !LINUX
-			fruity = new Frida.FruityHostSessionBackend ();
-			fruity.provider_available.connect ((provider) => {
-				var device = new RemoteDevice (this, last_device_id++, provider.name, provider.kind, provider);
+			service = new HostSessionService.with_default_backends ();
+			service.provider_available.connect ((provider) => {
+				var device = new Device (this, last_device_id++, provider.name, provider.kind, provider);
 				devices.add (device);
 				changed ();
 			});
-			fruity.provider_unavailable.connect ((provider) => {
+			service.provider_unavailable.connect ((provider) => {
 				foreach (var device in devices) {
 					if (device.provider == provider) {
 						device._do_close (false);
@@ -95,8 +86,23 @@ namespace Frida {
 				}
 				changed ();
 			});
-			yield fruity.start ();
-#endif
+			yield service.start ();
+		}
+
+		private async void _do_close () {
+			if (service == null)
+				return;
+
+			foreach (var device in devices.to_array ())
+				yield device._do_close (true);
+			devices.clear ();
+
+			yield service.stop ();
+			service = null;
+		}
+
+		private Object create<T> () {
+			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
 		private abstract class ManagerTask<T> : AsyncTask<T> {
@@ -112,7 +118,7 @@ namespace Frida {
 		}
 	}
 
-	public abstract class Device : Object {
+	public class Device : Object {
 		public signal void closed ();
 
 		public uint id {
@@ -132,7 +138,7 @@ namespace Frida {
 
 		public Frida.HostSessionProvider provider {
 			get;
-			protected set;
+			private set;
 		}
 
 		public MainContext main_context {
@@ -147,7 +153,7 @@ namespace Frida {
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 
-		public Device (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind) {
+		public Device (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind, Frida.HostSessionProvider provider) {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;
@@ -162,14 +168,38 @@ namespace Frida {
 					this.kind = "remote";
 					break;
 			}
+			this.provider = provider;
 			this.main_context = manager.main_context;
+
+			provider.agent_session_closed.connect (on_agent_session_closed);
 		}
 
-		public Gee.List<Frida.HostProcessInfo?> enumerate_processes () throws Error {
+		public async Gee.List<Frida.HostProcessInfo?> enumerate_processes () throws Error {
+			yield ensure_host_session ();
+			var processes = yield host_session.enumerate_processes ();
+			var result = new Gee.ArrayList<Frida.HostProcessInfo?> ();
+			foreach (var process in processes) {
+				result.add (process);
+			}
+			return result;
+		}
+
+		public Gee.List<Frida.HostProcessInfo?> enumerate_processes_sync () throws Error {
 			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
 		}
 
-		public uint spawn (string path, string[] argv, string[] envp) throws Error {
+		private class EnumerateTask : DeviceTask<Gee.List<Frida.HostProcessInfo?>> {
+			protected override async Gee.List<Frida.HostProcessInfo?> perform_operation () throws Error {
+				return yield parent.enumerate_processes ();
+			}
+		}
+
+		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+			yield ensure_host_session ();
+			return yield host_session.spawn (path, argv, envp);
+		}
+
+		public uint spawn_sync (string path, string[] argv, string[] envp) throws Error {
 			var task = create<SpawnTask> () as SpawnTask;
 			task.path = path;
 			task.argv = argv;
@@ -177,20 +207,61 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		public void resume (uint pid) throws Error {
+		private class SpawnTask : DeviceTask<uint> {
+			public string path;
+			public string[] argv;
+			public string[] envp;
+
+			protected override async uint perform_operation () throws Error {
+				return yield parent.spawn (path, argv, envp);
+			}
+		}
+
+		public async void resume (uint pid) throws Error {
+			yield ensure_host_session ();
+			yield host_session.resume (pid);
+		}
+
+		public void resume_sync (uint pid) throws Error {
 			var task = create<ResumeTask> () as ResumeTask;
 			task.pid = pid;
 			task.start_and_wait_for_completion ();
 		}
 
-		public Session attach (uint pid) throws Error {
+		private class ResumeTask : DeviceTask<void> {
+			public uint pid;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.resume (pid);
+			}
+		}
+
+		public async Session attach (uint pid) throws Error {
+			var session = session_by_pid[pid];
+			if (session == null) {
+				yield ensure_host_session ();
+
+				var agent_session_id = yield host_session.attach_to (pid);
+				var agent_session = yield provider.obtain_agent_session (agent_session_id);
+				session = new Session (this, pid, agent_session);
+				session_by_pid[pid] = session;
+				session_by_handle[agent_session_id.handle] = session;
+			}
+			return session;
+		}
+
+		public Session attach_sync (uint pid) throws Error {
 			var task = create<AttachTask> () as AttachTask;
 			task.pid = pid;
 			return task.start_and_wait_for_completion ();
 		}
 
-		private Object create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
+		private class AttachTask : DeviceTask<Session> {
+			public uint pid;
+
+			protected override async Session perform_operation () throws Error {
+				return yield parent.attach (pid);
+			}
 		}
 
 		public async void _do_close (bool may_block) {
@@ -198,12 +269,14 @@ namespace Frida {
 				return;
 			is_closed = true;
 
+			provider.agent_session_closed.disconnect (on_agent_session_closed);
+
 			foreach (var session in session_by_pid.values.to_array ())
 				yield session._do_close (may_block);
 			session_by_pid.clear ();
 			session_by_handle.clear ();
 
-			yield release_host_session ();
+			host_session = null;
 
 			manager._release_device (this);
 			manager = null;
@@ -224,67 +297,22 @@ namespace Frida {
 			}
 			assert (handle != 0);
 			session_by_handle.unset (handle);
+		}
 
-			if (!is_closed) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					if (!is_closed && session_by_pid.is_empty)
-						release_host_session ();
-					return false;
-				});
-				source.attach (main_context);
+		private async void ensure_host_session () throws IOError {
+			if (host_session == null) {
+				host_session = yield provider.create ();
 			}
 		}
 
-		private class EnumerateTask : DeviceTask<Gee.List<Frida.HostProcessInfo?>> {
-			protected override async Gee.List<Frida.HostProcessInfo?> perform_operation () throws Error {
-				yield parent.ensure_host_session ();
-				var processes = yield parent.host_session.enumerate_processes ();
-				var result = new Gee.ArrayList<Frida.HostProcessInfo?> ();
-				foreach (var process in processes) {
-					result.add(process);
-				}
-				return result;
-			}
+		protected void on_agent_session_closed (Frida.AgentSessionId id, Error? error) {
+			var session = session_by_handle[id.handle];
+			if (session != null)
+				session._do_close (false);
 		}
 
-		private class SpawnTask : DeviceTask<uint> {
-			public string path;
-			public string[] argv;
-			public string[] envp;
-
-			protected override async uint perform_operation () throws Error {
-				yield parent.ensure_host_session ();
-				return yield parent.host_session.spawn (path, argv, envp);
-			}
-		}
-
-		private class ResumeTask : DeviceTask<void> {
-			public uint pid;
-
-			protected override async void perform_operation () throws Error {
-				yield parent.ensure_host_session ();
-				yield parent.host_session.resume (pid);
-			}
-		}
-
-		private class AttachTask : DeviceTask<Session> {
-			public uint pid;
-
-			protected override async Session perform_operation () throws Error {
-				var session = parent.session_by_pid[pid];
-				if (session == null) {
-					yield parent.ensure_host_session ();
-
-					var agent_session_id = yield parent.host_session.attach_to (pid);
-					var agent_session = yield parent.provider.obtain_agent_session (agent_session_id);
-					session = new Session (parent, pid, agent_session);
-					parent.session_by_pid[pid] = session;
-					parent.session_by_handle[agent_session_id.handle] = session;
-				}
-
-				return session;
-			}
+		private Object create<T> () {
+			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
 		private abstract class DeviceTask<T> : AsyncTask<T> {
@@ -297,191 +325,6 @@ namespace Frida {
 				if (parent.is_closed)
 					throw new IOError.FAILED ("invalid operation (device is closed)");
 			}
-		}
-
-		protected abstract async void ensure_host_session () throws IOError;
-		protected abstract async void release_host_session ();
-
-		protected void on_agent_session_closed (Frida.AgentSessionId id, Error? error) {
-			var session = session_by_handle[id.handle];
-			if (session != null)
-				session._do_close (false);
-		}
-	}
-
-	private class LocalDevice : Device {
-#if !WINDOWS
-		private Server server;
-		private Frida.TcpHostSessionProvider local_provider;
-#else
-		private Frida.WindowsHostSessionProvider local_provider;
-#endif
-
-		public LocalDevice (DeviceManager manager, uint id) throws IOError {
-			base (manager, id, "Local System", Frida.HostSessionProviderKind.LOCAL_SYSTEM);
-		}
-
-		protected override async void ensure_host_session () throws IOError {
-			if (host_session == null) {
-#if !WINDOWS
-				var s = new Server ();
-				var p = new Frida.TcpHostSessionProvider.for_address (s.address);
-#else
-				var p = new Frida.WindowsHostSessionProvider ();
-#endif
-				var hs = yield p.create ();
-
-#if !WINDOWS
-				server = s;
-#endif
-				local_provider = p;
-				provider = p;
-				host_session = hs;
-
-				provider.agent_session_closed.connect (on_agent_session_closed);
-			}
-		}
-
-		protected override async void release_host_session () {
-			if (host_session != null) {
-				provider.agent_session_closed.disconnect (on_agent_session_closed);
-
-				yield local_provider.close ();
-
-				host_session = null;
-				provider = null;
-				local_provider = null;
-
-#if !WINDOWS
-				server.destroy ();
-				server = null;
-#endif
-			}
-		}
-
-#if !WINDOWS
-		private class Server {
-			private TemporaryFile executable;
-
-			public string address {
-				get;
-				private set;
-			}
-
-			private const string SERVER_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
-
-			public Server () throws IOError {
-				var blob = PyFrida.Data.get_frida_server_blob ();
-				executable = new TemporaryFile.from_stream ("server", new MemoryInputStream.from_data (blob.data, null));
-				try {
-					executable.file.set_attribute_uint32 (FILE_ATTRIBUTE_UNIX_MODE, 0755, FileQueryInfoFlags.NONE);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
-				}
-
-				address = SERVER_ADDRESS_TEMPLATE.printf (get_available_port ());
-
-				try {
-					string[] argv = new string[] { executable.file.get_path (), address };
-					Pid child_pid;
-					Process.spawn_async (null, argv, null, 0, null, out child_pid);
-				} catch (SpawnError e) {
-					executable.destroy ();
-					throw new IOError.FAILED (e.message);
-				}
-			}
-
-			public void destroy () {
-				executable.destroy ();
-			}
-
-			private uint get_available_port () {
-				uint port = 27042;
-
-				bool found_available = false;
-				var loopback = new InetAddress.loopback (SocketFamily.IPV4);
-				var address_in_use = new IOError.ADDRESS_IN_USE ("");
-				while (!found_available) {
-					try {
-						var socket = new Socket (SocketFamily.IPV4, SocketType.STREAM, SocketProtocol.TCP);
-						socket.bind (new InetSocketAddress (loopback, (uint16) port), false);
-						socket.close ();
-						found_available = true;
-					} catch (Error e) {
-						if (e.code == address_in_use.code)
-							port--;
-						else
-							found_available = true;
-					}
-				}
-
-				return port;
-			}
-		}
-
-		private class TemporaryFile {
-			public File file {
-				get;
-				private set;
-			}
-
-			public TemporaryFile.from_stream (string name, InputStream istream) throws IOError {
-				this.file = File.new_for_path (Path.build_filename (Environment.get_tmp_dir (), "cloud-spy-%p-%u-%s".printf (this, Random.next_int (), name)));
-
-				try {
-					var ostream = file.create (FileCreateFlags.NONE, null);
-
-					var buf_size = 128 * 1024;
-					var buf = new uint8[buf_size];
-
-					while (true) {
-						var bytes_read = istream.read (buf);
-						if (bytes_read == 0)
-							break;
-						buf.resize ((int) bytes_read);
-
-						size_t bytes_written;
-						ostream.write_all (buf, out bytes_written);
-					}
-
-					ostream.close (null);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
-				}
-			}
-
-			~TemporaryFile () {
-				destroy ();
-			}
-
-			public void destroy () {
-				try {
-					file.delete (null);
-				} catch (Error e) {
-				}
-			}
-		}
-#endif
-	}
-
-	private class RemoteDevice : Device {
-		public RemoteDevice (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind, Frida.HostSessionProvider provider) {
-			base (manager, id, name, kind);
-			this.provider = provider;
-			provider.agent_session_closed.connect (on_agent_session_closed);
-		}
-
-		~RemoteDevice () {
-			provider.agent_session_closed.disconnect (on_agent_session_closed);
-		}
-
-		protected override async void ensure_host_session () throws IOError {
-			if (host_session == null) {
-				host_session = yield provider.create ();
-			}
-		}
-
-		protected override async void release_host_session () {
 		}
 	}
 
@@ -517,7 +360,11 @@ namespace Frida {
 			internal_session.message_from_script.connect (on_message_from_script);
 		}
 
-		public void close () {
+		public async void close () {
+			yield _do_close (true);
+		}
+
+		public void close_sync () {
 			try {
 				(create<CloseTask> () as CloseTask).start_and_wait_for_completion ();
 			} catch (Error e) {
@@ -525,10 +372,34 @@ namespace Frida {
 			}
 		}
 
-		public Script create_script (string source) throws Error {
+		private class CloseTask : SessionTask<void> {
+			protected override void validate_operation () throws Error {
+			}
+
+			protected override async void perform_operation () throws Error {
+				yield parent.close ();
+			}
+		}
+
+		public async Script create_script (string source) throws Error {
+			var sid = yield internal_session.create_script (source);
+			var script = new Script (this, sid);
+			script_by_id[sid.handle] = script;
+			return script;
+		}
+
+		public Script create_script_sync (string source) throws Error {
 			var task = create<CreateScriptTask> () as CreateScriptTask;
 			task.source = source;
 			return task.start_and_wait_for_completion ();
+		}
+
+		private class CreateScriptTask : SessionTask<Script> {
+			public string source;
+
+			protected override async Script perform_operation () throws Error {
+				return yield parent.create_script (source);
+			}
 		}
 
 		private void on_message_from_script (Frida.AgentScriptId sid, string message, uint8[] data) {
@@ -540,19 +411,6 @@ namespace Frida {
 		public void _release_script (Frida.AgentScriptId sid) {
 			var script_did_exist = script_by_id.unset (sid.handle);
 			assert (script_did_exist);
-		}
-
-		private Object create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
-		}
-
-		private class CloseTask : SessionTask<void> {
-			protected override void validate_operation () throws Error {
-			}
-
-			protected override async void perform_operation () throws Error {
-				yield parent._do_close (true);
-			}
 		}
 
 		public async void _do_close (bool may_block) {
@@ -578,15 +436,8 @@ namespace Frida {
 			closed ();
 		}
 
-		private class CreateScriptTask : SessionTask<Script> {
-			public string source;
-
-			protected override async Script perform_operation () throws Error {
-				var sid = yield parent.internal_session.create_script (source);
-				var script = new Script (parent, sid);
-				parent.script_by_id[sid.handle] = script;
-				return script;
-			}
+		private Object create<T> () {
+			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
 		private abstract class SessionTask<T> : AsyncTask<T> {
@@ -619,33 +470,49 @@ namespace Frida {
 			this.main_context = session.main_context;
 		}
 
-		public void load () throws Error {
+		public async void load () throws Error {
+			yield session.internal_session.load_script (script_id);
+		}
+
+		public void load_sync () throws Error {
 			(create<LoadTask> () as LoadTask).start_and_wait_for_completion ();
 		}
 
-		public void unload () throws Error {
+		private class LoadTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.load ();
+			}
+		}
+
+		public async void unload () throws Error {
+			yield _do_unload (true);
+		}
+
+		public void unload_sync () throws Error {
 			(create<UnloadTask> () as UnloadTask).start_and_wait_for_completion ();
 		}
 
-		public void post_message (string message) throws Error {
+		private class UnloadTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.unload ();
+			}
+		}
+
+		public async void post_message (string message) throws Error {
+			yield session.internal_session.post_message_to_script (script_id, message);
+		}
+
+		public void post_message_sync (string message) throws Error {
 			var task = create<PostMessageTask> () as PostMessageTask;
 			task.message = message;
 			task.start_and_wait_for_completion ();
 		}
 
-		private Object create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
-		}
+		private class PostMessageTask : ScriptTask<void> {
+			public string message;
 
-		private class LoadTask : ScriptTask<void> {
 			protected override async void perform_operation () throws Error {
-				yield parent.session.internal_session.load_script (parent.script_id);
-			}
-		}
-
-		private class UnloadTask : ScriptTask<void> {
-			protected override async void perform_operation () throws Error {
-				yield parent._do_unload (true);
+				yield parent.post_message (message);
 			}
 		}
 
@@ -665,12 +532,8 @@ namespace Frida {
 			}
 		}
 
-		private class PostMessageTask : ScriptTask<void> {
-			public string message;
-
-			protected override async void perform_operation () throws Error {
-				yield parent.session.internal_session.post_message_to_script (parent.script_id, message);
-			}
+		private Object create<T> () {
+			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
 		private abstract class ScriptTask<T> : AsyncTask<T> {

@@ -79,10 +79,11 @@ backend_valaflags += \
 endif
 
 libfrida_core_la_SOURCES = \
-	system.vala \
+	frida.vala \
 	host-session-service.vala \
 	$(backend_sources) \
-	tcp/tcp-host-session.vala
+	tcp/tcp-host-session.vala \
+	system.vala
 libfrida_core_la_CFLAGS = \
 	-w
 libfrida_core_la_LIBADD = \
