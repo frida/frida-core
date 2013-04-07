@@ -72,13 +72,13 @@
 /src/darwin/darwin-host-session.c
 /src/darwin/fruitjector-helper.c
 /src/darwin/fruitjector-types.c
-/src/darwin/fruitjector-types.h
-/src/darwin/fruitjector-types.vapi
 /src/darwin/fruitjector.c
 /src/frida-core.h
 /src/frida-core.vapi
 /src/frida-server
 /src/frida.c
+/src/fruitjector-types.h
+/src/fruitjector-types.vapi
 /src/fruity/fruity-client.c
 /src/fruity/fruity-host-session.c
 /src/fruity/fruity-property-list.c

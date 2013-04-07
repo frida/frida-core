@@ -27,7 +27,7 @@ glue_sources += \
 	darwin/darwin-host-session-glue.c \
 	darwin/fruitjector-glue.c
 backend_libadd += \
-	$(builddir)/libfrida-fruitjector-types.la \
+	$(builddir)/libfruitjector-types.la \
 	$(builddir)/libfrida-data-fruitjector.la
 backend_valaflags += \
 	--pkg=frida-data-fruitjector
@@ -37,22 +37,22 @@ backend_programs += \
 frida_fruitjector_helper_SOURCES = \
 	darwin/fruitjector-helper.vala
 frida_fruitjector_helper_LDADD = \
-	$(builddir)/libfrida-fruitjector-types.la
+	$(builddir)/libfruitjector-types.la
 frida_fruitjector_helper_VALAFLAGS = \
 	--header=fruitjector-helper.h \
-	--pkg=frida-fruitjector-types \
 	--vapidir=$(abs_srcdir) \
+	--pkg=fruitjector-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 backend_libraries += \
-	libfrida-fruitjector-types.la
-libfrida_fruitjector_types_la_SOURCES = \
+	libfruitjector-types.la
+libfruitjector_types_la_SOURCES = \
 	darwin/fruitjector-types.vala
-libfrida_fruitjector_types_la_VALAFLAGS = \
-	--vapi=frida-fruitjector-types.vapi \
-	--library=frida-fruitjector-types \
-	--header=frida-fruitjector-types.h \
+libfruitjector_types_la_VALAFLAGS = \
+	--vapi=fruitjector-types.vapi \
+	--library=fruitjector-types \
+	--header=fruitjector-types.h \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
