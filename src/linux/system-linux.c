@@ -55,5 +55,8 @@ frida_system_kill (guint pid)
   kill (pid, SIGKILL);
 }
 
-  g_assert_not_reached ();
+gchar *
+frida_temporary_directory_get_system_tmp (void)
+{
+  return g_strdup (g_get_tmp_dir ());
 }

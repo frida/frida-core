@@ -33,7 +33,7 @@ namespace Frida {
 				agents[desc.name] = agent;
 			}
 
-			return _do_inject (pid, agent.file.get_path (), data_string);
+			return _do_inject (pid, agent.path, data_string);
 		}
 
 		public bool any_still_injected () {
@@ -61,51 +61,6 @@ namespace Frida {
 		public extern void _destroy_context ();
 		public extern void _free_instance (void * instance);
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
-
-		protected class TemporaryFile {
-			public File file {
-				get;
-				private set;
-			}
-
-			public TemporaryFile.from_stream (string name, InputStream istream) throws IOError {
-				this.file = File.new_for_path (Path.build_filename (_get_tmp_dir (), "frida-%p-%u-%s".printf (this, Random.next_int (), name)));
-
-				try {
-					var ostream = file.create (FileCreateFlags.NONE, null);
-
-					var buf_size = 128 * 1024;
-					var buf = new uint8[buf_size];
-
-					while (true) {
-						var bytes_read = istream.read (buf);
-						if (bytes_read == 0)
-							break;
-						buf.resize ((int) bytes_read);
-
-						size_t bytes_written;
-						ostream.write_all (buf, out bytes_written);
-					}
-
-					ostream.close (null);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
-				}
-			}
-
-			~TemporaryFile () {
-				destroy ();
-			}
-
-			public void destroy () {
-				try {
-					file.delete (null);
-				} catch (Error e) {
-				}
-			}
-
-			public static extern string _get_tmp_dir ();
-		}
 	}
 
 	public class AgentDescriptor : Object {

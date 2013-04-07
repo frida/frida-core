@@ -143,6 +143,15 @@ frida_system_kill (guint pid)
   kill (pid, SIGKILL);
 }
 
+gchar *
+frida_temporary_directory_get_system_tmp (void)
+{
+  if (geteuid () == 0)
+    return g_strdup ("/private/var/root");
+  else
+    return g_strdup (g_get_tmp_dir ());
+}
+
 #ifdef HAVE_IOS
 
 static void

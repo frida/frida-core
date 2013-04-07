@@ -178,7 +178,7 @@ namespace Frida {
 				try {
 					var transport = new PipeTransport.with_pid (0);
 					var pipe = new Pipe (transport.local_address);
-					void * process = resource_store.helper32.execute ("MANAGER " + transport.remote_address, level);
+					void * process = spawn (resource_store.helper32.path, "MANAGER " + transport.remote_address, level);
 					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, pipe, process);
 				} catch (IOError e) {
 					error = e;
@@ -237,6 +237,8 @@ namespace Frida {
 					return helper;
 				}
 			}
+
+			private static extern void * spawn (string path, string parameters, PrivilegeLevel level) throws IOError;
 		}
 
 		private class ResourceStore {
@@ -312,81 +314,6 @@ namespace Frida {
 					dll64 = null;
 				}
 			}
-		}
-
-		protected class TemporaryDirectory {
-			public string path {
-				get;
-				private set;
-			}
-
-			public TemporaryDirectory () {
-				path = create_tempdir ();
-			}
-
-			~TemporaryDirectory () {
-				destroy ();
-			}
-
-			public void destroy () {
-				destroy_tempdir (path);
-			}
-
-			private static extern string create_tempdir ();
-			private static extern void destroy_tempdir (string path);
-		}
-
-		protected class TemporaryFile {
-			protected File file;
-			private TemporaryDirectory directory;
-
-			public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory directory) throws IOError {
-				this.file = File.new_for_path (Path.build_filename (directory.path, name));
-				this.directory = directory;
-
-				try {
-					var ostream = file.create (FileCreateFlags.NONE, null);
-
-					var buf_size = 128 * 1024;
-					var buf = new uint8[buf_size];
-
-					while (true) {
-						var bytes_read = istream.read (buf);
-						if (bytes_read == 0)
-							break;
-						buf.resize ((int) bytes_read);
-
-						size_t bytes_written;
-						ostream.write_all (buf, out bytes_written);
-					}
-
-					ostream.close (null);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
-				}
-			}
-
-			private TemporaryFile (File file, TemporaryDirectory directory) {
-				this.file = file;
-				this.directory = directory;
-			}
-
-			~TemporaryFile () {
-				destroy ();
-			}
-
-			public void destroy () {
-				if (file != null) {
-					try {
-						file.delete (null);
-					} catch (Error e) {
-					}
-					file = null;
-				}
-				directory = null;
-			}
-
-			public extern void * execute (string parameters, PrivilegeLevel level) throws IOError;
 		}
 	}
 

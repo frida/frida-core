@@ -80,6 +80,12 @@ frida_system_kill (guint pid)
   g_assert_not_reached ();
 }
 
+gchar *
+frida_temporary_directory_get_system_tmp (void)
+{
+  return g_strdup (g_get_tmp_dir ());
+}
+
 static gboolean
 get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity)
 {

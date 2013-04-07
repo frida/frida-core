@@ -24,52 +24,8 @@ frida_winjector_helper_instance_close_process_handle (void * handle)
   CloseHandle (handle);
 }
 
-char *
-frida_winjector_temporary_directory_create_tempdir (void)
-{
-  const guint max_chars = MAX_PATH;
-  WCHAR * name;
-  GUID id;
-  gsize len;
-  gchar * name_utf8;
-
-  name = g_new0 (WCHAR, max_chars);
-  if (GetTempPathW (max_chars, name) == 0)
-    goto error;
-  if (CoCreateGuid (&id) != S_OK)
-    goto error;
-  StringCchCatW (name, max_chars, L"frida");
-  len = wcslen (name);
-  StringFromGUID2 (&id, name + len, max_chars - len - 1);
-  name[len] = L'-';
-  name[wcslen (name) - 1] = L'\\';
-
-  if (!CreateDirectoryW (name, NULL))
-    goto error;
-
-  name_utf8 = g_utf16_to_utf8 ((gunichar2 *) name, -1, NULL, NULL, NULL);
-  g_free (name);
-  return name_utf8;
-
-error:
-  g_free (name);
-  return NULL;
-}
-
-void
-frida_winjector_temporary_directory_destroy_tempdir (const char * path)
-{
-  WCHAR * path_utf16;
-
-  path_utf16 = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
-  RemoveDirectoryW (path_utf16);
-  g_free (path_utf16);
-}
-
 void *
-frida_winjector_temporary_file_execute (
-    FridaWinjectorTemporaryFile * self, const char * parameters,
-    FridaWinjectorPrivilegeLevel level, GError ** error)
+frida_winjector_helper_factory_spawn (const gchar * path, const gchar * parameters, FridaPrivilegeLevel level, GError ** error)
 {
   HANDLE process_handle;
   SHELLEXECUTEINFOW ei = { 0, };

@@ -85,49 +85,6 @@ namespace Frida {
 		public extern InputStream _get_fifo_for_instance (void * instance);
 		public extern void _free_instance (void * instance);
 		public extern uint _do_inject (uint pid, string so_path, string data_string) throws IOError;
-
-		protected class TemporaryFile {
-			public File file {
-				get;
-				private set;
-			}
-
-			public TemporaryFile.from_stream (string name, InputStream istream) throws IOError {
-				this.file = File.new_for_path (Path.build_filename (Environment.get_tmp_dir (), "frida-%p-%u-%s".printf (this, Random.next_int (), name)));
-
-				try {
-					var ostream = file.create (FileCreateFlags.NONE, null);
-
-					var buf_size = 128 * 1024;
-					var buf = new uint8[buf_size];
-
-					while (true) {
-						var bytes_read = istream.read (buf);
-						if (bytes_read == 0)
-							break;
-						buf.resize ((int) bytes_read);
-
-						size_t bytes_written;
-						ostream.write_all (buf, out bytes_written);
-					}
-
-					ostream.close (null);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
-				}
-			}
-
-			~TemporaryFile () {
-				destroy ();
-			}
-
-			public void destroy () {
-				try {
-					file.delete (null);
-				} catch (Error e) {
-				}
-			}
-		}
 	}
 
 	public class AgentDescriptor : Object {
