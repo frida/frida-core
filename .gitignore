@@ -77,6 +77,7 @@
 /src/frida-core.vapi
 /src/frida-server
 /src/frida.c
+/src/fruitjector-helper.h
 /src/fruitjector-types.h
 /src/fruitjector-types.vapi
 /src/fruity/fruity-client.c
