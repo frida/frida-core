@@ -53,6 +53,15 @@ frida_fruitjector_helper_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/fruitjector-helper.plist"
 endif
 
+frida-fruitjector-helper.stamp: frida-fruitjector-helper
+if OS_MAC
+	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaFruitjectorHelper" "$(builddir)/frida-fruitjector-helper" || true
+endif
+if OS_IOS
+	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/darwin/frida-fruitjector-helper.xcent" "$<" || true
+endif
+	touch frida-fruitjector-helper.stamp
+
 backend_libraries += \
 	libfruitjector-helper-glue.la
 libfruitjector_helper_glue_la_SOURCES = \
@@ -77,7 +86,7 @@ libfrida_data_fruitjector_la_SOURCES = \
 	$(builddir)/frida-data-fruitjector.c \
 	$(builddir)/frida-data-fruitjector-blob.S \
 	$(NULL)
-frida-data-fruitjector.c: $(builddir)/frida-fruitjector-helper
+frida-data-fruitjector.c: frida-fruitjector-helper.stamp
 	$(AM_V_GEN) \
 		"$(RESOURCE_COMPILER)" \
 			--enable-asm \
@@ -161,16 +170,6 @@ frida_server_VALAFLAGS = \
 	--pkg=frida-interfaces \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
-
-if OS_DARWIN
-all-local: frida-fruitjector-helper
-if OS_MAC
-	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaFruitjectorHelper" "$(builddir)/frida-fruitjector-helper" || true
-endif
-if OS_IOS
-	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/darwin/frida-fruitjector-helper.xcent" "$<" || true
-endif
-endif
 
 AM_CPPFLAGS = \
 	-include config.h \
