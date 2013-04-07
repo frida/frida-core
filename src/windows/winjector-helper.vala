@@ -100,6 +100,12 @@ namespace Winjector {
 				throw new IOError.FAILED ("already stopping");
 			stopping = true;
 
+			try {
+				yield connection.close ();
+			} catch (Error connection_error) {
+			}
+			connection.unregister_object (registration_id);
+
 			if (System.is_x64 ())
 				yield helper64.proxy.stop ();
 			yield helper32.proxy.stop ();
@@ -183,6 +189,12 @@ namespace Winjector {
 		}
 
 		public async void stop () throws IOError {
+			try {
+				yield connection.close ();
+			} catch (Error connection_error) {
+			}
+			connection.unregister_object (registration_id);
+
 			Timeout.add (20, () => {
 				shutdown ();
 				return false;
