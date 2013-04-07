@@ -6,20 +6,23 @@ namespace Frida {
 		public signal void uninjected (uint id);
 
 		private ResourceStore resource_store;
-		private HelperFactory helper_factory = new HelperFactory ();
+		private HelperFactory helper_factory;
 		private Gee.HashMap<uint, uint> pid_by_id = new Gee.HashMap<uint, uint> ();
 
 		public async void close () {
-			yield helper_factory.close ();
+			if (helper_factory != null) {
+				yield helper_factory.close ();
+				helper_factory = null;
+			}
 
 			resource_store = null;
 		}
 
 		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
-			if (resource_store == null) {
+			if (resource_store == null)
 				resource_store = new ResourceStore ();
-				helper_factory.resource_store = resource_store;
-			}
+			if (helper_factory == null)
+				helper_factory = new HelperFactory (this, resource_store);
 
 			var filename = resource_store.ensure_copy_of (desc);
 			var helper = yield helper_factory.obtain ();
@@ -37,13 +40,25 @@ namespace Frida {
 			return pid_by_id.has_key (id);
 		}
 
+		private void on_uninjected (uint id) {
+			pid_by_id.unset (id);
+			uninjected (id);
+		}
+
 		private class HelperInstance {
+			private weak Fruitjector parent;
 			private DBusConnection connection;
 			private FruitjectorHelper proxy;
 
-			public HelperInstance (DBusConnection connection, FruitjectorHelper proxy) {
+			public HelperInstance (Fruitjector parent, DBusConnection connection, FruitjectorHelper proxy) {
+				this.parent = parent;
 				this.connection = connection;
 				this.proxy = proxy;
+				this.proxy.uninjected.connect (on_uninjected);
+			}
+
+			~HelperInstance () {
+				this.proxy.uninjected.disconnect (on_uninjected);
 			}
 
 			public async void close () {
@@ -56,25 +71,31 @@ namespace Frida {
 					yield connection.close ();
 				} catch (Error connection_error) {
 				}
+
+				parent = null;
 			}
 
 			public async uint inject (uint pid, string filename, string data_string) throws IOError {
 				return yield proxy.inject (pid, filename, data_string);
 			}
+
+			private void on_uninjected (uint id) {
+				if (parent != null)
+					parent.on_uninjected (id);
+			}
 		}
 
 		private class HelperFactory {
+			private weak Fruitjector parent;
+			private ResourceStore resource_store;
 			private MainContext main_context;
 			private DBusServer server;
 			private HelperInstance helper;
 			private ArrayList<ObtainRequest> obtain_requests = new ArrayList<ObtainRequest> ();
 
-			public ResourceStore resource_store {
-				get;
-				set;
-			}
-
-			public HelperFactory () {
+			public HelperFactory (Fruitjector parent, ResourceStore resource_store) {
+				this.parent = parent;
+				this.resource_store = resource_store;
 				this.main_context = MainContext.get_thread_default ();
 			}
 
@@ -90,6 +111,8 @@ namespace Frida {
 				}
 
 				resource_store = null;
+
+				parent = null;
 			}
 
 			public async HelperInstance obtain () throws IOError {
@@ -143,7 +166,7 @@ namespace Frida {
 					FruitjectorHelper proxy;
 					if (error == null) {
 						proxy = yield connection.get_proxy (null, FruitjectorObjectPath.HELPER);
-						instance = new HelperInstance (connection, proxy);
+						instance = new HelperInstance (parent, connection, proxy);
 					}
 					timeout_source.destroy ();
 				} catch (Error e) {

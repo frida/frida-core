@@ -25,8 +25,6 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
-#if HAVE_LOCAL_BACKENDS
-
 #if DARWIN
 		GLib.Test.add_func ("/HostSession/Darwin/backend", () => {
 			var h = new Harness ((h) => Darwin.backend (h as Harness));
@@ -49,8 +47,6 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Windows.backend (h as Harness));
 			h.run ();
 		});
-#endif
-
 #endif
 
 	}
@@ -135,8 +131,6 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
-
-#if HAVE_LOCAL_BACKENDS
 
 #if DARWIN
 	namespace Darwin {
@@ -228,7 +222,7 @@ namespace Frida.HostSessionTest {
 
 				try {
 					string pgrep_output;
-					Process.spawn_sync (null, new string[] { "/usr/bin/pgrep", "Safari" }, null, 0, null, out pgrep_output, null, null);
+					GLib.Process.spawn_sync (null, new string[] { "/usr/bin/pgrep", "Safari" }, null, 0, null, out pgrep_output, null, null);
 					pid = (uint) int.parse (pgrep_output);
 				} catch (SpawnError spawn_error) {
 					stderr.printf ("ERROR: %s\n", spawn_error.message);
@@ -300,8 +294,6 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
-#endif
-
 #endif
 
 #if !LINUX

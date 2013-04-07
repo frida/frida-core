@@ -186,7 +186,6 @@
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
-	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
@@ -215,7 +214,6 @@ echo &gt; "$(IntDir)valacode.stamp"
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
-	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
@@ -244,7 +242,6 @@ echo &gt; "$(IntDir)valacode.stamp"
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
-	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
@@ -273,7 +270,6 @@ echo &gt; "$(IntDir)valacode.stamp"
 	async-harness.vala				^
 	process.vala				^
 	-D WINDOWS				^
-	-D HAVE_LOCAL_BACKENDS			^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^

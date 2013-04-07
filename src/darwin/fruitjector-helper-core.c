@@ -1,4 +1,4 @@
-#include "frida-core.h"
+#include "fruitjector-helper.h"
 
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -52,7 +52,7 @@ struct _FridaFruitContext
 
 struct _FridaInjectionInstance
 {
-  FridaFruitjector * fruitjector;
+  FruitjectorService * service;
   guint id;
   mach_port_t task;
   vm_address_t payload_address;
@@ -142,7 +142,7 @@ static void frida_emit_thread_terminate (FridaEmitContext * ctx);
 static void frida_emit_pthread_stub_body (FridaEmitContext * ctx);
 
 void
-_frida_fruitjector_create_context (FridaFruitjector * self)
+_fruitjector_service_create_context (FruitjectorService * self)
 {
   FridaFruitContext * ctx;
 
@@ -154,7 +154,7 @@ _frida_fruitjector_create_context (FridaFruitjector * self)
 }
 
 void
-_frida_fruitjector_destroy_context (FridaFruitjector * self)
+_fruitjector_service_destroy_context (FruitjectorService * self)
 {
   FridaFruitContext * ctx = self->context;
 
@@ -164,12 +164,12 @@ _frida_fruitjector_destroy_context (FridaFruitjector * self)
 }
 
 static FridaInjectionInstance *
-frida_injection_instance_new (FridaFruitjector * fruitjector, guint id)
+frida_injection_instance_new (FruitjectorService * service, guint id)
 {
   FridaInjectionInstance * instance;
 
   instance = g_slice_new (FridaInjectionInstance);
-  instance->fruitjector = g_object_ref (fruitjector);
+  instance->service = g_object_ref (service);
   instance->id = id;
   instance->task = MACH_PORT_NULL;
   instance->payload_address = 0;
@@ -192,7 +192,7 @@ frida_injection_instance_free (FridaInjectionInstance * instance)
     vm_deallocate (instance->task, instance->payload_address, FRIDA_PAYLOAD_SIZE);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
-  g_object_unref (instance->fruitjector);
+  g_object_unref (instance->service);
   g_slice_free (FridaInjectionInstance, instance);
 }
 
@@ -201,17 +201,17 @@ frida_injection_instance_handle_event (void * context)
 {
   FridaInjectionInstance * instance = context;
 
-  _frida_fruitjector_on_instance_dead (instance->fruitjector, instance->id);
+  _fruitjector_service_on_instance_dead (instance->service, instance->id);
 }
 
 void
-_frida_fruitjector_free_instance (FridaFruitjector * self, void * instance)
+_fruitjector_service_free_instance (FruitjectorService * self, void * instance)
 {
   frida_injection_instance_free (instance);
 }
 
 guint
-_frida_fruitjector_do_inject (FridaFruitjector * self, guint pid, const gchar * dylib_path, const char * data_string, GError ** error)
+_fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gchar * dylib_path, const char * data_string, GError ** error)
 {
   FridaFruitContext * ctx = self->context;
   FridaInjectionInstance * instance;
@@ -343,15 +343,6 @@ error_epilogue:
     frida_injection_instance_free (instance);
     return 0;
   }
-}
-
-gchar *
-_frida_fruitjector_temporary_file_get_tmp_dir (void)
-{
-  if (geteuid () == 0)
-    return g_strdup ("/private/var/root");
-  else
-    return g_strdup (g_get_tmp_dir ());
 }
 
 static gboolean

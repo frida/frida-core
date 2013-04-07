@@ -20,8 +20,19 @@ namespace Fruitjector {
 		private DBusConnection connection;
 		private uint registration_id;
 
+		/* these should be private, but must be accessible to glue code */
+		public void * context;
+		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
+		public uint last_id = 1;
+
 		public Service (string parent_address) {
 			Object (parent_address: parent_address);
+		}
+
+		~Service () {
+			foreach (var instance in instance_by_id.values)
+				_free_instance (instance);
+			_destroy_context ();
 		}
 
 		public int run () {
@@ -63,8 +74,25 @@ namespace Fruitjector {
 		}
 
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {
-			return 1337;
+			uint result = _do_inject (pid, filename, data_string);
+			return result;
 		}
+
+		public void _on_instance_dead (uint id) {
+			Idle.add (() => {
+				void * instance;
+				bool instance_id_found = instance_by_id.unset (id, out instance);
+				assert (instance_id_found);
+				_free_instance (instance);
+				uninjected (id);
+				return false;
+			});
+		}
+
+		public extern void _create_context ();
+		public extern void _destroy_context ();
+		public extern void _free_instance (void * instance);
+		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
 	}
 }
 #endif
