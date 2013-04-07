@@ -70,6 +70,10 @@
 /src/Makefile
 /src/Makefile.in
 /src/darwin/darwin-host-session.c
+/src/darwin/fruitjector-helper.c
+/src/darwin/fruitjector-types.c
+/src/darwin/fruitjector-types.h
+/src/darwin/fruitjector-types.vapi
 /src/darwin/fruitjector.c
 /src/frida-core.h
 /src/frida-core.vapi
