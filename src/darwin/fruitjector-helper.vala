@@ -27,6 +27,7 @@ namespace Fruitjector {
 
 		public Service (string parent_address) {
 			Object (parent_address: parent_address);
+			_create_context ();
 		}
 
 		~Service () {
@@ -74,8 +75,7 @@ namespace Fruitjector {
 		}
 
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {
-			uint result = _do_inject (pid, filename, data_string);
-			return result;
+			return _do_inject (pid, filename, data_string);
 		}
 
 		public void _on_instance_dead (uint id) {
