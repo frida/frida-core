@@ -126,7 +126,7 @@ noinst_LTLIBRARIES = \
 
 fridacoreincludedir = $(includedir)/frida-1.0
 fridacoreinclude_HEADERS = \
-	frida-core.h
+	$(srcdir)/frida-core.h
 
 libfrida_core_1_0_la_SOURCES = \
 	$(NULL)
@@ -134,12 +134,12 @@ libfrida_core_1_0_la_LDFLAGS = \
 	-export-symbols-regex "^frida_.*" \
 	$(FRIDA_LDFLAGS)
 libfrida_core_1_0_la_LIBADD = \
-	$(builddir)/libfrida-core-glue.la \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
 	$(builddir)/libfrida-data-agent.la \
 	$(backend_libadd) \
 	libfrida-core.la \
+	$(builddir)/libfrida-core-glue.la \
 	$(FRIDA_LIBS)
 
 libfrida_core_la_SOURCES = \
