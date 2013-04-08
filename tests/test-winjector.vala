@@ -126,7 +126,11 @@ namespace Frida.WinjectorTest {
 				injector = null;
 			}
 
-			loop.quit ();
+			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
 		}
 	}
 }

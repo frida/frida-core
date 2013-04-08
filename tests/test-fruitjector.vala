@@ -86,7 +86,12 @@ namespace Frida.FruitjectorTest {
 				yield injector.close ();
 				injector = null;
 			}
-			loop.quit ();
+
+			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
 		}
 
 		public void inject (string name, string data_string) {
