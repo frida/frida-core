@@ -80,6 +80,7 @@ namespace Frida {
 				yield;
 			}
 
+			yield injector.close ();
 			injector = null;
 		}
 

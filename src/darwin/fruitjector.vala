@@ -58,6 +58,7 @@ namespace Frida {
 			}
 
 			~HelperInstance () {
+				this.parent = null;
 				this.proxy.uninjected.disconnect (on_uninjected);
 			}
 
@@ -66,12 +67,7 @@ namespace Frida {
 					yield proxy.stop ();
 				} catch (IOError proxy_error) {
 				}
-
-				try {
-					yield connection.close ();
-				} catch (Error connection_error) {
-				}
-
+				connection = null;
 				parent = null;
 			}
 
@@ -145,6 +141,8 @@ namespace Frida {
 					if (server == null) {
 						server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 						server.start ();
+						var tokens = server.client_address.split ("=", 2);
+						resource_store.pipe = new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir);
 					}
 					var connection_handler = server.new_connection.connect ((c) => {
 						connection = c;
@@ -224,6 +222,11 @@ namespace Frida {
 				private set;
 			}
 
+			public TemporaryFile pipe {
+				get;
+				set;
+			}
+
 			private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
 
 			public ResourceStore () throws IOError {
@@ -237,6 +240,9 @@ namespace Frida {
 			~ResourceStore () {
 				foreach (var tempfile in agents.values)
 					tempfile.destroy ();
+				if (pipe != null)
+					pipe.destroy ();
+				helper.destroy ();
 				tempdir.destroy ();
 			}
 

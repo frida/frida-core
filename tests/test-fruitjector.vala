@@ -32,6 +32,8 @@ namespace Frida.FruitjectorTest {
 			} catch (Error delete_error) {
 				assert_not_reached ();
 			}
+
+			rat.close ();
 		});
 	}
 
@@ -76,6 +78,25 @@ namespace Frida.FruitjectorTest {
 
 		~LabRat () {
 			main_context.pop_thread_default ();
+		}
+
+		public void close () {
+			var loop = new MainLoop (main_context);
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				do_close (loop);
+				return false;
+			});
+			source.attach (main_context);
+			loop.run ();
+		}
+
+		private async void do_close (MainLoop loop) {
+			if (injector != null) {
+				yield injector.close ();
+				injector = null;
+			}
+			loop.quit ();
 		}
 
 		public void inject (string name, string data_string) {

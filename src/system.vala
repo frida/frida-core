@@ -156,7 +156,7 @@ namespace Frida {
 			}
 		}
 
-		private TemporaryFile (File file, TemporaryDirectory directory) {
+		public TemporaryFile (File file, TemporaryDirectory directory) {
 			this.file = file;
 			this.directory = directory;
 		}
