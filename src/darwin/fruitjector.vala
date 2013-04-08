@@ -46,20 +46,19 @@ namespace Frida {
 		}
 
 		private class HelperInstance {
+			private weak HelperFactory factory;
 			private weak Fruitjector parent;
 			private DBusConnection connection;
 			private FruitjectorHelper proxy;
 
-			public HelperInstance (Fruitjector parent, DBusConnection connection, FruitjectorHelper proxy) {
+			public HelperInstance (HelperFactory factory, Fruitjector parent, DBusConnection connection, FruitjectorHelper proxy) {
+				this.factory = factory;
 				this.parent = parent;
 				this.connection = connection;
 				this.proxy = proxy;
-				this.proxy.uninjected.connect (on_uninjected);
-			}
 
-			~HelperInstance () {
-				this.parent = null;
-				this.proxy.uninjected.disconnect (on_uninjected);
+				connection.closed.connect (on_connection_closed);
+				proxy.uninjected.connect (on_uninjected);
 			}
 
 			public async void close () {
@@ -67,7 +66,16 @@ namespace Frida {
 					yield proxy.stop ();
 				} catch (IOError proxy_error) {
 				}
+				proxy.uninjected.disconnect (on_uninjected);
+				proxy = null;
+
+				connection.closed.disconnect (on_connection_closed);
+				try {
+					yield connection.close ();
+				} catch (Error connection_error) {
+				}
 				connection = null;
+
 				parent = null;
 			}
 
@@ -75,9 +83,14 @@ namespace Frida {
 				return yield proxy.inject (pid, filename, data_string);
 			}
 
+			private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
+				proxy.uninjected.disconnect (on_uninjected);
+				connection.closed.disconnect (on_connection_closed);
+				factory._release_helper (this);
+			}
+
 			private void on_uninjected (uint id) {
-				if (parent != null)
-					parent.on_uninjected (id);
+				parent.on_uninjected (id);
 			}
 		}
 
@@ -160,11 +173,13 @@ namespace Frida {
 					spawn (resource_store.helper.path, argv);
 					yield;
 					server.disconnect (connection_handler);
+					server.stop ();
+					server = null;
 
 					FruitjectorHelper proxy;
 					if (error == null) {
 						proxy = yield connection.get_proxy (null, FruitjectorObjectPath.HELPER);
-						instance = new HelperInstance (parent, connection, proxy);
+						instance = new HelperInstance (this, parent, connection, proxy);
 					}
 					timeout_source.destroy ();
 				} catch (Error e) {
@@ -182,6 +197,11 @@ namespace Frida {
 				foreach (var request in obtain_requests)
 					request.complete (instance, error);
 				obtain_requests.clear ();
+			}
+
+			public void _release_helper (HelperInstance instance) {
+				if (instance == this.helper)
+					this.helper = null;
 			}
 
 			private class ObtainRequest {

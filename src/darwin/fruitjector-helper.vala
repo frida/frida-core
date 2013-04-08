@@ -18,7 +18,7 @@ namespace Fruitjector {
 		private int run_result = 0;
 
 		private DBusConnection connection;
-		private uint registration_id;
+		private uint registration_id = 0;
 
 		/* these should be private, but must be accessible to glue code */
 		public void * context;
@@ -47,16 +47,25 @@ namespace Fruitjector {
 			return run_result;
 		}
 
-		private void shutdown () {
-			Idle.add (() => {
-				loop.quit ();
-				return false;
-			});
+		private async void shutdown () {
+			if (connection != null) {
+				if (registration_id != 0)
+					connection.unregister_object (registration_id);
+				connection.closed.disconnect (on_connection_closed);
+				try {
+					yield connection.close ();
+				} catch (Error connection_error) {
+				}
+				connection = null;
+			}
+
+			loop.quit ();
 		}
 
 		private async void start () {
 			try {
 				connection = yield DBusConnection.new_for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection.closed.connect (on_connection_closed);
 				FruitjectorHelper helper = this;
 				registration_id = connection.register_object (FruitjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
@@ -76,6 +85,10 @@ namespace Fruitjector {
 
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {
 			return _do_inject (pid, filename, data_string);
+		}
+
+		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
+			shutdown ();
 		}
 
 		public void _on_instance_dead (uint id) {
