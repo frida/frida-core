@@ -114,13 +114,33 @@ glue_sources += \
 	fruity/fruity-host-session-darwin.m
 endif
 
-bin_PROGRAMS = \
+lib_LTLIBRARIES = \
+	libfrida-core-1.0.la
+noinst_PROGRAMS = \
 	$(backend_programs)
 noinst_LTLIBRARIES = \
 	$(backend_libraries) \
 	libfrida-data-agent.la \
 	libfrida-core.la \
 	libfrida-core-glue.la
+
+fridacoreincludedir = $(includedir)/frida-1.0
+fridacoreinclude_HEADERS = \
+	frida-core.h
+
+libfrida_core_1_0_la_SOURCES = \
+	$(NULL)
+libfrida_core_1_0_la_LDFLAGS = \
+	-export-symbols-regex "^frida_.*" \
+	$(FRIDA_LDFLAGS)
+libfrida_core_1_0_la_LIBADD = \
+	$(builddir)/libfrida-core-glue.la \
+	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
+	$(top_builddir)/lib/pipe/libfrida-pipe.la \
+	$(builddir)/libfrida-data-agent.la \
+	$(backend_libadd) \
+	libfrida-core.la \
+	$(FRIDA_LIBS)
 
 libfrida_core_la_SOURCES = \
 	frida.vala \
@@ -130,12 +150,6 @@ libfrida_core_la_SOURCES = \
 	system.vala
 libfrida_core_la_CFLAGS = \
 	-w
-libfrida_core_la_LIBADD = \
-	$(builddir)/libfrida-core-glue.la \
-	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
-	$(top_builddir)/lib/pipe/libfrida-pipe.la \
-	$(builddir)/libfrida-data-agent.la \
-	$(backend_libadd)
 libfrida_core_la_VALAFLAGS = \
 	--vapi=frida-core.vapi \
 	--library=frida-core \

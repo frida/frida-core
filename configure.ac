@@ -1,4 +1,4 @@
-AC_INIT([frida-core], [0.1])
+AC_INIT([frida-core], [1.0.0])
 AC_CONFIG_SRCDIR([src/frida.vala])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -126,6 +126,7 @@ AC_SUBST(FRIDA_PACKAGES)
 AC_CHECK_HEADERS([sys/user.h])
 
 AC_CONFIG_FILES([
+  frida-core-1.0.pc
   Makefile
   tools/Makefile
   lib/Makefile

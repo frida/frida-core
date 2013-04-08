@@ -6,6 +6,14 @@ SUBDIRS = \
 	src \
 	tests
 
+pcfiles = \
+	frida-core-1.0.pc
+
+all-local: $(pcfiles)
+
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = $(pcfiles)
+
 if OS_ANDROID
 RPFX = /data/local/tmp
 MKDIR = busybox mkdir

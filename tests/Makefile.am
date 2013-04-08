@@ -32,7 +32,9 @@ frida_tests_LDADD = \
 	$(builddir)/libfrida-tests.la \
 	$(FRIDA_LIBS)
 frida_tests_LDFLAGS = \
-	$(FRIDA_LDFLAGS)
+	$(top_builddir)/src/libfrida-core-1.0.la \
+	$(FRIDA_LDFLAGS) \
+	-static
 frida_tests_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/src \
@@ -59,7 +61,6 @@ libfrida_tests_la_CFLAGS = \
 	-w
 libfrida_tests_la_LIBADD = \
 	$(builddir)/libfrida-tests-glue.la \
-	$(top_builddir)/src/libfrida-core.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la
 libfrida_tests_la_VALAFLAGS = \
 	--vapi=frida-tests.vapi \

@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: Frida Core
+Description: Frida Core
+Version: @VERSION@
+Libs: -L${libdir} -lfrida-core-1.0
+Cflags: -I${includedir}/frida-1.0

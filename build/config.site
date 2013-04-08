@@ -111,7 +111,6 @@ case "$PACKAGE_TARNAME" in
   ;;
   'frida-core')
     enable_maintainer_mode=yes
-    prefix="/Library/Frida"
     frida_flags="$frida_warning_flags $frida_flags"
   ;;
   *)
