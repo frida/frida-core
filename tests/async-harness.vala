@@ -3,51 +3,39 @@ namespace Frida.Test {
 		public delegate void TestSequenceFunc (void * h);
 		private TestSequenceFunc test_sequence;
 
-		protected MainContext main_context;
 		private MainLoop main_loop;
-		private TimeoutSource timeout_source;
+		private uint timeout_id;
 
 		public AsyncHarness (owned TestSequenceFunc func) {
 			test_sequence = (owned) func;
 		}
 
 		public void run () {
-			main_context = provide_main_context ();
-			main_loop = new MainLoop (main_context);
+			main_loop = new MainLoop ();
 
 			var timed_out = false;
 
 			uint timeout = provide_timeout ();
 			if (timeout != 0) {
-				timeout_source = new TimeoutSource.seconds (timeout);
-				timeout_source.set_callback (() => {
+				timeout_id = Timeout.add_seconds (timeout, () => {
 					timed_out = true;
 					main_loop.quit ();
 					return false;
 				});
-				timeout_source.attach (main_context);
 			}
 
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
+			Idle.add (() => {
 				test_sequence (this);
 				return false;
 			});
-			idle.attach (main_context);
 
-			main_context.push_thread_default ();
 			main_loop.run ();
-			main_context.pop_thread_default ();
 
 			assert (!timed_out);
-			if (timeout_source != null) {
-				timeout_source.destroy ();
-				timeout_source = null;
+			if (timeout_id != 0) {
+				Source.remove (timeout_id);
+				timeout_id = 0;
 			}
-		}
-
-		protected virtual MainContext provide_main_context () {
-			return new MainContext ();
 		}
 
 		protected virtual uint provide_timeout () {
@@ -55,30 +43,26 @@ namespace Frida.Test {
 		}
 
 		public async void process_events () {
-			var timeout = new TimeoutSource (10);
-			timeout.set_callback (() => {
+			Timeout.add (10, () => {
 				process_events.callback ();
 				return false;
 			});
-			timeout.attach (main_context);
 			yield;
-
-			return;
 		}
 
 		public void disable_timeout () {
-			timeout_source.destroy ();
-			timeout_source = null;
+			if (timeout_id != 0) {
+				Source.remove (timeout_id);
+				timeout_id = 0;
+			}
 		}
 
 		public virtual void done () {
 			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
-			var idle = new IdleSource ();
-			idle.set_callback (() => {
+			Idle.add (() => {
 				main_loop.quit ();
 				return false;
 			});
-			idle.attach (main_context);
 		}
 	}
 }

@@ -53,14 +53,10 @@ namespace Frida.LinjectorTest {
 			private set;
 		}
 
-		private MainContext main_context;
 		private string rat_directory;
 		private Linjector injector;
 
 		public LabRat (string dir, string name, string logfile) {
-			main_context = new MainContext ();
-			main_context.push_thread_default ();
-
 			rat_directory = dir;
 			var rat_file = Path.build_filename (rat_directory, name);
 
@@ -74,18 +70,12 @@ namespace Frida.LinjectorTest {
 			}
 		}
 
-		~LabRat () {
-			main_context.pop_thread_default ();
-		}
-
 		public void inject (string name, string data_string) {
-			var loop = new MainLoop (main_context);
-			var source = new IdleSource ();
-			source.set_callback (() => {
+			var loop = new MainLoop ();
+			Idle.add (() => {
 				do_injection (name, data_string, loop);
 				return false;
 			});
-			source.attach (main_context);
 			loop.run ();
 		}
 
@@ -117,25 +107,23 @@ namespace Frida.LinjectorTest {
 		}
 
 		public void wait_for_uninject () {
-			var loop = new MainLoop (main_context);
+			var loop = new MainLoop ();
 
 			var handler_id = injector.uninjected.connect ((id) => {
 				loop.quit ();
 			});
 
 			var timed_out = false;
-			var timeout = new TimeoutSource.seconds (1);
-			timeout.set_callback (() => {
+			var timeout_id = Timeout.add_seconds (1, () => {
 				timed_out = true;
 				loop.quit ();
 				return false;
 			});
-			timeout.attach (main_context);
 
 			loop.run ();
 
 			assert (!timed_out);
-			timeout.destroy ();
+			Source.remove (timeout_id);
 			injector.disconnect (handler_id);
 		}
 
