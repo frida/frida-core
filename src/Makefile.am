@@ -108,7 +108,6 @@ glue_sources += \
 endif
 
 bin_PROGRAMS = \
-	frida-server \
 	$(backend_programs)
 noinst_LTLIBRARIES = \
 	$(backend_libraries) \
@@ -151,25 +150,6 @@ libfrida_core_glue_la_SOURCES = \
 	$(glue_sources)
 libfrida_core_glue_la_LIBTOOLFLAGS = \
 	--tag=CC
-
-frida_server_SOURCES = \
-	server.vala
-frida_server_CFLAGS = \
-	-w
-frida_server_LDFLAGS = \
-	$(FRIDA_LDFLAGS)
-frida_server_LDADD = \
-	$(builddir)/libfrida-core.la \
-	$(FRIDA_LIBS)
-frida_server_VALAFLAGS = \
-	--vapidir=$(abs_top_srcdir)/vapi \
-	--vapidir=$(abs_top_srcdir)/lib/interfaces \
-	--vapidir=$(abs_srcdir) \
-	--pkg=config \
-	--pkg=frida-core \
-	--pkg=frida-interfaces \
-	@FRIDA_PACKAGES@ \
-	@FRIDA_VALAFLAGS@
 
 AM_CPPFLAGS = \
 	-include config.h \
