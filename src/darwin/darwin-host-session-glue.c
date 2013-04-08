@@ -338,6 +338,8 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
   msg.header.msgh_reserved = 0;
   msg.header.msgh_id = 1437;
   mach_msg_send (&msg.header);
+
+  self->reply_port = MACH_PORT_NULL;
 }
 
 static void
