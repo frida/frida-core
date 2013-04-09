@@ -141,6 +141,8 @@ libfrida_core_1_0_la_LIBADD = \
 	libfrida-core.la \
 	$(builddir)/libfrida-core-glue.la \
 	$(FRIDA_LIBS)
+libfrida_core_1_0_la_LIBTOOLFLAGS = \
+	--tag=disable-shared
 
 libfrida_core_la_SOURCES = \
 	frida.vala \
