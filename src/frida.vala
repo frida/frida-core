@@ -1,4 +1,8 @@
 namespace Frida {
+	public extern void init ();
+	public extern void deinit ();
+	public extern MainContext get_main_context ();
+
 	public class DeviceManager : Object {
 		public signal void changed ();
 
@@ -13,8 +17,8 @@ namespace Frida {
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 		private uint last_device_id = 1;
 
-		public DeviceManager (MainContext main_context) {
-			this.main_context = main_context;
+		public DeviceManager () {
+			this.main_context = get_main_context ();
 		}
 
 		public override void dispose () {

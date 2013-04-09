@@ -168,6 +168,7 @@ libfrida_core_la_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 
 libfrida_core_glue_la_SOURCES = \
+	frida-glue.c \
 	$(glue_sources)
 
 AM_CPPFLAGS = \
