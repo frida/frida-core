@@ -47,17 +47,17 @@ namespace Frida {
 			}
 		}
 
-		public async Gee.List<Device> enumerate_devices () throws Error {
+		public async DeviceList enumerate_devices () throws Error {
 			yield ensure_service ();
-			return devices.slice (0, devices.size);
+			return new DeviceList (devices.slice (0, devices.size));
 		}
 
-		public Gee.List<Device> enumerate_devices_sync () throws Error {
+		public DeviceList enumerate_devices_sync () throws Error {
 			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
 		}
 
-		private class EnumerateTask : ManagerTask<Gee.List<Device>> {
-			protected override async Gee.List<Device> perform_operation () throws Error {
+		private class EnumerateTask : ManagerTask<DeviceList> {
+			protected override async DeviceList perform_operation () throws Error {
 				return yield parent.enumerate_devices ();
 			}
 		}
@@ -118,6 +118,22 @@ namespace Frida {
 		}
 	}
 
+	public class DeviceList : Object {
+		private Gee.List<Device> items;
+
+		public DeviceList (Gee.List<Device> items) {
+			this.items = items;
+		}
+
+		public int size () {
+			return items.size;
+		}
+
+		public new Device get (int index) {
+			return items.get (index);
+		}
+	}
+
 	public class Device : Object {
 		public signal void lost ();
 
@@ -136,7 +152,7 @@ namespace Frida {
 			private set;
 		}
 
-		public Frida.HostSessionProvider provider {
+		public HostSessionProvider provider {
 			get;
 			private set;
 		}
@@ -149,22 +165,22 @@ namespace Frida {
 		private weak DeviceManager manager;
 		private bool is_closed = false;
 
-		protected Frida.HostSession host_session;
-		private Gee.HashMap<uint, Process> process_by_pid = new Gee.HashMap<uint, Process> ();
-		private Gee.HashMap<uint, Process> process_by_handle = new Gee.HashMap<uint, Process> ();
+		protected HostSession host_session;
+		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
+		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 
-		public Device (DeviceManager manager, uint id, string name, Frida.HostSessionProviderKind kind, Frida.HostSessionProvider provider) {
+		public Device (DeviceManager manager, uint id, string name, HostSessionProviderKind kind, HostSessionProvider provider) {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;
 			switch (kind) {
-				case Frida.HostSessionProviderKind.LOCAL_SYSTEM:
+				case HostSessionProviderKind.LOCAL_SYSTEM:
 					this.kind = "local";
 					break;
-				case Frida.HostSessionProviderKind.LOCAL_TETHER:
+				case HostSessionProviderKind.LOCAL_TETHER:
 					this.kind = "tether";
 					break;
-				case Frida.HostSessionProviderKind.REMOTE_SYSTEM:
+				case HostSessionProviderKind.REMOTE_SYSTEM:
 					this.kind = "remote";
 					break;
 			}
@@ -174,22 +190,28 @@ namespace Frida {
 			provider.agent_session_closed.connect (on_agent_session_closed);
 		}
 
-		public async Gee.List<Frida.HostProcessInfo?> enumerate_processes () throws Error {
+		public async ProcessList enumerate_processes () throws Error {
 			yield ensure_host_session ();
 			var processes = yield host_session.enumerate_processes ();
-			var result = new Gee.ArrayList<Frida.HostProcessInfo?> ();
-			foreach (var process in processes) {
-				result.add (process);
+			var result = new Gee.ArrayList<Process> ();
+			foreach (var p in processes) {
+				result.add (new Process (p.pid, p.name, icon_from_image_data (p.small_icon), icon_from_image_data (p.large_icon)));
 			}
-			return result;
+			return new ProcessList (result);
 		}
 
-		public Gee.List<Frida.HostProcessInfo?> enumerate_processes_sync () throws Error {
+		private Icon? icon_from_image_data (ImageData img) {
+			if (img.width == 0)
+				return null;
+			return new Icon (img.width, img.height, img.rowstride, Base64.decode (img.pixels));
+		}
+
+		public ProcessList enumerate_processes_sync () throws Error {
 			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
 		}
 
-		private class EnumerateTask : DeviceTask<Gee.List<Frida.HostProcessInfo?>> {
-			protected override async Gee.List<Frida.HostProcessInfo?> perform_operation () throws Error {
+		private class EnumerateTask : DeviceTask<ProcessList> {
+			protected override async ProcessList perform_operation () throws Error {
 				return yield parent.enumerate_processes ();
 			}
 		}
@@ -236,30 +258,30 @@ namespace Frida {
 			}
 		}
 
-		public async Process attach (uint pid) throws Error {
-			var process = process_by_pid[pid];
-			if (process == null) {
+		public async Session attach (uint pid) throws Error {
+			var session = session_by_pid[pid];
+			if (session == null) {
 				yield ensure_host_session ();
 
 				var agent_session_id = yield host_session.attach_to (pid);
 				var agent_session = yield provider.obtain_agent_session (agent_session_id);
-				process = new Process (this, pid, agent_session);
-				process_by_pid[pid] = process;
-				process_by_handle[agent_session_id.handle] = process;
+				session = new Session (this, pid, agent_session);
+				session_by_pid[pid] = session;
+				session_by_handle[agent_session_id.handle] = session;
 			}
-			return process;
+			return session;
 		}
 
-		public Process attach_sync (uint pid) throws Error {
+		public Session attach_sync (uint pid) throws Error {
 			var task = create<AttachTask> () as AttachTask;
 			task.pid = pid;
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class AttachTask : DeviceTask<Process> {
+		private class AttachTask : DeviceTask<Session> {
 			public uint pid;
 
-			protected override async Process perform_operation () throws Error {
+			protected override async Session perform_operation () throws Error {
 				return yield parent.attach (pid);
 			}
 		}
@@ -271,10 +293,10 @@ namespace Frida {
 
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
 
-			foreach (var process in process_by_pid.values.to_array ())
-				yield process._do_close (may_block);
-			process_by_pid.clear ();
-			process_by_handle.clear ();
+			foreach (var session in session_by_pid.values.to_array ())
+				yield session._do_close (may_block);
+			session_by_pid.clear ();
+			session_by_handle.clear ();
 
 			host_session = null;
 
@@ -284,19 +306,19 @@ namespace Frida {
 			lost ();
 		}
 
-		public void _release_process (Process process) {
-			var process_did_exist = process_by_pid.unset (process.pid);
-			assert (process_did_exist);
+		public void _release_session (Session session) {
+			var session_did_exist = session_by_pid.unset (session.pid);
+			assert (session_did_exist);
 
 			uint handle = 0;
-			foreach (var entry in process_by_handle.entries) {
-				if (entry.value == process) {
+			foreach (var entry in session_by_handle.entries) {
+				if (entry.value == session) {
 					handle = entry.key;
 					break;
 				}
 			}
 			assert (handle != 0);
-			process_by_handle.unset (handle);
+			session_by_handle.unset (handle);
 		}
 
 		private async void ensure_host_session () throws IOError {
@@ -305,10 +327,10 @@ namespace Frida {
 			}
 		}
 
-		protected void on_agent_session_closed (Frida.AgentSessionId id, Error? error) {
-			var process = process_by_handle[id.handle];
-			if (process != null)
-				process._do_close (false);
+		private void on_agent_session_closed (AgentSessionId id, Error? error) {
+			var session = session_by_handle[id.handle];
+			if (session != null)
+				session._do_close (false);
 		}
 
 		private Object create<T> () {
@@ -328,7 +350,81 @@ namespace Frida {
 		}
 	}
 
+	public class ProcessList : Object {
+		private Gee.List<Process> items;
+
+		public ProcessList (Gee.List<Process> items) {
+			this.items = items;
+		}
+
+		public int size () {
+			return items.size;
+		}
+
+		public new Process get (int index) {
+			return items.get (index);
+		}
+	}
+
 	public class Process : Object {
+		public uint pid {
+			get;
+			private set;
+		}
+
+		public string name {
+			get;
+			private set;
+		}
+
+		public Icon? small_icon {
+			get;
+			private set;
+		}
+
+		public Icon? large_icon {
+			get;
+			private set;
+		}
+
+		public Process (uint pid, string name, Icon? small_icon, Icon? large_icon) {
+			this.pid = pid;
+			this.name = name;
+			this.small_icon = small_icon;
+			this.large_icon = large_icon;
+		}
+	}
+
+	public class Icon : Object {
+		public int width {
+			get;
+			private set;
+		}
+
+		public int height {
+			get;
+			private set;
+		}
+
+		public int rowstride {
+			get;
+			private set;
+		}
+
+		public uint8[] pixels {
+			get;
+			private set;
+		}
+
+		public Icon (int width, int height, int rowstride, uint8[] pixels) {
+			this.width = width;
+			this.height = height;
+			this.rowstride = rowstride;
+			this.pixels = pixels;
+		}
+	}
+
+	public class Session : Object {
 		public signal void detached ();
 
 		public uint pid {
@@ -336,7 +432,7 @@ namespace Frida {
 			private set;
 		}
 
-		public Frida.AgentSession session {
+		public AgentSession session {
 			get;
 			private set;
 		}
@@ -351,7 +447,7 @@ namespace Frida {
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
-		public Process (Device device, uint pid, Frida.AgentSession agent_session) {
+		public Session (Device device, uint pid, AgentSession agent_session) {
 			this.device = device;
 			this.pid = pid;
 			this.session = agent_session;
@@ -402,13 +498,13 @@ namespace Frida {
 			}
 		}
 
-		private void on_message_from_script (Frida.AgentScriptId sid, string message, uint8[] data) {
+		private void on_message_from_script (AgentScriptId sid, string message, uint8[] data) {
 			var script = script_by_id[sid.handle];
 			if (script != null)
 				script.message (message, data);
 		}
 
-		public void _release_script (Frida.AgentScriptId sid) {
+		public void _release_script (AgentScriptId sid) {
 			var script_did_exist = script_by_id.unset (sid.handle);
 			assert (script_did_exist);
 		}
@@ -430,7 +526,7 @@ namespace Frida {
 			session.message_from_script.disconnect (on_message_from_script);
 			session = null;
 
-			device._release_process (this);
+			device._release_session (this);
 			device = null;
 
 			detached ();
@@ -441,14 +537,14 @@ namespace Frida {
 		}
 
 		private abstract class ProcessTask<T> : AsyncTask<T> {
-			public weak Process parent {
+			public weak Session parent {
 				get;
 				construct;
 			}
 
 			protected override void validate_operation () throws Error {
 				if (parent.is_closed)
-					throw new IOError.FAILED ("invalid operation (detached from process)");
+					throw new IOError.FAILED ("invalid operation (detached from session)");
 			}
 		}
 	}
@@ -461,17 +557,17 @@ namespace Frida {
 			private set;
 		}
 
-		private weak Process process;
-		private Frida.AgentScriptId script_id;
+		private weak Session session;
+		private AgentScriptId script_id;
 
-		public Script (Process process, Frida.AgentScriptId script_id) {
-			this.process = process;
+		public Script (Session session, AgentScriptId script_id) {
+			this.session = session;
 			this.script_id = script_id;
-			this.main_context = process.main_context;
+			this.main_context = session.main_context;
 		}
 
 		public async void load () throws Error {
-			yield process.session.load_script (script_id);
+			yield session.session.load_script (script_id);
 		}
 
 		public void load_sync () throws Error {
@@ -499,7 +595,7 @@ namespace Frida {
 		}
 
 		public async void post_message (string message) throws Error {
-			yield process.session.post_message_to_script (script_id, message);
+			yield session.session.post_message_to_script (script_id, message);
 		}
 
 		public void post_message_sync (string message) throws Error {
@@ -517,8 +613,8 @@ namespace Frida {
 		}
 
 		public async void _do_unload (bool may_block) {
-			var p = process;
-			process = null;
+			var p = session;
+			session = null;
 
 			var sid = script_id;
 
@@ -543,7 +639,7 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.process == null)
+				if (parent.session == null)
 					throw new IOError.FAILED ("invalid operation (script is destroyed)");
 			}
 		}
