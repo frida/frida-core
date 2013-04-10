@@ -30,7 +30,7 @@ namespace Frida {
 				agents[desc.name] = agent;
 			}
 
-			var id = _do_inject (pid, agent.file.get_path (), data_string);
+			var id = _do_inject (pid, agent.path, data_string);
 
 			var fifo = _get_fifo_for_instance (instance_by_id[id]);
 			var buf = new uint8[1];
