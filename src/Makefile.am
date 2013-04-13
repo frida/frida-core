@@ -178,6 +178,8 @@ libfrida_core_la_VALAFLAGS = \
 libfrida_core_glue_la_SOURCES = \
 	frida-glue.c \
 	$(glue_sources)
+libfrida_core_glue_la_LIBTOOLFLAGS = \
+	--tag=CC
 
 AM_CPPFLAGS = \
 	-include config.h \
