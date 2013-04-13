@@ -543,7 +543,7 @@ frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaRemot
       GUM_ARG_REGISTER, GUM_REG_XAX,
       GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_PORT_RIGHT_RECEIVE),
       GUM_ARG_REGISTER, GUM_REG_XBP);
-  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_EBP, GUM_REG_RBP);
+  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XBP, GUM_REG_XBP);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XAX); /* release space */
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_msg_impl);
@@ -555,9 +555,9 @@ frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaRemot
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX, 7,
       GUM_ARG_REGISTER, GUM_REG_XBX,                                    /* header           */
       GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_SEND_MSG | MACH_RCV_MSG), /* flags            */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageTx)),   /* send size        */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageRx)),   /* max receive size */
-      GUM_ARG_REGISTER, GUM_REG_RBP,                                    /* receive port     */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageTx)), /* send size        */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageRx)), /* max receive size */
+      GUM_ARG_REGISTER, GUM_REG_XBP,                                    /* receive port     */
       GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_MSG_TIMEOUT_NONE),        /* timeout          */
       GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_PORT_NULL)                /* notification     */
   );
@@ -570,7 +570,7 @@ frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaRemot
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->mach_port_deallocate_impl);
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XBX, 2,
       GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_REGISTER, GUM_REG_RBP);
+      GUM_ARG_REGISTER, GUM_REG_XBP);
 
   gum_x86_writer_put_popax (&cw);
   gum_x86_writer_put_ret (&cw);
