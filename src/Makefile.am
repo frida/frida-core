@@ -190,7 +190,7 @@ AM_CPPFLAGS = \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
 
-RESOURCE_COMPILER = $(top_builddir)/tools/resource-compiler
+RESOURCE_COMPILER = $(top_builddir)/tools/frida-resource-compiler
 
 if OS_LINUX
 soext = .so
