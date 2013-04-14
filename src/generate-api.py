@@ -128,6 +128,11 @@ if __name__ == '__main__':
                 for klass in api_classes:
                     klass.sort_members()
 
+            with open(os.path.join(sys.argv[4], 'frida-core-1.0.deps'), 'wb') as output_deps_file:
+                output_deps_file.write("glib-2.0\n")
+                output_deps_file.write("gobject-2.0\n")
+                output_deps_file.write("gio-2.0\n")
+
             with open(os.path.join(sys.argv[4], 'frida-core-1.0.vapi'), 'wb') as output_vapi_file:
                 output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
                 output_vapi_file.write("\nnamespace Frida {")

@@ -132,6 +132,7 @@ fridacoreinclude_HEADERS = \
 
 vapidir = $(datadir)/vala/vapi
 vapi_DATA = \
+	$(builddir)/api/frida-core-1.0.deps \
 	$(builddir)/api/frida-core-1.0.vapi
 
 frida-api-stamp: libfrida-core-1.0.la $(srcdir)/generate-api.py
