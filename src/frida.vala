@@ -1,5 +1,6 @@
 namespace Frida {
 	public extern void init ();
+	public extern void shutdown ();
 	public extern void deinit ();
 	public extern MainContext get_main_context ();
 

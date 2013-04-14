@@ -137,6 +137,7 @@ if __name__ == '__main__':
                 output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
                 output_vapi_file.write("\nnamespace Frida {")
                 output_vapi_file.write("\n\tpublic static void init ();")
+                output_vapi_file.write("\n\tpublic static void shutdown ();")
                 output_vapi_file.write("\n\tpublic static void deinit ();")
                 output_vapi_file.write("\n\tpublic static GLib.MainContext get_main_context ();")
 
@@ -166,6 +167,7 @@ if __name__ == '__main__':
 
                 output_header_file.write("\n\n/* Library lifetime */")
                 output_header_file.write("\nvoid frida_init (void);")
+                output_header_file.write("\nvoid frida_shutdown (void);")
                 output_header_file.write("\nvoid frida_deinit (void);")
                 output_header_file.write("\nGMainContext * frida_get_main_context (void);")
 

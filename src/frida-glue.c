@@ -10,7 +10,7 @@ static gboolean stop_main_loop (gpointer data);
 void
 frida_init (void)
 {
-  g_assert (main_thread == NULL);
+  g_assert (main_loop == NULL);
 
   g_type_init ();
 
@@ -20,17 +20,30 @@ frida_init (void)
 }
 
 void
-frida_deinit (void)
+frida_shutdown (void)
 {
-  g_assert (main_thread != NULL);
+  GSource * source;
 
-  GSource * source = g_idle_source_new ();
+  g_assert (main_loop != NULL);
+
+  source = g_idle_source_new ();
   g_source_set_priority (source, G_PRIORITY_LOW);
   g_source_set_callback (source, stop_main_loop, NULL, NULL);
   g_source_attach (source, main_context);
   g_source_unref (source);
 
   g_thread_join (main_thread);
+  main_thread = NULL;
+}
+
+void
+frida_deinit (void)
+{
+  g_assert (main_loop != NULL);
+
+  if (main_thread != NULL)
+    frida_shutdown ();
+
   g_main_loop_unref (main_loop);
   g_main_context_unref (main_context);
 
