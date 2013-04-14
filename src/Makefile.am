@@ -114,7 +114,7 @@ glue_sources += \
 	fruity/fruity-host-session-darwin.m
 endif
 
-BUILT_SOURCES = frida.h.stamp
+BUILT_SOURCES = frida-api-stamp
 
 lib_LTLIBRARIES = \
 	libfrida-core-1.0.la
@@ -128,11 +128,16 @@ noinst_LTLIBRARIES = \
 
 fridacoreincludedir = $(includedir)/frida-1.0
 fridacoreinclude_HEADERS = \
-	$(builddir)/frida.h
+	$(builddir)/api/frida-core.h
 
-frida.h.stamp: libfrida-core-1.0.la $(srcdir)/generate-api-header.py
-	python $(srcdir)/generate-api-header.py $(srcdir)/frida.vala $(srcdir)/frida-core.h $(builddir)/frida.h
-	touch frida.h.stamp
+vapidir = $(datadir)/vala/vapi
+vapi_DATA = \
+	$(builddir)/api/frida-core-1.0.vapi
+
+frida-api-stamp: libfrida-core-1.0.la $(srcdir)/generate-api.py
+	mkdir -p $(builddir)/api
+	python $(srcdir)/generate-api.py $(srcdir)/frida.vala $(srcdir)/frida-core.vapi $(srcdir)/frida-core.h $(builddir)/api
+	touch $@
 
 libfrida_core_1_0_la_SOURCES = \
 	$(NULL)
