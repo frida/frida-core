@@ -21,7 +21,7 @@ def camel_identifier_to_lc(camel_identifier):
     return result
 
 def beautify_cprototype(cprototype):
-    result = re.sub(r"([a-z])\*", r"\1 *", cprototype)
+    result = re.sub(r"([a-z0-9])\*", r"\1 *", cprototype)
     result = result.replace("_length1", "_length")
     result = result.replace(" _callback_,", " callback,")
     result = result.replace(" _user_data_", " user_data")
