@@ -7,10 +7,13 @@ import sys
 class ApiClass:
     def __init__(self, name):
         self.name = name
+        self.name_lc = camel_identifier_to_lc(self.name)
+        self.name_uc = camel_identifier_to_uc(self.name)
         self.property_names = []
         self.method_names = []
         self.c_name = 'Frida' + name
         self.c_name_lc = camel_identifier_to_lc(self.c_name)
+        self.c_get_type = None
         self.c_constructor = None
         self.c_getter_prototypes = []
         self.c_method_prototypes = []
@@ -30,6 +33,14 @@ def camel_identifier_to_lc(camel_identifier):
         if c.istitle() and len(result) > 0:
             result += '_'
         result += c.lower()
+    return result
+
+def camel_identifier_to_uc(camel_identifier):
+    result = ""
+    for c in camel_identifier:
+        if c.istitle() and len(result) > 0:
+            result += '_'
+        result += c.upper()
     return result
 
 def beautify_cprototype(cprototype):
@@ -70,7 +81,7 @@ if __name__ == '__main__':
                     method_cname_lc = klass.c_name_lc + '_' + method_name
                     if method_cname_lc not in seen_cfunctions:
                         seen_cfunctions[method_cname_lc] = True
-                        if method_name not in ('get_type', 'construct', 'get_main_context', 'get_provider', 'get_session'):
+                        if method_name not in ('construct', 'get_main_context', 'get_provider', 'get_session'):
                             if (klass.c_name + '*') in m.group(0):
                                 if method_name == 'new':
                                     if not klass.name.endswith("List") and method_cprototype.endswith("(void);"):
@@ -81,6 +92,8 @@ if __name__ == '__main__':
                                 else:
                                     klass.method_names.append(method_name)
                                     klass.c_method_prototypes.append(method_cprototype)
+                            elif method_name == 'get_type':
+                                klass.c_get_type = method_cprototype
 
             with open(sys.argv[2]) as core_vapi_file:
                 current_class = None
@@ -181,5 +194,22 @@ if __name__ == '__main__':
                     if len(klass.c_method_prototypes) > 0:
                         sections.append("\n" + "\n".join(klass.c_method_prototypes))
                     output_header_file.write("\n".join(sections))
+
+                output_header_file.write("\n\n/* GTypes */")
+                for klass in api_classes:
+                    if klass.c_get_type is not None:
+                        output_header_file.write("\n" + klass.c_get_type)
+
+                output_header_file.write("\n\n/* Macros */")
+                macros = []
+                for klass in api_classes:
+                    macros.append("""#define FRIDA_TYPE_%(name_uc)s (frida_%(name_lc)s_get_type ())
+#define FRIDA_%(name_uc)s(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_%(name_uc)s, Frida%(name)s))
+#define FRIDA_%(name_uc)s_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST ((klass), FRIDA_TYPE_%(name_uc)s, Frida%(name)sClass))
+#define FRIDA_IS_%(name_uc)s(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_%(name_uc)s))
+#define FRIDA_IS_%(name_uc)s_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), FRIDA_TYPE_%(name_uc)s))
+#define FRIDA_%(name_uc)s_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj), FRIDA_TYPE_%(name_uc)s, Frida%(name)sClass))""" \
+                        % { 'name': klass.name, 'name_lc': klass.name_lc, 'name_uc': klass.name_uc })
+                output_header_file.write("\n" + "\n\n".join(macros))
 
                 output_header_file.write("\n\n#endif\n")
