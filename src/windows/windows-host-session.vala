@@ -113,7 +113,7 @@ namespace Frida {
 		}
 
 		public async AgentSessionId attach_to (uint pid) throws IOError {
-			var transport = new PipeTransport.with_pid (pid);
+			var transport = new PipeTransport ();
 			var stream = new Pipe (transport.local_address);
 			yield winjector.inject (pid, agent_desc, transport.remote_address, null);
 			return yield allocate_session (transport, stream);

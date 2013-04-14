@@ -104,7 +104,7 @@ namespace Frida {
 			entries.clear ();
 		}
 
-		protected async AgentSessionId allocate_session (Object transport, IOStream stream) throws IOError {
+		protected async AgentSessionId allocate_session (Object? transport, IOStream stream) throws IOError {
 			var cancellable = new Cancellable ();
 			var cancelled = new IOError.CANCELLED ("");
 			var timeout_source = new TimeoutSource (2000);
@@ -195,7 +195,7 @@ namespace Frida {
 				private set;
 			}
 
-			public Object transport {
+			public Object? transport {
 				get;
 				private set;
 			}
@@ -214,7 +214,7 @@ namespace Frida {
 			private Gee.ArrayList<DBusConnection> client_connections = new Gee.ArrayList<DBusConnection> ();
 			private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
-			public Entry (AgentSessionId id, Object transport, DBusConnection agent_connection, AgentSession agent_session) {
+			public Entry (AgentSessionId id, Object? transport, DBusConnection agent_connection, AgentSession agent_session) {
 				this.id = id;
 				this.transport = transport;
 				this.agent_connection = agent_connection;

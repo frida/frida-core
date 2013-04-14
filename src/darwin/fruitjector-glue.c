@@ -8,6 +8,12 @@
 #include <sys/stat.h>
 
 guint
+_frida_fruitjector_get_pid (void)
+{
+  return getpid ();
+}
+
+guint
 frida_fruitjector_helper_factory_spawn (const gchar * path, gchar ** argv, int argv_length, GError ** error)
 {
   gchar ** envp;

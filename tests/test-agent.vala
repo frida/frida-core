@@ -140,7 +140,7 @@ namespace Frida.AgentTest {
 			main_impl = (AgentMainFunc) main_func_symbol;
 
 			try {
-				transport = new PipeTransport.with_pid (Frida.Test.Process.current.id);
+				transport = new PipeTransport ();
 			} catch (IOError transport_error) {
 				printerr ("failed to create transport: %s\n", transport_error.message);
 				assert_not_reached ();

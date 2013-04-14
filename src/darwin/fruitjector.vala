@@ -19,16 +19,11 @@ namespace Frida {
 		}
 
 		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
-			if (resource_store == null)
-				resource_store = new ResourceStore ();
-			if (helper_factory == null)
-				helper_factory = new HelperFactory (this, resource_store);
-
-			var filename = resource_store.ensure_copy_of (desc);
+			yield ensure_helper_factory ();
 			var helper = yield helper_factory.obtain ();
+			var filename = resource_store.ensure_copy_of (desc);
 			var id = yield helper.inject (pid, filename, data_string);
 			pid_by_id[id] = pid;
-
 			return id;
 		}
 
@@ -40,10 +35,27 @@ namespace Frida {
 			return pid_by_id.has_key (id);
 		}
 
+		public async void make_pipe_endpoints (uint pid, out string local_address, out string remote_address) throws IOError {
+			yield ensure_helper_factory ();
+			var helper = yield helper_factory.obtain ();
+			var endpoints = yield helper.make_pipe_endpoints (_get_pid (), pid);
+			local_address = endpoints.local_address;
+			remote_address = endpoints.remote_address;
+		}
+
 		private void on_uninjected (uint id) {
 			pid_by_id.unset (id);
 			uninjected (id);
 		}
+
+		private async void ensure_helper_factory () throws IOError {
+			if (resource_store == null)
+				resource_store = new ResourceStore ();
+			if (helper_factory == null)
+				helper_factory = new HelperFactory (this, resource_store);
+		}
+
+		public static extern uint _get_pid ();
 
 		private class HelperInstance {
 			private weak HelperFactory factory;
@@ -81,6 +93,10 @@ namespace Frida {
 
 			public async uint inject (uint pid, string filename, string data_string) throws IOError {
 				return yield proxy.inject (pid, filename, data_string);
+			}
+
+			public async FruitjectorPipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError {
+				return yield proxy.make_pipe_endpoints (local_pid, remote_pid);
 			}
 
 			private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {

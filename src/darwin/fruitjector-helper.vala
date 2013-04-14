@@ -87,6 +87,10 @@ namespace Fruitjector {
 			return _do_inject (pid, filename, data_string);
 		}
 
+		public async FruitjectorPipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError {
+			return _do_make_pipe_endpoints (local_pid, remote_pid);
+		}
+
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			shutdown ();
 		}
@@ -106,6 +110,7 @@ namespace Fruitjector {
 		public extern void _destroy_context ();
 		public extern void _free_instance (void * instance);
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
+		public static extern FruitjectorPipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
 	}
 }
 #endif

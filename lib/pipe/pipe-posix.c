@@ -50,7 +50,7 @@ static void frida_pipe_fd_enable_blocking (int fd);
 static gchar * frida_pipe_generate_name (void);
 
 void *
-_frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   FridaPipeTransportBackend * backend;
   int ret;

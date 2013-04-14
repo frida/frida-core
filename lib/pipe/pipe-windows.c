@@ -12,14 +12,8 @@
     goto handle_winapi_error; \
   }
 
-typedef struct _FridaPipeTransportBackend FridaPipeTransportBackend;
 typedef struct _FridaPipeBackend FridaPipeBackend;
 typedef enum _FridaPipeRole FridaPipeRole;
-
-struct _FridaPipeTransportBackend
-{
-  gboolean placeholder;
-};
 
 struct _FridaPipeBackend
 {
@@ -46,15 +40,11 @@ static gboolean frida_pipe_backend_await (FridaPipeBackend * self, HANDLE comple
 static void frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
 
 void *
-_frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
-  FridaPipeTransportBackend * backend;
   gchar * name;
 
-  (void) pid;
   (void) error;
-
-  backend = g_slice_new0 (FridaPipeTransportBackend);
 
   name = frida_pipe_generate_name ();
 
@@ -63,15 +53,13 @@ _frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar *
 
   g_free (name);
 
-  return backend;
+  return NULL;
 }
 
 void
-_frida_pipe_transport_destroy_backend (void * b)
+_frida_pipe_transport_destroy_backend (void * backend)
 {
-  FridaPipeTransportBackend * backend = (FridaPipeTransportBackend *) b;
-
-  g_slice_free (FridaPipeTransportBackend, backend);
+  (void) backend;
 }
 
 void *

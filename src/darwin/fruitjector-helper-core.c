@@ -334,7 +334,7 @@ handle_cpu_type_error:
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %s (%d)", failed_operation, mach_error_string (ret), ret);
+        "%s failed while trying to inject: %s (%d)", failed_operation, mach_error_string (ret), ret);
     goto error_epilogue;
   }
 
@@ -342,6 +342,99 @@ error_epilogue:
   {
     frida_injection_instance_free (instance);
     return 0;
+  }
+}
+
+void
+_fruitjector_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, FridaFruitjectorPipeEndpoints * result, GError ** error)
+{
+  mach_port_t self_task;
+  mach_port_t local_task = MACH_PORT_NULL;
+  mach_port_t remote_task = MACH_PORT_NULL;
+  mach_port_name_t local_rx = MACH_PORT_NULL;
+  mach_port_name_t local_tx = MACH_PORT_NULL;
+  mach_port_name_t remote_rx = MACH_PORT_NULL;
+  mach_port_name_t remote_tx = MACH_PORT_NULL;
+  mach_port_name_t tx = MACH_PORT_NULL;
+  kern_return_t ret;
+  const gchar * failed_operation;
+  mach_msg_type_name_t acquired_type;
+  gchar * local_address, * remote_address;
+
+  self_task = mach_task_self ();
+
+  ret = task_for_pid (self_task, local_pid, &local_task);
+  CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid() for local pid");
+
+  ret = task_for_pid (self_task, remote_pid, &remote_task);
+  CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid() for remote pid");
+
+  ret = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate local_rx");
+
+  ret = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate remote_rx");
+
+  ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right local_tx");
+  local_tx = tx - 1;
+  do
+  {
+    local_tx++;
+    ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+  }
+  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right local_tx");
+  mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+  tx = MACH_PORT_NULL;
+
+  ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right remote_tx");
+  remote_tx = tx - 1;
+  do
+  {
+    remote_tx++;
+    ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+  }
+  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
+  mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+  tx = MACH_PORT_NULL;
+
+  local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
+  remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
+  frida_fruitjector_pipe_endpoints_init (result, local_address, remote_address);
+  g_free (remote_address);
+  g_free (local_address);
+
+  goto beach;
+
+handle_mach_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "%s failed while trying to make pipe endpoints: %s (%d)", failed_operation, mach_error_string (ret), ret);
+
+    if (tx != MACH_PORT_NULL)
+      mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+    if (remote_tx != MACH_PORT_NULL)
+      mach_port_mod_refs (remote_task, remote_tx, MACH_PORT_RIGHT_SEND, -1);
+    if (local_tx != MACH_PORT_NULL)
+      mach_port_mod_refs (local_task, local_tx, MACH_PORT_RIGHT_SEND, -1);
+    if (remote_rx != MACH_PORT_NULL)
+      mach_port_mod_refs (remote_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+    if (local_rx != MACH_PORT_NULL)
+      mach_port_mod_refs (local_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+
+    goto beach;
+  }
+beach:
+  {
+    if (remote_task != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, remote_task);
+    if (local_task != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, local_task);
+
+    return;
   }
 }
 

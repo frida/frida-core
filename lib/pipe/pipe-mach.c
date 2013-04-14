@@ -11,18 +11,8 @@
     goto handle_mach_error; \
   }
 
-typedef struct _FridaPipeTransportBackend FridaPipeTransportBackend;
 typedef struct _FridaPipeBackend FridaPipeBackend;
 typedef struct _FridaPipeMessage FridaPipeMessage;
-
-struct _FridaPipeTransportBackend
-{
-  mach_port_t task;
-  mach_port_name_t local_rx;
-  mach_port_name_t local_tx;
-  mach_port_name_t remote_rx;
-  mach_port_name_t remote_tx;
-};
 
 struct _FridaPipeBackend
 {
@@ -48,73 +38,58 @@ static void frida_pipe_backend_on_tx_port_dead (void * context);
 static void frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
 
 void *
-_frida_pipe_transport_create_backend (guint pid, gchar ** local_address, gchar ** remote_address, GError ** error)
+_frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
-  FridaPipeTransportBackend * backend;
-  const gchar * failed_operation;
+  mach_port_t self_task;
+  mach_port_name_t local_rx = MACH_PORT_NULL;
+  mach_port_name_t local_tx = MACH_PORT_NULL;
+  mach_port_name_t remote_rx = MACH_PORT_NULL;
+  mach_port_name_t remote_tx = MACH_PORT_NULL;
   kern_return_t ret;
+  const gchar * failed_operation;
   mach_msg_type_name_t acquired_type;
 
-  backend = g_slice_new (FridaPipeTransportBackend);
-  backend->task = MACH_PORT_NULL;
-  backend->local_rx = MACH_PORT_NULL;
-  backend->local_tx = MACH_PORT_NULL;
-  backend->remote_rx = MACH_PORT_NULL;
-  backend->remote_tx = MACH_PORT_NULL;
+  self_task = mach_task_self ();
 
-  ret = task_for_pid (mach_task_self (), pid, &backend->task);
-  CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
-
-  ret = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &backend->local_rx);
+  ret = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate local_rx");
 
-  ret = mach_port_allocate (backend->task, MACH_PORT_RIGHT_RECEIVE, &backend->remote_rx);
+  ret = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate remote_rx");
 
-  ret = mach_port_extract_right (backend->task, backend->remote_rx, MACH_MSG_TYPE_MAKE_SEND, &backend->local_tx, &acquired_type);
+  ret = mach_port_extract_right (self_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right remote_tx");
+
+  ret = mach_port_extract_right (self_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right local_tx");
 
-  backend->remote_tx = backend->local_rx - 1;
-  do
-  {
-    backend->remote_tx++;
-    ret = mach_port_insert_right (backend->task, backend->remote_tx, backend->local_rx, MACH_MSG_TYPE_MAKE_SEND);
-  }
-  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && backend->remote_tx < 0xffffffff);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
+  *local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
+  *remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
 
-  *local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->local_rx, backend->local_tx);
-  *remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", backend->remote_rx, backend->remote_tx);
-
-  return backend;
+  return NULL;
 
 handle_mach_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %s (%d)", failed_operation, mach_error_string (ret), ret);
-    _frida_pipe_transport_destroy_backend (backend);
+        "%s failed while trying to make pipe transport: %s (%d)", failed_operation, mach_error_string (ret), ret);
+
+    if (remote_tx != MACH_PORT_NULL)
+      mach_port_mod_refs (self_task, remote_tx, MACH_PORT_RIGHT_SEND, -1);
+    if (local_tx != MACH_PORT_NULL)
+      mach_port_mod_refs (self_task, local_tx, MACH_PORT_RIGHT_SEND, -1);
+    if (remote_rx != MACH_PORT_NULL)
+      mach_port_mod_refs (self_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+    if (local_rx != MACH_PORT_NULL)
+      mach_port_mod_refs (self_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+
     return NULL;
   }
 }
 
 void
-_frida_pipe_transport_destroy_backend (void * b)
+_frida_pipe_transport_destroy_backend (void * backend)
 {
-  FridaPipeTransportBackend * backend = (FridaPipeTransportBackend *) b;
-  task_t self_task = mach_task_self ();
-
-  if (backend->remote_tx != MACH_PORT_NULL)
-    mach_port_mod_refs (backend->task, backend->remote_tx, MACH_PORT_RIGHT_SEND, -1);
-  if (backend->local_tx != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, backend->local_tx, MACH_PORT_RIGHT_SEND, -1);
-  if (backend->remote_rx != MACH_PORT_NULL)
-    mach_port_mod_refs (backend->task, backend->remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
-  if (backend->local_rx != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, backend->local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
-  if (backend->task != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, backend->task);
-
-  g_slice_free (FridaPipeTransportBackend, backend);
+  (void) backend;
 }
 
 void *

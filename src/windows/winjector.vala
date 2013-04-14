@@ -174,7 +174,7 @@ namespace Frida {
 				IOError error = null;
 
 				try {
-					var transport = new PipeTransport.with_pid (0);
+					var transport = new PipeTransport ();
 					var pipe = new Pipe (transport.local_address);
 					void * process = spawn (resource_store.helper32.path, "MANAGER " + transport.remote_address, level);
 					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, pipe, process);

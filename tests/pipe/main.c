@@ -14,7 +14,7 @@ main (int argc, char * argv[])
 
   if (argc == 1)
   {
-    transport = frida_pipe_transport_new_with_pid (0, NULL);
+    transport = frida_pipe_transport_new (NULL);
     address = frida_pipe_transport_get_local_address (transport);
     g_print ("listening on '%s'\n", frida_pipe_transport_get_remote_address (transport));
   }
