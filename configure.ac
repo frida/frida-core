@@ -111,16 +111,19 @@ pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.
 FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg frida-gum-1.0"
 PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
 
+FRIDA_BACKEND_LIBS=
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
-  FRIDA_LDFLAGS="$FRIDA_LDFLAGS -Wl,-framework -Wl,Foundation"
+  FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,Foundation"
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
-  FRIDA_LDFLAGS="$FRIDA_LDFLAGS -Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
+  FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
 fi
+FRIDA_LDFLAGS="$FRIDA_LDFLAGS $FRIDA_BACKEND_LIBS"
 
 AC_SUBST(FRIDA_CFLAGS)
 AC_SUBST(FRIDA_LDFLAGS)
 AC_SUBST(FRIDA_LIBS)
+AC_SUBST(FRIDA_BACKEND_LIBS)
 AC_SUBST(FRIDA_PACKAGES)
 
 AC_CHECK_HEADERS([sys/user.h])
