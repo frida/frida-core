@@ -116,7 +116,7 @@ if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,Foundation"
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
-  FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
+  FRIDA_BACKEND_LIBS="$FRIDA_BACKEND_LIBS -Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
 fi
 FRIDA_LDFLAGS="$FRIDA_LDFLAGS $FRIDA_BACKEND_LIBS"
 
