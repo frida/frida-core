@@ -1,4 +1,4 @@
-bin_PROGRAMS = frida-resource-compiler
+noinst_PROGRAMS = frida-resource-compiler
 
 frida_resource_compiler_SOURCES = \
 	resource-compiler.vala
