@@ -1,3 +1,13 @@
+RESOURCE_COMPILER = $(top_builddir)/tools/frida-resource-compiler
+
+if OS_LINUX
+soext = .so
+endif
+if OS_DARWIN
+soext = .dylib
+endif
+AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
+
 backend_programs = $(NULL)
 backend_libraries = $(NULL)
 backend_sources = $(NULL)
@@ -16,6 +26,8 @@ glue_sources += \
 endif
 
 if OS_DARWIN
+FRUITJECTOR_HELPER = $(builddir)/frida-fruitjector-helper
+
 backend_sources += \
 	darwin/darwin-host-session.vala \
 	darwin/fruitjector.vala
@@ -99,7 +111,7 @@ frida-data-fruitjector.c: frida-fruitjector-helper.stamp
 			--enable-asm \
 			-c "$(srcdir)/darwin/fruitjector.resources" \
 			-o "$(builddir)/frida-data-fruitjector" \
-			$(builddir)/frida-fruitjector-helper
+			$(FRUITJECTOR_HELPER)
 backend_cleanfiles += \
 	$(builddir)/frida-data-fruitjector.vapi \
 	$(builddir)/frida-data-fruitjector.h \
@@ -195,16 +207,6 @@ AM_CPPFLAGS = \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
-
-RESOURCE_COMPILER = $(top_builddir)/tools/frida-resource-compiler
-
-if OS_LINUX
-soext = .so
-endif
-if OS_DARWIN
-soext = .dylib
-endif
-AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
 
 libfrida_data_agent_la_SOURCES = \
 	$(builddir)/frida-data-agent.c \
