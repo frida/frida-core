@@ -175,6 +175,8 @@ if __name__ == '__main__':
 
                 output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n")
 
+                output_header_file.write("\nG_BEGIN_DECLS\n")
+
                 for klass in api_classes:
                     output_header_file.write("\ntypedef struct _%s %s;" % (klass.c_name, klass.c_name))
 
@@ -211,5 +213,7 @@ if __name__ == '__main__':
 #define FRIDA_%(name_uc)s_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj), FRIDA_TYPE_%(name_uc)s, Frida%(name)sClass))""" \
                         % { 'name': klass.name, 'name_lc': klass.name_lc, 'name_uc': klass.name_uc })
                 output_header_file.write("\n" + "\n\n".join(macros))
+
+                output_header_file.write("\n\nG_END_DECLS")
 
                 output_header_file.write("\n\n#endif\n")
