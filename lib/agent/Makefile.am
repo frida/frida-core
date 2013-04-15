@@ -33,7 +33,3 @@ AM_CPPFLAGS = \
 	$(FRIDA_CFLAGS) \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe
-
-install-exec-local: libfrida-agent.la
-	install -d "$(DESTDIR)$(libdir)/frida/"
-	install "$(builddir)/.libs/libfrida-agent.dylib" "$(DESTDIR)$(libdir)/frida/frida-agent.dylib"
