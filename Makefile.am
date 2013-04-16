@@ -4,6 +4,7 @@ SUBDIRS = \
 	tools \
 	lib \
 	src \
+	server \
 	tests
 
 pcfiles = \

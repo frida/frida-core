@@ -137,6 +137,7 @@ AC_CONFIG_FILES([
   lib/pipe/Makefile
   lib/agent/Makefile
   src/Makefile
+  server/Makefile
   tests/Makefile
   tests/pipe/Makefile
 ])
