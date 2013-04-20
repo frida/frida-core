@@ -45,8 +45,8 @@ namespace Frida.WinjectorTest {
 			Object (name: name);
 
 			var self_filename = Frida.Test.Process.current.filename;
-			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename)))),
-				"tests", "labrats");
+			rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename))))),
+				"frida-core", "tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
 			process = Frida.Test.Process.start (rat_file);
