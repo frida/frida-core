@@ -1,12 +1,12 @@
-noinst_PROGRAMS = frida-resource-compiler
+noinst_PROGRAMS = resource-compiler
 
-frida_resource_compiler_SOURCES = \
+resource_compiler_SOURCES = \
 	resource-compiler.vala
-frida_resource_compiler_CFLAGS = \
+resource_compiler_CFLAGS = \
 	-w
-frida_resource_compiler_LDADD = \
+resource_compiler_LDADD = \
 	$(FRIDA_LIBS)
-frida_resource_compiler_VALAFLAGS = \
+resource_compiler_VALAFLAGS = \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 

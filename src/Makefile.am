@@ -1,4 +1,4 @@
-RESOURCE_COMPILER = $(top_builddir)/tools/frida-resource-compiler
+RESOURCE_COMPILER = $(top_builddir)/tools/resource-compiler
 
 if OS_LINUX
 soext = .so
