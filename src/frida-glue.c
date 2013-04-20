@@ -70,6 +70,8 @@ frida_get_main_context (void)
 static gpointer
 run_main_loop (gpointer data)
 {
+  (void) data;
+
   g_main_context_push_thread_default (main_context);
   g_main_loop_run (main_loop);
   g_main_context_pop_thread_default (main_context);
@@ -80,6 +82,8 @@ run_main_loop (gpointer data)
 static gboolean
 stop_main_loop (gpointer data)
 {
+  (void) data;
+
   g_main_loop_quit (main_loop);
 
   return FALSE;
