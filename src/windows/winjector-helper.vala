@@ -48,7 +48,6 @@ namespace Winjector {
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
-		private bool stopping = false;
 
 		private DBusConnection connection;
 		private uint registration_id;
@@ -71,6 +70,23 @@ namespace Winjector {
 			return run_result;
 		}
 
+		private async void shutdown () {
+			if (connection != null) {
+				if (registration_id != 0)
+					connection.unregister_object (registration_id);
+				connection.closed.disconnect (on_connection_closed);
+				try {
+					yield connection.close ();
+				} catch (Error connection_error) {
+				}
+				connection = null;
+			}
+
+			if (context != null)
+				stop_services (context);
+			loop.quit ();
+		}
+
 		private async void start () {
 			try {
 				helper32 = new HelperService (Service.derive_svcname_for_suffix ("32"));
@@ -91,30 +107,17 @@ namespace Winjector {
 			} catch (Error e) {
 				stderr.printf ("start failed: %s\n", e.message);
 				run_result = 1;
-				loop.quit ();
+				shutdown ();
 			}
 		}
 
 		public async void stop () throws IOError {
-			if (stopping)
-				throw new IOError.FAILED ("already stopping");
-			stopping = true;
-
-			try {
-				yield connection.close ();
-			} catch (Error connection_error) {
-			}
-			connection.unregister_object (registration_id);
-
 			if (System.is_x64 ())
 				yield helper64.proxy.stop ();
 			yield helper32.proxy.stop ();
 
-			// HACK: give child processes some time to shut down
-			Timeout.add (100, () => {
-				if (context != null)
-					stop_services (context);
-				loop.quit ();
+			Timeout.add (20, () => {
+				shutdown ();
 				return false;
 			});
 		}
@@ -189,16 +192,21 @@ namespace Winjector {
 		}
 
 		public async void stop () throws IOError {
+			Timeout.add (20, () => {
+				do_stop ();
+				return false;
+			});
+		}
+
+		private async void do_stop () throws IOError {
+			connection.unregister_object (registration_id);
 			try {
 				yield connection.close ();
 			} catch (Error connection_error) {
 			}
-			connection.unregister_object (registration_id);
+			connection = null;
 
-			Timeout.add (20, () => {
-				shutdown ();
-				return false;
-			});
+			shutdown ();
 		}
 
 		public async void inject (uint pid, string filename, string data_string) throws IOError {
