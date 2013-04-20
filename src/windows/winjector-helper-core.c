@@ -1,5 +1,6 @@
 #include "winjector-helper.h"
 
+#include <gio/gio.h>
 #include <gum/gum.h>
 #include <gum/arch-x86/gumx86writer.h>
 

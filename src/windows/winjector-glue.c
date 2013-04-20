@@ -25,12 +25,11 @@ frida_winjector_helper_instance_close_process_handle (void * handle)
 }
 
 void *
-frida_winjector_helper_factory_spawn (const gchar * path, const gchar * parameters, FridaPrivilegeLevel level, GError ** error)
+frida_winjector_helper_factory_spawn (const gchar * path, const gchar * parameters, FridaWinjectorPrivilegeLevel level, GError ** error)
 {
   HANDLE process_handle;
   SHELLEXECUTEINFOW ei = { 0, };
-  gchar * file;
-  WCHAR * file_utf16;
+  WCHAR * path_utf16;
   WCHAR * parameters_utf16;
 
   CoInitializeEx (NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -44,10 +43,8 @@ frida_winjector_helper_factory_spawn (const gchar * path, const gchar * paramete
   else
     ei.lpVerb = L"open";
 
-  file = g_file_get_path (self->file);
-  file_utf16 = (WCHAR *) g_utf8_to_utf16 (file, -1, NULL, NULL, NULL);
-  ei.lpFile = file_utf16;
-  g_free (file);
+  path_utf16 = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
+  ei.lpFile = path_utf16;
 
   parameters_utf16 =
       (WCHAR *) g_utf8_to_utf16 (parameters, -1, NULL, NULL, NULL);
@@ -70,7 +67,7 @@ frida_winjector_helper_factory_spawn (const gchar * path, const gchar * paramete
   }
 
   g_free (parameters_utf16);
-  g_free (file_utf16);
+  g_free (path_utf16);
 
   CoUninitialize ();
 

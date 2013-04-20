@@ -240,7 +240,7 @@ namespace Frida {
 		}
 
 		private class ResourceStore {
-			private TemporaryDirectory tempdir = new TemporaryDirectory ();
+			private TemporaryDirectory tempdir;
 
 			public TemporaryFile helper32 {
 				get;
@@ -255,10 +255,13 @@ namespace Frida {
 			private HashMap<string, TemporaryAgent> agents = new HashMap<string, TemporaryAgent> ();
 
 			public ResourceStore () throws IOError {
+				tempdir = new TemporaryDirectory ();
+
 				var blob32 = Frida.Data.Winjector.get_winjector_helper_32_exe_blob ();
 				helper32 = new TemporaryFile.from_stream ("frida-winjector-helper-32.exe",
 					new MemoryInputStream.from_data (blob32.data, null),
 					tempdir);
+
 				var blob64 = Frida.Data.Winjector.get_winjector_helper_64_exe_blob ();
 				helper64 = new TemporaryFile.from_stream ("frida-winjector-helper-64.exe",
 					new MemoryInputStream.from_data (blob64.data, null),
