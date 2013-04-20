@@ -122,36 +122,32 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="src\frida-server.vala">
+    <CustomBuild Include="server\server.vala">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida-server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" server/server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)src\frida-server.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida-server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)server\server.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" server/server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)src\frida-server.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida-server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)server\server.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" server/server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)src\frida-server.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" src/frida-server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)server\server.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" server/server.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-server --header=$(IntDir)frida-server.h --symbols=$(IntDir)frida-server.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-1.0 --pkg=gio-2.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)src\frida-server.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)server\server.vala;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
@@ -165,15 +161,15 @@ echo &gt; "$(IntDir)valacode.stamp"
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)src\frida-server.c">
+    <ClCompile Include="$(IntDir)server\server.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)src\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)server\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)server\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)server\</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)server\</ObjectFileName>
     </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
