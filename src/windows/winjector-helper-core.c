@@ -34,7 +34,7 @@ struct _RemoteWorkerContext
   gpointer virtual_free_impl;
 
   WCHAR dll_path[MAX_PATH + 1];
-  gchar frida_agent_main_string[14 + 1];
+  gchar frida_agent_main_string[16 + 1];
   gchar data_string[MAX_PATH + 1];
 
   gpointer entrypoint;
