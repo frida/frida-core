@@ -9,6 +9,7 @@ namespace Frida.WinjectorTest {
 				rat.close ();
 				assert (exitcode == 12345);
 			} catch (IOError e) {
+				stdout.printf ("ERROR: '%s'\n", e.message);
 				assert_not_reached ();
 			}
 		});
