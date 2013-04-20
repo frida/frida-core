@@ -11,9 +11,6 @@
     <Filter Include="Source Files\generated\core">
       <UniqueIdentifier>{eef66507-e4a8-4117-87d0-a5b24833ddba}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\core">
-      <UniqueIdentifier>{b6dfc63e-558b-4086-bdb4-0478fe64c3be}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Header Files">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
@@ -58,11 +55,8 @@
     <Filter Include="Source Files\tcp">
       <UniqueIdentifier>{d4552ab5-00ec-4394-bf75-666ac4f869a1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Resource Files\winjector">
+    <Filter Include="Resource Files\windows">
       <UniqueIdentifier>{c619adbc-c722-4220-8c57-9d40ce4e94ee}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Resource Files\agent">
-      <UniqueIdentifier>{e7df245c-eab8-41b6-bdd6-aa44dfcd8426}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -87,19 +81,13 @@
     <None Include="src\fruity\fruity-property-list.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
-    <None Include="src\session-manager.vala">
-      <Filter>Source Files\core</Filter>
+    <None Include="src\host-session-service.vala">
+      <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\host-session-service.c">
       <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\windows\winjector-error.c">
-      <Filter>Source Files\generated\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\windows\winjector-ipc.c">
-      <Filter>Source Files\generated\windows</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\windows\winjector.c">
       <Filter>Source Files\generated\windows</Filter>
@@ -128,9 +116,6 @@
     <ClCompile Include="src\fruity\fruity-host-session-windows.c">
       <Filter>Source Files\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="src\windows\icon-helpers.c">
-      <Filter>Source Files\core</Filter>
-    </ClCompile>
     <ClCompile Include="src\windows\winjector-glue.c">
       <Filter>Source Files\windows</Filter>
     </ClCompile>
@@ -143,22 +128,31 @@
     <ClCompile Include="$(IntDir)src\fruity\fruity-property-list.c">
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
-    <ClCompile Include="src\windows\system-windows.c">
-      <Filter>Source Files\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\session-manager.c">
+    <ClCompile Include="$(IntDir)src\frida.c">
       <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\windows\winjector-types.c">
+      <Filter>Source Files\generated\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\windows\system-windows.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\windows\icon-helpers.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\frida-glue.c">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="data\winjector\winjector.resources">
-      <Filter>Resource Files\winjector</Filter>
+    <CustomBuild Include="src\windows\winjector.resources">
+      <Filter>Resource Files\windows</Filter>
     </CustomBuild>
-    <CustomBuild Include="data\agent\agent.resources">
-      <Filter>Resource Files\agent</Filter>
+    <CustomBuild Include="src\frida.vala">
+      <Filter>Source Files</Filter>
     </CustomBuild>
-    <CustomBuild Include="src\host-session-service.vala">
-      <Filter>Source Files\core</Filter>
+    <CustomBuild Include="src\agent.resources">
+      <Filter>Resource Files</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
@@ -166,7 +160,7 @@
       <Filter>Header Files\generated</Filter>
     </ClInclude>
     <ClInclude Include="src\windows\icon-helpers.h">
-      <Filter>Source Files\core</Filter>
+      <Filter>Source Files\windows</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

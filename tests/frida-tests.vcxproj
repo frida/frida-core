@@ -64,10 +64,10 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
     <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AllRules.ruleset</CodeAnalysisRuleSet>
     <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
     <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
@@ -91,7 +91,7 @@
       <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -108,7 +108,7 @@
       <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -125,7 +125,7 @@
       <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -142,7 +142,7 @@
       <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /B /Y "$(SolutionDir)ext\gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
+      <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\$(PlatformName)\dbghelp.dll" "$(TargetDir)dbghelp.dll"
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>

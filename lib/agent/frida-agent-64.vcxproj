@@ -40,8 +40,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
     <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AllRules.ruleset</CodeAnalysisRuleSet>
     <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
     <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
@@ -67,7 +67,7 @@
   </ItemDefinitionGroup>
   <Import Project="frida-agent-common.props" />
   <ItemGroup>
-    <ProjectReference Include="..\..\ext\gum\gum-64.vcxproj">
+    <ProjectReference Include="..\..\..\frida-gum\gum-64.vcxproj">
       <Project>{dc30a450-95bc-4476-a2f9-45100562424e}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
@@ -75,7 +75,7 @@
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\..\ext\builddeps.vcxproj">
+    <ProjectReference Include="..\..\..\frida-builddeps.vcxproj">
       <Project>{4afce7c4-6d9a-4663-b43c-d2e518486910}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>

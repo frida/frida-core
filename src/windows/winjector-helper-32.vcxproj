@@ -39,8 +39,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)obj\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)build\tmp-windows\$(Platform)-$(Configuration)\$(ProjectName)\</OutDir>
     <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AllRules.ruleset</CodeAnalysisRuleSet>
     <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
     <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
@@ -65,7 +65,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\ext\gum\gum-32.vcxproj">
+    <ProjectReference Include="..\..\..\frida-gum\gum-32.vcxproj">
       <Project>{b31c7d42-54b6-49bb-b30c-11745c48b062}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
@@ -73,7 +73,7 @@
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\lib\pipe\frida-pipe-32.vcxproj">
+    <ProjectReference Include="..\..\lib\pipe\frida-pipe-32.vcxproj">
       <Project>{4c39c3cf-13e5-4346-b6ae-f73013105936}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
@@ -81,7 +81,7 @@
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\tools\resource-compiler.vcxproj">
+    <ProjectReference Include="..\..\tools\resource-compiler.vcxproj">
       <Project>{81b3e411-8676-41eb-84c6-1e5307f0c5ff}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
