@@ -10,13 +10,18 @@ static gboolean stop_main_loop (gpointer data);
 void
 frida_init (void)
 {
-  g_assert (main_loop == NULL);
+  static gsize frida_initialized = FALSE;
 
-  g_type_init ();
+  if (g_once_init_enter (&frida_initialized))
+  {
+    g_type_init ();
 
-  main_context = g_main_context_ref (g_main_context_default ());
-  main_loop = g_main_loop_new (main_context, FALSE);
-  main_thread = g_thread_create (run_main_loop, NULL, TRUE, NULL);
+    main_context = g_main_context_ref (g_main_context_default ());
+    main_loop = g_main_loop_new (main_context, FALSE);
+    main_thread = g_thread_create (run_main_loop, NULL, TRUE, NULL);
+
+    g_once_init_leave (&frida_initialized, TRUE);
+  }
 }
 
 void
@@ -45,7 +50,9 @@ frida_deinit (void)
     frida_shutdown ();
 
   g_main_loop_unref (main_loop);
+  main_loop = NULL;
   g_main_context_unref (main_context);
+  main_context = NULL;
 
   g_io_deinit ();
 
