@@ -6,6 +6,10 @@ namespace Frida {
 		private uint protocol_version = 1;
 
 		public async void start () {
+			do_start ();
+		}
+
+		private async void do_start () {
 			control_client = yield create_client ();
 			control_client.device_attached.connect ((device_id, device_udid) => {
 				if (provider_by_device_id.has_key (device_id))
@@ -30,16 +34,18 @@ namespace Frida {
 				yield control_client.establish ();
 				yield control_client.enable_listen_mode ();
 			} catch (IOError e) {
-				debug ("failed to establish: %s", e.message);
+				yield stop ();
 			}
 		}
 
 		public async void stop () {
-			try {
-				yield control_client.close ();
-			} catch (IOError e) {
+			if (control_client != null) {
+				try {
+					yield control_client.close ();
+				} catch (IOError e) {
+				}
+				control_client = null;
 			}
-			control_client = null;
 
 			foreach (var provider in provider_by_device_id.values) {
 				if (provider.is_open)
