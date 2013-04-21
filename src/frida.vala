@@ -152,6 +152,11 @@ namespace Frida {
 			private set;
 		}
 
+		public Icon? icon {
+			get;
+			private set;
+		}
+
 		public DeviceType dtype {
 			get;
 			private set;
@@ -178,6 +183,7 @@ namespace Frida {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;
+			this.icon = icon_from_image_data (provider.icon);
 			switch (kind) {
 				case HostSessionProviderKind.LOCAL_SYSTEM:
 					this.dtype = DeviceType.LOCAL;
@@ -205,8 +211,8 @@ namespace Frida {
 			return new ProcessList (result);
 		}
 
-		private Icon? icon_from_image_data (ImageData img) {
-			if (img.width == 0)
+		private Icon? icon_from_image_data (ImageData? img) {
+			if (img == null || img.width == 0)
 				return null;
 			return new Icon (img.width, img.height, img.rowstride, Base64.decode (img.pixels));
 		}
