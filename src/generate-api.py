@@ -4,6 +4,17 @@ import os
 import re
 import sys
 
+class ApiEnum:
+    def __init__(self, name):
+        self.name = name
+        self.name_lc = camel_identifier_to_lc(self.name)
+        self.name_uc = camel_identifier_to_uc(self.name)
+        self.c_name = 'Frida' + name
+        self.c_name_lc = camel_identifier_to_lc(self.c_name)
+        self.c_definition = None
+        self.vapi_declaration = None
+        self.vapi_members = []
+
 class ApiClass:
     def __init__(self, name):
         self.name = name
@@ -43,6 +54,9 @@ def camel_identifier_to_uc(camel_identifier):
         result += c.upper()
     return result
 
+def beautify_cenum(cenum):
+    return cenum.replace("  ", " ").replace("\t", "  ")
+
 def beautify_cprototype(cprototype):
     result = re.sub(r"([a-z0-9])\*", r"\1 *", cprototype)
     result = result.replace("_length1", "_length")
@@ -68,6 +82,16 @@ if __name__ == '__main__':
         api_vala = api_vala_file.read()
         with open(sys.argv[3]) as core_header_file:
             core_header = core_header_file.read()
+
+            api_enums = [ApiEnum(m.group(1)) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala, re.MULTILINE)]
+            enum_by_name = {}
+            for enum in api_enums:
+                enum_by_name[enum.name] = enum
+            for enum in api_enums:
+                for m in re.finditer(r"typedef\s+enum\s+.*?\s+(\w+);", core_header, re.DOTALL):
+                    if m.group(1) == enum.c_name:
+                        enum.c_definition = beautify_cenum(m.group(0))
+                        break
 
             api_classes = [ApiClass(m.group(1)) for m in re.finditer(r"^\t+public\s+class\s+(\w+)\s+", api_vala, re.MULTILINE)]
             class_by_name = {}
@@ -96,6 +120,7 @@ if __name__ == '__main__':
                                 klass.c_get_type = method_cprototype
 
             with open(sys.argv[2]) as core_vapi_file:
+                current_enum = None
                 current_class = None
                 ignoring = False
                 for line in core_vapi_file:
@@ -113,8 +138,15 @@ if __name__ == '__main__':
                             if stripped_line == "}":
                                 ignoring = False
                         else:
-                            if stripped_line.startswith("[CCode (cprefix") or stripped_line.startswith("public interface") or stripped_line.startswith("public abstract"):
+                            if stripped_line.startswith("public interface") or stripped_line.startswith("public abstract"):
                                 ignoring = True
+                            elif stripped_line.startswith("public enum"):
+                                name = re.match(r"^public enum (\w+) ", stripped_line).group(1)
+                                if name not in enum_by_name:
+                                    ignoring = True
+                                else:
+                                    current_enum = enum_by_name[name]
+                                    current_enum.vapi_declaration = stripped_line
                             elif stripped_line.startswith("public class"):
                                 name = re.match(r"^public class (\w+) ", stripped_line).group(1)
                                 if name not in class_by_name:
@@ -123,7 +155,10 @@ if __name__ == '__main__':
                                     current_class = class_by_name[name]
                                     current_class.vapi_declaration = stripped_line
                             elif stripped_line == "}":
+                                current_enum = None
                                 current_class = None
+                    elif current_enum is not None:
+                        current_enum.vapi_members.append(stripped_line)
                     elif current_class is not None and stripped_line.startswith("public"):
                         if stripped_line.startswith("public " + current_class.name + " ("):
                             if current_class.c_constructor is not None:
@@ -154,6 +189,11 @@ if __name__ == '__main__':
                 output_vapi_file.write("\n\tpublic static void deinit ();")
                 output_vapi_file.write("\n\tpublic static GLib.MainContext get_main_context ();")
 
+                for enum in api_enums:
+                    output_vapi_file.write("\n\n\t%s\n\t\t" % enum.vapi_declaration)
+                    output_vapi_file.write("\n\t\t".join(enum.vapi_members))
+                    output_vapi_file.write("\n\t}")
+
                 for klass in api_classes:
                     output_vapi_file.write("\n\n\t%s" % klass.vapi_declaration)
                     sections = []
@@ -180,6 +220,11 @@ if __name__ == '__main__':
                 for klass in api_classes:
                     output_header_file.write("\ntypedef struct _%s %s;" % (klass.c_name, klass.c_name))
 
+                if len(api_enums) > 0:
+                    output_header_file.write("\n")
+                    for enum in api_enums:
+                        output_header_file.write("\n" + enum.c_definition)
+
                 output_header_file.write("\n\n/* Library lifetime */")
                 output_header_file.write("\nvoid frida_init (void);")
                 output_header_file.write("\nvoid frida_shutdown (void);")
@@ -198,12 +243,17 @@ if __name__ == '__main__':
                     output_header_file.write("\n".join(sections))
 
                 output_header_file.write("\n\n/* GTypes */")
+                for enum in api_enums:
+                    output_header_file.write("\nGType %s_get_type (void) G_GNUC_CONST;" % enum.c_name_lc)
                 for klass in api_classes:
                     if klass.c_get_type is not None:
                         output_header_file.write("\n" + klass.c_get_type)
 
                 output_header_file.write("\n\n/* Macros */")
                 macros = []
+                for enum in api_enums:
+                    macros.append("#define FRIDA_TYPE_%(name_uc)s (frida_%(name_lc)s_get_type ())" \
+                        % { 'name_lc': enum.name_lc, 'name_uc': enum.name_uc })
                 for klass in api_classes:
                     macros.append("""#define FRIDA_TYPE_%(name_uc)s (frida_%(name_lc)s_get_type ())
 #define FRIDA_%(name_uc)s(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_%(name_uc)s, Frida%(name)s))
