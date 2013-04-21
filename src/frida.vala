@@ -152,7 +152,7 @@ namespace Frida {
 			private set;
 		}
 
-		public string kind {
+		public DeviceType dtype {
 			get;
 			private set;
 		}
@@ -180,13 +180,13 @@ namespace Frida {
 			this.name = name;
 			switch (kind) {
 				case HostSessionProviderKind.LOCAL_SYSTEM:
-					this.kind = "local";
+					this.dtype = DeviceType.LOCAL;
 					break;
 				case HostSessionProviderKind.LOCAL_TETHER:
-					this.kind = "tether";
+					this.dtype = DeviceType.TETHER;
 					break;
 				case HostSessionProviderKind.REMOTE_SYSTEM:
-					this.kind = "remote";
+					this.dtype = DeviceType.REMOTE;
 					break;
 			}
 			this.provider = provider;
@@ -353,6 +353,12 @@ namespace Frida {
 					throw new IOError.FAILED ("invalid operation (device is gone)");
 			}
 		}
+	}
+
+	public enum DeviceType {
+		LOCAL,
+		TETHER,
+		REMOTE
 	}
 
 	public class ProcessList : Object {
