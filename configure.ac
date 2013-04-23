@@ -107,7 +107,10 @@ fi
 AC_SUBST(FRIDA_VALAFLAGS)
 
 GLIB_VERSION=2.26.0
-pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, frida-gum-1.0, udis86"
+pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-1.0 >= 0.5.2, frida-gum-1.0"
+if [[ "$HAVE_I386" = "yes" ]]; then
+  pkg_modules="$pkg_modules, udis86"
+fi
 FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-1.0 --pkg frida-gum-1.0"
 PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
 
