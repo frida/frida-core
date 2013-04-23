@@ -30,9 +30,9 @@ frida_tests_SOURCES = \
 	main.vala
 frida_tests_LDADD = \
 	$(builddir)/libfrida-tests.la \
+	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(FRIDA_LIBS)
 frida_tests_LDFLAGS = \
-	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(FRIDA_LDFLAGS) \
 	-static
 frida_tests_VALAFLAGS = \
