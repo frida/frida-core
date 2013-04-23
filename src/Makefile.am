@@ -203,7 +203,6 @@ AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe \
-	-I $(top_srcdir)/ext/gum/ext/udis86 \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
