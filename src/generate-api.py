@@ -187,7 +187,7 @@ if __name__ == '__main__':
                 output_vapi_file.write("\n\tpublic static void init ();")
                 output_vapi_file.write("\n\tpublic static void shutdown ();")
                 output_vapi_file.write("\n\tpublic static void deinit ();")
-                output_vapi_file.write("\n\tpublic static GLib.MainContext get_main_context ();")
+                output_vapi_file.write("\n\tpublic static unowned GLib.MainContext get_main_context ();")
 
                 for enum in api_enums:
                     output_vapi_file.write("\n\n\t%s\n\t\t" % enum.vapi_declaration)
