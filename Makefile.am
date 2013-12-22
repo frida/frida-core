@@ -49,7 +49,7 @@ endif
 
 if OS_IOS
 RURL = root@${IOS_IPADDR}
-RPFX = ${prefix}
+RPFX = /Library/Frida
 RSYNC = rsync -Lz
 
 deploy: all
