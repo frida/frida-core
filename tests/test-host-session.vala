@@ -31,6 +31,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+#if MAC
 		GLib.Test.add_func ("/HostSession/Darwin/spawn", () => {
 			var h = new Harness ((h) => Darwin.spawn (h as Harness));
 			h.run ();
@@ -40,6 +41,7 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch (h as Harness));
 			h.run ();
 		});
+#endif
 #endif
 
 #if WINDOWS
@@ -164,6 +166,7 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
+#if MAC
 		private static async void spawn (Harness h) {
 			var backend = new DarwinHostSessionBackend ();
 			h.service.add_backend (backend);
@@ -251,6 +254,7 @@ namespace Frida.HostSessionTest {
 			}
 
 		}
+#endif
 
 	}
 #endif
