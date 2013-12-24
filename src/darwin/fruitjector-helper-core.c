@@ -441,6 +441,8 @@ static gboolean
 frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details,
     vm_address_t remote_payload_base, GError ** error)
 {
+  memset (self, 0, sizeof (FridaAgentContext));
+
   if (!frida_agent_context_init_functions (self, details, error))
     return FALSE;
 
