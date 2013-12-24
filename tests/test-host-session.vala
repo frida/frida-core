@@ -168,6 +168,12 @@ namespace Frida.HostSessionTest {
 
 #if MAC
 		private static async void spawn (Harness h) {
+			if (sizeof (size_t) != 8) {
+				stdout.printf ("<skipping, only available on 64-bit for now> ");
+				h.done ();
+				return;
+			}
+
 			var backend = new DarwinHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
