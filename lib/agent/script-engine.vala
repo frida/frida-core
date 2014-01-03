@@ -18,13 +18,10 @@ namespace Frida.Agent {
 			});
 		}
 
-		~ScriptEngine () {
-			shutdown ();
-		}
-
-		public void shutdown () {
-			foreach (var instance in instance_by_id.values)
-				instance.script.unload ();
+		public async void shutdown () {
+			foreach (var instance in instance_by_id.values) {
+				yield instance.destroy ();
+			}
 			instance_by_id.clear ();
 		}
 
@@ -46,11 +43,11 @@ namespace Frida.Agent {
 			return instance;
 		}
 
-		public void destroy_script (AgentScriptId sid) throws IOError {
+		public async void destroy_script (AgentScriptId sid) throws IOError {
 			ScriptInstance instance;
 			if (!instance_by_id.unset (sid.handle, out instance))
 				throw new IOError.FAILED ("invalid script id");
-			instance.script.unload ();
+			yield instance.destroy ();
 		}
 
 		public void load_script (AgentScriptId sid) throws IOError {
@@ -80,6 +77,20 @@ namespace Frida.Agent {
 
 			public ScriptInstance (AgentScriptId sid, Gum.Script script) {
 				Object (sid: sid, script: script);
+			}
+
+			public async void destroy () {
+				Gum.Stalker stalker = script.get_stalker ();
+				script.unload ();
+				while (stalker.garbage_collect ()) {
+					var source = new TimeoutSource (10);
+					source.set_callback (() => {
+						destroy.callback ();
+						return false;
+					});
+					source.attach (MainContext.get_thread_default ());
+					yield;
+				}
 			}
 		}
 	}

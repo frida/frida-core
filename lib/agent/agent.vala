@@ -23,8 +23,11 @@ namespace Frida.Agent {
 			if (closing)
 				throw new IOError.FAILED ("close already in progress");
 			closing = true;
+			perform_close ();
+		}
 
-			script_engine.shutdown ();
+		private async void perform_close () {
+			yield script_engine.shutdown ();
 			script_engine = null;
 
 			Timeout.add (10, () => {
@@ -43,20 +46,29 @@ namespace Frida.Agent {
 		}
 
 		public async AgentScriptId create_script (string source) throws IOError {
+			validate_state ();
 			var instance = script_engine.create_script (source);
 			return instance.sid;
 		}
 
 		public async void destroy_script (AgentScriptId sid) throws IOError {
-			script_engine.destroy_script (sid);
+			validate_state ();
+			yield script_engine.destroy_script (sid);
 		}
 
 		public async void load_script (AgentScriptId sid) throws IOError {
+			validate_state ();
 			script_engine.load_script (sid);
 		}
 
 		public async void post_message_to_script (AgentScriptId sid, string message) throws IOError {
+			validate_state ();
 			script_engine.post_message_to_script (sid, message);
+		}
+
+		private void validate_state () throws IOError {
+			if (closing)
+				throw new IOError.FAILED ("close in progress");
 		}
 
 		public void run () throws Error {
