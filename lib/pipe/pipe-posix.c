@@ -200,7 +200,7 @@ _frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int
   FridaPipeBackend * backend = self->_backend;
 
   if (!frida_pipe_backend_connect (backend, cancellable, error))
-    return 0;
+    return -1;
 
   return g_input_stream_read (backend->input, buffer, buffer_length, cancellable, error);
 }
@@ -211,7 +211,7 @@ _frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, 
   FridaPipeBackend * backend = self->_backend;
 
   if (!frida_pipe_backend_connect (backend, cancellable, error))
-    return 0;
+    return -1;
 
   return g_output_stream_write (backend->output, buffer, buffer_length, cancellable, error);
 }

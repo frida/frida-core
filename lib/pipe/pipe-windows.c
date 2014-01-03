@@ -225,7 +225,7 @@ gssize
 _frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
-  gssize result = 0;
+  gssize result = -1;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
   DWORD bytes_transferred;
@@ -263,7 +263,7 @@ gssize
 _frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
-  gssize result = 0;
+  gssize result = -1;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
   DWORD bytes_transferred;

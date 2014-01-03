@@ -260,7 +260,7 @@ handle_error:
     g_free (msg);
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
         "mach_msg failed: %s (%d)", mach_error_string (ret), ret);
-    return 0;
+    return -1;
   }
 
 handle_cancel:
@@ -315,6 +315,6 @@ handle_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
         "mach_msg_send failed: %s (%d)", mach_error_string (ret), ret);
-    return 0;
+    return -1;
   }
 }
