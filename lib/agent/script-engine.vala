@@ -83,7 +83,7 @@ namespace Frida.Agent {
 				Gum.Stalker stalker = script.get_stalker ();
 				script.unload ();
 				while (stalker.garbage_collect ()) {
-					var source = new TimeoutSource (10);
+					var source = new TimeoutSource (50);
 					source.set_callback (() => {
 						destroy.callback ();
 						return false;
