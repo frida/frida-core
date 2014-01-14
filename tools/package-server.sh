@@ -50,6 +50,7 @@ cat >"$tmpdir/Library/LaunchDaemons/com.tillitech.frida-server.plist" <<EOF
 </dict>
 </plist>
 EOF
+chmod 644 "$tmpdir/Library/LaunchDaemons/com.tillitech.frida-server.plist"
 
 mkdir -p "$tmpdir/DEBIAN/"
 cat >"$tmpdir/DEBIAN/control" <<EOF
@@ -66,6 +67,8 @@ Maintainer: Ole André Vadla Ravnås <ole.andre.ravnas@tillitech.com>
 Author: Frida Developers <ole.andre.ravnas@tillitech.com>
 Section: Development
 EOF
+chmod 644 "$tmpdir/DEBIAN/control"
+
 cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/sh
 
@@ -79,7 +82,7 @@ fi
 
 exit 0
 EOF
-chmod +x "$tmpdir/DEBIAN/extrainst_"
+chmod 755 "$tmpdir/DEBIAN/extrainst_"
 cat >"$tmpdir/DEBIAN/prerm" <<EOF
 #!/bin/sh
 
@@ -89,7 +92,7 @@ fi
 
 exit 0
 EOF
-chmod +x "$tmpdir/DEBIAN/prerm"
+chmod 755 "$tmpdir/DEBIAN/prerm"
 
 fakeroot sh -s <<FAKEROOT_SCRIPT
 chown -R 0:0 "$tmpdir"
