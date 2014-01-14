@@ -147,9 +147,19 @@ gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
   if (geteuid () == 0)
+  {
+    /* Sandboxed system daemons are likely able to read from this location */
     return g_strdup ("/private/var/root");
+  }
   else
+  {
+#ifdef HAVE_MAC
+    /* Mac App Store apps are sandboxed but able to read ~/.Trash/ */
+    return g_build_filename (g_get_home_dir (), ".Trash", NULL);
+#else
     return g_strdup (g_get_tmp_dir ());
+#endif
+  }
 }
 
 #ifdef HAVE_IOS
