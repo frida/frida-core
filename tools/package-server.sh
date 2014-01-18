@@ -61,7 +61,7 @@ Priority: optional
 Size: 12288000
 Installed-Size: 12000
 Architecture: iphoneos-arm
-Description: Inspect and manipulate iOS apps over USB.
+Description: Inject JavaScript to explore iOS apps over USB.
 Homepage: http://frida.github.io/
 Maintainer: Ole André Vadla Ravnås <ole.andre.ravnas@tillitech.com>
 Author: Frida Developers <ole.andre.ravnas@tillitech.com>
