@@ -123,7 +123,7 @@ static gpointer frida_find_library_base (pid_t pid, const gchar * library_name, 
 
 static gpointer frida_find_landing_strip (pid_t pid);
 
-static gboolean frida_examine_range_for_landing_strip (const GumMemoryRange * range, GumPageProtection prot, gpointer user_data);
+static gboolean frida_examine_range_for_landing_strip (const GumRangeDetails * details, gpointer user_data);
 
 static FridaInjectionInstance *
 frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid)
@@ -793,9 +793,10 @@ frida_find_landing_strip (pid_t pid)
 }
 
 static gboolean
-frida_examine_range_for_landing_strip (const GumMemoryRange * range, GumPageProtection prot, gpointer user_data)
+frida_examine_range_for_landing_strip (const GumRangeDetails * details, gpointer user_data)
 {
   FridaFindLandingStripContext * ctx = (FridaFindLandingStripContext *) user_data;
+  const GumMemoryRange * range = details->range;
   const gsize * cur, * end;
 
   cur = GSIZE_TO_POINTER (range->base_address);

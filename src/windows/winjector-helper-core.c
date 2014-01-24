@@ -82,7 +82,7 @@ static gboolean initialize_remote_worker_context (RemoteWorkerContext * rwc, Inj
 static void cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details);
 
 static gboolean remote_worker_context_has_resolved_all_kernel32_functions (const RemoteWorkerContext * rwc);
-static gboolean remote_worker_context_collect_kernel32_export (const gchar * name, GumAddress address, gpointer user_data);
+static gboolean remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data);
 
 static gboolean file_exists_and_is_readable (const WCHAR * filename);
 static void set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error);
@@ -672,18 +672,21 @@ remote_worker_context_has_resolved_all_kernel32_functions (const RemoteWorkerCon
 }
 
 static gboolean
-remote_worker_context_collect_kernel32_export (const gchar * name, GumAddress address, gpointer user_data)
+remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data)
 {
   RemoteWorkerContext * rwc = (RemoteWorkerContext *) user_data;
 
-  if (strcmp (name, "LoadLibraryW") == 0)
-    rwc->load_library_impl = GSIZE_TO_POINTER (address);
-  else if (strcmp (name, "GetProcAddress") == 0)
-    rwc->get_proc_address_impl = GSIZE_TO_POINTER (address);
-  else if (strcmp (name, "FreeLibrary") == 0)
-    rwc->free_library_impl = GSIZE_TO_POINTER (address);
-  else if (strcmp (name, "VirtualFree") == 0)
-    rwc->virtual_free_impl = GSIZE_TO_POINTER (address);
+  if (details->type != GUM_EXPORT_FUNCTION)
+    return TRUE;
+
+  if (strcmp (details->name, "LoadLibraryW") == 0)
+    rwc->load_library_impl = GSIZE_TO_POINTER (details->address);
+  else if (strcmp (details->name, "GetProcAddress") == 0)
+    rwc->get_proc_address_impl = GSIZE_TO_POINTER (details->address);
+  else if (strcmp (details->name, "FreeLibrary") == 0)
+    rwc->free_library_impl = GSIZE_TO_POINTER (details->address);
+  else if (strcmp (details->name, "VirtualFree") == 0)
+    rwc->virtual_free_impl = GSIZE_TO_POINTER (details->address);
 
   return TRUE;
 }

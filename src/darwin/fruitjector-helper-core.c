@@ -128,7 +128,7 @@ static gboolean frida_agent_context_init_functions_the_easy_way (FridaAgentConte
     const FridaAgentDetails * details, GError ** error);
 static gboolean frida_agent_context_init_functions_the_hard_way (FridaAgentContext * self,
     const FridaAgentDetails * details, GError ** error);
-static gboolean frida_fill_function_if_matching (const gchar * name, GumAddress address, gpointer user_data);
+static gboolean frida_fill_function_if_matching (const GumExportDetails * details, gpointer user_data);
 
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type);
@@ -562,19 +562,21 @@ frida_agent_context_init_functions_the_hard_way (FridaAgentContext * self, const
 }
 
 #define FRIDA_CTX_ASSIGN_AND_RETURN_IF_MATCHING(field) \
-  if (strcmp (name, G_STRINGIFY (field)) == 0) \
+  if (strcmp (details->name, G_STRINGIFY (field)) == 0) \
   { \
-    ctx->agent->field##_impl = address; \
+    ctx->agent->field##_impl = details->address; \
     ctx->remaining--; \
     return ctx->remaining != 0; \
   }
 
 static gboolean
-frida_fill_function_if_matching (const gchar * name,
-                               GumAddress address,
-                               gpointer user_data)
+frida_fill_function_if_matching (const GumExportDetails * details,
+                                 gpointer user_data)
 {
   FridaFillContext * ctx = user_data;
+
+  if (details->type != GUM_EXPORT_FUNCTION)
+    return TRUE;
 
   FRIDA_CTX_ASSIGN_AND_RETURN_IF_MATCHING (_pthread_set_self);
   FRIDA_CTX_ASSIGN_AND_RETURN_IF_MATCHING (cthread_set_self);

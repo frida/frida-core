@@ -94,7 +94,7 @@ static void frida_spawn_instance_on_server_recv (void * context);
 static gboolean frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error);
 static gboolean frida_spawn_instance_find_remote_api_the_easy_way (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error);
 static gboolean frida_spawn_instance_find_remote_api_the_hard_way (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error);
-static gboolean frida_fill_function_if_matching (const gchar * name, GumAddress address, gpointer user_data);
+static gboolean frida_fill_function_if_matching (const GumExportDetails * details, gpointer user_data);
 
 static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error);
 static gboolean frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaRemoteApi * api, guint8 * code, guint * code_size, GError ** error);
@@ -452,19 +452,21 @@ frida_spawn_instance_find_remote_api_the_hard_way (FridaSpawnInstance * self, Fr
 }
 
 #define FRIDA_REMOTE_API_ASSIGN_AND_RETURN_IF_MATCHING(field) \
-  if (strcmp (name, G_STRINGIFY (field)) == 0) \
+  if (strcmp (details->name, G_STRINGIFY (field)) == 0) \
   { \
-    ctx->api->field##_impl = address; \
+    ctx->api->field##_impl = details->address; \
     ctx->remaining--; \
     return ctx->remaining != 0; \
   }
 
 static gboolean
-frida_fill_function_if_matching (const gchar * name,
-                               GumAddress address,
-                               gpointer user_data)
+frida_fill_function_if_matching (const GumExportDetails * details,
+                                 gpointer user_data)
 {
   FridaFillContext * ctx = user_data;
+
+  if (details->type != GUM_EXPORT_FUNCTION)
+    return TRUE;
 
   FRIDA_REMOTE_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_task_self);
   FRIDA_REMOTE_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_port_allocate);

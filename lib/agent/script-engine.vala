@@ -9,9 +9,9 @@ namespace Frida.Agent {
 		private HashMap<uint, ScriptInstance> instance_by_id = new HashMap<uint, ScriptInstance> ();
 
 		construct {
-			Gum.Process.enumerate_modules ((name, range, path) => {
-				if (name.index_of ("frida-agent.") != -1) {
-					agent_range = range;
+			Gum.Process.enumerate_modules ((details) => {
+				if (details.name.index_of ("frida-agent.") != -1) {
+					agent_range = details.range;
 					return false;
 				}
 				return true;
