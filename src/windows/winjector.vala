@@ -176,7 +176,8 @@ namespace Frida {
 				try {
 					var transport = new PipeTransport ();
 					var pipe = new Pipe (transport.local_address);
-					void * process = spawn (resource_store.helper32.path, "MANAGER " + transport.remote_address, level);
+					var level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
+					void * process = spawn (resource_store.helper32.path, "MANAGER %s %s".printf (level_str, transport.remote_address), level);
 					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, pipe, process);
 				} catch (IOError e) {
 					error = e;

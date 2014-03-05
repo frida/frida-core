@@ -16,11 +16,18 @@ namespace Winjector {
 		}
 
 		if (mode == HelperMode.MANAGER) {
-			if (args.length != 3)
+			if (args.length != 4)
 				return 1;
-			var parent_address = args[2];
+			PrivilegeLevel level;
+			var level_str = args[2].up ();
+			switch (level_str) {
+				case "NORMAL":   level = PrivilegeLevel.NORMAL;   break;
+				case "ELEVATED": level = PrivilegeLevel.ELEVATED; break;
+				default:					  return 1;
+			}
+			var parent_address = args[3];
 
-			var manager = new Winjector.Manager (parent_address);
+			var manager = new Winjector.Manager (parent_address, level);
 			return manager.run ();
 		}
 
@@ -40,8 +47,18 @@ namespace Winjector {
 		SERVICE
 	}
 
+	public enum PrivilegeLevel {
+		NORMAL,
+		ELEVATED
+	}
+
 	public class Manager : Object, WinjectorHelper {
 		public string parent_address {
+			get;
+			construct;
+		}
+
+		public PrivilegeLevel level {
 			get;
 			construct;
 		}
@@ -55,8 +72,8 @@ namespace Winjector {
 		private HelperService helper64;
 		private void * context;
 
-		public Manager (string parent_address) {
-			Object (parent_address: parent_address);
+		public Manager (string parent_address, PrivilegeLevel level) {
+			Object (parent_address: parent_address, level: level);
 		}
 
 		public int run () {
@@ -93,7 +110,7 @@ namespace Winjector {
 				if (System.is_x64 ())
 					helper64 = new HelperService (Service.derive_svcname_for_suffix ("64"));
 
-				context = start_services (Service.derive_basename ());
+				context = start_services (Service.derive_basename (), level);
 
 				yield helper32.start ();
 				if (System.is_x64 ())
@@ -158,7 +175,7 @@ namespace Winjector {
 			}
 		}
 
-		private static extern void * start_services (string service_basename);
+		private static extern void * start_services (string service_basename, PrivilegeLevel level);
 		private static extern void stop_services (void * context);
 	}
 

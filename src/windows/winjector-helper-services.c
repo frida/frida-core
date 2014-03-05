@@ -66,13 +66,16 @@ static WCHAR * winjector_managed_service_name = NULL;
 static SERVICE_STATUS_HANDLE winjector_managed_service_status_handle = NULL;
 
 void *
-winjector_manager_start_services (const char * service_basename)
+winjector_manager_start_services (const char * service_basename,
+    WinjectorPrivilegeLevel level)
 {
   WinjectorServiceContext * self;
 
   self = winjector_service_context_new (service_basename);
 
-  self->scm = OpenSCManager (NULL, NULL, SC_MANAGER_ALL_ACCESS);
+  self->scm = (level == WINJECTOR_PRIVILEGE_LEVEL_ELEVATED)
+      ? OpenSCManager (NULL, NULL, SC_MANAGER_ALL_ACCESS)
+      : NULL;
   if (self->scm != NULL)
   {
     if (!register_and_start_services (self))
