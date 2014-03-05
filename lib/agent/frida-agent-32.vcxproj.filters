@@ -46,6 +46,8 @@
     <None Include="script-engine.vala">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="$(ProjectDir)..\interfaces\session.vala" />
+    <None Include="$(ProjectDir)..\interfaces\session.vala">
+      <Filter>Source Files\lib\interfaces</Filter>
+    </None>
   </ItemGroup>
 </Project>
