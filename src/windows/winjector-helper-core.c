@@ -15,6 +15,13 @@
     goto handle_os_error; \
   }
 
+#define CHECK_NT_RESULT(n1, cmp, n2, op) \
+  if (!((n1) cmp (n2))) \
+  { \
+    failed_operation = op; \
+    goto handle_nt_error; \
+  }
+
 typedef struct _InjectionDetails InjectionDetails;
 typedef struct _RemoteWorkerContext RemoteWorkerContext;
 typedef struct _TrickContext TrickContext;
@@ -74,6 +81,20 @@ struct _TrickContext
   gsize saved_flags;
   gsize saved_xip;
 };
+
+typedef struct _RtlClientId RtlClientId;
+
+struct _RtlClientId
+{
+  SIZE_T unique_process;
+  SIZE_T unique_thread;
+};
+
+typedef NTSTATUS (WINAPI * RtlCreateUserThreadFunc) (HANDLE process, SECURITY_DESCRIPTOR * sec,
+    BOOLEAN create_suspended, ULONG stack_zero_bits, SIZE_T * stack_reserved, SIZE_T * stack_commit,
+    LPTHREAD_START_ROUTINE start_address, LPVOID parameter, HANDLE * thread_handle, RtlClientId * result);
+
+static gboolean enable_debug_privilege (void);
 
 static HANDLE try_to_grab_a_thread_in (DWORD process_id, GError ** error);
 static void trick_thread_into_spawning_worker_thread (HANDLE process_handle, HANDLE thread_handle, RemoteWorkerContext * rwc, GError ** error);
@@ -135,10 +156,11 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
 {
   gboolean success = FALSE;
   const gchar * failed_operation;
+  NTSTATUS nt_status;
   HANDLE waitable_remote_thread_handle = NULL;
   InjectionDetails details;
-  gboolean enable_stealth_mode = FALSE;
-  DWORD our_session_id, target_session_id, desired_access;
+  gboolean enable_stealth_mode = FALSE; /* TODO: stabilize */
+  DWORD desired_access;
   HANDLE thread_handle = NULL;
   gboolean rwc_initialized = FALSE;
   RemoteWorkerContext rwc;
@@ -150,12 +172,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   if (!file_exists_and_is_readable (details.dll_path))
     goto file_does_not_exist;
 
-  if (ProcessIdToSessionId (GetCurrentProcessId (), &our_session_id) &&
-      ProcessIdToSessionId (process_id, &target_session_id) &&
-      target_session_id != our_session_id)
-  {
-    enable_stealth_mode = TRUE;
-  }
+  enable_debug_privilege ();
 
   desired_access = 
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
@@ -187,7 +204,16 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   else
   {
     thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint), rwc.argument, 0, NULL);
-    CHECK_OS_RESULT (thread_handle, !=, NULL, "CreateRemoteThread");
+    if (thread_handle == NULL)
+    {
+      RtlCreateUserThreadFunc rtl_create_user_thread;
+      RtlClientId client_id;
+
+      rtl_create_user_thread = (RtlCreateUserThreadFunc) GetProcAddress (GetModuleHandleW (L"ntdll.dll"), "RtlCreateUserThread");
+      nt_status = rtl_create_user_thread (details.process_handle, NULL, FALSE, 0, NULL, NULL,
+          GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint), rwc.argument, &thread_handle, &client_id);
+      CHECK_NT_RESULT (nt_status, == , 0, "RtlCreateUserThread");
+    }
 
     waitable_remote_thread_handle = thread_handle;
     thread_handle = NULL;
@@ -232,6 +258,20 @@ handle_os_error:
         failed_operation, process_id, os_error);
     goto beach;
   }
+handle_nt_error:
+  {
+    gint code;
+
+    if (nt_status == 0xC0000022) /* STATUS_ACCESS_DENIED */
+      code = G_IO_ERROR_PERMISSION_DENIED;
+    else
+      code = G_IO_ERROR_FAILED;
+
+    g_set_error (error, G_IO_ERROR, code,
+        "%s(pid=%u) failed: 0x%08lx",
+        failed_operation, process_id, nt_status);
+    goto beach;
+  }
 
 beach:
   {
@@ -248,6 +288,42 @@ beach:
 
     return waitable_remote_thread_handle;
   }
+}
+
+static gboolean
+enable_debug_privilege (void)
+{
+  static gboolean enabled = FALSE;
+  gboolean success = FALSE;
+  HANDLE token = NULL;
+  TOKEN_PRIVILEGES privileges;
+  LUID_AND_ATTRIBUTES * p = &privileges.Privileges[0];
+
+  if (enabled)
+    return TRUE;
+
+  if (!OpenProcessToken (GetCurrentProcess (), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &token))
+    goto beach;
+
+  privileges.PrivilegeCount = 1;
+  if (!LookupPrivilegeValueW (NULL, L"SeDebugPrivilege", &p->Luid))
+    goto beach;
+  p->Attributes = SE_PRIVILEGE_ENABLED;
+
+  if (!AdjustTokenPrivileges (token, FALSE, &privileges, 0, NULL, NULL))
+    goto beach;
+
+  if (GetLastError () == ERROR_NOT_ALL_ASSIGNED)
+    goto beach;
+
+  enabled = TRUE;
+  success = TRUE;
+
+beach:
+  if (token != NULL)
+    CloseHandle (token);
+
+  return success;
 }
 
 static HANDLE
