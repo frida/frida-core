@@ -10,6 +10,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Manual/full-cycle", () => {
+			var h = new Harness.without_timeout ((h) => Service.Manual.full_cycle (h as Harness));
+			h.run ();
+		});
+
 #if !LINUX
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
@@ -130,6 +135,50 @@ namespace Frida.HostSessionTest {
 			public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
 				throw new IOError.FAILED ("not implemented");
 			}
+		}
+
+		namespace Manual {
+
+			private static async void full_cycle (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with target application running> ");
+					h.done ();
+					return;
+				}
+
+				stdout.printf ("\nEnter PID: ");
+				stdout.flush ();
+				int pid = int.parse(stdin.read_line());
+
+#if LINUX
+				var backend = new LinuxHostSessionBackend ();
+#endif
+#if DARWIN
+				var backend = new DarwinHostSessionBackend ();
+#endif
+#if WINDOWS
+				var backend = new WindowsHostSessionBackend ();
+#endif
+				h.service.add_backend (backend);
+				yield h.service.start ();
+				yield h.process_events ();
+				var prov = h.first_provider ();
+
+				try {
+					var host_session = yield prov.create ();
+					var id = yield host_session.attach_to (pid);
+					yield prov.obtain_agent_session (id);
+				} catch (IOError e) {
+					stderr.printf ("ERROR: %s\n", e.message);
+					assert_not_reached ();
+				}
+
+				yield h.service.stop ();
+				h.service.remove_backend (backend);
+
+				h.done ();
+			}
+
 		}
 
 	}
@@ -443,10 +492,17 @@ namespace Frida.HostSessionTest {
 			private set;
 		}
 
+		private uint timeout = 5;
+
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
 		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
+		}
+
+		public Harness.without_timeout (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
+			base ((owned) func);
+			timeout = 0;
 		}
 
 		construct {
@@ -457,6 +513,10 @@ namespace Frida.HostSessionTest {
 			service.provider_unavailable.connect ((provider) => {
 				assert (available_providers.remove (provider));
 			});
+		}
+
+		protected override uint provide_timeout () {
+			return timeout;
 		}
 
 		public async void wait_for_provider () {
