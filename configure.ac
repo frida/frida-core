@@ -23,12 +23,16 @@ LT_INIT
 
 HAVE_I386=no
 HAVE_ARM=no
-case $target_cpu in
+HAVE_ARM64=no
+case $host_cpu in
   i?86|x86*)
     HAVE_I386=yes
   ;;
-  arm*)
+  arm)
     HAVE_ARM=yes
+  ;;
+  aarch64)
+    HAVE_ARM64=yes
   ;;
 esac
 if [[ "$HAVE_I386" = "yes" ]]; then
@@ -37,8 +41,12 @@ fi
 if [[ "$HAVE_ARM" = "yes" ]]; then
   AC_DEFINE(HAVE_ARM, 1, [Define to 1 if target is ARM based.])
 fi
+if [[ "$HAVE_ARM64" = "yes" ]]; then
+  AC_DEFINE(HAVE_ARM64, 1, [Define to 1 if target is AArch64 based.])
+fi
 AM_CONDITIONAL(ARCH_I386, [test "$HAVE_I386" = "yes"])
 AM_CONDITIONAL(ARCH_ARM, [test "$HAVE_ARM" = "yes"])
+AM_CONDITIONAL(ARCH_ARM64, test "$HAVE_ARM64" = "yes")
 
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
@@ -57,7 +65,7 @@ AM_CONDITIONAL(OS_DARWIN, [test "x$HAVE_DARWIN" = "xyes"])
 case $host_os in
   darwin*)
     case $host_cpu in
-      arm)
+      arm|aarch64)
         HAVE_MAC=no
         HAVE_IOS=yes
         ;;
