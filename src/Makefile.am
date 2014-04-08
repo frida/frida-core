@@ -26,7 +26,7 @@ glue_sources += \
 endif
 
 if OS_DARWIN
-FRUITJECTOR_HELPER = $(builddir)/frida-fruitjector-helper
+FRUITJECTOR_HELPER = frida-fruitjector-helper
 
 backend_sources += \
 	darwin/darwin-host-session.vala \
@@ -36,8 +36,8 @@ glue_sources += \
 	darwin/darwin-host-session-glue.c \
 	darwin/fruitjector-glue.c
 backend_libadd += \
-	$(builddir)/libfruitjector-types.la \
-	$(builddir)/libfrida-data-fruitjector.la
+	libfruitjector-types.la \
+	libfrida-data-fruitjector.la
 backend_valaflags += \
 	--pkg=fruitjector-types \
 	--pkg=frida-data-fruitjector
@@ -49,8 +49,8 @@ frida_fruitjector_helper_SOURCES = \
 frida_fruitjector_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_fruitjector_helper_LDADD = \
-	$(builddir)/libfruitjector-helper-main.la \
-	$(builddir)/libfruitjector-helper-glue.la \
+	libfruitjector-helper-main.la \
+	libfruitjector-helper-glue.la \
 	$(FRIDA_LIBS)
 if OS_MAC
 frida_fruitjector_helper_LDFLAGS += \
@@ -67,7 +67,7 @@ libfruitjector_helper_main_la_SOURCES = \
 libfruitjector_helper_main_la_CFLAGS = \
 	-w
 libfruitjector_helper_main_la_LIBADD = \
-	$(builddir)/libfruitjector-types.la \
+	libfruitjector-types.la \
 	$(FRIDA_LIBS)
 libfruitjector_helper_main_la_VALAFLAGS = \
 	--header=fruitjector-helper.h \
@@ -102,8 +102,8 @@ endif
 backend_libraries += \
 	libfrida-data-fruitjector.la
 libfrida_data_fruitjector_la_SOURCES = \
-	$(builddir)/frida-data-fruitjector.c \
-	$(builddir)/frida-data-fruitjector-blob.S \
+	frida-data-fruitjector.c \
+	frida-data-fruitjector-blob.S \
 	$(NULL)
 frida-data-fruitjector.c: frida-fruitjector-helper.stamp
 	$(AM_V_GEN) \
@@ -113,10 +113,10 @@ frida-data-fruitjector.c: frida-fruitjector-helper.stamp
 			-o "$(builddir)/frida-data-fruitjector" \
 			$(FRUITJECTOR_HELPER)
 backend_cleanfiles += \
-	$(builddir)/frida-data-fruitjector.vapi \
-	$(builddir)/frida-data-fruitjector.h \
-	$(builddir)/frida-data-fruitjector.c \
-	$(builddir)/frida-data-fruitjector-blob.S
+	frida-data-fruitjector.vapi \
+	frida-data-fruitjector.h \
+	frida-data-fruitjector.c \
+	frida-data-fruitjector-blob.S
 
 backend_sources += \
 	fruity/fruity-client.vala \
@@ -159,10 +159,10 @@ libfrida_core_1_0_la_LDFLAGS = \
 libfrida_core_1_0_la_LIBADD = \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
-	$(builddir)/libfrida-data-agent.la \
+	libfrida-data-agent.la \
 	$(backend_libadd) \
 	libfrida-core.la \
-	$(builddir)/libfrida-core-glue.la \
+	libfrida-core-glue.la \
 	$(FRIDA_LIBS)
 libfrida_core_1_0_la_LIBTOOLFLAGS = \
 	--tag=disable-shared
@@ -207,8 +207,8 @@ AM_CPPFLAGS = \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
 
 libfrida_data_agent_la_SOURCES = \
-	$(builddir)/frida-data-agent.c \
-	$(builddir)/frida-data-agent-blob.S \
+	frida-data-agent.c \
+	frida-data-agent-blob.S \
 	$(NULL)
 frida-data-agent.c: $(AGENT)
 	$(AM_V_GEN) \
@@ -219,9 +219,9 @@ frida-data-agent.c: $(AGENT)
 			$(AGENT)
 
 CLEANFILES = \
-	$(builddir)/frida-data-agent.vapi \
-	$(builddir)/frida-data-agent.h \
-	$(builddir)/frida-data-agent.c \
-	$(builddir)/frida-data-agent-blob.S \
+	frida-data-agent.vapi \
+	frida-data-agent.h \
+	frida-data-agent.c \
+	frida-data-agent-blob.S \
 	$(backend_cleanfiles) \
 	$(NULL)
