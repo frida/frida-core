@@ -17,7 +17,12 @@
 
 #define FRIDA_SYSTEM_LIBC         "/usr/lib/libSystem.B.dylib"
 
-#define FRIDA_PAGE_SIZE           (4096)
+/* TODO: check page size dynamically */
+#ifdef HAVE_ARM64
+# define FRIDA_PAGE_SIZE          (16384)
+#else
+# define FRIDA_PAGE_SIZE          (4096)
+#endif
 #define FRIDA_STACK_GUARD_SIZE    FRIDA_PAGE_SIZE
 #define FRIDA_STACK_SIZE          (32 * 1024)
 #define FRIDA_PTHREAD_DATA_SIZE   (2 * FRIDA_PAGE_SIZE)
@@ -216,14 +221,14 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
   FridaAgentContext agent_ctx;
-#ifdef HAVE_ARM
-  arm_thread_state_t state;
-  mach_msg_type_number_t state_count = ARM_THREAD_STATE_COUNT;
-  thread_state_flavor_t state_flavor = ARM_THREAD_STATE;
-#else
+#ifdef HAVE_I386
   x86_thread_state_t state;
   mach_msg_type_number_t state_count = x86_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = x86_THREAD_STATE;
+#else
+  arm_unified_thread_state_t state;
+  mach_msg_type_number_t state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
+  thread_state_flavor_t state_flavor = ARM_UNIFIED_THREAD_STATE;
 #endif
   dispatch_source_t source;
 
@@ -267,14 +272,7 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
   bzero (&state, sizeof (state));
-#if defined(HAVE_ARM)
-  state.__r[7] = payload_address + FRIDA_DATA_OFFSET;
-
-  state.__sp = payload_address + FRIDA_STACK_TOP_OFFSET;
-  state.__lr = 0xcafebabe;
-  state.__pc = payload_address + FRIDA_MACH_CODE_OFFSET;
-  state.__cpsr = FRIDA_PSR_THUMB;
-#else
+#ifdef HAVE_I386
   if (details.cpu_type == GUM_CPU_AMD64)
   {
     x86_thread_state64_t * ts;
@@ -302,6 +300,39 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
 
     ts->__esp = payload_address + FRIDA_STACK_TOP_OFFSET;
     ts->__eip = payload_address + FRIDA_MACH_CODE_OFFSET;
+  }
+#else
+  if (details.cpu_type == GUM_CPU_ARM64)
+  {
+    arm_thread_state64_t * ts;
+
+    state.ash.flavor = ARM_THREAD_STATE64;
+    state.ash.count = ARM_THREAD_STATE64_COUNT;
+
+    ts = &state.ts_64;
+
+    ts->__x[20] = payload_address + FRIDA_DATA_OFFSET;
+
+    ts->__sp = payload_address + FRIDA_STACK_TOP_OFFSET;
+    ts->__lr = 0xcafebabe;
+    ts->__pc = payload_address + FRIDA_MACH_CODE_OFFSET;
+    ts->__cpsr = FRIDA_PSR_THUMB;
+  }
+  else
+  {
+    arm_thread_state32_t * ts;
+
+    state.ash.flavor = ARM_THREAD_STATE32;
+    state.ash.count = ARM_THREAD_STATE32_COUNT;
+
+    ts = &state.ts_32;
+
+    ts->__r[7] = payload_address + FRIDA_DATA_OFFSET;
+
+    ts->__sp = payload_address + FRIDA_STACK_TOP_OFFSET;
+    ts->__lr = 0xcafebabe;
+    ts->__pc = payload_address + FRIDA_MACH_CODE_OFFSET;
+    ts->__cpsr = FRIDA_PSR_THUMB;
   }
 #endif
 
@@ -907,9 +938,15 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
   ctx.code = code;
   gum_arm64_writer_init (&ctx.aw, ctx.code);
 
+  gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_mov_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_SP);
+  gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_X19, GUM_A64REG_X20);
   frida_agent_context_emit_arm64_pthread_setup (self, &ctx);
   frida_agent_context_emit_arm64_pthread_create_and_join (self, &ctx);
   frida_agent_context_emit_arm64_thread_terminate (self, &ctx);
+  gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_ret (&ctx.aw);
 
   gum_arm64_writer_free (&ctx.aw);
 }
@@ -925,6 +962,7 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_SP);
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_mov_reg_reg (&ctx.aw, GUM_A64REG_X20, GUM_A64REG_X0);
   frida_agent_context_emit_arm64_pthread_stub_body (self, &ctx);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_X19, GUM_A64REG_X20);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_LR);
@@ -959,7 +997,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
   EMIT_ARM64_LOAD (X0, data_string);
   EMIT_ARM64_CALL (X8);
 
-  EMIT_ARM64_MOVE (X0, X4);
+  EMIT_ARM64_MOVE (X0, X19);
   EMIT_ARM64_LOAD (X8, dlclose_impl);
   EMIT_ARM64_CALL (X8);
 }
