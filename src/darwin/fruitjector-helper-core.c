@@ -25,7 +25,7 @@
 #endif
 #define FRIDA_STACK_GUARD_SIZE    FRIDA_PAGE_SIZE
 #define FRIDA_STACK_SIZE          (32 * 1024)
-#define FRIDA_PTHREAD_DATA_SIZE   (2 * FRIDA_PAGE_SIZE)
+#define FRIDA_PTHREAD_DATA_SIZE   (8192)
 #define FRIDA_CODE_OFFSET         (0)
 #define FRIDA_MACH_CODE_OFFSET    (0)
 #define FRIDA_PTHREAD_CODE_OFFSET (512)
@@ -223,13 +223,13 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
   FridaAgentContext agent_ctx;
 #ifdef HAVE_I386
   x86_thread_state_t state;
-  mach_msg_type_number_t state_count = x86_THREAD_STATE_COUNT;
-  thread_state_flavor_t state_flavor = x86_THREAD_STATE;
 #else
-  arm_unified_thread_state_t state;
-  mach_msg_type_number_t state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
-  thread_state_flavor_t state_flavor = ARM_UNIFIED_THREAD_STATE;
+  arm_thread_state_t state32;
+  arm_unified_thread_state_t state64;
 #endif
+  thread_state_t state_data;
+  mach_msg_type_number_t state_count;
+  thread_state_flavor_t state_flavor;
   dispatch_source_t source;
 
   instance = frida_injection_instance_new (self, self->last_id++);
@@ -271,8 +271,9 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
   ret = vm_protect (details.task, payload_address + FRIDA_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
 
-  bzero (&state, sizeof (state));
 #ifdef HAVE_I386
+  bzero (&state, sizeof (state));
+
   if (details.cpu_type == GUM_CPU_AMD64)
   {
     x86_thread_state64_t * ts;
@@ -280,7 +281,7 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
     state.tsh.flavor = x86_THREAD_STATE64;
     state.tsh.count = x86_THREAD_STATE64_COUNT;
 
-    ts = &state.uts.ts64;
+    ts = &state.ts_64;
 
     ts->__rbp = payload_address + FRIDA_DATA_OFFSET;
 
@@ -294,49 +295,57 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
     state.tsh.flavor = x86_THREAD_STATE32;
     state.tsh.count = x86_THREAD_STATE32_COUNT;
 
-    ts = &state.uts.ts32;
+    ts = &state.ts_32;
 
     ts->__ebp = payload_address + FRIDA_DATA_OFFSET;
 
     ts->__esp = payload_address + FRIDA_STACK_TOP_OFFSET;
     ts->__eip = payload_address + FRIDA_MACH_CODE_OFFSET;
   }
+
+  state_data = (thread_state_t) &state;
+  state_count = x86_THREAD_STATE_COUNT;
+  state_flavor = x86_THREAD_STATE;
 #else
   if (details.cpu_type == GUM_CPU_ARM64)
   {
     arm_thread_state64_t * ts;
 
-    state.ash.flavor = ARM_THREAD_STATE64;
-    state.ash.count = ARM_THREAD_STATE64_COUNT;
+    bzero (&state64, sizeof (state64));
 
-    ts = &state.ts_64;
+    state64.ash.flavor = ARM_THREAD_STATE64;
+    state64.ash.count = ARM_THREAD_STATE64_COUNT;
+
+    ts = &state64.ts_64;
 
     ts->__x[20] = payload_address + FRIDA_DATA_OFFSET;
 
     ts->__sp = payload_address + FRIDA_STACK_TOP_OFFSET;
     ts->__lr = 0xcafebabe;
     ts->__pc = payload_address + FRIDA_MACH_CODE_OFFSET;
-    ts->__cpsr = FRIDA_PSR_THUMB;
+
+    state_data = (thread_state_t) &state64;
+    state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
+    state_flavor = ARM_UNIFIED_THREAD_STATE;
   }
   else
   {
-    arm_thread_state32_t * ts;
+    bzero (&state32, sizeof (state32));
 
-    state.ash.flavor = ARM_THREAD_STATE32;
-    state.ash.count = ARM_THREAD_STATE32_COUNT;
+    state32.__r[7] = payload_address + FRIDA_DATA_OFFSET;
 
-    ts = &state.ts_32;
+    state32.__sp = payload_address + FRIDA_STACK_TOP_OFFSET;
+    state32.__lr = 0xcafebabe;
+    state32.__pc = payload_address + FRIDA_MACH_CODE_OFFSET;
+    state32.__cpsr = FRIDA_PSR_THUMB;
 
-    ts->__r[7] = payload_address + FRIDA_DATA_OFFSET;
-
-    ts->__sp = payload_address + FRIDA_STACK_TOP_OFFSET;
-    ts->__lr = 0xcafebabe;
-    ts->__pc = payload_address + FRIDA_MACH_CODE_OFFSET;
-    ts->__cpsr = FRIDA_PSR_THUMB;
+    state_data = (thread_state_t) &state32;
+    state_count = ARM_THREAD_STATE_COUNT;
+    state_flavor = ARM_THREAD_STATE;
   }
 #endif
 
-  ret = thread_create_running (details.task, state_flavor, (thread_state_t) &state, state_count, &instance->thread);
+  ret = thread_create_running (details.task, state_flavor, state_data, state_count, &instance->thread);
   CHECK_MACH_RESULT (ret, ==, 0, "thread_create_running");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_id), GUINT_TO_POINTER (instance->id), instance);
