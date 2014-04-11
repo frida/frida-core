@@ -281,7 +281,7 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
     state.tsh.flavor = x86_THREAD_STATE64;
     state.tsh.count = x86_THREAD_STATE64_COUNT;
 
-    ts = &state.ts_64;
+    ts = &state.uts.ts64;
 
     ts->__rbp = payload_address + FRIDA_DATA_OFFSET;
 
@@ -295,7 +295,7 @@ _fruitjector_service_do_inject (FruitjectorService * self, guint pid, const gcha
     state.tsh.flavor = x86_THREAD_STATE32;
     state.tsh.count = x86_THREAD_STATE32_COUNT;
 
-    ts = &state.ts_32;
+    ts = &state.uts.ts32;
 
     ts->__ebp = payload_address + FRIDA_DATA_OFFSET;
 
