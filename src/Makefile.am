@@ -105,7 +105,7 @@ libfrida_data_fruitjector_la_SOURCES = \
 	frida-data-fruitjector.c \
 	frida-data-fruitjector-blob.S \
 	$(NULL)
-frida-data-fruitjector.c: frida-fruitjector-helper.stamp
+frida-data-fruitjector.c frida-data-fruitjector-blob.S: frida-fruitjector-helper.stamp
 	$(AM_V_GEN) \
 		"$(RESOURCE_COMPILER)" \
 			--enable-asm \
@@ -210,7 +210,7 @@ libfrida_data_agent_la_SOURCES = \
 	frida-data-agent.c \
 	frida-data-agent-blob.S \
 	$(NULL)
-frida-data-agent.c: $(AGENT)
+frida-data-agent.c frida-data-agent-blob.S: $(AGENT)
 	$(AM_V_GEN) \
 		"$(RESOURCE_COMPILER)" \
 			--enable-asm \
