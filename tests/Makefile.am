@@ -9,8 +9,7 @@ endif
 endif
 
 noinst_PROGRAMS = \
-	frida-tests \
-	inject-victim
+	frida-tests
 noinst_LTLIBRARIES = \
 	libfrida-tests.la \
 	libfrida-tests-glue.la
@@ -81,6 +80,12 @@ libfrida_tests_glue_la_SOURCES = \
 	process-unix.c \
 	runner-glue.c
 
+data/.stamp:
+	mkdir -p $(@D)
+	cp $(srcdir)/labrats/unixvictim-* $(@D)
+	cp $(srcdir)/labrats/unixattacker-* $(@D)
+	touch $@
+
 AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
@@ -92,11 +97,11 @@ AM_CPPFLAGS = \
 	-DPKGTESTDIR=\""$(prefix)/tests"\"
 
 if OS_MAC
-all-local: frida-tests
+all-local: frida-tests data/.stamp
 	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaTests" "$<" || true
 endif
 
 if OS_IOS
-all-local: frida-tests
+all-local: frida-tests data/.stamp
 	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/frida-tests.xcent" "frida-tests" || true
 endif

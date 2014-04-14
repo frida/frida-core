@@ -1,40 +1,53 @@
 #if DARWIN
 namespace Frida.FruitjectorTest {
 	public static void add_tests () {
-		GLib.Test.add_func ("/Fruitjector/inject", () => {
-			var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-
-			var logfile = File.new_for_path (Path.build_filename (tests_dir, "inject-attacker.log"));
-
-			try {
-				logfile.delete ();
-			} catch (Error delete_error) {
-			}
-
-			var rat = new LabRat (tests_dir, "inject-victim", logfile.get_path ());
-
-			rat.inject ("libinject-attacker.dylib", "");
-			rat.wait_for_uninject ();
-
-			assert (content_of (logfile) == ">m<");
-
-			var requested_exit_code = 43;
-			rat.inject ("libinject-attacker.dylib", requested_exit_code.to_string ());
-			rat.wait_for_uninject ();
-
-			assert (content_of (logfile) == ">m<>m<");
-
-			var exit_code = rat.wait_for_process_to_exit ();
-			assert (exit_code == requested_exit_code);
-
-			try {
-				logfile.delete ();
-			} catch (Error delete_error) {
-				assert_not_reached ();
-			}
-
-			rat.close ();
+		GLib.Test.add_func ("/Fruitjector/inject-match-arch", () => {
+			test_injection (Arch.MATCH);
 		});
+
+		GLib.Test.add_func ("/Fruitjector/inject-cross-arch", () => {
+			if (sizeof (void *) != 8) {
+				stdout.printf ("<64-bit only>");
+				return;
+			}
+
+			test_injection (Arch.CROSS);
+		});
+	}
+
+	private static void test_injection (Arch arch) {
+		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+
+		var logfile = File.new_for_path (Path.build_filename (tests_dir, "unixattacker.log"));
+		try {
+			logfile.delete ();
+		} catch (Error delete_error) {
+		}
+		Environment.set_variable ("FRIDA_LABRAT_LOGFILE", logfile.get_path (), true);
+
+		var rat = new LabRat (tests_dir, "unixvictim", arch);
+
+		rat.inject ("unixattacker", "");
+		rat.wait_for_uninject ();
+
+		assert (content_of (logfile) == ">m<");
+
+		var requested_exit_code = 43;
+		rat.inject ("unixattacker", requested_exit_code.to_string ());
+		rat.wait_for_uninject ();
+
+		assert (content_of (logfile) == ">m<>m<");
+
+		var exit_code = rat.wait_for_process_to_exit ();
+		assert (exit_code == requested_exit_code);
+
+		try {
+			logfile.delete ();
+		} catch (Error delete_error) {
+			assert_not_reached ();
+		}
+
+		rat.close ();
 	}
 
 	private static string content_of (File file) {
@@ -49,27 +62,61 @@ namespace Frida.FruitjectorTest {
 		}
 	}
 
+	private enum Arch {
+		MATCH,
+		CROSS
+	}
+
 	private class LabRat {
 		public Frida.Test.Process process {
 			get;
 			private set;
 		}
 
-		private string rat_directory;
+		private string data_directory;
 		private Fruitjector injector;
 
-		public LabRat (string dir, string name, string logfile) {
-			rat_directory = dir;
-			var rat_file = Path.build_filename (rat_directory, name);
+		public LabRat (string dir, string name, Arch arch) {
+			data_directory = Path.build_filename (dir, "data");
+			var rat_file = Path.build_filename (data_directory, name + osSuffix ());
 
-			Environment.set_variable ("FRIDA_LABRAT_LOGFILE", logfile, true);
+			string path = "/usr/bin/arch";
+			string[] argv = new string[] {
+				path,
+				archFlag (arch),
+				rat_file
+			};
 
 			try {
-				process = Frida.Test.Process.start (rat_file);
+				process = Frida.Test.Process.start (path, argv);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
+		}
+
+		private static string osSuffix () {
+#if MAC
+			return "-mac";
+#endif
+#if IOS
+			return "-ios";
+#endif
+		}
+
+		private static string archFlag (Arch arch) {
+#if MAC
+			if (arch == Arch.MATCH)
+				return (sizeof (void *)) == 4 ? "-i386" : "-x86_64";
+			else
+				return (sizeof (void *)) == 4 ? "-x86_64" : "-i386";
+#endif
+#if IOS
+			if (arch == Arch.MATCH)
+				return (sizeof (void *)) == 4 ? "-armv7" : "-arm64";
+			else
+				return (sizeof (void *)) == 4 ? "-arm64" : "-armv7";
+#endif
 		}
 
 		public void close () {
@@ -108,9 +155,7 @@ namespace Frida.FruitjectorTest {
 				injector = new Fruitjector ();
 
 			try {
-				var dylib = Path.build_filename (rat_directory, name);
-				if (!FileUtils.test (dylib, FileTest.EXISTS))
-					dylib = Path.build_filename (rat_directory, ".libs", name);
+				var dylib = Path.build_filename (data_directory, name + osSuffix () + ".dylib");
 				assert (FileUtils.test (dylib, FileTest.EXISTS));
 
 				AgentDescriptor desc;

@@ -234,7 +234,7 @@ namespace Frida.HostSessionTest {
 				var host_session = yield prov.create ();
 
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "inject-victim");
+				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim-mac");
 				string[] argv = { victim_path };
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
