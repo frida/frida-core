@@ -55,8 +55,8 @@ frida_test_process_backend_self_id (void)
 }
 
 void
-frida_test_process_backend_do_start (const char * filename,
-    void ** handle, guint * id, GError ** error)
+frida_test_process_backend_do_start (const char * path, gchar ** argv,
+    int argv_length, void ** handle, guint * id, GError ** error)
 {
   const gchar * override = g_getenv ("FRIDA_TARGET_PID");
   if (override != NULL)
@@ -71,7 +71,7 @@ frida_test_process_backend_do_start (const char * filename,
     pid = vfork ();
     if (pid == 0)
     {
-      execl (filename, filename, NULL);
+      execv (path, argv);
       _exit (1);
     }
     else if (pid < 0)

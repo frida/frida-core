@@ -26,21 +26,20 @@ frida_test_process_backend_self_id (void)
 }
 
 void
-frida_test_process_backend_do_start (const char * filename,
-    void ** handle, guint * id, GError ** error)
+frida_test_process_backend_do_start (const char * path, gchar ** argv,
+    int argv_length, void ** handle, guint * id, GError ** error)
 {
-  LPWSTR filename_utf16;
+  LPWSTR path_utf16;
   STARTUPINFOW startup_info = { 0, };
   PROCESS_INFORMATION process_info = { 0, };
   BOOL success;
 
-  filename_utf16 =
-      g_utf8_to_utf16 (filename, -1, NULL, NULL, NULL);
+  path_utf16 = g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
 
   startup_info.cb = sizeof (startup_info);
 
-  success = CreateProcessW (filename_utf16, NULL, NULL, NULL, FALSE, 0, NULL,
-      NULL, &startup_info, &process_info);
+  success = CreateProcessW (path_utf16, NULL, NULL, NULL, FALSE, 0, NULL, NULL,
+      &startup_info, &process_info);
 
   if (success)
   {
@@ -55,7 +54,7 @@ frida_test_process_backend_do_start (const char * filename,
         "CreateProcess failed: 0x%08x\n", GetLastError ());
   }
 
-  g_free (filename_utf16);
+  g_free (path_utf16);
 }
 
 int
