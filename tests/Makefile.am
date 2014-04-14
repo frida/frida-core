@@ -13,8 +13,7 @@ noinst_PROGRAMS = \
 	inject-victim
 noinst_LTLIBRARIES = \
 	libfrida-tests.la \
-	libfrida-tests-glue.la \
-	libinject-attacker.la
+	libfrida-tests-glue.la
 
 platform_tests = $(NULL)
 
@@ -82,16 +81,6 @@ libfrida_tests_glue_la_SOURCES = \
 	process-unix.c \
 	runner-glue.c
 
-inject_victim_SOURCES = \
-	inject-victim.c
-
-libinject_attacker_la_SOURCES = \
-	inject-attacker.c
-libinject_attacker_la_LDFLAGS = \
-	-rpath /nowhere
-libinject_attacker_la_LIBADD = \
-	$(FRIDA_LIBS)
-
 AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
@@ -110,5 +99,4 @@ endif
 if OS_IOS
 all-local: frida-tests
 	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/frida-tests.xcent" "frida-tests" || true
-	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/inject-victim.xcent" "inject-victim" || true
 endif

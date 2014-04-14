@@ -1,4 +1,4 @@
-#include <glib.h>
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +32,7 @@ append_to_log (char c)
   FILE *f;
 
   f = fopen (getenv ("FRIDA_LABRAT_LOGFILE"), "ab");
-  g_assert (f != NULL);
+  assert (f != NULL);
   fwrite (&c, 1, 1, f);
   fclose (f);
 }
