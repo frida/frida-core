@@ -101,6 +101,10 @@ all-local: frida-tests data/.stamp
 	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaTests" "$<" || true
 endif
 
+if OS_LINUX
+all-local: data/.stamp
+endif
+
 if OS_IOS
 all-local: frida-tests data/.stamp
 	codesign -f -s "$$IOS_CERTID" --entitlements "$(srcdir)/frida-tests.xcent" "frida-tests" || true

@@ -5,21 +5,23 @@ namespace Frida.LinjectorTest {
 			var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 
 			var logfile = File.new_for_path (Path.build_filename (tests_dir, "inject-attacker.log"));
-
 			try {
 				logfile.delete ();
 			} catch (Error delete_error) {
 			}
+			var envp = new string[] {
+				"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
+			};
 
-			var rat = new LabRat (tests_dir, "inject-victim", logfile.get_path ());
+			var rat = new LabRat (tests_dir, "unixvictim", envp);
 
-			rat.inject ("libinject-attacker.so", "");
+			rat.inject ("unixattacker", "");
 			rat.wait_for_uninject ();
 
 			assert (content_of (logfile) == ">m<");
 
 			var requested_exit_code = 43;
-			rat.inject ("libinject-attacker.so", requested_exit_code.to_string ());
+			rat.inject ("unixattacker", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
 			assert (content_of (logfile) == ">m<>m<");
@@ -53,21 +55,27 @@ namespace Frida.LinjectorTest {
 			private set;
 		}
 
-		private string rat_directory;
+		private string data_directory;
 		private Linjector injector;
 
-		public LabRat (string dir, string name, string logfile) {
-			rat_directory = dir;
-			var rat_file = Path.build_filename (rat_directory, name);
+		public LabRat (string dir, string name, string[] envp) {
+			data_directory = Path.build_filename (dir, "data");
+			var rat_file = Path.build_filename (data_directory, name + arch_suffix ());
 
-			Environment.set_variable ("FRIDA_LABRAT_LOGFILE", logfile, true);
+			string[] argv = new string[] {
+				rat_file
+			};
 
 			try {
-				process = Frida.Test.Process.start (rat_file);
+				process = Frida.Test.Process.start (rat_file, argv, envp, Frida.Test.Arch.CURRENT);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
+		}
+
+		private static string arch_suffix () {
+			return "-linux-x86_64";
 		}
 
 		public void inject (string name, string data_string) {
@@ -84,9 +92,7 @@ namespace Frida.LinjectorTest {
 				injector = new Linjector ();
 
 			try {
-				var sofile = Path.build_filename (rat_directory, name);
-				if (!FileUtils.test (sofile, FileTest.EXISTS))
-					sofile = Path.build_filename (rat_directory, ".libs", name);
+				var sofile = Path.build_filename (data_directory, name + arch_suffix () + ".so");
 				assert (FileUtils.test (sofile, FileTest.EXISTS));
 
 				AgentDescriptor desc;
