@@ -35,6 +35,13 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
   PROCESS_INFORMATION process_info = { 0, };
   BOOL success;
 
+  /* TODO: implement these when needed */
+  (void) argv;
+  (void) argv_length;
+  (void) envp;
+  (void) envp_length;
+  (void) arch;
+
   path_utf16 = g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
 
   startup_info.cb = sizeof (startup_info);
