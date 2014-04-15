@@ -61,3 +61,19 @@ frida_test_environment_deinit (void)
   }
 #endif
 }
+
+FridaTestOS
+frida_test_os (void)
+{
+#if defined (G_OS_WIN32)
+  return FRIDA_TEST_OS_WINDOWS;
+#elif defined (HAVE_MAC)
+  return FRIDA_TEST_OS_MAC;
+#elif defined (HAVE_LINUX)
+  return FRIDA_TEST_OS_LINUX;
+#elif defined (HAVE_IOS)
+  return FRIDA_TEST_OS_IOS;
+#elif defined (HAVE_ANDROID)
+  return FRIDA_TEST_OS_ANDROID;
+#endif
+}

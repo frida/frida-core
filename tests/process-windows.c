@@ -27,7 +27,8 @@ frida_test_process_backend_self_id (void)
 
 void
 frida_test_process_backend_do_start (const char * path, gchar ** argv,
-    int argv_length, void ** handle, guint * id, GError ** error)
+    int argv_length, gchar ** envp, int envp_length, FridaTestArch arch,
+    void ** handle, guint * id, GError ** error)
 {
   LPWSTR path_utf16;
   STARTUPINFOW startup_info = { 0, };

@@ -31,10 +31,10 @@ namespace Frida.Test {
 			Object (handle: handle, id: id);
 		}
 
-		public static Process start (string path, string[] argv) throws IOError {
+		public static Process start (string path, string[] argv, string[] envp, Arch arch) throws IOError {
 			void * handle;
 			uint id;
-			ProcessBackend.do_start (path, argv, out handle, out id);
+			ProcessBackend.do_start (path, argv, envp, arch, out handle, out id);
 			return new Process (handle, id);
 		}
 
@@ -47,7 +47,7 @@ namespace Frida.Test {
 		private extern void * self_handle ();
 		private extern uint self_id ();
 		private extern string filename_of (void * handle);
-		private extern void do_start (string path, string[] argv, out void * handle, out uint id) throws IOError;
+		private extern void do_start (string path, string[] argv, string[] envp, Arch arch, out void * handle, out uint id) throws IOError;
 		private extern int do_join (void * handle, uint timeout_msec) throws IOError;
 	}
 }

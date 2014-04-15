@@ -1,21 +1,21 @@
 #if DARWIN
 namespace Frida.FruitjectorTest {
 	public static void add_tests () {
-		GLib.Test.add_func ("/Fruitjector/inject-match-arch", () => {
-			test_injection (Arch.MATCH);
+		GLib.Test.add_func ("/Fruitjector/inject-current-arch", () => {
+			test_injection (Frida.Test.Arch.CURRENT);
 		});
 
-		GLib.Test.add_func ("/Fruitjector/inject-cross-arch", () => {
+		GLib.Test.add_func ("/Fruitjector/inject-other-arch", () => {
 			if (sizeof (void *) != 8) {
 				stdout.printf ("<64-bit only>");
 				return;
 			}
 
-			test_injection (Arch.CROSS);
+			test_injection (Frida.Test.Arch.OTHER);
 		});
 	}
 
-	private static void test_injection (Arch arch) {
+	private static void test_injection (Frida.Test.Arch arch) {
 		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 
 		var logfile = File.new_for_path (Path.build_filename (tests_dir, "unixattacker.log"));
@@ -23,9 +23,11 @@ namespace Frida.FruitjectorTest {
 			logfile.delete ();
 		} catch (Error delete_error) {
 		}
-		Environment.set_variable ("FRIDA_LABRAT_LOGFILE", logfile.get_path (), true);
+		var envp = new string[] {
+			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
+		};
 
-		var rat = new LabRat (tests_dir, "unixvictim", arch);
+		var rat = new LabRat (tests_dir, "unixvictim", envp, arch);
 
 		rat.inject ("unixattacker", "");
 		rat.wait_for_uninject ();
@@ -62,11 +64,6 @@ namespace Frida.FruitjectorTest {
 		}
 	}
 
-	private enum Arch {
-		MATCH,
-		CROSS
-	}
-
 	private class LabRat {
 		public Frida.Test.Process process {
 			get;
@@ -76,47 +73,31 @@ namespace Frida.FruitjectorTest {
 		private string data_directory;
 		private Fruitjector injector;
 
-		public LabRat (string dir, string name, Arch arch) {
+		public LabRat (string dir, string name, string[] envp, Frida.Test.Arch arch) {
 			data_directory = Path.build_filename (dir, "data");
-			var rat_file = Path.build_filename (data_directory, name + osSuffix ());
+			var rat_file = Path.build_filename (data_directory, name + os_suffix ());
 
-			string path = "/usr/bin/arch";
 			string[] argv = new string[] {
-				path,
-				archFlag (arch),
 				rat_file
 			};
 
 			try {
-				process = Frida.Test.Process.start (path, argv);
+				process = Frida.Test.Process.start (rat_file, argv, envp, arch);
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
 		}
 
-		private static string osSuffix () {
-#if MAC
-			return "-mac";
-#endif
-#if IOS
-			return "-ios";
-#endif
-		}
-
-		private static string archFlag (Arch arch) {
-#if MAC
-			if (arch == Arch.MATCH)
-				return (sizeof (void *)) == 4 ? "-i386" : "-x86_64";
-			else
-				return (sizeof (void *)) == 4 ? "-x86_64" : "-i386";
-#endif
-#if IOS
-			if (arch == Arch.MATCH)
-				return (sizeof (void *)) == 4 ? "-armv7" : "-arm64";
-			else
-				return (sizeof (void *)) == 4 ? "-arm64" : "-armv7";
-#endif
+		private static string os_suffix () {
+			switch (Frida.Test.os ()) {
+				case Frida.Test.OS.MAC:
+					return "-mac";
+				case Frida.Test.OS.IOS:
+					return "-ios";
+				default:
+					assert_not_reached ();
+			}
 		}
 
 		public void close () {
@@ -155,7 +136,7 @@ namespace Frida.FruitjectorTest {
 				injector = new Fruitjector ();
 
 			try {
-				var dylib = Path.build_filename (data_directory, name + osSuffix () + ".dylib");
+				var dylib = Path.build_filename (data_directory, name + os_suffix () + ".dylib");
 				assert (FileUtils.test (dylib, FileTest.EXISTS));
 
 				AgentDescriptor desc;

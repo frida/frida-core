@@ -50,7 +50,7 @@ endif
 if OS_IOS
 RURL = root@${IOS_IPADDR}
 RPFX = /Library/Frida
-RSYNC = rsync -Lz
+RSYNC = rsync -rLz
 
 deploy: all
 	ssh "${RURL}" "mkdir -p \"${RPFX}/sbin/\""
@@ -62,8 +62,7 @@ check: all
 	ssh "${RURL}" "mkdir -p \"${RPFX}\"/{lib/frida,tests}"
 	${RSYNC} \
 		"$(top_builddir)/tests/frida-tests" \
-		"$(top_builddir)/tests/inject-victim" \
-		"$(top_builddir)/tests/.libs/libinject-attacker.dylib" \
+		"$(top_builddir)/tests/data" \
 		"${RURL}:\"${RPFX}/tests/\""
 	${RSYNC} \
 		"$(top_builddir)/lib/agent/.libs/libfrida-agent.dylib" \

@@ -7,14 +7,17 @@ namespace Frida.SystemTest {
 
 			assert (processes.length > 0);
 
-#if WINDOWS || IOS
-			int num_icons_seen = 0;
-			foreach (var p in processes) {
-				if (p.small_icon.pixels != "" && p.large_icon.pixels != "")
-					num_icons_seen++;
+			switch (Frida.Test.os ()) {
+				case Frida.Test.OS.WINDOWS:
+				case Frida.Test.OS.IOS:
+					int num_icons_seen = 0;
+					foreach (var p in processes) {
+						if (p.small_icon.pixels != "" && p.large_icon.pixels != "")
+							num_icons_seen++;
+					}
+					assert (num_icons_seen > 0);
+					break;
 			}
-			assert (num_icons_seen > 0);
-#endif
 
 			timer.start ();
 			processes = System.enumerate_processes ();
@@ -23,9 +26,9 @@ namespace Frida.SystemTest {
 			if (GLib.Test.verbose ())
 				stdout.printf (" [spent %f and %f] ", time_spent_on_first_run, time_spent_on_second_run);
 
-#if IOS
-			assert (time_spent_on_second_run <= time_spent_on_first_run / 2.0);
-#endif
+			if (Frida.Test.os () == Frida.Test.OS.IOS) {
+				assert (time_spent_on_second_run <= time_spent_on_first_run / 2.0);
+			}
 		});
 	}
 }

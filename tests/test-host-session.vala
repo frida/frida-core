@@ -36,7 +36,6 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-#if MAC
 		GLib.Test.add_func ("/HostSession/Darwin/spawn", () => {
 			var h = new Harness ((h) => Darwin.spawn (h as Harness));
 			h.run ();
@@ -46,7 +45,6 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch (h as Harness));
 			h.run ();
 		});
-#endif
 #endif
 
 #if WINDOWS
@@ -215,10 +213,9 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-#if MAC
 		private static async void spawn (Harness h) {
-			if (sizeof (size_t) != 8) {
-				stdout.printf ("<skipping, only available on 64-bit for now> ");
+			if (Frida.Test.os () != Frida.Test.OS.MAC || sizeof (size_t) != 8) {
+				stdout.printf ("<skipping, only available on 64-bit Mac for now> ");
 				h.done ();
 				return;
 			}
@@ -309,7 +306,6 @@ namespace Frida.HostSessionTest {
 			}
 
 		}
-#endif
 
 	}
 #endif

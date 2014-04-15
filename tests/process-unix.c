@@ -1,6 +1,7 @@
 #include "frida-tests.h"
 
 #include <errno.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #ifdef HAVE_DARWIN
 # include <mach-o/dyld.h>
@@ -56,7 +57,8 @@ frida_test_process_backend_self_id (void)
 
 void
 frida_test_process_backend_do_start (const char * path, gchar ** argv,
-    int argv_length, void ** handle, guint * id, GError ** error)
+    int argv_length, gchar ** envp, int envp_length, FridaTestArch arch,
+    void ** handle, guint * id, GError ** error)
 {
   const gchar * override = g_getenv ("FRIDA_TARGET_PID");
   if (override != NULL)
@@ -67,17 +69,43 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
   else
   {
     pid_t pid;
+    posix_spawnattr_t attr;
+    sigset_t signal_mask_set;
+    int result;
 
-    pid = vfork ();
-    if (pid == 0)
+    posix_spawnattr_init (&attr);
+    sigemptyset (&signal_mask_set);
+    posix_spawnattr_setsigmask (&attr, &signal_mask_set);
+    posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK);
+
+#ifdef HAVE_DARWIN
+    if (arch == FRIDA_TEST_ARCH_OTHER)
     {
-      execv (path, argv);
-      _exit (1);
+      cpu_type_t pref;
+      size_t ocount;
+
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+      pref = CPU_TYPE_X86_64;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+      pref = CPU_TYPE_X86;
+#elif defined (HAVE_ARM)
+      pref = CPU_TYPE_ARM64;
+#elif defined (HAVE_ARM64)
+      pref = CPU_TYPE_ARM;
+#endif
+
+      posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
     }
-    else if (pid < 0)
+#endif
+
+    result = posix_spawn (&pid, path, NULL, &attr, argv, envp);
+
+    posix_spawnattr_destroy (&attr);
+
+    if (result != 0)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-          "vfork failed: %d", errno);
+          "posix_spawn failed: %d", errno);
       return;
     }
 

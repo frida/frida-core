@@ -26,4 +26,18 @@ namespace Frida.Test {
 		public extern void deinit ();
 	}
 
+	public extern OS os ();
+
+	public enum OS {
+		WINDOWS,
+		MAC,
+		LINUX,
+		IOS,
+		ANDROID
+	}
+
+	public enum Arch {
+		CURRENT,
+		OTHER
+	}
 }
