@@ -49,7 +49,11 @@ namespace Frida.WinjectorTest {
 				"frida-core", "tests", "labrats");
 
 			var rat_file = Path.build_filename (rat_directory, name + ".exe");
-			process = Frida.Test.Process.start (rat_file);
+			var argv = new string[] {
+				rat_file
+			};
+			var envp = new string[] {};
+			process = Frida.Test.Process.start (rat_file, argv, envp, Frida.Test.Arch.CURRENT);
 		}
 
 		public void inject (string name, string data_string) {

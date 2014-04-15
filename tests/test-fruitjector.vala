@@ -77,7 +77,7 @@ namespace Frida.FruitjectorTest {
 			data_directory = Path.build_filename (dir, "data");
 			var rat_file = Path.build_filename (data_directory, name + os_suffix ());
 
-			string[] argv = new string[] {
+			var argv = new string[] {
 				rat_file
 			};
 

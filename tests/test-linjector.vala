@@ -62,7 +62,7 @@ namespace Frida.LinjectorTest {
 			data_directory = Path.build_filename (dir, "data");
 			var rat_file = Path.build_filename (data_directory, name + arch_suffix ());
 
-			string[] argv = new string[] {
+			var argv = new string[] {
 				rat_file
 			};
 
