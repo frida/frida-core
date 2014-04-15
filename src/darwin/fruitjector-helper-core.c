@@ -484,11 +484,10 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 
   self->thread_self_data = remote_payload_base + FRIDA_THREAD_SELF_OFFSET;
 
-#ifdef HAVE_ARM
-  self->pthread_create_start_routine = remote_payload_base + FRIDA_PTHREAD_CODE_OFFSET + 1;
-#else
-  self->pthread_create_start_routine = remote_payload_base + FRIDA_PTHREAD_CODE_OFFSET;
-#endif
+  if (details->cpu_type == GUM_CPU_ARM)
+    self->pthread_create_start_routine = remote_payload_base + FRIDA_PTHREAD_CODE_OFFSET + 1;
+  else
+    self->pthread_create_start_routine = remote_payload_base + FRIDA_PTHREAD_CODE_OFFSET;
   self->pthread_create_arg = remote_payload_base + FRIDA_DATA_OFFSET;
 
   self->dylib_path = remote_payload_base + FRIDA_DATA_OFFSET +
