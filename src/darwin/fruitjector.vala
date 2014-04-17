@@ -285,11 +285,14 @@ namespace Frida {
 			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
 				var temp_agent = agents[desc.name];
 				if (temp_agent == null) {
-					temp_agent = new TemporaryFile.from_stream (desc.name, desc.dylib, tempdir);
+					var dylib = clone_dylib (desc.dylib);
+					temp_agent = new TemporaryFile.from_stream (desc.name, dylib, tempdir);
 					agents[desc.name] = temp_agent;
 				}
 				return temp_agent.path;
 			}
+
+			private static extern InputStream clone_dylib (InputStream dylib);
 		}
 	}
 
