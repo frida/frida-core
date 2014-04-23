@@ -1,7 +1,9 @@
 #include "frida-tests.h"
 
 #include <errno.h>
-#include <spawn.h>
+#ifdef HAVE_SPAWN_H
+# include <spawn.h>
+#endif
 #include <sys/wait.h>
 #ifdef HAVE_DARWIN
 # include <mach-o/dyld.h>
@@ -69,6 +71,7 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
   else
   {
     pid_t pid;
+#ifdef HAVE_SPAWN_H
     posix_spawnattr_t attr;
     sigset_t signal_mask_set;
     int result;
@@ -108,6 +111,20 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
           "posix_spawn failed: %d", errno);
       return;
     }
+#else
+    pid = vfork ();
+    if (pid == 0)
+    {
+      execv (path, argv);
+      _exit (1);
+    }
+    else if (pid < 0)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+          "vfork failed: %d", errno);
+      return;
+    }
+#endif
 
     *handle = GSIZE_TO_POINTER (pid);
     *id = pid;
