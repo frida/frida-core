@@ -1,4 +1,5 @@
 class Vala.ResourceCompiler {
+	private static string toolchain;
 	private static bool enable_asm = false;
 	private static string config_filename;
 	private static string output_basename;
@@ -6,6 +7,7 @@ class Vala.ResourceCompiler {
 	private static string[] input_filenames;
 
 	private const OptionEntry[] options = {
+		{ "toolchain", 't', 0, OptionArg.STRING, ref toolchain, "Generate output for TOOLCHAIN", "TOOLCHAIN" },
 		{ "enable-asm", 0, 0, OptionArg.NONE, ref enable_asm, "Enable assembly output to speed up build", null },
 		{ "config-filename", 'c', 0, OptionArg.FILENAME, ref config_filename, "Read configuration from CONFIGFILE", "CONFIGFILE" },
 		{ "output-basename", 'o', 0, OptionArg.FILENAME, ref output_basename, "Place output in BASENAME", "BASENAME" },
@@ -132,10 +134,10 @@ class Vala.ResourceCompiler {
 				null);
 		}
 
-#if DARWIN
-		if (enable_asm)
+		if (enable_asm && toolchain == "apple")
 			asource.put_string (".const\n");
-#endif
+
+		var asm_identifier_prefix = toolchain == "apple" ? "_" : "";
 
 		foreach (var category in categories) {
 			bool is_root_category = (category.name == "root");
@@ -157,11 +159,6 @@ class Vala.ResourceCompiler {
 				size_by_index.add (file_size);
 
 				if (enable_asm) {
-#if DARWIN
-					var asm_identifier_prefix = "_";
-#else
-					var asm_identifier_prefix = "";
-#endif
 					var blob_identifier = "_" + namespace_cprefix + "_" + identifier;
 					blob_identifier_by_index.add (blob_identifier);
 
@@ -374,6 +371,12 @@ class Vala.ResourceCompiler {
 	}
 
 	static int main (string[] args) {
+#if DARWIN
+		toolchain = "apple";
+#else
+		toolchain = "gnu";
+#endif
+
 		try {
 			var ctx = new OptionContext ("- Vala Resource Compiler");
 			ctx.set_help_enabled (true);
