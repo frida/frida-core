@@ -129,13 +129,18 @@ static FridaInjectionInstance *
 frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid)
 {
   FridaInjectionInstance * instance;
+#ifdef HAVE_ANDROID
+  const gchar * tmp_dir = "/data/local/tmp";
+#else
+  const gchar * tmp_dir = "/tmp";
+#endif
   int ret;
 
   instance = g_slice_new0 (FridaInjectionInstance);
   instance->linjector = g_object_ref (linjector);
   instance->id = id;
   instance->pid = pid;
-  instance->fifo_path = g_strdup_printf ("/tmp/linjector-%d-%p-%d", getpid (), linjector, pid);
+  instance->fifo_path = g_strdup_printf ("%s/linjector-%d-%p-%d", tmp_dir, getpid (), linjector, pid);
   ret = mkfifo (instance->fifo_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
   g_assert_cmpint (ret, ==, 0);
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);

@@ -58,5 +58,9 @@ frida_system_kill (guint pid)
 gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
+#ifdef HAVE_ANDROID
+  return g_strdup ("/data/local/tmp");
+#else
   return g_strdup (g_get_tmp_dir ());
+#endif
 }
