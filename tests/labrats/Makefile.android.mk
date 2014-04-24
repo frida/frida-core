@@ -31,9 +31,24 @@ unixvictim-android-arm: unixvictim.c
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-android-arm.so: unixattacker.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+unixattacker-android-arm.so: unixattacker.c unixattacker-android-arm.version
+	$(CC) $(CFLAGS) $(LDFLAGS) \
+		-shared \
+		-Wl,-soname,unixattacker-android-arm.so \
+		-Wl,--version-script=unixattacker-android-arm.version \
+		$< \
+		-o $@.tmp
 	$(STRIP) --strip-all $@.tmp
+	mv $@.tmp $@
+
+unixattacker-android-arm.version:
+	echo "UNIXATTACKER_ANDROID_ARM_1.0 {"     > $@.tmp
+	echo "  global:"             >> $@.tmp
+	echo "    frida_agent_main;" >> $@.tmp
+	echo ""                      >> $@.tmp
+	echo "  local:"              >> $@.tmp
+	echo "    *;"                >> $@.tmp
+	echo "};"                    >> $@.tmp
 	mv $@.tmp $@
 
 .PHONY: all
