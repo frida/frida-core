@@ -17,19 +17,19 @@ pkgconfig_DATA = $(pcfiles)
 
 if OS_ANDROID
 RPFX = /data/local/tmp
-MKDIR = busybox mkdir
-RM = busybox rm
+MKDIR = mkdir
+RM = rm
 DEBUG_PORT = 5042
 
 check: all
-	adb shell "${MKDIR} -p \"${RPFX}/tests/\" \"${RPFX}/lib/frida/\""
-	arm-linux-androideabi-strip -s "$(top_builddir)/tests/frida-tests"
-	arm-linux-androideabi-strip -s "$(top_builddir)/lib/agent/.libs/libfrida-agent.so"
-	arm-linux-androideabi-strip -s "$(top_builddir)/tests/.libs/libinject-attacker.so"
-	adb push "$(top_builddir)/tests/frida-tests" "${RPFX}/tests/"
+	adb shell "${MKDIR} -p \"${RPFX}/tests/data/\" \"${RPFX}/lib/frida/\""
+	cp "$(top_builddir)/tests/frida-tests" "$(top_builddir)/tests/frida-tests.stripped"
+	$$STRIP --strip-all "$(top_builddir)/tests/frida-tests.stripped"
+	adb push "$(top_builddir)/tests/frida-tests.stripped" "${RPFX}/tests/frida-tests"
 	adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "${RPFX}/lib/frida/frida-agent.so"
-	adb push "$(top_builddir)/tests/.libs/libinject-attacker.so" "${RPFX}/tests/inject-attacker.so"
-	adb shell "su -c \"${RPFX}/tests/frida-tests\""
+	adb push "$(top_builddir)/tests/data/unixvictim-android-arm" "${RPFX}/tests/data/unixvictim-android-arm"
+	adb push "$(top_builddir)/tests/data/unixattacker-android-arm.so" "${RPFX}/tests/data/unixattacker-android-arm.so"
+	adb shell "su -c \"${RPFX}/tests/frida-tests -p /Linjector/inject\""
 
 check-gdb: $(top_builddir)/tests/android-gdb.setup
 	adb shell "${RM} -f /data/local/tmp/tests/debug-socket"

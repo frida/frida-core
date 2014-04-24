@@ -69,11 +69,25 @@ frida_test_os (void)
   return FRIDA_TEST_OS_WINDOWS;
 #elif defined (HAVE_MAC)
   return FRIDA_TEST_OS_MAC;
-#elif defined (HAVE_LINUX)
-  return FRIDA_TEST_OS_LINUX;
 #elif defined (HAVE_IOS)
   return FRIDA_TEST_OS_IOS;
 #elif defined (HAVE_ANDROID)
   return FRIDA_TEST_OS_ANDROID;
+#elif defined (HAVE_LINUX)
+  return FRIDA_TEST_OS_LINUX;
+#endif
+}
+
+FridaTestCPU
+frida_test_cpu (void)
+{
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  return FRIDA_TEST_CPU_X86_32;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+  return FRIDA_TEST_CPU_X86_64;
+#elif defined (HAVE_ARM)
+  return FRIDA_TEST_CPU_ARM_32;
+#elif defined (HAVE_ARM64)
+  return FRIDA_TEST_CPU_ARM_64;
 #endif
 }

@@ -27,6 +27,7 @@ namespace Frida.Test {
 	}
 
 	public extern OS os ();
+	public extern CPU cpu ();
 
 	public enum OS {
 		WINDOWS,
@@ -34,6 +35,13 @@ namespace Frida.Test {
 		LINUX,
 		IOS,
 		ANDROID
+	}
+
+	public enum CPU {
+		X86_32,
+		X86_64,
+		ARM_32,
+		ARM_64
 	}
 
 	public enum Arch {

@@ -75,7 +75,31 @@ namespace Frida.LinjectorTest {
 		}
 
 		private static string arch_suffix () {
-			return "-linux-x86_64";
+			string os_name;
+			switch (Frida.Test.os ()) {
+				case Frida.Test.OS.LINUX:
+					os_name = "linux";
+					break;
+				case Frida.Test.OS.ANDROID:
+					os_name = "android";
+					break;
+				default:
+					assert_not_reached ();
+			}
+
+			string cpu_name;
+			switch (Frida.Test.cpu ()) {
+				case Frida.Test.CPU.X86_64:
+					cpu_name = "x86_64";
+					break;
+				case Frida.Test.CPU.ARM_32:
+					cpu_name = "arm";
+					break;
+				default:
+					assert_not_reached ();
+			}
+
+			return "-" + os_name + "-" + cpu_name;
 		}
 
 		public void inject (string name, string data_string) {
