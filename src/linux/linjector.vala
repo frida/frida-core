@@ -27,7 +27,7 @@ namespace Frida {
 			}
 			var filename = resource_store.ensure_copy_of (desc);
 
-			var id = _do_inject (pid, filename, data_string);
+			var id = _do_inject (pid, filename, data_string, resource_store.tempdir.path);
 
 			var fifo = _get_fifo_for_instance (instance_by_id[id]);
 			var buf = new uint8[1];
@@ -98,7 +98,7 @@ namespace Frida {
 
 		public extern InputStream _get_fifo_for_instance (void * instance);
 		public extern void _free_instance (void * instance);
-		public extern uint _do_inject (uint pid, string so_path, string data_string) throws IOError;
+		public extern uint _do_inject (uint pid, string so_path, string data_string, string temp_path) throws IOError;
 
 		private class ResourceStore {
 			public TemporaryDirectory tempdir {

@@ -135,21 +135,16 @@ static GumAddress frida_find_landing_strip (pid_t pid);
 static gboolean frida_examine_range_for_landing_strip (const GumRangeDetails * details, gpointer user_data);
 
 static FridaInjectionInstance *
-frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid)
+frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid, const char * temp_path)
 {
   FridaInjectionInstance * instance;
-#ifdef HAVE_ANDROID
-  const gchar * tmp_dir = "/data/local/tmp";
-#else
-  const gchar * tmp_dir = "/tmp";
-#endif
   int ret;
 
   instance = g_slice_new0 (FridaInjectionInstance);
   instance->linjector = g_object_ref (linjector);
   instance->id = id;
   instance->pid = pid;
-  instance->fifo_path = g_strdup_printf ("%s/linjector-%d-%p-%d", tmp_dir, getpid (), linjector, pid);
+  instance->fifo_path = g_strdup_printf ("%s/linjector-%p-%d", temp_path, linjector, pid);
   ret = mkfifo (instance->fifo_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
   g_assert_cmpint (ret, ==, 0);
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
@@ -198,13 +193,13 @@ _frida_linjector_free_instance (FridaLinjector * self, void * instance)
 
 guint
 _frida_linjector_do_inject (FridaLinjector * self, guint pid, const char * so_path, const char * data_string,
-    GError ** error)
+    const char * temp_path, GError ** error)
 {
   FridaInjectionInstance * instance;
   FridaInjectionParams params = { pid, so_path, data_string };
   regs_t saved_regs;
 
-  instance = frida_injection_instance_new (self, self->last_id++, pid);
+  instance = frida_injection_instance_new (self, self->last_id++, pid, temp_path);
 
   if (!frida_attach_to_process (pid, &saved_regs, error))
     goto beach;
