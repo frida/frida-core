@@ -115,7 +115,7 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
     pid = vfork ();
     if (pid == 0)
     {
-      execv (path, argv);
+      execve (path, argv, envp);
       _exit (1);
     }
     else if (pid < 0)
