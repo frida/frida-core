@@ -123,6 +123,9 @@ static gboolean frida_wait_for_attach_signal (pid_t pid);
 static gboolean frida_wait_for_child_signal (pid_t pid, int signal);
 
 static GumAddress frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
+#ifdef HAVE_ANDROID
+static GumAddress frida_resolve_remote_linker_function (int remote_pid, gpointer func);
+#endif
 
 static GumAddress frida_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
@@ -234,7 +237,8 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
     GError ** error)
 {
   FridaCodeChunk code;
-  guint offset = 0;
+  guint padding = 0;
+  GumAddress address_mask = 0;
   FridaTrampolineData * data;
 
   code.cur = code.bytes;
@@ -245,10 +249,10 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
     GumX86Writer cw;
     guint i;
 
-    offset = 2;
+    padding = 2;
 
     gum_x86_writer_init (&cw, code.cur);
-    for (i = 0; i != offset; i++)
+    for (i = 0; i != padding; i++)
       gum_x86_writer_put_nop (&cw);
     gum_x86_writer_flush (&cw);
     code.cur = gum_x86_writer_cur (&cw);
@@ -260,7 +264,8 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   {
     GumThumbWriter cw;
 
-    offset = 2 | 1;
+    padding = 2;
+    address_mask = 1;
 
     gum_thumb_writer_init (&cw, code.cur);
     gum_thumb_writer_put_nop (&cw);
@@ -284,7 +289,7 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
 
-  if (!frida_remote_exec (params->pid, params->remote_address + offset, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, error))
+  if (!frida_remote_exec (params->pid, (params->remote_address + padding) | address_mask, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, error))
     return FALSE;
 
   return TRUE;
@@ -303,6 +308,9 @@ frida_x86_commit_code (GumX86Writer * cw, FridaCodeChunk * code)
 static void
 frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
+#ifdef HAVE_ANDROID
+# error Not yet ported to Android/x86
+#else
   GumX86Writer cw;
   const guint worker_offset = 128;
 
@@ -404,20 +412,98 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 
   frida_x86_commit_code (&cw, code);
   gum_x86_writer_free (&cw);
+#endif
 }
 
 #elif defined (HAVE_ARM)
 
 static void
+frida_arm_commit_code (GumThumbWriter * cw, FridaCodeChunk * code)
+{
+  gum_thumb_writer_flush (cw);
+  code->cur = gum_thumb_writer_cur (cw);
+  code->size += gum_thumb_writer_offset (cw);
+}
+
+static void
 frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
+#ifdef HAVE_ANDROID
   GumThumbWriter cw;
+  const guint worker_offset = 64;
 
   gum_thumb_writer_init (&cw, code->cur);
 
-  gum_thumb_writer_put_breakpoint (&cw);
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_libc_function (params->pid, "pthread_create"),
+      4,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_ADDRESS, remote_address + worker_offset + 1,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
+  gum_thumb_writer_put_breakpoint (&cw);
+  gum_thumb_writer_flush (&cw);
+  g_assert_cmpuint (gum_thumb_writer_offset (&cw), <=, worker_offset);
+  while (gum_thumb_writer_offset (&cw) != worker_offset - code->size)
+    gum_thumb_writer_put_nop (&cw);
+  frida_arm_commit_code (&cw, code);
   gum_thumb_writer_free (&cw);
+
+  gum_thumb_writer_init (&cw, code->cur);
+
+  gum_thumb_writer_put_push_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_libc_function (params->pid, "open"),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY));
+  gum_thumb_writer_put_mov_reg_reg (&cw, GUM_AREG_R7, GUM_AREG_R0);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_libc_function (params->pid, "write"),
+      3,
+      GUM_ARG_REGISTER, GUM_AREG_R7,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_linker_function (params->pid, dlopen),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
+  gum_thumb_writer_put_mov_reg_reg (&cw, GUM_AREG_R6, GUM_AREG_R0);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_linker_function (params->pid, dlsym),
+      2,
+      GUM_ARG_REGISTER, GUM_AREG_R6,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  gum_thumb_writer_put_mov_reg_reg (&cw, GUM_AREG_R5, GUM_AREG_R0);
+
+  gum_thumb_writer_put_call_reg_with_arguments (&cw,
+      GUM_AREG_R5,
+      1,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)));
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_linker_function (params->pid, dlclose),
+      1,
+      GUM_ARG_REGISTER, GUM_AREG_R6);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_remote_libc_function (params->pid, "close"),
+      1,
+      GUM_ARG_REGISTER, GUM_AREG_R7);
+
+  gum_thumb_writer_put_pop_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
+
+  frida_arm_commit_code (&cw, code);
+  gum_thumb_writer_free (&cw);
+#else
+# error Not yet ported to Linux/ARM
+#endif
 }
 
 #endif
@@ -784,6 +870,27 @@ frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name)
   return frida_resolve_remote_library_function (remote_pid, "libc", function_name);
 }
 
+#ifdef HAVE_ANDROID
+
+static GumAddress
+frida_resolve_remote_linker_function (int remote_pid, gpointer func)
+{
+  const gchar * linker_path = "/system/bin/linker";
+  GumAddress local_base, remote_base, remote_address;
+
+  local_base = frida_find_library_base (getpid (), linker_path, NULL);
+  g_assert (local_base != 0);
+
+  remote_base = frida_find_library_base (remote_pid, linker_path, NULL);
+  g_assert (remote_base != 0);
+
+  remote_address = remote_base + (GUM_ADDRESS (func) - local_base);
+
+  return remote_address;
+}
+
+#endif
+
 static GumAddress
 frida_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name)
 {
@@ -841,7 +948,6 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   {
     guint64 start;
     gint n;
-    gchar * p;
 
     n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
     if (n == 1)
@@ -851,18 +957,28 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
     if (path[0] == '[')
       continue;
 
-    p = strrchr (path, '/');
-    if (p != NULL)
+    if (strcmp (path, library_name) == 0)
     {
-      p++;
-      if (g_str_has_prefix (p, library_name) && g_str_has_suffix (p, ".so"))
+      result = start;
+      if (library_path != NULL)
+        *library_path = g_strdup (path);
+    }
+    else
+    {
+      gchar * p = strrchr (path, '/');
+      if (p != NULL)
       {
-        gchar next_char = p[strlen (library_name)];
-        if (next_char == '-' || next_char == '.')
+        p++;
+
+        if (g_str_has_prefix (p, library_name) && g_str_has_suffix (p, ".so"))
         {
-          result = start;
-          if (library_path != NULL)
-            *library_path = g_strdup (path);
+          gchar next_char = p[strlen (library_name)];
+          if (next_char == '-' || next_char == '.')
+          {
+            result = start;
+            if (library_path != NULL)
+              *library_path = g_strdup (path);
+          }
         }
       }
     }

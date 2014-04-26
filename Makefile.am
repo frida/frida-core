@@ -26,10 +26,10 @@ check: all
 	cp "$(top_builddir)/tests/frida-tests" "$(top_builddir)/tests/frida-tests.stripped"
 	$$STRIP --strip-all "$(top_builddir)/tests/frida-tests.stripped"
 	adb push "$(top_builddir)/tests/frida-tests.stripped" "${RPFX}/tests/frida-tests"
-	##adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "${RPFX}/lib/frida/frida-agent.so"
-	##adb push "$(top_builddir)/tests/data/unixvictim-android-arm" "${RPFX}/tests/data/unixvictim-android-arm"
-	##adb push "$(top_builddir)/tests/data/unixattacker-android-arm.so" "${RPFX}/tests/data/unixattacker-android-arm.so"
-	adb shell "su -c \"${RPFX}/tests/frida-tests -p /Linjector/inject\""
+	adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "${RPFX}/lib/frida/frida-agent.so"
+	adb push "$(top_builddir)/tests/data/unixvictim-android-arm" "${RPFX}/tests/data/unixvictim-android-arm"
+	adb push "$(top_builddir)/tests/data/unixattacker-android-arm.so" "${RPFX}/tests/data/unixattacker-android-arm.so"
+	adb shell "su -c \"${RPFX}/tests/frida-tests\""
 
 check-gdb: $(top_builddir)/tests/android-gdb.setup
 	adb shell "${RM} -f /data/local/tmp/tests/debug-socket"

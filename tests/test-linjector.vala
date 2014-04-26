@@ -24,7 +24,11 @@ namespace Frida.LinjectorTest {
 			rat.inject ("unixattacker", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
-			assert (content_of (logfile) == ">m<>m<");
+			if (Frida.Test.os () == Frida.Test.OS.ANDROID) {
+				assert (content_of (logfile) == ">m<>m");
+			} else {
+				assert (content_of (logfile) == ">m<>m<");
+			}
 
 			var exit_code = rat.wait_for_process_to_exit ();
 			assert (exit_code == requested_exit_code);
