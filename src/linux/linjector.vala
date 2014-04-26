@@ -5,7 +5,7 @@ namespace Frida {
 	public class Linjector : Object {
 		public signal void uninjected (uint id);
 
-		private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
+		private ResourceStore resource_store;
 
 		/* these should be private, but must be accessible to glue code */
 		private MainContext main_context;
@@ -17,24 +17,38 @@ namespace Frida {
 		}
 
 		~Linjector () {
-			foreach (var tempfile in agents.values)
-				tempfile.destroy ();
 			foreach (var instance in instance_by_id.values)
 				_free_instance (instance);
 		}
 
 		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
-			var agent = agents[desc.name];
-			if (agent == null) {
-				agent = new TemporaryFile.from_stream (desc.name, desc.sofile);
-				agents[desc.name] = agent;
+			if (resource_store == null) {
+				resource_store = new ResourceStore ();
 			}
+			var filename = resource_store.ensure_copy_of (desc);
 
-			var id = _do_inject (pid, agent.path, data_string);
+			var id = _do_inject (pid, filename, data_string);
 
 			var fifo = _get_fifo_for_instance (instance_by_id[id]);
 			var buf = new uint8[1];
-			var size = yield fifo.read_async (buf);
+			var cancellable = new Cancellable ();
+			var cancelled = new IOError.CANCELLED ("");
+			var timeout_source = new TimeoutSource (2000);
+			timeout_source.set_callback (() => {
+				cancellable.cancel ();
+				return false;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
+			ssize_t size;
+			try {
+				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
+			} catch (Error e) {
+				if (e is IOError && e.code == cancelled.code)
+					throw new IOError.TIMED_OUT ("timed out");
+				else
+					throw new IOError.FAILED (e.message);
+			}
+			timeout_source.destroy ();
 			if (size == 0) {
 				var source = new IdleSource ();
 				source.set_callback (() => {
@@ -85,6 +99,34 @@ namespace Frida {
 		public extern InputStream _get_fifo_for_instance (void * instance);
 		public extern void _free_instance (void * instance);
 		public extern uint _do_inject (uint pid, string so_path, string data_string) throws IOError;
+
+		private class ResourceStore {
+			public TemporaryDirectory tempdir {
+				get;
+				private set;
+			}
+
+			private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
+
+			public ResourceStore () throws IOError {
+				tempdir = new TemporaryDirectory ();
+			}
+
+			~ResourceStore () {
+				foreach (var tempfile in agents.values)
+					tempfile.destroy ();
+				tempdir.destroy ();
+			}
+
+			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
+				var temp_agent = agents[desc.name];
+				if (temp_agent == null) {
+					temp_agent = new TemporaryFile.from_stream (desc.name, desc.sofile, tempdir);
+					agents[desc.name] = temp_agent;
+				}
+				return temp_agent.path;
+			}
+		}
 	}
 
 	public class AgentDescriptor : Object {
