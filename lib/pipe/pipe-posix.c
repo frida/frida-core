@@ -9,7 +9,12 @@
 
 /* FIXME: this transport is not secure */
 
-#define PIPE_CONNECT_INTERVAL 50
+#ifdef HAVE_ANDROID
+# define FRIDA_TEMP_PATH "/data/local/tmp"
+#else
+# define FRIDA_TEMP_PATH "/tmp"
+#endif
+#define FRIDA_PIPE_CONNECT_INTERVAL 50
 
 #define CHECK_POSIX_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
@@ -257,9 +262,9 @@ frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellab
     if (!connected)
     {
       if (have_cancel_pollfd)
-        g_poll (&cancel, 1, PIPE_CONNECT_INTERVAL);
+        g_poll (&cancel, 1, FRIDA_PIPE_CONNECT_INTERVAL);
       else
-        g_usleep (PIPE_CONNECT_INTERVAL * 1000);
+        g_usleep (FRIDA_PIPE_CONNECT_INTERVAL * 1000);
     }
 
     if (g_cancellable_set_error_if_cancelled (cancellable, error))
@@ -283,7 +288,7 @@ frida_pipe_generate_name (void)
   GString * s;
   guint i;
 
-  s = g_string_new ("/tmp/frida-");
+  s = g_string_new (FRIDA_TEMP_PATH "/frida-");
   for (i = 0; i != 16; i++)
     g_string_append_printf (s, "%02x", g_random_int_range (0, 255));
 

@@ -10,5 +10,6 @@ libfrida_interfaces_la_VALAFLAGS = \
 	@FRIDA_PACKAGES@
 
 AM_CPPFLAGS = \
+	-include config.h \
 	$(FRIDA_CFLAGS) \
 	-w

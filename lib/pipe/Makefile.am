@@ -21,5 +21,6 @@ libfrida_pipe_glue_la_SOURCES = pipe-posix.c
 endif
 
 AM_CPPFLAGS = \
+	-include config.h \
 	$(FRIDA_CFLAGS) \
 	-I $(top_builddir)/lib/interfaces

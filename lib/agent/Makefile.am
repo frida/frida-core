@@ -30,6 +30,7 @@ libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
 
 AM_CPPFLAGS = \
+	-include config.h \
 	$(FRIDA_CFLAGS) \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe
