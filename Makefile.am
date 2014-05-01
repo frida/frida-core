@@ -30,12 +30,12 @@ check: all
 	adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "${RPFX}/lib/frida/libfrida-agent.so"
 	adb push "$(top_builddir)/tests/data/unixvictim-android-arm" "${RPFX}/tests/data/unixvictim-android-arm"
 	adb push "$(top_builddir)/tests/data/unixattacker-android-arm.so" "${RPFX}/tests/data/unixattacker-android-arm.so"
-	adb shell "su -c \"${RPFX}/tests/frida-tests -p /Agent/Script/performance\""
+	adb shell "su -c \"${RPFX}/tests/frida-tests\""
 
 check-gdb: $(top_builddir)/tests/android-gdb.setup
 	adb shell "${RM} -f /data/local/tmp/tests/debug-socket"
 	adb push "${ANDROID_NDK_ROOT}/prebuilt/android-arm/gdbserver/gdbserver" "${RPFX}/tests/"
-	adb shell "${RPFX}/tests/gdbserver +${RPFX}/tests/debug-socket ${RPFX}/tests/frida-tests -p /Agent/Script/performance" &
+	adb shell "${RPFX}/tests/gdbserver +${RPFX}/tests/debug-socket ${RPFX}/tests/frida-tests" &
 	sleep 1
 	adb forward tcp:${DEBUG_PORT} localfilesystem:${RPFX}/tests/debug-socket
 	${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-4.8/prebuilt/darwin-x86_64/bin/arm-linux-androideabi-gdb -x "$(top_builddir)/tests/android-gdb.setup"
