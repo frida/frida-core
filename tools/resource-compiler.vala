@@ -344,13 +344,13 @@ namespace Frida {
 		}
 
 		static int main (string[] args) {
-	#if WINDOWS
+#if WINDOWS
 			toolchain = Toolchain.MICROSOFT;
-	#elif DARWIN
+#elif DARWIN
 			toolchain = Toolchain.APPLE;
-	#else
-			toolchain = Toolchain.GNU
-	#endif
+#else
+			toolchain = Toolchain.GNU;
+#endif
 			machine = Machine.ANY;
 
 			try {
