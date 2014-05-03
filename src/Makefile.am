@@ -108,7 +108,6 @@ libfrida_data_fruitjector_la_SOURCES = \
 frida-data-fruitjector.c frida-data-fruitjector-blob.S: frida-fruitjector-helper.stamp
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
-			--enable-asm \
 			-c "$(srcdir)/darwin/fruitjector.resources" \
 			-o "$(builddir)/frida-data-fruitjector" \
 			$(FRUITJECTOR_HELPER)
@@ -213,7 +212,6 @@ libfrida_data_agent_la_SOURCES = \
 frida-data-agent.c frida-data-agent-blob.S: $(AGENT)
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
-			--enable-asm \
 			-c "$(srcdir)/agent.resources" \
 			-o "$(builddir)/frida-data-agent" \
 			$(AGENT)
