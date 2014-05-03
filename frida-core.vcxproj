@@ -90,7 +90,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -99,7 +99,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;$(SolutionDir)udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -108,7 +108,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -117,17 +117,17 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;$(SolutionDir)udis86;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <CustomBuild Include="src\agent.resources">
       <FileType>Document</FileType>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll;%(AdditionalInputs)</AdditionalInputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing Agent resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\agent.stamp</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing Agent resources</Message>
@@ -137,28 +137,28 @@
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Agent resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\agent.stamp</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
     </CustomBuild>
     <CustomBuild Include="src\windows\winjector.resources">
       <FileType>Document</FileType>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)..\resource-compiler\resource-compiler.exe;$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe;$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe;%(AdditionalInputs)</AdditionalInputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Serializing Winjector resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)data\winjector.stamp</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Serializing Winjector resources</Message>
@@ -168,19 +168,19 @@ REM. &gt; "$(IntDir)data\agent.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Winjector resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\winjector.stamp</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\windows\winjector.resources" -o "$(IntDir)data\frida-data-winjector" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\winjector-helper-32\winjector-helper-32.exe" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\winjector-helper-64\winjector-helper-64.exe" || exit 1
 REM. &gt; "$(IntDir)data\winjector.stamp"
 </Command>
     </CustomBuild>
