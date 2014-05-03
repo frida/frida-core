@@ -659,7 +659,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.rip = func;
 
-  for (i = 0; i !== args_length && i < 6; i++)
+  for (i = 0; i != args_length && i < 6; i++)
   {
     switch (i)
     {
