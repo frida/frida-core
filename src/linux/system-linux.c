@@ -17,8 +17,8 @@ frida_system_enumerate_processes (int * result_length1)
   while ((proc_name = g_dir_read_name (proc_dir)) != NULL)
   {
     guint pid;
-    gchar * tmp = NULL;
-    gchar * name;
+    gchar * tmp = NULL, * cmdline = NULL, * name;
+    gboolean is_process;
     FridaHostProcessInfo * process_info;
 
     pid = strtoul (proc_name, &tmp, 10);
@@ -26,15 +26,21 @@ frida_system_enumerate_processes (int * result_length1)
       continue;
 
     tmp = g_build_filename ("/proc", proc_name, "exe", NULL);
-    name = g_file_read_link (tmp, NULL);
+    is_process = g_file_test (tmp, G_FILE_TEST_EXISTS);
     g_free (tmp);
 
-    if (name == NULL)
+    if (!is_process)
       continue;
 
-    tmp = g_path_get_basename (name);
-    g_free (name);
-    name = tmp;
+    tmp = g_build_filename ("/proc", proc_name, "cmdline", NULL);
+    g_file_get_contents (tmp, &cmdline, NULL, NULL);
+    g_free (tmp);
+
+    if (cmdline == NULL)
+      continue;
+
+    name = g_path_get_basename (cmdline);
+    g_free (cmdline);
 
     g_array_set_size (processes, processes->len + 1);
     process_info = &g_array_index (processes, FridaHostProcessInfo, processes->len - 1);
