@@ -585,11 +585,12 @@ namespace Frida {
 				write_section_header (debug);
 
 				var rdata = SectionHeader ();
+				var rdata_align_shift = (obj_path.length + compiler_name.length) % 2 == 0 ? 0 : 1;
 				rdata.name = ".rdata";
 				rdata.virtual_size = 0;
 				rdata.virtual_address = 0;
 				rdata.size_of_raw_data = 0; /* filled out at the end */
-				rdata.pointer_to_raw_data = debug.pointer_to_raw_data + debug.size_of_raw_data;
+				rdata.pointer_to_raw_data = debug.pointer_to_raw_data + debug.size_of_raw_data + rdata_align_shift;
 				rdata.pointer_to_relocations = 0;
 				rdata.pointer_to_line_numbers = 0;
 				rdata.number_of_relocations = 0;
@@ -620,10 +621,8 @@ namespace Frida {
 				stream.put_byte (0);
 
 				/* Section 3: Read-only initialized data: filled out by one or more write() calls */
-				var output_stream = stream.get_base_stream () as Seekable;
-				var current_position = output_stream.tell ();
-				if (current_position % 2 != 0) {
-					var padding = new uint8[2 - (rdata_size % 2)];
+				if (rdata_align_shift > 0) {
+					var padding = new uint8[rdata_align_shift];
 					stream.write_all (padding);
 				}
 			}
