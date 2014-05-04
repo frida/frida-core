@@ -30,7 +30,7 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
-#if LINUX
+#if 0
 		GLib.Test.add_func ("/HostSession/Linux/spawn", () => {
 			var h = new Harness ((h) => Linux.spawn (h as Harness));
 			h.run ();
@@ -193,12 +193,10 @@ namespace Frida.HostSessionTest {
 
 	}
 
-#if LINUX
+#if 0
 	namespace Linux {
 
 		private static async void spawn (Harness h) {
-			h.done ();
-			return;
 			var backend = new LinuxHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
