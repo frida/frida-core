@@ -22,6 +22,7 @@ backend_sources += \
 	linux/linjector.vala
 glue_sources += \
 	linux/system-linux.c \
+	linux/linux-host-session-glue.c \
 	linux/linjector-glue.c
 endif
 

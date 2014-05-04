@@ -64,7 +64,7 @@ namespace Frida.LinjectorTest {
 
 		public LabRat (string dir, string name, string[] envp) {
 			data_directory = Path.build_filename (dir, "data");
-			var rat_file = Path.build_filename (data_directory, name + arch_suffix ());
+			var rat_file = Path.build_filename (data_directory, name + Frida.Test.arch_suffix ());
 
 			var argv = new string[] {
 				rat_file
@@ -76,34 +76,6 @@ namespace Frida.LinjectorTest {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
-		}
-
-		private static string arch_suffix () {
-			string os_name;
-			switch (Frida.Test.os ()) {
-				case Frida.Test.OS.LINUX:
-					os_name = "linux";
-					break;
-				case Frida.Test.OS.ANDROID:
-					os_name = "android";
-					break;
-				default:
-					assert_not_reached ();
-			}
-
-			string cpu_name;
-			switch (Frida.Test.cpu ()) {
-				case Frida.Test.CPU.X86_64:
-					cpu_name = "x86_64";
-					break;
-				case Frida.Test.CPU.ARM_32:
-					cpu_name = "arm";
-					break;
-				default:
-					assert_not_reached ();
-			}
-
-			return "-" + os_name + "-" + cpu_name;
 		}
 
 		public void inject (string name, string data_string) {
@@ -120,7 +92,7 @@ namespace Frida.LinjectorTest {
 				injector = new Linjector ();
 
 			try {
-				var sofile = Path.build_filename (data_directory, name + arch_suffix () + ".so");
+				var sofile = Path.build_filename (data_directory, name + Frida.Test.arch_suffix () + ".so");
 				assert (FileUtils.test (sofile, FileTest.EXISTS));
 
 				AgentDescriptor desc;

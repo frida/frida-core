@@ -27,7 +27,36 @@ namespace Frida.Test {
 	}
 
 	public extern OS os ();
+
 	public extern CPU cpu ();
+
+	public string arch_suffix () {
+		string os_name;
+		switch (os ()) {
+			case OS.LINUX:
+				os_name = "linux";
+				break;
+			case OS.ANDROID:
+				os_name = "android";
+				break;
+			default:
+				assert_not_reached ();
+		}
+
+		string cpu_name;
+		switch (Frida.Test.cpu ()) {
+			case CPU.X86_64:
+				cpu_name = "x86_64";
+				break;
+			case CPU.ARM_32:
+				cpu_name = "arm";
+				break;
+			default:
+				assert_not_reached ();
+		}
+
+		return "-" + os_name + "-" + cpu_name;
+	}
 
 	public enum OS {
 		WINDOWS,

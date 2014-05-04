@@ -84,11 +84,8 @@ guint
 _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
 {
   FridaSpawnInstance * instance;
-  WCHAR * application_name, *command_line, *environment;
+  WCHAR * application_name, * command_line, * environment;
   STARTUPINFO startup_info;
-
-  (void) self;
-  (void) error;
 
   instance = frida_spawn_instance_new (self);
 

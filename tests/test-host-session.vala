@@ -30,6 +30,13 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
+#if LINUX
+		GLib.Test.add_func ("/HostSession/Linux/spawn", () => {
+			var h = new Harness ((h) => Linux.spawn (h as Harness));
+			h.run ();
+		});
+#endif
+
 #if DARWIN
 		GLib.Test.add_func ("/HostSession/Darwin/backend", () => {
 			var h = new Harness ((h) => Darwin.backend (h as Harness));
@@ -185,6 +192,59 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
+
+#if LINUX
+	namespace Linux {
+
+		private static async void spawn (Harness h) {
+			h.done ();
+			return;
+			var backend = new LinuxHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			try {
+				var host_session = yield prov.create ();
+
+				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim" + Frida.Test.arch_suffix ());
+				string[] argv = { victim_path };
+				string[] envp = {};
+				var pid = yield host_session.spawn (victim_path, argv, envp);
+				var session_id = yield host_session.attach_to (pid);
+				var session = yield prov.obtain_agent_session (session_id);
+				string received_message = null;
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					received_message = message;
+					spawn.callback ();
+				});
+				var script_id = yield session.create_script (
+					"Interceptor.attach (Module.findExportByName('libc.so', 'sleep'), {" +
+					"  onEnter: function(args) {" +
+					"    send({ seconds: args[0].toInt32() });" +
+					"  }" +
+					"});");
+				yield session.load_script (script_id);
+				yield host_session.resume (pid);
+				yield;
+				session.disconnect (message_handler);
+				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
+				yield host_session.kill (pid);
+			} catch (IOError e) {
+				stderr.printf ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+			h.done ();
+		}
+
+	}
+#endif
 
 #if DARWIN
 	namespace Darwin {

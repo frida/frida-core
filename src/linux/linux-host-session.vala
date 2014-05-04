@@ -54,6 +54,8 @@ namespace Frida {
 	}
 
 	public class LinuxHostSession : BaseDBusHostSession, HostSession {
+		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
+
 		private Linjector injector = new Linjector ();
 		private AgentDescriptor agent_desc;
 
@@ -78,14 +80,23 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			throw new IOError.FAILED ("not yet implemented in the Linux backend");
+			return _do_spawn (path, argv, envp);
 		}
 
 		public async void resume (uint pid) throws IOError {
-			throw new IOError.FAILED ("not yet implemented in the Linux backend");
+			void * instance;
+			bool instance_found = instance_by_pid.unset (pid, out instance);
+			if (!instance_found)
+				throw new IOError.FAILED ("no such pid");
+			_resume_instance (instance);
+			_free_instance (instance);
 		}
 
 		public async void kill (uint pid) throws IOError {
+			void * instance;
+			bool instance_found = instance_by_pid.unset (pid, out instance);
+			if (instance_found)
+				_free_instance (instance);
 			System.kill (pid);
 		}
 
@@ -95,6 +106,10 @@ namespace Frida {
 			yield injector.inject (pid, agent_desc, transport.remote_address);
 			return yield allocate_session (transport, stream);
 		}
+
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
+		public extern void _resume_instance (void * instance);
+		public extern void _free_instance (void * instance);
 	}
 }
 #endif

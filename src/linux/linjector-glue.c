@@ -66,6 +66,7 @@ struct _FridaInjectionInstance
   FridaLinjector * linjector;
   guint id;
   pid_t pid;
+  gboolean already_attached;
   gchar * fifo_path;
   gint fifo;
   GumAddress remote_payload;
@@ -110,8 +111,8 @@ static gboolean frida_emit_and_remote_execute (FridaEmitFunc func, const FridaIn
 
 static void frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
-static gboolean frida_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error);
-static gboolean frida_detach_from_process (pid_t pid, const regs_t * saved_regs, GError ** error);
+static gboolean frida_attach_to_process (FridaInjectionInstance * instance, regs_t * saved_regs, GError ** error);
+static gboolean frida_detach_from_process (FridaInjectionInstance * instance, const regs_t * saved_regs, GError ** error);
 
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
 static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
@@ -144,6 +145,7 @@ frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid, c
   instance->linjector = g_object_ref (linjector);
   instance->id = id;
   instance->pid = pid;
+  instance->already_attached = FALSE;
   instance->fifo_path = g_strdup_printf ("%s/linjector-%d", temp_path, pid);
   ret = mkfifo (instance->fifo_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
   g_assert_cmpint (ret, ==, 0);
@@ -161,12 +163,12 @@ frida_injection_instance_free (FridaInjectionInstance * instance)
     regs_t saved_regs;
     GError * error = NULL;
 
-    if (frida_attach_to_process (instance->pid, &saved_regs, &error))
+    if (frida_attach_to_process (instance, &saved_regs, &error))
     {
       frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
       g_clear_error (&error);
 
-      frida_detach_from_process (instance->pid, &saved_regs, &error);
+      frida_detach_from_process (instance, &saved_regs, &error);
     }
 
     g_clear_error (&error);
@@ -201,7 +203,7 @@ _frida_linjector_do_inject (FridaLinjector * self, guint pid, const char * so_pa
 
   instance = frida_injection_instance_new (self, self->last_id++, pid, temp_path);
 
-  if (!frida_attach_to_process (pid, &saved_regs, error))
+  if (!frida_attach_to_process (instance, &saved_regs, error))
     goto beach;
 
   params.fifo_path = instance->fifo_path;
@@ -213,7 +215,7 @@ _frida_linjector_do_inject (FridaLinjector * self, guint pid, const char * so_pa
   if (!frida_emit_and_remote_execute (frida_emit_payload_code, &params, NULL, error))
     goto beach;
 
-  if (!frida_detach_from_process (pid, &saved_regs, error))
+  if (!frida_detach_from_process (instance, &saved_regs, error))
     goto beach;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_id), GUINT_TO_POINTER (instance->id), instance);
@@ -504,20 +506,34 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 #endif
 
 static gboolean
-frida_attach_to_process (pid_t pid, regs_t * saved_regs, GError ** error)
+frida_attach_to_process (FridaInjectionInstance * instance, regs_t * saved_regs, GError ** error)
 {
+  const pid_t pid = instance->pid;
   long ret;
   const gchar * failed_operation;
-  gboolean success;
+  gboolean maybe_already_attached, success;
 
   ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
+  maybe_already_attached = (ret != 0 && errno == EPERM);
+  if (maybe_already_attached)
+  {
+    ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
-  success = frida_wait_for_attach_signal (pid);
-  CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
+    instance->already_attached = TRUE;
+  }
+  else
+  {
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+    instance->already_attached = FALSE;
+
+    success = frida_wait_for_attach_signal (pid);
+    CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
+
+    ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+  }
 
   return TRUE;
 
@@ -529,16 +545,20 @@ handle_os_error:
 }
 
 static gboolean
-frida_detach_from_process (pid_t pid, const regs_t * saved_regs, GError ** error)
+frida_detach_from_process (FridaInjectionInstance * instance, const regs_t * saved_regs, GError ** error)
 {
+  const pid_t pid = instance->pid;
   long ret;
   const gchar * failed_operation;
 
   ret = ptrace (PTRACE_SETREGS, pid, NULL, (void *) saved_regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
 
-  ret = ptrace (PTRACE_DETACH, pid, NULL, NULL);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_DETACH");
+  if (!instance->already_attached)
+  {
+    ret = ptrace (PTRACE_DETACH, pid, NULL, NULL);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_DETACH");
+  }
 
   return TRUE;
 
