@@ -75,9 +75,14 @@ frida_system_enumerate_processes (int * result_length1)
 void
 frida_system_kill (guint pid)
 {
-  (void) pid;
+  HANDLE process;
 
-  g_assert_not_reached ();
+  process = OpenProcess (PROCESS_TERMINATE, FALSE, pid);
+  if (process != NULL)
+  {
+    TerminateProcess (process, 0xdeadbeef);
+    CloseHandle (process);
+  }
 }
 
 gchar *

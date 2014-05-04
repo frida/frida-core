@@ -52,6 +52,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Windows.backend (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Windows/spawn", () => {
+			var h = new Harness ((h) => Windows.spawn (h as Harness));
+			h.run ();
+		});
 #endif
 
 	}
@@ -345,6 +350,53 @@ namespace Frida.HostSessionTest {
 			yield h.service.stop ();
 			h.service.remove_backend (backend);
 
+			h.done ();
+		}
+
+		private static async void spawn (Harness h) {
+			var backend = new WindowsHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			try {
+				var host_session = yield prov.create ();
+
+				var self_filename = Frida.Test.Process.current.filename;
+				var rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename))))),
+					"frida-core", "tests", "labrats");
+				var victim_path = Path.build_filename (rat_directory, "winvictim-sleepy%d.exe".printf (sizeof (void *) == 4 ? 32 : 64));
+				string[] argv = { victim_path };
+				string[] envp = {};
+				var pid = yield host_session.spawn (victim_path, argv, envp);
+				var session_id = yield host_session.attach_to (pid);
+				var session = yield prov.obtain_agent_session (session_id);
+				string received_message = null;
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					received_message = message;
+					spawn.callback ();
+				});
+				var script_id = yield session.create_script (
+					"Interceptor.attach (Module.findExportByName('user32.dll', 'GetMessageW'), {" +
+					"  onEnter: function(args) {" +
+					"    send('GetMessage');" +
+					"  }" +
+					"});");
+				yield session.load_script (script_id);
+				yield host_session.resume (pid);
+				yield;
+				session.disconnect (message_handler);
+				assert (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
+				yield host_session.kill (pid);
+			} catch (IOError e) {
+				stderr.printf ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
 			h.done ();
 		}
 

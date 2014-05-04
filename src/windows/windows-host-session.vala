@@ -66,6 +66,8 @@ namespace Frida {
 	public class WindowsHostSession : BaseDBusHostSession, HostSession {
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
+		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
+
 		private Winjector winjector = new Winjector ();
 		private AgentDescriptor agent_desc;
 
@@ -96,20 +98,28 @@ namespace Frida {
 		}
 
 		public async HostProcessInfo[] enumerate_processes () throws IOError {
-			var processes = yield process_enumerator.enumerate_processes ();
-			return processes;
+			return yield process_enumerator.enumerate_processes ();
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			throw new IOError.FAILED ("not yet implemented in the Windows backend");
+			return _do_spawn (path, argv, envp);
 		}
 
 		public async void resume (uint pid) throws IOError {
-			throw new IOError.FAILED ("not yet implemented in the Windows backend");
+			void * instance;
+			bool instance_found = instance_by_pid.unset (pid, out instance);
+			if (!instance_found)
+				throw new IOError.FAILED ("no such pid");
+			_resume_instance (instance);
+			_free_instance (instance);
 		}
 
 		public async void kill (uint pid) throws IOError {
-			throw new IOError.FAILED ("not yet implemented in the Windows backend");
+			void * instance;
+			bool instance_found = instance_by_pid.unset (pid, out instance);
+			if (instance_found)
+				_free_instance (instance);
+			System.kill (pid);
 		}
 
 		public async AgentSessionId attach_to (uint pid) throws IOError {
@@ -118,6 +128,10 @@ namespace Frida {
 			yield winjector.inject (pid, agent_desc, transport.remote_address);
 			return yield allocate_session (transport, stream);
 		}
+
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
+		public extern void _resume_instance (void * instance);
+		public extern void _free_instance (void * instance);
 	}
 }
 #endif
