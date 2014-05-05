@@ -192,6 +192,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 #endif
 
   original_entry_code = ptrace (PTRACE_PEEKDATA, pid, entry_point_address, NULL);
+
 #ifdef HAVE_ARM
   if (ctx.word_size == 4)
   {

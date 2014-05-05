@@ -30,12 +30,10 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
-#if 0
 		GLib.Test.add_func ("/HostSession/Linux/spawn", () => {
 			var h = new Harness ((h) => Linux.spawn (h as Harness));
 			h.run ();
 		});
-#endif
 
 #if DARWIN
 		GLib.Test.add_func ("/HostSession/Darwin/backend", () => {
@@ -193,7 +191,6 @@ namespace Frida.HostSessionTest {
 
 	}
 
-#if 0
 	namespace Linux {
 
 		private static async void spawn (Harness h) {
@@ -242,7 +239,6 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
-#endif
 
 #if DARWIN
 	namespace Darwin {
