@@ -41,7 +41,7 @@ static FridaSpawnInstance * frida_spawn_instance_new (FridaLinuxHostSession * ho
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
-static gboolean frida_wait_for_child_syscall (pid_t pid, GError ** error);
+static gboolean frida_wait_for_child_signal (pid_t pid, int signal);
 static gboolean frida_run_to_entry_point (pid_t pid, GError ** error);
 
 static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer user_data);
@@ -51,6 +51,9 @@ _frida_linux_host_session_do_spawn (FridaLinuxHostSession * self, const gchar * 
 {
   FridaSpawnInstance * instance;
   int status;
+  long ret;
+  gboolean success;
+  const gchar * failed_operation;
 
   instance = frida_spawn_instance_new (self);
 
@@ -67,15 +70,12 @@ _frida_linux_host_session_do_spawn (FridaLinuxHostSession * self, const gchar * 
   }
 
   waitpid (instance->pid, &status, 0);
-  ptrace (PTRACE_SETOPTIONS, instance->pid, NULL, GSIZE_TO_POINTER (PTRACE_O_TRACESYSGOOD));
 
-  /* execve enter */
-  if (!frida_wait_for_child_syscall (instance->pid, error))
-    goto error_epilogue;
+  ret = ptrace (PTRACE_CONT, instance->pid, NULL, NULL);
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  /* execve leave */
-  if (!frida_wait_for_child_syscall (instance->pid, error))
-    goto error_epilogue;
+  success = frida_wait_for_child_signal (instance->pid, SIGTRAP);
+  CHECK_OS_RESULT (success, !=, FALSE, "wait(SIGTRAP)");
 
   if (!frida_run_to_entry_point (instance->pid, error))
     goto error_epilogue;
@@ -84,6 +84,11 @@ _frida_linux_host_session_do_spawn (FridaLinuxHostSession * self, const gchar * 
 
   return instance->pid;
 
+handle_os_error:
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    goto error_epilogue;
+  }
 error_epilogue:
   {
     frida_spawn_instance_free (instance);
@@ -129,34 +134,6 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
 }
 
 static gboolean
-frida_wait_for_child_syscall (pid_t pid, GError ** error)
-{
-  gboolean stopped_at_syscall;
-
-  do
-  {
-    int status;
-
-    ptrace (PTRACE_SYSCALL, pid, NULL, NULL);
-
-    waitpid (pid, &status, 0);
-    if (WIFEXITED (status))
-      goto handle_exited_error;
-
-    stopped_at_syscall = WIFSTOPPED (status) && (WSTOPSIG (status) & 0x80) != 0;
-  }
-  while (!stopped_at_syscall);
-
-  return TRUE;
-
-handle_exited_error:
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "process exited prematurely");
-    return FALSE;
-  }
-}
-
-static gboolean
 frida_wait_for_child_signal (pid_t pid, int signal)
 {
   int status = 0;
@@ -181,7 +158,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 
   ctx.pid = pid;
   ctx.entry_point = 0;
-  gum_linux_enumerate_ranges (pid, 0, frida_examine_range_for_elf_header, &ctx);
+  gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_elf_header, &ctx);
   if (ctx.entry_point == 0)
     goto handle_probe_error;
 
@@ -218,12 +195,6 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 #endif
 
   ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (patched_entry_code));
-
-  ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
-
-  success = frida_wait_for_child_signal (pid, SIGTRAP);
-  CHECK_OS_RESULT (success, !=, FALSE, "wait(SIGTRAP)");
 
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
