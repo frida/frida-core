@@ -6,6 +6,9 @@
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#ifdef HAVE_SYS_USER_H
+# include <sys/user.h>
+#endif
 
 #define FRIDA_OFFSET_E_ENTRY 0x18
 #if defined (HAVE_I386)
@@ -20,6 +23,14 @@
     failed_operation = op; \
     goto handle_os_error; \
   }
+
+#if defined (HAVE_I386)
+# define regs_t struct user_regs_struct
+#elif defined (HAVE_ARM)
+# define regs_t struct pt_regs
+#else
+# error Unsupported architecture
+#endif
 
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
 typedef struct _FridaProbeElfContext FridaProbeElfContext;
@@ -153,6 +164,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   gpointer entry_point_address;
   long original_entry_code, patched_entry_code;
   long ret;
+  regs_t regs;
   const gchar * failed_operation;
   gboolean success;
 
@@ -203,6 +215,20 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   CHECK_OS_RESULT (success, !=, FALSE, "WAIT(FRIDA_SIGBKPT)");
 
   ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (original_entry_code));
+
+  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.eip = GPOINTER_TO_SIZE (entry_point_address);
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+  regs.rip = GPOINTER_TO_SIZE (entry_point_address);
+#elif defined (HAVE_ARM)
+  regs.ARM_pc = GPOINTER_TO_SIZE (entry_point_address);
+#endif
+
+  ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
 
   return TRUE;
 

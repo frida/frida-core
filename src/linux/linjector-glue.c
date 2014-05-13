@@ -40,11 +40,11 @@
   }
 
 #if defined (HAVE_I386)
-#define regs_t struct user_regs_struct
+# define regs_t struct user_regs_struct
 #elif defined (HAVE_ARM)
-#define regs_t struct pt_regs
+# define regs_t struct pt_regs
 #else
-#error Unsupported architecture
+# error Unsupported architecture
 #endif
 
 #define FRIDA_REMOTE_PAYLOAD_SIZE (8192)
