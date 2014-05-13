@@ -241,23 +241,7 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   code.cur = code.bytes;
   code.size = 0;
 
-#if defined (HAVE_I386)
-  {
-    GumX86Writer cw;
-    guint i;
-
-    padding = 2;
-
-    gum_x86_writer_init (&cw, code.cur);
-    for (i = 0; i != padding; i++)
-      gum_x86_writer_put_nop (&cw);
-    gum_x86_writer_flush (&cw);
-    code.cur = gum_x86_writer_cur (&cw);
-    code.size += gum_x86_writer_offset (&cw);
-
-    gum_x86_writer_free (&cw);
-  }
-#elif defined (HAVE_ARM)
+#if defined (HAVE_ARM)
   {
     GumThumbWriter cw;
 
@@ -663,6 +647,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   return_address = frida_find_landing_strip (pid);
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.orig_eax = -1;
+
   regs.eip = func;
 
   for (i = 0; i < args_length; i++)
@@ -677,6 +663,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.esp), GSIZE_TO_POINTER (return_address));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+  regs.orig_rax = -1;
+
   regs.rip = func;
 
   for (i = 0; i != args_length && i < 6; i++)
@@ -785,7 +773,14 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
-#if defined (HAVE_I386)
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.orig_eax = -1;
+
+  regs.eip = remote_address;
+  regs.esp = remote_stack;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+  regs.orig_rax = -1;
+
   regs.rip = remote_address;
   regs.rsp = remote_stack;
 #elif defined (HAVE_ARM)
