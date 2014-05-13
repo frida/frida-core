@@ -220,10 +220,17 @@ namespace Frida.HostSessionTest {
 					spawn.callback ();
 				});
 				var script_id = yield session.create_script (
-					"Interceptor.attach (Module.findExportByName('libc.so', 'sleep'), {" +
-					"  onEnter: function(args) {" +
-					"    send({ seconds: args[0].toInt32() });" +
-					"  }" +
+					"Process.enumerateModules({" +
+					"  onMatch: function (m) {" +
+					"    if (m.name.indexOf('libc') === 0) {" +
+					"      Interceptor.attach (Module.findExportByName(m.name, 'sleep'), {" +
+					"        onEnter: function (args) {" +
+					"          send({ seconds: args[0].toInt32() });" +
+					"        }" +
+					"      });" +
+					"    }" +
+					"  }," +
+					"  onComplete: function () {}" +
 					"});");
 				yield session.load_script (script_id);
 				yield host_session.resume (pid);
@@ -307,7 +314,7 @@ namespace Frida.HostSessionTest {
 				});
 				var script_id = yield session.create_script (
 					"Interceptor.attach (Module.findExportByName('libSystem.B.dylib', 'sleep'), {" +
-					"  onEnter: function(args) {" +
+					"  onEnter: function (args) {" +
 					"    send({ seconds: args[0].toInt32() });" +
 					"  }" +
 					"});");
@@ -438,7 +445,7 @@ namespace Frida.HostSessionTest {
 				});
 				var script_id = yield session.create_script (
 					"Interceptor.attach (Module.findExportByName('user32.dll', 'GetMessageW'), {" +
-					"  onEnter: function(args) {" +
+					"  onEnter: function (args) {" +
 					"    send('GetMessage');" +
 					"  }" +
 					"});");
