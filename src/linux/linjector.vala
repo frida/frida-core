@@ -38,7 +38,7 @@ namespace Frida {
 				cancellable.cancel ();
 				return false;
 			});
-			timeout_source.attach (MainContext.get_thread_default ());
+			timeout_source.attach (main_context);
 			ssize_t size;
 			try {
 				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
@@ -70,7 +70,16 @@ namespace Frida {
 				try {
 					var size = yield fifo.read_async (buf);
 					if (size == 0) {
-						_on_uninject (id);
+						/*
+						 * Give it some time to execute its final instructions before we free the memory being executed
+						 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
+						 */
+						var timeout_source = new TimeoutSource (50);
+						timeout_source.set_callback (() => {
+							_on_uninject (id);
+							return false;
+						});
+						timeout_source.attach (main_context);
 						return;
 					}
 				} catch (IOError e) {
