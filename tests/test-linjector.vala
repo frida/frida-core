@@ -15,6 +15,9 @@ namespace Frida.LinjectorTest {
 
 			var rat = new LabRat (tests_dir, "unixvictim", envp);
 
+			/* TODO: improve Linjector to handle injection into a process that hasn't yet finished initializing */
+			Thread.usleep (50000);
+
 			rat.inject ("unixattacker", "");
 			rat.wait_for_uninject ();
 
