@@ -5,6 +5,8 @@ namespace Frida {
 	public extern unowned MainContext get_main_context ();
 
 	public class DeviceManager : Object {
+		public signal void added (Device device);
+		public signal void removed (Device device);
 		public signal void changed ();
 
 		public MainContext main_context {
@@ -80,11 +82,13 @@ namespace Frida {
 			service.provider_available.connect ((provider) => {
 				var device = new Device (this, last_device_id++, provider.name, provider.kind, provider);
 				devices.add (device);
+				added (device);
 				changed ();
 			});
 			service.provider_unavailable.connect ((provider) => {
 				foreach (var device in devices) {
 					if (device.provider == provider) {
+						removed (device);
 						device._do_close (false);
 						break;
 					}
