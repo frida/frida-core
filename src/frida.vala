@@ -634,6 +634,9 @@ namespace Frida {
 		}
 
 		public async void _do_unload (bool may_block) {
+			if (session == null) {
+				return;
+			}
 			var p = session;
 			session = null;
 
