@@ -1,13 +1,13 @@
 #include "frida-core.h"
 
 #include <dlfcn.h>
-#include <libproc.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
 
 #ifdef HAVE_MAC
 
+# include <libproc.h>
 # import <AppKit/AppKit.h>
 # import <Foundation/Foundation.h>
 
@@ -134,7 +134,7 @@ frida_system_enumerate_processes (int * result_length1)
     {
 #ifdef HAVE_MAC
       NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info->_pid];
-      if (app != nil)
+      if (app.icon != nil)
       {
         info->_name = g_strdup ([app.localizedName UTF8String]);
 
@@ -143,10 +143,14 @@ frida_system_enumerate_processes (int * result_length1)
       else
 #endif
       {
+#ifdef HAVE_MAC
         gchar path[PROC_PIDPATHINFO_MAXSIZE];
 
         proc_pidpath (info->_pid, path, sizeof (path));
         info->_name = g_path_get_basename (path);
+#else
+        info->_name = g_strdup (e->kp_proc.p_comm);
+#endif
 
         frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
         frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
@@ -198,34 +202,38 @@ extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaIma
 static void
 init_icon_from_ns_image_scaled_to (FridaImageData * icon, NSImage * image, guint target_width, guint target_height)
 {
-  const guint bytes_per_row = target_width * 4;
   NSBitmapImageRep * rep;
   NSGraphicsContext * context;
 
+  icon->_width = target_width;
+  icon->_height = target_height;
+  icon->_rowstride = target_width * 4;
+
   rep = [[NSBitmapImageRep alloc]
       initWithBitmapDataPlanes:nil
-                    pixelsWide:target_width
-                    pixelsHigh:target_height
+                    pixelsWide:icon->_width
+                    pixelsHigh:icon->_height
                  bitsPerSample:8
                samplesPerPixel:4
                       hasAlpha:YES
                       isPlanar:NO
                 colorSpaceName:NSCalibratedRGBColorSpace
                   bitmapFormat:0
-                   bytesPerRow:0
+                   bytesPerRow:icon->_rowstride
                   bitsPerPixel:32];
 
   context = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
 
   [NSGraphicsContext saveGraphicsState];
   [NSGraphicsContext setCurrentContext:context];
-  [image drawAtPoint:NSZeroPoint
-            fromRect:NSZeroRect
-           operation:NSCompositeCopy
-            fraction:1.0];
+  [image drawInRect:NSMakeRect (0, 0, icon->_width, icon->_height)
+           fromRect:NSZeroRect
+          operation:NSCompositeCopy
+           fraction:1.0];
+  [context flushGraphics];
   [NSGraphicsContext restoreGraphicsState];
 
-  icon->_pixels = g_base64_encode ([rep bitmapData], bytes_per_row * target_height);
+  icon->_pixels = g_base64_encode ([rep bitmapData], icon->_rowstride * icon->_height);
 
   [rep release];
 }
