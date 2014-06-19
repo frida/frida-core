@@ -126,6 +126,9 @@ FRIDA_BACKEND_LIBS=
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,Foundation"
 fi
+if [[ "x$HAVE_MAC" = "xyes" ]]; then
+  FRIDA_BACKEND_LIBS="$FRIDA_BACKEND_LIBS -Wl,-framework -Wl,AppKit"
+fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
   FRIDA_BACKEND_LIBS="$FRIDA_BACKEND_LIBS -Wl,-framework -Wl,CoreGraphics -Wl,-framework -Wl,UIKit"
 fi

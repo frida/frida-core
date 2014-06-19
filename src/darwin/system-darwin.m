@@ -5,6 +5,17 @@
 #include <unistd.h>
 #include <sys/sysctl.h>
 
+#ifdef HAVE_MAC
+
+# include <libproc.h>
+# import <AppKit/AppKit.h>
+# import <Foundation/Foundation.h>
+
+static void extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon);
+static void init_icon_from_ns_image_scaled_to (FridaImageData * icon, NSImage * image, guint target_width, guint target_height);
+
+#endif
+
 #ifdef HAVE_IOS
 
 # import <UIKit/UIKit.h>
@@ -25,8 +36,6 @@ static void init_icon_from_ui_image_scaled_to (FridaImageData * icon, UIImage * 
 
 static FridaSpringboardApi * frida_springboard_api = NULL;
 
-#else
-# import <Foundation/Foundation.h>
 #endif
 
 typedef struct _FridaIconPair FridaIconPair;
@@ -123,10 +132,29 @@ frida_system_enumerate_processes (int * result_length1)
     else
 #endif
     {
-      info->_name = g_strdup (e->kp_proc.p_comm);
+#ifdef HAVE_MAC
+      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info->_pid];
+      if (app.icon != nil)
+      {
+        info->_name = g_strdup ([app.localizedName UTF8String]);
 
-      frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
-      frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
+        extract_icons_from_image (app.icon, &info->_small_icon, &info->_large_icon);
+      }
+      else
+#endif
+      {
+#ifdef HAVE_MAC
+        gchar path[PROC_PIDPATHINFO_MAXSIZE];
+
+        proc_pidpath (info->_pid, path, sizeof (path));
+        info->_name = g_path_get_basename (path);
+#else
+        info->_name = g_strdup (e->kp_proc.p_comm);
+#endif
+
+        frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
+        frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
+      }
     }
   }
 
@@ -162,6 +190,56 @@ frida_temporary_directory_get_system_tmp (void)
   }
 }
 
+#ifdef HAVE_MAC
+
+static void
+extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon)
+{
+  init_icon_from_ns_image_scaled_to (small_icon, image, 16, 16);
+  init_icon_from_ns_image_scaled_to (large_icon, image, 32, 32);
+}
+
+static void
+init_icon_from_ns_image_scaled_to (FridaImageData * icon, NSImage * image, guint target_width, guint target_height)
+{
+  NSBitmapImageRep * rep;
+  NSGraphicsContext * context;
+
+  icon->_width = target_width;
+  icon->_height = target_height;
+  icon->_rowstride = target_width * 4;
+
+  rep = [[NSBitmapImageRep alloc]
+      initWithBitmapDataPlanes:nil
+                    pixelsWide:icon->_width
+                    pixelsHigh:icon->_height
+                 bitsPerSample:8
+               samplesPerPixel:4
+                      hasAlpha:YES
+                      isPlanar:NO
+                colorSpaceName:NSCalibratedRGBColorSpace
+                  bitmapFormat:0
+                   bytesPerRow:icon->_rowstride
+                  bitsPerPixel:32];
+
+  context = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+
+  [NSGraphicsContext saveGraphicsState];
+  [NSGraphicsContext setCurrentContext:context];
+  [image drawInRect:NSMakeRect (0, 0, icon->_width, icon->_height)
+           fromRect:NSZeroRect
+          operation:NSCompositeCopy
+           fraction:1.0];
+  [context flushGraphics];
+  [NSGraphicsContext restoreGraphicsState];
+
+  icon->_pixels = g_base64_encode ([rep bitmapData], icon->_rowstride * icon->_height);
+
+  [rep release];
+}
+
+#endif
+
 #ifdef HAVE_IOS
 
 static void
@@ -178,7 +256,7 @@ extract_icons_from_identifier (NSString * identifier, FridaImageData * small_ico
     png_data = frida_springboard_api->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
 
     pair = g_new (FridaIconPair, 1);
-    image = [UIImage imageWithData: png_data];
+    image = [UIImage imageWithData:png_data];
     init_icon_from_ui_image_scaled_to (&pair->small_icon, image, 16, 16);
     init_icon_from_ui_image_scaled_to (&pair->large_icon, image, 32, 32);
     g_hash_table_insert (icon_pair_by_identifier, g_strdup ([identifier UTF8String]), pair);
