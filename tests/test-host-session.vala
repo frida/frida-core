@@ -263,7 +263,12 @@ namespace Frida.HostSessionTest {
 			var prov = h.first_provider ();
 
 			assert (prov.name == "Local System");
-			assert (prov.icon == null);
+
+			var icon = prov.icon;
+			assert (icon != null);
+			assert (icon.width == 16 && icon.height == 16);
+			assert (icon.rowstride == icon.width * 4);
+			assert (icon.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
