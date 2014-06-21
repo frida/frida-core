@@ -487,13 +487,13 @@ namespace Frida.HostSessionTest {
 
 #if WINDOWS
 			assert (prov.name != "Apple Mobile Device"); /* should manage to extract a user-defined name */
+#endif
 
 			var icon = prov.icon;
 			assert (icon != null);
 			assert (icon.width == 16 && icon.height == 16);
 			assert (icon.rowstride == icon.width * 4);
 			assert (icon.pixels.length > 0);
-#endif
 
 			try {
 				var session = yield prov.create ();

@@ -15,13 +15,13 @@ namespace Frida.Fruity {
 		public override async void connect_to_port (uint device_id, uint port) throws IOError {
 			assert (is_processing_messages);
 
-			uint8[] connect_body = new uint8[8];
+			var connect_body = new uint8[8];
 
 			uint32 * p = (void *) connect_body;
 			p[0] = device_id.to_little_endian ();
 			p[1] = ((uint32) port << 16).to_big_endian ();
 
-			int result = yield query (MessageType.CONNECT, connect_body, true);
+			var result = yield query (MessageType.CONNECT, connect_body, true);
 			handle_connect_result (result);
 		}
 
@@ -40,9 +40,10 @@ namespace Frida.Fruity {
 				case MessageType.DEVICE_ATTACHED:
 					if (msg.body_size < 4)
 						throw new IOError.FAILED ("unexpected payload size for ATTACHED");
+
 					uint attached_id = body_u32[0];
-					unowned string attached_udid = (string) (msg.body + 6);
-					device_attached (attached_id, attached_udid);
+					unowned string udid = (string) (msg.body + 6);
+					device_attached (attached_id, -1, udid);
 					break;
 
 				case MessageType.DEVICE_DETACHED:
@@ -92,15 +93,16 @@ namespace Frida.Fruity {
 			var plist = new PropertyList.from_xml (xml);
 			var message_type = plist.get_string ("MessageType");
 			if (message_type == "Result") {
-				int result = plist.get_int ("Number");
+				var result = plist.get_int ("Number");
 				handle_result_message (msg, result);
 			} else if (message_type == "Attached") {
-				uint attached_id = (uint) plist.get_int ("DeviceID");
+				var attached_id = (uint) plist.get_int ("DeviceID");
 				var props = plist.get_plist ("Properties");
-				string attached_udid = props.get_string ("SerialNumber");
-				device_attached (attached_id, attached_udid);
+				var product_id = props.get_int ("ProductID");
+				var udid = props.get_string ("SerialNumber");
+				device_attached (attached_id, product_id, udid);
 			} else if (message_type == "Detached") {
-				uint detached_id = (uint) plist.get_int ("DeviceID");
+				var detached_id = (uint) plist.get_int ("DeviceID");
 				device_detached (detached_id);
 			} else {
 				throw new IOError.FAILED ("unexpected message type: %s", message_type);
@@ -147,8 +149,8 @@ namespace Frida.Fruity {
 		private const uint16 USBMUX_SERVER_PORT = 27015;
 		private const uint16 MAX_MESSAGE_SIZE = 2048;
 
-		public signal void device_attached (uint device_id, string device_udid);
-		public signal void device_detached (uint device_id);
+		public signal void device_attached (uint id, int product_id, string udid);
+		public signal void device_detached (uint id);
 
 		construct {
 			reset ();

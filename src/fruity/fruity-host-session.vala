@@ -11,20 +11,20 @@ namespace Frida {
 
 		private async void do_start () {
 			control_client = yield create_client ();
-			control_client.device_attached.connect ((device_id, device_udid) => {
-				if (provider_by_device_id.has_key (device_id))
+			control_client.device_attached.connect ((id, product_id, udid) => {
+				if (provider_by_device_id.has_key (id))
 					return;
 
-				var provider = new FruityHostSessionProvider (this, device_id, device_udid);
-				provider_by_device_id[device_id] = provider;
+				var provider = new FruityHostSessionProvider (this, id, product_id, udid);
+				provider_by_device_id[id] = provider;
 				open_provider (provider);
 			});
-			control_client.device_detached.connect ((device_id) => {
-				if (!provider_by_device_id.has_key (device_id))
+			control_client.device_detached.connect ((id) => {
+				if (!provider_by_device_id.has_key (id))
 					return;
 
 				FruityHostSessionProvider provider;
-				provider_by_device_id.unset (device_id, out provider);
+				provider_by_device_id.unset (id, out provider);
 
 				if (provider.is_open)
 					provider_unavailable (provider);
@@ -120,6 +120,11 @@ namespace Frida {
 			construct;
 		}
 
+		public int device_product_id {
+			get;
+			construct;
+		}
+
 		public string device_udid {
 			get;
 			construct;
@@ -134,15 +139,15 @@ namespace Frida {
 
 		private const uint ZID_SERVER_PORT = 27042;
 
-		public FruityHostSessionProvider (FruityHostSessionBackend backend, uint device_id, string device_udid) {
-			Object (backend: backend, device_id: device_id, device_udid: device_udid);
+		public FruityHostSessionProvider (FruityHostSessionBackend backend, uint device_id, int device_product_id, string device_udid) {
+			Object (backend: backend, device_id: device_id, device_product_id: device_product_id, device_udid: device_udid);
 		}
 
 		public async void open () throws IOError {
 			bool got_details = false;
 			for (int i = 1; !got_details; i++) {
 				try {
-					_extract_details_for_device_with_udid (device_udid, out _name, out _icon);
+					_extract_details_for_device (device_product_id, device_udid, out _name, out _icon);
 					got_details = true;
 				} catch (IOError e) {
 					if (i != 60) {
@@ -215,7 +220,7 @@ namespace Frida {
 			return session;
 		}
 
-		public static extern void _extract_details_for_device_with_udid (string udid, out string name, out ImageData? icon) throws IOError;
+		public static extern void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon) throws IOError;
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
