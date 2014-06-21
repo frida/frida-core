@@ -114,13 +114,13 @@ struct _FridaMacModel
 
 static const FridaMacModel mac_models[] =
 {
-  { NULL, "com.apple.led-cinema-display-27" },
+  { NULL,         "com.apple.led-cinema-display-27" },
   { "MacBookAir", "com.apple.macbookair-11-unibody" },
   { "MacBookPro", "com.apple.macbookpro-13-unibody" },
-  { "MacBook", "com.apple.macbook-unibody" },
-  { "iMac", "com.apple.imac-unibody-21" },
-  { "Macmini", "com.apple.macmini-unibody" },
-  { "MacPro", "com.apple.macpro" }
+  { "MacBook",    "com.apple.macbook-unibody" },
+  { "iMac",       "com.apple.imac-unibody-21" },
+  { "Macmini",    "com.apple.macmini-unibody" },
+  { "MacPro",     "com.apple.macpro" }
 };
 
 #endif
@@ -141,13 +141,11 @@ _frida_darwin_host_session_provider_extract_icon (void)
   model_name = g_malloc (size);
   sysctlbyname ("hw.model", model_name, &size, NULL, 0);
 
-  model = NULL;
-  for (i = 1; i != G_N_ELEMENTS (mac_models); i++)
+  for (model = NULL, i = 1; i != G_N_ELEMENTS (mac_models) && model == NULL; i++)
   {
     if (g_str_has_prefix (model_name, mac_models[i].name))
       model = &mac_models[i];
   }
-
   if (model == NULL)
     model = &mac_models[0];
 
