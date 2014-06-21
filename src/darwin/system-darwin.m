@@ -1,5 +1,7 @@
 #include "frida-core.h"
 
+#include "icon-helpers.h"
+
 #include <dlfcn.h>
 #include <signal.h>
 #include <unistd.h>
@@ -9,10 +11,8 @@
 
 # include <libproc.h>
 # import <AppKit/AppKit.h>
-# import <Foundation/Foundation.h>
 
 static void extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon);
-static void init_icon_from_ns_image_scaled_to (FridaImageData * icon, NSImage * image, guint target_width, guint target_height);
 
 #endif
 
@@ -32,7 +32,6 @@ struct _FridaSpringboardApi
 };
 
 static void extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon);
-static void init_icon_from_ui_image_scaled_to (FridaImageData * icon, UIImage * image, guint target_width, guint target_height);
 
 static FridaSpringboardApi * frida_springboard_api = NULL;
 
@@ -195,47 +194,8 @@ frida_temporary_directory_get_system_tmp (void)
 static void
 extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon)
 {
-  init_icon_from_ns_image_scaled_to (small_icon, image, 16, 16);
-  init_icon_from_ns_image_scaled_to (large_icon, image, 32, 32);
-}
-
-static void
-init_icon_from_ns_image_scaled_to (FridaImageData * icon, NSImage * image, guint target_width, guint target_height)
-{
-  NSBitmapImageRep * rep;
-  NSGraphicsContext * context;
-
-  icon->_width = target_width;
-  icon->_height = target_height;
-  icon->_rowstride = target_width * 4;
-
-  rep = [[NSBitmapImageRep alloc]
-      initWithBitmapDataPlanes:nil
-                    pixelsWide:icon->_width
-                    pixelsHigh:icon->_height
-                 bitsPerSample:8
-               samplesPerPixel:4
-                      hasAlpha:YES
-                      isPlanar:NO
-                colorSpaceName:NSCalibratedRGBColorSpace
-                  bitmapFormat:0
-                   bytesPerRow:icon->_rowstride
-                  bitsPerPixel:32];
-
-  context = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
-
-  [NSGraphicsContext saveGraphicsState];
-  [NSGraphicsContext setCurrentContext:context];
-  [image drawInRect:NSMakeRect (0, 0, icon->_width, icon->_height)
-           fromRect:NSZeroRect
-          operation:NSCompositeCopy
-           fraction:1.0];
-  [context flushGraphics];
-  [NSGraphicsContext restoreGraphicsState];
-
-  icon->_pixels = g_base64_encode ([rep bitmapData], icon->_rowstride * icon->_height);
-
-  [rep release];
+  _frida_image_data_init_from_native_image_scaled_to (small_icon, image, 16, 16);
+  _frida_image_data_init_from_native_image_scaled_to (large_icon, image, 32, 32);
 }
 
 #endif
@@ -257,8 +217,8 @@ extract_icons_from_identifier (NSString * identifier, FridaImageData * small_ico
 
     pair = g_new (FridaIconPair, 1);
     image = [UIImage imageWithData:png_data];
-    init_icon_from_ui_image_scaled_to (&pair->small_icon, image, 16, 16);
-    init_icon_from_ui_image_scaled_to (&pair->large_icon, image, 32, 32);
+    _frida_image_data_init_from_native_image_scaled_to (&pair->small_icon, image, 16, 16);
+    _frida_image_data_init_from_native_image_scaled_to (&pair->large_icon, image, 32, 32);
     g_hash_table_insert (icon_pair_by_identifier, g_strdup ([identifier UTF8String]), pair);
 
     [png_data release];
@@ -266,68 +226,6 @@ extract_icons_from_identifier (NSString * identifier, FridaImageData * small_ico
 
   frida_image_data_copy (&pair->small_icon, small_icon);
   frida_image_data_copy (&pair->large_icon, large_icon);
-}
-
-static void
-init_icon_from_ui_image_scaled_to (FridaImageData * icon, UIImage * image, guint target_width, guint target_height)
-{
-  CGImageRef cgimage;
-  CGSize full, scaled;
-  guint pixel_buf_size;
-  guint8 * pixel_buf;
-  guint32 * pixels;
-  guint i;
-  CGColorSpaceRef colorspace;
-  CGContextRef cgctx;
-  CGRect target_rect = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
-
-  icon->_width = target_width;
-  icon->_height = target_height;
-  icon->_rowstride = target_width * 4;
-
-  cgimage = [image CGImage];
-
-  full.width = CGImageGetWidth (cgimage);
-  full.height = CGImageGetHeight (cgimage);
-
-  if (full.height > full.width)
-  {
-    scaled.width = (CGFloat) full.width * ((CGFloat) target_height / full.height);
-    scaled.height = target_height;
-  }
-  else
-  {
-    scaled.width = target_width;
-    scaled.height = (CGFloat) full.height * ((CGFloat) target_width / full.width);
-  }
-
-  pixel_buf_size = icon->_width * icon->_rowstride;
-  pixel_buf = g_malloc (pixel_buf_size);
-
-  /*
-   * HACK ALERT:
-   *
-   * CoreGraphics does not yet support non-premultiplied, so we make sure it multiplies with the same pixels as
-   * those usually rendered onto by the frida GUI... ICK!
-   */
-  pixels = (guint32 *) pixel_buf;
-  for (i = 0; i != icon->_width * icon->_height; i++)
-    pixels[i] = GUINT32_TO_BE (0xf0f0f0ff);
-
-  colorspace = CGColorSpaceCreateDeviceRGB ();
-  cgctx = CGBitmapContextCreate (pixel_buf, icon->_width, icon->_height, 8, icon->_rowstride, colorspace,
-      kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedLast);
-  g_assert (cgctx != NULL);
-
-  target_rect.size = scaled;
-
-  CGContextDrawImage (cgctx, target_rect, cgimage);
-
-  icon->_pixels = g_base64_encode (CGBitmapContextGetData (cgctx), pixel_buf_size);
-
-  CGContextRelease (cgctx);
-  CGColorSpaceRelease (colorspace);
-  g_free (pixel_buf);
 }
 
 #endif /* HAVE_IOS */

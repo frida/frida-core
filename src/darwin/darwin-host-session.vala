@@ -23,14 +23,19 @@ namespace Frida {
 		}
 
 		public ImageData? icon {
-			get { return null; }
+			get { return _icon; }
 		}
+		private ImageData? _icon;
 
 		public HostSessionProviderKind kind {
 			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
 		}
 
 		private DarwinHostSession host_session;
+
+		construct {
+			_icon = _extract_icon ();
+		}
 
 		public async void close () {
 			if (host_session != null)
@@ -51,6 +56,8 @@ namespace Frida {
 				throw new IOError.FAILED ("no such id");
 			return yield host_session.obtain_agent_session (id);
 		}
+
+		public static extern ImageData? _extract_icon ();
 	}
 
 	public class DarwinHostSession : BaseDBusHostSession, HostSession {

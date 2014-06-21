@@ -35,7 +35,9 @@ backend_sources += \
 glue_sources += \
 	darwin/system-darwin.m \
 	darwin/darwin-host-session-glue.c \
-	darwin/fruitjector-glue.c
+	darwin/fruitjector-glue.c \
+	darwin/icon-helpers.h \
+	darwin/icon-helpers.m
 backend_libadd += \
 	libfruitjector-types.la \
 	libfrida-data-fruitjector.la
