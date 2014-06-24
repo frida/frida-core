@@ -51,6 +51,8 @@ frida_system_enumerate_processes (int * result_length1)
 
   g_dir_close (proc_dir);
 
+  frida_image_data_destroy (&no_icon);
+
   *result_length1 = processes->len;
   return (FridaHostProcessInfo *) g_array_free (processes, FALSE);
 }
