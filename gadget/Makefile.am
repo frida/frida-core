@@ -16,14 +16,13 @@ libfrida_gadget_1_0_la_CFLAGS = \
 libfrida_gadget_1_0_la_LIBADD = \
 	$(builddir)/libfrida-gadget-glue.la \
 	$(top_builddir)/src/libfrida-core-1.0.la \
-	$(top_builddir)/lib/agent/libfrida-agent.la \
+	$(top_builddir)/lib/agent/.libs/libfrida-agent.a \
 	$(platform_libs) \
 	$(FRIDA_LIBS)
 libfrida_gadget_1_0_la_LDFLAGS = \
 	-export-symbols-regex '^(JNI_OnLoad|JNI_OnUnload)$$' \
 	-no-undefined \
-	-avoid-version \
-	-static
+	-avoid-version
 libfrida_gadget_1_0_la_VALAFLAGS = \
 	--library=frida-gadget \
 	--header=frida-gadget.h \

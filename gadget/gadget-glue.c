@@ -23,6 +23,12 @@ JNI_OnUnload (JavaVM * vm, void * reserved)
 }
 
 void
+frida_gadget_log_info (const gchar * message)
+{
+  __android_log_write (ANDROID_LOG_INFO, "re.frida.Gadget", message);
+}
+
+void
 frida_gadget_log_error (const gchar * message)
 {
   __android_log_write (ANDROID_LOG_ERROR, "re.frida.Gadget", message);
@@ -37,9 +43,15 @@ frida_gadget_log_error (const gchar * message)
 #endif
 
 void
+frida_gadget_log_info (const gchar * message)
+{
+  g_print ("*** FRIDA GADGET INFO ***: %s\n", message);
+}
+
+void
 frida_gadget_log_error (const gchar * message)
 {
-  g_printerr ("[Frida Gadget] %s\n", message);
+  g_printerr ("*** FRIDA GADGET ERROR ***: %s\n", message);
 }
 
 #endif
