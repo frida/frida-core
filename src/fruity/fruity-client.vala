@@ -186,7 +186,7 @@ namespace Frida.Fruity {
 
 				is_processing_messages = true;
 
-				process_incoming_messages ();
+				process_incoming_messages.begin ();
 			} catch (Error e) {
 				reset ();
 				throw new IOError.FAILED (e.message);

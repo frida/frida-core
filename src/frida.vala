@@ -89,7 +89,7 @@ namespace Frida {
 				foreach (var device in devices) {
 					if (device.provider == provider) {
 						removed (device);
-						device._do_close (false);
+						device._do_close.begin (false);
 						break;
 					}
 				}
@@ -345,7 +345,7 @@ namespace Frida {
 		private void on_agent_session_closed (AgentSessionId id, Error? error) {
 			var session = session_by_handle[id.handle];
 			if (session != null)
-				session._do_close (false);
+				session._do_close.begin (false);
 		}
 
 		private Object create<T> () {
@@ -689,7 +689,7 @@ namespace Frida {
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				do_perform_operation ();
+				do_perform_operation.begin ();
 				return false;
 			});
 			source.attach (main_context);

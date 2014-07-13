@@ -65,6 +65,12 @@ struct _FridaAutoInterceptContext
 
 static gpointer frida_agent_auto_ignorer_thread_create_proxy (gpointer data);
 
+void *
+frida_agent_auto_ignorer_get_address_of_g_thread_create_full (void)
+{
+  return g_thread_create_full;
+}
+
 void
 frida_agent_auto_ignorer_intercept_thread_creation (FridaAgentAutoIgnorer * self,
     GumInvocationContext * ic)

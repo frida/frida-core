@@ -38,6 +38,18 @@ namespace Frida {
 			construct;
 		}
 
+		public override InputStream input_stream {
+			get {
+				return input;
+			}
+		}
+
+		public override OutputStream output_stream {
+			get {
+				return output;
+			}
+		}
+
 		public void * _backend;
 
 		private PipeInputStream input;
@@ -56,21 +68,13 @@ namespace Frida {
 			_destroy_backend (_backend);
 		}
 
-		public override bool close_fn (Cancellable? cancellable = null) throws Error {
+		public override bool close (Cancellable? cancellable = null) throws IOError {
 			return _close ();
-		}
-
-		public override unowned InputStream get_input_stream () {
-			return input;
-		}
-
-		public override unowned OutputStream get_output_stream () {
-			return output;
 		}
 
 		public static extern void * _create_backend (string address) throws IOError;
 		public static extern void _destroy_backend (void * backend);
-		public extern bool _close () throws Error;
+		public extern bool _close () throws IOError;
 	}
 
 	public class PipeInputStream : InputStream {
@@ -78,6 +82,10 @@ namespace Frida {
 
 		public PipeInputStream (void * backend) {
 			this._backend = backend;
+		}
+
+		public override bool close (GLib.Cancellable? cancellable = null) throws IOError {
+			return true;
 		}
 
 		public override ssize_t read (uint8[] buffer, Cancellable? cancellable = null) throws IOError {
@@ -92,6 +100,10 @@ namespace Frida {
 
 		public PipeOutputStream (void * backend) {
 			this._backend = backend;
+		}
+
+		public override bool close (GLib.Cancellable? cancellable = null) throws IOError {
+			return true;
 		}
 
 		public override ssize_t write (uint8[] buffer, Cancellable? cancellable = null) throws IOError {

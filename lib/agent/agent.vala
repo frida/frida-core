@@ -23,7 +23,7 @@ namespace Frida.Agent {
 			if (closing)
 				throw new IOError.FAILED ("close already in progress");
 			closing = true;
-			perform_close ();
+			perform_close.begin ();
 		}
 
 		private async void perform_close () {
@@ -31,7 +31,7 @@ namespace Frida.Agent {
 			script_engine = null;
 
 			Timeout.add (30, () => {
-				teardown_connection_and_schedule_shutdown ();
+				teardown_connection_and_schedule_shutdown.begin ();
 				return false;
 			});
 		}
@@ -72,14 +72,14 @@ namespace Frida.Agent {
 		}
 
 		public void run () throws Error {
-			setup_connection ();
+			setup_connection.begin ();
 			main_loop = new MainLoop ();
 			main_loop.run ();
 		}
 
 		private async void setup_connection () {
 			try {
-				connection = yield DBusConnection.new_for_stream (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield DBusConnection.new (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 			} catch (Error error) {
 				printerr ("failed to create connection: %s\n", error.message);
 				return;
@@ -91,7 +91,7 @@ namespace Frida.Agent {
 				connection.start_message_processing ();
 			} catch (IOError io_error) {
 				printerr ("failed to register object: %s\n", io_error.message);
-				close ();
+				close.begin ();
 			}
 		}
 
@@ -112,7 +112,7 @@ namespace Frida.Agent {
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (!closed_by_us)
-				close ();
+				close.begin ();
 		}
 	}
 
@@ -124,7 +124,7 @@ namespace Frida.Agent {
 		}
 
 		public void enable () {
-			interceptor.attach_listener ((void *) Thread.create_full, this);
+			interceptor.attach_listener (get_address_of_g_thread_create_full (), this);
 		}
 
 		public void disable () {
@@ -138,6 +138,7 @@ namespace Frida.Agent {
 		private void on_leave (Gum.InvocationContext context) {
 		}
 
+		private static extern void * get_address_of_g_thread_create_full ();
 		private extern void intercept_thread_creation (Gum.InvocationContext context);
 	}
 

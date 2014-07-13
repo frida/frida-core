@@ -60,7 +60,7 @@ namespace Frida {
 				foreach (var input in config.get_string_list (group, "inputs")) {
 					var regex = new Regex (input);
 
-					var enumerator = input_dir.enumerate_children (FILE_ATTRIBUTE_STANDARD_NAME, FileQueryInfoFlags.NONE);
+					var enumerator = input_dir.enumerate_children (FileAttribute.STANDARD_NAME, FileQueryInfoFlags.NONE);
 
 					FileInfo file_info;
 					while ((file_info = enumerator.next_file ()) != null) {
@@ -172,9 +172,9 @@ namespace Frida {
 					var input_file = File.new_for_commandline_arg (input_filename);
 
 					var file_input_stream = input_file.read (null);
-					var input_info = file_input_stream.query_info (FILE_ATTRIBUTE_STANDARD_SIZE);
+					var input_info = file_input_stream.query_info (FileAttribute.STANDARD_SIZE);
 					var identifier = identifier_from_filename (input_file.get_basename ());
-					var file_size = input_info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
+					var file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
 
 					identifier_by_index.add (identifier);
 					size_by_index.add (file_size);
@@ -286,8 +286,8 @@ namespace Frida {
 
 			try {
 				var input = file.read ();
-				var info = input.query_info (FILE_ATTRIBUTE_STANDARD_SIZE);
-				var existing_size = (size_t) info.get_attribute_uint64 (FILE_ATTRIBUTE_STANDARD_SIZE);
+				var info = input.query_info (FileAttribute.STANDARD_SIZE);
+				var existing_size = (size_t) info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
 
 				if (existing_size == new_content.get_data_size ()) {
 					uint8[] existing_content_data = new uint8[existing_size];
@@ -306,7 +306,7 @@ namespace Frida {
 			uint8[] blob = new uint8[blob_size];
 			Memory.copy(blob, new_content.data, blob_size);
 			var output = file.replace (null, false, FileCreateFlags.REPLACE_DESTINATION);
-			output.write_all (blob);
+			output.write_all (blob, null);
 		}
 
 		private string c_namespace_from_vala (string vala_ns) {
@@ -510,7 +510,7 @@ namespace Frida {
 			public void write (string name, InputStream data) throws Error {
 				if (rdata_size % SECTION_DATA_ALIGNMENT != 0) {
 					var padding = new uint8[SECTION_DATA_ALIGNMENT - (rdata_size % SECTION_DATA_ALIGNMENT)];
-					stream.write_all (padding);
+					stream.write_all (padding, null);
 					rdata_size += padding.length;
 					rdata_crc = Checksum.crc32 (padding, rdata_crc);
 				}
@@ -525,7 +525,7 @@ namespace Frida {
 						break;
 					buf.resize ((int) bytes_read);
 
-					stream.write_all (buf);
+					stream.write_all (buf, null);
 					rdata_size += bytes_read;
 					rdata_crc = Checksum.crc32 (buf, rdata_crc);
 				}
@@ -623,7 +623,7 @@ namespace Frida {
 				/* Section 3: Read-only initialized data: filled out by one or more write() calls */
 				if (rdata_align_shift > 0) {
 					var padding = new uint8[rdata_align_shift];
-					stream.write_all (padding);
+					stream.write_all (padding, null);
 				}
 			}
 

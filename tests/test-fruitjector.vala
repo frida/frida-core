@@ -55,7 +55,7 @@ namespace Frida.FruitjectorTest {
 	private static string content_of (File file) {
 		try {
 			uint8[] contents;
-			file.load_contents (null, out contents);
+			file.load_contents (null, out contents, null);
 			unowned string str = (string) contents;
 			return str;
 		} catch (Error load_error) {
@@ -103,7 +103,7 @@ namespace Frida.FruitjectorTest {
 		public void close () {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_close (loop);
+				do_close.begin (loop);
 				return false;
 			});
 			loop.run ();
@@ -125,7 +125,7 @@ namespace Frida.FruitjectorTest {
 		public void inject (string name, string data_string) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_injection (name, data_string, loop);
+				do_injection.begin (name, data_string, loop);
 				return false;
 			});
 			loop.run ();

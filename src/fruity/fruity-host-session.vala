@@ -6,7 +6,7 @@ namespace Frida {
 		private uint protocol_version = 1;
 
 		public async void start () {
-			do_start ();
+			do_start.begin ();
 		}
 
 		private async void do_start () {
@@ -17,7 +17,7 @@ namespace Frida {
 
 				var provider = new FruityHostSessionProvider (this, id, product_id, udid);
 				provider_by_device_id[id] = provider;
-				open_provider (provider);
+				open_provider.begin (provider);
 			});
 			control_client.device_detached.connect ((id) => {
 				if (!provider_by_device_id.has_key (id))
@@ -183,7 +183,7 @@ namespace Frida {
 
 			DBusConnection connection;
 			try {
-				connection = yield DBusConnection.new_for_stream (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 			} catch (Error e) {
 				throw new IOError.FAILED (e.message);
 			}
@@ -205,7 +205,7 @@ namespace Frida {
 
 			DBusConnection connection;
 			try {
-				connection = yield DBusConnection.new_for_stream (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 			} catch (Error dbus_error) {
 				throw new IOError.FAILED (dbus_error.message);
 			}

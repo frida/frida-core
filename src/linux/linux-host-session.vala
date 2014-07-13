@@ -53,7 +53,7 @@ namespace Frida {
 		}
 	}
 
-	public class LinuxHostSession : BaseDBusHostSession, HostSession {
+	public class LinuxHostSession : BaseDBusHostSession {
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
 		private Linjector injector = new Linjector ();
@@ -75,15 +75,15 @@ namespace Frida {
 			injector = null;
 		}
 
-		public async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
+		public override async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
 			return System.enumerate_processes ();
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public override async uint spawn (string path, string[] argv, string[] envp) throws IOError {
 			return _do_spawn (path, argv, envp);
 		}
 
-		public async void resume (uint pid) throws IOError {
+		public override async void resume (uint pid) throws IOError {
 			void * instance;
 			bool instance_found = instance_by_pid.unset (pid, out instance);
 			if (!instance_found)
@@ -92,7 +92,7 @@ namespace Frida {
 			_free_instance (instance);
 		}
 
-		public async void kill (uint pid) throws IOError {
+		public override async void kill (uint pid) throws IOError {
 			void * instance;
 			bool instance_found = instance_by_pid.unset (pid, out instance);
 			if (instance_found)
@@ -100,11 +100,12 @@ namespace Frida {
 			System.kill (pid);
 		}
 
-		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {
-			var transport = new PipeTransport ();
-			var stream = new Pipe (transport.local_address);
-			yield injector.inject (pid, agent_desc, transport.remote_address);
-			return yield allocate_session (transport, stream);
+		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError {
+			var pipe_transport = new PipeTransport ();
+			var stream = new Pipe (pipe_transport.local_address);
+			yield injector.inject (pid, agent_desc, pipe_transport.remote_address);
+			transport = pipe_transport;
+			return stream;
 		}
 
 		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;

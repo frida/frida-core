@@ -60,7 +60,7 @@ namespace Frida {
 		public static extern ImageData? _extract_icon ();
 	}
 
-	public class DarwinHostSession : BaseDBusHostSession, HostSession {
+	public class DarwinHostSession : BaseDBusHostSession {
 		public signal void child_dead (uint pid);
 		public signal void child_ready (uint pid);
 
@@ -91,11 +91,11 @@ namespace Frida {
 			injector = null;
 		}
 
-		public async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
+		public override async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
 			return System.enumerate_processes ();
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public override async uint spawn (string path, string[] argv, string[] envp) throws IOError {
 			string error = null;
 
 			uint child_pid = _do_spawn (path, argv, envp);
@@ -120,7 +120,7 @@ namespace Frida {
 			return child_pid;
 		}
 
-		public async void resume (uint pid) throws IOError {
+		public override async void resume (uint pid) throws IOError {
 			void * instance;
 			bool instance_found = instance_by_pid.unset (pid, out instance);
 			if (!instance_found)
@@ -129,16 +129,17 @@ namespace Frida {
 			_free_instance (instance);
 		}
 
-		public async void kill (uint pid) throws IOError {
+		public override async void kill (uint pid) throws IOError {
 			System.kill (pid);
 		}
 
-		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {
+		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError {
 			string local_address, remote_address;
 			yield injector.make_pipe_endpoints (pid, out local_address, out remote_address);
 			var stream = new Pipe (local_address);
 			yield injector.inject (pid, agent_desc, remote_address);
-			return yield allocate_session (null, stream);
+			transport = null;
+			return stream;
 		}
 
 		public void _on_instance_dead (uint pid) {

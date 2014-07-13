@@ -91,7 +91,7 @@ namespace Frida {
 		public abstract async void stop ();
 	}
 
-	public abstract class BaseDBusHostSession : Object {
+	public abstract class BaseDBusHostSession : Object, HostSession {
 		public signal void agent_session_closed (AgentSessionId id, Error? error);
 
 		private const string LISTEN_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
@@ -104,7 +104,23 @@ namespace Frida {
 			entries.clear ();
 		}
 
-		protected async AgentSessionId allocate_session (Object? transport, IOStream stream) throws IOError {
+		public abstract async HostProcessInfo[] enumerate_processes () throws IOError;
+
+		public abstract async uint spawn (string path, string[] argv, string[] envp) throws IOError;
+
+		public abstract async void resume (uint pid) throws IOError;
+
+		public abstract async void kill (uint pid) throws IOError;
+
+		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {
+			foreach (var e in entries) {
+				if (e.pid == pid)
+					return e.id;
+			}
+
+			Object transport;
+			var stream = yield perform_attach_to (pid, out transport);
+
 			var cancellable = new Cancellable ();
 			var cancelled = new IOError.CANCELLED ("");
 			var timeout_source = new TimeoutSource (2000);
@@ -117,13 +133,13 @@ namespace Frida {
 			DBusConnection connection;
 			AgentSession session;
 			try {
-				connection = yield DBusConnection.new_for_stream (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+				connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
-			} catch (Error e) {
-				if (e is IOError && e.code == cancelled.code)
+			} catch (Error establish_error) {
+				if (establish_error is IOError && establish_error.code == cancelled.code)
 					throw new IOError.TIMED_OUT ("timed out");
 				else
-					throw new IOError.FAILED (e.message);
+					throw new IOError.FAILED (establish_error.message);
 			}
 			if (cancellable.is_cancelled ())
 				throw new IOError.TIMED_OUT ("timed out");
@@ -147,7 +163,7 @@ namespace Frida {
 			var port = last_agent_port++;
 			AgentSessionId id = AgentSessionId (port);
 
-			var entry = new Entry (id, transport, connection, session);
+			var entry = new Entry (id, pid, transport, connection, session);
 			entries.add (entry);
 			connection.closed.connect (on_connection_closed);
 
@@ -165,6 +181,8 @@ namespace Frida {
 
 			return AgentSessionId (port);
 		}
+
+		protected abstract async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError;
 
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
 			foreach (var entry in entries) {
@@ -195,6 +213,11 @@ namespace Frida {
 				private set;
 			}
 
+			public uint pid {
+				get;
+				private set;
+			}
+
 			public Object? transport {
 				get;
 				private set;
@@ -214,8 +237,9 @@ namespace Frida {
 			private Gee.ArrayList<DBusConnection> client_connections = new Gee.ArrayList<DBusConnection> ();
 			private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
-			public Entry (AgentSessionId id, Object? transport, DBusConnection agent_connection, AgentSession agent_session) {
+			public Entry (AgentSessionId id, uint pid, Object? transport, DBusConnection agent_connection, AgentSession agent_session) {
 				this.id = id;
+				this.pid = pid;
 				this.transport = transport;
 				this.agent_connection = agent_connection;
 				this.agent_session = agent_session;
@@ -255,7 +279,7 @@ namespace Frida {
 						registration_id_by_connection[connection] = registration_id;
 					} catch (IOError e) {
 						printerr ("failed to register object: %s\n", e.message);
-						close ();
+						close.begin ();
 						return false;
 					}
 

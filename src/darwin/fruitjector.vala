@@ -147,7 +147,7 @@ namespace Frida {
 				if (obtain_requests.size == 0) {
 					var source = new IdleSource ();
 					source.set_callback (() => {
-						do_obtain ();
+						do_obtain.begin ();
 						return false;
 					});
 					source.attach (main_context);
@@ -204,10 +204,6 @@ namespace Frida {
 					error = new IOError.FAILED (e.message);
 				}
 
-				complete_obtain (instance, error);
-			}
-
-			private async void complete_obtain (HelperInstance? instance, IOError? error) {
 				this.helper = instance;
 
 				foreach (var request in obtain_requests)

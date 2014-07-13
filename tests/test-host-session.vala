@@ -1,17 +1,17 @@
 namespace Frida.HostSessionTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/HostSession/Service/provider-available", () => {
-			var h = new Harness ((h) => Service.provider_available (h as Harness));
+			var h = new Harness ((h) => Service.provider_available.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Service/provider-unavailable", () => {
-			var h = new Harness ((h) => Service.provider_unavailable (h as Harness));
+			var h = new Harness ((h) => Service.provider_unavailable.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Manual/full-cycle", () => {
-			var h = new Harness.without_timeout ((h) => Service.Manual.full_cycle (h as Harness));
+			var h = new Harness.without_timeout ((h) => Service.Manual.full_cycle.begin (h as Harness));
 			h.run ();
 		});
 
@@ -25,43 +25,43 @@ namespace Frida.HostSessionTest {
 		});
 
 		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
-			var h = new Harness ((h) => Fruity.backend (h as Harness));
+			var h = new Harness ((h) => Fruity.backend.begin (h as Harness));
 			h.run ();
 		});
 #endif
 
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/spawn", () => {
-			var h = new Harness ((h) => Linux.spawn (h as Harness));
+			var h = new Harness ((h) => Linux.spawn.begin (h as Harness));
 			h.run ();
 		});
 #endif
 
 #if DARWIN
 		GLib.Test.add_func ("/HostSession/Darwin/backend", () => {
-			var h = new Harness ((h) => Darwin.backend (h as Harness));
+			var h = new Harness ((h) => Darwin.backend.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Darwin/spawn", () => {
-			var h = new Harness ((h) => Darwin.spawn (h as Harness));
+			var h = new Harness ((h) => Darwin.spawn.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Darwin/Manual/cross-arch", () => {
-			var h = new Harness ((h) => Darwin.Manual.cross_arch (h as Harness));
+			var h = new Harness ((h) => Darwin.Manual.cross_arch.begin (h as Harness));
 			h.run ();
 		});
 #endif
 
 #if WINDOWS
 		GLib.Test.add_func ("/HostSession/Windows/backend", () => {
-			var h = new Harness ((h) => Windows.backend (h as Harness));
+			var h = new Harness ((h) => Windows.backend.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Windows/spawn", () => {
-			var h = new Harness ((h) => Windows.spawn (h as Harness));
+			var h = new Harness ((h) => Windows.spawn.begin (h as Harness));
 			h.run ();
 		});
 #endif

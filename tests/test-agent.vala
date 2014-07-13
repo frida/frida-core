@@ -1,12 +1,12 @@
 namespace Frida.AgentTest {
 	public static void add_tests () {
 		GLib.Test.add_func ("/Agent/Script/load-and-receive-messages", () => {
-			var h = new Harness ((h) => Script.load_and_receive_messages (h as Harness));
+			var h = new Harness ((h) => Script.load_and_receive_messages.begin (h as Harness));
 			h.run ();
 		});
 
 		GLib.Test.add_func ("/Agent/Script/performance", () => {
-			var h = new Harness ((h) => Script.performance (h as Harness));
+			var h = new Harness ((h) => Script.performance.begin (h as Harness));
 			h.run ();
 		});
 	}
@@ -153,7 +153,7 @@ namespace Frida.AgentTest {
 			}
 
 			try {
-				connection = yield DBusConnection.new_for_stream (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
+				connection = yield DBusConnection.new (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
 				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
 			} catch (Error dbus_error) {
 				assert_not_reached ();
@@ -179,7 +179,8 @@ namespace Frida.AgentTest {
 			}
 			connection = null;
 
-			main_thread.join ();
+			Thread<bool> t = main_thread;
+			t.join ();
 			main_thread = null;
 
 			module = null;
