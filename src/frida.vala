@@ -677,8 +677,8 @@ namespace Frida {
 
 		private MainLoop loop;
 		private bool completed;
-		private Mutex mutex = new Mutex ();
-		private Cond cond = new Cond ();
+		private Mutex mutex;
+		private Cond cond;
 
 		private T result;
 		private Error error;

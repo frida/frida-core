@@ -14,12 +14,7 @@ namespace Frida {
 			var request = new EnumerateRequest (() => enumerate_processes.callback ());
 			if (is_first_request) {
 				current_main_context = MainContext.get_thread_default ();
-
-				try {
-					Thread.create<void> (enumerate_processes_worker, false);
-				} catch (ThreadError e) {
-					error (e.message);
-				}
+				new Thread<bool> ("frida-enumerate-processes", enumerate_processes_worker);
 			}
 			pending_requests.add (request);
 			yield;
@@ -27,7 +22,7 @@ namespace Frida {
 			return request.result;
 		}
 
-		private void enumerate_processes_worker () {
+		private bool enumerate_processes_worker () {
 			var processes = System.enumerate_processes ();
 
 			var source = new IdleSource ();
@@ -42,6 +37,8 @@ namespace Frida {
 				return false;
 			});
 			source.attach (current_main_context);
+
+			return true;
 		}
 
 		private class EnumerateRequest {

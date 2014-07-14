@@ -59,7 +59,7 @@ namespace Frida {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (closed_by_us)
 				return;
-			unregister (connection);
+			unregister.begin (connection);
 			connections.remove (connection);
 
 			if (connections.is_empty)
@@ -78,7 +78,7 @@ namespace Frida {
 				shutdown_source = Timeout.add (timeout, () => {
 					server.stop ();
 					server = null;
-					perform_shutdown ();
+					perform_shutdown.begin ();
 					return false;
 				});
 			}

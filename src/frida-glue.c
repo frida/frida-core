@@ -14,11 +14,13 @@ frida_init (void)
 
   if (g_once_init_enter (&frida_initialized))
   {
-    g_type_init ();
+#if GLIB_CHECK_VERSION (2, 42, 0)
+    glib_init ();
+#endif
 
     main_context = g_main_context_ref (g_main_context_default ());
     main_loop = g_main_loop_new (main_context, FALSE);
-    main_thread = g_thread_create (run_main_loop, NULL, TRUE, NULL);
+    main_thread = g_thread_new ("frida-main-loop", run_main_loop, NULL);
 
     g_once_init_leave (&frida_initialized, TRUE);
   }
@@ -54,11 +56,9 @@ frida_deinit (void)
   g_main_context_unref (main_context);
   main_context = NULL;
 
-  g_io_deinit ();
-
-  g_type_deinit ();
-  g_thread_deinit ();
-  g_mem_deinit ();
+#if GLIB_CHECK_VERSION (2, 42, 0)
+  glib_deinit ();
+#endif
 }
 
 GMainContext *

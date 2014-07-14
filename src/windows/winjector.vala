@@ -74,7 +74,7 @@ namespace Frida {
 
 			public async void open () throws IOError {
 				try {
-					connection = yield DBusConnection.new_for_stream (pipe, null, DBusConnectionFlags.NONE);
+					connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE);
 				} catch (Error e) {
 					throw new IOError.FAILED (e.message);
 				}
@@ -155,11 +155,7 @@ namespace Frida {
 					return helper;
 
 				if (obtain_requests.size == 0) {
-					try {
-						Thread.create<bool> (obtain_worker, false);
-					} catch (ThreadError e) {
-						error (e.message);
-					}
+					new Thread<bool> ("frida-winjector", obtain_worker);
 				}
 
 				var request = new ObtainRequest (() => obtain.callback ());
@@ -185,7 +181,7 @@ namespace Frida {
 
 				var source = new IdleSource ();
 				source.set_callback (() => {
-					complete_obtain (instance, error);
+					complete_obtain.begin (instance, error);
 					return false;
 				});
 				source.attach (main_context);

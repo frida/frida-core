@@ -78,7 +78,7 @@ namespace Winjector {
 
 		public int run () {
 			Idle.add (() => {
-				start ();
+				start.begin ();
 				return false;
 			});
 
@@ -116,7 +116,7 @@ namespace Winjector {
 				if (System.is_x64 ())
 					yield helper64.start ();
 
-				connection = yield DBusConnection.new_for_stream (new Pipe (parent_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield DBusConnection.new (new Pipe (parent_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
@@ -124,7 +124,7 @@ namespace Winjector {
 			} catch (Error e) {
 				stderr.printf ("start failed: %s\n", e.message);
 				run_result = 1;
-				shutdown ();
+				shutdown.begin ();
 			}
 		}
 
@@ -134,7 +134,7 @@ namespace Winjector {
 			yield helper32.proxy.stop ();
 
 			Timeout.add (20, () => {
-				shutdown ();
+				shutdown.begin ();
 				return false;
 			});
 		}
@@ -147,7 +147,7 @@ namespace Winjector {
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			stop ();
+			stop.begin ();
 		}
 
 		private class HelperService {
@@ -167,7 +167,7 @@ namespace Winjector {
 
 			public async void start () throws IOError {
 				try {
-					connection = yield DBusConnection.new_for_stream (pipe, null, DBusConnectionFlags.NONE);
+					connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE);
 				} catch (Error e) {
 					throw new IOError.FAILED (e.message);
 				}
@@ -187,7 +187,7 @@ namespace Winjector {
 
 		public Service () {
 			Idle.add (() => {
-				start ();
+				start.begin ();
 				return false;
 			});
 		}
@@ -198,7 +198,7 @@ namespace Winjector {
 
 		private async void start () {
 			try {
-				connection = yield DBusConnection.new_for_stream (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield DBusConnection.new (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
@@ -210,7 +210,7 @@ namespace Winjector {
 
 		public async void stop () throws IOError {
 			Timeout.add (20, () => {
-				do_stop ();
+				do_stop.begin ();
 				return false;
 			});
 		}

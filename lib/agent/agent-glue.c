@@ -33,12 +33,7 @@ frida_agent_environment_init (void)
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
-#ifdef _DEBUG
-  g_thread_init_with_errorcheck_mutexes (NULL);
-#else
-  g_thread_init (NULL);
-#endif
-  g_type_init ();
+  glib_init ();
   gum_init_with_features ((GumFeatureFlags)
       (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
 }
@@ -46,12 +41,8 @@ frida_agent_environment_init (void)
 void
 frida_agent_environment_deinit (void)
 {
-  g_io_deinit ();
-
   gum_deinit ();
-  g_type_deinit ();
-  g_thread_deinit ();
-  g_mem_deinit ();
+  glib_deinit ();
 }
 
 typedef struct _FridaAutoInterceptContext FridaAutoInterceptContext;
@@ -65,10 +56,12 @@ struct _FridaAutoInterceptContext
 
 static gpointer frida_agent_auto_ignorer_thread_create_proxy (gpointer data);
 
+GThread * g_thread_new_internal (const gchar * name, GThreadFunc proxy, GThreadFunc func, gpointer data, gsize stack_size, GError ** error);
+
 void *
-frida_agent_auto_ignorer_get_address_of_g_thread_create_full (void)
+frida_agent_auto_ignorer_get_address_of_g_thread_new_internal (void)
 {
-  return g_thread_create_full;
+  return GUM_FUNCPTR_TO_POINTER (g_thread_new_internal);
 }
 
 void

@@ -112,25 +112,25 @@
   <ItemGroup>
     <CustomBuild Include="resource-compiler.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-1.0 || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)resource-compiler.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-1.0 || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)resource-compiler.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-1.0 || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)resource-compiler.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-1.0 || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" resource-compiler.vala -D WINDOWS --ccode --directory=$(IntDir) $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)resource-compiler.vala;%(AdditionalInputs)</AdditionalInputs>

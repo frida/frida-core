@@ -100,7 +100,7 @@ namespace Frida.AgentTest {
 		private delegate void AgentMainFunc (string data_string);
 		private AgentMainFunc main_impl;
 		private PipeTransport transport;
-		private unowned Thread<bool> main_thread;
+		private Thread<bool> main_thread;
 		private DBusConnection connection;
 		private AgentSession session;
 
@@ -146,11 +146,7 @@ namespace Frida.AgentTest {
 				assert_not_reached ();
 			}
 
-			try {
-				main_thread = Thread.create<bool> (agent_main_worker, true);
-			} catch (ThreadError thread_error) {
-				assert_not_reached ();
-			}
+			main_thread = new Thread<bool> ("frida-test-agent-worker", agent_main_worker);
 
 			try {
 				connection = yield DBusConnection.new (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);

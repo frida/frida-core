@@ -36,8 +36,9 @@ frida_test_environment_init (int * args_length1, char *** args)
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
-  g_thread_init (NULL);
-  g_type_init ();
+#if GLIB_CHECK_VERSION (2, 42, 0)
+  glib_init ();
+#endif
   g_test_init (args_length1, args, NULL);
   gum_init ();
 }
@@ -45,13 +46,10 @@ frida_test_environment_init (int * args_length1, char *** args)
 void
 frida_test_environment_deinit (void)
 {
-  g_io_deinit ();
-
   gum_deinit ();
-  g_test_deinit ();
-  g_type_deinit ();
-  g_thread_deinit ();
-  g_mem_deinit ();
+#if GLIB_CHECK_VERSION (2, 42, 0)
+  glib_deinit ();
+#endif
 
 #if defined (G_OS_WIN32) && !DEBUG_HEAP_LEAKS
   if (IsDebuggerPresent ())

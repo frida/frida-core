@@ -124,7 +124,7 @@ namespace Frida.Agent {
 		}
 
 		public void enable () {
-			interceptor.attach_listener (get_address_of_g_thread_create_full (), this);
+			interceptor.attach_listener (get_address_of_g_thread_new_internal (), this);
 		}
 
 		public void disable () {
@@ -138,7 +138,7 @@ namespace Frida.Agent {
 		private void on_leave (Gum.InvocationContext context) {
 		}
 
-		private static extern void * get_address_of_g_thread_create_full ();
+		private static extern void * get_address_of_g_thread_new_internal ();
 		private extern void intercept_thread_creation (Gum.InvocationContext context);
 	}
 

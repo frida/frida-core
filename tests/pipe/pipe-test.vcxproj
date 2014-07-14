@@ -52,12 +52,12 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-pipe-32;$(IntDir);$(SolutionDir)ext\gum;$(SolutionDir)ext\gum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.12\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-pipe-32;$(IntDir);$(SolutionDir)ext\gum;$(SolutionDir)ext\gum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-0.8;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.12\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>frida-pipe-32.lib;ffi.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;json-glib-1.0.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>frida-pipe-32.lib;ffi.lib;gee-0.8.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;json-glib-1.0.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;$(IntDir)..\gum-64;$(SolutionDir)ext\sdk-windows\$(PlatformName)-$(ConfigurationName)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
@@ -70,14 +70,14 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-pipe-32;$(IntDir);$(SolutionDir)ext\gum;$(SolutionDir)ext\gum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.12\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-pipe-32;$(IntDir);$(SolutionDir)ext\gum;$(SolutionDir)ext\gum\libs;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\json-glib-1.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gee-0.8;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\gio-win32-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\glib-2.0\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include\glib-2.0;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\lib\libffi-3.0.12\include;$(SolutionDir)ext\sdk-windows\$(Platform)-$(Configuration)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>frida-pipe-32.lib;ffi.lib;gee-1.0.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;json-glib-1.0.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>frida-pipe-32.lib;ffi.lib;gee-0.8.lib;gio-2.0.lib;glib-2.0.lib;gmodule-2.0.lib;gobject-2.0.lib;gthread-2.0.lib;intl.lib;json-glib-1.0.lib;v8_base.lib;v8_snapshot.lib;z.lib;dnsapi.lib;psapi.lib;shlwapi.lib;winmm.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;$(IntDir)..\gum-64;$(SolutionDir)ext\sdk-windows\$(PlatformName)-$(ConfigurationName)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>

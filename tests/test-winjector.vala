@@ -59,7 +59,7 @@ namespace Frida.WinjectorTest {
 		public void inject (string name, string data_string) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_injection (name, data_string, loop);
+				do_injection.begin (name, data_string, loop);
 				return false;
 			});
 			loop.run ();
@@ -87,7 +87,7 @@ namespace Frida.WinjectorTest {
 		public void close () {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_close (loop);
+				do_close.begin (loop);
 				return false;
 			});
 			loop.run ();
