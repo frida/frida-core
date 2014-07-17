@@ -10,7 +10,7 @@ namespace Frida.Agent {
 
 		construct {
 			Gum.Process.enumerate_modules ((details) => {
-				if (details.name.index_of ("frida-agent.") != -1 || details.name.index_of ("frida-gadget.") != -1) {
+				if (details.name.index_of ("frida-agent") != -1 || details.name.index_of ("frida-gadget") != -1) {
 					agent_range = details.range;
 					return false;
 				}

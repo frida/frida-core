@@ -118,17 +118,32 @@ namespace Frida.Agent {
 
 	public class AutoIgnorer : Object, Gum.InvocationListener {
 		protected Gum.Interceptor interceptor;
+		protected Gum.MemoryRange? agent_range;
+
+		construct {
+			Gum.Process.enumerate_modules ((details) => {
+				if (details.name.index_of ("frida-agent") != -1 || details.name.index_of ("frida-gadget") != -1) {
+					agent_range = details.range;
+					return false;
+				}
+				return true;
+			});
+		}
 
 		public AutoIgnorer (Gum.Interceptor interceptor) {
 			this.interceptor = interceptor;
 		}
 
 		public void enable () {
-			interceptor.attach_listener (get_address_of_g_thread_new_internal (), this);
+			Gum.Script.ignore_current_thread ();
+
+			interceptor.attach_listener (get_address_of_thread_create_func (), this);
 		}
 
 		public void disable () {
 			interceptor.detach_listener (this);
+
+			Gum.Script.unignore_current_thread ();
 		}
 
 		private void on_enter (Gum.InvocationContext context) {
@@ -138,7 +153,7 @@ namespace Frida.Agent {
 		private void on_leave (Gum.InvocationContext context) {
 		}
 
-		private static extern void * get_address_of_g_thread_new_internal ();
+		private static extern void * get_address_of_thread_create_func ();
 		private extern void intercept_thread_creation (Gum.InvocationContext context);
 	}
 
@@ -150,7 +165,6 @@ namespace Frida.Agent {
 
 	private void run_server_listening_on (string pipe_address) {
 		var interceptor = Gum.Interceptor.obtain ();
-		interceptor.ignore_current_thread ();
 
 		var ignorer = new AutoIgnorer (interceptor);
 		ignorer.enable ();
@@ -164,7 +178,6 @@ namespace Frida.Agent {
 		}
 
 		ignorer.disable ();
-		interceptor.unignore_current_thread ();
 	}
 
 	namespace Environment {

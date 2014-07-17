@@ -7,6 +7,7 @@
 
 #ifdef G_OS_WIN32
 #include <crtdbg.h>
+#include <process.h>
 #endif
 
 void
@@ -49,51 +50,64 @@ frida_agent_environment_deinit (void)
 
 typedef struct _FridaAutoInterceptContext FridaAutoInterceptContext;
 
+#ifdef G_OS_WIN32
+typedef unsigned NativeThreadFuncReturnType;
+# define NATIVE_THREAD_FUNC_API __stdcall
+#else
+typedef void * NativeThreadFuncReturnType;
+# define NATIVE_THREAD_FUNC_API
+#endif
+typedef NativeThreadFuncReturnType (NATIVE_THREAD_FUNC_API * NativeThreadFunc) (void * data);
+
 struct _FridaAutoInterceptContext
 {
   GumInterceptor * interceptor;
-  GThreadFunc thread_func;
-  gpointer thread_data;
+  NativeThreadFunc thread_func;
+  void * thread_data;
 };
 
-static gpointer frida_agent_auto_ignorer_thread_create_proxy (gpointer data);
-
-GThread * g_thread_new_internal (const gchar * name, GThreadFunc proxy, GThreadFunc func, gpointer data, gsize stack_size, GError ** error);
+static NativeThreadFuncReturnType frida_agent_auto_ignorer_thread_create_proxy (void * data);
 
 void *
-frida_agent_auto_ignorer_get_address_of_g_thread_new_internal (void)
+frida_agent_auto_ignorer_get_address_of_thread_create_func (void)
 {
-  return GUM_FUNCPTR_TO_POINTER (g_thread_new_internal);
+  return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
 }
 
 void
 frida_agent_auto_ignorer_intercept_thread_creation (FridaAgentAutoIgnorer * self,
     GumInvocationContext * ic)
 {
-  FridaAutoInterceptContext * ctx;
+  NativeThreadFunc thread_func;
 
-  ctx = g_slice_new (FridaAutoInterceptContext);
-  ctx->interceptor = g_object_ref (self->interceptor);
-  ctx->thread_func = GUM_POINTER_TO_FUNCPTR (GThreadFunc,
-      gum_invocation_context_get_nth_argument (ic, 0));
-  ctx->thread_data = gum_invocation_context_get_nth_argument (ic, 1);
-  gum_invocation_context_replace_nth_argument (ic, 0,
-      GUM_FUNCPTR_TO_POINTER (frida_agent_auto_ignorer_thread_create_proxy));
-  gum_invocation_context_replace_nth_argument (ic, 1, ctx);
+  thread_func = GUM_POINTER_TO_FUNCPTR (NativeThreadFunc, gum_invocation_context_get_nth_argument (ic, 2));
+  if (GUM_MEMORY_RANGE_INCLUDES (self->agent_range, GUM_ADDRESS (thread_func)))
+  {
+    FridaAutoInterceptContext * ctx;
+
+    ctx = g_slice_new (FridaAutoInterceptContext);
+    ctx->interceptor = g_object_ref (self->interceptor);
+    ctx->thread_func = thread_func;
+    ctx->thread_data = gum_invocation_context_get_nth_argument (ic, 3);
+    gum_invocation_context_replace_nth_argument (ic, 2, GUM_FUNCPTR_TO_POINTER (frida_agent_auto_ignorer_thread_create_proxy));
+    gum_invocation_context_replace_nth_argument (ic, 3, ctx);
+  }
 }
 
-static gpointer
-frida_agent_auto_ignorer_thread_create_proxy (gpointer data)
+static NativeThreadFuncReturnType
+frida_agent_auto_ignorer_thread_create_proxy (void * data)
 {
   FridaAutoInterceptContext * ctx = data;
-  gpointer result;
+  NativeThreadFuncReturnType result;
 
-  gum_interceptor_ignore_current_thread (ctx->interceptor);
+  gum_script_ignore_current_thread ();
+
   result = ctx->thread_func (ctx->thread_data);
-  gum_interceptor_unignore_current_thread (ctx->interceptor);
 
   g_object_unref (ctx->interceptor);
   g_slice_free (FridaAutoInterceptContext, ctx);
+
+  gum_script_unignore_current_thread ();
 
   return result;
 }
