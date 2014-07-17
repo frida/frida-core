@@ -59,6 +59,7 @@ namespace Frida {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (closed_by_us)
 				return;
+
 			unregister.begin (connection);
 			connections.remove (connection);
 

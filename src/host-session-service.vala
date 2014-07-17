@@ -193,6 +193,10 @@ namespace Frida {
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (closed_by_us)
+				return;
+
 			Entry entry_to_remove = null;
 			foreach (var entry in entries) {
 				if (entry.agent_connection == connection) {
