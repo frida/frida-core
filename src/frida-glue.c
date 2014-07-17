@@ -16,6 +16,7 @@ frida_init (void)
   {
 #if GLIB_CHECK_VERSION (2, 42, 0)
     glib_init ();
+    gio_init ();
 #endif
 
     main_context = g_main_context_ref (g_main_context_default ());
@@ -57,6 +58,7 @@ frida_deinit (void)
   main_context = NULL;
 
 #if GLIB_CHECK_VERSION (2, 42, 0)
+  gio_deinit ();
   glib_deinit ();
 #endif
 }

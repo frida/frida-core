@@ -38,6 +38,7 @@ frida_test_environment_init (int * args_length1, char *** args)
 #endif
 #if GLIB_CHECK_VERSION (2, 42, 0)
   glib_init ();
+  gio_init ();
 #endif
   g_test_init (args_length1, args, NULL);
   gum_init ();
@@ -48,6 +49,7 @@ frida_test_environment_deinit (void)
 {
   gum_deinit ();
 #if GLIB_CHECK_VERSION (2, 42, 0)
+  gio_deinit ();
   glib_deinit ();
 #endif
 
