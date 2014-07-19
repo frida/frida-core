@@ -13,6 +13,15 @@
 void
 frida_agent_environment_init (void)
 {
+  GMemVTable mem_vtable = {
+    gum_malloc,
+    gum_realloc,
+    gum_free,
+    gum_calloc,
+    gum_malloc,
+    gum_realloc
+  };
+
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   int tmp_flag;
 
@@ -30,6 +39,8 @@ frida_agent_environment_init (void)
   _CrtSetDbgFlag (tmp_flag);
 #endif
 
+  gum_memory_init ();
+  g_mem_set_vtable (&mem_vtable);
   g_setenv ("G_DEBUG", "fatal-warnings:fatal-criticals", TRUE);
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
@@ -46,6 +57,7 @@ frida_agent_environment_deinit (void)
   gum_deinit ();
   gio_deinit ();
   glib_deinit ();
+  gum_memory_deinit ();
 }
 
 typedef struct _FridaAutoInterceptContext FridaAutoInterceptContext;
