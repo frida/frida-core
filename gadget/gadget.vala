@@ -69,7 +69,7 @@ namespace Frida.Gadget {
 
 			public void shutdown () {
 				if (script_engine != null) {
-					script_engine.shutdown ();
+					script_engine.shutdown.begin ();
 					script_engine = null;
 				}
 
@@ -116,7 +116,7 @@ namespace Frida.Gadget {
 
 				var source = new TimeoutSource (50);
 				source.set_callback (() => {
-					connection.close ();
+					connection.close.begin ();
 					return false;
 				});
 				source.attach (Frida.get_main_context ());
@@ -141,6 +141,7 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private bool loaded = false;
 	private Server server;
 	private Gum.Interceptor interceptor;
 	private Frida.Agent.AutoIgnorer ignorer;
@@ -148,18 +149,16 @@ namespace Frida.Gadget {
 	private Cond cond;
 
 	public void load () {
-		if (mutex != null)
+		if (loaded)
 			return;
+		loaded = true;
 
 		Environment.set_variable ("G_DEBUG", "fatal-warnings:fatal-criticals", true);
 		Frida.init ();
 
-		mutex = new Mutex ();
-		cond = new Cond ();
-
 		var source = new IdleSource ();
 		source.set_callback (() => {
-			create_server ();
+			create_server.begin ();
 			return false;
 		});
 		source.attach (Frida.get_main_context ());
@@ -171,13 +170,14 @@ namespace Frida.Gadget {
 	}
 
 	public void unload () {
-		if (mutex == null)
+		if (!loaded)
 			return;
+		loaded = false;
 
 		{
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				destroy_server ();
+				destroy_server.begin ();
 				return false;
 			});
 			source.attach (Frida.get_main_context ());
@@ -187,9 +187,6 @@ namespace Frida.Gadget {
 		while (server != null)
 			cond.wait (mutex);
 		mutex.unlock ();
-
-		cond = null;
-		mutex = null;
 
 		Frida.deinit ();
 	}

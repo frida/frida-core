@@ -6,8 +6,10 @@
 #include <gum/gum.h>
 
 #ifdef G_OS_WIN32
-#include <crtdbg.h>
-#include <process.h>
+# include <crtdbg.h>
+# include <process.h>
+#else
+# include <pthread.h>
 #endif
 
 void
@@ -83,7 +85,11 @@ static NativeThreadFuncReturnType frida_agent_auto_ignorer_thread_create_proxy (
 void *
 frida_agent_auto_ignorer_get_address_of_thread_create_func (void)
 {
+#ifdef G_OS_WIN32
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
+#else
+  return GUM_FUNCPTR_TO_POINTER (pthread_create);
+#endif
 }
 
 void

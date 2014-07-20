@@ -9,8 +9,10 @@ main (int argc, char * argv[])
   gchar c;
   GError * error = NULL;
 
-  g_thread_init_with_errorcheck_mutexes (NULL);
-  g_type_init ();
+#if GLIB_CHECK_VERSION (2, 42, 0)
+  glib_init ();
+  gio_init ();
+#endif
 
   if (argc == 1)
   {
