@@ -182,9 +182,12 @@ _frida_pipe_close (FridaPipe * self, GError ** error)
 static void
 frida_pipe_backend_on_tx_port_dead (void * context)
 {
-  FridaPipeBackend * backend = context;
+  FridaPipeBackend * self = context;
 
-  frida_pipe_backend_close_ports (backend, NULL);
+  mach_port_mod_refs (mach_task_self (), self->tx_port, MACH_PORT_RIGHT_DEAD_NAME, -1);
+  self->tx_port = MACH_PORT_NULL;
+
+  frida_pipe_backend_close_ports (self, NULL);
 }
 
 gssize
