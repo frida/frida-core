@@ -38,7 +38,7 @@ namespace Fruitjector {
 
 		public int run () {
 			Idle.add (() => {
-				start ();
+				start.begin ();
 				return false;
 			});
 
@@ -72,13 +72,13 @@ namespace Fruitjector {
 			} catch (Error e) {
 				stderr.printf ("start failed: %s\n", e.message);
 				run_result = 1;
-				shutdown ();
+				shutdown.begin ();
 			}
 		}
 
 		public async void stop () throws IOError {
 			Timeout.add (20, () => {
-				shutdown ();
+				shutdown.begin ();
 				return false;
 			});
 		}
@@ -92,7 +92,7 @@ namespace Fruitjector {
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
-			shutdown ();
+			shutdown.begin ();
 		}
 
 		public void _on_instance_dead (uint id) {

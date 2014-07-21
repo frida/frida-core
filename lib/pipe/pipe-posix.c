@@ -35,7 +35,7 @@ struct _FridaPipeTransportBackend
 
 struct _FridaPipeBackend
 {
-  GMutex * mutex;
+  GMutex mutex;
   FridaPipeRole role;
   gchar * rx_name;
   gchar * tx_name;
@@ -122,7 +122,7 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
 
   backend = g_slice_new0 (FridaPipeBackend);
 
-  backend->mutex = g_mutex_new ();
+  g_mutex_init (&backend->mutex);
 
   tokens = g_regex_split_simple ("^pipe:role=(.+?),rx=(.+?),tx=(.+?)$", address, 0, 0);
   g_assert_cmpuint (g_strv_length (tokens), ==, 5);
@@ -180,7 +180,7 @@ _frida_pipe_destroy_backend (void * b)
   g_free (backend->rx_name);
   g_free (backend->tx_name);
 
-  g_mutex_free (backend->mutex);
+  g_mutex_clear (&backend->mutex);
 
   g_slice_free (FridaPipeBackend, backend);
 }
@@ -233,10 +233,10 @@ frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellab
 
   connected = FALSE;
 
-  g_mutex_lock (backend->mutex);
+  g_mutex_lock (&backend->mutex);
   is_master = !backend->connecting;
   backend->connecting = TRUE;
-  g_mutex_unlock (backend->mutex);
+  g_mutex_unlock (&backend->mutex);
 
   have_cancel_pollfd = cancellable != NULL ? g_cancellable_make_pollfd (cancellable, &cancel) : FALSE;
 
@@ -248,16 +248,16 @@ frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellab
       if (fd != -1)
       {
         frida_pipe_fd_enable_blocking (fd);
-        g_mutex_lock (backend->mutex);
+        g_mutex_lock (&backend->mutex);
         backend->output = G_OUTPUT_STREAM (g_unix_output_stream_new (fd, TRUE));
-        g_mutex_unlock (backend->mutex);
+        g_mutex_unlock (&backend->mutex);
         unlink (backend->tx_name);
       }
     }
 
-    g_mutex_lock (backend->mutex);
+    g_mutex_lock (&backend->mutex);
     connected = backend->output != NULL;
-    g_mutex_unlock (backend->mutex);
+    g_mutex_unlock (&backend->mutex);
 
     if (!connected)
     {

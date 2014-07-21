@@ -57,7 +57,7 @@ namespace Frida {
 				});
 				source.attach (main_context);
 			} else {
-				_monitor_instance (id);
+				_monitor_instance.begin (id);
 			}
 
 			return id;
