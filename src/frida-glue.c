@@ -12,13 +12,13 @@ frida_init (void)
 {
   static gsize frida_initialized = FALSE;
 
-  if (g_once_init_enter (&frida_initialized))
-  {
 #if GLIB_CHECK_VERSION (2, 42, 0)
-    glib_init ();
-    gio_init ();
+  glib_init ();
+  gio_init ();
 #endif
 
+  if (g_once_init_enter (&frida_initialized))
+  {
     main_context = g_main_context_ref (g_main_context_default ());
     main_loop = g_main_loop_new (main_context, FALSE);
     main_thread = g_thread_new ("frida-main-loop", run_main_loop, NULL);
