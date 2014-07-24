@@ -25,11 +25,6 @@
 #endif
 #include <sys/wait.h>
 
-#if defined (HAVE_I386)
-# define FRIDA_SIGBKPT SIGTRAP
-#elif defined (HAVE_ARM)
-# define FRIDA_SIGBKPT SIGBUS
-#endif
 #define FRIDA_RTLD_DLOPEN (0x80000000)
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
@@ -52,6 +47,8 @@
 #define FRIDA_REMOTE_STACK_OFFSET (FRIDA_REMOTE_PAYLOAD_SIZE - 512)
 #define FRIDA_REMOTE_DATA_FIELD(n) \
   GSIZE_TO_POINTER (remote_address + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
+
+#define FRIDA_DUMMY_RETURN_ADDRESS 0x320
 
 typedef struct _FridaInjectionInstance FridaInjectionInstance;
 typedef struct _FridaInjectionParams FridaInjectionParams;
@@ -122,6 +119,7 @@ static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddr
 
 static gboolean frida_wait_for_attach_signal (pid_t pid);
 static gboolean frida_wait_for_child_signal (pid_t pid, int signal);
+static gboolean frida_wait_for_child_breakpoint (pid_t pid);
 
 static GumAddress frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
 #ifdef HAVE_ANDROID
@@ -130,10 +128,6 @@ static GumAddress frida_resolve_remote_linker_function (int remote_pid, gpointer
 
 static GumAddress frida_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
-
-static GumAddress frida_find_landing_strip (pid_t pid);
-
-static gboolean frida_examine_range_for_landing_strip (const GumRangeDetails * details, gpointer user_data);
 
 static FridaInjectionInstance *
 frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid, const char * temp_path)
@@ -637,14 +631,11 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   long ret;
   const gchar * failed_operation;
   regs_t regs;
-  GumAddress return_address;
   gint i;
   gboolean success;
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
-
-  return_address = frida_find_landing_strip (pid);
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   regs.orig_eax = -1;
@@ -660,7 +651,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   }
 
   regs.rsp -= 4;
-  ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.esp), GSIZE_TO_POINTER (return_address));
+  ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.esp), GSIZE_TO_POINTER (FRIDA_DUMMY_RETURN_ADDRESS));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.orig_rax = -1;
@@ -703,7 +694,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   }
 
   regs.rsp -= 8;
-  ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.rsp), GSIZE_TO_POINTER (return_address));
+  ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.rsp), GSIZE_TO_POINTER (FRIDA_DUMMY_RETURN_ADDRESS));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_ARM)
   if ((func & 1) != 0)
@@ -730,7 +721,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
   }
 
-  regs.ARM_lr = return_address;
+  regs.ARM_lr = FRIDA_DUMMY_RETURN_ADDRESS;
 #endif
 
   ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
@@ -739,7 +730,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_signal (pid, FRIDA_SIGBKPT);
+  success = frida_wait_for_child_signal (pid, SIGSEGV);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
@@ -803,7 +794,7 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_signal (pid, FRIDA_SIGBKPT);
+  success = frida_wait_for_child_breakpoint (pid);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   if (result != NULL)
@@ -872,6 +863,19 @@ frida_wait_for_child_signal (pid_t pid, int signal)
     return FALSE;
 
   return WSTOPSIG (status) == signal;
+}
+
+static gboolean
+frida_wait_for_child_breakpoint (pid_t pid)
+{
+  int status = 0;
+  pid_t res;
+
+  res = waitpid (pid, &status, 0);
+  if (res != pid || !WIFSTOPPED (status))
+    return FALSE;
+
+  return (WSTOPSIG (status) == SIGTRAP) || (WSTOPSIG (status) == SIGBUS);
 }
 
 static GumAddress
@@ -1000,87 +1004,4 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   fclose (fp);
 
   return result;
-}
-
-static GumAddress
-frida_find_landing_strip (pid_t pid)
-{
-  FridaFindLandingStripContext ctx;
-
-  ctx.pid = pid;
-  ctx.result = 0;
-
-  gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_landing_strip, &ctx);
-
-  return ctx.result;
-}
-
-static gboolean
-frida_examine_range_for_landing_strip (const GumRangeDetails * details, gpointer user_data)
-{
-  FridaFindLandingStripContext * ctx = (FridaFindLandingStripContext *) user_data;
-  const GumMemoryRange * range = details->range;
-  GumAddress cur, end;
-
-  cur = range->base_address;
-  end = range->base_address + range->size;
-
-  while (ctx->result == 0 && cur < end)
-  {
-    long ret;
-    gsize val;
-
-    errno = 0;
-    ret = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (cur), NULL);
-    if (ret == -1 && errno != 0)
-      break;
-
-    val = (gsize) ret;
-
-#if defined (HAVE_I386)
-# define GUM_X86_INSN_INT3 0xcc
-    {
-      guint i;
-
-      for (i = 0; i != 8; i++)
-      {
-        if ((val & 0xff) == GUM_X86_INSN_INT3)
-        {
-          ctx->result = cur + i;
-          break;
-        }
-
-        val >>= 8;
-      }
-    }
-#elif defined (HAVE_ARM)
-# define GUM_ARM_INSN_BKPT_T1 0xbe00
-# define GUM_ARM_INSN_BKPT_A1 0x1200070
-    {
-      guint i;
-
-      if ((val & 0xfff000f0) == GUM_ARM_INSN_BKPT_A1)
-      {
-        ctx->result = cur;
-      }
-      else
-      {
-        for (i = 0; i != 2; i++)
-        {
-          if ((val & 0xff00) == GUM_ARM_INSN_BKPT_T1)
-          {
-            ctx->result = cur + (i * 2) + 1;
-            break;
-          }
-
-          val >>= 16;
-        }
-      }
-    }
-#endif
-
-    cur += 4;
-  }
-
-  return ctx->result == 0;
 }
