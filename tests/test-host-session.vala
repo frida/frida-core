@@ -264,11 +264,13 @@ namespace Frida.HostSessionTest {
 
 			assert (prov.name == "Local System");
 
-			var icon = prov.icon;
-			assert (icon != null);
-			assert (icon.width == 16 && icon.height == 16);
-			assert (icon.rowstride == icon.width * 4);
-			assert (icon.pixels.length > 0);
+			if (Frida.Test.os () == Frida.Test.OS.MAC) {
+				var icon = prov.icon;
+				assert (icon != null);
+				assert (icon.width == 16 && icon.height == 16);
+				assert (icon.rowstride == icon.width * 4);
+				assert (icon.pixels.length > 0);
+			}
 
 			try {
 				var session = yield prov.create ();
