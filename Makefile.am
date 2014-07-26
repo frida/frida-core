@@ -76,6 +76,6 @@ check: all
 		"${RURL}:\"${RPFX}/tests/\""
 	${RSYNC} \
 		"$(top_builddir)/lib/agent/.libs/libfrida-agent.dylib" \
-		"${RURL}:\"${RPFX}/lib/frida/frida-agent.dylib\""
+		"${RURL}:\"${RPFX}/lib/frida/libfrida-agent.dylib\""
 	ssh "${RURL}" "\"${RPFX}/tests/frida-tests\""
 endif
