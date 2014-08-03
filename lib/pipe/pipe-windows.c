@@ -1,4 +1,11 @@
-#include "frida-pipe.h"
+#ifdef _MSC_VER
+# pragma warning (push)
+# pragma warning (disable: 4028 4090 4100)
+#endif
+#include "pipe.c"
+#ifdef _MSC_VER
+# pragma warning (pop)
+#endif
 
 #include <windows.h>
 #include <aclapi.h>
@@ -222,8 +229,9 @@ handle_error:
 }
 
 gssize
-frida_pipe_input_stream_real_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
+  FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
   FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
   gssize result = -1;
   OVERLAPPED overlapped = { 0, };
@@ -260,8 +268,9 @@ beach:
 }
 
 gssize
-frida_pipe_output_stream_real_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
+  FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
   FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
   gssize result = -1;
   OVERLAPPED overlapped = { 0, };
