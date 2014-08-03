@@ -14,7 +14,7 @@ namespace Frida {
 			private set;
 		}
 
-		private bool is_closed = false;
+		private Gee.Promise<bool> close_request;
 
 		private HostSessionService service = null;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
@@ -30,10 +30,6 @@ namespace Frida {
 		}
 
 		public async void close () {
-			if (is_closed)
-				return;
-			is_closed = true;
-
 			yield _do_close ();
 		}
 
@@ -99,15 +95,26 @@ namespace Frida {
 		}
 
 		private async void _do_close () {
-			if (service == null)
+			if (close_request != null) {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 				return;
+			}
+			close_request = new Gee.Promise<bool> ();
 
-			foreach (var device in devices.to_array ())
-				yield device._do_close (true);
-			devices.clear ();
+			if (service != null) {
+				foreach (var device in devices.to_array ())
+					yield device._do_close (true);
+				devices.clear ();
 
-			yield service.stop ();
-			service = null;
+				yield service.stop ();
+				service = null;
+			}
+
+			close_request.set_value (true);
 		}
 
 		private Object create<T> () {
@@ -121,7 +128,7 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.is_closed)
+				if (parent.close_request != null)
 					throw new IOError.FAILED ("invalid operation (manager is closed)");
 			}
 		}
@@ -177,7 +184,7 @@ namespace Frida {
 		}
 
 		private weak DeviceManager manager;
-		private bool is_closed = false;
+		private Gee.Promise<bool> close_request;
 
 		protected HostSession host_session;
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
@@ -302,14 +309,21 @@ namespace Frida {
 		}
 
 		public async void _do_close (bool may_block) {
-			if (is_closed)
+			if (close_request != null) {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 				return;
-			is_closed = true;
+			}
+			close_request = new Gee.Promise<bool> ();
 
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
 
-			foreach (var session in session_by_pid.values.to_array ())
+			foreach (var session in session_by_pid.values.to_array ()) {
 				yield session._do_close (may_block);
+			}
 			session_by_pid.clear ();
 			session_by_handle.clear ();
 
@@ -319,6 +333,8 @@ namespace Frida {
 			manager = null;
 
 			lost ();
+
+			close_request.set_value (true);
 		}
 
 		public void _release_session (Session session) {
@@ -359,7 +375,7 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.is_closed)
+				if (parent.close_request != null)
 					throw new IOError.FAILED ("invalid operation (device is gone)");
 			}
 		}
@@ -464,7 +480,7 @@ namespace Frida {
 		}
 
 		private weak Device device;
-		private bool is_closed = false;
+		private Gee.Promise<bool> close_request;
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
@@ -531,9 +547,15 @@ namespace Frida {
 		}
 
 		public async void _do_close (bool may_block) {
-			if (is_closed)
+			if (close_request != null) {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 				return;
-			is_closed = true;
+			}
+			close_request = new Gee.Promise<bool> ();
 
 			foreach (var script in script_by_id.values.to_array ())
 				yield script._do_unload (may_block);
@@ -551,6 +573,7 @@ namespace Frida {
 			device = null;
 
 			detached ();
+			close_request.set_value (true);
 		}
 
 		private Object create<T> () {
@@ -564,7 +587,7 @@ namespace Frida {
 			}
 
 			protected override void validate_operation () throws Error {
-				if (parent.is_closed)
+				if (parent.close_request != null)
 					throw new IOError.FAILED ("invalid operation (detached from session)");
 			}
 		}
