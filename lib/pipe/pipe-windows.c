@@ -222,7 +222,7 @@ handle_error:
 }
 
 gssize
-_frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_real_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
   gssize result = -1;
@@ -260,7 +260,7 @@ beach:
 }
 
 gssize
-_frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_real_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
   gssize result = -1;

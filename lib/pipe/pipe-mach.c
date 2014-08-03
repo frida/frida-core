@@ -191,7 +191,7 @@ frida_pipe_backend_on_tx_port_dead (void * context)
 }
 
 gssize
-_frida_pipe_input_stream_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_real_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeBackend * backend = self->_backend;
   FridaPipeMessage * msg = NULL;
@@ -290,7 +290,7 @@ frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_dat
 }
 
 gssize
-_frida_pipe_output_stream_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_real_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeBackend * backend = self->_backend;
   guint msg_size;

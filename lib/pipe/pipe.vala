@@ -88,11 +88,7 @@ namespace Frida {
 			return true;
 		}
 
-		public override ssize_t read (uint8[] buffer, Cancellable? cancellable = null) throws IOError {
-			return _read (buffer, cancellable);
-		}
-
-		public extern ssize_t _read (uint8[] buffer, Cancellable? cancellable) throws IOError;
+		public override extern ssize_t read (uint8[] buffer, Cancellable? cancellable = null) throws IOError;
 	}
 
 	public class PipeOutputStream : OutputStream {
@@ -106,10 +102,6 @@ namespace Frida {
 			return true;
 		}
 
-		public override ssize_t write (uint8[] buffer, Cancellable? cancellable = null) throws IOError {
-			return _write (buffer, cancellable);
-		}
-
-		public extern ssize_t _write (uint8[] buffer, Cancellable? cancellable) throws IOError;
+		public override extern ssize_t write (uint8[] buffer, Cancellable? cancellable = null) throws IOError;
 	}
 }
