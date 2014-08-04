@@ -460,8 +460,9 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 
   gum_thumb_writer_put_call_reg_with_arguments (&cw,
       GUM_AREG_R5,
-      1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)));
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_remote_linker_function (params->pid, dlclose),
