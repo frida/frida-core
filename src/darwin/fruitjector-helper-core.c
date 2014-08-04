@@ -803,6 +803,7 @@ static void frida_agent_context_emit_arm_pthread_setup (FridaAgentContext * self
 static void frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, FridaEmitContext * ctx);
 static void frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaEmitContext * ctx);
 static void frida_agent_context_emit_arm_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
+static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, GumArmReg reg, GumThumbWriter * tw);
 
 static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code);
 static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code);
