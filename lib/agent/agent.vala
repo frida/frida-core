@@ -119,6 +119,7 @@ namespace Frida.Agent {
 	public class AutoIgnorer : Object, Gum.InvocationListener {
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange? agent_range;
+		private Gum.ThreadId parent_thread_id;
 
 		construct {
 			Gum.Process.enumerate_modules ((details) => {
@@ -130,12 +131,15 @@ namespace Frida.Agent {
 			});
 		}
 
-		public AutoIgnorer (Gum.Interceptor interceptor) {
+		public AutoIgnorer (Gum.Interceptor interceptor, Gum.ThreadId parent_thread_id = 0) {
 			this.interceptor = interceptor;
+			this.parent_thread_id = parent_thread_id;
 		}
 
 		public void enable () {
-			Gum.Script.ignore_current_thread ();
+			if (parent_thread_id != 0)
+				Gum.Script.ignore (parent_thread_id);
+			Gum.Script.ignore (Gum.Process.get_current_thread_id ());
 
 			interceptor.attach_listener (get_address_of_thread_create_func (), this);
 		}
@@ -143,7 +147,9 @@ namespace Frida.Agent {
 		public void disable () {
 			interceptor.detach_listener (this);
 
-			Gum.Script.unignore_current_thread ();
+			Gum.Script.unignore (Gum.Process.get_current_thread_id ());
+			if (parent_thread_id != 0)
+				Gum.Script.unignore (parent_thread_id);
 		}
 
 		private void on_enter (Gum.InvocationContext context) {
@@ -157,27 +163,27 @@ namespace Frida.Agent {
 		private extern void intercept_thread_creation (Gum.InvocationContext context);
 	}
 
-	public void main (string pipe_address) {
+	public void main (string pipe_address, Gum.ThreadId parent_thread_id) {
 		Environment.init ();
-		run_server_listening_on (pipe_address);
-		Environment.deinit ();
-	}
 
-	private void run_server_listening_on (string pipe_address) {
-		var interceptor = Gum.Interceptor.obtain ();
+		{
+			var interceptor = Gum.Interceptor.obtain ();
 
-		var ignorer = new AutoIgnorer (interceptor);
-		ignorer.enable ();
+			var ignorer = new AutoIgnorer (interceptor, parent_thread_id);
+			ignorer.enable ();
 
-		var server = new AgentServer (pipe_address);
+			var server = new AgentServer (pipe_address);
 
-		try {
-			server.run ();
-		} catch (Error e) {
-			printerr ("error: %s\n", e.message);
+			try {
+				server.run ();
+			} catch (Error e) {
+				printerr ("error: %s\n", e.message);
+			}
+
+			ignorer.disable ();
 		}
 
-		ignorer.disable ();
+		Environment.deinit ();
 	}
 
 	namespace Environment {

@@ -365,8 +365,9 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
       GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
 
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (data_string));
+      2,
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (data_string),
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (0));
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
       frida_resolve_remote_libc_function (params->pid, "__libc_dlclose"));

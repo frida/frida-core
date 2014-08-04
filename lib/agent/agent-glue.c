@@ -115,17 +115,20 @@ frida_agent_auto_ignorer_intercept_thread_creation (FridaAgentAutoIgnorer * self
 static NativeThreadFuncReturnType
 frida_agent_auto_ignorer_thread_create_proxy (void * data)
 {
+  GumThreadId current_thread_id;
   FridaAutoInterceptContext * ctx = data;
   NativeThreadFuncReturnType result;
 
-  gum_script_ignore_current_thread ();
+  current_thread_id = gum_process_get_current_thread_id ();
+
+  gum_script_ignore (current_thread_id);
 
   result = ctx->thread_func (ctx->thread_data);
 
   g_object_unref (ctx->interceptor);
   g_slice_free (FridaAutoInterceptContext, ctx);
 
-  gum_script_unignore_current_thread ();
+  gum_script_unignore (current_thread_id);
 
   return result;
 }
