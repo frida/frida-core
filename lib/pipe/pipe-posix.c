@@ -1,4 +1,11 @@
-#include "frida-pipe.h"
+#ifdef __clang__
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wincompatible-pointer-types"
+#endif
+#include "pipe.c"
+#ifdef __clang__
+# pragma clang diagnostic pop
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -200,8 +207,9 @@ _frida_pipe_close (FridaPipe * self, GError ** error)
 }
 
 gssize
-frida_pipe_input_stream_real_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
+  FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
 
   if (!frida_pipe_backend_connect (backend, cancellable, error))
@@ -211,8 +219,9 @@ frida_pipe_input_stream_real_read (FridaPipeInputStream * self, guint8 * buffer,
 }
 
 gssize
-frida_pipe_output_stream_real_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
+  FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
 
   if (!frida_pipe_backend_connect (backend, cancellable, error))

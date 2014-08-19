@@ -1,4 +1,11 @@
-#include "frida-pipe.h"
+#ifdef __clang__
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wincompatible-pointer-types"
+#endif
+#include "pipe.c"
+#ifdef __clang__
+# pragma clang diagnostic pop
+#endif
 
 #include <stdio.h>
 #include <dispatch/dispatch.h>
@@ -191,8 +198,9 @@ frida_pipe_backend_on_tx_port_dead (void * context)
 }
 
 gssize
-frida_pipe_input_stream_real_read (FridaPipeInputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
+  FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
   FridaPipeMessage * msg = NULL;
   kern_return_t ret;
@@ -290,8 +298,9 @@ frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_dat
 }
 
 gssize
-frida_pipe_output_stream_real_write (FridaPipeOutputStream * self, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
+  FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
   guint msg_size;
   FridaPipeMessage * msg;
