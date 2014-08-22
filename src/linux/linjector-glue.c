@@ -2,7 +2,6 @@
 
 #include <gio/gunixinputstream.h>
 #ifdef HAVE_I386
-# include <udis86.h>
 # include <gum/arch-x86/gumx86writer.h>
 #endif
 #ifdef HAVE_ARM
