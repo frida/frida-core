@@ -197,7 +197,7 @@ frida_pipe_backend_on_tx_port_dead (void * context)
   frida_pipe_backend_close_ports (self, NULL);
 }
 
-gssize
+static gssize
 frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
@@ -297,7 +297,7 @@ frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_dat
   mach_msg_send (&msg.header);
 }
 
-gssize
+static gssize
 frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);

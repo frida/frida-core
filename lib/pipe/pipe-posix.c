@@ -206,7 +206,7 @@ _frida_pipe_close (FridaPipe * self, GError ** error)
   return TRUE;
 }
 
-gssize
+static gssize
 frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
@@ -218,7 +218,7 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
   return g_input_stream_read (backend->input, buffer, buffer_length, cancellable, error);
 }
 
-gssize
+static gssize
 frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
 {
   FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
