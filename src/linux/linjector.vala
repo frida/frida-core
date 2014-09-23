@@ -5,7 +5,25 @@ namespace Frida {
 	public class Linjector : Object {
 		public signal void uninjected (uint id);
 
-		private ResourceStore resource_store;
+		public string temp_directory {
+			owned get {
+				return resource_store.tempdir.path;
+			}
+		}
+
+		private ResourceStore resource_store {
+			get {
+				if (_resource_store == null) {
+					try {
+						_resource_store = new ResourceStore ();
+					} catch (IOError e) {
+						assert_not_reached ();
+					}
+				}
+				return _resource_store;
+			}
+		}
+		private ResourceStore _resource_store;
 
 		/* these should be private, but must be accessible to glue code */
 		private MainContext main_context;
@@ -22,9 +40,6 @@ namespace Frida {
 		}
 
 		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
-			if (resource_store == null) {
-				resource_store = new ResourceStore ();
-			}
 			var filename = resource_store.ensure_copy_of (desc);
 
 			var id = _do_inject (pid, filename, data_string, resource_store.tempdir.path);
@@ -119,6 +134,7 @@ namespace Frida {
 
 			public ResourceStore () throws IOError {
 				tempdir = new TemporaryDirectory ();
+				FileUtils.chmod (tempdir.path, 0755);
 			}
 
 			~ResourceStore () {
@@ -131,6 +147,7 @@ namespace Frida {
 				var temp_agent = agents[desc.name];
 				if (temp_agent == null) {
 					temp_agent = new TemporaryFile.from_stream (desc.name, desc.sofile, tempdir);
+					FileUtils.chmod (temp_agent.path, 0755);
 					agents[desc.name] = temp_agent;
 				}
 				return temp_agent.path;

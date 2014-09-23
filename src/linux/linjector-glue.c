@@ -132,6 +132,7 @@ static FridaInjectionInstance *
 frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid, const char * temp_path)
 {
   FridaInjectionInstance * instance;
+  const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   int ret;
 
   instance = g_slice_new0 (FridaInjectionInstance);
@@ -140,7 +141,9 @@ frida_injection_instance_new (FridaLinjector * linjector, guint id, pid_t pid, c
   instance->pid = pid;
   instance->already_attached = FALSE;
   instance->fifo_path = g_strdup_printf ("%s/linjector-%d", temp_path, pid);
-  ret = mkfifo (instance->fifo_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+  ret = mkfifo (instance->fifo_path, mode);
+  g_assert_cmpint (ret, ==, 0);
+  ret = chmod (instance->fifo_path, mode);
   g_assert_cmpint (ret, ==, 0);
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
   g_assert_cmpint (instance->fifo, !=, -1);

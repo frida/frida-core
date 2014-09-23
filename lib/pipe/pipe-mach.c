@@ -44,6 +44,12 @@ static void frida_pipe_backend_on_tx_port_dead (void * context);
 
 static void frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
 
+void
+frida_pipe_transport_set_temp_directory (const gchar * path)
+{
+  (void) path;
+}
+
 void *
 _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {

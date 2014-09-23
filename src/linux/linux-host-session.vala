@@ -101,6 +101,7 @@ namespace Frida {
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError {
+			PipeTransport.set_temp_directory (injector.temp_directory);
 			var pipe_transport = new PipeTransport ();
 			var stream = new Pipe (pipe_transport.local_address);
 			yield injector.inject (pid, agent_desc, pipe_transport.remote_address);

@@ -61,26 +61,48 @@ static gboolean frida_pipe_backend_connect (FridaPipeBackend * backend, GCancell
 static void frida_pipe_fd_enable_blocking (int fd);
 static gchar * frida_pipe_generate_name (void);
 
+static gchar * temp_directory = NULL;
+
+static const gchar *
+frida_pipe_transport_get_temp_directory (void)
+{
+  if (temp_directory != NULL)
+    return temp_directory;
+  else
+    return FRIDA_TEMP_PATH;
+}
+
+void
+frida_pipe_transport_set_temp_directory (const gchar * path)
+{
+  g_free (temp_directory);
+  temp_directory = g_strdup (path);
+}
+
 void *
 _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   FridaPipeTransportBackend * backend;
+  const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   int ret;
   const gchar * failed_operation;
-  mode_t saved_umask;
 
   backend = g_slice_new (FridaPipeTransportBackend);
 
   backend->local_name = frida_pipe_generate_name ();
   backend->remote_name = frida_pipe_generate_name ();
 
-  saved_umask = umask (0);
-
-  ret = mkfifo (backend->local_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+  ret = mkfifo (backend->local_name, mode);
   CHECK_POSIX_RESULT (ret, ==, 0, "mkfifo");
 
-  ret = mkfifo (backend->remote_name, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+  ret = chmod (backend->local_name, mode);
+  CHECK_POSIX_RESULT (ret, ==, 0, "chmod");
+
+  ret = mkfifo (backend->remote_name, mode);
   CHECK_POSIX_RESULT (ret, ==, 0, "mkfifo");
+
+  ret = chmod (backend->remote_name, mode);
+  CHECK_POSIX_RESULT (ret, ==, 0, "chmod");
 
   *local_address = g_strdup_printf ("pipe:role=server,rx=%s,tx=%s", backend->local_name, backend->remote_name);
   *remote_address = g_strdup_printf ("pipe:role=client,rx=%s,tx=%s", backend->remote_name, backend->local_name);
@@ -99,8 +121,6 @@ handle_posix_error:
   }
 beach:
   {
-    umask (saved_umask);
-
     return backend;
   }
 }
@@ -297,7 +317,8 @@ frida_pipe_generate_name (void)
   GString * s;
   guint i;
 
-  s = g_string_new (FRIDA_TEMP_PATH "/frida-");
+  s = g_string_new (frida_pipe_transport_get_temp_directory ());
+  g_string_append (s, "/pipe-");
   for (i = 0; i != 16; i++)
     g_string_append_printf (s, "%02x", g_random_int_range (0, 255));
 

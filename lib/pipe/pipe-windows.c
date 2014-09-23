@@ -46,6 +46,12 @@ static WCHAR * frida_pipe_path_from_name (const gchar * name);
 static gboolean frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
 static void frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
 
+void
+frida_pipe_transport_set_temp_directory (const gchar * path)
+{
+  (void) path;
+}
+
 void *
 _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {

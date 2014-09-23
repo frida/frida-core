@@ -263,10 +263,12 @@ namespace Frida {
 
 			public ResourceStore () throws IOError {
 				tempdir = new TemporaryDirectory ();
+				FileUtils.chmod (tempdir.path, 0755);
 				var blob = Frida.Data.Fruitjector.get_frida_fruitjector_helper_blob ();
 				helper = new TemporaryFile.from_stream ("frida-fruitjector-helper",
 					new MemoryInputStream.from_data (blob.data, null),
 					tempdir);
+				FileUtils.chmod (helper.path, 0700);
 			}
 
 			~ResourceStore () {
@@ -283,6 +285,7 @@ namespace Frida {
 				if (temp_agent == null) {
 					var dylib = clone_dylib (desc.dylib);
 					temp_agent = new TemporaryFile.from_stream (desc.name, dylib, tempdir);
+					FileUtils.chmod (temp_agent.path, 0755);
 					agents[desc.name] = temp_agent;
 				}
 				return temp_agent.path;

@@ -23,6 +23,8 @@ namespace Frida {
 			_destroy_backend (_backend);
 		}
 
+		public static extern void set_temp_directory (string path);
+
 		public static extern void * _create_backend (out string local_address, out string remote_address) throws IOError;
 		public static extern void _destroy_backend (void * backend);
 	}
