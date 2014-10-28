@@ -997,10 +997,12 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_SP);
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_push_reg_reg (&ctx.aw, GUM_A64REG_X21, GUM_A64REG_X22);
   frida_agent_context_emit_arm64_thread_id_setup (self, &ctx);
   frida_agent_context_emit_arm64_pthread_setup (self, &ctx);
   frida_agent_context_emit_arm64_pthread_create_and_join (self, &ctx);
   frida_agent_context_emit_arm64_thread_terminate (self, &ctx);
+  gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_X21, GUM_A64REG_X22);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_X19, GUM_A64REG_X20);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, GUM_A64REG_FP, GUM_A64REG_LR);
   gum_arm64_writer_put_ret (&ctx.aw);
@@ -1053,7 +1055,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
   EMIT_ARM64_CALL (X8);
   EMIT_ARM64_MOVE (X8, X0);
 
-  EMIT_ARM64_MOVE (X1, X9);
+  EMIT_ARM64_LOAD (X1, thread_id);
   EMIT_ARM64_LOAD (X0, data_string);
   EMIT_ARM64_CALL (X8);
 
@@ -1067,8 +1069,8 @@ frida_agent_context_emit_arm64_thread_id_setup (FridaAgentContext * self, FridaE
 {
   EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
   EMIT_ARM64_CALL (X8);
-  EMIT_ARM64_MOVE (X9, X0);
-  EMIT_ARM64_STORE (thread_id, X9);
+  EMIT_ARM64_MOVE (X21, X0);
+  EMIT_ARM64_STORE (thread_id, X21);
 }
 
 static void
@@ -1108,7 +1110,7 @@ frida_agent_context_emit_arm64_pthread_create_and_join (FridaAgentContext * self
 static void
 frida_agent_context_emit_arm64_thread_terminate (FridaAgentContext * self, FridaEmitContext * ctx)
 {
-  EMIT_ARM64_MOVE (X0, X9);
+  EMIT_ARM64_MOVE (X0, X21);
   EMIT_ARM64_LOAD (X8, thread_terminate_impl);
   EMIT_ARM64_CALL (X8);
 }
