@@ -11,6 +11,8 @@
 #include <dispatch/dispatch.h>
 #include <mach/mach.h>
 
+#define FRIDA_PIPE_MAX_WRITE_SIZE (10 * 1024 * 1024)
+
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
@@ -308,11 +310,13 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
 {
   FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
+  gint len;
   guint msg_size;
   FridaPipeMessage * msg;
   kern_return_t ret;
 
-  msg_size = (sizeof (FridaPipeMessage) + buffer_length + 3) & ~3;
+  len = MIN (buffer_length, FRIDA_PIPE_MAX_WRITE_SIZE);
+  msg_size = (sizeof (FridaPipeMessage) + len + 3) & ~3;
   msg = g_malloc (msg_size);
   msg->header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, 0);
   msg->header.msgh_size = msg_size;
@@ -320,14 +324,14 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
   msg->header.msgh_local_port = MACH_PORT_NULL;
   msg->header.msgh_reserved = 0;
   msg->header.msgh_id = 1;
-  msg->size = buffer_length;
-  memcpy (msg->payload, buffer, buffer_length);
+  msg->size = len;
+  memcpy (msg->payload, buffer, len);
   ret = mach_msg_send (&msg->header);
   g_free (msg);
   if (ret != 0)
     goto handle_error;
 
-  return buffer_length;
+  return len;
 
 handle_error:
   {
