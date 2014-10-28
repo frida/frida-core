@@ -4,6 +4,8 @@ namespace Frida {
 	public extern void deinit ();
 	public extern unowned MainContext get_main_context ();
 
+	public extern void unref (void * obj);
+
 	public class DeviceManager : Object {
 		public signal void added (Device device);
 		public signal void removed (Device device);
@@ -22,11 +24,6 @@ namespace Frida {
 
 		public DeviceManager () {
 			this.main_context = get_main_context ();
-		}
-
-		public override void dispose () {
-			close_sync ();
-			base.dispose ();
 		}
 
 		public async void close () {

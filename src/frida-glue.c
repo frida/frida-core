@@ -5,6 +5,7 @@ static GMainLoop * main_loop;
 static GMainContext * main_context;
 
 static gpointer run_main_loop (gpointer data);
+static gboolean dummy_callback (gpointer data);
 static gboolean stop_main_loop (gpointer data);
 
 void
@@ -25,6 +26,18 @@ frida_init (void)
 
     g_once_init_leave (&frida_initialized, TRUE);
   }
+}
+
+void
+frida_unref (gpointer obj)
+{
+  GSource * source;
+
+  source = g_idle_source_new ();
+  g_source_set_priority (source, G_PRIORITY_HIGH);
+  g_source_set_callback (source, dummy_callback, obj, g_object_unref);
+  g_source_attach (source, main_context);
+  g_source_unref (source);
 }
 
 void
@@ -79,6 +92,14 @@ run_main_loop (gpointer data)
   g_main_context_pop_thread_default (main_context);
 
   return NULL;
+}
+
+static gboolean
+dummy_callback (gpointer data)
+{
+  (void) data;
+
+  return FALSE;
 }
 
 static gboolean

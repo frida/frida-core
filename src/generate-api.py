@@ -231,6 +231,9 @@ if __name__ == '__main__':
                 output_header_file.write("\nvoid frida_deinit (void);")
                 output_header_file.write("\nGMainContext * frida_get_main_context (void);")
 
+                output_header_file.write("\n\n/* Object lifetime */")
+                output_header_file.write("\nvoid frida_unref (gpointer obj);")
+
                 for klass in api_classes:
                     output_header_file.write("\n\n/* %s */" % klass.name)
                     sections = []
