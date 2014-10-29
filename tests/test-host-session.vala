@@ -28,6 +28,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Fruity.backend.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/large-messages", () => {
+			var h = new Harness ((h) => Fruity.large_messages.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if LINUX
@@ -511,6 +516,82 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
+			} catch (IOError e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+
+			h.done ();
+		}
+
+		private static async void large_messages (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+				h.done ();
+				return;
+			}
+
+			var backend = new FruityHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			h.disable_timeout (); /* this is a manual test after all */
+			yield h.wait_for_provider ();
+			var prov = h.first_provider ();
+
+			try {
+				stdout.printf ("connecting to frida-server\n");
+				var host_session = yield prov.create ();
+				stdout.printf ("enumerating processes\n");
+				var processes = yield host_session.enumerate_processes ();
+				assert (processes.length > 0);
+
+				HostProcessInfo? process = null;
+				foreach (var p in processes) {
+					if (p.name == "hello-frida") {
+						process = p;
+						break;
+					}
+				}
+				assert (process != null);
+
+				stdout.printf ("attaching to target process\n");
+				var session_id = yield host_session.attach_to (process.pid);
+				var session = yield prov.obtain_agent_session (session_id);
+				string received_message = null;
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					received_message = message;
+					large_messages.callback ();
+				});
+				stdout.printf ("creating script\n");
+				var script_id = yield session.create_script (
+					"function onMessage(message) {" +
+					"  send(\"ACK: \" + message.length);" +
+					"  recv(onMessage);" +
+					"}" +
+					"recv(onMessage);"
+				);
+				stdout.printf ("loading script\n");
+				yield session.load_script (script_id);
+				var steps = new uint[] { 1024, 4096, 8192, 16384, 32768 };
+				var transport_overhead = 163;
+				foreach (var step in steps) {
+					var builder = new StringBuilder ();
+					builder.append ("\"");
+					for (var i = 0; i != step - transport_overhead; i++) {
+						builder.append ("s");
+					}
+					builder.append ("\"");
+					yield session.post_message_to_script (script_id, builder.str);
+					yield;
+					stdout.printf ("received message: '%s'\n", received_message);
+				}
+				session.disconnect (message_handler);
+
+				yield session.destroy_script (script_id);
+				yield session.close ();
 			} catch (IOError e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
