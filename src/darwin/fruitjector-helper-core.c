@@ -132,10 +132,6 @@ static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaA
     vm_address_t remote_payload_base, GError ** error);
 static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details,
     GError ** error);
-static gboolean frida_agent_context_init_functions_the_easy_way (FridaAgentContext * self,
-    const FridaAgentDetails * details, GError ** error);
-static gboolean frida_agent_context_init_functions_the_hard_way (FridaAgentContext * self,
-    const FridaAgentDetails * details, GError ** error);
 static gboolean frida_fill_function_if_matching (const GumExportDetails * details, gpointer user_data);
 
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type);
@@ -512,72 +508,6 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 
 static gboolean
 frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details, GError ** error)
-{
-  GumCpuType own_cpu_type;
-  if (!gum_darwin_cpu_type_from_pid (getpid (), &own_cpu_type))
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe cpu type");
-    return FALSE;
-  }
-
-  if (details->cpu_type == own_cpu_type)
-    return frida_agent_context_init_functions_the_easy_way (self, details, error);
-  else
-    return frida_agent_context_init_functions_the_hard_way (self, details, error);
-}
-
-#define FRIDA_CTX_ASSIGN_FUNCTION(field) \
-  self->field##_impl = GUM_ADDRESS (dlsym (syslib_handle, G_STRINGIFY (field))); \
-  CHECK_DL_RESULT (self->field##_impl, !=, 0, "dlsym(\"" G_STRINGIFY (field) "\")")
-#define FRIDA_CTX_TRY_ASSIGN_FUNCTION(field) \
-  self->field##_impl = GUM_ADDRESS (dlsym (syslib_handle, G_STRINGIFY (field)))
-#define CHECK_DL_RESULT(n1, cmp, n2, op) \
-  if (!(n1 cmp n2)) \
-  { \
-    failed_operation = op; \
-    goto handle_dl_error; \
-  }
-
-static gboolean
-frida_agent_context_init_functions_the_easy_way (FridaAgentContext * self, const FridaAgentDetails * details, GError ** error)
-{
-  gboolean result = FALSE;
-  void * syslib_handle;
-  const gchar * failed_operation;
-
-  syslib_handle = dlopen (FRIDA_SYSTEM_LIBC, RTLD_LAZY | RTLD_GLOBAL);
-  CHECK_DL_RESULT (syslib_handle, !=, NULL, "dlopen");
-
-  FRIDA_CTX_ASSIGN_FUNCTION (_pthread_set_self);
-  FRIDA_CTX_TRY_ASSIGN_FUNCTION (cthread_set_self);
-  FRIDA_CTX_ASSIGN_FUNCTION (pthread_create);
-  FRIDA_CTX_ASSIGN_FUNCTION (pthread_join);
-  FRIDA_CTX_ASSIGN_FUNCTION (thread_terminate);
-  FRIDA_CTX_ASSIGN_FUNCTION (mach_thread_self);
-  FRIDA_CTX_ASSIGN_FUNCTION (dlopen);
-  FRIDA_CTX_ASSIGN_FUNCTION (dlsym);
-  FRIDA_CTX_ASSIGN_FUNCTION (dlclose);
-
-  result = TRUE;
-  goto beach;
-
-handle_dl_error:
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %s", failed_operation, dlerror ());
-    goto beach;
-  }
-
-beach:
-  {
-    if (syslib_handle != NULL)
-      dlclose (syslib_handle);
-    return result;
-  }
-}
-
-static gboolean
-frida_agent_context_init_functions_the_hard_way (FridaAgentContext * self, const FridaAgentDetails * details, GError ** error)
 {
   FridaFillContext fill_ctx;
   gboolean resolved_all;

@@ -3,7 +3,6 @@
 #include "icon-helpers.h"
 
 #include <dispatch/dispatch.h>
-#include <dlfcn.h>
 #include <errno.h>
 #ifdef HAVE_ARM
 # include <gum/arch-arm/gumthumbwriter.h>
@@ -95,8 +94,6 @@ static void frida_spawn_instance_on_task_dead (void * context);
 static void frida_spawn_instance_on_server_recv (void * context);
 
 static gboolean frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error);
-static gboolean frida_spawn_instance_find_remote_api_the_easy_way (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error);
-static gboolean frida_spawn_instance_find_remote_api_the_hard_way (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error);
 static gboolean frida_fill_function_if_matching (const GumExportDetails * details, gpointer user_data);
 
 static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error);
@@ -436,66 +433,6 @@ frida_spawn_instance_on_server_recv (void * context)
 
 static gboolean
 frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error)
-{
-  GumCpuType own_cpu_type;
-  if (!gum_darwin_cpu_type_from_pid (getpid (), &own_cpu_type))
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe cpu type");
-    return FALSE;
-  }
-
-  if (self->cpu_type == own_cpu_type)
-    return frida_spawn_instance_find_remote_api_the_easy_way (self, api, error);
-  else
-    return frida_spawn_instance_find_remote_api_the_hard_way (self, api, error);
-}
-
-#define FRIDA_REMOTE_API_ASSIGN_FUNCTION(field) \
-  api->field##_impl = GUM_ADDRESS (dlsym (syslib_handle, G_STRINGIFY (field))); \
-  CHECK_DL_RESULT (api->field##_impl, !=, 0, "dlsym(\"" G_STRINGIFY (field) "\")")
-#define CHECK_DL_RESULT(n1, cmp, n2, op) \
-  if (!(n1 cmp n2)) \
-  { \
-    failed_operation = op; \
-    goto handle_dl_error; \
-  }
-
-static gboolean
-frida_spawn_instance_find_remote_api_the_easy_way (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error)
-{
-  gboolean result = FALSE;
-  void * syslib_handle;
-  const gchar * failed_operation;
-
-  syslib_handle = dlopen (FRIDA_SYSTEM_LIBC, RTLD_LAZY | RTLD_GLOBAL);
-  CHECK_DL_RESULT (syslib_handle, !=, NULL, "dlopen");
-
-  FRIDA_REMOTE_API_ASSIGN_FUNCTION (mach_task_self);
-  FRIDA_REMOTE_API_ASSIGN_FUNCTION (mach_port_allocate);
-  FRIDA_REMOTE_API_ASSIGN_FUNCTION (mach_port_deallocate);
-  FRIDA_REMOTE_API_ASSIGN_FUNCTION (mach_msg);
-  FRIDA_REMOTE_API_ASSIGN_FUNCTION (abort);
-
-  result = TRUE;
-  goto beach;
-
-handle_dl_error:
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %s", failed_operation, dlerror ());
-    goto beach;
-  }
-
-beach:
-  {
-    if (syslib_handle != NULL)
-      dlclose (syslib_handle);
-    return result;
-  }
-}
-
-static gboolean
-frida_spawn_instance_find_remote_api_the_hard_way (FridaSpawnInstance * self, FridaRemoteApi * api, GError ** error)
 {
   FridaFillContext fill_ctx;
 
