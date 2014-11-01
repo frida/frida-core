@@ -82,10 +82,10 @@ namespace Frida {
 		public override async void close () {
 			yield base.close ();
 
-			while (injector.any_still_injected ()) {
-				injector.uninjected.connect ((id) => close.callback ());
+			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
+			while (injector.any_still_injected ())
 				yield;
-			}
+			injector.disconnect (uninjected_handler);
 
 			yield injector.close ();
 			injector = null;
