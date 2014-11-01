@@ -437,7 +437,7 @@ frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaRemoteApi 
   FridaFillContext fill_ctx;
 
   fill_ctx.api = api;
-  fill_ctx.remaining = 1;
+  fill_ctx.remaining = 5;
   gum_darwin_enumerate_exports (self->task, FRIDA_SYSTEM_LIBC, frida_fill_function_if_matching, &fill_ctx);
 
   if (fill_ctx.remaining > 0)
