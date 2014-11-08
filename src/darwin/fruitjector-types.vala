@@ -1,6 +1,6 @@
 #if DARWIN
 namespace Frida {
-	[DBus (name = "org.boblycat.frida.FruitjectorHelper")]
+	[DBus (name = "re.frida.FruitjectorHelper")]
 	public interface FruitjectorHelper : Object {
 		public signal void uninjected (uint id);
 		public abstract async void stop () throws IOError;
@@ -26,7 +26,7 @@ namespace Frida {
 	}
 
 	namespace FruitjectorObjectPath {
-		public const string HELPER = "/org/boblycat/frida/FruitjectorHelper";
+		public const string HELPER = "/re/frida/FruitjectorHelper";
 	}
 }
 #endif

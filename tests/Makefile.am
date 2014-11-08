@@ -98,7 +98,7 @@ AM_CPPFLAGS = \
 
 if OS_MAC
 all-local: frida-tests data/.stamp
-	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaTests" "$<" || true
+	codesign -s "$$MAC_CERTID" -i "re.frida.CoreTests" "$<" || true
 endif
 
 if OS_LINUX

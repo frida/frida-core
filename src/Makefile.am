@@ -95,7 +95,7 @@ libfruitjector_types_la_VALAFLAGS = \
 
 frida-fruitjector-helper.stamp: frida-fruitjector-helper
 if OS_MAC
-	codesign -s "$$MAC_CERTID" -i "com.tillitech.FridaFruitjectorHelper" "$(builddir)/frida-fruitjector-helper" || true
+	codesign -s "$$MAC_CERTID" -i "re.frida.FruitjectorHelper" "$(builddir)/frida-fruitjector-helper" || true
 endif
 if OS_IOS
 	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/darwin/fruitjector-helper.xcent" "$<" || true

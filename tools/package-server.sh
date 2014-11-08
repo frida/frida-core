@@ -28,13 +28,13 @@ cp "$FRIDA_SERVER" "$tmpdir/usr/sbin/frida-server"
 chmod 755 "$tmpdir/usr/sbin/frida-server"
 
 mkdir -p "$tmpdir/Library/LaunchDaemons/"
-cat >"$tmpdir/Library/LaunchDaemons/com.tillitech.frida-server.plist" <<EOF
+cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.tillitech.frida-server</string>
+	<string>re.frida.server</string>
 	<key>Program</key>
 	<string>/usr/sbin/frida-server</string>
 	<key>ProgramArguments</key>
@@ -50,11 +50,11 @@ cat >"$tmpdir/Library/LaunchDaemons/com.tillitech.frida-server.plist" <<EOF
 </dict>
 </plist>
 EOF
-chmod 644 "$tmpdir/Library/LaunchDaemons/com.tillitech.frida-server.plist"
+chmod 644 "$tmpdir/Library/LaunchDaemons/re.frida.server.plist"
 
 mkdir -p "$tmpdir/DEBIAN/"
 cat >"$tmpdir/DEBIAN/control" <<EOF
-Package: com.tillitech.frida-server
+Package: re.frida.server
 Name: Frida
 Version: $FRIDA_VERSION
 Priority: optional
@@ -73,11 +73,11 @@ cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/sh
 
 if [[ \$1 == upgrade ]]; then
-  /bin/launchctl unload /Library/LaunchDaemons/com.tillitech.frida-server.plist
+  /bin/launchctl unload /Library/LaunchDaemons/re.frida.server.plist
 fi
 
 if [[ \$1 == install || \$1 == upgrade ]]; then
-  /bin/launchctl load /Library/LaunchDaemons/com.tillitech.frida-server.plist
+  /bin/launchctl load /Library/LaunchDaemons/re.frida.server.plist
 fi
 
 exit 0
@@ -87,7 +87,7 @@ cat >"$tmpdir/DEBIAN/prerm" <<EOF
 #!/bin/sh
 
 if [[ \$1 == remove || \$1 == purge ]]; then
-  /bin/launchctl unload /Library/LaunchDaemons/com.tillitech.frida-server.plist
+  /bin/launchctl unload /Library/LaunchDaemons/re.frida.server.plist
 fi
 
 exit 0

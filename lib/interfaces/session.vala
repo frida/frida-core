@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "org.boblycat.frida.HostSession")]
+	[DBus (name = "re.frida.HostSession")]
 	public interface HostSession : Object {
 		public abstract async HostProcessInfo[] enumerate_processes () throws IOError;
 
@@ -9,7 +9,7 @@ namespace Frida {
 		public abstract async AgentSessionId attach_to (uint pid) throws IOError;
 	}
 
-	[DBus (name = "org.boblycat.frida.AgentSession")]
+	[DBus (name = "re.frida.AgentSession")]
 	public interface AgentSession : Object {
 		public abstract async void close () throws IOError;
 
@@ -101,7 +101,7 @@ namespace Frida {
 	}
 
 	namespace ObjectPath {
-		public const string HOST_SESSION = "/org/boblycat/frida/HostSession";
-		public const string AGENT_SESSION = "/org/boblycat/frida/AgentSession";
+		public const string HOST_SESSION = "/re/frida/HostSession";
+		public const string AGENT_SESSION = "/re/frida/AgentSession";
 	}
 }

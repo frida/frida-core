@@ -115,7 +115,7 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   dispatch_source_t source;
 
   backend = g_slice_new (FridaPipeBackend);
-  backend->dispatch_queue = dispatch_queue_create ("org.boblycat.frida.pipe.queue", NULL);
+  backend->dispatch_queue = dispatch_queue_create ("re.frida.pipe.queue", NULL);
   assigned = sscanf (address, "pipe:rx=%d,tx=%d", &rx, &tx);
   g_assert_cmpint (assigned, ==, 2);
   backend->rx_port = rx;

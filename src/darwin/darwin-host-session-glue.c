@@ -164,8 +164,7 @@ _frida_darwin_host_session_create_context (FridaDarwinHostSession * self)
   FridaDarwinHostContext * ctx;
 
   ctx = g_slice_new (FridaDarwinHostContext);
-  ctx->dispatch_queue = dispatch_queue_create (
-      "org.boblycat.frida.darwin-host-session.queue", NULL);
+  ctx->dispatch_queue = dispatch_queue_create ("re.frida.darwin-host-session.queue", NULL);
 
   self->context = ctx;
 }
