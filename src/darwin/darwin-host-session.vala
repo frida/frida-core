@@ -68,12 +68,16 @@ namespace Frida {
 		public void * context;
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
-		private Fruitjector injector = new Fruitjector ();
+		private HelperProcess helper;
+		private Fruitjector injector;
 		private AgentDescriptor agent_desc;
 
 		construct {
 			main_context = MainContext.get_thread_default ();
 			_create_context ();
+
+			helper = new HelperProcess ();
+			injector = new Fruitjector.with_helper (helper);
 
 			var blob = Frida.Data.Agent.get_libfrida_agent_dylib_blob ();
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
@@ -83,12 +87,17 @@ namespace Frida {
 			yield base.close ();
 
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (injector.any_still_injected ())
+			while (injector.any_still_injected ()) {
+				stdout.printf ("waiting for uninject\n");
 				yield;
+			}
+			stdout.printf ("satisfied\n");
 			injector.disconnect (uninjected_handler);
-
 			yield injector.close ();
 			injector = null;
+
+			yield helper.close ();
+			helper = null;
 		}
 
 		public override async Frida.HostProcessInfo[] enumerate_processes () throws IOError {

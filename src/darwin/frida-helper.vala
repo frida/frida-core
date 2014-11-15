@@ -8,7 +8,7 @@ namespace Fruitjector {
 		return service.run ();
 	}
 
-	public class Service : Object, FruitjectorHelper {
+	public class Service : Object, Helper {
 		public string parent_address {
 			get;
 			construct;
@@ -66,8 +66,8 @@ namespace Fruitjector {
 			try {
 				connection = yield DBusConnection.new_for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
-				FruitjectorHelper helper = this;
-				registration_id = connection.register_object (FruitjectorObjectPath.HELPER, helper);
+				Helper helper = this;
+				registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 				connection.start_message_processing ();
 			} catch (Error e) {
 				stderr.printf ("start failed: %s\n", e.message);
@@ -87,7 +87,7 @@ namespace Fruitjector {
 			return _do_inject (pid, filename, data_string);
 		}
 
-		public async FruitjectorPipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError {
+		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError {
 			return _do_make_pipe_endpoints (local_pid, remote_pid);
 		}
 
@@ -110,7 +110,7 @@ namespace Fruitjector {
 		public extern void _destroy_context ();
 		public extern void _free_instance (void * instance);
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
-		public static extern FruitjectorPipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
+		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
 	}
 }
 #endif

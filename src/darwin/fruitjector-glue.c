@@ -1,13 +1,7 @@
 #include "frida-core.h"
 
-#ifdef HAVE_MAC
-# include <crt_externs.h>
-#endif
-#include <errno.h>
-#include <spawn.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
-#include <sys/stat.h>
 
 static void update_mach_uuid_32 (struct mach_header * mach_header);
 static void update_mach_uuid_64 (struct mach_header_64 * mach_header);
@@ -19,34 +13,8 @@ _frida_fruitjector_get_pid (void)
   return getpid ();
 }
 
-guint
-frida_fruitjector_helper_factory_spawn (const gchar * path, gchar ** argv, int argv_length, GError ** error)
-{
-  gchar ** envp;
-  pid_t pid;
-
-  chmod (path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
-
-#ifdef HAVE_MAC
-  envp = *_NSGetEnviron ();
-#else
-  envp = NULL;
-#endif
-  if (posix_spawn (&pid, path, NULL, NULL, argv, envp) != 0)
-    goto handle_spawn_error;
-
-  return pid;
-
-handle_spawn_error:
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "posix_spawn failed: %s (%d)", strerror (errno), errno);
-    return 0;
-  }
-}
-
 GInputStream *
-frida_fruitjector_resource_store_clone_dylib (GInputStream * dylib)
+_frida_fruitjector_clone_dylib (GInputStream * dylib)
 {
   GSeekable * seekable = G_SEEKABLE (dylib);
   goffset previous_offset, size;

@@ -1,4 +1,4 @@
-#include "fruitjector-helper.h"
+#include "frida-helper.h"
 
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -380,7 +380,7 @@ error_epilogue:
 }
 
 void
-_fruitjector_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, FridaFruitjectorPipeEndpoints * result, GError ** error)
+_fruitjector_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, FridaPipeEndpoints * result, GError ** error)
 {
   mach_port_t self_task;
   mach_port_t local_task = MACH_PORT_NULL;
@@ -437,7 +437,7 @@ _fruitjector_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, 
 
   local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
   remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
-  frida_fruitjector_pipe_endpoints_init (result, local_address, remote_address);
+  frida_pipe_endpoints_init (result, local_address, remote_address);
   g_free (remote_address);
   g_free (local_address);
 

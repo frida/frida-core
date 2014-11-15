@@ -1,14 +1,14 @@
 #if DARWIN
 namespace Frida {
-	[DBus (name = "re.frida.FruitjectorHelper")]
-	public interface FruitjectorHelper : Object {
+	[DBus (name = "re.frida.Helper")]
+	public interface Helper : Object {
 		public signal void uninjected (uint id);
 		public abstract async void stop () throws IOError;
 		public abstract async uint inject (uint pid, string filename, string data_string) throws IOError;
-		public abstract async FruitjectorPipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
+		public abstract async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
 	}
 
-	public struct FruitjectorPipeEndpoints {
+	public struct PipeEndpoints {
 		public string local_address {
 			get;
 			private set;
@@ -19,14 +19,14 @@ namespace Frida {
 			private set;
 		}
 
-		public FruitjectorPipeEndpoints (string local_address, string remote_address) {
+		public PipeEndpoints (string local_address, string remote_address) {
 			this.local_address = local_address;
 			this.remote_address = remote_address;
 		}
 	}
 
-	namespace FruitjectorObjectPath {
-		public const string HELPER = "/re/frida/FruitjectorHelper";
+	namespace ObjectPath {
+		public const string HELPER = "/re/frida/Helper";
 	}
 }
 #endif

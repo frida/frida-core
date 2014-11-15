@@ -27,98 +27,100 @@ glue_sources += \
 endif
 
 if OS_DARWIN
-FRUITJECTOR_HELPER = frida-fruitjector-helper
+HELPER = frida-helper
 
 backend_sources += \
 	darwin/darwin-host-session.vala \
-	darwin/fruitjector.vala
+	darwin/fruitjector.vala \
+	darwin/frida-helper-process.vala
 glue_sources += \
 	darwin/system-darwin.m \
 	darwin/darwin-host-session-glue.c \
 	darwin/fruitjector-glue.c \
+	darwin/frida-helper-process-glue.c \
 	darwin/icon-helpers.h \
 	darwin/icon-helpers.m
 backend_libadd += \
-	libfruitjector-types.la \
-	libfrida-data-fruitjector.la
+	libfrida-helper-types.la \
+	libfrida-data-helper-process.la
 backend_valaflags += \
-	--pkg=fruitjector-types \
-	--pkg=frida-data-fruitjector
+	--pkg=frida-helper-types \
+	--pkg=frida-data-helper-process
 
 backend_programs += \
-	frida-fruitjector-helper
-frida_fruitjector_helper_SOURCES = \
+	frida-helper
+frida_helper_SOURCES = \
 	$(NULL)
-frida_fruitjector_helper_LDFLAGS = \
+frida_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
-frida_fruitjector_helper_LDADD = \
-	libfruitjector-helper-main.la \
-	libfruitjector-helper-glue.la \
+frida_helper_LDADD = \
+	libfrida-helper-main.la \
+	libfrida-helper-glue.la \
 	$(FRIDA_LIBS)
 if OS_MAC
-frida_fruitjector_helper_LDFLAGS += \
-	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/fruitjector-helper.plist"
+frida_helper_LDFLAGS += \
+	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/frida-helper.plist"
 endif
 
 backend_libraries += \
-	libfruitjector-types.la \
-	libfruitjector-helper-main.la \
-	libfruitjector-helper-glue.la
+	libfrida-helper-types.la \
+	libfrida-helper-main.la \
+	libfrida-helper-glue.la
 
-libfruitjector_helper_main_la_SOURCES = \
-	darwin/fruitjector-helper.vala
-libfruitjector_helper_main_la_CFLAGS = \
+libfrida_helper_main_la_SOURCES = \
+	darwin/frida-helper.vala
+libfrida_helper_main_la_CFLAGS = \
 	-w
-libfruitjector_helper_main_la_LIBADD = \
-	libfruitjector-types.la \
+libfrida_helper_main_la_LIBADD = \
+	libfrida-helper-types.la \
 	$(FRIDA_LIBS)
-libfruitjector_helper_main_la_VALAFLAGS = \
-	--header=fruitjector-helper.h \
+libfrida_helper_main_la_VALAFLAGS = \
+	--header=frida-helper.h \
 	--vapidir=$(abs_srcdir) \
-	--pkg=fruitjector-types \
+	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
-libfruitjector_helper_glue_la_SOURCES = \
-	darwin/fruitjector-helper-core.c
+libfrida_helper_glue_la_SOURCES = \
+	darwin/frida-helper-core.c
 
-libfruitjector_types_la_SOURCES = \
-	darwin/fruitjector-types.vala
-libfruitjector_types_la_CFLAGS = \
+libfrida_helper_types_la_SOURCES = \
+	darwin/frida-helper-types.vala
+libfrida_helper_types_la_CFLAGS = \
 	-w
-libfruitjector_types_la_VALAFLAGS = \
-	--vapi=fruitjector-types.vapi \
-	--library=fruitjector-types \
-	--header=fruitjector-types.h \
+libfrida_helper_types_la_VALAFLAGS = \
+	--vapi=frida-helper-types.vapi \
+	--library=frida-helper-types \
+	--header=frida-helper-types.h \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
-frida-fruitjector-helper.stamp: frida-fruitjector-helper
+frida-helper.stamp: frida-helper
 if OS_MAC
-	codesign -s "$$MAC_CERTID" -i "re.frida.FruitjectorHelper" "$(builddir)/frida-fruitjector-helper" || true
+	codesign -s "$$MAC_CERTID" -i "re.frida.FruitjectorHelper" "$(builddir)/frida-helper" || true
 endif
 if OS_IOS
-	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/darwin/fruitjector-helper.xcent" "$<" || true
+	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/darwin/frida-helper.xcent" "$<" || true
 endif
-	touch frida-fruitjector-helper.stamp
+	touch frida-helper.stamp
 
 backend_libraries += \
-	libfrida-data-fruitjector.la
-libfrida_data_fruitjector_la_SOURCES = \
-	frida-data-fruitjector.c \
-	frida-data-fruitjector-blob.S \
+	libfrida-data-helper-process.la
+libfrida_data_helper_process_la_SOURCES = \
+	frida-data-helper-process.c \
+	frida-data-helper-process-blob.S \
 	$(NULL)
-frida-data-fruitjector.c frida-data-fruitjector-blob.S: frida-fruitjector-helper.stamp
+frida-data-helper-process.c frida-data-helper-process-blob.S: frida-helper.stamp
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
-			-c "$(srcdir)/darwin/fruitjector.resources" \
-			-o "$(builddir)/frida-data-fruitjector" \
-			$(FRUITJECTOR_HELPER)
+			-c "$(srcdir)/darwin/frida-helper-process.resources" \
+			-o "$(builddir)/frida-data-helper-process" \
+			$(HELPER)
 backend_cleanfiles += \
-	frida-data-fruitjector.vapi \
-	frida-data-fruitjector.h \
-	frida-data-fruitjector.c \
-	frida-data-fruitjector-blob.S
+	frida-data-helper-process.vapi \
+	frida-data-helper-process.h \
+	frida-data-helper-process.c \
+	frida-data-helper-process-blob.S
 
 backend_sources += \
 	fruity/fruity-client.vala \
