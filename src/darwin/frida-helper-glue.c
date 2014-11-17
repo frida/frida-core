@@ -357,7 +357,7 @@ frida_spawn_fill_context_process_export (const GumExportDetails * details, gpoin
   return TRUE;
 }
 
-#ifdef HAVE_ARM
+#if defined (HAVE_ARM) || defined (HAVE_ARM64)
 
 static gboolean
 frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
