@@ -886,7 +886,7 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
 
   ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right local_tx");
-  local_tx = tx - 1;
+  local_tx = local_rx;
   do
   {
     local_tx++;
@@ -899,7 +899,7 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
 
   ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right remote_tx");
-  remote_tx = tx - 1;
+  remote_tx = remote_rx;
   do
   {
     remote_tx++;
