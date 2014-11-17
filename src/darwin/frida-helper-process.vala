@@ -35,7 +35,6 @@ namespace Frida {
 		}
 
 		public async void close () {
-			stdout.printf ("before close\n");
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
@@ -55,7 +54,6 @@ namespace Frida {
 			}
 
 			_resource_store = null;
-			stdout.printf ("after close\n");
 		}
 
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {

@@ -87,11 +87,8 @@ namespace Frida {
 			yield base.close ();
 
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (injector.any_still_injected ()) {
-				stdout.printf ("waiting for uninject\n");
+			while (injector.any_still_injected ())
 				yield;
-			}
-			stdout.printf ("satisfied\n");
 			injector.disconnect (uninjected_handler);
 			yield injector.close ();
 			injector = null;
