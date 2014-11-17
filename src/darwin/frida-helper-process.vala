@@ -56,6 +56,16 @@ namespace Frida {
 			_resource_store = null;
 		}
 
+		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			var helper = yield obtain ();
+			return yield helper.spawn (path, argv, envp);
+		}
+
+		public async void resume (uint pid) throws IOError {
+			var helper = yield obtain ();
+			yield helper.resume (pid);
+		}
+
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {
 			var helper = yield obtain ();
 			return yield helper.inject (pid, filename, data_string);
@@ -101,7 +111,7 @@ namespace Frida {
 				});
 				timeout_source.attach (main_context);
 				string[] argv = { resource_store.helper.path, server.client_address };
-				spawn (resource_store.helper.path, argv);
+				spawn_helper (resource_store.helper.path, argv);
 				yield;
 				server.disconnect (connection_handler);
 				server.stop ();
@@ -142,7 +152,7 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private static extern uint spawn (string path, string[] argv) throws IOError;
+		private static extern uint spawn_helper (string path, string[] argv) throws IOError;
 	}
 
 	private class ResourceStore {

@@ -1,14 +1,15 @@
 #if DARWIN
-using Frida;
-
-namespace Fruitjector {
+namespace Frida {
 	public int main (string[] args) {
 		var parent_address = args[1];
-		var service = new Service (parent_address);
+		var service = new HelperService (parent_address);
 		return service.run ();
 	}
 
-	public class Service : Object, Helper {
+	public class HelperService : Object, Helper {
+		public signal void child_dead (uint pid);
+		public signal void child_ready (uint pid);
+
 		public string parent_address {
 			get;
 			construct;
@@ -22,17 +23,20 @@ namespace Fruitjector {
 
 		/* these should be private, but must be accessible to glue code */
 		public void * context;
-		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
+		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
+		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
 		public uint last_id = 1;
 
-		public Service (string parent_address) {
+		public HelperService (string parent_address) {
 			Object (parent_address: parent_address);
 			_create_context ();
 		}
 
-		~Service () {
-			foreach (var instance in instance_by_id.values)
-				_free_instance (instance);
+		~HelperService () {
+			foreach (var instance in spawn_instance_by_pid.values)
+				_free_spawn_instance (instance);
+			foreach (var instance in inject_instance_by_id.values)
+				_free_inject_instance (instance);
 			_destroy_context ();
 		}
 
@@ -83,6 +87,40 @@ namespace Fruitjector {
 			});
 		}
 
+		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			string error = null;
+
+			uint child_pid = _do_spawn (path, argv, envp);
+			var death_handler = child_dead.connect ((pid) => {
+				if (pid == child_pid) {
+					error = "child died prematurely";
+					spawn.callback ();
+				}
+			});
+			var ready_handler = child_ready.connect ((pid) => {
+				if (pid == child_pid) {
+					spawn.callback ();
+				}
+			});
+			yield;
+			disconnect (death_handler);
+			disconnect (ready_handler);
+
+			if (error != null)
+				throw new IOError.FAILED (error);
+
+			return child_pid;
+		}
+
+		public async void resume (uint pid) throws IOError {
+			void * instance;
+			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
+			if (!instance_found)
+				throw new IOError.FAILED ("no such pid");
+			_resume_spawn_instance (instance);
+			_free_spawn_instance (instance);
+		}
+
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {
 			return _do_inject (pid, filename, data_string);
 		}
@@ -95,12 +133,30 @@ namespace Fruitjector {
 			shutdown.begin ();
 		}
 
-		public void _on_instance_dead (uint id) {
+		public void _on_spawn_instance_dead (uint pid) {
 			Idle.add (() => {
 				void * instance;
-				bool instance_id_found = instance_by_id.unset (id, out instance);
+				bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
+				assert (instance_found);
+				_free_spawn_instance (instance);
+				child_dead (pid);
+				return false;
+			});
+		}
+
+		public void _on_spawn_instance_ready (uint pid) {
+			Idle.add (() => {
+				child_ready (pid);
+				return false;
+			});
+		}
+
+		public void _on_inject_instance_dead (uint id) {
+			Idle.add (() => {
+				void * instance;
+				bool instance_id_found = inject_instance_by_id.unset (id, out instance);
 				assert (instance_id_found);
-				_free_instance (instance);
+				_free_inject_instance (instance);
 				uninjected (id);
 				return false;
 			});
@@ -108,7 +164,10 @@ namespace Fruitjector {
 
 		public extern void _create_context ();
 		public extern void _destroy_context ();
-		public extern void _free_instance (void * instance);
+		public extern void _resume_spawn_instance (void * instance);
+		public extern void _free_spawn_instance (void * instance);
+		public extern void _free_inject_instance (void * instance);
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
 	}

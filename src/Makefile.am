@@ -82,7 +82,7 @@ libfrida_helper_main_la_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_glue_la_SOURCES = \
-	darwin/frida-helper-core.c
+	darwin/frida-helper-glue.c
 
 libfrida_helper_types_la_SOURCES = \
 	darwin/frida-helper-types.vala
