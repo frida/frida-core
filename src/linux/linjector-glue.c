@@ -912,7 +912,7 @@ frida_resolve_remote_linker_function (int remote_pid, gpointer func)
 static GumAddress
 frida_resolve_remote_library_function (int remote_pid, const gchar * library_name, const gchar * function_name)
 {
-  gchar * local_library_path, * remote_library_path;
+  gchar * local_library_path, * remote_library_path, * canonical_library_name;
   GumAddress local_base, remote_base, remote_address;
   gpointer module, local_address;
 
@@ -924,7 +924,9 @@ frida_resolve_remote_library_function (int remote_pid, const gchar * library_nam
 
   g_assert_cmpstr (local_library_path, ==, remote_library_path);
 
-  module = dlopen (local_library_path, RTLD_GLOBAL | RTLD_NOW);
+  canonical_library_name = g_path_get_basename (local_library_path);
+
+  module = dlopen (canonical_library_name, RTLD_GLOBAL | RTLD_NOW);
   g_assert (module != NULL);
 
   local_address = dlsym (module, function_name);
@@ -936,6 +938,7 @@ frida_resolve_remote_library_function (int remote_pid, const gchar * library_nam
 
   g_free (local_library_path);
   g_free (remote_library_path);
+  g_free (canonical_library_name);
 
   return remote_address;
 }
