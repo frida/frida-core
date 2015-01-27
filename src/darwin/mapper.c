@@ -18,6 +18,17 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
   g_mapped_file_unref (file);
 
   mapper->cpu_type = cpu_type;
+  switch (cpu_type)
+  {
+    case GUM_CPU_IA32:
+    case GUM_CPU_AMD64:
+    case GUM_CPU_ARM:
+      mapper->page_size = 4096;
+      break;
+    case GUM_CPU_ARM64:
+      mapper->page_size = 16384;
+      break;
+  }
 
   mapper->header_32 = NULL;
   mapper->header_64 = NULL;
@@ -60,11 +71,28 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       break;
   }
 
-  if (cpu_type == GUM_CPU_IA32 || cpu_type == GUM_CPU_ARM)
-    g_assert (mapper->header_32 != NULL);
+  switch (cpu_type)
+  {
+    case GUM_CPU_IA32:
+    case GUM_CPU_ARM:
+      g_assert (mapper->header_32 != NULL);
+      mapper->header_64 = NULL;
+      mapper->load_commands = (const struct load_command *) (mapper->header_32 + 1);
+      mapper->load_command_count = mapper->header_32->ncmds;
+      break;
+    case GUM_CPU_AMD64:
+    case GUM_CPU_ARM64:
+      g_assert (mapper->header_64 != NULL);
+      mapper->header_32 = NULL;
+      mapper->load_commands = (const struct load_command *) (mapper->header_64 + 1);
+      mapper->load_command_count = mapper->header_64->ncmds;
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
 
-  if (cpu_type == GUM_CPU_AMD64 || cpu_type == GUM_CPU_ARM64)
-    g_assert (mapper->header_64 != NULL);
+  mapper->mapped_size = 0;
 }
 
 void
@@ -77,7 +105,43 @@ frida_mapper_free (FridaMapper * mapper)
 gsize
 frida_mapper_size (FridaMapper * self)
 {
-  return 4096; /* TODO */
+  gconstpointer p;
+  gsize i;
+
+  if (self->mapped_size != 0)
+    return self->mapped_size;
+
+  p = self->load_commands;
+  for (i = 0; i != self->load_command_count; i++)
+  {
+    const struct load_command * lc = (const struct load_command *) p;
+
+    switch (lc->cmd)
+    {
+      case LC_SEGMENT:
+      {
+        struct segment_command * sc = (struct segment_command *) lc;
+        self->mapped_size += sc->vmsize;
+        if (sc->vmsize % self->page_size != 0)
+          self->mapped_size += self->page_size - (sc->vmsize % self->page_size);
+        break;
+      }
+      case LC_SEGMENT_64:
+      {
+        struct segment_command_64 * sc = (struct segment_command_64 *) lc;
+        self->mapped_size += sc->vmsize;
+        if (sc->vmsize % self->page_size != 0)
+          self->mapped_size += self->page_size - (sc->vmsize % self->page_size);
+        break;
+      }
+      default:
+        break;
+    }
+
+    p += lc->cmdsize;
+  }
+
+  return self->mapped_size;
 }
 
 void

@@ -9,8 +9,12 @@ struct _FridaMapper
 {
   GBytes * bytes;
   GumCpuType cpu_type;
+  gsize page_size;
   const struct mach_header * header_32;
   const struct mach_header_64 * header_64;
+  const struct load_command * load_commands;
+  gsize load_command_count;
+  gsize mapped_size;
 };
 
 void frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cpu_type);
