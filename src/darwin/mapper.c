@@ -76,6 +76,7 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
     case GUM_CPU_IA32:
     case GUM_CPU_ARM:
       g_assert (mapper->header_32 != NULL);
+      mapper->header = mapper->header_32;
       mapper->header_64 = NULL;
       mapper->load_commands = (const struct load_command *) (mapper->header_32 + 1);
       mapper->load_command_count = mapper->header_32->ncmds;
@@ -83,6 +84,7 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
     case GUM_CPU_AMD64:
     case GUM_CPU_ARM64:
       g_assert (mapper->header_64 != NULL);
+      mapper->header = mapper->header_64;
       mapper->header_32 = NULL;
       mapper->load_commands = (const struct load_command *) (mapper->header_64 + 1);
       mapper->load_command_count = mapper->header_64->ncmds;
@@ -147,7 +149,47 @@ frida_mapper_size (FridaMapper * self)
 void
 frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_address)
 {
-  /* TODO */
+  gconstpointer p;
+  gsize i;
+
+  p = self->load_commands;
+  for (i = 0; i != self->load_command_count; i++)
+  {
+    const struct load_command * lc = (const struct load_command *) p;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      mach_vm_address_t vm_address;
+      mach_vm_size_t vm_size;
+      guint64 file_offset, file_size;
+      vm_prot_t protection;
+
+      if (lc->cmd == LC_SEGMENT)
+      {
+        struct segment_command * sc = (struct segment_command *) lc;
+        vm_address = sc->vmaddr;
+        vm_size = sc->vmsize;
+        file_offset = sc->fileoff;
+        file_size = sc->filesize;
+        protection = sc->initprot;
+      }
+      else
+      {
+        struct segment_command_64 * sc = (struct segment_command_64 *) lc;
+        vm_address = sc->vmaddr;
+        vm_size = sc->vmsize;
+        file_offset = sc->fileoff;
+        file_size = sc->filesize;
+        protection = sc->initprot;
+      }
+
+      mach_vm_write (task, base_address + vm_address, (vm_offset_t) self->header + file_offset, file_size);
+
+      mach_vm_protect (task, base_address + vm_address, vm_size, FALSE, protection);
+    }
+
+    p += lc->cmdsize;
+  }
 }
 
 gsize
