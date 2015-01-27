@@ -7,9 +7,11 @@
 
 typedef void (* UnixAttackerEntrypoint) (const gchar * data_string);
 
-int
-main (int argc, char * argv[])
+gint
+main (gint argc, gchar * argv[])
 {
+  const gchar * dylib_path;
+  GumCpuType cpu_type;
   FridaMapper mapper;
   mach_port_name_t task;
   mach_vm_address_t base_address = 0;
@@ -26,7 +28,20 @@ main (int argc, char * argv[])
     return 1;
   }
 
-  frida_mapper_init (&mapper, argv[1]);
+  dylib_path = argv[1];
+#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  cpu_type = GUM_CPU_IA32;
+#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+  cpu_type = GUM_CPU_AMD64;
+#elif defined (HAVE_ARM)
+  cpu_type = GUM_CPU_ARM;
+#elif defined (HAVE_ARM64)
+  cpu_type = GUM_CPU_ARM64;
+#else
+# error Unsupported CPU type
+#endif
+
+  frida_mapper_init (&mapper, dylib_path, cpu_type);
 
   task = mach_task_self ();
 

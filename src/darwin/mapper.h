@@ -7,12 +7,13 @@ typedef struct _FridaMapper FridaMapper;
 
 struct _FridaMapper
 {
-  GMappedFile * file;
   GBytes * bytes;
-  gconstpointer data;
+  GumCpuType cpu_type;
+  const struct mach_header * header_32;
+  const struct mach_header_64 * header_64;
 };
 
-void frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path);
+void frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cpu_type);
 void frida_mapper_free (FridaMapper * mapper);
 
 gsize frida_mapper_size (FridaMapper * self);
