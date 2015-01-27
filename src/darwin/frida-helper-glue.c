@@ -119,6 +119,7 @@ struct _FridaInjectInstance
   guint id;
   mach_port_t task;
   vm_address_t payload_address;
+  vm_size_t payload_size;
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
 };
@@ -496,7 +497,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
   if (instance->payload_address != 0)
-    vm_deallocate (instance->task, instance->payload_address, FRIDA_INJECT_PAYLOAD_SIZE);
+    vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
   g_object_unref (instance->service);
@@ -716,7 +717,9 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid");
   instance->task = details.task;
 
-  ret = vm_allocate (details.task, &payload_address, FRIDA_INJECT_PAYLOAD_SIZE, TRUE);
+  instance->payload_size = FRIDA_INJECT_PAYLOAD_SIZE;
+
+  ret = vm_allocate (details.task, &payload_address, instance->payload_size, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
   instance->payload_address = payload_address;
 
@@ -729,7 +732,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type);
   ret = vm_write (details.task, payload_address + FRIDA_INJECT_MACH_CODE_OFFSET,
       (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(mach_stub_code)");
+  CHECK_MACH_RESULT (ret, ==, 0, "vm_write (mach_stub_code)");
 
   frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, details.cpu_type);
   ret = vm_write (details.task, payload_address + FRIDA_INJECT_PTHREAD_CODE_OFFSET,
