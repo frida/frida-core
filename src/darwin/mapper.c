@@ -4,6 +4,17 @@
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
 
+typedef struct _FridaSegment FridaSegment;
+
+struct _FridaSegment
+{
+  GumAddress vm_address;
+  guint64 vm_size;
+  guint64 file_offset;
+  guint64 file_size;
+  vm_prot_t protection;
+};
+
 static GumAddress frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address);
 static GumAddress frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address);
 
@@ -12,20 +23,17 @@ static guint64 frida_mapper_read_uleb128 (const guint8 ** p);
 void
 frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cpu_type)
 {
-  GMappedFile * file;
-  gconstpointer data;
+  gpointer data;
   const struct fat_header * fat_header;
-  gconstpointer p;
+  gpointer p;
   gsize i;
 
   memset (mapper, 0, sizeof (FridaMapper));
 
-  file = g_mapped_file_new (dylib_path, FALSE, NULL);
-  g_assert (file != NULL);
+  mapper->file = g_mapped_file_new (dylib_path, TRUE, NULL);
+  g_assert (mapper->file != NULL);
 
-  mapper->bytes = g_mapped_file_get_bytes (file);
-
-  g_mapped_file_unref (file);
+  data = g_mapped_file_get_contents (mapper->file);
 
   mapper->cpu_type = cpu_type;
   switch (cpu_type)
@@ -48,7 +56,6 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       break;
   }
 
-  data = g_bytes_get_data (mapper->bytes, NULL);
   fat_header = data;
   switch (fat_header->magic)
   {
@@ -60,7 +67,7 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       for (i = 0; i != count; i++)
       {
         struct fat_arch * fat_arch = ((struct fat_arch *) (fat_header + 1)) + i;
-        gconstpointer mach_header = data + OSSwapInt32 (fat_arch->offset);
+        gpointer mach_header = data + OSSwapInt32 (fat_arch->offset);
         switch (((struct mach_header *) mach_header)->magic)
         {
           case MH_MAGIC:
@@ -93,7 +100,7 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       g_assert (mapper->header_32 != NULL);
       mapper->header = mapper->header_32;
       mapper->header_64 = NULL;
-      mapper->commands = (const struct load_command *) (mapper->header_32 + 1);
+      mapper->commands = (struct load_command *) (mapper->header_32 + 1);
       mapper->command_count = mapper->header_32->ncmds;
       break;
     case GUM_CPU_AMD64:
@@ -101,13 +108,15 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       g_assert (mapper->header_64 != NULL);
       mapper->header = mapper->header_64;
       mapper->header_32 = NULL;
-      mapper->commands = (const struct load_command *) (mapper->header_64 + 1);
+      mapper->commands = (struct load_command *) (mapper->header_64 + 1);
       mapper->command_count = mapper->header_64->ncmds;
       break;
     default:
       g_assert_not_reached ();
       break;
   }
+
+  mapper->segments = g_array_new (FALSE, FALSE, sizeof (FridaSegment));
 
   p = mapper->commands;
   for (i = 0; i != mapper->command_count; i++)
@@ -116,6 +125,34 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
 
     switch (lc->cmd)
     {
+      case LC_SEGMENT:
+      case LC_SEGMENT_64:
+      {
+        FridaSegment segment;
+
+        if (lc->cmd == LC_SEGMENT)
+        {
+          struct segment_command * sc = (struct segment_command *) lc;
+          segment.vm_address = sc->vmaddr;
+          segment.vm_size = sc->vmsize;
+          segment.file_offset = sc->fileoff;
+          segment.file_size = sc->filesize;
+          segment.protection = sc->initprot;
+        }
+        else
+        {
+          struct segment_command_64 * sc = (struct segment_command_64 *) lc;
+          segment.vm_address = sc->vmaddr;
+          segment.vm_size = sc->vmsize;
+          segment.file_offset = sc->fileoff;
+          segment.file_size = sc->filesize;
+          segment.protection = sc->initprot;
+        }
+
+        g_array_append_val (mapper->segments, segment);
+
+        break;
+      }
       case LC_DYLD_INFO_ONLY:
         mapper->info = p;
         break;
@@ -136,57 +173,34 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
 void
 frida_mapper_free (FridaMapper * mapper)
 {
-  g_bytes_unref (mapper->bytes);
-  mapper->bytes = NULL;
+  g_array_unref (mapper->segments);
+  mapper->segments = NULL;
+
+  g_mapped_file_unref (mapper->file);
+  mapper->file = NULL;
 }
 
 gsize
 frida_mapper_size (FridaMapper * self)
 {
-  gconstpointer p;
-  gsize i;
+  gsize result = 0;
+  guint i;
 
-  if (self->mapped_size != 0)
-    return self->mapped_size;
-
-  p = self->commands;
-  for (i = 0; i != self->command_count; i++)
+  for (i = 0; i != self->segments->len; i++)
   {
-    const struct load_command * lc = (const struct load_command *) p;
-
-    switch (lc->cmd)
-    {
-      case LC_SEGMENT:
-      {
-        struct segment_command * sc = (struct segment_command *) lc;
-        self->mapped_size += sc->vmsize;
-        if (sc->vmsize % self->page_size != 0)
-          self->mapped_size += self->page_size - (sc->vmsize % self->page_size);
-        break;
-      }
-      case LC_SEGMENT_64:
-      {
-        struct segment_command_64 * sc = (struct segment_command_64 *) lc;
-        self->mapped_size += sc->vmsize;
-        if (sc->vmsize % self->page_size != 0)
-          self->mapped_size += self->page_size - (sc->vmsize % self->page_size);
-        break;
-      }
-      default:
-        break;
-    }
-
-    p += lc->cmdsize;
+    FridaSegment * segment = &g_array_index (self->segments, FridaSegment, i);
+    result += segment->vm_size;
+    if (segment->vm_size % self->page_size != 0)
+      result += self->page_size - (segment->vm_size % self->page_size);
   }
 
-  return self->mapped_size;
+  return result;
 }
 
 void
 frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_address)
 {
-  gconstpointer p;
-  gsize i;
+  guint i;
 
   {
     const guint8 * start = self->header + self->info->bind_off;
@@ -266,6 +280,7 @@ frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_a
         case BIND_OPCODE_DO_BIND:
           g_print ("BIND_OPCODE_DO_BIND\n");
           /* TODO: bind! */
+          g_print ("  symbol_name='%s'\n", symbol_name);
           address += self->pointer_size;
           break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
@@ -301,43 +316,13 @@ frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_a
     }
   }
 
-  p = self->commands;
-  for (i = 0; i != self->command_count; i++)
+  for (i = 0; i != self->segments->len; i++)
   {
-    const struct load_command * lc = (const struct load_command *) p;
+    FridaSegment * s = &g_array_index (self->segments, FridaSegment, i);
 
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      mach_vm_address_t vm_address;
-      mach_vm_size_t vm_size;
-      GumAddress file_offset, file_size;
-      vm_prot_t protection;
+    mach_vm_write (task, base_address + s->vm_address, (vm_offset_t) self->header + s->file_offset, s->file_size);
 
-      if (lc->cmd == LC_SEGMENT)
-      {
-        struct segment_command * sc = (struct segment_command *) lc;
-        vm_address = sc->vmaddr;
-        vm_size = sc->vmsize;
-        file_offset = sc->fileoff;
-        file_size = sc->filesize;
-        protection = sc->initprot;
-      }
-      else
-      {
-        struct segment_command_64 * sc = (struct segment_command_64 *) lc;
-        vm_address = sc->vmaddr;
-        vm_size = sc->vmsize;
-        file_offset = sc->fileoff;
-        file_size = sc->filesize;
-        protection = sc->initprot;
-      }
-
-      mach_vm_write (task, base_address + vm_address, (vm_offset_t) self->header + file_offset, file_size);
-
-      mach_vm_protect (task, base_address + vm_address, vm_size, FALSE, protection);
-    }
-
-    p += lc->cmdsize;
+    mach_vm_protect (task, base_address + s->vm_address, s->vm_size, FALSE, s->protection);
   }
 }
 
@@ -380,80 +365,18 @@ frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
   return 0;
 }
 
-/* TODO: introduce a segment structure and consider doing the parsing just once */
-
 static GumAddress
 frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address)
 {
-  gsize current_index, i;
-  gconstpointer p;
-
-  p = self->commands;
-  current_index = 0;
-  for (i = 0; i != self->command_count; i++)
-  {
-    const struct load_command * lc = (const struct load_command *) p;
-
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      if (current_index == index)
-      {
-        if (lc->cmd == LC_SEGMENT)
-        {
-          struct segment_command * sc = (struct segment_command *) lc;
-          return base_address + sc->vmaddr;
-        }
-        else
-        {
-          struct segment_command_64 * sc = (struct segment_command_64 *) lc;
-          return base_address + sc->vmaddr;
-        }
-      }
-      current_index++;
-    }
-
-    p += lc->cmdsize;
-  }
-
-  g_assert_not_reached ();
-  return 0;
+  FridaSegment * segment = &g_array_index (self->segments, FridaSegment, index);
+  return base_address + segment->vm_address;
 }
 
 static GumAddress
 frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address)
 {
-  gsize current_index, i;
-  gconstpointer p;
-
-  p = self->commands;
-  current_index = 0;
-  for (i = 0; i != self->command_count; i++)
-  {
-    const struct load_command * lc = (const struct load_command *) p;
-
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      if (current_index == index)
-      {
-        if (lc->cmd == LC_SEGMENT)
-        {
-          struct segment_command * sc = (struct segment_command *) lc;
-          return base_address + sc->vmaddr + sc->vmsize;
-        }
-        else
-        {
-          struct segment_command_64 * sc = (struct segment_command_64 *) lc;
-          return base_address + sc->vmaddr + sc->vmsize;
-        }
-      }
-      current_index++;
-    }
-
-    p += lc->cmdsize;
-  }
-
-  g_assert_not_reached ();
-  return 0;
+  FridaSegment * segment = &g_array_index (self->segments, FridaSegment, index);
+  return base_address + segment->vm_address + segment->vm_size;
 }
 
 static guint64

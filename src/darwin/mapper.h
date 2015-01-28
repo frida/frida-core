@@ -7,18 +7,22 @@ typedef struct _FridaMapper FridaMapper;
 
 struct _FridaMapper
 {
-  GBytes * bytes;
+  GMappedFile * file;
   GumCpuType cpu_type;
   gsize page_size;
   gsize pointer_size;
-  gconstpointer header;
-  const struct mach_header * header_32;
-  const struct mach_header_64 * header_64;
-  const struct load_command * commands;
+
+  gpointer header;
+  struct mach_header * header_32;
+  struct mach_header_64 * header_64;
+  struct load_command * commands;
   gsize command_count;
-  const struct dyld_info_command * info;
-  const struct symtab_command * symtab;
-  const struct dysymtab_command * dysymtab;
+  struct dyld_info_command * info;
+  struct symtab_command * symtab;
+  struct dysymtab_command * dysymtab;
+
+  GArray * segments;
+
   gsize mapped_size;
 };
 
