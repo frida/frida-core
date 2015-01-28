@@ -2,6 +2,7 @@
 
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
+#include <mach-o/nlist.h>
 
 void
 frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cpu_type)
@@ -9,6 +10,10 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
   GMappedFile * file;
   gconstpointer data;
   const struct fat_header * fat_header;
+  gconstpointer p;
+  gsize i;
+
+  memset (mapper, 0, sizeof (FridaMapper));
 
   file = g_mapped_file_new (dylib_path, FALSE, NULL);
   g_assert (file != NULL);
@@ -29,9 +34,6 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       mapper->page_size = 16384;
       break;
   }
-
-  mapper->header_32 = NULL;
-  mapper->header_64 = NULL;
 
   data = g_bytes_get_data (mapper->bytes, NULL);
   fat_header = data;
@@ -78,23 +80,41 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
       g_assert (mapper->header_32 != NULL);
       mapper->header = mapper->header_32;
       mapper->header_64 = NULL;
-      mapper->load_commands = (const struct load_command *) (mapper->header_32 + 1);
-      mapper->load_command_count = mapper->header_32->ncmds;
+      mapper->commands = (const struct load_command *) (mapper->header_32 + 1);
+      mapper->command_count = mapper->header_32->ncmds;
       break;
     case GUM_CPU_AMD64:
     case GUM_CPU_ARM64:
       g_assert (mapper->header_64 != NULL);
       mapper->header = mapper->header_64;
       mapper->header_32 = NULL;
-      mapper->load_commands = (const struct load_command *) (mapper->header_64 + 1);
-      mapper->load_command_count = mapper->header_64->ncmds;
+      mapper->commands = (const struct load_command *) (mapper->header_64 + 1);
+      mapper->command_count = mapper->header_64->ncmds;
       break;
     default:
       g_assert_not_reached ();
       break;
   }
 
-  mapper->mapped_size = 0;
+  p = mapper->commands;
+  for (i = 0; i != mapper->command_count; i++)
+  {
+    const struct load_command * lc = p;
+
+    switch (lc->cmd)
+    {
+      case LC_SYMTAB:
+        mapper->symtab = p;
+        break;
+      case LC_DYSYMTAB:
+        mapper->dysymtab = p;
+        break;
+      default:
+        break;
+    }
+
+    p += lc->cmdsize;
+  }
 }
 
 void
@@ -113,8 +133,8 @@ frida_mapper_size (FridaMapper * self)
   if (self->mapped_size != 0)
     return self->mapped_size;
 
-  p = self->load_commands;
-  for (i = 0; i != self->load_command_count; i++)
+  p = self->commands;
+  for (i = 0; i != self->command_count; i++)
   {
     const struct load_command * lc = (const struct load_command *) p;
 
@@ -152,8 +172,8 @@ frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_a
   gconstpointer p;
   gsize i;
 
-  p = self->load_commands;
-  for (i = 0; i != self->load_command_count; i++)
+  p = self->commands;
+  for (i = 0; i != self->command_count; i++)
   {
     const struct load_command * lc = (const struct load_command *) p;
 
@@ -161,7 +181,7 @@ frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_a
     {
       mach_vm_address_t vm_address;
       mach_vm_size_t vm_size;
-      guint64 file_offset, file_size;
+      GumAddress file_offset, file_size;
       vm_prot_t protection;
 
       if (lc->cmd == LC_SEGMENT)
@@ -192,8 +212,41 @@ frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_a
   }
 }
 
-gsize
+GumAddress
 frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
 {
-  return 0; /* TODO */
+  const struct symtab_command * st = self->symtab;
+  const struct dysymtab_command * ds = self->dysymtab;
+  gconstpointer symbase, strbase;
+  gsize i;
+
+  symbase = self->header + st->symoff;
+  strbase = self->header + st->stroff;
+
+  for (i = ds->iextdefsym; i != ds->iextdefsym + ds->nextdefsym; i++)
+  {
+    const gchar * name;
+    GumAddress address;
+
+    if (self->header_32 != NULL)
+    {
+      const struct nlist * sym = symbase + (i * sizeof (struct nlist));
+      name = strbase + sym->n_un.n_strx;
+      address = sym->n_value;
+    }
+    else
+    {
+      const struct nlist_64 * sym = symbase + (i * sizeof (struct nlist_64));
+      name = strbase + sym->n_un.n_strx;
+      address = sym->n_value;
+    }
+
+    if (name[0] == '_')
+      name++;
+
+    if (strcmp (name, symbol) == 0)
+      return address;
+  }
+
+  return 0;
 }
