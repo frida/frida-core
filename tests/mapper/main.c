@@ -11,9 +11,9 @@ gint
 main (gint argc, gchar * argv[])
 {
   const gchar * dylib_path;
-  GumCpuType cpu_type;
-  FridaMapper mapper;
   mach_port_name_t task;
+  GumCpuType cpu_type;
+  FridaMapper * mapper;
   mach_vm_address_t base_address = 0;
   kern_return_t kr;
   UnixAttackerEntrypoint entrypoint;
@@ -29,6 +29,7 @@ main (gint argc, gchar * argv[])
   }
 
   dylib_path = argv[1];
+  task = mach_task_self ();
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   cpu_type = GUM_CPU_IA32;
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
@@ -41,22 +42,20 @@ main (gint argc, gchar * argv[])
 # error Unsupported CPU type
 #endif
 
-  frida_mapper_init (&mapper, dylib_path, cpu_type);
+  mapper = frida_mapper_new (dylib_path, task, cpu_type);
 
-  task = mach_task_self ();
-
-  kr = mach_vm_allocate (task, &base_address, frida_mapper_size (&mapper), VM_FLAGS_ANYWHERE);
+  kr = mach_vm_allocate (task, &base_address, frida_mapper_size (mapper), VM_FLAGS_ANYWHERE);
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
-  frida_mapper_map (&mapper, task, base_address);
+  frida_mapper_map (mapper, base_address);
 
-  entrypoint = (UnixAttackerEntrypoint) (base_address + frida_mapper_resolve (&mapper, "frida_agent_main"));
+  entrypoint = (UnixAttackerEntrypoint) (base_address + frida_mapper_resolve (mapper, "frida_agent_main"));
   entrypoint ("");
 
-  kr = mach_vm_deallocate (task, base_address, frida_mapper_size (&mapper));
+  kr = mach_vm_deallocate (task, base_address, frida_mapper_size (mapper));
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
-  frida_mapper_free (&mapper);
+  frida_mapper_free (mapper);
 
   return 0;
 }

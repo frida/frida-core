@@ -8,6 +8,7 @@ typedef struct _FridaMapper FridaMapper;
 struct _FridaMapper
 {
   GMappedFile * file;
+  mach_port_t task;
   GumCpuType cpu_type;
   gsize page_size;
   gsize pointer_size;
@@ -26,11 +27,11 @@ struct _FridaMapper
   gsize mapped_size;
 };
 
-void frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cpu_type);
+FridaMapper * frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type);
 void frida_mapper_free (FridaMapper * mapper);
 
 gsize frida_mapper_size (FridaMapper * self);
-void frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_address);
+void frida_mapper_map (FridaMapper * self, mach_vm_address_t base_address);
 GumAddress frida_mapper_resolve (FridaMapper * self, const gchar * symbol);
 
 #endif
