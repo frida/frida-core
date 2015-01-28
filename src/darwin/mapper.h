@@ -7,6 +7,8 @@ typedef struct _FridaMapper FridaMapper;
 
 struct _FridaMapper
 {
+  FridaMapper * parent;
+
   GMappedFile * file;
   mach_port_t task;
   GumCpuType cpu_type;
@@ -23,8 +25,7 @@ struct _FridaMapper
   struct dysymtab_command * dysymtab;
 
   GArray * segments;
-
-  gsize mapped_size;
+  GArray * libraries;
 };
 
 FridaMapper * frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type);

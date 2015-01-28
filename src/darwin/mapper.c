@@ -5,6 +5,7 @@
 #include <mach-o/nlist.h>
 
 typedef struct _FridaSegment FridaSegment;
+typedef struct _FridaLibrary FridaLibrary;
 
 struct _FridaSegment
 {
@@ -15,6 +16,13 @@ struct _FridaSegment
   vm_prot_t protection;
 };
 
+struct _FridaLibrary
+{
+  gchar * name;
+};
+
+static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type);
+
 static void frida_mapper_bind (FridaMapper * self, mach_vm_address_t base_address);
 static GumAddress frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address);
 static GumAddress frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address);
@@ -24,6 +32,12 @@ static guint64 frida_mapper_read_uleb128 (const guint8 ** p);
 FridaMapper *
 frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type)
 {
+  return frida_mapper_new_with_parent (NULL, dylib_path, task, cpu_type);
+}
+
+static FridaMapper *
+frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type)
+{
   FridaMapper * mapper;
   gpointer data;
   const struct fat_header * fat_header;
@@ -32,10 +46,10 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
 
   mapper = g_slice_new0 (FridaMapper);
 
+  mapper->parent = parent;
+
   mapper->file = g_mapped_file_new (dylib_path, TRUE, NULL);
   g_assert (mapper->file != NULL);
-
-  data = g_mapped_file_get_contents (mapper->file);
 
   mapper->task = task;
   mapper->cpu_type = cpu_type;
@@ -59,6 +73,7 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
       break;
   }
 
+  data = g_mapped_file_get_contents (mapper->file);
   fat_header = data;
   switch (fat_header->magic)
   {
@@ -120,6 +135,7 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
   }
 
   mapper->segments = g_array_new (FALSE, FALSE, sizeof (FridaSegment));
+  mapper->libraries = g_array_new (FALSE, FALSE, sizeof (FridaLibrary));
 
   p = mapper->commands;
   for (i = 0; i != mapper->command_count; i++)
@@ -135,7 +151,7 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
 
         if (lc->cmd == LC_SEGMENT)
         {
-          struct segment_command * sc = (struct segment_command *) lc;
+          struct segment_command * sc = p;
           segment.vm_address = sc->vmaddr;
           segment.vm_size = sc->vmsize;
           segment.file_offset = sc->fileoff;
@@ -144,7 +160,7 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
         }
         else
         {
-          struct segment_command_64 * sc = (struct segment_command_64 *) lc;
+          struct segment_command_64 * sc = p;
           segment.vm_address = sc->vmaddr;
           segment.vm_size = sc->vmsize;
           segment.file_offset = sc->fileoff;
@@ -153,6 +169,17 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
         }
 
         g_array_append_val (mapper->segments, segment);
+
+        break;
+      }
+      case LC_LOAD_DYLIB:
+      {
+        struct dylib_command * dc = p;
+        FridaLibrary library;
+
+        library.name = p + dc->dylib.name.offset;
+
+        g_array_append_val (mapper->libraries, library);
 
         break;
       }
@@ -178,6 +205,7 @@ frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_typ
 void
 frida_mapper_free (FridaMapper * mapper)
 {
+  g_array_unref (mapper->libraries);
   g_array_unref (mapper->segments);
 
   g_mapped_file_unref (mapper->file);
@@ -338,15 +366,15 @@ frida_mapper_bind (FridaMapper * self, mach_vm_address_t base_address)
 GumAddress
 frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
 {
-  const struct symtab_command * st = self->symtab;
-  const struct dysymtab_command * ds = self->dysymtab;
+  const struct symtab_command * sc = self->symtab;
+  const struct dysymtab_command * dc = self->dysymtab;
   gconstpointer symbase, strbase;
   gsize i;
 
-  symbase = self->header + st->symoff;
-  strbase = self->header + st->stroff;
+  symbase = self->header + sc->symoff;
+  strbase = self->header + sc->stroff;
 
-  for (i = ds->iextdefsym; i != ds->iextdefsym + ds->nextdefsym; i++)
+  for (i = dc->iextdefsym; i != dc->iextdefsym + dc->nextdefsym; i++)
   {
     const gchar * name;
     GumAddress address;
