@@ -4,6 +4,11 @@
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
 
+static GumAddress frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address);
+static GumAddress frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address);
+
+static guint64 frida_mapper_read_uleb128 (const guint8 ** p);
+
 void
 frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cpu_type)
 {
@@ -26,11 +31,19 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
   switch (cpu_type)
   {
     case GUM_CPU_IA32:
+      mapper->pointer_size = 4;
+      mapper->page_size = 4096;
+      break;
     case GUM_CPU_AMD64:
+      mapper->pointer_size = 8;
+      mapper->page_size = 4096;
+      break;
     case GUM_CPU_ARM:
+      mapper->pointer_size = 4;
       mapper->page_size = 4096;
       break;
     case GUM_CPU_ARM64:
+      mapper->pointer_size = 8;
       mapper->page_size = 16384;
       break;
   }
@@ -103,6 +116,9 @@ frida_mapper_init (FridaMapper * mapper, const gchar * dylib_path, GumCpuType cp
 
     switch (lc->cmd)
     {
+      case LC_DYLD_INFO_ONLY:
+        mapper->info = p;
+        break;
       case LC_SYMTAB:
         mapper->symtab = p;
         break;
@@ -171,6 +187,119 @@ frida_mapper_map (FridaMapper * self, mach_port_t task, mach_vm_address_t base_a
 {
   gconstpointer p;
   gsize i;
+
+  {
+    const guint8 * start = self->header + self->info->bind_off;
+    const guint8 * end = start + self->info->bind_size;
+    const guint8 * p = start;
+    gboolean done = FALSE;
+
+    guint8 type = 0;
+    gint segment_index = 0;
+    GumAddress address = frida_mapper_segment_start (self, 0, base_address);
+    GumAddress segment_end = frida_mapper_segment_end (self, 0, base_address);
+    const gchar * symbol_name = NULL;
+    guint8 symbol_flags = 0;
+    gint library_ordinal = 0;
+    GumAddress addend = 0;
+
+    while (!done && p != end)
+    {
+      guint8 opcode = *p & BIND_OPCODE_MASK;
+      guint8 immediate = *p & BIND_IMMEDIATE_MASK;
+
+      p++;
+
+      switch (opcode)
+      {
+        case BIND_OPCODE_DONE:
+          g_print ("BIND_OPCODE_DONE\n");
+          done = TRUE;
+          break;
+        case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+          g_print ("BIND_OPCODE_SET_DYLIB_ORDINAL_IMM\n");
+          library_ordinal = immediate;
+          break;
+        case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+          g_print ("BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB\n");
+          library_ordinal = frida_mapper_read_uleb128 (&p);
+          break;
+        case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+          g_print ("BIND_OPCODE_SET_DYLIB_SPECIAL_IMM\n");
+          if (immediate == 0)
+          {
+            library_ordinal = 0;
+          }
+          else
+          {
+            gint8 value = BIND_OPCODE_MASK | immediate;
+            library_ordinal = value;
+          }
+          break;
+        case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+          g_print ("BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM\n");
+          symbol_name = (gchar *) p;
+          symbol_flags = immediate;
+          while (*p != '\0')
+            p++;
+          p++;
+          break;
+        case BIND_OPCODE_SET_TYPE_IMM:
+          g_print ("BIND_OPCODE_SET_TYPE_IMM\n");
+          type = immediate;
+          break;
+        case BIND_OPCODE_SET_ADDEND_SLEB:
+          g_print ("BIND_OPCODE_SET_ADDEND_SLEB\n");
+          addend = frida_mapper_read_uleb128 (&p);
+          break;
+        case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+          g_print ("BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB\n");
+          segment_index = immediate;
+          address = frida_mapper_segment_start (self, segment_index, base_address);
+          address += frida_mapper_read_uleb128 (&p);
+          segment_end = frida_mapper_segment_end (self, segment_index, base_address);
+          break;
+        case BIND_OPCODE_ADD_ADDR_ULEB:
+          g_print ("BIND_OPCODE_ADD_ADDR_ULEB\n");
+          address += frida_mapper_read_uleb128 (&p);
+          break;
+        case BIND_OPCODE_DO_BIND:
+          g_print ("BIND_OPCODE_DO_BIND\n");
+          /* TODO: bind! */
+          address += self->pointer_size;
+          break;
+        case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+          g_print ("BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB\n");
+          /* TODO: bind! */
+          address += self->pointer_size + frida_mapper_read_uleb128 (&p);
+          break;
+        case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+          g_print ("BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED\n");
+          /* TODO: bind! */
+          address += self->pointer_size + (immediate * self->pointer_size);
+          break;
+        case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+        {
+          gsize count, skip;
+
+          g_print ("BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB\n");
+
+          count = frida_mapper_read_uleb128 (&p);
+          skip = frida_mapper_read_uleb128 (&p);
+          for (i = 0; i != count; ++i)
+          {
+            /* TODO: bind! */
+            address += self->pointer_size + skip;
+          }
+
+          break;
+        }
+        default:
+          g_assert_not_reached ();
+          break;
+      }
+    }
+  }
 
   p = self->commands;
   for (i = 0; i != self->command_count; i++)
@@ -249,4 +378,102 @@ frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
   }
 
   return 0;
+}
+
+/* TODO: introduce a segment structure and consider doing the parsing just once */
+
+static GumAddress
+frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address)
+{
+  gsize current_index, i;
+  gconstpointer p;
+
+  p = self->commands;
+  current_index = 0;
+  for (i = 0; i != self->command_count; i++)
+  {
+    const struct load_command * lc = (const struct load_command *) p;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      if (current_index == index)
+      {
+        if (lc->cmd == LC_SEGMENT)
+        {
+          struct segment_command * sc = (struct segment_command *) lc;
+          return base_address + sc->vmaddr;
+        }
+        else
+        {
+          struct segment_command_64 * sc = (struct segment_command_64 *) lc;
+          return base_address + sc->vmaddr;
+        }
+      }
+      current_index++;
+    }
+
+    p += lc->cmdsize;
+  }
+
+  g_assert_not_reached ();
+  return 0;
+}
+
+static GumAddress
+frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address)
+{
+  gsize current_index, i;
+  gconstpointer p;
+
+  p = self->commands;
+  current_index = 0;
+  for (i = 0; i != self->command_count; i++)
+  {
+    const struct load_command * lc = (const struct load_command *) p;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      if (current_index == index)
+      {
+        if (lc->cmd == LC_SEGMENT)
+        {
+          struct segment_command * sc = (struct segment_command *) lc;
+          return base_address + sc->vmaddr + sc->vmsize;
+        }
+        else
+        {
+          struct segment_command_64 * sc = (struct segment_command_64 *) lc;
+          return base_address + sc->vmaddr + sc->vmsize;
+        }
+      }
+      current_index++;
+    }
+
+    p += lc->cmdsize;
+  }
+
+  g_assert_not_reached ();
+  return 0;
+}
+
+static guint64
+frida_mapper_read_uleb128 (const guint8 ** data)
+{
+  const guint8 * p = *data;
+  guint64 result = 0;
+  gint offset = 0;
+
+  do
+  {
+    guint64 chunk = *p & 0x7f;
+
+    g_assert_cmpint (offset, <=, 63);
+    result |= (chunk << offset);
+    offset += 7;
+  }
+  while (*p++ & 0x80);
+
+  *data = p;
+
+  return result;
 }

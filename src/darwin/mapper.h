@@ -10,11 +10,13 @@ struct _FridaMapper
   GBytes * bytes;
   GumCpuType cpu_type;
   gsize page_size;
+  gsize pointer_size;
   gconstpointer header;
   const struct mach_header * header_32;
   const struct mach_header_64 * header_64;
   const struct load_command * commands;
   gsize command_count;
+  const struct dyld_info_command * info;
   const struct symtab_command * symtab;
   const struct dysymtab_command * dysymtab;
   gsize mapped_size;
