@@ -27,7 +27,7 @@ struct _FridaMapper
 
   FridaLibrary * library;
   GArray * segments;
-  GPtrArray * libraries;
+  GPtrArray * dependencies;
 
   GHashTable * mappings;
 };
