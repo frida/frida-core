@@ -5,7 +5,7 @@
 #include <mach-o/nlist.h>
 
 typedef struct _FridaSegment FridaSegment;
-typedef struct _FridaLibrary FridaLibrary;
+typedef struct _FridaMapping FridaMapping;
 
 struct _FridaSegment
 {
@@ -16,27 +16,45 @@ struct _FridaSegment
   vm_prot_t protection;
 };
 
+struct _FridaMapping
+{
+  FridaLibrary * library;
+  GumAddress base_address;
+  FridaMapper * mapper;
+};
+
 struct _FridaLibrary
 {
+  int ref_count;
   gchar * name;
 };
 
-static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type);
+static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 
-static void frida_mapper_bind (FridaMapper * self, mach_vm_address_t base_address);
-static GumAddress frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address);
-static GumAddress frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address);
+static FridaLibrary * frida_mapper_get_library (FridaMapper * self, const gchar * name, FridaMapper * referrer);
+static gboolean frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details, gpointer user_data);
+static FridaMapping * frida_mapper_add_existing_mapping (FridaMapper * self, FridaLibrary * library, GumAddress base_address);
+static FridaMapping * frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaMapper * mapper);
+static void frida_mapper_bind (FridaMapper * self, GumAddress base_address);
+static GumAddress frida_mapper_segment_start (FridaMapper * self, gsize index, GumAddress base_address);
+static GumAddress frida_mapper_segment_end (FridaMapper * self, gsize index, GumAddress base_address);
 
 static guint64 frida_mapper_read_uleb128 (const guint8 ** p);
 
+static void frida_mapping_free (FridaMapping * mapping);
+
+static FridaLibrary * frida_library_new (const gchar * name);
+static FridaLibrary * frida_library_ref (FridaLibrary * self);
+static void frida_library_unref (FridaLibrary * self);
+
 FridaMapper *
-frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type)
+frida_mapper_new (const gchar * name, mach_port_t task, GumCpuType cpu_type)
 {
-  return frida_mapper_new_with_parent (NULL, dylib_path, task, cpu_type);
+  return frida_mapper_new_with_parent (NULL, name, task, cpu_type);
 }
 
 static FridaMapper *
-frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type)
+frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type)
 {
   FridaMapper * mapper;
   gpointer data;
@@ -48,7 +66,7 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, ma
 
   mapper->parent = parent;
 
-  mapper->file = g_mapped_file_new (dylib_path, TRUE, NULL);
+  mapper->file = g_mapped_file_new (name, TRUE, NULL);
   g_assert (mapper->file != NULL);
 
   mapper->task = task;
@@ -134,8 +152,16 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, ma
       break;
   }
 
+  mapper->library = frida_library_new (name);
   mapper->segments = g_array_new (FALSE, FALSE, sizeof (FridaSegment));
-  mapper->libraries = g_array_new (FALSE, FALSE, sizeof (FridaLibrary));
+  mapper->libraries = g_ptr_array_new_full (5, (GDestroyNotify) frida_library_unref);
+
+  if (parent == NULL)
+  {
+    mapper->mappings = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_mapping_free);
+    frida_mapper_add_pending_mapping (mapper, name, mapper);
+    gum_darwin_enumerate_modules (task, frida_mapper_add_existing_mapping_from_module, mapper);
+  }
 
   p = mapper->commands;
   for (i = 0; i != mapper->command_count; i++)
@@ -175,11 +201,12 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, ma
       case LC_LOAD_DYLIB:
       {
         struct dylib_command * dc = p;
-        FridaLibrary library;
+        const gchar * name;
+        FridaLibrary * library;
 
-        library.name = p + dc->dylib.name.offset;
-
-        g_array_append_val (mapper->libraries, library);
+        name = p + dc->dylib.name.offset;
+        library = frida_mapper_get_library (parent != NULL ? parent : mapper, name, mapper);
+        g_ptr_array_add (mapper->libraries, library);
 
         break;
       }
@@ -205,12 +232,76 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * dylib_path, ma
 void
 frida_mapper_free (FridaMapper * mapper)
 {
-  g_array_unref (mapper->libraries);
+  if (mapper->mappings != NULL)
+    g_hash_table_unref (mapper->mappings);
+
+  g_ptr_array_unref (mapper->libraries);
   g_array_unref (mapper->segments);
+  frida_library_unref (mapper->library);
 
   g_mapped_file_unref (mapper->file);
 
   g_slice_free (FridaMapper, mapper);
+}
+
+static FridaLibrary *
+frida_mapper_get_library (FridaMapper * self, const gchar * name, FridaMapper * referrer)
+{
+  FridaMapping * mapping;
+
+  mapping = g_hash_table_lookup (self->mappings, name);
+  if (mapping == NULL)
+  {
+    FridaMapper * mapper;
+
+    mapper = frida_mapper_new_with_parent (self, name, self->task, self->cpu_type);
+    mapping = frida_mapper_add_pending_mapping (self, name, mapper);
+  }
+
+  return frida_library_ref (mapping->library);
+}
+
+static gboolean
+frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details, gpointer user_data)
+{
+  FridaMapper * self = user_data;
+  FridaLibrary * library;
+
+  library = frida_library_new (details->path);
+  frida_mapper_add_existing_mapping (self, library, details->range->base_address);
+  frida_library_unref (library);
+
+  return TRUE;
+}
+
+static FridaMapping *
+frida_mapper_add_existing_mapping (FridaMapper * self, FridaLibrary * library, GumAddress base_address)
+{
+  FridaMapping * mapping;
+
+  mapping = g_slice_new (FridaMapping);
+  mapping->library = frida_library_ref (library);
+  mapping->base_address = base_address;
+  mapping->mapper = NULL;
+
+  g_hash_table_insert (self->mappings, g_strdup (library->name), mapping);
+
+  return mapping;
+}
+
+static FridaMapping *
+frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaMapper * mapper)
+{
+  FridaMapping * mapping;
+
+  mapping = g_slice_new (FridaMapping);
+  mapping->library = frida_library_ref (mapper->library);
+  mapping->base_address = 0;
+  mapping->mapper = mapper;
+
+  g_hash_table_insert (self->mappings, g_strdup (name), mapping);
+
+  return mapping;
 }
 
 gsize
@@ -231,7 +322,7 @@ frida_mapper_size (FridaMapper * self)
 }
 
 void
-frida_mapper_map (FridaMapper * self, mach_vm_address_t base_address)
+frida_mapper_map (FridaMapper * self, GumAddress base_address)
 {
   guint i;
 
@@ -248,7 +339,7 @@ frida_mapper_map (FridaMapper * self, mach_vm_address_t base_address)
 }
 
 static void
-frida_mapper_bind (FridaMapper * self, mach_vm_address_t base_address)
+frida_mapper_bind (FridaMapper * self, GumAddress base_address)
 {
   const guint8 * start = self->header + self->info->bind_off;
   const guint8 * end = start + self->info->bind_size;
@@ -403,14 +494,14 @@ frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
 }
 
 static GumAddress
-frida_mapper_segment_start (FridaMapper * self, gsize index, mach_vm_address_t base_address)
+frida_mapper_segment_start (FridaMapper * self, gsize index, GumAddress base_address)
 {
   FridaSegment * segment = &g_array_index (self->segments, FridaSegment, index);
   return base_address + segment->vm_address;
 }
 
 static GumAddress
-frida_mapper_segment_end (FridaMapper * self, gsize index, mach_vm_address_t base_address)
+frida_mapper_segment_end (FridaMapper * self, gsize index, GumAddress base_address)
 {
   FridaSegment * segment = &g_array_index (self->segments, FridaSegment, index);
   return base_address + segment->vm_address + segment->vm_size;
@@ -436,4 +527,40 @@ frida_mapper_read_uleb128 (const guint8 ** data)
   *data = p;
 
   return result;
+}
+
+static void
+frida_mapping_free (FridaMapping * mapping)
+{
+  frida_library_unref (mapping->library);
+  g_slice_free (FridaMapping, mapping);
+}
+
+static FridaLibrary *
+frida_library_new (const gchar * name)
+{
+  FridaLibrary * library;
+
+  library = g_slice_new (FridaLibrary);
+  library->ref_count = 1;
+  library->name = g_strdup (name);
+
+  return library;
+}
+
+static FridaLibrary *
+frida_library_ref (FridaLibrary * self)
+{
+  self->ref_count++;
+  return self;
+}
+
+static void
+frida_library_unref (FridaLibrary * self)
+{
+  if (--self->ref_count == 0)
+  {
+    g_free (self->name);
+    g_slice_free (FridaLibrary, self);
+  }
 }

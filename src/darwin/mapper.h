@@ -4,6 +4,7 @@
 #include <gum/gumdarwin.h>
 
 typedef struct _FridaMapper FridaMapper;
+typedef struct _FridaLibrary FridaLibrary;
 
 struct _FridaMapper
 {
@@ -24,15 +25,18 @@ struct _FridaMapper
   struct symtab_command * symtab;
   struct dysymtab_command * dysymtab;
 
+  FridaLibrary * library;
   GArray * segments;
-  GArray * libraries;
+  GPtrArray * libraries;
+
+  GHashTable * mappings;
 };
 
-FridaMapper * frida_mapper_new (const gchar * dylib_path, mach_port_t task, GumCpuType cpu_type);
+FridaMapper * frida_mapper_new (const gchar * name, mach_port_t task, GumCpuType cpu_type);
 void frida_mapper_free (FridaMapper * mapper);
 
 gsize frida_mapper_size (FridaMapper * self);
-void frida_mapper_map (FridaMapper * self, mach_vm_address_t base_address);
+void frida_mapper_map (FridaMapper * self, GumAddress base_address);
 GumAddress frida_mapper_resolve (FridaMapper * self, const gchar * symbol);
 
 #endif
