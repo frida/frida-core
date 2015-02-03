@@ -37,6 +37,6 @@ void frida_mapper_free (FridaMapper * mapper);
 
 gsize frida_mapper_size (FridaMapper * self);
 void frida_mapper_map (FridaMapper * self, GumAddress base_address);
-GumAddress frida_mapper_resolve (FridaMapper * self, const gchar * symbol);
+GumAddress frida_mapper_resolve (FridaMapper * self, FridaLibrary * library, const gchar * symbol);
 
 #endif
