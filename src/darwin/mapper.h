@@ -11,22 +11,10 @@ struct _FridaMapper
   FridaMapper * parent;
 
   GMappedFile * file;
-  mach_port_t task;
-  GumCpuType cpu_type;
-  gsize page_size;
-  gsize pointer_size;
-
-  gpointer header;
-  struct mach_header * header_32;
-  struct mach_header_64 * header_64;
-  struct load_command * commands;
-  gsize command_count;
-  struct dyld_info_command * info;
-  struct symtab_command * symtab;
-  struct dysymtab_command * dysymtab;
+  gpointer data;
+  gsize size;
 
   FridaLibrary * library;
-  GArray * segments;
   GPtrArray * dependencies;
 
   GHashTable * mappings;
