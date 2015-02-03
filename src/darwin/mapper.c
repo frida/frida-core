@@ -60,10 +60,20 @@ struct _FridaSymbolDetails
 {
   guint64 flags;
 
-  guint64 offset;
-
-  gint reexport_library_ordinal;
-  const gchar * reexport_symbol;
+  union
+  {
+    struct {
+      guint64 offset;
+    };
+    struct {
+      guint64 stub;
+      guint64 resolver;
+    };
+    struct {
+      gint reexport_library_ordinal;
+      const gchar * reexport_symbol;
+    };
+  };
 };
 
 struct _FridaBindDetails
@@ -232,7 +242,7 @@ frida_mapper_dependency (FridaMapper * self, gint ordinal)
 {
   FridaMapping * result;
 
-  g_assert_cmpint (ordinal, >=, 1); /* FIXME */
+  g_assert_cmpint (ordinal, >=, 1); /* TODO */
   result = g_ptr_array_index (self->dependencies, ordinal - 1);
   g_assert (result != NULL);
 
@@ -327,6 +337,7 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
 
   library->base_address = base_address;
 
+  /* TODO: relocations */
   frida_mapper_enumerate_binds (self, frida_mapper_bind, self);
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, self);
 
@@ -338,6 +349,8 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
 
     mach_vm_protect (library->task, base_address + s->vm_address, s->vm_size, FALSE, s->protection);
   }
+
+  /* TODO: generate init and fini functions for calling constructors and destructors */
 }
 
 GumAddress
@@ -364,13 +377,23 @@ frida_mapper_resolve (FridaMapper * self, FridaLibrary * library, const gchar * 
   switch (details.flags & EXPORT_SYMBOL_FLAGS_KIND_MASK)
   {
     case EXPORT_SYMBOL_FLAGS_KIND_REGULAR:
-      g_assert_cmpint (details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER, ==, 0); /* TODO: necessary? */
+      if ((details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0)
+      {
+        /* XXX: we ignore interposing */
+
+        if ((details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0)
+        {
+          /* TODO: generate trampoline for resolver */
+          g_print ("[%s :: %s] stub=%p resolver=%p\n", library->name, symbol, (gpointer) details.stub, (gpointer) details.resolver);
+        }
+
+        return 1;
+      }
       return library->base_address + details.offset;
     case EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL:
+      return library->base_address + details.offset;
     case EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE:
-      /* TODO: necessary? */
-      g_assert_not_reached ();
-      break;
+      return details.offset;
     default:
       g_assert_not_reached ();
       break;
@@ -385,12 +408,14 @@ frida_mapper_bind (const FridaBindDetails * details, gpointer user_data)
   FridaMapper * self = user_data;
   FridaMapping * dependency;
   GumAddress address;
+  gboolean is_weak_import;
 
   g_assert_cmpint (details->type, ==, BIND_TYPE_POINTER); /* until necessary */
-  g_assert_cmpint (details->symbol_flags, ==, 0);
 
   dependency = frida_mapper_dependency (self, details->library_ordinal);
   address = frida_mapper_resolve (self, dependency->library, details->symbol_name) + details->addend;
+  is_weak_import = (details->symbol_flags & BIND_SYMBOL_FLAGS_WEAK_IMPORT) != 0;
+  g_assert (address != 0 || is_weak_import);
 
   if (details->offset < details->segment->file_size)
   {
@@ -709,7 +734,7 @@ frida_library_dependency (FridaLibrary * self, gint ordinal)
 {
   const gchar * result;
 
-  g_assert_cmpint (ordinal, >=, 1); /* FIXME */
+  g_assert_cmpint (ordinal, >=, 1); /* TODO */
 
   if (!frida_library_ensure_metadata (self))
     return NULL;
@@ -731,17 +756,17 @@ frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDet
   details->flags = frida_read_uleb128 (&p, self->exports_end);
   if ((details->flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0)
   {
-    details->offset = 0;
-
     details->reexport_library_ordinal = frida_read_uleb128 (&p, self->exports_end);
     details->reexport_symbol = (*p != '\0') ? (gchar *) p : symbol;
+  }
+  else if ((details->flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0)
+  {
+    details->stub = frida_read_uleb128 (&p, self->exports_end);
+    details->resolver = frida_read_uleb128 (&p, self->exports_end);
   }
   else
   {
     details->offset = frida_read_uleb128 (&p, self->exports_end);
-
-    details->reexport_library_ordinal = 0;
-    details->reexport_symbol = NULL;
   }
 
   return TRUE;
