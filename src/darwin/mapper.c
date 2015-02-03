@@ -6,6 +6,10 @@
 
 #define MAX_METADATA_SIZE (64 * 1024)
 
+#ifndef EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE
+# define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE 2
+#endif
+
 typedef struct _FridaSegment FridaSegment;
 typedef struct _FridaMapping FridaMapping;
 typedef struct _FridaSymbolDetails FridaSymbolDetails;
@@ -53,6 +57,8 @@ struct _FridaMapping
 struct _FridaSymbolDetails
 {
   guint64 flags;
+
+  guint64 offset;
 
   gint reexport_library_ordinal;
   const gchar * reexport_symbol;
@@ -110,7 +116,6 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
   struct mach_header_64 * header_64 = NULL;
   gsize size_32 = 0;
   gsize size_64 = 0;
-  gsize metadata_size;
   GPtrArray * dependencies;
   guint i;
 
@@ -183,8 +188,7 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
   }
 
   mapper->library = frida_library_new (name, task, cpu_type, 0);
-  metadata_size = MIN (mapper->size, MAX_METADATA_SIZE);
-  frida_library_take_metadata (mapper->library, g_memdup (mapper->data, metadata_size), metadata_size);
+  frida_library_take_metadata (mapper->library, g_memdup (mapper->data, mapper->size), mapper->size);
   mapper->dependencies = g_ptr_array_new_full (5, (GDestroyNotify) frida_mapping_unref);
 
   if (parent == NULL)
@@ -354,7 +358,21 @@ frida_mapper_resolve (FridaMapper * self, FridaLibrary * library, const gchar * 
     return frida_mapper_resolve (self, target->library, details.reexport_symbol);
   }
 
-  g_print ("TODO!\n");
+  switch (details.flags & EXPORT_SYMBOL_FLAGS_KIND_MASK)
+  {
+    case EXPORT_SYMBOL_FLAGS_KIND_REGULAR:
+      g_assert_cmpint (details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER, ==, 0); /* TODO: necessary? */
+      return library->base_address + details.offset;
+    case EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL:
+    case EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE:
+      /* TODO: necessary? */
+      g_assert_not_reached ();
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
   return 0;
 }
 
@@ -617,12 +635,15 @@ frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDet
   details->flags = frida_read_uleb128 (&p, self->exports_end);
   if ((details->flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0)
   {
+    details->offset = 0;
+
     details->reexport_library_ordinal = frida_read_uleb128 (&p, self->exports_end);
     details->reexport_symbol = (*p != '\0') ? (gchar *) p : symbol;
   }
   else
   {
-    /* TODO */
+    details->offset = frida_read_uleb128 (&p, self->exports_end);
+
     details->reexport_library_ordinal = 0;
     details->reexport_symbol = NULL;
   }
