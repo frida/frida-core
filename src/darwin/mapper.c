@@ -347,7 +347,6 @@ frida_mapper_resolve (FridaMapper * self, FridaLibrary * library, const gchar * 
   if (!frida_library_resolve (library, symbol, &details))
     return 0;
 
-  g_print ("resolve %s :: %s => %p\n", library->name, symbol, (gpointer) details.flags);
   if ((details.flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0)
   {
     const gchar * target_name;
@@ -741,7 +740,7 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
   struct mach_header * header;
   gpointer p;
   guint cmd_index;
-  gsize exports_size;
+  GumAddress linkedit;
 
   g_assert (self->metadata == NULL);
 
@@ -815,15 +814,15 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
     p += lc->cmdsize;
   }
 
+  if (!gum_darwin_find_linkedit (metadata, metadata_size, &linkedit))
+    goto beach;
+
   if (self->base_address != 0)
   {
     gint64 slide;
-    GumAddress linkedit;
+    gsize exports_size;
 
     if (!gum_darwin_find_slide (self->base_address, metadata, metadata_size, &slide))
-      goto beach;
-
-    if (!gum_darwin_find_linkedit (metadata, metadata_size, &linkedit))
       goto beach;
     linkedit += slide;
 
@@ -832,19 +831,8 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
   }
   else
   {
-    guint i;
-
-    for (i = 0; i != self->segments->len; i++)
-    {
-      FridaSegment * segment = &g_array_index (self->segments, FridaSegment, i);
-      if (strcmp (segment->name, "__LINKEDIT") == 0)
-      {
-        self->exports = g_memdup (metadata + segment->file_offset + self->info->export_off, self->info->export_size);
-        self->exports_end = self->exports + self->info->export_size;
-
-        break;
-      }
-    }
+    self->exports = g_memdup (metadata + linkedit + self->info->export_off, self->info->export_size);
+    self->exports_end = self->exports + self->info->export_size;
   }
 
   success = self->exports != NULL;

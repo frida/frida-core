@@ -49,7 +49,7 @@ main (gint argc, gchar * argv[])
 
   frida_mapper_map (mapper, base_address);
 
-  entrypoint = (UnixAttackerEntrypoint) (base_address + frida_mapper_resolve (mapper, mapper->library, "frida_agent_main"));
+  entrypoint = (UnixAttackerEntrypoint) frida_mapper_resolve (mapper, mapper->library, "_frida_agent_main");
   entrypoint ("");
 
   kr = mach_vm_deallocate (task, base_address, frida_mapper_size (mapper));
