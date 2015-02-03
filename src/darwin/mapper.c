@@ -386,12 +386,34 @@ frida_mapper_bind (const FridaBindDetails * details, gpointer user_data)
   FridaMapping * dependency;
   GumAddress address;
 
-  dependency = frida_mapper_dependency (self, details->library_ordinal);
-  g_print ("bind(segment=%s, offset=%p, type=0x%02x, library=%s, symbol_name=%s, symbol_flags=0x%02x, addend=%p)\n",
-      details->segment->name, (gpointer) details->offset, (gint) details->type, dependency->library->name, details->symbol_name, (gint) details->symbol_flags, (gpointer) details->addend);
+  g_assert_cmpint (details->type, ==, BIND_TYPE_POINTER); /* until necessary */
+  g_assert_cmpint (details->symbol_flags, ==, 0);
 
-  address = frida_mapper_resolve (self, dependency->library, details->symbol_name);
-  g_print ("  *** %s to %p\n", details->symbol_name, (gpointer) address);
+  dependency = frida_mapper_dependency (self, details->library_ordinal);
+  address = frida_mapper_resolve (self, dependency->library, details->symbol_name) + details->addend;
+
+  if (details->offset < details->segment->file_size)
+  {
+    gpointer entry = self->data + details->segment->file_offset + details->offset;
+    if (self->library->pointer_size == 4)
+      *((guint32 *) entry) = address;
+    else
+      *((guint64 *) entry) = address;
+  }
+  else
+  {
+    mach_vm_address_t entry = self->library->base_address + details->segment->vm_address + details->offset;
+    if (self->library->pointer_size == 4)
+    {
+      guint32 address32 = address;
+      mach_vm_write (self->library->task, entry, (vm_offset_t) &address32, sizeof (address32));
+    }
+    else
+    {
+      guint64 address64 = address;
+      mach_vm_write (self->library->task, entry, (vm_offset_t) &address64, sizeof (address64));
+    }
+  }
 }
 
 static void
