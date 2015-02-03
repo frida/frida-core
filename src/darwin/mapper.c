@@ -68,7 +68,8 @@ struct _FridaSymbolDetails
 
 struct _FridaBindDetails
 {
-  GumAddress address;
+  const FridaSegment * segment;
+  guint64 offset;
   guint8 type;
   gint library_ordinal;
   const gchar * symbol_name;
@@ -83,8 +84,8 @@ static gboolean frida_mapper_add_existing_mapping_from_module (const GumModuleDe
 static FridaMapping * frida_mapper_add_existing_mapping (FridaMapper * self, FridaLibrary * library, GumAddress base_address);
 static FridaMapping * frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaMapper * mapper);
 static void frida_mapper_bind (const FridaBindDetails * details, gpointer user_data);
-static void frida_mapper_enumerate_binds (FridaMapper * self, GumAddress base_address, FridaFoundBindFunc func, gpointer user_data);
-static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, GumAddress base_address, FridaFoundBindFunc func, gpointer user_data);
+static void frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
+static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
 
 static FridaMapping * frida_mapping_ref (FridaMapping * self);
 static void frida_mapping_unref (FridaMapping * self);
@@ -92,8 +93,7 @@ static void frida_mapping_unref (FridaMapping * self);
 static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address);
 static FridaLibrary * frida_library_ref (FridaLibrary * self);
 static void frida_library_unref (FridaLibrary * self);
-static GumAddress frida_library_segment_start (FridaLibrary * self, gsize index, GumAddress base_address);
-static GumAddress frida_library_segment_end (FridaLibrary * self, gsize index, GumAddress base_address);
+static const FridaSegment * frida_library_segment (FridaLibrary * self, gsize index);
 static const gchar * frida_library_dependency (FridaLibrary * self, gint ordinal);
 static gboolean frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDetails * details);
 static const guint8 * frida_library_find_export_node (FridaLibrary * self, const gchar * name);
@@ -327,8 +327,8 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
 
   library->base_address = base_address;
 
-  frida_mapper_enumerate_binds (self, base_address, frida_mapper_bind, self);
-  frida_mapper_enumerate_lazy_binds (self, base_address, frida_mapper_bind, self);
+  frida_mapper_enumerate_binds (self, frida_mapper_bind, self);
+  frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, self);
 
   for (i = 0; i != library->segments->len; i++)
   {
@@ -387,33 +387,36 @@ frida_mapper_bind (const FridaBindDetails * details, gpointer user_data)
   GumAddress address;
 
   dependency = frida_mapper_dependency (self, details->library_ordinal);
-  g_print ("bind(address=%p, type=0x%02x, library=%s, symbol_name=%s, symbol_flags=0x%02x, addend=%p)\n",
-      (gpointer) details->address, (gint) details->type, dependency->library->name, details->symbol_name, (gint) details->symbol_flags, (gpointer) details->addend);
+  g_print ("bind(segment=%s, offset=%p, type=0x%02x, library=%s, symbol_name=%s, symbol_flags=0x%02x, addend=%p)\n",
+      details->segment->name, (gpointer) details->offset, (gint) details->type, dependency->library->name, details->symbol_name, (gint) details->symbol_flags, (gpointer) details->addend);
 
   address = frida_mapper_resolve (self, dependency->library, details->symbol_name);
   g_print ("  *** %s to %p\n", details->symbol_name, (gpointer) address);
 }
 
 static void
-frida_mapper_enumerate_binds (FridaMapper * self, GumAddress base_address, FridaFoundBindFunc func, gpointer user_data)
+frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data)
 {
   FridaLibrary * library = self->library;
-  const guint8 * start = self->data + library->info->bind_off;
-  const guint8 * end = start + library->info->bind_size;
-  const guint8 * p = start;
-  gboolean done = FALSE;
-
+  const guint8 * start, * end, * p;
+  gboolean done;
   FridaBindDetails details;
-  GumAddress segment_end;
+  guint64 max_offset;
 
-  details.address = frida_library_segment_start (library, 0, base_address);
+  start = self->data + library->info->bind_off;
+  end = start + library->info->bind_size;
+  p = start;
+  done = FALSE;
+
+  details.segment = frida_library_segment (library, 0);
+  details.offset = 0;
   details.type = 0;
   details.library_ordinal = 0;
   details.symbol_name = NULL;
   details.symbol_flags = 0;
   details.addend = 0;
 
-  segment_end = frida_library_segment_end (library, 0, base_address);
+  max_offset = details.segment->vm_size;
 
   while (!done && p != end)
   {
@@ -460,28 +463,28 @@ frida_mapper_enumerate_binds (FridaMapper * self, GumAddress base_address, Frida
       case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
       {
         gint segment_index = immediate;
-        details.address = frida_library_segment_start (library, segment_index, base_address);
-        details.address += frida_read_uleb128 (&p, end);
-        segment_end = frida_library_segment_end (library, segment_index, base_address);
+        details.segment = frida_library_segment (library, segment_index);
+        details.offset = frida_read_uleb128 (&p, end);
+        max_offset = details.segment->vm_size;
         break;
       }
       case BIND_OPCODE_ADD_ADDR_ULEB:
-        details.address += frida_read_uleb128 (&p, end);
+        details.offset += frida_read_uleb128 (&p, end);
         break;
       case BIND_OPCODE_DO_BIND:
-        g_assert_cmpuint (details.address, <, segment_end);
+        g_assert_cmpuint (details.offset, <, max_offset);
         func (&details, user_data);
-        details.address += library->pointer_size;
+        details.offset += library->pointer_size;
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-        g_assert_cmpuint (details.address, <, segment_end);
+        g_assert_cmpuint (details.offset, <, max_offset);
         func (&details, user_data);
-        details.address += library->pointer_size + frida_read_uleb128 (&p, end);
+        details.offset += library->pointer_size + frida_read_uleb128 (&p, end);
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-        g_assert_cmpuint (details.address, <, segment_end);
+        g_assert_cmpuint (details.offset, <, max_offset);
         func (&details, user_data);
-        details.address += library->pointer_size + (immediate * library->pointer_size);
+        details.offset += library->pointer_size + (immediate * library->pointer_size);
         break;
       case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
       {
@@ -491,9 +494,9 @@ frida_mapper_enumerate_binds (FridaMapper * self, GumAddress base_address, Frida
         skip = frida_read_uleb128 (&p, end);
         for (i = 0; i != count; ++i)
         {
-          g_assert_cmpuint (details.address, <, segment_end);
+          g_assert_cmpuint (details.offset, <, max_offset);
           func (&details, user_data);
-          details.address += library->pointer_size + skip;
+          details.offset += library->pointer_size + skip;
         }
 
         break;
@@ -506,24 +509,26 @@ frida_mapper_enumerate_binds (FridaMapper * self, GumAddress base_address, Frida
 }
 
 static void
-frida_mapper_enumerate_lazy_binds (FridaMapper * self, GumAddress base_address, FridaFoundBindFunc func, gpointer user_data)
+frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data)
 {
   FridaLibrary * library = self->library;
-  const guint8 * start = self->data + library->info->lazy_bind_off;
-  const guint8 * end = start + library->info->lazy_bind_size;
-  const guint8 * p = start;
-
+  const guint8 * start, * end, * p;
   FridaBindDetails details;
-  GumAddress segment_end;
+  guint64 max_offset;
 
-  details.address = frida_library_segment_start (library, 0, base_address);
+  start = self->data + library->info->lazy_bind_off;
+  end = start + library->info->lazy_bind_size;
+  p = start;
+
+  details.segment = frida_library_segment (library, 0);
+  details.offset = 0;
   details.type = BIND_TYPE_POINTER;
   details.library_ordinal = 0;
   details.symbol_name = NULL;
   details.symbol_flags = 0;
   details.addend = 0;
 
-  segment_end = frida_library_segment_end (library, 0, base_address);
+  max_offset = details.segment->vm_size;
 
   while (p != end)
   {
@@ -569,18 +574,18 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, GumAddress base_address, 
       case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
       {
         gint segment_index = immediate;
-        details.address = frida_library_segment_start (library, segment_index, base_address);
-        details.address += frida_read_uleb128 (&p, end);
-        segment_end = frida_library_segment_end (library, segment_index, base_address);
+        details.segment = frida_library_segment (library, segment_index);
+        details.offset = frida_read_uleb128 (&p, end);
+        max_offset = details.segment->vm_size;
         break;
       }
       case BIND_OPCODE_ADD_ADDR_ULEB:
-        details.address += frida_read_uleb128 (&p, end);
+        details.offset += frida_read_uleb128 (&p, end);
         break;
       case BIND_OPCODE_DO_BIND:
-        g_assert_cmpuint (details.address, <, segment_end);
+        g_assert_cmpuint (details.offset, <, max_offset);
         func (&details, user_data);
-        details.address += library->pointer_size;
+        details.offset += library->pointer_size;
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
       case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
@@ -671,18 +676,10 @@ frida_library_unref (FridaLibrary * self)
   }
 }
 
-static GumAddress
-frida_library_segment_start (FridaLibrary * self, gsize index, GumAddress base_address)
+static const FridaSegment *
+frida_library_segment (FridaLibrary * self, gsize index)
 {
-  FridaSegment * segment = &g_array_index (self->segments, FridaSegment, index);
-  return base_address + segment->vm_address;
-}
-
-static GumAddress
-frida_library_segment_end (FridaLibrary * self, gsize index, GumAddress base_address)
-{
-  FridaSegment * segment = &g_array_index (self->segments, FridaSegment, index);
-  return base_address + segment->vm_address + segment->vm_size;
+  return &g_array_index (self->segments, FridaSegment, index);
 }
 
 static const gchar *
