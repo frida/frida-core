@@ -862,7 +862,6 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
   struct mach_header * header;
   gpointer p;
   guint cmd_index;
-  GumAddress linkedit;
 
   g_assert (self->metadata == NULL);
 
@@ -936,13 +935,14 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
     p += lc->cmdsize;
   }
 
-  if (!gum_darwin_find_linkedit (metadata, metadata_size, &linkedit))
-    goto beach;
-
   if (self->base_address != 0)
   {
+    GumAddress linkedit;
     gint64 slide;
     gsize exports_size;
+
+    if (!gum_darwin_find_linkedit (metadata, metadata_size, &linkedit))
+      goto beach;
 
     if (!gum_darwin_find_slide (self->base_address, metadata, metadata_size, &slide))
       goto beach;
@@ -953,7 +953,7 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
   }
   else
   {
-    self->exports = g_memdup (metadata + linkedit + self->info->export_off, self->info->export_size);
+    self->exports = g_memdup (metadata + self->info->export_off, self->info->export_size);
     self->exports_end = self->exports + self->info->export_size;
   }
 
