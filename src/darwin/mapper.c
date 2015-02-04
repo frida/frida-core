@@ -16,12 +16,18 @@
 # define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE 2
 #endif
 
-#define BASE_FOOTPRINT_SIZE_32 2
-#define BASE_FOOTPRINT_SIZE_64 2
-#define DEPENDENCY_FOOTPRINT_SIZE_32 7
-#define DEPENDENCY_FOOTPRINT_SIZE_64 12
-#define RESOLVER_FOOTPRINT_SIZE_32 21
-#define RESOLVER_FOOTPRINT_SIZE_64 38
+#ifdef HAVE_I386
+# define BASE_FOOTPRINT_SIZE_32 2
+# define BASE_FOOTPRINT_SIZE_64 2
+# define DEPENDENCY_FOOTPRINT_SIZE_32 7
+# define DEPENDENCY_FOOTPRINT_SIZE_64 12
+# define RESOLVER_FOOTPRINT_SIZE_32 21
+# define RESOLVER_FOOTPRINT_SIZE_64 38
+# define INIT_FOOTPRINT_SIZE_32 10 /* TODO: adjust */
+# define INIT_FOOTPRINT_SIZE_64 10 /* TODO: adjust */
+# define TERM_FOOTPRINT_SIZE_32 10 /* TODO: adjust */
+# define TERM_FOOTPRINT_SIZE_64 10 /* TODO: adjust */
+#endif
 
 typedef struct _FridaLibrary FridaLibrary;
 typedef struct _FridaSegment FridaSegment;
@@ -30,9 +36,13 @@ typedef struct _FridaSymbolValue FridaSymbolValue;
 typedef struct _FridaSymbolDetails FridaSymbolDetails;
 typedef struct _FridaRebaseDetails FridaRebaseDetails;
 typedef struct _FridaBindDetails FridaBindDetails;
+typedef struct _FridaInitPointersDetails FridaInitPointersDetails;
+typedef struct _FridaTermPointersDetails FridaTermPointersDetails;
 
 typedef void (* FridaFoundRebaseFunc) (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data);
 typedef void (* FridaFoundBindFunc) (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
+typedef void (* FridaFoundInitPointersFunc) (FridaMapper * self, const FridaInitPointersDetails * details, gpointer user_data);
+typedef void (* FridaFoundTermPointersFunc) (FridaMapper * self, const FridaTermPointersDetails * details, gpointer user_data);
 
 struct _FridaMapper
 {
@@ -143,12 +153,27 @@ struct _FridaBindDetails
   GumAddress addend;
 };
 
+struct _FridaInitPointersDetails
+{
+  GumAddress address;
+  guint64 count;
+};
+
+struct _FridaTermPointersDetails
+{
+  GumAddress address;
+  guint64 count;
+};
+
 static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static void frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static void frida_mapper_init_dependencies (FridaMapper * self);
 static void frida_mapper_init_footprint_budget (FridaMapper * self);
 
 static void frida_mapper_emit_runtime (FridaMapper * self);
+static void frida_mapper_accumulate_bind_footprint_size (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
+static void frida_mapper_accumulate_init_footprint_size (FridaMapper * self, const FridaInitPointersDetails * details, gpointer user_data);
+static void frida_mapper_accumulate_term_footprint_size (FridaMapper * self, const FridaTermPointersDetails * details, gpointer user_data);
 
 static FridaMapping * frida_mapper_dependency (FridaMapper * self, gint ordinal);
 static FridaMapping * frida_mapper_resolve_dependency (FridaMapper * self, const gchar * name, FridaMapper * referrer);
@@ -157,12 +182,13 @@ static gboolean frida_mapper_add_existing_mapping_from_module (const GumModuleDe
 static FridaMapping * frida_mapper_add_existing_mapping (FridaMapper * self, FridaLibrary * library, GumAddress base_address);
 static FridaMapping * frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaMapper * mapper);
 static void frida_mapper_rebase (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data);
-static void frida_mapper_accumulate_bind_footprint_size (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
 static void frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
 
 static void frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, gpointer user_data);
 static void frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
 static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
+static void frida_mapper_enumerate_init_pointers (FridaMapper * self, FridaFoundInitPointersFunc func, gpointer user_data);
+static void frida_mapper_enumerate_term_pointers (FridaMapper * self, FridaFoundTermPointersFunc func, gpointer user_data);
 
 static void frida_mapping_free (FridaMapping * self);
 
@@ -339,6 +365,8 @@ frida_mapper_init_footprint_budget (FridaMapper * self)
   }
   frida_mapper_enumerate_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
+  frida_mapper_enumerate_init_pointers (self, frida_mapper_accumulate_init_footprint_size, &runtime_size);
+  frida_mapper_enumerate_term_pointers (self, frida_mapper_accumulate_term_footprint_size, &runtime_size);
   if (runtime_size % library->page_size != 0)
     runtime_size += library->page_size - (runtime_size % library->page_size);
 
@@ -466,6 +494,8 @@ frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
 static void frida_mapper_emit_child_constructor_call (FridaMapper * child, GumX86Writer * cw);
 static void frida_mapper_emit_child_destructor_call (FridaMapper * child, GumX86Writer * cw);
 static void frida_mapper_emit_resolve_if_needed (FridaMapper * self, const FridaBindDetails * details, GumX86Writer * cw);
+static void frida_mapper_emit_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumX86Writer * cw);
+static void frida_mapper_emit_term_calls (FridaMapper * self, const FridaTermPointersDetails * details, GumX86Writer * cw);
 
 static void
 frida_mapper_emit_runtime (FridaMapper * self)
@@ -484,9 +514,11 @@ frida_mapper_emit_runtime (FridaMapper * self)
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &cw);
   frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
   frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
+  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &cw);
   gum_x86_writer_put_ret (&cw);
 
   self->destructor_offset = gum_x86_writer_offset (&cw);
+  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &cw);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &cw);
   gum_x86_writer_put_ret (&cw);
 
@@ -532,6 +564,18 @@ frida_mapper_emit_resolve_if_needed (FridaMapper * self, const FridaBindDetails 
   gum_x86_writer_put_mov_reg_ptr_reg (cw, GUM_REG_XCX, GUM_REG_XAX);
 }
 
+static void
+frida_mapper_emit_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumX86Writer * cw)
+{
+  /* TODO */
+}
+
+static void
+frida_mapper_emit_term_calls (FridaMapper * self, const FridaTermPointersDetails * details, GumX86Writer * cw)
+{
+  /* TODO */
+}
+
 #else
 
 static void
@@ -541,6 +585,39 @@ frida_mapper_emit_runtime (FridaMapper * self)
 }
 
 #endif
+
+static void
+frida_mapper_accumulate_bind_footprint_size (FridaMapper * self, const FridaBindDetails * details, gpointer user_data)
+{
+  gsize * total = user_data;
+  FridaMapping * dependency;
+  FridaSymbolValue value;
+
+  dependency = frida_mapper_dependency (self, details->library_ordinal);
+  if (frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value))
+  {
+    if (value.resolver != 0)
+    {
+      *total += self->library->pointer_size == 4 ? RESOLVER_FOOTPRINT_SIZE_32 : RESOLVER_FOOTPRINT_SIZE_64;
+    }
+  }
+}
+
+static void
+frida_mapper_accumulate_init_footprint_size (FridaMapper * self, const FridaInitPointersDetails * details, gpointer user_data)
+{
+  gsize * total = user_data;
+
+  *total += self->library->pointer_size == 4 ? INIT_FOOTPRINT_SIZE_32 : INIT_FOOTPRINT_SIZE_64;
+}
+
+static void
+frida_mapper_accumulate_term_footprint_size (FridaMapper * self, const FridaTermPointersDetails * details, gpointer user_data)
+{
+  gsize * total = user_data;
+
+  *total += self->library->pointer_size == 4 ? TERM_FOOTPRINT_SIZE_32 : TERM_FOOTPRINT_SIZE_64;
+}
 
 static FridaMapping *
 frida_mapper_dependency (FridaMapper * self, gint ordinal)
@@ -692,23 +769,6 @@ frida_mapper_rebase (FridaMapper * self, const FridaRebaseDetails * details, gpo
     case REBASE_TYPE_TEXT_PCREL32:
     default:
       g_assert_not_reached ();
-  }
-}
-
-static void
-frida_mapper_accumulate_bind_footprint_size (FridaMapper * self, const FridaBindDetails * details, gpointer user_data)
-{
-  gsize * total = user_data;
-  FridaMapping * dependency;
-  FridaSymbolValue value;
-
-  dependency = frida_mapper_dependency (self, details->library_ordinal);
-  if (frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value))
-  {
-    if (value.resolver != 0)
-    {
-      *total += self->library->pointer_size == 4 ? RESOLVER_FOOTPRINT_SIZE_32 : RESOLVER_FOOTPRINT_SIZE_64;
-    }
   }
 }
 
@@ -1045,6 +1105,84 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
 }
 
 static void
+frida_mapper_enumerate_init_pointers (FridaMapper * self, FridaFoundInitPointersFunc func, gpointer user_data)
+{
+  GumAddress slide;
+  const struct mach_header * header;
+  gpointer command;
+  gsize command_index;
+
+  slide = frida_library_slide (self->library);
+
+  header = (struct mach_header *) self->data;
+  if (header->magic == MH_MAGIC)
+    command = self->data + sizeof (struct mach_header);
+  else
+    command = self->data + sizeof (struct mach_header_64);
+  for (command_index = 0; command_index != header->ncmds; command_index++)
+  {
+    const struct load_command * lc = command;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      gconstpointer sections;
+      gsize section_count, section_index;
+
+      if (lc->cmd == LC_SEGMENT)
+      {
+        const struct segment_command * sc = command;
+        sections = sc + 1;
+        section_count = sc->nsects;
+      }
+      else
+      {
+        const struct segment_command_64 * sc = command;
+        sections = sc + 1;
+        section_count = sc->nsects;
+      }
+
+      for (section_index = 0; section_index != section_count; section_index++)
+      {
+        GumAddress address;
+        guint64 size;
+        guint32 flags;
+
+        if (lc->cmd == LC_SEGMENT)
+        {
+          const struct section * s = sections + (section_index * sizeof (struct section));
+          address = s->addr + (guint32) slide;
+          size = s->size;
+          flags = s->flags;
+        }
+        else
+        {
+          const struct section_64 * s = sections + (section_index * sizeof (struct section_64));
+          address = s->addr + (guint64) slide;
+          size = s->size;
+          flags = s->flags;
+        }
+
+        if ((flags & SECTION_TYPE) == S_MOD_INIT_FUNC_POINTERS)
+        {
+          FridaInitPointersDetails details;
+          details.address = address;
+          details.count = size / self->library->pointer_size;
+          func (self, &details, user_data);
+        }
+      }
+    }
+
+    command += lc->cmdsize;
+  }
+}
+
+static void
+frida_mapper_enumerate_term_pointers (FridaMapper * self, FridaFoundTermPointersFunc func, gpointer user_data)
+{
+  /* TODO */
+}
+
+static void
 frida_mapping_free (FridaMapping * self)
 {
   frida_library_unref (self->library);
@@ -1260,20 +1398,20 @@ static gboolean
 frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metadata_size)
 {
   gboolean success = FALSE;
-  struct mach_header * header;
-  gpointer p;
-  guint cmd_index;
+  const struct mach_header * header;
+  gpointer command;
+  gsize command_index;
 
   g_assert (self->metadata == NULL);
 
   header = (struct mach_header *) metadata;
   if (header->magic == MH_MAGIC)
-    p = metadata + sizeof (struct mach_header);
+    command = metadata + sizeof (struct mach_header);
   else
-    p = metadata + sizeof (struct mach_header_64);
-  for (cmd_index = 0; cmd_index != header->ncmds; cmd_index++)
+    command = metadata + sizeof (struct mach_header_64);
+  for (command_index = 0; command_index != header->ncmds; command_index++)
   {
-    struct load_command * lc = (struct load_command *) p;
+    const struct load_command * lc = (struct load_command *) command;
 
     switch (lc->cmd)
     {
@@ -1284,7 +1422,7 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
 
         if (lc->cmd == LC_SEGMENT)
         {
-          const struct segment_command * sc = p;
+          const struct segment_command * sc = command;
           strcpy (segment.name, sc->segname);
           segment.vm_address = sc->vmaddr;
           segment.vm_size = sc->vmsize;
@@ -1294,7 +1432,7 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
         }
         else
         {
-          const struct segment_command_64 * sc = p;
+          const struct segment_command_64 * sc = command;
           strcpy (segment.name, sc->segname);
           segment.vm_address = sc->vmaddr;
           segment.vm_size = sc->vmsize;
@@ -1317,28 +1455,28 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
       case LC_REEXPORT_DYLIB:
       case LC_LOAD_UPWARD_DYLIB:
       {
-        const struct dylib_command * dc = p;
+        const struct dylib_command * dc = command;
         gchar * name;
 
-        name = p + dc->dylib.name.offset;
+        name = command + dc->dylib.name.offset;
         g_ptr_array_add (self->dependencies, name);
 
         break;
       }
       case LC_DYLD_INFO_ONLY:
-        self->info = p;
+        self->info = command;
         break;
       case LC_SYMTAB:
-        self->symtab = p;
+        self->symtab = command;
         break;
       case LC_DYSYMTAB:
-        self->dysymtab = p;
+        self->dysymtab = command;
         break;
       default:
         break;
     }
 
-    p += lc->cmdsize;
+    command += lc->cmdsize;
   }
 
   if (self->base_address != 0)
