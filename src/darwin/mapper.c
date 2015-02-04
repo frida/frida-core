@@ -16,9 +16,12 @@
 # define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE 2
 #endif
 
-/* TODO: adjust these */
-#define RESOLVER_FOOTPRINT_SIZE_32 12
-#define RESOLVER_FOOTPRINT_SIZE_64 24
+#define BASE_FOOTPRINT_SIZE_32 2
+#define BASE_FOOTPRINT_SIZE_64 2
+#define DEPENDENCY_FOOTPRINT_SIZE_32 7
+#define DEPENDENCY_FOOTPRINT_SIZE_64 12
+#define RESOLVER_FOOTPRINT_SIZE_32 21
+#define RESOLVER_FOOTPRINT_SIZE_64 38
 
 typedef struct _FridaLibrary FridaLibrary;
 typedef struct _FridaSegment FridaSegment;
@@ -35,7 +38,7 @@ struct _FridaMapper
 
   gboolean mapped;
 
-  GMappedFile * file;
+  gpointer image;
   gpointer data;
   gsize data_size;
   FridaLibrary * library;
@@ -49,6 +52,7 @@ struct _FridaMapper
   gsize constructor_offset;
   gsize destructor_offset;
 
+  GSList * children;
   GHashTable * mappings;
 };
 
@@ -134,6 +138,8 @@ static void frida_mapper_init_dependencies (FridaMapper * self);
 static void frida_mapper_init_footprint_budget (FridaMapper * self);
 
 static void frida_mapper_emit_runtime (FridaMapper * self);
+
+static FridaMapping * frida_mapper_dependency (FridaMapper * self, gint ordinal);
 static FridaMapping * frida_mapper_resolve_dependency (FridaMapper * self, const gchar * name, FridaMapper * referrer);
 static gboolean frida_mapper_resolve_symbol (FridaMapper * self, FridaLibrary * library, const gchar * symbol, FridaSymbolValue * value);
 static gboolean frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details, gpointer user_data);
@@ -144,8 +150,7 @@ static void frida_mapper_bind (FridaMapper * self, const FridaBindDetails * deta
 static void frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
 static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
 
-static FridaMapping * frida_mapping_ref (FridaMapping * self);
-static void frida_mapping_unref (FridaMapping * self);
+static void frida_mapping_free (FridaMapping * self);
 
 static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address);
 static FridaLibrary * frida_library_ref (FridaLibrary * self);
@@ -186,18 +191,18 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
 static void
 frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type)
 {
-  gpointer data;
+  gsize image_size;
+  gboolean image_loaded;
   const struct fat_header * fat_header;
   struct mach_header * header_32 = NULL;
   struct mach_header_64 * header_64 = NULL;
   gsize size_32 = 0;
   gsize size_64 = 0;
 
-  self->file = g_mapped_file_new (name, TRUE, NULL);
-  g_assert (self->file != NULL);
+  image_loaded = g_file_get_contents (name, (gchar **) &self->image, &image_size, NULL);
+  g_assert (image_loaded);
 
-  data = g_mapped_file_get_contents (self->file);
-  fat_header = data;
+  fat_header = self->image;
   switch (fat_header->magic)
   {
     case FAT_CIGAM:
@@ -208,7 +213,7 @@ frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t t
       for (i = 0; i != count; i++)
       {
         struct fat_arch * fat_arch = ((struct fat_arch *) (fat_header + 1)) + i;
-        gpointer mach_header = data + GUINT32_FROM_BE (fat_arch->offset);
+        gpointer mach_header = self->image + GUINT32_FROM_BE (fat_arch->offset);
         switch (((struct mach_header *) mach_header)->magic)
         {
           case MH_MAGIC:
@@ -224,14 +229,16 @@ frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t t
             break;
         }
       }
+
+      break;
     }
     case MH_MAGIC:
-      header_32 = data;
-      size_32 = g_mapped_file_get_length (self->file);
+      header_32 = self->image;
+      size_32 = image_size;
       break;
     case MH_MAGIC_64:
-      header_64 = data;
-      size_64 = g_mapped_file_get_length (self->file);
+      header_64 = self->image;
+      size_64 = image_size;
       break;
     default:
       g_assert_not_reached ();
@@ -268,11 +275,11 @@ frida_mapper_init_dependencies (FridaMapper * self)
   GPtrArray * dependencies;
   guint i;
 
-  self->dependencies = g_ptr_array_new_full (5, (GDestroyNotify) frida_mapping_unref);
+  self->dependencies = g_ptr_array_sized_new (5);
 
   if (self->parent == NULL)
   {
-    self->mappings = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_mapping_unref);
+    self->mappings = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_mapping_free);
     frida_mapper_add_pending_mapping (self, library->name, self);
     gum_darwin_enumerate_modules (library->task, frida_mapper_add_existing_mapping_from_module, self);
   }
@@ -304,6 +311,16 @@ frida_mapper_init_footprint_budget (FridaMapper * self)
   }
 
   runtime_size = 0;
+  if (library->pointer_size == 4)
+  {
+    runtime_size += BASE_FOOTPRINT_SIZE_32;
+    runtime_size += g_slist_length (self->children) * DEPENDENCY_FOOTPRINT_SIZE_32;
+  }
+  else
+  {
+    runtime_size += BASE_FOOTPRINT_SIZE_64;
+    runtime_size += g_slist_length (self->children) * DEPENDENCY_FOOTPRINT_SIZE_64;
+  }
   frida_mapper_enumerate_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
   if (runtime_size % library->page_size != 0)
@@ -319,13 +336,15 @@ frida_mapper_free (FridaMapper * mapper)
   if (mapper->mappings != NULL)
     g_hash_table_unref (mapper->mappings);
 
+  g_slist_free_full (mapper->children, (GDestroyNotify) frida_mapper_free);
+
   g_free (mapper->runtime);
 
   g_ptr_array_unref (mapper->dependencies);
 
   frida_library_unref (mapper->library);
 
-  g_mapped_file_unref (mapper->file);
+  g_free (mapper->image);
 
   g_slice_free (FridaMapper, mapper);
 }
@@ -333,22 +352,44 @@ frida_mapper_free (FridaMapper * mapper)
 gsize
 frida_mapper_size (FridaMapper * self)
 {
-  return self->vm_size;
+  gsize result;
+  GSList * cur;
+
+  result = self->vm_size;
+
+  for (cur = self->children; cur != NULL; cur = cur->next)
+  {
+    FridaMapper * child = cur->data;
+
+    result += child->vm_size;
+  }
+
+  return result;
 }
 
 void
 frida_mapper_map (FridaMapper * self, GumAddress base_address)
 {
+  GSList * cur;
   FridaLibrary * library = self->library;
   guint i;
 
   g_assert (!self->mapped);
 
+  for (cur = self->children; cur != NULL; cur = cur->next)
+  {
+    FridaMapper * child = cur->data;
+
+    frida_mapper_map (child, base_address);
+
+    base_address += child->vm_size;
+  }
+
   library->base_address = base_address;
   self->runtime_address = base_address + self->vm_size - self->runtime_size;
 
-  frida_mapper_enumerate_binds (self, frida_mapper_bind, self);
-  frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, self);
+  frida_mapper_enumerate_binds (self, frida_mapper_bind, NULL);
+  frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, NULL);
 
   frida_mapper_emit_runtime (self);
 
@@ -405,6 +446,10 @@ frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
 
 #ifdef HAVE_I386
 
+static void frida_mapper_emit_child_constructor_call (FridaMapper * child, GumX86Writer * cw);
+static void frida_mapper_emit_child_destructor_call (FridaMapper * child, GumX86Writer * cw);
+static void frida_mapper_emit_resolve_if_needed (FridaMapper * self, const FridaBindDetails * details, GumX86Writer * cw);
+
 static void
 frida_mapper_emit_runtime (FridaMapper * self)
 {
@@ -417,14 +462,55 @@ frida_mapper_emit_runtime (FridaMapper * self)
   gum_x86_writer_set_target_cpu (&cw, self->library->cpu_type);
 
   self->constructor_offset = gum_x86_writer_offset (&cw);
+  g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &cw);
+  frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
+  frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
   gum_x86_writer_put_ret (&cw);
 
   self->destructor_offset = gum_x86_writer_offset (&cw);
+  g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &cw);
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_flush (&cw);
   g_assert_cmpint (gum_x86_writer_offset (&cw), <=, self->runtime_size);
   gum_x86_writer_free (&cw);
+}
+
+static void
+frida_mapper_emit_child_constructor_call (FridaMapper * child, GumX86Writer * cw)
+{
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XCX, frida_mapper_constructor (child));
+  gum_x86_writer_put_call_reg (cw, GUM_REG_XCX);
+}
+
+static void
+frida_mapper_emit_child_destructor_call (FridaMapper * child, GumX86Writer * cw)
+{
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XCX, frida_mapper_destructor (child));
+  gum_x86_writer_put_call_reg (cw, GUM_REG_XCX);
+}
+
+static void
+frida_mapper_emit_resolve_if_needed (FridaMapper * self, const FridaBindDetails * details, GumX86Writer * cw)
+{
+  FridaMapping * dependency;
+  FridaSymbolValue value;
+  gboolean success;
+  GumAddress entry;
+
+  dependency = frida_mapper_dependency (self, details->library_ordinal);
+  success = frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value);
+  if (!success || value.resolver == 0)
+    return;
+
+  entry = self->library->base_address + details->segment->vm_address + details->offset;
+
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XCX, value.resolver);
+  gum_x86_writer_put_call_reg (cw, GUM_REG_XCX);
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XCX, details->addend);
+  gum_x86_writer_put_add_reg_reg (cw, GUM_REG_XAX, GUM_REG_XCX);
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XCX, entry);
+  gum_x86_writer_put_mov_reg_ptr_reg (cw, GUM_REG_XCX, GUM_REG_XAX);
 }
 
 #else
@@ -461,12 +547,18 @@ frida_mapper_resolve_dependency (FridaMapper * self, const gchar * name, FridaMa
   if (mapping == NULL)
   {
     FridaMapper * mapper;
+    GSList * referrer_node;
 
     mapper = frida_mapper_new_with_parent (self, name, self->library->task, self->library->cpu_type);
     mapping = frida_mapper_add_pending_mapping (self, name, mapper);
+    referrer_node = g_slist_find (self->children, referrer);
+    if (referrer_node != NULL)
+      self->children = g_slist_insert_before (self->children, referrer_node, mapper);
+    else
+      self->children = g_slist_prepend (self->children, mapper);
   }
 
-  return frida_mapping_ref (mapping);
+  return mapping;
 }
 
 static gboolean
@@ -486,7 +578,7 @@ frida_mapper_resolve_symbol (FridaMapper * self, FridaLibrary * library, const g
     FridaMapping * target;
 
     target_name = frida_library_dependency (library, details.reexport_library_ordinal);
-    target = g_hash_table_lookup (self->mappings, target_name);
+    target = frida_mapper_resolve_dependency (self, target_name, self);
     return frida_mapper_resolve_symbol (self, target->library, details.reexport_symbol, value);
   }
 
@@ -588,12 +680,7 @@ frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointe
   dependency = frida_mapper_dependency (self, details->library_ordinal);
   success = frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value);
   if (success)
-  {
-    if (value.resolver == 0)
-      value.address += details->addend;
-    else
-      g_assert_cmpint (details->addend, ==, 0);
-  }
+    value.address += details->addend;
   is_weak_import = (details->symbol_flags & BIND_SYMBOL_FLAGS_WEAK_IMPORT) != 0;
   g_assert (success || is_weak_import);
 
@@ -826,21 +913,11 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
   }
 }
 
-static FridaMapping *
-frida_mapping_ref (FridaMapping * self)
-{
-  self->ref_count++;
-  return self;
-}
-
 static void
-frida_mapping_unref (FridaMapping * self)
+frida_mapping_free (FridaMapping * self)
 {
-  if (--self->ref_count == 0)
-  {
-    frida_library_unref (self->library);
-    g_slice_free (FridaMapping, self);
-  }
+  frida_library_unref (self->library);
+  g_slice_free (FridaMapping, self);
 }
 
 static FridaLibrary *
