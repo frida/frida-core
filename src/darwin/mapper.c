@@ -74,6 +74,7 @@ struct _FridaLibrary
   const struct dyld_info_command * info;
   const struct symtab_command * symtab;
   const struct dysymtab_command * dysymtab;
+  GumAddress preferred_address;
   GArray * segments;
   guint8 * exports;
   const guint8 * exports_end;
@@ -128,6 +129,7 @@ struct _FridaRebaseDetails
   const FridaSegment * segment;
   guint64 offset;
   guint8 type;
+  GumAddress slide;
 };
 
 struct _FridaBindDetails
@@ -164,9 +166,11 @@ static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBin
 
 static void frida_mapping_free (FridaMapping * self);
 
-static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address);
+static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static FridaLibrary * frida_library_ref (FridaLibrary * self);
 static void frida_library_unref (FridaLibrary * self);
+static void frida_library_set_base_address (FridaLibrary * self, GumAddress base_address);
+static GumAddress frida_library_slide (FridaLibrary * self);
 static const FridaSegment * frida_library_segment (FridaLibrary * self, gsize index);
 static const gchar * frida_library_dependency (FridaLibrary * self, gint ordinal);
 static gboolean frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDetails * details);
@@ -276,7 +280,7 @@ frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t t
       break;
   }
 
-  self->library = frida_library_new (name, task, cpu_type, 0);
+  self->library = frida_library_new (name, task, cpu_type);
   frida_library_take_metadata (self->library, g_memdup (self->data, self->data_size), self->data_size);
 }
 
@@ -397,7 +401,7 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
     base_address += child->vm_size;
   }
 
-  library->base_address = base_address;
+  frida_library_set_base_address (library, base_address);
   self->runtime_address = base_address + self->vm_size - self->runtime_size;
 
   frida_mapper_enumerate_rebases (self, frida_mapper_rebase, NULL);
@@ -473,6 +477,8 @@ frida_mapper_emit_runtime (FridaMapper * self)
 
   gum_x86_writer_init (&cw, self->runtime);
   gum_x86_writer_set_target_cpu (&cw, self->library->cpu_type);
+
+  /* TODO: stack alignment */
 
   self->constructor_offset = gum_x86_writer_offset (&cw);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &cw);
@@ -629,7 +635,8 @@ frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details,
   GumAddress base_address = details->range->base_address;
   FridaLibrary * library;
 
-  library = frida_library_new (details->path, self->library->task, self->library->cpu_type, base_address);
+  library = frida_library_new (details->path, self->library->task, self->library->cpu_type);
+  frida_library_set_base_address (library, base_address);
   frida_mapper_add_existing_mapping (self, library, base_address);
   frida_library_unref (library);
 
@@ -667,16 +674,22 @@ frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaM
 static void
 frida_mapper_rebase (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data)
 {
-  /* TODO */
+  gpointer entry;
+
+  g_assert_cmpint (details->offset, <, details->segment->file_size);
+
+  entry = self->data + details->segment->file_offset + details->offset;
 
   switch (details->type)
   {
     case REBASE_TYPE_POINTER:
-      break;
     case REBASE_TYPE_TEXT_ABSOLUTE32:
+      if (self->library->pointer_size == 4)
+        *((guint32 *) entry) += (guint32) details->slide;
+      else
+        *((guint64 *) entry) += (guint64) details->slide;
       break;
     case REBASE_TYPE_TEXT_PCREL32:
-      break;
     default:
       g_assert_not_reached ();
   }
@@ -705,8 +718,10 @@ frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointe
   FridaMapping * dependency;
   FridaSymbolValue value;
   gboolean success, is_weak_import;
+  gpointer entry;
 
-  g_assert_cmpint (details->type, ==, BIND_TYPE_POINTER); /* until necessary */
+  g_assert_cmpint (details->type, ==, BIND_TYPE_POINTER);
+  g_assert_cmpint (details->offset, <, details->segment->file_size);
 
   dependency = frida_mapper_dependency (self, details->library_ordinal);
   success = frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value);
@@ -715,28 +730,11 @@ frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointe
   is_weak_import = (details->symbol_flags & BIND_SYMBOL_FLAGS_WEAK_IMPORT) != 0;
   g_assert (success || is_weak_import);
 
-  if (details->offset < details->segment->file_size)
-  {
-    gpointer entry = self->data + details->segment->file_offset + details->offset;
-    if (self->library->pointer_size == 4)
-      *((guint32 *) entry) = value.address;
-    else
-      *((guint64 *) entry) = value.address;
-  }
+  entry = self->data + details->segment->file_offset + details->offset;
+  if (self->library->pointer_size == 4)
+    *((guint32 *) entry) = value.address;
   else
-  {
-    mach_vm_address_t entry = self->library->base_address + details->segment->vm_address + details->offset;
-    if (self->library->pointer_size == 4)
-    {
-      guint32 address32 = value.address;
-      mach_vm_write (self->library->task, entry, (vm_offset_t) &address32, sizeof (address32));
-    }
-    else
-    {
-      guint64 address64 = value.address;
-      mach_vm_write (self->library->task, entry, (vm_offset_t) &address64, sizeof (address64));
-    }
-  }
+    *((guint64 *) entry) = value.address;
 }
 
 static void
@@ -756,6 +754,7 @@ frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, g
   details.segment = frida_library_segment (library, 0);
   details.offset = 0;
   details.type = 0;
+  details.slide = frida_library_slide (library);
 
   max_offset = details.segment->vm_size;
 
@@ -1053,7 +1052,7 @@ frida_mapping_free (FridaMapping * self)
 }
 
 static FridaLibrary *
-frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address)
+frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type)
 {
   FridaLibrary * library;
 
@@ -1083,7 +1082,6 @@ frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type, Gu
       library->page_size = 16384;
       break;
   }
-  library->base_address = base_address;
 
   library->segments = g_array_new (FALSE, FALSE, sizeof (FridaSegment));
   library->dependencies = g_ptr_array_sized_new (5);
@@ -1112,6 +1110,18 @@ frida_library_unref (FridaLibrary * self)
 
     g_slice_free (FridaLibrary, self);
   }
+}
+
+static void
+frida_library_set_base_address (FridaLibrary * self, GumAddress base_address)
+{
+  self->base_address = base_address;
+}
+
+static GumAddress
+frida_library_slide (FridaLibrary * self)
+{
+  return self->base_address - self->preferred_address;
 }
 
 static const FridaSegment *
@@ -1295,6 +1305,11 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
 
         g_array_append_val (self->segments, segment);
 
+        if (strcmp (segment.name, "__TEXT") == 0)
+        {
+          self->preferred_address = segment.vm_address;
+        }
+
         break;
       }
       case LC_LOAD_DYLIB:
@@ -1329,15 +1344,12 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
   if (self->base_address != 0)
   {
     GumAddress linkedit;
-    gint64 slide;
     gsize exports_size;
 
     if (!gum_darwin_find_linkedit (metadata, metadata_size, &linkedit))
       goto beach;
 
-    if (!gum_darwin_find_slide (self->base_address, metadata, metadata_size, &slide))
-      goto beach;
-    linkedit += slide;
+    linkedit += frida_library_slide (self);
 
     self->exports = gum_darwin_read (self->task, linkedit + self->info->export_off, self->info->export_size, &exports_size);
     self->exports_end = self->exports != NULL ? self->exports + exports_size : NULL;
