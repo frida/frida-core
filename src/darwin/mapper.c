@@ -801,7 +801,6 @@ frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointe
   gpointer entry;
 
   g_assert_cmpint (details->type, ==, BIND_TYPE_POINTER);
-  g_assert_cmpint (details->offset, <, details->segment->file_size);
 
   dependency = frida_mapper_dependency (self, details->library_ordinal);
   success = frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value);
@@ -836,7 +835,7 @@ frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, g
   details.type = 0;
   details.slide = frida_library_slide (library);
 
-  max_offset = details.segment->vm_size;
+  max_offset = details.segment->file_size;
 
   while (!done && p != end)
   {
@@ -858,7 +857,7 @@ frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, g
         gint segment_index = immediate;
         details.segment = frida_library_segment (library, segment_index);
         details.offset = frida_read_uleb128 (&p, end);
-        max_offset = details.segment->vm_size;
+        max_offset = details.segment->file_size;
         break;
       }
       case REBASE_OPCODE_ADD_ADDR_ULEB:
@@ -943,7 +942,7 @@ frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpoin
   details.symbol_flags = 0;
   details.addend = 0;
 
-  max_offset = details.segment->vm_size;
+  max_offset = details.segment->file_size;
 
   while (!done && p != end)
   {
@@ -992,7 +991,7 @@ frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpoin
         gint segment_index = immediate;
         details.segment = frida_library_segment (library, segment_index);
         details.offset = frida_read_uleb128 (&p, end);
-        max_offset = details.segment->vm_size;
+        max_offset = details.segment->file_size;
         break;
       }
       case BIND_OPCODE_ADD_ADDR_ULEB:
@@ -1055,7 +1054,7 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
   details.symbol_flags = 0;
   details.addend = 0;
 
-  max_offset = details.segment->vm_size;
+  max_offset = details.segment->file_size;
 
   while (p != end)
   {
@@ -1103,7 +1102,7 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
         gint segment_index = immediate;
         details.segment = frida_library_segment (library, segment_index);
         details.offset = frida_read_uleb128 (&p, end);
-        max_offset = details.segment->vm_size;
+        max_offset = details.segment->file_size;
         break;
       }
       case BIND_OPCODE_ADD_ADDR_ULEB:
