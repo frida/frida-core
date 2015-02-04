@@ -16,6 +16,8 @@ main (gint argc, gchar * argv[])
   FridaMapper * mapper;
   mach_vm_address_t base_address = 0;
   kern_return_t kr;
+  FridaMapperConstructor constructor;
+  FridaMapperDestructor destructor;
   UnixAttackerEntrypoint entrypoint;
 
 #if GLIB_CHECK_VERSION (2, 42, 0)
@@ -49,8 +51,13 @@ main (gint argc, gchar * argv[])
 
   frida_mapper_map (mapper, base_address);
 
-  entrypoint = (UnixAttackerEntrypoint) frida_mapper_resolve (mapper, mapper->library, "_frida_agent_main");
+  constructor = (FridaMapperConstructor) frida_mapper_constructor (mapper);
+  destructor = (FridaMapperDestructor) frida_mapper_destructor (mapper);
+  entrypoint = (UnixAttackerEntrypoint) frida_mapper_resolve (mapper, "frida_agent_main");
+
+  constructor ();
   entrypoint ("");
+  destructor ();
 
   kr = mach_vm_deallocate (task, base_address, frida_mapper_size (mapper));
   g_assert_cmpint (kr, ==, KERN_SUCCESS);

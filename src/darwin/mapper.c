@@ -10,12 +10,30 @@
 # define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE 2
 #endif
 
+typedef struct _FridaLibrary FridaLibrary;
 typedef struct _FridaSegment FridaSegment;
 typedef struct _FridaMapping FridaMapping;
+typedef struct _FridaSymbolValue FridaSymbolValue;
 typedef struct _FridaSymbolDetails FridaSymbolDetails;
 typedef struct _FridaBindDetails FridaBindDetails;
 
 typedef void (* FridaFoundBindFunc) (const FridaBindDetails * details, gpointer user_data);
+
+struct _FridaMapper
+{
+  FridaMapper * parent;
+
+  gboolean mapped;
+
+  GMappedFile * file;
+  gpointer data;
+  gsize size;
+
+  FridaLibrary * library;
+  GPtrArray * dependencies;
+
+  GHashTable * mappings;
+};
 
 struct _FridaLibrary
 {
@@ -56,6 +74,12 @@ struct _FridaMapping
   FridaMapper * mapper;
 };
 
+struct _FridaSymbolValue
+{
+  GumAddress address;
+  GumAddress resolver;
+};
+
 struct _FridaSymbolDetails
 {
   guint64 flags;
@@ -90,6 +114,7 @@ struct _FridaBindDetails
 static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 
 static FridaMapping * frida_mapper_resolve_dependency (FridaMapper * self, const gchar * name, FridaMapper * referrer);
+static gboolean frida_mapper_resolve_symbol (FridaMapper * self, FridaLibrary * library, const gchar * symbol, FridaSymbolValue * value);
 static gboolean frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details, gpointer user_data);
 static FridaMapping * frida_mapper_add_existing_mapping (FridaMapper * self, FridaLibrary * library, GumAddress base_address);
 static FridaMapping * frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaMapper * mapper);
@@ -237,6 +262,88 @@ frida_mapper_free (FridaMapper * mapper)
   g_slice_free (FridaMapper, mapper);
 }
 
+gsize
+frida_mapper_size (FridaMapper * self)
+{
+  FridaLibrary * library = self->library;
+  gsize result = 0;
+  guint i;
+
+  for (i = 0; i != library->segments->len; i++)
+  {
+    FridaSegment * segment = &g_array_index (library->segments, FridaSegment, i);
+    result += segment->vm_size;
+    if (segment->vm_size % library->page_size != 0)
+      result += library->page_size - (segment->vm_size % library->page_size);
+  }
+
+  return result;
+}
+
+void
+frida_mapper_map (FridaMapper * self, GumAddress base_address)
+{
+  FridaLibrary * library = self->library;
+  guint i;
+
+  g_assert (!self->mapped);
+
+  library->base_address = base_address;
+
+  /* TODO: relocations */
+  frida_mapper_enumerate_binds (self, frida_mapper_bind, self);
+  frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, self);
+
+  for (i = 0; i != library->segments->len; i++)
+  {
+    FridaSegment * s = &g_array_index (library->segments, FridaSegment, i);
+
+    mach_vm_write (library->task, base_address + s->vm_address, (vm_offset_t) self->data + s->file_offset, s->file_size);
+
+    mach_vm_protect (library->task, base_address + s->vm_address, s->vm_size, FALSE, s->protection);
+  }
+
+  /* TODO: generate constructor and destructor */
+
+  self->mapped = TRUE;
+}
+
+GumAddress
+frida_mapper_constructor (FridaMapper * self)
+{
+  g_assert (self->mapped);
+
+  return 0;
+}
+
+GumAddress
+frida_mapper_destructor (FridaMapper * self)
+{
+  g_assert (self->mapped);
+
+  return 0;
+}
+
+GumAddress
+frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
+{
+  gchar * mangled_symbol;
+  FridaSymbolValue value;
+  gboolean success;
+
+  g_assert (self->mapped);
+
+  mangled_symbol = g_strconcat ("_", symbol, NULL);
+  success = frida_mapper_resolve_symbol (self, self->library, mangled_symbol, &value);
+  g_free (mangled_symbol);
+  if (!success)
+    return 0;
+  else if (value.resolver != 0)
+    return 0;
+
+  return value.address;
+}
+
 static FridaMapping *
 frida_mapper_dependency (FridaMapper * self, gint ordinal)
 {
@@ -267,6 +374,54 @@ frida_mapper_resolve_dependency (FridaMapper * self, const gchar * name, FridaMa
   }
 
   return frida_mapping_ref (mapping);
+}
+
+static gboolean
+frida_mapper_resolve_symbol (FridaMapper * self, FridaLibrary * library, const gchar * symbol, FridaSymbolValue * value)
+{
+  FridaSymbolDetails details;
+
+  if (self->parent != NULL)
+    return frida_mapper_resolve_symbol (self->parent, library, symbol, value);
+
+  if (!frida_library_resolve (library, symbol, &details))
+    return 0;
+
+  if ((details.flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0)
+  {
+    const gchar * target_name;
+    FridaMapping * target;
+
+    target_name = frida_library_dependency (library, details.reexport_library_ordinal);
+    target = g_hash_table_lookup (self->mappings, target_name);
+    return frida_mapper_resolve_symbol (self, target->library, details.reexport_symbol, value);
+  }
+
+  switch (details.flags & EXPORT_SYMBOL_FLAGS_KIND_MASK)
+  {
+    case EXPORT_SYMBOL_FLAGS_KIND_REGULAR:
+      if ((details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0)
+      {
+        /* XXX: we ignore interposing */
+        value->address = library->base_address + details.stub;
+        value->resolver = library->base_address + details.resolver;
+        return TRUE;
+      }
+      value->address = library->base_address + details.offset;
+      value->resolver = 0;
+      return TRUE;
+    case EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL:
+      value->address = library->base_address + details.offset;
+      value->resolver = 0;
+      return TRUE;
+    case EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE:
+      value->address = details.offset;
+      value->resolver = 0;
+      return TRUE;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
 }
 
 static gboolean
@@ -311,131 +466,47 @@ frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaM
   return mapping;
 }
 
-gsize
-frida_mapper_size (FridaMapper * self)
-{
-  FridaLibrary * library = self->library;
-  gsize result = 0;
-  guint i;
-
-  for (i = 0; i != library->segments->len; i++)
-  {
-    FridaSegment * segment = &g_array_index (library->segments, FridaSegment, i);
-    result += segment->vm_size;
-    if (segment->vm_size % library->page_size != 0)
-      result += library->page_size - (segment->vm_size % library->page_size);
-  }
-
-  return result;
-}
-
-void
-frida_mapper_map (FridaMapper * self, GumAddress base_address)
-{
-  FridaLibrary * library = self->library;
-  guint i;
-
-  library->base_address = base_address;
-
-  /* TODO: relocations */
-  frida_mapper_enumerate_binds (self, frida_mapper_bind, self);
-  frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, self);
-
-  for (i = 0; i != library->segments->len; i++)
-  {
-    FridaSegment * s = &g_array_index (library->segments, FridaSegment, i);
-
-    mach_vm_write (library->task, base_address + s->vm_address, (vm_offset_t) self->data + s->file_offset, s->file_size);
-
-    mach_vm_protect (library->task, base_address + s->vm_address, s->vm_size, FALSE, s->protection);
-  }
-
-  /* TODO: generate init and fini functions for calling constructors and destructors */
-}
-
-GumAddress
-frida_mapper_resolve (FridaMapper * self, FridaLibrary * library, const gchar * symbol)
-{
-  FridaSymbolDetails details;
-
-  if (self->parent != NULL)
-    return frida_mapper_resolve (self->parent, library, symbol);
-
-  if (!frida_library_resolve (library, symbol, &details))
-    return 0;
-
-  if ((details.flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0)
-  {
-    const gchar * target_name;
-    FridaMapping * target;
-
-    target_name = frida_library_dependency (library, details.reexport_library_ordinal);
-    target = g_hash_table_lookup (self->mappings, target_name);
-    return frida_mapper_resolve (self, target->library, details.reexport_symbol);
-  }
-
-  switch (details.flags & EXPORT_SYMBOL_FLAGS_KIND_MASK)
-  {
-    case EXPORT_SYMBOL_FLAGS_KIND_REGULAR:
-      if ((details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0)
-      {
-        /* XXX: we ignore interposing */
-
-        if ((details.flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0)
-        {
-          /* TODO: generate trampoline for resolver */
-          g_print ("[%s :: %s] stub=%p resolver=%p\n", library->name, symbol, (gpointer) details.stub, (gpointer) details.resolver);
-        }
-
-        return 1;
-      }
-      return library->base_address + details.offset;
-    case EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL:
-      return library->base_address + details.offset;
-    case EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE:
-      return details.offset;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-
-  return 0;
-}
-
 static void
 frida_mapper_bind (const FridaBindDetails * details, gpointer user_data)
 {
   FridaMapper * self = user_data;
   FridaMapping * dependency;
-  GumAddress address;
-  gboolean is_weak_import;
+  FridaSymbolValue value;
+  gboolean success, is_weak_import;
 
   g_assert_cmpint (details->type, ==, BIND_TYPE_POINTER); /* until necessary */
 
   dependency = frida_mapper_dependency (self, details->library_ordinal);
-  address = frida_mapper_resolve (self, dependency->library, details->symbol_name) + details->addend;
+  success = frida_mapper_resolve_symbol (self, dependency->library, details->symbol_name, &value);
+  if (success)
+  {
+    if (value.resolver == 0)
+      value.address += details->addend;
+    else
+      g_assert_cmpint (details->addend, ==, 0);
+  }
   is_weak_import = (details->symbol_flags & BIND_SYMBOL_FLAGS_WEAK_IMPORT) != 0;
-  g_assert (address != 0 || is_weak_import);
+  g_assert (success || is_weak_import);
 
   if (details->offset < details->segment->file_size)
   {
     gpointer entry = self->data + details->segment->file_offset + details->offset;
     if (self->library->pointer_size == 4)
-      *((guint32 *) entry) = address;
+      *((guint32 *) entry) = value.address;
     else
-      *((guint64 *) entry) = address;
+      *((guint64 *) entry) = value.address;
   }
   else
   {
     mach_vm_address_t entry = self->library->base_address + details->segment->vm_address + details->offset;
     if (self->library->pointer_size == 4)
     {
-      guint32 address32 = address;
+      guint32 address32 = value.address;
       mach_vm_write (self->library->task, entry, (vm_offset_t) &address32, sizeof (address32));
     }
     else
     {
-      guint64 address64 = address;
+      guint64 address64 = value.address;
       mach_vm_write (self->library->task, entry, (vm_offset_t) &address64, sizeof (address64));
     }
   }
