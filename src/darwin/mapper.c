@@ -17,8 +17,8 @@
 #endif
 
 #ifdef HAVE_I386
-# define BASE_FOOTPRINT_SIZE_32 2
-# define BASE_FOOTPRINT_SIZE_64 2
+# define BASE_FOOTPRINT_SIZE_32 2 /* TODO: adjust */
+# define BASE_FOOTPRINT_SIZE_64 2 /* TODO: adjust */
 # define DEPENDENCY_FOOTPRINT_SIZE_32 7
 # define DEPENDENCY_FOOTPRINT_SIZE_64 12
 # define RESOLVER_FOOTPRINT_SIZE_32 21
@@ -511,15 +511,23 @@ frida_mapper_emit_runtime (FridaMapper * self)
   /* TODO: stack alignment */
 
   self->constructor_offset = gum_x86_writer_offset (&cw);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &cw);
   frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
   frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
   frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &cw);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_ret (&cw);
 
   self->destructor_offset = gum_x86_writer_offset (&cw);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
   frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &cw);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &cw);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_flush (&cw);
@@ -567,7 +575,19 @@ frida_mapper_emit_resolve_if_needed (FridaMapper * self, const FridaBindDetails 
 static void
 frida_mapper_emit_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumX86Writer * cw)
 {
-  /* TODO */
+  gconstpointer next_label = GSIZE_TO_POINTER (details->address);
+
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XBP, details->address);
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XBX, details->count);
+
+  gum_x86_writer_put_label (cw, next_label);
+
+  gum_x86_writer_put_mov_reg_reg_ptr (cw, GUM_REG_XAX, GUM_REG_XBP);
+  gum_x86_writer_put_call_reg (cw, GUM_REG_XAX);
+
+  gum_x86_writer_put_add_reg_imm (cw, GUM_REG_XBP, self->library->pointer_size);
+  gum_x86_writer_put_dec_reg (cw, GUM_REG_XBX);
+  gum_x86_writer_put_jcc_short_label (cw, GUM_X86_JNZ, next_label, GUM_NO_HINT);
 }
 
 static void
