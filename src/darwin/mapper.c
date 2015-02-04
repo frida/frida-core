@@ -28,8 +28,10 @@ typedef struct _FridaSegment FridaSegment;
 typedef struct _FridaMapping FridaMapping;
 typedef struct _FridaSymbolValue FridaSymbolValue;
 typedef struct _FridaSymbolDetails FridaSymbolDetails;
+typedef struct _FridaRebaseDetails FridaRebaseDetails;
 typedef struct _FridaBindDetails FridaBindDetails;
 
+typedef void (* FridaFoundRebaseFunc) (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data);
 typedef void (* FridaFoundBindFunc) (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
 
 struct _FridaMapper
@@ -121,6 +123,13 @@ struct _FridaSymbolDetails
   };
 };
 
+struct _FridaRebaseDetails
+{
+  const FridaSegment * segment;
+  guint64 offset;
+  guint8 type;
+};
+
 struct _FridaBindDetails
 {
   const FridaSegment * segment;
@@ -145,8 +154,11 @@ static gboolean frida_mapper_resolve_symbol (FridaMapper * self, FridaLibrary * 
 static gboolean frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details, gpointer user_data);
 static FridaMapping * frida_mapper_add_existing_mapping (FridaMapper * self, FridaLibrary * library, GumAddress base_address);
 static FridaMapping * frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaMapper * mapper);
+static void frida_mapper_rebase (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data);
 static void frida_mapper_accumulate_bind_footprint_size (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
 static void frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
+
+static void frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, gpointer user_data);
 static void frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
 static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, gpointer user_data);
 
@@ -388,6 +400,7 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
   library->base_address = base_address;
   self->runtime_address = base_address + self->vm_size - self->runtime_size;
 
+  frida_mapper_enumerate_rebases (self, frida_mapper_rebase, NULL);
   frida_mapper_enumerate_binds (self, frida_mapper_bind, NULL);
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, NULL);
 
@@ -518,7 +531,7 @@ frida_mapper_emit_resolve_if_needed (FridaMapper * self, const FridaBindDetails 
 static void
 frida_mapper_emit_runtime (FridaMapper * self)
 {
-  /* TODO */
+  /* TODO: ARM support */
 }
 
 #endif
@@ -652,6 +665,24 @@ frida_mapper_add_pending_mapping (FridaMapper * self, const gchar * name, FridaM
 }
 
 static void
+frida_mapper_rebase (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data)
+{
+  /* TODO */
+
+  switch (details->type)
+  {
+    case REBASE_TYPE_POINTER:
+      break;
+    case REBASE_TYPE_TEXT_ABSOLUTE32:
+      break;
+    case REBASE_TYPE_TEXT_PCREL32:
+      break;
+    default:
+      g_assert_not_reached ();
+  }
+}
+
+static void
 frida_mapper_accumulate_bind_footprint_size (FridaMapper * self, const FridaBindDetails * details, gpointer user_data)
 {
   gsize * total = user_data;
@@ -706,8 +737,109 @@ frida_mapper_bind (FridaMapper * self, const FridaBindDetails * details, gpointe
       mach_vm_write (self->library->task, entry, (vm_offset_t) &address64, sizeof (address64));
     }
   }
+}
 
-  /* TODO: schedule code generation for calling resolver */
+static void
+frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, gpointer user_data)
+{
+  FridaLibrary * library = self->library;
+  const guint8 * start, * end, * p;
+  gboolean done;
+  FridaRebaseDetails details;
+  guint64 max_offset;
+
+  start = self->data + library->info->rebase_off;
+  end = start + library->info->rebase_size;
+  p = start;
+  done = FALSE;
+
+  details.segment = frida_library_segment (library, 0);
+  details.offset = 0;
+  details.type = 0;
+
+  max_offset = details.segment->vm_size;
+
+  while (!done && p != end)
+  {
+    guint8 opcode = *p & REBASE_OPCODE_MASK;
+    guint8 immediate = *p & REBASE_IMMEDIATE_MASK;
+
+    p++;
+
+    switch (opcode)
+    {
+      case REBASE_OPCODE_DONE:
+        done = TRUE;
+        break;
+      case REBASE_OPCODE_SET_TYPE_IMM:
+        details.type = immediate;
+        break;
+      case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+      {
+        gint segment_index = immediate;
+        details.segment = frida_library_segment (library, segment_index);
+        details.offset = frida_read_uleb128 (&p, end);
+        max_offset = details.segment->vm_size;
+        break;
+      }
+      case REBASE_OPCODE_ADD_ADDR_ULEB:
+        details.offset += frida_read_uleb128 (&p, end);
+        break;
+      case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
+        details.offset += immediate * library->pointer_size;
+        break;
+      case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+      {
+        guint8 i;
+
+        for (i = 0; i != immediate; i++)
+        {
+          g_assert_cmpuint (details.offset, <, max_offset);
+          func (self, &details, user_data);
+          details.offset += library->pointer_size;
+        }
+
+        break;
+      }
+      case REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
+      {
+        guint64 count, i;
+
+        count = frida_read_uleb128 (&p, end);
+        for (i = 0; i != immediate; i++)
+        {
+          g_assert_cmpuint (details.offset, <, max_offset);
+          func (self, &details, user_data);
+          details.offset += library->pointer_size;
+        }
+
+        break;
+      }
+      case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
+        g_assert_cmpuint (details.offset, <, max_offset);
+        func (self, &details, user_data);
+        details.offset += library->pointer_size + frida_read_uleb128 (&p, end);
+        break;
+      case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
+      {
+        gsize count, skip, i;
+
+        count = frida_read_uleb128 (&p, end);
+        skip = frida_read_uleb128 (&p, end);
+        for (i = 0; i != count; ++i)
+        {
+          g_assert_cmpuint (details.offset, <, max_offset);
+          func (self, &details, user_data);
+          details.offset += library->pointer_size + skip;
+        }
+
+        break;
+      }
+      default:
+        g_assert_not_reached ();
+        break;
+    }
+  }
 }
 
 static void
@@ -804,7 +936,7 @@ frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpoin
         break;
       case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
       {
-        gsize count, skip, i;
+        guint64 count, skip, i;
 
         count = frida_read_uleb128 (&p, end);
         skip = frida_read_uleb128 (&p, end);
