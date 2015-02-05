@@ -508,21 +508,17 @@ frida_mapper_emit_runtime (FridaMapper * self)
   gum_x86_writer_init (&cw, self->runtime);
   gum_x86_writer_set_target_cpu (&cw, self->library->cpu_type);
 
-  /* TODO: review 32-bit stack alignment */
-
   self->constructor_offset = gum_x86_writer_offset (&cw);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
-  if (self->library->cpu_type == GUM_CPU_AMD64)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 8);
+  gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, self->library->pointer_size);
 
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &cw);
   frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
   frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &cw);
   frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &cw);
 
-  if (self->library->cpu_type == GUM_CPU_AMD64)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 8);
+  gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, self->library->pointer_size);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_ret (&cw);
@@ -530,14 +526,12 @@ frida_mapper_emit_runtime (FridaMapper * self)
   self->destructor_offset = gum_x86_writer_offset (&cw);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
-  if (self->library->cpu_type == GUM_CPU_AMD64)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 8);
+  gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, self->library->pointer_size);
 
   frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &cw);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &cw);
 
-  if (self->library->cpu_type == GUM_CPU_AMD64)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 8);
+  gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, self->library->pointer_size);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
   gum_x86_writer_put_ret (&cw);
