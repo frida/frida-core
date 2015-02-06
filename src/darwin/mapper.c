@@ -150,7 +150,7 @@ struct _FridaBindDetails
   gint library_ordinal;
   const gchar * symbol_name;
   guint8 symbol_flags;
-  GumAddress addend;
+  gint64 addend;
 };
 
 struct _FridaInitPointersDetails
@@ -204,6 +204,7 @@ static const guint8 * frida_library_find_export_node (FridaLibrary * self, const
 static gboolean frida_library_ensure_metadata (FridaLibrary * self);
 static gboolean frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metadata_size);
 
+static gint64 frida_read_sleb128 (const guint8 ** data, const guint8 * end);
 static guint64 frida_read_uleb128 (const guint8 ** p, const guint8 * end);
 static void frida_skip_uleb128 (const guint8 ** p);
 
@@ -991,7 +992,7 @@ frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpoin
         details.type = immediate;
         break;
       case BIND_OPCODE_SET_ADDEND_SLEB:
-        details.addend = frida_read_uleb128 (&p, end);
+        details.addend = frida_read_sleb128 (&p, end);
         break;
       case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
       {
@@ -1102,7 +1103,7 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
         details.type = immediate;
         break;
       case BIND_OPCODE_SET_ADDEND_SLEB:
-        details.addend = frida_read_uleb128 (&p, end);
+        details.addend = frida_read_sleb128 (&p, end);
         break;
       case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
       {
@@ -1533,6 +1534,36 @@ beach:
     g_free (metadata);
 
   return success;
+}
+
+static gint64
+frida_read_sleb128 (const guint8 ** data, const guint8 * end)
+{
+  const guint8 * p = *data;
+  gint64 result = 0;
+  gint offset = 0;
+  guint8 value;
+
+  do
+  {
+    gint64 chunk;
+
+    g_assert (p != end);
+    g_assert_cmpint (offset, <=, 63);
+
+    value = *p;
+    chunk = value & 0x7f;
+    result |= (chunk << offset);
+    offset += 7;
+  }
+  while (*p++ & 0x80);
+
+  if ((value & 0x40) != 0)
+    result |= G_GINT64_CONSTANT (-1) << offset;
+
+  *data = p;
+
+  return result;
 }
 
 static guint64
