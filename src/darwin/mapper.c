@@ -17,16 +17,16 @@
 #endif
 
 #ifdef HAVE_I386
-# define BASE_FOOTPRINT_SIZE_32 2 /* TODO: adjust */
-# define BASE_FOOTPRINT_SIZE_64 2 /* TODO: adjust */
+# define BASE_FOOTPRINT_SIZE_32 22
+# define BASE_FOOTPRINT_SIZE_64 26
 # define DEPENDENCY_FOOTPRINT_SIZE_32 7
 # define DEPENDENCY_FOOTPRINT_SIZE_64 12
 # define RESOLVER_FOOTPRINT_SIZE_32 21
 # define RESOLVER_FOOTPRINT_SIZE_64 38
-# define INIT_FOOTPRINT_SIZE_32 10 /* TODO: adjust */
-# define INIT_FOOTPRINT_SIZE_64 10 /* TODO: adjust */
-# define TERM_FOOTPRINT_SIZE_32 10 /* TODO: adjust */
-# define TERM_FOOTPRINT_SIZE_64 10 /* TODO: adjust */
+# define INIT_FOOTPRINT_SIZE_32 22
+# define INIT_FOOTPRINT_SIZE_64 35
+# define TERM_FOOTPRINT_SIZE_32 22
+# define TERM_FOOTPRINT_SIZE_64 35
 #endif
 
 typedef struct _FridaLibrary FridaLibrary;
@@ -65,7 +65,8 @@ struct _FridaMapper
   gsize vm_size;
   gpointer runtime;
   GumAddress runtime_address;
-  gsize runtime_size;
+  gsize runtime_vm_size;
+  gsize runtime_file_size;
   gsize constructor_offset;
   gsize destructor_offset;
 
@@ -401,11 +402,13 @@ frida_mapper_init_footprint_budget (FridaMapper * self)
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
   frida_mapper_enumerate_init_pointers (self, frida_mapper_accumulate_init_footprint_size, &runtime_size);
   frida_mapper_enumerate_term_pointers (self, frida_mapper_accumulate_term_footprint_size, &runtime_size);
-  if (runtime_size % library->page_size != 0)
-    runtime_size += library->page_size - (runtime_size % library->page_size);
 
-  self->vm_size = segments_size + runtime_size;
-  self->runtime_size = runtime_size;
+  self->runtime_vm_size = runtime_size;
+  if (runtime_size % library->page_size != 0)
+    self->runtime_vm_size += library->page_size - (runtime_size % library->page_size);
+  self->runtime_file_size = runtime_size;
+
+  self->vm_size = segments_size + self->runtime_vm_size;
 }
 
 void
@@ -464,7 +467,7 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
   }
 
   frida_library_set_base_address (library, base_address);
-  self->runtime_address = base_address + self->vm_size - self->runtime_size;
+  self->runtime_address = base_address + self->vm_size - self->runtime_vm_size;
 
   frida_mapper_enumerate_rebases (self, frida_mapper_rebase, NULL);
   frida_mapper_enumerate_binds (self, frida_mapper_bind, NULL);
@@ -480,8 +483,8 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
     mach_vm_protect (library->task, base_address + s->vm_address, s->vm_size, FALSE, s->protection);
   }
 
-  mach_vm_write (library->task, self->runtime_address, (vm_offset_t) self->runtime, self->runtime_size);
-  mach_vm_protect (library->task, self->runtime_address, self->runtime_size, FALSE,
+  mach_vm_write (library->task, self->runtime_address, (vm_offset_t) self->runtime, self->runtime_file_size);
+  mach_vm_protect (library->task, self->runtime_address, self->runtime_vm_size, FALSE,
       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY | VM_PROT_EXECUTE);
 
   self->mapped = TRUE;
@@ -536,8 +539,7 @@ frida_mapper_emit_runtime (FridaMapper * self)
 {
   GumX86Writer cw;
 
-  self->runtime = g_malloc (self->runtime_size);
-  memset (self->runtime, 0xcc, self->runtime_size);
+  self->runtime = g_malloc (self->runtime_file_size);
 
   gum_x86_writer_init (&cw, self->runtime);
   gum_x86_writer_set_target_cpu (&cw, self->library->cpu_type);
@@ -571,7 +573,7 @@ frida_mapper_emit_runtime (FridaMapper * self)
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_flush (&cw);
-  g_assert_cmpint (gum_x86_writer_offset (&cw), <=, self->runtime_size);
+  g_assert_cmpint (gum_x86_writer_offset (&cw), ==, self->runtime_file_size);
   gum_x86_writer_free (&cw);
 }
 
