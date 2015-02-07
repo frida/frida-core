@@ -667,6 +667,8 @@ frida_mapper_emit_term_calls (FridaMapper * self, const FridaTermPointersDetails
 static void frida_mapper_emit_arm_runtime (FridaMapper * self);
 
 static void frida_mapper_emit_arm64_runtime (FridaMapper * self);
+static void frida_mapper_emit_arm64_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumArm64Writer * aw);
+static void frida_mapper_emit_arm64_term_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumArm64Writer * aw);
 
 static void
 frida_mapper_emit_runtime (FridaMapper * self)
@@ -730,8 +732,8 @@ frida_mapper_emit_arm64_runtime (FridaMapper * self)
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &aw);
   frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &aw);
   frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &aw);
-  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &aw);
   */
+  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_arm64_init_calls, &aw);
 
   gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
   gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
@@ -744,8 +746,8 @@ frida_mapper_emit_arm64_runtime (FridaMapper * self)
   gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
   gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
 
+  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_arm64_term_calls, &aw);
   /*
-  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &aw);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &aw);
   */
 
@@ -757,6 +759,30 @@ frida_mapper_emit_arm64_runtime (FridaMapper * self)
   gum_arm64_writer_flush (&aw);
   g_assert_cmpint (gum_arm64_writer_offset (&aw), ==, self->runtime_file_size);
   gum_arm64_writer_free (&aw);
+}
+
+static void
+frida_mapper_emit_arm64_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumArm64Writer * aw)
+{
+  gconstpointer next_label = GSIZE_TO_POINTER (details->address);
+
+  gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X19, details->address);
+  gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X20, details->count);
+
+  gum_arm64_writer_put_label (aw, next_label);
+
+  gum_arm64_writer_put_ldr_reg_reg_offset (aw, GUM_A64REG_X0, GUM_A64REG_X19, 0);
+  /* TODO: pass argc, argv, envp, apple, program vars */
+  gum_arm64_writer_put_blr_reg (aw, GUM_A64REG_X0);
+
+  gum_arm64_writer_put_add_reg_reg_imm (aw, GUM_A64REG_X19, GUM_A64REG_X19, 8);
+  gum_arm64_writer_put_sub_reg_reg_imm (aw, GUM_A64REG_X20, GUM_A64REG_X20, 1);
+  gum_arm64_writer_put_cbnz_reg_label (aw, GUM_A64REG_X20, next_label);
+}
+
+static void
+frida_mapper_emit_arm64_term_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumArm64Writer * aw)
+{
 }
 
 #endif
