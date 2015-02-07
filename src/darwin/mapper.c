@@ -35,9 +35,9 @@
 # define RESOLVER_FOOTPRINT_SIZE_32 0 /* TODO */
 # define RESOLVER_FOOTPRINT_SIZE_64 0 /* TODO */
 # define INIT_FOOTPRINT_SIZE_32 0 /* TODO */
-# define INIT_FOOTPRINT_SIZE_64 0 /* TODO */
+# define INIT_FOOTPRINT_SIZE_64 44
 # define TERM_FOOTPRINT_SIZE_32 0 /* TODO */
-# define TERM_FOOTPRINT_SIZE_64 0 /* TODO */
+# define TERM_FOOTPRINT_SIZE_64 44
 #endif
 
 typedef struct _FridaLibrary FridaLibrary;
@@ -584,7 +584,7 @@ frida_mapper_emit_runtime (FridaMapper * self)
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_flush (&cw);
-  g_assert_cmpint (gum_x86_writer_offset (&cw), ==, self->runtime_file_size);
+  g_assert_cmpint (gum_x86_writer_offset (&cw), <=, self->runtime_file_size);
   gum_x86_writer_free (&cw);
 }
 
@@ -711,7 +711,7 @@ frida_mapper_emit_arm_runtime (FridaMapper * self)
   gum_thumb_writer_put_pop_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
 
   gum_thumb_writer_flush (&tw);
-  g_assert_cmpint (gum_thumb_writer_offset (&tw), ==, self->runtime_file_size);
+  g_assert_cmpint (gum_thumb_writer_offset (&tw), <=, self->runtime_file_size);
   gum_thumb_writer_free (&tw);
 }
 
@@ -757,7 +757,7 @@ frida_mapper_emit_arm64_runtime (FridaMapper * self)
   gum_arm64_writer_put_ret (&aw);
 
   gum_arm64_writer_flush (&aw);
-  g_assert_cmpint (gum_arm64_writer_offset (&aw), ==, self->runtime_file_size);
+  g_assert_cmpint (gum_arm64_writer_offset (&aw), <=, self->runtime_file_size);
   gum_arm64_writer_free (&aw);
 }
 
@@ -783,6 +783,19 @@ frida_mapper_emit_arm64_init_calls (FridaMapper * self, const FridaInitPointersD
 static void
 frida_mapper_emit_arm64_term_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumArm64Writer * aw)
 {
+  gconstpointer next_label = GSIZE_TO_POINTER (details->address);
+
+  gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X19, details->address + ((details->count - 1) * self->library->pointer_size));
+  gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X20, details->count);
+
+  gum_arm64_writer_put_label (aw, next_label);
+
+  gum_arm64_writer_put_ldr_reg_reg_offset (aw, GUM_A64REG_X0, GUM_A64REG_X19, 0);
+  gum_arm64_writer_put_blr_reg (aw, GUM_A64REG_X0);
+
+  gum_arm64_writer_put_sub_reg_reg_imm (aw, GUM_A64REG_X19, GUM_A64REG_X19, 8);
+  gum_arm64_writer_put_sub_reg_reg_imm (aw, GUM_A64REG_X20, GUM_A64REG_X20, 1);
+  gum_arm64_writer_put_cbnz_reg_label (aw, GUM_A64REG_X20, next_label);
 }
 
 #endif
