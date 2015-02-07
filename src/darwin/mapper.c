@@ -31,6 +31,7 @@
 
 typedef struct _FridaLibrary FridaLibrary;
 typedef struct _FridaSegment FridaSegment;
+typedef struct _FridaSectionDetails FridaSectionDetails;
 typedef struct _FridaMapping FridaMapping;
 typedef struct _FridaSymbolValue FridaSymbolValue;
 typedef struct _FridaSymbolDetails FridaSymbolDetails;
@@ -39,6 +40,10 @@ typedef struct _FridaBindDetails FridaBindDetails;
 typedef struct _FridaInitPointersDetails FridaInitPointersDetails;
 typedef struct _FridaTermPointersDetails FridaTermPointersDetails;
 
+typedef struct _FridaEmitSectionInitPointersContext FridaEmitSectionInitPointersContext;
+typedef struct _FridaEmitSectionTermPointersContext FridaEmitSectionTermPointersContext;
+
+typedef void (* FridaFoundSectionFunc) (FridaLibrary * self, const FridaSectionDetails * details, gpointer user_data);
 typedef void (* FridaFoundRebaseFunc) (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data);
 typedef void (* FridaFoundBindFunc) (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
 typedef void (* FridaFoundInitPointersFunc) (FridaMapper * self, const FridaInitPointersDetails * details, gpointer user_data);
@@ -99,6 +104,16 @@ struct _FridaSegment
   guint64 file_offset;
   guint64 file_size;
   vm_prot_t protection;
+};
+
+struct _FridaSectionDetails
+{
+  const gchar * segment_name;
+  const gchar * section_name;
+  GumAddress vm_address;
+  guint64 size;
+  guint32 file_offset;
+  guint32 flags;
 };
 
 struct _FridaMapping
@@ -165,6 +180,20 @@ struct _FridaTermPointersDetails
   guint64 count;
 };
 
+struct _FridaEmitSectionInitPointersContext
+{
+  FridaMapper * mapper;
+  FridaFoundInitPointersFunc func;
+  gpointer user_data;
+};
+
+struct _FridaEmitSectionTermPointersContext
+{
+  FridaMapper * mapper;
+  FridaFoundTermPointersFunc func;
+  gpointer user_data;
+};
+
 static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static void frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static void frida_mapper_init_dependencies (FridaMapper * self);
@@ -190,6 +219,9 @@ static void frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBin
 static void frida_mapper_enumerate_init_pointers (FridaMapper * self, FridaFoundInitPointersFunc func, gpointer user_data);
 static void frida_mapper_enumerate_term_pointers (FridaMapper * self, FridaFoundTermPointersFunc func, gpointer user_data);
 
+static void frida_mapper_emit_section_init_pointers (FridaLibrary * self, const FridaSectionDetails * details, gpointer user_data);
+static void frida_mapper_emit_section_term_pointers (FridaLibrary * self, const FridaSectionDetails * details, gpointer user_data);
+
 static void frida_mapping_free (FridaMapping * self);
 
 static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type);
@@ -198,6 +230,7 @@ static void frida_library_unref (FridaLibrary * self);
 static void frida_library_set_base_address (FridaLibrary * self, GumAddress base_address);
 static GumAddress frida_library_slide (FridaLibrary * self);
 static const FridaSegment * frida_library_segment (FridaLibrary * self, gsize index);
+static void frida_library_enumerate_sections (FridaLibrary * self, FridaFoundSectionFunc func, gpointer user_data);
 static const gchar * frida_library_dependency (FridaLibrary * self, gint ordinal);
 static gboolean frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDetails * details);
 static const guint8 * frida_library_find_export_node (FridaLibrary * self, const gchar * name);
@@ -590,7 +623,7 @@ frida_mapper_emit_init_calls (FridaMapper * self, const FridaInitPointersDetails
   gum_x86_writer_put_label (cw, next_label);
 
   gum_x86_writer_put_mov_reg_reg_ptr (cw, GUM_REG_XAX, GUM_REG_XBP);
-  /* TODO: pass argc, argv, envp, etc. */
+  /* TODO: pass argc, argv, envp, apple, program vars */
   gum_x86_writer_put_call_reg (cw, GUM_REG_XAX);
 
   gum_x86_writer_put_add_reg_imm (cw, GUM_REG_XBP, self->library->pointer_size);
@@ -601,7 +634,19 @@ frida_mapper_emit_init_calls (FridaMapper * self, const FridaInitPointersDetails
 static void
 frida_mapper_emit_term_calls (FridaMapper * self, const FridaTermPointersDetails * details, GumX86Writer * cw)
 {
-  /* TODO */
+  gconstpointer next_label = GSIZE_TO_POINTER (details->address);
+
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XBP, details->address + ((details->count - 1) * self->library->pointer_size));
+  gum_x86_writer_put_mov_reg_address (cw, GUM_REG_XBX, details->count);
+
+  gum_x86_writer_put_label (cw, next_label);
+
+  gum_x86_writer_put_mov_reg_reg_ptr (cw, GUM_REG_XAX, GUM_REG_XBP);
+  gum_x86_writer_put_call_reg (cw, GUM_REG_XAX);
+
+  gum_x86_writer_put_sub_reg_imm (cw, GUM_REG_XBP, self->library->pointer_size);
+  gum_x86_writer_put_dec_reg (cw, GUM_REG_XBX);
+  gum_x86_writer_put_jcc_short_label (cw, GUM_X86_JNZ, next_label, GUM_NO_HINT);
 }
 
 #else
@@ -1134,79 +1179,47 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
 static void
 frida_mapper_enumerate_init_pointers (FridaMapper * self, FridaFoundInitPointersFunc func, gpointer user_data)
 {
-  GumAddress slide;
-  const struct mach_header * header;
-  gpointer command;
-  gsize command_index;
-
-  slide = frida_library_slide (self->library);
-
-  header = (struct mach_header *) self->data;
-  if (header->magic == MH_MAGIC)
-    command = self->data + sizeof (struct mach_header);
-  else
-    command = self->data + sizeof (struct mach_header_64);
-  for (command_index = 0; command_index != header->ncmds; command_index++)
-  {
-    const struct load_command * lc = command;
-
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      gconstpointer sections;
-      gsize section_count, section_index;
-
-      if (lc->cmd == LC_SEGMENT)
-      {
-        const struct segment_command * sc = command;
-        sections = sc + 1;
-        section_count = sc->nsects;
-      }
-      else
-      {
-        const struct segment_command_64 * sc = command;
-        sections = sc + 1;
-        section_count = sc->nsects;
-      }
-
-      for (section_index = 0; section_index != section_count; section_index++)
-      {
-        GumAddress address;
-        guint64 size;
-        guint32 flags;
-
-        if (lc->cmd == LC_SEGMENT)
-        {
-          const struct section * s = sections + (section_index * sizeof (struct section));
-          address = s->addr + (guint32) slide;
-          size = s->size;
-          flags = s->flags;
-        }
-        else
-        {
-          const struct section_64 * s = sections + (section_index * sizeof (struct section_64));
-          address = s->addr + (guint64) slide;
-          size = s->size;
-          flags = s->flags;
-        }
-
-        if ((flags & SECTION_TYPE) == S_MOD_INIT_FUNC_POINTERS)
-        {
-          FridaInitPointersDetails details;
-          details.address = address;
-          details.count = size / self->library->pointer_size;
-          func (self, &details, user_data);
-        }
-      }
-    }
-
-    command += lc->cmdsize;
-  }
+  FridaEmitSectionInitPointersContext ctx;
+  ctx.mapper = self;
+  ctx.func = func;
+  ctx.user_data = user_data;
+  frida_library_enumerate_sections (self->library, frida_mapper_emit_section_init_pointers, &ctx);
 }
 
 static void
 frida_mapper_enumerate_term_pointers (FridaMapper * self, FridaFoundTermPointersFunc func, gpointer user_data)
 {
-  /* TODO */
+  FridaEmitSectionTermPointersContext ctx;
+  ctx.mapper = self;
+  ctx.func = func;
+  ctx.user_data = user_data;
+  frida_library_enumerate_sections (self->library, frida_mapper_emit_section_term_pointers, &ctx);
+}
+
+static void
+frida_mapper_emit_section_init_pointers (FridaLibrary * self, const FridaSectionDetails * details, gpointer user_data)
+{
+  if ((details->flags & SECTION_TYPE) == S_MOD_INIT_FUNC_POINTERS)
+  {
+    FridaEmitSectionInitPointersContext * ctx = user_data;
+    FridaInitPointersDetails d;
+    d.address = details->vm_address;
+    d.count = details->size / self->pointer_size;
+    ctx->func (ctx->mapper, &d, ctx->user_data);
+  }
+}
+
+static void
+frida_mapper_emit_section_term_pointers (FridaLibrary * self, const FridaSectionDetails * details, gpointer user_data)
+{
+  if ((details->flags & SECTION_TYPE) == S_MOD_TERM_FUNC_POINTERS)
+  {
+    FridaEmitSectionTermPointersContext * ctx = user_data;
+    FridaTermPointersDetails d;
+    d.address = details->vm_address;
+    d.count = details->size / self->pointer_size;
+    ctx->func (ctx->mapper, &d, ctx->user_data);
+  }
 }
 
 static void
@@ -1293,6 +1306,75 @@ static const FridaSegment *
 frida_library_segment (FridaLibrary * self, gsize index)
 {
   return &g_array_index (self->segments, FridaSegment, index);
+}
+
+static void
+frida_library_enumerate_sections (FridaLibrary * self, FridaFoundSectionFunc func, gpointer user_data)
+{
+  const struct mach_header * header;
+  gpointer command;
+  gsize command_index;
+  GumAddress slide;
+
+  header = (struct mach_header *) self->metadata;
+  if (header->magic == MH_MAGIC)
+    command = self->metadata + sizeof (struct mach_header);
+  else
+    command = self->metadata + sizeof (struct mach_header_64);
+  slide = frida_library_slide (self);
+  for (command_index = 0; command_index != header->ncmds; command_index++)
+  {
+    const struct load_command * lc = command;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      gconstpointer sections;
+      gsize section_count, section_index;
+
+      if (lc->cmd == LC_SEGMENT)
+      {
+        const struct segment_command * sc = command;
+        sections = sc + 1;
+        section_count = sc->nsects;
+      }
+      else
+      {
+        const struct segment_command_64 * sc = command;
+        sections = sc + 1;
+        section_count = sc->nsects;
+      }
+
+      for (section_index = 0; section_index != section_count; section_index++)
+      {
+        FridaSectionDetails details;
+
+        if (lc->cmd == LC_SEGMENT)
+        {
+          const struct section * s = sections + (section_index * sizeof (struct section));
+          details.segment_name = s->segname;
+          details.section_name = s->sectname;
+          details.vm_address = s->addr + (guint32) slide;
+          details.size = s->size;
+          details.file_offset = s->offset;
+          details.flags = s->flags;
+        }
+        else
+        {
+          const struct section_64 * s = sections + (section_index * sizeof (struct section_64));
+          details.segment_name = s->segname;
+          details.section_name = s->sectname;
+          details.vm_address = s->addr + (guint64) slide;
+          details.size = s->size;
+          details.file_offset = s->offset;
+          details.flags = s->flags;
+        }
+
+        func (self, &details, user_data);
+      }
+    }
+
+    command += lc->cmdsize;
+  }
 }
 
 static const gchar *
