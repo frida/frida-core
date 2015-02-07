@@ -16,7 +16,7 @@
 # define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE 2
 #endif
 
-#ifdef HAVE_I386
+#if defined (HAVE_I386)
 # define BASE_FOOTPRINT_SIZE_32 22
 # define BASE_FOOTPRINT_SIZE_64 26
 # define DEPENDENCY_FOOTPRINT_SIZE_32 14
@@ -27,6 +27,17 @@
 # define INIT_FOOTPRINT_SIZE_64 35
 # define TERM_FOOTPRINT_SIZE_32 22
 # define TERM_FOOTPRINT_SIZE_64 35
+#elif defined (HAVE_ARM) || defined (HAVE_ARM64)
+# define BASE_FOOTPRINT_SIZE_32 8
+# define BASE_FOOTPRINT_SIZE_64 64
+# define DEPENDENCY_FOOTPRINT_SIZE_32 0 /* TODO */
+# define DEPENDENCY_FOOTPRINT_SIZE_64 0 /* TODO */
+# define RESOLVER_FOOTPRINT_SIZE_32 0 /* TODO */
+# define RESOLVER_FOOTPRINT_SIZE_64 0 /* TODO */
+# define INIT_FOOTPRINT_SIZE_32 0 /* TODO */
+# define INIT_FOOTPRINT_SIZE_64 0 /* TODO */
+# define TERM_FOOTPRINT_SIZE_32 0 /* TODO */
+# define TERM_FOOTPRINT_SIZE_64 0 /* TODO */
 #endif
 
 typedef struct _FridaLibrary FridaLibrary;
@@ -526,7 +537,7 @@ frida_mapper_resolve (FridaMapper * self, const gchar * symbol)
   return value.address;
 }
 
-#ifdef HAVE_I386
+#if defined (HAVE_I386)
 
 static void frida_mapper_emit_child_constructor_call (FridaMapper * child, GumX86Writer * cw);
 static void frida_mapper_emit_child_destructor_call (FridaMapper * child, GumX86Writer * cw);
@@ -651,12 +662,101 @@ frida_mapper_emit_term_calls (FridaMapper * self, const FridaTermPointersDetails
   gum_x86_writer_put_jcc_short_label (cw, GUM_X86_JNZ, next_label, GUM_NO_HINT);
 }
 
-#else
+#elif defined (HAVE_ARM) || defined (HAVE_ARM64)
+
+static void frida_mapper_emit_arm_runtime (FridaMapper * self);
+
+static void frida_mapper_emit_arm64_runtime (FridaMapper * self);
 
 static void
 frida_mapper_emit_runtime (FridaMapper * self)
 {
-  /* TODO: ARM support */
+  self->runtime = g_malloc (self->runtime_file_size);
+
+  if (self->library->cpu_type == GUM_CPU_ARM)
+    frida_mapper_emit_arm_runtime (self);
+  else
+    frida_mapper_emit_arm64_runtime (self);
+}
+
+static void
+frida_mapper_emit_arm_runtime (FridaMapper * self)
+{
+  GumThumbWriter tw;
+
+  gum_thumb_writer_init (&tw, self->runtime);
+
+  self->constructor_offset = gum_thumb_writer_offset (&tw) + 1;
+  gum_thumb_writer_put_push_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
+
+  /*
+  g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &tw);
+  frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &tw);
+  frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &tw);
+  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &tw);
+  */
+
+  gum_thumb_writer_put_pop_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
+
+  self->destructor_offset = gum_thumb_writer_offset (&tw) + 1;
+  gum_thumb_writer_put_push_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
+
+  /*
+  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &tw);
+  g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &tw);
+  */
+
+  gum_thumb_writer_put_pop_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
+
+  gum_thumb_writer_flush (&tw);
+  g_assert_cmpint (gum_thumb_writer_offset (&tw), ==, self->runtime_file_size);
+  gum_thumb_writer_free (&tw);
+}
+
+static void
+frida_mapper_emit_arm64_runtime (FridaMapper * self)
+{
+  GumArm64Writer aw;
+
+  gum_arm64_writer_init (&aw, self->runtime);
+
+  self->constructor_offset = gum_arm64_writer_offset (&aw);
+  gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_mov_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_SP);
+  gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
+
+  /*
+  g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &aw);
+  frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &aw);
+  frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &aw);
+  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &aw);
+  */
+
+  gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
+  gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_ret (&aw);
+
+  self->destructor_offset = gum_arm64_writer_offset (&aw);
+  gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_mov_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_SP);
+  gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_push_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
+
+  /*
+  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &aw);
+  g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &aw);
+  */
+
+  gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
+  gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
+  gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_ret (&aw);
+
+  gum_arm64_writer_flush (&aw);
+  g_assert_cmpint (gum_arm64_writer_offset (&aw), ==, self->runtime_file_size);
+  gum_arm64_writer_free (&aw);
 }
 
 #endif
