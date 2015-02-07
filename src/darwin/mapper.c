@@ -892,7 +892,7 @@ frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, g
         guint64 count, i;
 
         count = frida_read_uleb128 (&p, end);
-        for (i = 0; i != immediate; i++)
+        for (i = 0; i != count; i++)
         {
           g_assert_cmpuint (details.offset, <, max_offset);
           func (self, &details, user_data);
