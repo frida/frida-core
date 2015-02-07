@@ -19,8 +19,8 @@
 #ifdef HAVE_I386
 # define BASE_FOOTPRINT_SIZE_32 22
 # define BASE_FOOTPRINT_SIZE_64 26
-# define DEPENDENCY_FOOTPRINT_SIZE_32 7
-# define DEPENDENCY_FOOTPRINT_SIZE_64 12
+# define DEPENDENCY_FOOTPRINT_SIZE_32 14
+# define DEPENDENCY_FOOTPRINT_SIZE_64 24
 # define RESOLVER_FOOTPRINT_SIZE_32 21
 # define RESOLVER_FOOTPRINT_SIZE_64 38
 # define INIT_FOOTPRINT_SIZE_32 22
@@ -388,20 +388,20 @@ frida_mapper_init_footprint_budget (FridaMapper * self)
   }
 
   runtime_size = 0;
-  if (library->pointer_size == 4)
-  {
-    runtime_size += BASE_FOOTPRINT_SIZE_32;
-    runtime_size += g_slist_length (self->children) * DEPENDENCY_FOOTPRINT_SIZE_32;
-  }
-  else
-  {
-    runtime_size += BASE_FOOTPRINT_SIZE_64;
-    runtime_size += g_slist_length (self->children) * DEPENDENCY_FOOTPRINT_SIZE_64;
-  }
   frida_mapper_enumerate_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_accumulate_bind_footprint_size, &runtime_size);
   frida_mapper_enumerate_init_pointers (self, frida_mapper_accumulate_init_footprint_size, &runtime_size);
   frida_mapper_enumerate_term_pointers (self, frida_mapper_accumulate_term_footprint_size, &runtime_size);
+  if (library->pointer_size == 4)
+  {
+    runtime_size += g_slist_length (self->children) * DEPENDENCY_FOOTPRINT_SIZE_32;
+    runtime_size += BASE_FOOTPRINT_SIZE_32;
+  }
+  else
+  {
+    runtime_size += g_slist_length (self->children) * DEPENDENCY_FOOTPRINT_SIZE_64;
+    runtime_size += BASE_FOOTPRINT_SIZE_64;
+  }
 
   self->runtime_vm_size = runtime_size;
   if (runtime_size % library->page_size != 0)
