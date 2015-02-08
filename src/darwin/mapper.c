@@ -208,6 +208,7 @@ struct _FridaEmitSectionTermPointersContext
 
 static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static void frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type);
+static void frida_mapper_load_data (FridaMapper * self, const gchar * name, GumCpuType cpu_type);
 static void frida_mapper_init_dependencies (FridaMapper * self);
 static void frida_mapper_init_footprint_budget (FridaMapper * self);
 
@@ -278,6 +279,17 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
 
 static void
 frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type)
+{
+  frida_mapper_load_data (self, name, cpu_type);
+
+  self->library = frida_library_new (name, task, cpu_type);
+  frida_library_take_metadata (self->library, g_memdup (self->data, self->data_size), self->data_size);
+}
+
+#ifdef HAVE_I386
+
+static void
+frida_mapper_load_data (FridaMapper * self, const gchar * name, GumCpuType cpu_type)
 {
   gsize image_size;
   gboolean image_loaded;
@@ -351,10 +363,49 @@ frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t t
       g_assert_not_reached ();
       break;
   }
-
-  self->library = frida_library_new (name, task, cpu_type);
-  frida_library_take_metadata (self->library, g_memdup (self->data, self->data_size), self->data_size);
 }
+
+#elif defined (HAVE_ARM) || defined (HAVE_ARM64)
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <mach-o/arch.h>
+#include <mach-o/dyld.h>
+
+static const gchar * frida_current_architecture_name (void);
+
+static void
+frida_mapper_load_data (FridaMapper * self, const gchar * name, GumCpuType cpu_type)
+{
+  gchar * cache_path;
+  int fd;
+
+  cache_path = g_strconcat (
+      "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_",
+      frida_current_architecture_name (),
+      NULL);
+
+  fd = open (cache_path, 0);
+  g_assert (fd != -1);
+
+beach:
+  close (fd);
+
+  g_free (cache_path);
+}
+
+static const gchar *
+frida_current_architecture_name (void)
+{
+  const struct mach_header * header;
+  const NXArchInfo * info;
+
+  header = _dyld_get_image_header (0);
+  info = NXGetArchInfoFromCpuType (header->cputype, header->cpusubtype);
+  return info->name;
+}
+
+#endif
 
 static void
 frida_mapper_init_dependencies (FridaMapper * self)
