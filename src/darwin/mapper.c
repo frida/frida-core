@@ -1,11 +1,15 @@
 #include "mapper.h"
 
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
 #else
 # include <gum/arch-arm/gumthumbwriter.h>
 # include <gum/arch-arm64/gumarm64writer.h>
 #endif
+#include <mach-o/arch.h>
+#include <mach-o/dyld.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
@@ -54,6 +58,10 @@ typedef struct _FridaTermPointersDetails FridaTermPointersDetails;
 typedef struct _FridaEmitSectionInitPointersContext FridaEmitSectionInitPointersContext;
 typedef struct _FridaEmitSectionTermPointersContext FridaEmitSectionTermPointersContext;
 
+typedef struct _FridaDyldCacheHeader FridaDyldCacheHeader;
+typedef struct _FridaDyldCacheMappingInfo FridaDyldCacheMappingInfo;
+typedef struct _FridaDyldCacheImageInfo FridaDyldCacheImageInfo;
+
 typedef void (* FridaFoundSectionFunc) (FridaLibrary * self, const FridaSectionDetails * details, gpointer user_data);
 typedef void (* FridaFoundRebaseFunc) (FridaMapper * self, const FridaRebaseDetails * details, gpointer user_data);
 typedef void (* FridaFoundBindFunc) (FridaMapper * self, const FridaBindDetails * details, gpointer user_data);
@@ -66,10 +74,8 @@ struct _FridaMapper
 
   gboolean mapped;
 
-  gpointer image;
-  gpointer data;
-  gsize data_size;
   FridaLibrary * library;
+  gpointer data;
 
   GPtrArray * dependencies;
 
@@ -97,7 +103,10 @@ struct _FridaLibrary
   gsize page_size;
   GumAddress base_address;
 
-  gpointer metadata;
+  GMappedFile * file;
+  gconstpointer data;
+  gsize data_size;
+  gconstpointer linkedit;
   const struct dyld_info_command * info;
   const struct symtab_command * symtab;
   const struct dysymtab_command * dysymtab;
@@ -206,9 +215,34 @@ struct _FridaEmitSectionTermPointersContext
   gpointer user_data;
 };
 
+struct _FridaDyldCacheHeader
+{
+  gchar magic[16];
+  guint32 mapping_offset;
+  guint32 mapping_count;
+  guint32 images_offset;
+  guint32 images_count;
+};
+
+struct _FridaDyldCacheMappingInfo
+{
+  GumAddress address;
+  guint64 size;
+  guint64 offset;
+  guint32 max_protection;
+  guint32 initial_protection;
+};
+
+struct _FridaDyldCacheImageInfo
+{
+  GumAddress address;
+  guint64 mtime;
+  guint64 inode;
+  guint32 name_offset;
+  guint32 padding;
+};
+
 static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
-static void frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type);
-static void frida_mapper_load_data (FridaMapper * self, const gchar * name, GumCpuType cpu_type);
 static void frida_mapper_init_dependencies (FridaMapper * self);
 static void frida_mapper_init_footprint_budget (FridaMapper * self);
 
@@ -237,6 +271,8 @@ static void frida_mapper_emit_section_term_pointers (FridaLibrary * self, const 
 
 static void frida_mapping_free (FridaMapping * self);
 
+static FridaLibrary * frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cpu_type);
+static FridaLibrary * frida_library_new_from_memory (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address);
 static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static FridaLibrary * frida_library_ref (FridaLibrary * self);
 static void frida_library_unref (FridaLibrary * self);
@@ -247,8 +283,17 @@ static void frida_library_enumerate_sections (FridaLibrary * self, FridaFoundSec
 static const gchar * frida_library_dependency (FridaLibrary * self, gint ordinal);
 static gboolean frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDetails * details);
 static const guint8 * frida_library_find_export_node (FridaLibrary * self, const gchar * name);
-static gboolean frida_library_ensure_metadata (FridaLibrary * self);
-static gboolean frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metadata_size);
+static gboolean frida_library_ensure_data_loaded (FridaLibrary * self);
+static gboolean frida_library_try_load_data_from_cache (FridaLibrary * self, const gchar * name, GumCpuType cpu_type);
+static void frida_library_load_data_from_filesystem (FridaLibrary * self, const gchar * name, GumCpuType cpu_type);
+static gboolean frida_library_load_data_from_memory (FridaLibrary * self);
+static gboolean frida_library_take_data (FridaLibrary * self, GMappedFile * file, gconstpointer data, gsize data_size, gconstpointer linkedit);
+
+static const FridaDyldCacheImageInfo * frida_dyld_cache_find_image_by_name (const gchar * name, const FridaDyldCacheImageInfo * images, gsize image_count, gconstpointer cache);
+static gsize frida_dyld_cache_compute_image_size (const FridaDyldCacheImageInfo * image, const FridaDyldCacheImageInfo * images, gsize image_count);
+static guint64 frida_dyld_cache_offset_from_address (GumAddress address, const FridaDyldCacheMappingInfo * mappings, gsize mapping_count);
+
+static const gchar * frida_current_architecture_name (void);
 
 static gint64 frida_read_sleb128 (const guint8 ** data, const guint8 * end);
 static guint64 frida_read_uleb128 (const guint8 ** p, const guint8 * end);
@@ -270,142 +315,14 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
 
   mapper->mapped = FALSE;
 
-  frida_mapper_init_library (mapper, name, task, cpu_type);
+  mapper->library = frida_library_new_from_file (name, task, cpu_type);
+  mapper->data = g_memdup (mapper->library->data, mapper->library->data_size);
+
   frida_mapper_init_dependencies (mapper);
   frida_mapper_init_footprint_budget (mapper);
 
   return mapper;
 }
-
-static void
-frida_mapper_init_library (FridaMapper * self, const gchar * name, mach_port_t task, GumCpuType cpu_type)
-{
-  frida_mapper_load_data (self, name, cpu_type);
-
-  self->library = frida_library_new (name, task, cpu_type);
-  frida_library_take_metadata (self->library, g_memdup (self->data, self->data_size), self->data_size);
-}
-
-#ifdef HAVE_I386
-
-static void
-frida_mapper_load_data (FridaMapper * self, const gchar * name, GumCpuType cpu_type)
-{
-  gsize image_size;
-  gboolean image_loaded;
-  const struct fat_header * fat_header;
-  struct mach_header * header_32 = NULL;
-  struct mach_header_64 * header_64 = NULL;
-  gsize size_32 = 0;
-  gsize size_64 = 0;
-
-  image_loaded = g_file_get_contents (name, (gchar **) &self->image, &image_size, NULL);
-  g_assert (image_loaded);
-
-  fat_header = self->image;
-  switch (fat_header->magic)
-  {
-    case FAT_CIGAM:
-    {
-      uint32_t count, i;
-
-      count = GUINT32_FROM_BE (fat_header->nfat_arch);
-      for (i = 0; i != count; i++)
-      {
-        struct fat_arch * fat_arch = ((struct fat_arch *) (fat_header + 1)) + i;
-        gpointer mach_header = self->image + GUINT32_FROM_BE (fat_arch->offset);
-        switch (((struct mach_header *) mach_header)->magic)
-        {
-          case MH_MAGIC:
-            header_32 = mach_header;
-            size_32 = GUINT32_FROM_BE (fat_arch->size);
-            break;
-          case MH_MAGIC_64:
-            header_64 = mach_header;
-            size_64 = GUINT32_FROM_BE (fat_arch->size);
-            break;
-          default:
-            g_assert_not_reached ();
-            break;
-        }
-      }
-
-      break;
-    }
-    case MH_MAGIC:
-      header_32 = self->image;
-      size_32 = image_size;
-      break;
-    case MH_MAGIC_64:
-      header_64 = self->image;
-      size_64 = image_size;
-      break;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-
-  switch (cpu_type)
-  {
-    case GUM_CPU_IA32:
-    case GUM_CPU_ARM:
-      g_assert (header_32 != NULL);
-      self->data = header_32;
-      self->data_size = size_32;
-      break;
-    case GUM_CPU_AMD64:
-    case GUM_CPU_ARM64:
-      g_assert (header_64 != NULL);
-      self->data = header_64;
-      self->data_size = size_64;
-      break;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-}
-
-#elif defined (HAVE_ARM) || defined (HAVE_ARM64)
-
-#include <fcntl.h>
-#include <unistd.h>
-#include <mach-o/arch.h>
-#include <mach-o/dyld.h>
-
-static const gchar * frida_current_architecture_name (void);
-
-static void
-frida_mapper_load_data (FridaMapper * self, const gchar * name, GumCpuType cpu_type)
-{
-  gchar * cache_path;
-  int fd;
-
-  cache_path = g_strconcat (
-      "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_",
-      frida_current_architecture_name (),
-      NULL);
-
-  fd = open (cache_path, 0);
-  g_assert (fd != -1);
-
-beach:
-  close (fd);
-
-  g_free (cache_path);
-}
-
-static const gchar *
-frida_current_architecture_name (void)
-{
-  const struct mach_header * header;
-  const NXArchInfo * info;
-
-  header = _dyld_get_image_header (0);
-  info = NXGetArchInfoFromCpuType (header->cputype, header->cpusubtype);
-  return info->name;
-}
-
-#endif
 
 static void
 frida_mapper_init_dependencies (FridaMapper * self)
@@ -485,9 +402,8 @@ frida_mapper_free (FridaMapper * mapper)
 
   g_ptr_array_unref (mapper->dependencies);
 
+  g_free (mapper->data);
   frida_library_unref (mapper->library);
-
-  g_free (mapper->image);
 
   g_slice_free (FridaMapper, mapper);
 }
@@ -1016,8 +932,7 @@ frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details,
   GumAddress base_address = details->range->base_address;
   FridaLibrary * library;
 
-  library = frida_library_new (details->path, self->library->task, self->library->cpu_type);
-  frida_library_set_base_address (library, base_address);
+  library = frida_library_new_from_memory (details->path, self->library->task, self->library->cpu_type, base_address);
   frida_mapper_add_existing_mapping (self, library, base_address);
   frida_library_unref (library);
 
@@ -1109,7 +1024,7 @@ frida_mapper_enumerate_rebases (FridaMapper * self, FridaFoundRebaseFunc func, g
   FridaRebaseDetails details;
   guint64 max_offset;
 
-  start = self->data + library->info->rebase_off;
+  start = self->library->linkedit + library->info->rebase_off;
   end = start + library->info->rebase_size;
   p = start;
   done = FALSE;
@@ -1213,7 +1128,7 @@ frida_mapper_enumerate_binds (FridaMapper * self, FridaFoundBindFunc func, gpoin
   FridaBindDetails details;
   guint64 max_offset;
 
-  start = self->data + library->info->bind_off;
+  start = self->library->linkedit + library->info->bind_off;
   end = start + library->info->bind_size;
   p = start;
   done = FALSE;
@@ -1326,7 +1241,7 @@ frida_mapper_enumerate_lazy_binds (FridaMapper * self, FridaFoundBindFunc func, 
   FridaBindDetails details;
   guint64 max_offset;
 
-  start = self->data + library->info->lazy_bind_off;
+  start = self->library->linkedit + library->info->lazy_bind_off;
   end = start + library->info->lazy_bind_size;
   p = start;
 
@@ -1461,6 +1376,29 @@ frida_mapping_free (FridaMapping * self)
 }
 
 static FridaLibrary *
+frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cpu_type)
+{
+  FridaLibrary * library;
+
+  library = frida_library_new (name, task, cpu_type);
+  if (!frida_library_try_load_data_from_cache (library, name, cpu_type))
+    frida_library_load_data_from_filesystem (library, name, cpu_type);
+
+  return library;
+}
+
+static FridaLibrary *
+frida_library_new_from_memory (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address)
+{
+  FridaLibrary * library;
+
+  library = frida_library_new (name, task, cpu_type);
+  frida_library_set_base_address (library, base_address);
+
+  return library;
+}
+
+static FridaLibrary *
 frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type)
 {
   FridaLibrary * library;
@@ -1513,7 +1451,10 @@ frida_library_unref (FridaLibrary * self)
     g_ptr_array_unref (self->dependencies);
     g_free (self->exports);
     g_array_unref (self->segments);
-    g_free (self->metadata);
+    if (self->file != NULL)
+      g_mapped_file_unref (self->file);
+    else
+      g_free ((gpointer) self->data);
 
     g_free (self->name);
 
@@ -1543,15 +1484,15 @@ static void
 frida_library_enumerate_sections (FridaLibrary * self, FridaFoundSectionFunc func, gpointer user_data)
 {
   const struct mach_header * header;
-  gpointer command;
+  gconstpointer command;
   gsize command_index;
   GumAddress slide;
 
-  header = (struct mach_header *) self->metadata;
+  header = (struct mach_header *) self->data;
   if (header->magic == MH_MAGIC)
-    command = self->metadata + sizeof (struct mach_header);
+    command = self->data + sizeof (struct mach_header);
   else
-    command = self->metadata + sizeof (struct mach_header_64);
+    command = self->data + sizeof (struct mach_header_64);
   slide = frida_library_slide (self);
   for (command_index = 0; command_index != header->ncmds; command_index++)
   {
@@ -1615,7 +1556,7 @@ frida_library_dependency (FridaLibrary * self, gint ordinal)
 
   g_assert_cmpint (ordinal, >=, 1); /* TODO */
 
-  if (!frida_library_ensure_metadata (self))
+  if (!frida_library_ensure_data_loaded (self))
     return NULL;
 
   result = g_ptr_array_index (self->dependencies, ordinal - 1);
@@ -1656,7 +1597,7 @@ frida_library_find_export_node (FridaLibrary * self, const gchar * symbol)
 {
   const guint8 * p;
 
-  if (!frida_library_ensure_metadata (self))
+  if (!frida_library_ensure_data_loaded (self))
     return NULL;
 
   p = self->exports;
@@ -1717,38 +1658,191 @@ frida_library_find_export_node (FridaLibrary * self, const gchar * symbol)
 }
 
 static gboolean
-frida_library_ensure_metadata (FridaLibrary * self)
+frida_library_ensure_data_loaded (FridaLibrary * self)
 {
-  gpointer metadata;
-  gsize metadata_size;
-
-  if (self->metadata != NULL)
+  if (self->data != NULL)
     return TRUE;
-
-  g_assert_cmpint (self->base_address, !=, 0);
-
-  metadata = gum_darwin_read (self->task, self->base_address, MAX_METADATA_SIZE, &metadata_size);
-  if (metadata == NULL)
-    return FALSE;
-
-  return frida_library_take_metadata (self, metadata, metadata_size);
+  else
+    return frida_library_load_data_from_memory (self);
 }
 
 static gboolean
-frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metadata_size)
+frida_library_try_load_data_from_cache (FridaLibrary * self, const gchar * name, GumCpuType cpu_type)
+{
+  gboolean success = FALSE;
+  gchar * path;
+  gint fd = -1, result;
+  GMappedFile * file = NULL;
+  gconstpointer cache;
+  const FridaDyldCacheHeader * header;
+  const FridaDyldCacheImageInfo * images, * image;
+  const FridaDyldCacheMappingInfo * mappings;
+  guint64 image_offset;
+  gconstpointer data;
+  gsize data_size;
+
+  path = g_strconcat (
+      "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_",
+      frida_current_architecture_name (),
+      NULL);
+
+  fd = open (path, 0);
+  if (fd == -1)
+    goto beach;
+
+  result = fcntl (fd, F_NOCACHE, TRUE);
+  g_assert (result == 0);
+
+  file = g_mapped_file_new_from_fd (fd, FALSE, NULL);
+  g_assert (file != NULL);
+
+  fd = -1; /* TODO: verify assumption that GMappedFile takes ownership of fd */
+
+  cache = g_mapped_file_get_contents (file);
+  g_assert (cache != NULL);
+
+  header = cache;
+  images = cache + header->images_offset;
+  mappings = cache + header->mapping_offset;
+
+  image = frida_dyld_cache_find_image_by_name (name, images, header->images_count, cache);
+  if (image == NULL)
+    goto beach;
+
+  image_offset = frida_dyld_cache_offset_from_address (image->address, mappings, header->mapping_count);
+  data_size = frida_dyld_cache_compute_image_size (image, images, header->images_count);
+  data = cache + image_offset;
+
+  success = frida_library_take_data (self, g_mapped_file_ref (file), data, data_size, cache);
+  g_assert (success);
+
+beach:
+  if (file != NULL)
+    g_mapped_file_unref (file);
+
+  if (fd != -1)
+    close (fd);
+
+  g_free (path);
+
+  return success;
+}
+
+static void
+frida_library_load_data_from_filesystem (FridaLibrary * self, const gchar * name, GumCpuType cpu_type)
+{
+  GMappedFile * file;
+  gconstpointer file_data;
+  gconstpointer data;
+  gsize data_size;
+  const struct fat_header * fat_header;
+  const struct mach_header * header_32 = NULL;
+  const struct mach_header_64 * header_64 = NULL;
+  gsize size_32 = 0;
+  gsize size_64 = 0;
+  gboolean success;
+
+  file = g_mapped_file_new (name, FALSE, NULL);
+  g_assert (file != NULL);
+
+  file_data = g_mapped_file_get_contents (file);
+
+  fat_header = file_data;
+  switch (fat_header->magic)
+  {
+    case FAT_CIGAM:
+    {
+      uint32_t count, i;
+
+      count = GUINT32_FROM_BE (fat_header->nfat_arch);
+      for (i = 0; i != count; i++)
+      {
+        struct fat_arch * fat_arch = ((struct fat_arch *) (fat_header + 1)) + i;
+        gconstpointer mach_header = file_data + GUINT32_FROM_BE (fat_arch->offset);
+        switch (((struct mach_header *) mach_header)->magic)
+        {
+          case MH_MAGIC:
+            header_32 = mach_header;
+            size_32 = GUINT32_FROM_BE (fat_arch->size);
+            break;
+          case MH_MAGIC_64:
+            header_64 = mach_header;
+            size_64 = GUINT32_FROM_BE (fat_arch->size);
+            break;
+          default:
+            g_assert_not_reached ();
+            break;
+        }
+      }
+
+      break;
+    }
+    case MH_MAGIC:
+      header_32 = file_data;
+      size_32 = g_mapped_file_get_length (file);
+      break;
+    case MH_MAGIC_64:
+      header_64 = file_data;
+      size_64 = g_mapped_file_get_length (file);
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  switch (cpu_type)
+  {
+    case GUM_CPU_IA32:
+    case GUM_CPU_ARM:
+      g_assert (header_32 != NULL);
+      data = header_32;
+      data_size = size_32;
+      break;
+    case GUM_CPU_AMD64:
+    case GUM_CPU_ARM64:
+      g_assert (header_64 != NULL);
+      data = header_64;
+      data_size = size_64;
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  success = frida_library_take_data (self, file, data, data_size, data);
+  g_assert (success);
+}
+
+static gboolean
+frida_library_load_data_from_memory (FridaLibrary * self)
+{
+  gconstpointer data;
+  gsize data_size;
+
+  g_assert_cmpint (self->base_address, !=, 0);
+
+  data = gum_darwin_read (self->task, self->base_address, MAX_METADATA_SIZE, &data_size);
+  if (data == NULL)
+    return FALSE;
+
+  return frida_library_take_data (self, NULL, data, data_size, NULL);
+}
+
+static gboolean
+frida_library_take_data (FridaLibrary * self, GMappedFile * file, gconstpointer data, gsize data_size, gconstpointer linkedit)
 {
   gboolean success = FALSE;
   const struct mach_header * header;
-  gpointer command;
+  gconstpointer command;
   gsize command_index;
 
-  g_assert (self->metadata == NULL);
+  g_assert (self->data == NULL);
 
-  header = (struct mach_header *) metadata;
+  header = (struct mach_header *) data;
   if (header->magic == MH_MAGIC)
-    command = metadata + sizeof (struct mach_header);
+    command = data + sizeof (struct mach_header);
   else
-    command = metadata + sizeof (struct mach_header_64);
+    command = data + sizeof (struct mach_header_64);
   for (command_index = 0; command_index != header->ncmds; command_index++)
   {
     const struct load_command * lc = (struct load_command *) command;
@@ -1796,10 +1890,10 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
       case LC_LOAD_UPWARD_DYLIB:
       {
         const struct dylib_command * dc = command;
-        gchar * name;
+        const gchar * name;
 
         name = command + dc->dylib.name.offset;
-        g_ptr_array_add (self->dependencies, name);
+        g_ptr_array_add (self->dependencies, (gpointer) name);
 
         break;
       }
@@ -1819,22 +1913,22 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
     command += lc->cmdsize;
   }
 
-  if (self->base_address != 0)
+  if (linkedit == NULL)
   {
-    GumAddress linkedit;
+    GumAddress memory_linkedit;
     gsize exports_size;
 
-    if (!gum_darwin_find_linkedit (metadata, metadata_size, &linkedit))
+    if (!gum_darwin_find_linkedit (data, data_size, &memory_linkedit))
       goto beach;
 
-    linkedit += frida_library_slide (self);
+    memory_linkedit += frida_library_slide (self);
 
-    self->exports = gum_darwin_read (self->task, linkedit + self->info->export_off, self->info->export_size, &exports_size);
+    self->exports = gum_darwin_read (self->task, memory_linkedit + self->info->export_off, self->info->export_size, &exports_size);
     self->exports_end = self->exports != NULL ? self->exports + exports_size : NULL;
   }
   else
   {
-    self->exports = g_memdup (metadata + self->info->export_off, self->info->export_size);
+    self->exports = g_memdup (linkedit + self->info->export_off, self->info->export_size);
     self->exports_end = self->exports + self->info->export_size;
   }
 
@@ -1842,11 +1936,103 @@ frida_library_take_metadata (FridaLibrary * self, gpointer metadata, gsize metad
 
 beach:
   if (success)
-    self->metadata = metadata;
+  {
+    self->file = file;
+    self->data = data;
+    self->data_size = data_size;
+    self->linkedit = linkedit;
+  }
   else
-    g_free (metadata);
+  {
+    if (file != NULL)
+      g_mapped_file_unref (file);
+    g_free ((gpointer) data);
+  }
 
   return success;
+}
+
+static const FridaDyldCacheImageInfo *
+frida_dyld_cache_find_image_by_name (const gchar * name, const FridaDyldCacheImageInfo * images, gsize image_count, gconstpointer cache)
+{
+  gsize i;
+
+  for (i = 0; i != image_count; i++)
+  {
+    const FridaDyldCacheImageInfo * image = &images[i];
+    const gchar * current_name;
+
+    current_name = cache + image->name_offset;
+    if (strcmp (current_name, name) == 0)
+      return image;
+  }
+
+  return NULL;
+}
+
+static gsize
+frida_dyld_cache_compute_image_size (const FridaDyldCacheImageInfo * image, const FridaDyldCacheImageInfo * images, gsize image_count)
+{
+  const FridaDyldCacheImageInfo * next_image;
+  gsize i;
+
+  next_image = NULL;
+  for (i = 0; i != image_count; i++)
+  {
+    const FridaDyldCacheImageInfo * candidate = &images[i];
+
+    if (candidate->address > image->address && (next_image == NULL || candidate->address < next_image->address))
+    {
+      next_image = candidate;
+    }
+  }
+  g_assert (next_image != NULL);
+
+  return next_image->address - image->address;
+}
+
+static guint64
+frida_dyld_cache_offset_from_address (GumAddress address, const FridaDyldCacheMappingInfo * mappings, gsize mapping_count)
+{
+  gsize i;
+
+  for (i = 0; i != mapping_count; i++)
+  {
+    const FridaDyldCacheMappingInfo * mapping = &mappings[i];
+
+    if (address >= mapping->address && address < mapping->address + mapping->size)
+    {
+      return address - mapping->address + mapping->offset;
+    }
+  }
+
+  g_assert_not_reached ();
+}
+
+static const gchar *
+frida_current_architecture_name (void)
+{
+  guint count, i;
+
+  count = _dyld_image_count ();
+  for (i = 0; i != count; i++)
+  {
+    const gchar * name;
+
+    name = _dyld_get_image_name (i);
+    if (strcmp (name, "/usr/lib/libSystem.B.dylib") == 0)
+    {
+      const struct mach_header * header;
+      const NXArchInfo * info;
+
+      header = _dyld_get_image_header (i);
+      info = NXGetArchInfoFromCpuType (header->cputype, header->cpusubtype);
+
+      return info->name;
+    }
+  }
+
+  g_assert_not_reached ();
 }
 
 static gint64
