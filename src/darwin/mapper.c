@@ -34,9 +34,9 @@
 # define DEPENDENCY_FOOTPRINT_SIZE_64 0 /* TODO */
 # define RESOLVER_FOOTPRINT_SIZE_32 0 /* TODO */
 # define RESOLVER_FOOTPRINT_SIZE_64 0 /* TODO */
-# define INIT_FOOTPRINT_SIZE_32 0 /* TODO */
+# define INIT_FOOTPRINT_SIZE_32 22
 # define INIT_FOOTPRINT_SIZE_64 44
-# define TERM_FOOTPRINT_SIZE_32 0 /* TODO */
+# define TERM_FOOTPRINT_SIZE_32 22
 # define TERM_FOOTPRINT_SIZE_64 44
 #endif
 
@@ -665,6 +665,8 @@ frida_mapper_emit_term_calls (FridaMapper * self, const FridaTermPointersDetails
 #elif defined (HAVE_ARM) || defined (HAVE_ARM64)
 
 static void frida_mapper_emit_arm_runtime (FridaMapper * self);
+static void frida_mapper_emit_arm_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumThumbWriter * tw);
+static void frida_mapper_emit_arm_term_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumThumbWriter * tw);
 
 static void frida_mapper_emit_arm64_runtime (FridaMapper * self);
 static void frida_mapper_emit_arm64_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumArm64Writer * aw);
@@ -695,16 +697,16 @@ frida_mapper_emit_arm_runtime (FridaMapper * self)
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_constructor_call, &tw);
   frida_mapper_enumerate_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &tw);
   frida_mapper_enumerate_lazy_binds (self, (FridaFoundBindFunc) frida_mapper_emit_resolve_if_needed, &tw);
-  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_init_calls, &tw);
   */
+  frida_mapper_enumerate_init_pointers (self, (FridaFoundInitPointersFunc) frida_mapper_emit_arm_init_calls, &tw);
 
   gum_thumb_writer_put_pop_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
 
   self->destructor_offset = gum_thumb_writer_offset (&tw) + 1;
   gum_thumb_writer_put_push_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
 
+  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_arm_term_calls, &tw);
   /*
-  frida_mapper_enumerate_term_pointers (self, (FridaFoundTermPointersFunc) frida_mapper_emit_term_calls, &tw);
   g_slist_foreach (self->children, (GFunc) frida_mapper_emit_child_destructor_call, &tw);
   */
 
@@ -713,6 +715,43 @@ frida_mapper_emit_arm_runtime (FridaMapper * self)
   gum_thumb_writer_flush (&tw);
   g_assert_cmpint (gum_thumb_writer_offset (&tw), <=, self->runtime_file_size);
   gum_thumb_writer_free (&tw);
+}
+
+static void
+frida_mapper_emit_arm_init_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumThumbWriter * tw)
+{
+  gconstpointer next_label = GSIZE_TO_POINTER (details->address);
+
+  gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R4, details->address);
+  gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R5, details->count);
+
+  gum_thumb_writer_put_label (tw, next_label);
+
+  gum_thumb_writer_put_ldr_reg_reg (tw, GUM_AREG_R0, GUM_AREG_R4);
+  /* TODO: pass argc, argv, envp, apple, program vars */
+  gum_thumb_writer_put_blx_reg (tw, GUM_AREG_R0);
+
+  gum_thumb_writer_put_add_reg_reg_imm (tw, GUM_AREG_R4, GUM_AREG_R4, 4);
+  gum_thumb_writer_put_sub_reg_reg_imm (tw, GUM_AREG_R5, GUM_AREG_R5, 1);
+  gum_thumb_writer_put_cbnz_reg_label (tw, GUM_AREG_R5, next_label);
+}
+
+static void
+frida_mapper_emit_arm_term_calls (FridaMapper * self, const FridaInitPointersDetails * details, GumThumbWriter * tw)
+{
+  gconstpointer next_label = GSIZE_TO_POINTER (details->address);
+
+  gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R4, details->address + ((details->count - 1) * 4));
+  gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R5, details->count);
+
+  gum_thumb_writer_put_label (tw, next_label);
+
+  gum_thumb_writer_put_ldr_reg_reg (tw, GUM_AREG_R0, GUM_AREG_R4);
+  gum_thumb_writer_put_blx_reg (tw, GUM_AREG_R0);
+
+  gum_thumb_writer_put_sub_reg_reg_imm (tw, GUM_AREG_R4, GUM_AREG_R4, 4);
+  gum_thumb_writer_put_sub_reg_reg_imm (tw, GUM_AREG_R5, GUM_AREG_R5, 1);
+  gum_thumb_writer_put_cbnz_reg_label (tw, GUM_AREG_R5, next_label);
 }
 
 static void
@@ -785,7 +824,7 @@ frida_mapper_emit_arm64_term_calls (FridaMapper * self, const FridaInitPointersD
 {
   gconstpointer next_label = GSIZE_TO_POINTER (details->address);
 
-  gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X19, details->address + ((details->count - 1) * self->library->pointer_size));
+  gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X19, details->address + ((details->count - 1) * 8));
   gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X20, details->count);
 
   gum_arm64_writer_put_label (aw, next_label);
