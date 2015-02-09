@@ -1004,12 +1004,9 @@ frida_mapper_add_existing_mapping_from_module (const GumModuleDetails * details,
   GumAddress base_address = details->range->base_address;
   FridaLibrary * library;
 
-  if (strcmp (details->path, "/usr/lib/system/libsystem_c.dylib") != 0)
-  {
-    library = frida_library_new_from_memory (details->path, self->library->task, self->library->cpu_type, base_address);
-    frida_mapper_add_existing_mapping (self, library, base_address);
-    frida_library_unref (library);
-  }
+  library = frida_library_new_from_memory (details->path, self->library->task, self->library->cpu_type, base_address);
+  frida_mapper_add_existing_mapping (self, library, base_address);
+  frida_library_unref (library);
 
   return TRUE;
 }
