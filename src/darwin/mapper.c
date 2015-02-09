@@ -1523,7 +1523,8 @@ frida_library_unref (FridaLibrary * self)
     g_ptr_array_unref (self->dependencies);
     g_free (self->exports);
     g_array_unref (self->segments);
-    frida_library_image_free (self->image);
+    if (self->image != NULL)
+      frida_library_image_free (self->image);
 
     g_free (self->name);
 
