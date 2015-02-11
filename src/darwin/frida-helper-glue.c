@@ -1134,13 +1134,13 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
 static void
 frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
-
   if (ctx->mapper != NULL)
   {
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, frida_mapper_constructor (ctx->mapper));
     gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
+
+    if (ctx->cw.target_cpu == GUM_CPU_IA32)
+      gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
 
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, frida_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
     FRIDA_EMIT_LOAD (XDX, data_string);
@@ -1149,13 +1149,18 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
         GUM_CALL_CAPI, GUM_REG_XAX, 2,
         GUM_ARG_REGISTER, GUM_REG_XDX,
         GUM_ARG_REGISTER, GUM_REG_XCX);
-    gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
+
+    if (ctx->cw.target_cpu == GUM_CPU_IA32)
+      gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
 
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, frida_mapper_destructor (ctx->mapper));
     gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
   }
   else
   {
+    if (ctx->cw.target_cpu == GUM_CPU_IA32)
+      gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
+
     FRIDA_EMIT_LOAD (XAX, dylib_path);
     FRIDA_EMIT_LOAD (XDX, dlopen_mode);
     FRIDA_EMIT_CALL (dlopen_impl, 2,
@@ -1182,11 +1187,8 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
         GUM_ARG_REGISTER, GUM_REG_XBX);
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
+      gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
   }
-
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
 }
 
 static void
