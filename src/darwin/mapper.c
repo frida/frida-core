@@ -799,7 +799,8 @@ frida_mapper_emit_arm_init_calls (FridaMapper * self, const FridaInitPointersDet
 
   gum_thumb_writer_put_add_reg_reg_imm (tw, GUM_AREG_R4, GUM_AREG_R4, 4);
   gum_thumb_writer_put_sub_reg_reg_imm (tw, GUM_AREG_R5, GUM_AREG_R5, 1);
-  gum_thumb_writer_put_cbnz_reg_label (tw, GUM_AREG_R5, next_label);
+  gum_thumb_writer_put_cmp_reg_imm (tw, GUM_AREG_R5, 0);
+  gum_thumb_writer_put_bne_label (tw, next_label);
 }
 
 static void
@@ -817,7 +818,8 @@ frida_mapper_emit_arm_term_calls (FridaMapper * self, const FridaInitPointersDet
 
   gum_thumb_writer_put_sub_reg_reg_imm (tw, GUM_AREG_R4, GUM_AREG_R4, 4);
   gum_thumb_writer_put_sub_reg_reg_imm (tw, GUM_AREG_R5, GUM_AREG_R5, 1);
-  gum_thumb_writer_put_cbnz_reg_label (tw, GUM_AREG_R5, next_label);
+  gum_thumb_writer_put_cmp_reg_imm (tw, GUM_AREG_R5, 0);
+  gum_thumb_writer_put_bne_label (tw, next_label);
 }
 
 static void
