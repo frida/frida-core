@@ -9,13 +9,11 @@ namespace Frida.Agent {
 		private DBusConnection connection;
 		private bool closing = false;
 		private uint registration_id = 0;
-		private ScriptEngine script_engine = new ScriptEngine ();
+		private ScriptEngine script_engine;
 
-		public AgentServer (string pipe_address) {
+		public AgentServer (string pipe_address, Gum.MemoryRange agent_range) {
 			Object (pipe_address: pipe_address);
-		}
-
-		construct {
+			script_engine = new ScriptEngine (agent_range);
 			script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 		}
 
@@ -118,21 +116,12 @@ namespace Frida.Agent {
 
 	public class AutoIgnorer : Object, Gum.InvocationListener {
 		protected Gum.Interceptor interceptor;
-		protected Gum.MemoryRange? agent_range;
+		protected Gum.MemoryRange agent_range;
 		private Gum.ThreadId parent_thread_id;
 
-		construct {
-			Gum.Process.enumerate_modules ((details) => {
-				if (details.name.index_of ("frida-agent") != -1 || details.name.index_of ("frida-gadget") != -1) {
-					agent_range = details.range;
-					return false;
-				}
-				return true;
-			});
-		}
-
-		public AutoIgnorer (Gum.Interceptor interceptor, Gum.ThreadId parent_thread_id = 0) {
+		public AutoIgnorer (Gum.Interceptor interceptor, Gum.MemoryRange agent_range, Gum.ThreadId parent_thread_id) {
 			this.interceptor = interceptor;
+			this.agent_range = agent_range;
 			this.parent_thread_id = parent_thread_id;
 		}
 
@@ -163,16 +152,18 @@ namespace Frida.Agent {
 		private extern void intercept_thread_creation (Gum.InvocationContext context);
 	}
 
-	public void main (string pipe_address, Gum.ThreadId parent_thread_id) {
+	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
 		Environment.init ();
 
 		{
+			var agent_range = memory_range (mapped_range);
+
 			var interceptor = Gum.Interceptor.obtain ();
 
-			var ignorer = new AutoIgnorer (interceptor, parent_thread_id);
+			var ignorer = new AutoIgnorer (interceptor, agent_range, parent_thread_id);
 			ignorer.enable ();
 
-			var server = new AgentServer (pipe_address);
+			var server = new AgentServer (pipe_address, agent_range);
 
 			try {
 				server.run ();
@@ -184,6 +175,23 @@ namespace Frida.Agent {
 		}
 
 		Environment.deinit ();
+	}
+
+	internal Gum.MemoryRange memory_range (Gum.MemoryRange? mapped_range) {
+		Gum.MemoryRange? result = mapped_range;
+
+		if (result == null) {
+			Gum.Process.enumerate_modules ((details) => {
+				if (details.name.index_of ("frida-agent") != -1) {
+					result = details.range;
+					return false;
+				}
+				return true;
+			});
+			assert (result != null);
+		}
+
+		return result;
 	}
 
 	namespace Environment {

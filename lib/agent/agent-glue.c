@@ -99,7 +99,7 @@ frida_agent_auto_ignorer_intercept_thread_creation (FridaAgentAutoIgnorer * self
   NativeThreadFunc thread_func;
 
   thread_func = GUM_POINTER_TO_FUNCPTR (NativeThreadFunc, gum_invocation_context_get_nth_argument (ic, 2));
-  if (GUM_MEMORY_RANGE_INCLUDES (self->agent_range, GUM_ADDRESS (thread_func)))
+  if (GUM_MEMORY_RANGE_INCLUDES (&self->agent_range, GUM_ADDRESS (thread_func)))
   {
     FridaAutoInterceptContext * ctx;
 
