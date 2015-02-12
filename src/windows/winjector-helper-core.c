@@ -612,11 +612,12 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       GUM_ARG_REGISTER, GUM_REG_XSI,
       GUM_ARG_REGISTER, GUM_REG_XDX);
 
-  /* xax (xbx->data_string) */
+  /* xax (xbx->data_string, NULL, 0) */
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, data_string));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
+      3,
       GUM_ARG_REGISTER, GUM_REG_XCX,
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (0),
       GUM_ARG_POINTER, GSIZE_TO_POINTER (0));
 
   /* FreeLibrary (xsi) */

@@ -61,9 +61,9 @@
 /src/Makefile
 /src/Makefile.in
 /src/darwin/darwin-host-session.c
+/src/darwin/frida-helper-process.c
 /src/darwin/frida-helper-types.c
 /src/darwin/frida-helper.c
-/src/darwin/frida-helper-process.c
 /src/darwin/fruitjector.c
 /src/frida-core.h
 /src/frida-core.vapi
@@ -92,6 +92,9 @@
 /tests/frida-tests.vapi
 /tests/inject-victim
 /tests/main.c
+/tests/mapper/Makefile
+/tests/mapper/Makefile.in
+/tests/mapper/mapper-test
 /tests/pipe/Makefile
 /tests/pipe/Makefile.in
 /tests/pipe/pipe-test

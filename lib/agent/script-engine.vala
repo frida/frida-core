@@ -4,18 +4,12 @@ namespace Frida.Agent {
 	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
 
-		private Gum.MemoryRange? agent_range;
+		private Gum.MemoryRange agent_range;
 		private uint last_script_id = 0;
 		private HashMap<uint, ScriptInstance> instance_by_id = new HashMap<uint, ScriptInstance> ();
 
-		construct {
-			Gum.Process.enumerate_modules ((details) => {
-				if (details.name.index_of ("frida-agent") != -1 || details.name.index_of ("frida-gadget") != -1) {
-					agent_range = details.range;
-					return false;
-				}
-				return true;
-			});
+		public ScriptEngine (Gum.MemoryRange agent_range) {
+			this.agent_range = agent_range;
 		}
 
 		public async void shutdown () {
@@ -28,8 +22,7 @@ namespace Frida.Agent {
 		public ScriptInstance create_script (string source) throws IOError {
 			var script = Gum.Script.from_string (source);
 			var sid = AgentScriptId (++last_script_id);
-			if (agent_range != null)
-				script.get_stalker ().exclude (agent_range);
+			script.get_stalker ().exclude (agent_range);
 			script.set_message_handler ((script, message, data) => {
 				Idle.add (() => {
 					this.message_from_script (sid, message, data);

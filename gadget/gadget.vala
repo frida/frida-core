@@ -2,8 +2,13 @@ namespace Frida.Gadget {
 	private class Server : Object {
 		private const string LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
 
+		private Gum.MemoryRange agent_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Session> sessions = new Gee.HashMap<DBusConnection, Session> ();
+
+		public Server (Gum.MemoryRange agent_range) {
+			this.agent_range = agent_range;
+		}
 
 		public async void start () throws Error {
 			server = new DBusServer.sync (LISTEN_ADDRESS, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
@@ -12,7 +17,7 @@ namespace Frida.Gadget {
 					return false;
 
 				try {
-					sessions[connection] = new Session (connection);
+					sessions[connection] = new Session (connection, agent_range);
 				} catch (IOError e) {
 					return false;
 				}
@@ -50,17 +55,15 @@ namespace Frida.Gadget {
 			private Frida.Agent.ScriptEngine script_engine;
 			private bool close_requested = false;
 
-			construct {
-				this_process = get_process_info ();
-
-				script_engine = new Frida.Agent.ScriptEngine ();
-				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
-			}
-
-			public Session (DBusConnection c) throws IOError {
+			public Session (DBusConnection c, Gum.MemoryRange agent_range) throws IOError {
 				connection = c;
 				host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
 				agent_registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, this as AgentSession);
+
+				this_process = get_process_info ();
+
+				script_engine = new Frida.Agent.ScriptEngine (agent_range);
+				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 			}
 
 			~Session () {
@@ -194,13 +197,15 @@ namespace Frida.Gadget {
 	private async void create_server () {
 		Gum.init_with_features (Gum.FeatureFlags.ALL & ~Gum.FeatureFlags.SYMBOL_LOOKUP);
 
+		var agent_range = memory_range ();
+
 		interceptor = Gum.Interceptor.obtain ();
 		interceptor.ignore_current_thread ();
 
-		ignorer = new Frida.Agent.AutoIgnorer (interceptor);
+		ignorer = new Frida.Agent.AutoIgnorer (interceptor, agent_range, 0);
 		ignorer.enable ();
 
-		var s = new Server ();
+		var s = new Server (agent_range);
 		try {
 			yield s.start ();
 		} catch (Error e) {
@@ -229,6 +234,21 @@ namespace Frida.Gadget {
 		server = null;
 		cond.signal ();
 		mutex.unlock ();
+	}
+
+	internal Gum.MemoryRange memory_range () {
+		Gum.MemoryRange? result = null;
+
+		Gum.Process.enumerate_modules ((details) => {
+			if (details.name.index_of ("frida-gadget") != -1) {
+				result = details.range;
+				return false;
+			}
+			return true;
+		});
+		assert (result != null);
+
+		return result;
 	}
 
 	private extern HostProcessInfo get_process_info ();
