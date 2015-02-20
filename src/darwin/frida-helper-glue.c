@@ -82,7 +82,7 @@ struct _FridaSpawnInstance
   dispatch_source_t task_monitor_source;
 
   GumAddress entrypoint;
-  vm_address_t payload_address;
+  mach_vm_address_t payload_address;
   guint8 * overwritten_code;
   guint overwritten_code_size;
 
@@ -122,7 +122,7 @@ struct _FridaInjectInstance
   FridaHelperService * service;
   guint id;
   mach_port_t task;
-  vm_address_t payload_address;
+  mach_vm_address_t payload_address;
   vm_size_t payload_size;
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
@@ -204,7 +204,7 @@ static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * se
 static gboolean frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error);
 
 static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details,
-    vm_address_t payload_base, vm_size_t payload_size, GError ** error);
+    mach_vm_address_t payload_base, vm_size_t payload_size, GError ** error);
 static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details,
     GError ** error);
 static gboolean frida_agent_fill_context_process_export (const GumExportDetails * details, gpointer user_data);
@@ -314,9 +314,9 @@ frida_spawn_instance_on_server_recv (void * context)
   g_assert_cmpint (msg.header.msgh_id, ==, 1337);
   self->reply_port = msg.header.msgh_remote_port;
 
-  vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  vm_write (self->task, self->entrypoint, (vm_offset_t) self->overwritten_code, self->overwritten_code_size);
-  vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  mach_vm_write (self->task, self->entrypoint, (vm_offset_t) self->overwritten_code, self->overwritten_code_size);
+  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
 
   _frida_helper_service_on_spawn_instance_ready (self->service, self->pid);
 }
@@ -504,7 +504,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
   if (instance->payload_address != 0)
-    vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
+    mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
   g_object_unref (instance->service);
@@ -538,7 +538,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   kern_return_t ret;
   mach_port_name_t task;
   FridaSpawnApi api;
-  vm_address_t payload_address = (vm_address_t) NULL;
+  mach_vm_address_t payload_address = 0;
   guint8 redirect_code[512];
   guint redirect_code_size;
   guint8 sync_code[512];
@@ -580,7 +580,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   ret = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate server");
 
-  ret = vm_allocate (task, &payload_address, FRIDA_SPAWN_PAYLOAD_SIZE, TRUE);
+  ret = mach_vm_allocate (task, &payload_address, FRIDA_SPAWN_PAYLOAD_SIZE, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
   instance->payload_address = payload_address;
 
@@ -588,17 +588,17 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
     goto error_epilogue;
   instance->overwritten_code = gum_darwin_read (task, instance->entrypoint, redirect_code_size, NULL);
   instance->overwritten_code_size = redirect_code_size;
-  ret = vm_protect (task, instance->entrypoint, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
-  ret = vm_write (task, instance->entrypoint, (vm_offset_t) redirect_code, redirect_code_size);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(redirect_code)");
-  ret = vm_protect (task, instance->entrypoint, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
+  ret = mach_vm_protect (task, instance->entrypoint, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
+  ret = mach_vm_write (task, instance->entrypoint, (vm_offset_t) redirect_code, redirect_code_size);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(redirect_code)");
+  ret = mach_vm_protect (task, instance->entrypoint, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
   if (!frida_spawn_instance_emit_sync_code (instance, &api, sync_code, &sync_code_size, error))
     goto error_epilogue;
-  ret = vm_write (task, payload_address + FRIDA_SPAWN_CODE_OFFSET, (vm_offset_t) sync_code, sync_code_size);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(sync_code)");
+  ret = mach_vm_write (task, payload_address + FRIDA_SPAWN_CODE_OFFSET, (vm_offset_t) sync_code, sync_code_size);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(sync_code)");
 
   msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, MACH_MSG_TYPE_MAKE_SEND_ONCE);
   msg.header.msgh_size = sizeof (msg);
@@ -614,14 +614,14 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   msg.header.msgh_local_port = MACH_PORT_NULL; /* filled in by the sync code */
   msg.header.msgh_reserved = 0;
   msg.header.msgh_id = 1337;
-  ret = vm_write (task, payload_address + FRIDA_SPAWN_DATA_OFFSET, (vm_offset_t) &msg, sizeof (msg));
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(data)");
+  ret = mach_vm_write (task, payload_address + FRIDA_SPAWN_DATA_OFFSET, (vm_offset_t) &msg, sizeof (msg));
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(data)");
 
-  ret = vm_protect (task, payload_address + FRIDA_SPAWN_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
+  ret = mach_vm_protect (task, payload_address + FRIDA_SPAWN_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
-  ret = vm_protect (task, payload_address + FRIDA_SPAWN_DATA_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
+  ret = mach_vm_protect (task, payload_address + FRIDA_SPAWN_DATA_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
 
@@ -698,7 +698,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   const gchar * failed_operation;
   kern_return_t ret;
   FridaMapper * mapper = NULL;
-  vm_address_t payload_address = (vm_address_t) NULL;
+  mach_vm_address_t payload_address = 0;
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
   FridaAgentContext agent_ctx;
@@ -734,37 +734,37 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   if (mapper != NULL)
     instance->payload_size += frida_mapper_size (mapper);
 
-  ret = vm_allocate (details.task, &payload_address, instance->payload_size, TRUE);
+  ret = mach_vm_allocate (details.task, &payload_address, instance->payload_size, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "vm_allocate");
   instance->payload_address = payload_address;
 
   if (mapper != NULL)
     frida_mapper_map (mapper, payload_address + FRIDA_INJECT_BASE_PAYLOAD_SIZE);
 
-  ret = vm_protect (details.task, payload_address + FRIDA_INJECT_STACK_GUARD_OFFSET, FRIDA_STACK_GUARD_SIZE, FALSE, VM_PROT_NONE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
+  ret = mach_vm_protect (details.task, payload_address + FRIDA_INJECT_STACK_GUARD_OFFSET, FRIDA_STACK_GUARD_SIZE, FALSE, VM_PROT_NONE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
   if (!frida_agent_context_init (&agent_ctx, &details, payload_address, instance->payload_size, error))
     goto error_epilogue;
 
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type, mapper);
-  ret = vm_write (details.task, payload_address + FRIDA_INJECT_MACH_CODE_OFFSET,
+  ret = mach_vm_write (details.task, payload_address + FRIDA_INJECT_MACH_CODE_OFFSET,
       (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write (mach_stub_code)");
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write (mach_stub_code)");
 
   frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, details.cpu_type, mapper);
-  ret = vm_write (details.task, payload_address + FRIDA_INJECT_PTHREAD_CODE_OFFSET,
+  ret = mach_vm_write (details.task, payload_address + FRIDA_INJECT_PTHREAD_CODE_OFFSET,
       (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(pthread_stub_code)");
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(pthread_stub_code)");
 
-  ret = vm_write (details.task, payload_address + FRIDA_INJECT_DATA_OFFSET, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_write(data)");
+  ret = mach_vm_write (details.task, payload_address + FRIDA_INJECT_DATA_OFFSET, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(data)");
 
-  ret = vm_protect (details.task, payload_address + FRIDA_INJECT_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
+  ret = mach_vm_protect (details.task, payload_address + FRIDA_INJECT_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
-  ret = vm_protect (details.task, payload_address + FRIDA_INJECT_DATA_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  CHECK_MACH_RESULT (ret, ==, 0, "vm_protect");
+  ret = mach_vm_protect (details.task, payload_address + FRIDA_INJECT_DATA_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
 #ifdef HAVE_I386
   bzero (&state, sizeof (state));
@@ -976,7 +976,7 @@ beach:
 
 static gboolean
 frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details,
-    vm_address_t payload_base, vm_size_t payload_size, GError ** error)
+    mach_vm_address_t payload_base, vm_size_t payload_size, GError ** error)
 {
   memset (self, 0, sizeof (FridaAgentContext));
 
