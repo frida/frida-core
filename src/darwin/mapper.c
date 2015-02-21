@@ -21,8 +21,8 @@
 #endif
 
 #if defined (HAVE_I386)
-# define BASE_FOOTPRINT_SIZE_32 22
-# define BASE_FOOTPRINT_SIZE_64 26
+# define BASE_FOOTPRINT_SIZE_32 25
+# define BASE_FOOTPRINT_SIZE_64 30
 # define DEPENDENCY_FOOTPRINT_SIZE_32 14
 # define DEPENDENCY_FOOTPRINT_SIZE_64 24
 # define RESOLVER_FOOTPRINT_SIZE_32 21
@@ -32,8 +32,8 @@
 # define TERM_FOOTPRINT_SIZE_32 22
 # define TERM_FOOTPRINT_SIZE_64 35
 #elif defined (HAVE_ARM) || defined (HAVE_ARM64)
-# define BASE_FOOTPRINT_SIZE_32 8
-# define BASE_FOOTPRINT_SIZE_64 64
+# define BASE_FOOTPRINT_SIZE_32 12
+# define BASE_FOOTPRINT_SIZE_64 72
 # define DEPENDENCY_FOOTPRINT_SIZE_32 20
 # define DEPENDENCY_FOOTPRINT_SIZE_64 32
 # define RESOLVER_FOOTPRINT_SIZE_32 24
@@ -88,6 +88,7 @@ struct _FridaMapper
   gsize runtime_file_size;
   gsize constructor_offset;
   gsize destructor_offset;
+  gsize atexit_stub_offset;
 
   GSList * children;
   GHashTable * mappings;
@@ -487,11 +488,11 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
   frida_library_set_base_address (library, base_address);
   self->runtime_address = base_address + self->vm_size - self->runtime_vm_size;
 
+  frida_mapper_emit_runtime (self);
+
   frida_mapper_enumerate_rebases (self, frida_mapper_rebase, NULL);
   frida_mapper_enumerate_binds (self, frida_mapper_bind, NULL);
   frida_mapper_enumerate_lazy_binds (self, frida_mapper_bind, NULL);
-
-  frida_mapper_emit_runtime (self);
 
   for (i = 0; i != library->segments->len; i++)
   {
@@ -605,6 +606,10 @@ frida_mapper_emit_runtime (FridaMapper * self)
   gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, self->library->pointer_size);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
+  gum_x86_writer_put_ret (&cw);
+
+  self->atexit_stub_offset = gum_x86_writer_offset (&cw);
+  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_flush (&cw);
@@ -741,6 +746,10 @@ frida_mapper_emit_arm_runtime (FridaMapper * self)
 
   gum_thumb_writer_put_pop_regs (&tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
 
+  self->atexit_stub_offset = gum_thumb_writer_offset (&tw) + 1;
+  gum_thumb_writer_put_ldr_reg_u32 (&tw, GUM_AREG_R0, 0);
+  gum_thumb_writer_put_bx_reg (&tw, GUM_AREG_LR);
+
   gum_thumb_writer_flush (&tw);
   g_assert_cmpint (gum_thumb_writer_offset (&tw), <=, self->runtime_file_size);
   gum_thumb_writer_free (&tw);
@@ -860,6 +869,10 @@ frida_mapper_emit_arm64_runtime (FridaMapper * self)
   gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X21, GUM_A64REG_X22);
   gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_X19, GUM_A64REG_X20);
   gum_arm64_writer_put_pop_reg_reg (&aw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_ret (&aw);
+
+  self->atexit_stub_offset = gum_arm64_writer_offset (&aw);
+  gum_arm64_writer_put_ldr_reg_u64 (&aw, GUM_A64REG_X0, 0);
   gum_arm64_writer_put_ret (&aw);
 
   gum_arm64_writer_flush (&aw);
@@ -1053,6 +1066,32 @@ frida_mapper_resolve_symbol (FridaMapper * self, FridaLibrary * library, const g
 
   if (self->parent != NULL)
     return frida_mapper_resolve_symbol (self->parent, library, symbol, value);
+
+  if (strcmp (symbol, "_atexit") == 0 ||
+      strcmp (symbol, "_atexit_b") == 0 ||
+      strcmp (symbol, "___cxa_atexit") == 0 ||
+      strcmp (symbol, "___cxa_thread_atexit") == 0 ||
+      strcmp (symbol, "__tlv_atexit") == 0)
+  {
+    /*
+     * We pretend we install the handler by resolving to a dummy function that
+     * does nothing. Memory for handlers isn't released, so we shouldn't let
+     * our libraries register them. In our case atexit is only for debugging
+     * purposes anyway (GLib installs a handler to print statistics when
+     * debugging is enabled).
+     */
+    if (self->atexit_stub_offset != 0)
+    {
+      value->address = self->runtime_address + self->atexit_stub_offset;
+    }
+    else
+    {
+      /* Resolving before mapped; we will handle it later. */
+      value->address = 0xdeadbeef;
+    }
+    value->resolver = 0;
+    return TRUE;
+  }
 
   if (!frida_library_resolve (library, symbol, &details))
     return 0;
