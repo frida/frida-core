@@ -7,7 +7,7 @@ namespace Frida.FruitjectorTest {
 
 		GLib.Test.add_func ("/Fruitjector/inject-other-arch", () => {
 			if (sizeof (void *) != 8) {
-				stdout.printf ("<64-bit only>");
+				stdout.printf ("<64-bit only> ");
 				return;
 			}
 
