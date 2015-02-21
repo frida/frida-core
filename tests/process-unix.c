@@ -82,19 +82,18 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
     posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK);
 
 #ifdef HAVE_DARWIN
-    if (arch == FRIDA_TEST_ARCH_OTHER)
     {
       cpu_type_t pref;
       size_t ocount;
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
-      pref = CPU_TYPE_X86_64;
+      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86 : CPU_TYPE_X86_64;
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
-      pref = CPU_TYPE_X86;
+      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86_64 : CPU_TYPE_X86;
 #elif defined (HAVE_ARM)
-      pref = CPU_TYPE_ARM64;
+      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM : CPU_TYPE_ARM64;
 #elif defined (HAVE_ARM64)
-      pref = CPU_TYPE_ARM;
+      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM64 : CPU_TYPE_ARM;
 #endif
 
       posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
