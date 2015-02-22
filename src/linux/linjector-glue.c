@@ -677,7 +677,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   regs.eip = func;
 
-  for (i = 0; i < args_length; i++)
+  for (i = args_length - 1; i >= 0; i--)
   {
     regs.esp -= 4;
 
