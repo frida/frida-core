@@ -277,6 +277,25 @@ namespace Frida {
 			}
 		}
 
+		public async void kill (uint pid) throws Error {
+			yield ensure_host_session ();
+			yield host_session.kill (pid);
+		}
+
+		public void kill_sync (uint pid) throws Error {
+			var task = create<KillTask> () as KillTask;
+			task.pid = pid;
+			task.start_and_wait_for_completion ();
+		}
+
+		private class KillTask : DeviceTask<void> {
+			public uint pid;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.kill (pid);
+			}
+		}
+
 		public async Session attach (uint pid) throws Error {
 			var session = session_by_pid[pid];
 			if (session == null) {
