@@ -45,11 +45,17 @@ namespace Frida.Test {
 
 		string cpu_name;
 		switch (Frida.Test.cpu ()) {
+			case CPU.X86_32:
+				cpu_name = "i386";
+				break;
 			case CPU.X86_64:
 				cpu_name = "x86_64";
 				break;
 			case CPU.ARM_32:
 				cpu_name = "arm";
+				break;
+			case CPU.ARM_64:
+				cpu_name = "arm64";
 				break;
 			default:
 				assert_not_reached ();
