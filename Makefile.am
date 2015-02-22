@@ -21,6 +21,30 @@ RPFX = /data/local/tmp
 MKDIR = mkdir
 RM = rm
 DEBUG_PORT = 5042
+
+if ARCH_I386
+ANDROID_SYSROOT = $(ANDROID_NDK_ROOT)/platforms/android-14/arch-x86
+
+check: all
+	adb shell "${MKDIR} -p \"${RPFX}/tests/data/\" \"${RPFX}/lib/frida/\""
+	cp "$(top_builddir)/tests/frida-tests" "$(top_builddir)/tests/frida-tests.stripped"
+	$$STRIP --strip-all "$(top_builddir)/tests/frida-tests.stripped"
+	adb push "$(top_builddir)/tests/frida-tests.stripped" "${RPFX}/tests/frida-tests"
+	adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "${RPFX}/lib/frida/libfrida-agent.so"
+	adb push "$(top_builddir)/tests/data/unixvictim-android-i386" "${RPFX}/tests/data/unixvictim-android-i386"
+	adb push "$(top_builddir)/tests/data/unixattacker-android-i386.so" "${RPFX}/tests/data/unixattacker-android-i386.so"
+	adb shell "su -c \"${RPFX}/tests/frida-tests\""
+
+check-gdb: $(top_builddir)/tests/android-gdb.setup
+	adb shell "${RM} -f /data/local/tmp/tests/debug-socket"
+	adb push "${ANDROID_NDK_ROOT}/prebuilt/android-x86/gdbserver/gdbserver" "${RPFX}/tests/"
+	adb shell "${RPFX}/tests/gdbserver +${RPFX}/tests/debug-socket ${RPFX}/tests/frida-tests" &
+	sleep 1
+	adb forward tcp:${DEBUG_PORT} localfilesystem:${RPFX}/tests/debug-socket
+	${ANDROID_NDK_ROOT}/toolchains/x86-4.8/prebuilt/darwin-x86_64/bin/i686-linux-android-gdb -x "$(top_builddir)/tests/android-gdb.setup"
+endif
+
+if ARCH_ARM
 ANDROID_SYSROOT = $(ANDROID_NDK_ROOT)/platforms/android-14/arch-arm
 
 check: all
@@ -40,6 +64,7 @@ check-gdb: $(top_builddir)/tests/android-gdb.setup
 	sleep 1
 	adb forward tcp:${DEBUG_PORT} localfilesystem:${RPFX}/tests/debug-socket
 	${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-4.8/prebuilt/darwin-x86_64/bin/arm-linux-androideabi-gdb -x "$(top_builddir)/tests/android-gdb.setup"
+endif
 
 $(top_builddir)/tests/android-gdb.setup: $(top_builddir)/tests/frida-tests $(top_builddir)/system/.stamp
 	echo "set solib-search-path $(abs_top_builddir)/tests:$(abs_top_builddir)/lib/agent/.libs:$(abs_top_builddir)/system/lib:${ANDROID_SYSROOT}/usr/lib" > $@
