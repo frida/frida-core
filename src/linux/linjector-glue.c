@@ -594,9 +594,10 @@ frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
   };
   GumAddress retval = 0;
 
-  frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "mmap"), args, G_N_ELEMENTS (args), &retval, error);
+  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "mmap"), args, G_N_ELEMENTS (args), &retval, error))
+    return 0;
 
-  if (retval == GUM_ADDRESS (-1))
+  if (retval == G_GUINT64_CONSTANT (0xffffffffffffffff))
     return 0;
 
   return retval;
