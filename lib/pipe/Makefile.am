@@ -7,6 +7,12 @@ libfrida_pipe_la_SOURCES = pipe-mach.c
 else
 libfrida_pipe_la_SOURCES = pipe-posix.c
 endif
+if OS_LINUX
+# FIXME: We disable warnings because of vintage GCC versions not supporting
+# temporary suppressions.
+libfrida_pipe_la_CFLAGS = \
+	-w
+endif
 libfrida_pipe_la_LIBADD = \
 	$(FRIDA_LIBS)
 libfrida_pipe_la_DEPENDENCIES = \
