@@ -8,7 +8,7 @@
 # include <gum/arch-arm/gumthumbwriter.h>
 # include <gum/arch-arm64/gumarm64writer.h>
 #endif
-#include <mach-o/arch.h>
+#include <mach/mach.h>
 #include <mach-o/dyld.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
@@ -90,6 +90,7 @@ struct _FridaMapper
   gsize destructor_offset;
   gsize atexit_stub_offset;
 
+  GMappedFile * cache_file;
   GSList * children;
   GHashTable * mappings;
 };
@@ -266,6 +267,7 @@ struct _FridaDyldCacheImageInfo
 };
 
 static FridaMapper * frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_port_t task, GumCpuType cpu_type);
+static void frida_mapper_init_cache_file (FridaMapper * self, GumCpuType cpu_type);
 static void frida_mapper_init_dependencies (FridaMapper * self);
 static void frida_mapper_init_footprint_budget (FridaMapper * self);
 
@@ -295,7 +297,7 @@ static void frida_mapper_emit_section_term_pointers (FridaLibrary * self, const 
 
 static void frida_mapping_free (FridaMapping * self);
 
-static FridaLibrary * frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cpu_type);
+static FridaLibrary * frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cpu_type, GMappedFile * cache_file);
 static FridaLibrary * frida_library_new_from_memory (const gchar * name, mach_port_t task, GumCpuType cpu_type, GumAddress base_address);
 static FridaLibrary * frida_library_new (const gchar * name, mach_port_t task, GumCpuType cpu_type);
 static FridaLibrary * frida_library_ref (FridaLibrary * self);
@@ -308,7 +310,7 @@ static const gchar * frida_library_dependency (FridaLibrary * self, gint ordinal
 static gboolean frida_library_resolve (FridaLibrary * self, const gchar * symbol, FridaSymbolDetails * details);
 static const guint8 * frida_library_find_export_node (FridaLibrary * self, const gchar * name);
 static gboolean frida_library_ensure_image_loaded (FridaLibrary * self);
-static gboolean frida_library_try_load_image_from_cache (FridaLibrary * self, const gchar * name, GumCpuType cpu_type);
+static gboolean frida_library_try_load_image_from_cache (FridaLibrary * self, const gchar * name, GumCpuType cpu_type, GMappedFile * cache_file);
 static void frida_library_load_image_from_filesystem (FridaLibrary * self, const gchar * name, GumCpuType cpu_type);
 static gboolean frida_library_load_image_from_memory (FridaLibrary * self);
 static gboolean frida_library_take_image (FridaLibrary * self, FridaLibraryImage * image);
@@ -321,11 +323,14 @@ static const FridaDyldCacheImageInfo * frida_dyld_cache_find_image_by_name (cons
 static guint64 frida_dyld_cache_compute_image_size (const FridaDyldCacheImageInfo * image, const FridaDyldCacheImageInfo * images, gsize image_count);
 static guint64 frida_dyld_cache_offset_from_address (GumAddress address, const FridaDyldCacheMappingInfo * mappings, gsize mapping_count);
 
-static const gchar * frida_current_architecture_name (void);
-
 static gint64 frida_read_sleb128 (const guint8 ** data, const guint8 * end);
 static guint64 frida_read_uleb128 (const guint8 ** p, const guint8 * end);
 static void frida_skip_uleb128 (const guint8 ** p);
+
+static const gchar * frida_cache_file_arch_candidates_ia32[] = { "i386", NULL };
+static const gchar * frida_cache_file_arch_candidates_amd64[] = { "x86_64", NULL };
+static const gchar * frida_cache_file_arch_candidates_arm[] = { "armv7s", "armv7", "armv6", NULL };
+static const gchar * frida_cache_file_arch_candidates_arm64[] = { "arm64", NULL };
 
 FridaMapper *
 frida_mapper_new (const gchar * name, mach_port_t task, GumCpuType cpu_type)
@@ -343,7 +348,10 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
 
   mapper->mapped = FALSE;
 
-  mapper->library = frida_library_new_from_file (name, task, cpu_type);
+  if (parent == NULL)
+    frida_mapper_init_cache_file (mapper, cpu_type);
+
+  mapper->library = frida_library_new_from_file (name, task, cpu_type, parent != NULL ? parent->cache_file : mapper->cache_file);
   mapper->image = frida_library_image_dup (mapper->library->image);
 
   if (parent != NULL)
@@ -353,6 +361,54 @@ frida_mapper_new_with_parent (FridaMapper * parent, const gchar * name, mach_por
   frida_mapper_init_footprint_budget (mapper);
 
   return mapper;
+}
+
+static void
+frida_mapper_init_cache_file (FridaMapper * self, GumCpuType cpu_type)
+{
+  const gchar ** candidates, ** candidate;
+  gint fd, result;
+
+  switch (cpu_type)
+  {
+    case GUM_CPU_IA32:
+      candidates = frida_cache_file_arch_candidates_ia32;
+      break;
+    case GUM_CPU_AMD64:
+      candidates = frida_cache_file_arch_candidates_amd64;
+      break;
+    case GUM_CPU_ARM:
+      candidates = frida_cache_file_arch_candidates_arm;
+      break;
+    case GUM_CPU_ARM64:
+      candidates = frida_cache_file_arch_candidates_arm64;
+      break;
+    default:
+      g_assert_not_reached ();
+  }
+
+  fd = -1;
+  for (candidate = candidates; *candidate != NULL && fd == -1; candidate++)
+  {
+    gchar * path;
+
+    path = g_strconcat (
+        "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_",
+        *candidate,
+        NULL);
+    fd = open (path, 0);
+    g_free (path);
+  }
+  if (fd == -1)
+    return;
+
+  result = fcntl (fd, F_NOCACHE, TRUE);
+  g_assert (result == 0);
+
+  self->cache_file = g_mapped_file_new_from_fd (fd, FALSE, NULL);
+  g_assert (self->cache_file != NULL);
+
+  close (fd);
 }
 
 static void
@@ -435,6 +491,8 @@ frida_mapper_free (FridaMapper * mapper)
 {
   if (mapper->mappings != NULL)
     g_hash_table_unref (mapper->mappings);
+  if (mapper->cache_file != NULL)
+    g_mapped_file_unref (mapper->cache_file);
 
   g_slist_free_full (mapper->children, (GDestroyNotify) frida_mapper_free);
 
@@ -1584,12 +1642,12 @@ frida_mapping_free (FridaMapping * self)
 }
 
 static FridaLibrary *
-frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cpu_type)
+frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cpu_type, GMappedFile * cache_file)
 {
   FridaLibrary * library;
 
   library = frida_library_new (name, task, cpu_type);
-  if (!frida_library_try_load_image_from_cache (library, name, cpu_type))
+  if (!frida_library_try_load_image_from_cache (library, name, cpu_type, cache_file))
     frida_library_load_image_from_filesystem (library, name, cpu_type);
 
   return library;
@@ -1873,37 +1931,17 @@ frida_library_ensure_image_loaded (FridaLibrary * self)
 }
 
 static gboolean
-frida_library_try_load_image_from_cache (FridaLibrary * self, const gchar * name, GumCpuType cpu_type)
+frida_library_try_load_image_from_cache (FridaLibrary * self, const gchar * name, GumCpuType cpu_type, GMappedFile * cache_file)
 {
-  gboolean success = FALSE;
-  gchar * path;
-  gint fd = -1, result;
-  GMappedFile * file = NULL;
   gpointer cache;
   const FridaDyldCacheHeader * header;
   const FridaDyldCacheImageInfo * images, * image;
   const FridaDyldCacheMappingInfo * mappings, * first_mapping, * second_mapping, * last_mapping, * mapping;
   guint64 image_offset, image_size;
   FridaLibraryImage * library_image;
+  gboolean success;
 
-  path = g_strconcat (
-      "/System/Library/Caches/com.apple.dyld/dyld_shared_cache_",
-      frida_current_architecture_name (),
-      NULL);
-
-  fd = open (path, 0);
-  if (fd == -1)
-    goto beach;
-
-  result = fcntl (fd, F_NOCACHE, TRUE);
-  g_assert (result == 0);
-
-  file = g_mapped_file_new_from_fd (fd, FALSE, NULL);
-  g_assert (file != NULL);
-
-  fd = -1; /* TODO: verify assumption that GMappedFile takes ownership of fd */
-
-  cache = g_mapped_file_get_contents (file);
+  cache = g_mapped_file_get_contents (cache_file);
   g_assert (cache != NULL);
 
   header = cache;
@@ -1915,7 +1953,7 @@ frida_library_try_load_image_from_cache (FridaLibrary * self, const gchar * name
 
   image = frida_dyld_cache_find_image_by_name (name, images, header->images_count, cache);
   if (image == NULL)
-    goto beach;
+    return FALSE;
 
   image_offset = frida_dyld_cache_offset_from_address (image->address, mappings, header->mapping_count);
   image_size = frida_dyld_cache_compute_image_size (image, images, header->images_count);
@@ -1942,21 +1980,12 @@ frida_library_try_load_image_from_cache (FridaLibrary * self, const gchar * name
   library_image->size = library_image->shared_offset + library_image->shared_size;
   library_image->linkedit = cache;
 
-  library_image->file = g_mapped_file_ref (file);
+  library_image->file = g_mapped_file_ref (cache_file);
 
   success = frida_library_take_image (self, library_image);
   g_assert (success);
 
-beach:
-  if (file != NULL)
-    g_mapped_file_unref (file);
-
-  if (fd != -1)
-    close (fd);
-
-  g_free (path);
-
-  return success;
+  return TRUE;
 }
 
 static void
@@ -2318,32 +2347,6 @@ frida_dyld_cache_offset_from_address (GumAddress address, const FridaDyldCacheMa
     if (address >= mapping->address && address < mapping->address + mapping->size)
     {
       return address - mapping->address + mapping->offset;
-    }
-  }
-
-  g_assert_not_reached ();
-}
-
-static const gchar *
-frida_current_architecture_name (void)
-{
-  guint count, i;
-
-  count = _dyld_image_count ();
-  for (i = 0; i != count; i++)
-  {
-    const gchar * name;
-
-    name = _dyld_get_image_name (i);
-    if (strcmp (name, "/usr/lib/libSystem.B.dylib") == 0)
-    {
-      const struct mach_header * header;
-      const NXArchInfo * info;
-
-      header = _dyld_get_image_header (i);
-      info = NXGetArchInfoFromCpuType (header->cputype, header->cpusubtype);
-
-      return info->name;
     }
   }
 
