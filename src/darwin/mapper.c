@@ -561,8 +561,8 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
     segment_address = base_address + s->vm_address - library->preferred_address;
     file_offset = s->file_offset != 0 ? s->file_offset - self->image->source_offset : 0;
 
-    vm_write (library->task, segment_address, (vm_offset_t) (self->image->data + file_offset), s->file_size);
-    vm_protect (library->task, segment_address, s->vm_size, FALSE, s->protection);
+    mach_vm_write (library->task, segment_address, (vm_offset_t) (self->image->data + file_offset), s->file_size);
+    mach_vm_protect (library->task, segment_address, s->vm_size, FALSE, s->protection);
   }
 
   shared_segments = self->image->shared_segments;
@@ -570,12 +570,12 @@ frida_mapper_map (FridaMapper * self, GumAddress base_address)
   {
     FridaLibraryImageSegment * s = &g_array_index (shared_segments, FridaLibraryImageSegment, i);
 
-    vm_write (library->task, base_address + s->offset, (vm_offset_t) self->image->data + s->offset, s->size);
-    vm_protect (library->task, base_address + s->offset, s->size, FALSE, s->protection);
+    mach_vm_write (library->task, base_address + s->offset, (vm_offset_t) self->image->data + s->offset, s->size);
+    mach_vm_protect (library->task, base_address + s->offset, s->size, FALSE, s->protection);
   }
 
-  vm_write (library->task, self->runtime_address, (vm_offset_t) self->runtime, self->runtime_file_size);
-  vm_protect (library->task, self->runtime_address, self->runtime_vm_size, FALSE,
+  mach_vm_write (library->task, self->runtime_address, (vm_offset_t) self->runtime, self->runtime_file_size);
+  mach_vm_protect (library->task, self->runtime_address, self->runtime_vm_size, FALSE,
       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY | VM_PROT_EXECUTE);
 
   self->mapped = TRUE;
