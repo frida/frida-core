@@ -6,10 +6,6 @@ namespace Frida {
 		private uint protocol_version = 1;
 
 		public async void start () {
-			do_start.begin ();
-		}
-
-		private async void do_start () {
 			control_client = yield create_client ();
 			control_client.device_attached.connect ((id, product_id, udid) => {
 				if (provider_by_device_id.has_key (id))
