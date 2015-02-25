@@ -5,7 +5,7 @@ SUBDIRS = \
 	lib \
 	src \
 	server \
-	gadget \
+	##gadget \
 	tests
 
 pcfiles = \
