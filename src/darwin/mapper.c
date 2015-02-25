@@ -1647,7 +1647,7 @@ frida_library_new_from_file (const gchar * name, mach_port_t task, GumCpuType cp
   FridaLibrary * library;
 
   library = frida_library_new (name, task, cpu_type);
-  if (!frida_library_try_load_image_from_cache (library, name, cpu_type, cache_file))
+  if (cache_file == NULL || !frida_library_try_load_image_from_cache (library, name, cpu_type, cache_file))
     frida_library_load_image_from_filesystem (library, name, cpu_type);
 
   return library;
