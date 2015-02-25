@@ -195,12 +195,6 @@ namespace Frida.AgentTest {
 			return message;
 		}
 
-		/*
-		protected override uint provide_timeout () {
-			return 120;
-		}
-		*/
-
 		public class ScriptMessage {
 			public AgentScriptId sender_id {
 				get;
