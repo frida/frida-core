@@ -693,7 +693,7 @@ namespace Frida.HostSessionTest {
 			private set;
 		}
 
-		private uint timeout = 5;
+		private uint timeout = 20;
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
