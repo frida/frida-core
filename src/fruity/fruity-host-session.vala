@@ -2,10 +2,31 @@ namespace Frida {
 	public class FruityHostSessionBackend : Object, HostSessionBackend {
 		private Fruity.Client control_client;
 		private Gee.HashMap<uint, FruityHostSessionProvider> provider_by_device_id = new Gee.HashMap<uint, FruityHostSessionProvider> ();
+		private Gee.Promise<bool> start_request;
+		private StartedHandler started_handler;
+		private delegate void StartedHandler ();
 		private bool has_probed_protocol_version = false;
 		private uint protocol_version = 1;
 
 		public async void start () {
+			started_handler = () => start.callback ();
+			var timeout_source = new TimeoutSource (30);
+			timeout_source.set_callback (() => {
+				start.callback ();
+				return false;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
+			do_start.begin ();
+			yield;
+			started_handler = null;
+			timeout_source.destroy ();
+		}
+
+		private async void do_start () {
+			start_request = new Gee.Promise<bool> ();
+
+			bool success = true;
+
 			control_client = yield create_client ();
 			control_client.device_attached.connect ((id, product_id, udid) => {
 				if (provider_by_device_id.has_key (id))
@@ -30,11 +51,25 @@ namespace Frida {
 				yield control_client.establish ();
 				yield control_client.enable_listen_mode ();
 			} catch (IOError e) {
-				yield stop ();
+				success = false;
 			}
+
+			start_request.set_value (success);
+
+			if (!success)
+				yield stop ();
+
+			if (started_handler != null)
+				started_handler ();
 		}
 
 		public async void stop () {
+			try {
+				yield start_request.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
+
 			if (control_client != null) {
 				try {
 					yield control_client.close ();
@@ -133,7 +168,7 @@ namespace Frida {
 
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
-		private const uint ZID_SERVER_PORT = 27042;
+		private const uint SERVER_PORT = 27042;
 
 		public FruityHostSessionProvider (FruityHostSessionBackend backend, uint device_id, int device_product_id, string device_udid) {
 			Object (backend: backend, device_id: device_id, device_product_id: device_product_id, device_udid: device_udid);
@@ -175,7 +210,7 @@ namespace Frida {
 		public async HostSession create () throws IOError {
 			var client = yield backend.create_client ();
 			yield client.establish ();
-			yield client.connect_to_port (device_id, ZID_SERVER_PORT);
+			yield client.connect_to_port (device_id, SERVER_PORT);
 
 			DBusConnection connection;
 			try {
