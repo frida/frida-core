@@ -54,6 +54,15 @@ namespace Frida {
 				success = false;
 			}
 
+			if (success) {
+				/* perform a dummy-request to flush out any pending device attach notifications */
+				try {
+					yield control_client.connect_to_port (uint.MAX, uint.MAX);
+					assert_not_reached ();
+				} catch (IOError expected_error) {
+				}
+			}
+
 			start_request.set_value (success);
 
 			if (!success)
