@@ -99,7 +99,7 @@ libfrida_helper_types_la_VALAFLAGS = \
 
 frida-helper.stamp: frida-helper
 if OS_MAC
-	codesign -s "$$MAC_CERTID" -i "re.frida.FruitjectorHelper" "$(builddir)/frida-helper" || true
+	codesign -s "$$MAC_CERTID" -i "re.frida.Helper" "$(builddir)/frida-helper" || true
 endif
 if OS_IOS
 	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/darwin/frida-helper.xcent" "$<" || true
