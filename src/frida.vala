@@ -16,6 +16,7 @@ namespace Frida {
 			private set;
 		}
 
+		private Gee.Promise<bool> ensure_request;
 		private Gee.Promise<bool> close_request;
 
 		private HostSessionService service = null;
@@ -68,8 +69,15 @@ namespace Frida {
 		}
 
 		private async void ensure_service () throws IOError {
-			if (service != null)
+			if (ensure_request != null) {
+				try {
+					yield ensure_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 				return;
+			}
+			ensure_request = new Gee.Promise<bool> ();
 
 			service = new HostSessionService.with_default_backends ();
 			service.provider_available.connect ((provider) => {
@@ -89,6 +97,8 @@ namespace Frida {
 				changed ();
 			});
 			yield service.start ();
+
+			ensure_request.set_value (true);
 		}
 
 		private async void _do_close () {
@@ -101,6 +111,14 @@ namespace Frida {
 				return;
 			}
 			close_request = new Gee.Promise<bool> ();
+
+			if (ensure_request != null) {
+				try {
+					yield ensure_service ();
+				} catch (IOError io_error) {
+					assert_not_reached ();
+				}
+			}
 
 			if (service != null) {
 				foreach (var device in devices.to_array ())
