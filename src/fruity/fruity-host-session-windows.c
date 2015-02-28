@@ -77,7 +77,7 @@ _frida_fruity_host_session_provider_extract_details_for_device (gint product_id,
   WCHAR * udid_utf16 = NULL;
   FridaMobileDeviceInfo * mdev = NULL;
   FridaImageDeviceInfo * idev = NULL;
-  FridaImageData * idev_icon;
+  FridaImageData * idev_icon = NULL;
 
   (void) product_id;
 
@@ -88,15 +88,22 @@ _frida_fruity_host_session_provider_extract_details_for_device (gint product_id,
     goto beach;
 
   idev = find_image_device_by_location (mdev->location);
-  if (idev == NULL)
-    goto beach;
+  if (idev != NULL)
+  {
+    idev_icon = _frida_image_data_from_resource_url (idev->icon_url, FRIDA_ICON_SMALL);
+  }
 
-  idev_icon = _frida_image_data_from_resource_url (idev->icon_url, FRIDA_ICON_SMALL);
-  if (idev_icon == NULL)
-    goto beach;
-
-  *name = g_utf16_to_utf8 ((gunichar2 *) idev->friendly_name, -1, NULL, NULL, NULL);
-  *icon = idev_icon;
+  if (idev_icon != NULL)
+  {
+    *name = g_utf16_to_utf8 ((gunichar2 *) idev->friendly_name, -1, NULL, NULL, NULL);
+    *icon = idev_icon;
+  }
+  else
+  {
+    /* TODO: grab metadata from iTunes instead of relying on having an image device */
+    *name = "Apple Mobile Device";
+    *icon = NULL;
+  }
   result = TRUE;
 
 beach:
