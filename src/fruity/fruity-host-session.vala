@@ -10,7 +10,7 @@ namespace Frida {
 
 		public async void start () {
 			started_handler = () => start.callback ();
-			var timeout_source = new TimeoutSource (30);
+			var timeout_source = new TimeoutSource (100);
 			timeout_source.set_callback (() => {
 				start.callback ();
 				return false;
