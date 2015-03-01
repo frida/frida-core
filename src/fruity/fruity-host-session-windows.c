@@ -101,7 +101,7 @@ _frida_fruity_host_session_provider_extract_details_for_device (gint product_id,
   else
   {
     /* TODO: grab metadata from iTunes instead of relying on having an image device */
-    *name = "Apple Mobile Device";
+    *name = g_strdup ("Apple Mobile Device");
     *icon = NULL;
   }
   result = TRUE;
