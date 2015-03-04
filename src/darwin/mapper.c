@@ -845,7 +845,7 @@ frida_mapper_emit_arm_resolve_if_needed (FridaMapper * self, const FridaBindDeta
   gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R1, value.resolver);
   gum_thumb_writer_put_blx_reg (tw, GUM_AREG_R1);
   gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R1, details->addend);
-  gum_thumb_writer_put_add_reg_reg_imm (tw, GUM_AREG_R0, GUM_AREG_R1, 0);
+  gum_thumb_writer_put_add_reg_reg_reg (tw, GUM_AREG_R0, GUM_AREG_R0, GUM_AREG_R1);
   gum_thumb_writer_put_ldr_reg_address (tw, GUM_AREG_R1, entry);
   gum_thumb_writer_put_str_reg_reg_offset (tw, GUM_AREG_R0, GUM_AREG_R1, 0);
 }
@@ -970,7 +970,7 @@ frida_mapper_emit_arm64_resolve_if_needed (FridaMapper * self, const FridaBindDe
   gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X1, value.resolver);
   gum_arm64_writer_put_blr_reg (aw, GUM_A64REG_X1);
   gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X1, details->addend);
-  gum_arm64_writer_put_add_reg_reg_imm (aw, GUM_A64REG_X0, GUM_A64REG_X1, 0);
+  gum_arm64_writer_put_add_reg_reg_reg (aw, GUM_A64REG_X0, GUM_A64REG_X0, GUM_A64REG_X1);
   gum_arm64_writer_put_ldr_reg_address (aw, GUM_A64REG_X1, entry);
   gum_arm64_writer_put_str_reg_reg_offset (aw, GUM_A64REG_X0, GUM_A64REG_X1, 0);
 }
