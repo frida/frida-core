@@ -40,15 +40,13 @@ namespace Frida {
 		}
 
 		private class CloseTask : ManagerTask<void> {
-			protected override void validate_operation () throws Error {
-			}
-
 			protected override async void perform_operation () throws Error {
 				yield parent.close ();
 			}
 		}
 
 		public async DeviceList enumerate_devices () throws Error {
+			check_open ();
 			yield ensure_service ();
 			return new DeviceList (devices.slice (0, devices.size));
 		}
@@ -101,6 +99,11 @@ namespace Frida {
 			ensure_request.set_value (true);
 		}
 
+		private void check_open () throws Error {
+			if (close_request != null)
+				throw new IOError.FAILED ("invalid operation (device manager is closed)");
+		}
+
 		private async void _do_close () {
 			if (close_request != null) {
 				try {
@@ -140,11 +143,6 @@ namespace Frida {
 			public weak DeviceManager parent {
 				get;
 				construct;
-			}
-
-			protected override void validate_operation () throws Error {
-				if (parent.close_request != null)
-					throw new IOError.FAILED ("invalid operation (manager is closed)");
 			}
 		}
 	}
@@ -228,6 +226,7 @@ namespace Frida {
 		}
 
 		public async ProcessList enumerate_processes () throws Error {
+			check_open ();
 			yield ensure_host_session ();
 			var processes = yield host_session.enumerate_processes ();
 			var result = new Gee.ArrayList<Process> ();
@@ -254,6 +253,7 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+			check_open ();
 			yield ensure_host_session ();
 			return yield host_session.spawn (path, argv, envp);
 		}
@@ -277,6 +277,7 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid) throws Error {
+			check_open ();
 			yield ensure_host_session ();
 			yield host_session.resume (pid);
 		}
@@ -296,6 +297,7 @@ namespace Frida {
 		}
 
 		public async void kill (uint pid) throws Error {
+			check_open ();
 			yield ensure_host_session ();
 			yield host_session.kill (pid);
 		}
@@ -315,6 +317,7 @@ namespace Frida {
 		}
 
 		public async Session attach (uint pid) throws Error {
+			check_open ();
 			var session = session_by_pid[pid];
 			if (session == null) {
 				yield ensure_host_session ();
@@ -340,6 +343,11 @@ namespace Frida {
 			protected override async Session perform_operation () throws Error {
 				return yield parent.attach (pid);
 			}
+		}
+
+		private void check_open () throws Error {
+			if (close_request != null)
+				throw new IOError.FAILED ("invalid operation (device is gone)");
 		}
 
 		public async void _do_close (bool may_block) {
@@ -406,11 +414,6 @@ namespace Frida {
 			public weak Device parent {
 				get;
 				construct;
-			}
-
-			protected override void validate_operation () throws Error {
-				if (parent.close_request != null)
-					throw new IOError.FAILED ("invalid operation (device is gone)");
 			}
 		}
 	}
@@ -540,15 +543,13 @@ namespace Frida {
 		}
 
 		private class DetachTask : ProcessTask<void> {
-			protected override void validate_operation () throws Error {
-			}
-
 			protected override async void perform_operation () throws Error {
 				yield parent.detach ();
 			}
 		}
 
 		public async Script create_script (string source) throws Error {
+			check_open ();
 			var sid = yield session.create_script (source);
 			var script = new Script (this, sid);
 			script_by_id[sid.handle] = script;
@@ -580,6 +581,11 @@ namespace Frida {
 			assert (script_did_exist);
 		}
 
+		private void check_open () throws Error {
+			if (close_request != null)
+				throw new IOError.FAILED ("invalid operation (detached from session)");
+		}
+
 		public async void _do_close (bool may_block) {
 			if (close_request != null) {
 				try {
@@ -592,7 +598,7 @@ namespace Frida {
 			close_request = new Gee.Promise<bool> ();
 
 			foreach (var script in script_by_id.values.to_array ())
-				yield script._do_unload (may_block);
+				yield script._do_close (may_block);
 
 			if (may_block) {
 				try {
@@ -619,11 +625,6 @@ namespace Frida {
 				get;
 				construct;
 			}
-
-			protected override void validate_operation () throws Error {
-				if (parent.close_request != null)
-					throw new IOError.FAILED ("invalid operation (detached from session)");
-			}
 		}
 	}
 
@@ -645,6 +646,7 @@ namespace Frida {
 		}
 
 		public async void load () throws Error {
+			check_open ();
 			yield session.session.load_script (script_id);
 		}
 
@@ -659,7 +661,8 @@ namespace Frida {
 		}
 
 		public async void unload () throws Error {
-			yield _do_unload (true);
+			check_open ();
+			yield _do_close (true);
 		}
 
 		public void unload_sync () throws Error {
@@ -673,6 +676,7 @@ namespace Frida {
 		}
 
 		public async void post_message (string message) throws Error {
+			check_open ();
 			yield session.session.post_message_to_script (script_id, message);
 		}
 
@@ -690,7 +694,12 @@ namespace Frida {
 			}
 		}
 
-		public async void _do_unload (bool may_block) {
+		private void check_open () throws Error {
+			if (session == null)
+				throw new IOError.FAILED ("invalid operation (script is destroyed)");
+		}
+
+		public async void _do_close (bool may_block) {
 			if (session == null) {
 				return;
 			}
@@ -717,11 +726,6 @@ namespace Frida {
 			public weak Script parent {
 				get;
 				construct;
-			}
-
-			protected override void validate_operation () throws Error {
-				if (parent.session == null)
-					throw new IOError.FAILED ("invalid operation (script is destroyed)");
 			}
 		}
 	}
@@ -768,7 +772,6 @@ namespace Frida {
 
 		private async void do_perform_operation () {
 			try {
-				validate_operation ();
 				result = yield perform_operation ();
 			} catch (Error e) {
 				error = new IOError.FAILED (e.message);
@@ -784,7 +787,6 @@ namespace Frida {
 			}
 		}
 
-		protected abstract void validate_operation () throws Error;
 		protected abstract async T perform_operation () throws Error;
 	}
 }
