@@ -231,6 +231,10 @@ namespace Frida {
 			provider.agent_session_closed.connect (on_agent_session_closed);
 		}
 
+		public bool is_lost () {
+			return close_request != null;
+		}
+
 		public async ProcessList enumerate_processes () throws Error {
 			check_open ();
 			yield ensure_host_session ();
@@ -536,6 +540,10 @@ namespace Frida {
 			session.message_from_script.connect (on_message_from_script);
 		}
 
+		public bool is_detached () {
+			return close_request != null;
+		}
+
 		public async void detach () {
 			yield _do_close (true);
 		}
@@ -635,6 +643,7 @@ namespace Frida {
 	}
 
 	public class Script : Object {
+		public signal void destroyed ();
 		public signal void message (string message, uint8[] data);
 
 		public MainContext main_context {
@@ -649,6 +658,10 @@ namespace Frida {
 			this.session = session;
 			this.script_id = script_id;
 			this.main_context = session.main_context;
+		}
+
+		public bool is_destroyed () {
+			return session == null;
 		}
 
 		public async void load () throws Error {
@@ -722,6 +735,8 @@ namespace Frida {
 				} catch (IOError ignored_error) {
 				}
 			}
+
+			destroyed ();
 		}
 
 		private Object create<T> () {
