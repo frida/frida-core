@@ -77,24 +77,30 @@ namespace Frida {
 			}
 			ensure_request = new Gee.Promise<bool> ();
 
+			bool started = false;
 			service = new HostSessionService.with_default_backends ();
 			service.provider_available.connect ((provider) => {
 				var device = new Device (this, last_device_id++, provider.name, provider.kind, provider);
 				devices.add (device);
-				added (device);
-				changed ();
+				if (started) {
+					added (device);
+					changed ();
+				}
 			});
 			service.provider_unavailable.connect ((provider) => {
 				foreach (var device in devices) {
 					if (device.provider == provider) {
-						removed (device);
+						if (started)
+							removed (device);
 						device._do_close.begin (false);
 						break;
 					}
 				}
-				changed ();
+				if (started)
+					changed ();
 			});
 			yield service.start ();
+			started = true;
 
 			ensure_request.set_value (true);
 		}
