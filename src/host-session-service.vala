@@ -94,8 +94,14 @@ namespace Frida {
 	public abstract class BaseDBusHostSession : Object, HostSession {
 		public signal void agent_session_closed (AgentSessionId id, Error? error);
 
+		public bool forward_agent_sessions {
+			get;
+			set;
+		}
+
 		private const string LISTEN_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
-		private uint last_agent_port = 27043;
+		private const uint DEFAULT_AGENT_PORT = 27043;
+		private uint last_agent_port = DEFAULT_AGENT_PORT;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		public virtual async void close () {
@@ -144,40 +150,58 @@ namespace Frida {
 			if (cancellable.is_cancelled ())
 				throw new IOError.TIMED_OUT ("timed out");
 
-			bool found_available = false;
-			var loopback = new InetAddress.loopback (SocketFamily.IPV4);
-			var address_in_use = new IOError.ADDRESS_IN_USE ("");
-			while (!found_available) {
-				try {
-					var socket = new Socket (SocketFamily.IPV4, SocketType.STREAM, SocketProtocol.TCP);
-					socket.bind (new InetSocketAddress (loopback, (uint16) last_agent_port), false);
-					socket.close ();
-					found_available = true;
-				} catch (Error probe_error) {
-					if (probe_error.code == address_in_use.code)
-						last_agent_port++;
-					else
-						found_available = true;
+			timeout_source.destroy ();
+
+			uint port;
+			if (forward_agent_sessions) {
+				port = DEFAULT_AGENT_PORT;
+				bool found_available = false;
+				var loopback = new InetAddress.loopback (SocketFamily.IPV4);
+				var address_in_use = new IOError.ADDRESS_IN_USE ("");
+				while (!found_available) {
+					bool used_by_us = false;
+					foreach (var existing_entry in entries) {
+						if (existing_entry.id.handle == port) {
+							used_by_us = true;
+							break;
+						}
+					}
+					if (used_by_us) {
+						port++;
+					} else {
+						try {
+							var socket = new Socket (SocketFamily.IPV4, SocketType.STREAM, SocketProtocol.TCP);
+							socket.bind (new InetSocketAddress (loopback, (uint16) port), false);
+							socket.close ();
+							found_available = true;
+						} catch (Error probe_error) {
+							if (probe_error.code == address_in_use.code)
+								port++;
+							else
+								found_available = true;
+						}
+					}
 				}
+			} else {
+				port = last_agent_port++;
 			}
-			var port = last_agent_port++;
 			AgentSessionId id = AgentSessionId (port);
 
 			var entry = new Entry (id, pid, transport, connection, session);
 			entries.add (entry);
 			connection.closed.connect (on_connection_closed);
 
-			try {
-				entry.serve (LISTEN_ADDRESS_TEMPLATE.printf (port));
-			} catch (Error serve_error) {
+			if (forward_agent_sessions) {
 				try {
-					yield connection.close ();
-				} catch (Error cleanup_error) {
+					entry.serve (LISTEN_ADDRESS_TEMPLATE.printf (port));
+				} catch (Error serve_error) {
+					try {
+						yield connection.close ();
+					} catch (Error cleanup_error) {
+					}
+					throw new IOError.FAILED (serve_error.message);
 				}
-				throw new IOError.FAILED (serve_error.message);
 			}
-
-			timeout_source.destroy ();
 
 			return AgentSessionId (port);
 		}

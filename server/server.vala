@@ -19,6 +19,7 @@ namespace Frida {
 #if WINDOWS
 			host_session = new WindowsHostSession ();
 #endif
+			host_session.forward_agent_sessions = true;
 		}
 
 		public void run (string address, int timeout) throws Error {
