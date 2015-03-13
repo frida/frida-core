@@ -4,7 +4,8 @@ noinst_LTLIBRARIES = \
 
 libfrida_agent_la_SOURCES = \
 	agent.vala \
-	script-engine.vala
+	script-engine.vala \
+	dummy.cpp
 libfrida_agent_la_CFLAGS = \
 	-w
 libfrida_agent_la_LIBADD = \
