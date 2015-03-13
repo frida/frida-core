@@ -319,7 +319,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
       4,
       GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (worker_thread),
       GUM_ARG_POINTER, NULL,
-      GUM_ARG_POINTER, remote_address + worker_offset,
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (remote_address + worker_offset),
       GUM_ARG_POINTER, NULL);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
