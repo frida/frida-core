@@ -494,9 +494,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 
   gum_thumb_writer_init (&cw, code->cur);
 
-  /* r2 through r4 are only pushed to ensure 16-byte stack alignment */
-  gum_thumb_writer_put_push_regs (&cw, 7, GUM_AREG_R2, GUM_AREG_R3, GUM_AREG_R4,
-      GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
+  gum_thumb_writer_put_push_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_remote_libc_function (params->pid, "open"),
@@ -543,8 +541,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
       1,
       GUM_ARG_REGISTER, GUM_AREG_R7);
 
-  gum_thumb_writer_put_pop_regs (&cw, 7, GUM_AREG_R2, GUM_AREG_R3, GUM_AREG_R4,
-      GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
+  gum_thumb_writer_put_pop_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
 
   frida_arm_commit_code (&cw, code);
   gum_thumb_writer_free (&cw);
