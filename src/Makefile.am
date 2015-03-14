@@ -10,15 +10,15 @@ glue_sources = $(NULL)
 
 if OS_LINUX
 if ARCH_64BIT
-HELPER32 ?= null-resource.bin!frida-helper-32
+HELPER32 ?= $(srcdir)/null-resource.bin!frida-helper-32
 HELPER64 ?= frida-helper!frida-helper-64
-AGENT32 ?= null-resource.bin!frida-agent-32.so
+AGENT32 ?= $(srcdir)/null-resource.bin!frida-agent-32.so
 AGENT64 ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent-64.so
 else
 HELPER32 ?= frida-helper!frida-helper-32
-HELPER64 ?= null-resource.bin!frida-helper-64
+HELPER64 ?= $(srcdir)/null-resource.bin!frida-helper-64
 AGENT32 ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent-32.so
-AGENT64 ?= null-resource.bin!frida-agent-64.so
+AGENT64 ?= $(srcdir)/null-resource.bin!frida-agent-64.so
 endif
 HELPER = $(HELPER32) $(HELPER64)
 AGENT = $(AGENT32) $(AGENT64)
