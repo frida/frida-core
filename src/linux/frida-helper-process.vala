@@ -61,8 +61,32 @@ namespace Frida {
 			yield helper.kill (pid);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string) throws IOError {
-			var helper = yield obtain_for_pid (pid);
+		public async uint inject (uint pid, string filename_template, string data_string) throws IOError {
+			Gum.CpuType cpu_type;
+			try {
+				cpu_type = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
+
+			string filename;
+			switch (cpu_type) {
+				case Gum.CpuType.IA32:
+				case Gum.CpuType.ARM:
+					filename = filename_template.printf (32);
+					break;
+
+				case Gum.CpuType.AMD64:
+				case Gum.CpuType.ARM64:
+					filename = filename_template.printf (64);
+					break;
+
+				default:
+					assert_not_reached ();
+			}
+
+			var helper = yield obtain_for_cpu_type (cpu_type);
+
 			return yield helper.inject (pid, filename, data_string, resource_store.tempdir.path);
 		}
 
@@ -94,6 +118,7 @@ namespace Frida {
 					}
 					factory = factory32;
 					break;
+
 				case Gum.CpuType.AMD64:
 				case Gum.CpuType.ARM64:
 					if (factory64 == null) {
@@ -103,6 +128,7 @@ namespace Frida {
 					}
 					factory = factory64;
 					break;
+
 				default:
 					assert_not_reached ();
 			}
@@ -130,12 +156,12 @@ namespace Frida {
 
 		private TemporaryFile helper_file;
 		private ResourceStore resource_store;
-		private MainContext main_context;
+		private MainContext? main_context;
 		private DBusConnection connection;
 		private Helper proxy;
 		private Gee.Promise<Helper> obtain_request;
 
-		public HelperFactory (TemporaryFile helper_file, ResourceStore resource_store, MainContext main_context) {
+		public HelperFactory (TemporaryFile helper_file, ResourceStore resource_store, MainContext? main_context) {
 			this.helper_file = helper_file;
 			this.resource_store = resource_store;
 			this.main_context = main_context;

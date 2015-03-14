@@ -62,8 +62,11 @@ namespace Frida {
 			helper = new HelperProcess ();
 			injector = new Linjector.with_helper (helper);
 
-			var blob = Frida.Data.Agent.get_frida_agent_32_so_blob ();
-			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
+			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
+			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
+			agent_desc = new AgentDescriptor ("frida-agent-%u.dll",
+				new MemoryInputStream.from_data (blob32.data, null),
+				new MemoryInputStream.from_data (blob64.data, null));
 		}
 
 		public override async void close () {
