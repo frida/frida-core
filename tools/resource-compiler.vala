@@ -41,8 +41,14 @@ namespace Frida {
 			var categories = new Gee.ArrayList<ResourceCategory> ();
 
 			var root_category = new ResourceCategory ("root");
-			foreach (var filename in input_filenames)
-				root_category.files.add (filename);
+			foreach (var filename in input_filenames) {
+				var tokens = filename.split ("!", 2);
+				if (tokens.length == 2) {
+					root_category.files.add (new ResourceFile (tokens[1], tokens[0]));
+				} else {
+					root_category.files.add (new ResourceFile (Path.get_basename (tokens[0]), tokens[0]));
+				}
+			}
 			root_category.files.sort ();
 			categories.add (root_category);
 
@@ -66,7 +72,8 @@ namespace Frida {
 					while ((file_info = enumerator.next_file ()) != null) {
 						var filename = file_info.get_name ();
 						if (regex.match (filename)) {
-							category.files.add (Path.build_filename (input_dir.get_path (), filename));
+							var source = Path.build_filename (input_dir.get_path (), filename);
+							category.files.add (new ResourceFile (filename, source));
 						}
 					}
 
@@ -168,12 +175,12 @@ namespace Frida {
 				var size_by_index = new Gee.ArrayList<uint64?> ();
 				int file_count = category.files.size;
 
-				foreach (string input_filename in category.files) {
-					var input_file = File.new_for_commandline_arg (input_filename);
+				foreach (var input in category.files) {
+					var input_file = File.new_for_commandline_arg (input.source);
 
 					var file_input_stream = input_file.read (null);
 					var input_info = file_input_stream.query_info (FileAttribute.STANDARD_SIZE);
-					var identifier = identifier_from_filename (input_file.get_basename ());
+					var identifier = identifier_from_filename (input.name);
 					var file_size = input_info.get_attribute_uint64 (FileAttribute.STANDARD_SIZE);
 
 					identifier_by_index.add (identifier);
@@ -201,7 +208,7 @@ namespace Frida {
 
 				csource.put_string ("static const " + blob_ctype + " " + blob_list_identifier + "[" + category.files.size.to_string () + "] =\n{");
 				for (int file_index = 0; file_index != file_count; file_index++) {
-					var filename = Path.get_basename (category.files[file_index]);
+					var filename = category.files[file_index].name;
 					var blob_identifier = blob_identifier_by_index[file_index];
 					var size = size_by_index[file_index];
 					csource.put_string ("\n  { \"%s\", %s, %s },".printf (filename, blob_identifier, size.to_string ()));
@@ -436,14 +443,31 @@ namespace Frida {
 				private set;
 			}
 
-			public Gee.ArrayList<string> files {
+			public Gee.ArrayList<ResourceFile> files {
 				get;
 				private set;
 			}
 
 			public ResourceCategory (string name) {
 				this.name = name;
-				this.files = new Gee.ArrayList<string> ();
+				this.files = new Gee.ArrayList<ResourceFile> ();
+			}
+		}
+
+		private class ResourceFile {
+			public string name {
+				get;
+				private set;
+			}
+
+			public string source {
+				get;
+				private set;
+			}
+
+			public ResourceFile (string name, string source) {
+				this.name = name;
+				this.source = source;
 			}
 		}
 	}

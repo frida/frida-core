@@ -76,6 +76,9 @@
 /src/fruity/fruity-host-session.c
 /src/fruity/fruity-property-list.c
 /src/host-session-service.c
+/src/linux/frida-helper-process.c
+/src/linux/frida-helper-types.c
+/src/linux/frida-helper.c
 /src/linux/linjector.c
 /src/linux/linux-host-session.c
 /src/server.c

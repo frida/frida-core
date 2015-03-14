@@ -5,7 +5,7 @@
 #include <sys/stat.h>
 
 guint
-frida_helper_process_spawn_helper (const gchar * path, gchar ** argv, int argv_length, GError ** error)
+frida_helper_factory_spawn_helper (const gchar * path, gchar ** argv, int argv_length, GError ** error)
 {
   gchar ** envp;
   pid_t pid;

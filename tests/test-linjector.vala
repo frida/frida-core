@@ -101,7 +101,8 @@ namespace Frida.LinjectorTest {
 				AgentDescriptor desc;
 
 				try {
-					desc = new AgentDescriptor (name, File.new_for_path (sofile).read (null));
+					var file = File.new_for_path (sofile).read (null);
+					desc = new AgentDescriptor (name + "-%u.so", file, file);
 				} catch (Error io_error) {
 					assert_not_reached ();
 				}

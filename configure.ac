@@ -5,7 +5,7 @@ AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CANONICAL_SYSTEM
 
-AM_INIT_AUTOMAKE([-Wall -Werror subdir-objects no-dist-gzip dist-bzip2 foreign])
+AM_INIT_AUTOMAKE([-Wall -Wno-portability -Werror subdir-objects no-dist-gzip dist-bzip2 foreign])
 
 # Enable silent rules if available
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
@@ -24,15 +24,21 @@ LT_INIT
 HAVE_I386=no
 HAVE_ARM=no
 HAVE_ARM64=no
+HAVE_64BIT=no
 case $host_cpu in
-  i?86|x86*)
+  i?86)
     HAVE_I386=yes
+  ;;
+  x86*)
+    HAVE_I386=yes
+    HAVE_64BIT=yes
   ;;
   arm|armv7)
     HAVE_ARM=yes
   ;;
   aarch64)
     HAVE_ARM64=yes
+    HAVE_64BIT=yes
   ;;
 esac
 if [[ "$HAVE_I386" = "yes" ]]; then
@@ -47,6 +53,7 @@ fi
 AM_CONDITIONAL(ARCH_I386, [test "$HAVE_I386" = "yes"])
 AM_CONDITIONAL(ARCH_ARM, [test "$HAVE_ARM" = "yes"])
 AM_CONDITIONAL(ARCH_ARM64, test "$HAVE_ARM64" = "yes")
+AM_CONDITIONAL(ARCH_64BIT, test "$HAVE_64BIT" = "yes")
 
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
@@ -116,7 +123,10 @@ AC_SUBST(FRIDA_VALAFLAGS)
 
 GLIB_VERSION=2.26.0
 pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, frida-gum-1.0"
-FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg gee-0.8 --pkg frida-gum-1.0"
+FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg posix --pkg gee-0.8 --pkg frida-gum-1.0"
+if [[ "x$HAVE_LINUX" = "xyes" ]]; then
+  FRIDA_PACKAGES="$FRIDA_PACKAGES --pkg frida-gum-linux-1.0"
+fi
 PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
 
 FRIDA_BACKEND_LIBS=
