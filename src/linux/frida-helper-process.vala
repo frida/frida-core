@@ -1,6 +1,4 @@
 #if LINUX
-using Gee;
-
 namespace Frida {
 	internal class HelperProcess {
 		public signal void uninjected (uint id);
@@ -26,9 +24,6 @@ namespace Frida {
 		private ResourceStore _resource_store;
 
 		private MainContext main_context;
-		private DBusConnection connection;
-		private Helper proxy;
-		private Gee.Promise<Helper> obtain_request;
 
 		public HelperProcess () {
 			this.main_context = MainContext.get_thread_default ();
@@ -57,21 +52,36 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			var helper = yield obtain ();
+			var helper = yield obtain_for_path (path);
 			return yield helper.spawn (path, argv, envp);
 		}
 
 		public async void resume (uint pid) throws IOError {
-			var helper = yield obtain ();
+			var helper = yield obtain_for_pid (pid);
 			yield helper.resume (pid);
 		}
 
 		public async uint inject (uint pid, string filename, string data_string) throws IOError {
-			var helper = yield obtain ();
+			var helper = yield obtain_for_pid (pid);
 			return yield helper.inject (pid, filename, data_string);
 		}
 
-		private async Helper obtain () throws IOError {
+		private async Helper obtain_for_path (string path) throws IOError {
+		}
+
+		private async Helper obtain_for_pid (uint pid) throws IOError {
+		}
+	}
+
+	private class HelperFactory {
+		public signal void lost ();
+		public signal void uninjected (uint id);
+
+		private DBusConnection connection;
+		private Helper proxy;
+		private Gee.Promise<Helper> obtain_request;
+
+		public async Helper obtain () throws IOError {
 			if (obtain_request != null) {
 				try {
 					return yield obtain_request.future.wait_async ();
@@ -141,6 +151,7 @@ namespace Frida {
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			proxy.uninjected.disconnect (on_uninjected);
 			connection.closed.disconnect (on_connection_closed);
+			lost ();
 		}
 
 		private void on_uninjected (uint id) {
@@ -166,10 +177,7 @@ namespace Frida {
 			private set;
 		}
 
-		public TemporaryFile pipe {
-			get;
-			set;
-		}
+		private Gee.ArrayList<TemporaryFile> files = new Gee.ArrayList<TemporaryFile> ();
 
 		public ResourceStore () throws IOError {
 			tempdir = new TemporaryDirectory ();
@@ -182,18 +190,22 @@ namespace Frida {
 			FileUtils.chmod (helper32.path, 0700);
 
 			var blob64 = Frida.Data.Helper.get_frida_helper_64_blob ();
-			helper64 = new TemporaryFile.from_stream ("frida-helper-32",
+			helper64 = new TemporaryFile.from_stream ("frida-helper-64",
 				new MemoryInputStream.from_data (blob64.data, null),
 				tempdir);
 			FileUtils.chmod (helper64.path, 0700);
 		}
 
 		~ResourceStore () {
-			if (pipe != null)
-				pipe.destroy ();
+			foreach (var file in files)
+				file.destroy ();
 			helper64.destroy ();
 			helper32.destroy ();
 			tempdir.destroy ();
+		}
+
+		public void manage (TemporaryFile file) {
+			files.add (file);
 		}
 	}
 }

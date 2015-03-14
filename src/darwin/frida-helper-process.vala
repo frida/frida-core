@@ -1,6 +1,4 @@
 #if DARWIN
-using Gee;
-
 namespace Frida {
 	internal class HelperProcess {
 		public signal void uninjected (uint id);
