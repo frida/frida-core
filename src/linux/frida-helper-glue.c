@@ -220,7 +220,13 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   FridaInjectParams params = { pid, so_path, data_string };
   regs_t saved_regs;
 
-  instance = frida_inject_instance_new (self, self->last_id++, pid, temp_path);
+  if (self->last_id == 0 || self->last_id >= G_MAXINT)
+  {
+    /* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
+    self->last_id = (GLIB_SIZEOF_VOID_P == 4) ? 1 : 2;
+  }
+  instance = frida_inject_instance_new (self, self->last_id, pid, temp_path);
+  self->last_id += 2;
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
     goto beach;

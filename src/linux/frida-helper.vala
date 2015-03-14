@@ -21,7 +21,7 @@ namespace Frida {
 		/* these should be private, but must be accessible to glue code */
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
-		public uint last_id = 1;
+		public uint last_id = 0;
 
 		public HelperService (string parent_address) {
 			Object (parent_address: parent_address);
