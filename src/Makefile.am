@@ -1,13 +1,5 @@
 RESOURCE_COMPILER = $(top_builddir)/tools/resource-compiler
 
-if OS_LINUX
-soext = .so
-endif
-if OS_DARWIN
-soext = .dylib
-endif
-AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent$(soext)
-
 backend_programs = $(NULL)
 backend_libraries = $(NULL)
 backend_sources = $(NULL)
@@ -17,17 +9,101 @@ backend_cleanfiles = $(NULL)
 glue_sources = $(NULL)
 
 if OS_LINUX
+if ARCH_64BIT
+HELPER32 = null-resource.bin
+HELPER64 = frida-helper
+AGENT32 = null-resource.bin
+AGENT64 = $(top_builddir)/lib/agent/.libs/libfrida-agent.so
+else
+HELPER32 = frida-helper
+HELPER64 = null-resource.bin
+AGENT32 = $(top_builddir)/lib/agent/.libs/libfrida-agent.so
+AGENT64 = null-resource.bin
+endif
+AGENT = $(AGENT32) $(AGENT64)
+
 backend_sources += \
 	linux/linux-host-session.vala \
-	linux/linjector.vala
+	linux/linjector.vala \
+	linux/frida-helper-process.vala
 glue_sources += \
 	linux/system-linux.c \
 	linux/linux-host-session-glue.c \
-	linux/linjector-glue.c
+	linux/linjector-glue.c \
+	linux/frida-helper-process.glue
+backend_libadd += \
+	libfrida-helper-types.la \
+	libfrida-data-helper-process.la
+backend_valaflags += \
+	--pkg=frida-helper-types \
+	--pkg=frida-data-helper-process
+
+backend_programs += \
+	frida-helper
+frida_helper_SOURCES = \
+	$(NULL)
+frida_helper_LDFLAGS = \
+	$(FRIDA_LDFLAGS)
+frida_helper_LDADD = \
+	libfrida-helper-main.la \
+	libfrida-helper-glue.la \
+	$(FRIDA_LIBS)
+
+backend_libraries += \
+	libfrida-helper-types.la \
+	libfrida-helper-main.la \
+	libfrida-helper-glue.la
+
+libfrida_helper_main_la_SOURCES = \
+	linux/frida-helper.vala
+libfrida_helper_main_la_CFLAGS = \
+	-w
+libfrida_helper_main_la_LIBADD = \
+	libfrida-helper-types.la \
+	$(FRIDA_LIBS)
+libfrida_helper_main_la_VALAFLAGS = \
+	--header=frida-helper.h \
+	--vapidir=$(abs_srcdir) \
+	--pkg=frida-helper-types \
+	@FRIDA_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
+
+libfrida_helper_glue_la_SOURCES = \
+	linux/frida-helper-glue.c
+
+libfrida_helper_types_la_SOURCES = \
+	linux/frida-helper-types.vala
+libfrida_helper_types_la_CFLAGS = \
+	-w
+libfrida_helper_types_la_VALAFLAGS = \
+	--vapi=frida-helper-types.vapi \
+	--library=frida-helper-types \
+	--header=frida-helper-types.h \
+	@FRIDA_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
+
+backend_libraries += \
+	libfrida-data-helper-process.la
+libfrida_data_helper_process_la_SOURCES = \
+	frida-data-helper-process.c \
+	frida-data-helper-process-blob.S \
+	$(NULL)
+frida-data-helper-process.c frida-data-helper-process-blob.S:
+	$(AM_V_GEN) \
+		$(RESOURCE_COMPILER) \
+			-c "$(srcdir)/linux/frida-helper-process.resources" \
+			-o "$(builddir)/frida-data-helper-process" \
+			$(HELPER)
+backend_cleanfiles += \
+	frida-data-helper-process.vapi \
+	frida-data-helper-process.h \
+	frida-data-helper-process.c \
+	frida-data-helper-process-blob.S
 endif
 
 if OS_DARWIN
 HELPER = frida-helper
+AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib
 
 backend_sources += \
 	darwin/darwin-host-session.vala \

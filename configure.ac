@@ -24,15 +24,21 @@ LT_INIT
 HAVE_I386=no
 HAVE_ARM=no
 HAVE_ARM64=no
+HAVE_64BIT=no
 case $host_cpu in
-  i?86|x86*)
+  i?86)
     HAVE_I386=yes
+  ;;
+  x86*)
+    HAVE_I386=yes
+    HAVE_64BIT=yes
   ;;
   arm|armv7)
     HAVE_ARM=yes
   ;;
   aarch64)
     HAVE_ARM64=yes
+    HAVE_64BIT=yes
   ;;
 esac
 if [[ "$HAVE_I386" = "yes" ]]; then
@@ -47,6 +53,7 @@ fi
 AM_CONDITIONAL(ARCH_I386, [test "$HAVE_I386" = "yes"])
 AM_CONDITIONAL(ARCH_ARM, [test "$HAVE_ARM" = "yes"])
 AM_CONDITIONAL(ARCH_ARM64, test "$HAVE_ARM64" = "yes")
+AM_CONDITIONAL(ARCH_64BIT, test "$HAVE_64BIT" = "yes")
 
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
