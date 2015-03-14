@@ -37,7 +37,7 @@ glue_sources += \
 	linux/system-linux.c \
 	linux/linux-host-session-glue.c \
 	linux/linjector-glue.c \
-	linux/frida-helper-process.glue
+	linux/frida-helper-process-glue.c
 backend_libadd += \
 	libfrida-helper-types.la \
 	libfrida-data-helper-process.la
