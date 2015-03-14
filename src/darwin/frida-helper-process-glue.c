@@ -1,8 +1,5 @@
 #include "frida-core.h"
 
-#ifdef HAVE_MAC
-# include <crt_externs.h>
-#endif
 #include <errno.h>
 #include <spawn.h>
 #include <sys/stat.h>
@@ -12,15 +9,14 @@ frida_helper_process_spawn_helper (const gchar * path, gchar ** argv, int argv_l
 {
   gchar ** envp;
   pid_t pid;
+  int result;
 
   chmod (path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
 
-#ifdef HAVE_MAC
-  envp = *_NSGetEnviron ();
-#else
-  envp = NULL;
-#endif
-  if (posix_spawn (&pid, path, NULL, NULL, argv, envp) != 0)
+  envp = g_get_environ ();
+  result = posix_spawn (&pid, path, NULL, NULL, argv, envp);
+  g_strfreev (envp);
+  if (result != 0)
     goto handle_spawn_error;
 
   return pid;
@@ -32,4 +28,3 @@ handle_spawn_error:
     return 0;
   }
 }
-
