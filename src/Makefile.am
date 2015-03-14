@@ -10,17 +10,24 @@ glue_sources = $(NULL)
 
 if OS_LINUX
 if ARCH_64BIT
-HELPER32 = null-resource.bin
-HELPER64 = frida-helper
-AGENT32 = null-resource.bin
-AGENT64 = $(top_builddir)/lib/agent/.libs/libfrida-agent.so
+HELPER32 ?= null-resource.bin!frida-helper-32
+HELPER64 ?= frida-helper!frida-helper-64
+AGENT32 ?= null-resource.bin!frida-agent-32.so
+AGENT64 ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent-64.so
 else
-HELPER32 = frida-helper
-HELPER64 = null-resource.bin
-AGENT32 = $(top_builddir)/lib/agent/.libs/libfrida-agent.so
-AGENT64 = null-resource.bin
+HELPER32 ?= frida-helper!frida-helper-32
+HELPER64 ?= null-resource.bin!frida-helper-64
+AGENT32 ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent-32.so
+AGENT64 ?= null-resource.bin!frida-agent-64.so
 endif
+HELPER = $(HELPER32) $(HELPER64)
 AGENT = $(AGENT32) $(AGENT64)
+HELPER_TARGETS = \
+	$(shell echo $(HELPER32) | cut -f1 -d'!') \
+	$(shell echo $(HELPER64) | cut -f1 -d'!')
+AGENT_TARGETS = \
+	$(shell echo $(AGENT32) | cut -f1 -d'!') \
+	$(shell echo $(AGENT64) | cut -f1 -d'!')
 
 backend_sources += \
 	linux/linux-host-session.vala \
@@ -88,7 +95,7 @@ libfrida_data_helper_process_la_SOURCES = \
 	frida-data-helper-process.c \
 	frida-data-helper-process-blob.S \
 	$(NULL)
-frida-data-helper-process.c frida-data-helper-process-blob.S:
+frida-data-helper-process.c frida-data-helper-process-blob.S: $(HELPER_TARGETS)
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
 			-c "$(srcdir)/linux/frida-helper-process.resources" \
@@ -103,7 +110,8 @@ endif
 
 if OS_DARWIN
 HELPER = frida-helper
-AGENT = $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib
+AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib!frida-agent.dylib
+AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
 
 backend_sources += \
 	darwin/darwin-host-session.vala \
@@ -292,7 +300,7 @@ libfrida_data_agent_la_SOURCES = \
 	frida-data-agent.c \
 	frida-data-agent-blob.S \
 	$(NULL)
-frida-data-agent.c frida-data-agent-blob.S: $(AGENT)
+frida-data-agent.c frida-data-agent-blob.S: $(AGENT_TARGETS)
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
 			-c "$(srcdir)/agent.resources" \
