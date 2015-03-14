@@ -164,11 +164,14 @@ namespace Frida {
 
 		public extern void _create_context ();
 		public extern void _destroy_context ();
+
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
-		public extern void _free_inject_instance (void * instance);
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
+
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
+		public extern void _free_inject_instance (void * instance);
+
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
 	}
 }

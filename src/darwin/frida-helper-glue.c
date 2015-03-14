@@ -203,6 +203,11 @@ static gboolean frida_spawn_fill_context_process_export (const GumExportDetails 
 static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error);
 static gboolean frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error);
 
+static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id);
+static void frida_inject_instance_free (FridaInjectInstance * instance);
+
+static void frida_inject_instance_on_event (void * context);
+
 static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details,
     mach_vm_address_t payload_base, mach_vm_size_t payload_size, GError ** error);
 static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details,
@@ -231,298 +236,6 @@ _frida_helper_service_destroy_context (FridaHelperService * self)
   dispatch_release (ctx->dispatch_queue);
 
   g_slice_free (FridaHelperContext, ctx);
-}
-
-static FridaSpawnInstance *
-frida_spawn_instance_new (FridaHelperService * service)
-{
-  FridaSpawnInstance * instance;
-
-  instance = g_slice_new0 (FridaSpawnInstance);
-  instance->service = g_object_ref (service);
-  instance->task = MACH_PORT_NULL;
-  instance->task_monitor_source = NULL;
-
-  instance->overwritten_code = NULL;
-
-  instance->server_port = MACH_PORT_NULL;
-  instance->reply_port = MACH_PORT_NULL;
-  instance->server_recv_source = NULL;
-
-  return instance;
-}
-
-static void
-frida_spawn_instance_free (FridaSpawnInstance * instance)
-{
-  task_t self_task = mach_task_self ();
-
-  if (instance->server_recv_source != NULL)
-    dispatch_release (instance->server_recv_source);
-  if (instance->reply_port != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, instance->reply_port, MACH_PORT_RIGHT_SEND_ONCE, -1);
-  if (instance->server_port != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, instance->server_port, MACH_PORT_RIGHT_RECEIVE, -1);
-
-  g_free (instance->overwritten_code);
-
-  if (instance->task_monitor_source != NULL)
-    dispatch_release (instance->task_monitor_source);
-  if (instance->task != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, instance->task);
-  g_object_unref (instance->service);
-
-  g_slice_free (FridaSpawnInstance, instance);
-}
-
-static void
-frida_spawn_instance_resume (FridaSpawnInstance * self)
-{
-  FridaSpawnMessageTx msg;
-
-  msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
-  msg.header.msgh_size = sizeof (msg);
-  msg.header.msgh_remote_port = self->reply_port;
-  msg.header.msgh_local_port = MACH_PORT_NULL;
-  msg.header.msgh_reserved = 0;
-  msg.header.msgh_id = 1437;
-  mach_msg_send (&msg.header);
-
-  self->reply_port = MACH_PORT_NULL;
-}
-
-static void
-frida_spawn_instance_on_task_dead (void * context)
-{
-  FridaSpawnInstance * self = context;
-
-  _frida_helper_service_on_spawn_instance_dead (self->service, self->pid);
-}
-
-static void
-frida_spawn_instance_on_server_recv (void * context)
-{
-  FridaSpawnInstance * self = context;
-  FridaSpawnMessageRx msg;
-  kern_return_t ret;
-
-  bzero (&msg, sizeof (msg));
-  msg.header.msgh_size = sizeof (msg);
-  msg.header.msgh_local_port = self->server_port;
-  ret = mach_msg_receive (&msg.header);
-  g_assert_cmpint (ret, ==, 0);
-  g_assert_cmpint (msg.header.msgh_id, ==, 1337);
-  self->reply_port = msg.header.msgh_remote_port;
-
-  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  mach_vm_write (self->task, self->entrypoint, (vm_offset_t) self->overwritten_code, self->overwritten_code_size);
-  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-
-  _frida_helper_service_on_spawn_instance_ready (self->service, self->pid);
-}
-
-static gboolean
-frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaSpawnApi * api, GError ** error)
-{
-  FridaSpawnFillContext fill_ctx;
-
-  fill_ctx.api = api;
-  fill_ctx.remaining = 5;
-  gum_darwin_enumerate_exports (self->task, FRIDA_SYSTEM_LIBC, frida_spawn_fill_context_process_export, &fill_ctx);
-
-  if (fill_ctx.remaining > 0)
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "failed to resolve one or more functions");
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-#define FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING(field) \
-  if (strcmp (details->name, G_STRINGIFY (field)) == 0) \
-  { \
-    ctx->api->field##_impl = details->address; \
-    ctx->remaining--; \
-    return ctx->remaining != 0; \
-  }
-
-static gboolean
-frida_spawn_fill_context_process_export (const GumExportDetails * details, gpointer user_data)
-{
-  FridaSpawnFillContext * ctx = user_data;
-
-  if (details->type != GUM_EXPORT_FUNCTION)
-    return TRUE;
-
-  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_task_self);
-  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_port_allocate);
-  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_port_deallocate);
-  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_msg);
-  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (abort);
-
-  return TRUE;
-}
-
-#if defined (HAVE_ARM) || defined (HAVE_ARM64)
-
-static gboolean
-frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
-{
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented for ARM");
-  return FALSE;
-}
-
-static gboolean
-frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
-{
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented for ARM");
-  return FALSE;
-}
-
-#else
-
-static gboolean
-frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
-{
-  GumX86Writer cw;
-
-  gum_x86_writer_init (&cw, code);
-  gum_x86_writer_set_target_cpu (&cw, self->cpu_type);
-
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XAX); /* placeholder for entrypoint */
-  gum_x86_writer_put_pushax (&cw);
-
-  /* fill in the entrypoint so we can ret to it later */
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, self->entrypoint);
-  if (self->cpu_type == GUM_CPU_IA32)
-    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XSP, 8 * sizeof (guint32), GUM_REG_XAX);
-  else
-    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XSP, 16 * sizeof (guint64), GUM_REG_XAX);
-
-  /* transfer to the sync code */
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, self->payload_address + FRIDA_SPAWN_CODE_OFFSET);
-  gum_x86_writer_put_jmp_reg (&cw, GUM_REG_XAX);
-
-  gum_x86_writer_flush (&cw);
-  *code_size = gum_x86_writer_offset (&cw);
-  gum_x86_writer_free (&cw);
-
-  return TRUE;
-}
-
-static gboolean
-frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
-{
-  GumX86Writer cw;
-  gconstpointer panic_label = "frida_spawn_instance_panic";
-
-  gum_x86_writer_init (&cw, code);
-  gum_x86_writer_set_target_cpu (&cw, self->cpu_type);
-
-  /* xax = mach_task_self (); */
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_task_self_impl);
-  gum_x86_writer_put_call_reg (&cw, GUM_REG_XAX);
-
-  /* mach_port_allocate (xax, MACH_PORT_RIGHT_RECEIVE, &xbp); */
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->mach_port_allocate_impl);
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XAX); /* reserve space */
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XSP);
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XBX, 3,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_PORT_RIGHT_RECEIVE),
-      GUM_ARG_REGISTER, GUM_REG_XBP);
-  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XBP, GUM_REG_XBP);
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XAX); /* release space */
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_msg_impl);
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, self->payload_address + FRIDA_SPAWN_DATA_OFFSET);
-
-  /* xbx->header.msgh_local_port = *xbp; */
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBX, G_STRUCT_OFFSET (FridaSpawnMessageTx, header.msgh_local_port), GUM_REG_EBP);
-
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX, 7,
-      GUM_ARG_REGISTER, GUM_REG_XBX,                                    /* header           */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_SEND_MSG | MACH_RCV_MSG), /* flags            */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageTx)), /* send size        */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageRx)), /* max receive size */
-      GUM_ARG_REGISTER, GUM_REG_XBP,                                    /* receive port     */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_MSG_TIMEOUT_NONE),        /* timeout          */
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_PORT_NULL)                /* notification     */
-  );
-  gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
-  gum_x86_writer_put_jcc_short_label (&cw, GUM_X86_JNZ, panic_label, GUM_UNLIKELY);
-
-  /* mach_port_deallocate (mach_task_self (), xbp); */
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_task_self_impl);
-  gum_x86_writer_put_call_reg (&cw, GUM_REG_XAX);
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->mach_port_deallocate_impl);
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XBX, 2,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_REGISTER, GUM_REG_XBP);
-
-  gum_x86_writer_put_popax (&cw);
-  gum_x86_writer_put_ret (&cw);
-
-  gum_x86_writer_put_label (&cw, panic_label);
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->abort_impl);
-  gum_x86_writer_put_call_reg (&cw, GUM_REG_XBX);
-
-  gum_x86_writer_flush (&cw);
-  *code_size = gum_x86_writer_offset (&cw);
-  gum_x86_writer_free (&cw);
-
-  return TRUE;
-}
-
-#endif
-
-static FridaInjectInstance *
-frida_inject_instance_new (FridaHelperService * service, guint id)
-{
-  FridaInjectInstance * instance;
-
-  instance = g_slice_new (FridaInjectInstance);
-  instance->service = g_object_ref (service);
-  instance->id = id;
-  instance->task = MACH_PORT_NULL;
-  instance->payload_address = 0;
-  instance->thread = MACH_PORT_NULL;
-  instance->thread_monitor_source = NULL;
-
-  return instance;
-}
-
-static void
-frida_inject_instance_free (FridaInjectInstance * instance)
-{
-  task_t self_task = mach_task_self ();
-
-  if (instance->thread_monitor_source != NULL)
-    dispatch_release (instance->thread_monitor_source);
-  if (instance->thread != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, instance->thread);
-  if (instance->payload_address != 0)
-    mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
-  if (instance->task != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, instance->task);
-  g_object_unref (instance->service);
-  g_slice_free (FridaInjectInstance, instance);
-}
-
-static void
-frida_inject_instance_handle_event (void * context)
-{
-  FridaInjectInstance * instance = context;
-
-  _frida_helper_service_on_inject_instance_dead (instance->service, instance->id);
-}
-
-void
-_frida_helper_service_free_inject_instance (FridaHelperService * self, void * instance)
-{
-  frida_inject_instance_free (instance);
 }
 
 guint
@@ -849,8 +562,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
       ctx->dispatch_queue);
   instance->thread_monitor_source = source;
   dispatch_set_context (source, instance);
-  dispatch_source_set_event_handler_f (source,
-      frida_inject_instance_handle_event);
+  dispatch_source_set_event_handler_f (source, frida_inject_instance_on_event);
   dispatch_resume (source);
 
   result = instance->id;
@@ -879,6 +591,12 @@ beach:
 
     return result;
   }
+}
+
+void
+_frida_helper_service_free_inject_instance (FridaHelperService * self, void * instance)
+{
+  frida_inject_instance_free (instance);
 }
 
 void
@@ -972,6 +690,292 @@ beach:
 
     return;
   }
+}
+
+static FridaSpawnInstance *
+frida_spawn_instance_new (FridaHelperService * service)
+{
+  FridaSpawnInstance * instance;
+
+  instance = g_slice_new0 (FridaSpawnInstance);
+  instance->service = g_object_ref (service);
+  instance->task = MACH_PORT_NULL;
+  instance->task_monitor_source = NULL;
+
+  instance->overwritten_code = NULL;
+
+  instance->server_port = MACH_PORT_NULL;
+  instance->reply_port = MACH_PORT_NULL;
+  instance->server_recv_source = NULL;
+
+  return instance;
+}
+
+static void
+frida_spawn_instance_free (FridaSpawnInstance * instance)
+{
+  task_t self_task = mach_task_self ();
+
+  if (instance->server_recv_source != NULL)
+    dispatch_release (instance->server_recv_source);
+  if (instance->reply_port != MACH_PORT_NULL)
+    mach_port_mod_refs (self_task, instance->reply_port, MACH_PORT_RIGHT_SEND_ONCE, -1);
+  if (instance->server_port != MACH_PORT_NULL)
+    mach_port_mod_refs (self_task, instance->server_port, MACH_PORT_RIGHT_RECEIVE, -1);
+
+  g_free (instance->overwritten_code);
+
+  if (instance->task_monitor_source != NULL)
+    dispatch_release (instance->task_monitor_source);
+  if (instance->task != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->task);
+  g_object_unref (instance->service);
+
+  g_slice_free (FridaSpawnInstance, instance);
+}
+
+static void
+frida_spawn_instance_resume (FridaSpawnInstance * self)
+{
+  FridaSpawnMessageTx msg;
+
+  msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+  msg.header.msgh_size = sizeof (msg);
+  msg.header.msgh_remote_port = self->reply_port;
+  msg.header.msgh_local_port = MACH_PORT_NULL;
+  msg.header.msgh_reserved = 0;
+  msg.header.msgh_id = 1437;
+  mach_msg_send (&msg.header);
+
+  self->reply_port = MACH_PORT_NULL;
+}
+
+static void
+frida_spawn_instance_on_task_dead (void * context)
+{
+  FridaSpawnInstance * self = context;
+
+  _frida_helper_service_on_spawn_instance_dead (self->service, self->pid);
+}
+
+static void
+frida_spawn_instance_on_server_recv (void * context)
+{
+  FridaSpawnInstance * self = context;
+  FridaSpawnMessageRx msg;
+  kern_return_t ret;
+
+  bzero (&msg, sizeof (msg));
+  msg.header.msgh_size = sizeof (msg);
+  msg.header.msgh_local_port = self->server_port;
+  ret = mach_msg_receive (&msg.header);
+  g_assert_cmpint (ret, ==, 0);
+  g_assert_cmpint (msg.header.msgh_id, ==, 1337);
+  self->reply_port = msg.header.msgh_remote_port;
+
+  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  mach_vm_write (self->task, self->entrypoint, (vm_offset_t) self->overwritten_code, self->overwritten_code_size);
+  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+
+  _frida_helper_service_on_spawn_instance_ready (self->service, self->pid);
+}
+
+static gboolean
+frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaSpawnApi * api, GError ** error)
+{
+  FridaSpawnFillContext fill_ctx;
+
+  fill_ctx.api = api;
+  fill_ctx.remaining = 5;
+  gum_darwin_enumerate_exports (self->task, FRIDA_SYSTEM_LIBC, frida_spawn_fill_context_process_export, &fill_ctx);
+
+  if (fill_ctx.remaining > 0)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+        "failed to resolve one or more functions");
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+#define FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING(field) \
+  if (strcmp (details->name, G_STRINGIFY (field)) == 0) \
+  { \
+    ctx->api->field##_impl = details->address; \
+    ctx->remaining--; \
+    return ctx->remaining != 0; \
+  }
+
+static gboolean
+frida_spawn_fill_context_process_export (const GumExportDetails * details, gpointer user_data)
+{
+  FridaSpawnFillContext * ctx = user_data;
+
+  if (details->type != GUM_EXPORT_FUNCTION)
+    return TRUE;
+
+  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_task_self);
+  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_port_allocate);
+  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_port_deallocate);
+  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (mach_msg);
+  FRIDA_SPAWN_API_ASSIGN_AND_RETURN_IF_MATCHING (abort);
+
+  return TRUE;
+}
+
+#if defined (HAVE_ARM) || defined (HAVE_ARM64)
+
+static gboolean
+frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
+{
+  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented for ARM");
+  return FALSE;
+}
+
+static gboolean
+frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
+{
+  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented for ARM");
+  return FALSE;
+}
+
+#else
+
+static gboolean
+frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
+{
+  GumX86Writer cw;
+
+  gum_x86_writer_init (&cw, code);
+  gum_x86_writer_set_target_cpu (&cw, self->cpu_type);
+
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XAX); /* placeholder for entrypoint */
+  gum_x86_writer_put_pushax (&cw);
+
+  /* fill in the entrypoint so we can ret to it later */
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, self->entrypoint);
+  if (self->cpu_type == GUM_CPU_IA32)
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XSP, 8 * sizeof (guint32), GUM_REG_XAX);
+  else
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XSP, 16 * sizeof (guint64), GUM_REG_XAX);
+
+  /* transfer to the sync code */
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, self->payload_address + FRIDA_SPAWN_CODE_OFFSET);
+  gum_x86_writer_put_jmp_reg (&cw, GUM_REG_XAX);
+
+  gum_x86_writer_flush (&cw);
+  *code_size = gum_x86_writer_offset (&cw);
+  gum_x86_writer_free (&cw);
+
+  return TRUE;
+}
+
+static gboolean
+frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
+{
+  GumX86Writer cw;
+  gconstpointer panic_label = "frida_spawn_instance_panic";
+
+  gum_x86_writer_init (&cw, code);
+  gum_x86_writer_set_target_cpu (&cw, self->cpu_type);
+
+  /* xax = mach_task_self (); */
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_task_self_impl);
+  gum_x86_writer_put_call_reg (&cw, GUM_REG_XAX);
+
+  /* mach_port_allocate (xax, MACH_PORT_RIGHT_RECEIVE, &xbp); */
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->mach_port_allocate_impl);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XAX); /* reserve space */
+  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XSP);
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XBX, 3,
+      GUM_ARG_REGISTER, GUM_REG_XAX,
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_PORT_RIGHT_RECEIVE),
+      GUM_ARG_REGISTER, GUM_REG_XBP);
+  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XBP, GUM_REG_XBP);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XAX); /* release space */
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_msg_impl);
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, self->payload_address + FRIDA_SPAWN_DATA_OFFSET);
+
+  /* xbx->header.msgh_local_port = *xbp; */
+  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBX, G_STRUCT_OFFSET (FridaSpawnMessageTx, header.msgh_local_port), GUM_REG_EBP);
+
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX, 7,
+      GUM_ARG_REGISTER, GUM_REG_XBX,                                    /* header           */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_SEND_MSG | MACH_RCV_MSG), /* flags            */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageTx)), /* send size        */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (sizeof (FridaSpawnMessageRx)), /* max receive size */
+      GUM_ARG_REGISTER, GUM_REG_XBP,                                    /* receive port     */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_MSG_TIMEOUT_NONE),        /* timeout          */
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (MACH_PORT_NULL)                /* notification     */
+  );
+  gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
+  gum_x86_writer_put_jcc_short_label (&cw, GUM_X86_JNZ, panic_label, GUM_UNLIKELY);
+
+  /* mach_port_deallocate (mach_task_self (), xbp); */
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_task_self_impl);
+  gum_x86_writer_put_call_reg (&cw, GUM_REG_XAX);
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->mach_port_deallocate_impl);
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XBX, 2,
+      GUM_ARG_REGISTER, GUM_REG_XAX,
+      GUM_ARG_REGISTER, GUM_REG_XBP);
+
+  gum_x86_writer_put_popax (&cw);
+  gum_x86_writer_put_ret (&cw);
+
+  gum_x86_writer_put_label (&cw, panic_label);
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, api->abort_impl);
+  gum_x86_writer_put_call_reg (&cw, GUM_REG_XBX);
+
+  gum_x86_writer_flush (&cw);
+  *code_size = gum_x86_writer_offset (&cw);
+  gum_x86_writer_free (&cw);
+
+  return TRUE;
+}
+
+#endif
+
+static FridaInjectInstance *
+frida_inject_instance_new (FridaHelperService * service, guint id)
+{
+  FridaInjectInstance * instance;
+
+  instance = g_slice_new (FridaInjectInstance);
+  instance->service = g_object_ref (service);
+  instance->id = id;
+  instance->task = MACH_PORT_NULL;
+  instance->payload_address = 0;
+  instance->thread = MACH_PORT_NULL;
+  instance->thread_monitor_source = NULL;
+
+  return instance;
+}
+
+static void
+frida_inject_instance_free (FridaInjectInstance * instance)
+{
+  task_t self_task = mach_task_self ();
+
+  if (instance->thread_monitor_source != NULL)
+    dispatch_release (instance->thread_monitor_source);
+  if (instance->thread != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->thread);
+  if (instance->payload_address != 0)
+    mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
+  if (instance->task != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->task);
+  g_object_unref (instance->service);
+  g_slice_free (FridaInjectInstance, instance);
+}
+
+static void
+frida_inject_instance_on_event (void * context)
+{
+  FridaInjectInstance * instance = context;
+
+  _frida_helper_service_on_inject_instance_dead (instance->service, instance->id);
 }
 
 static gboolean
