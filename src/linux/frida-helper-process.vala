@@ -9,6 +9,9 @@ namespace Frida {
 			}
 		}
 
+		private HelperFactory factory32;
+		private HelperFactory factory64;
+
 		private ResourceStore resource_store {
 			get {
 				if (_resource_store == null) {
@@ -30,6 +33,115 @@ namespace Frida {
 		}
 
 		public async void close () {
+			if (factory32 != null) {
+				yield factory32.close ();
+				factory32 = null;
+			}
+
+			if (factory64 != null) {
+				yield factory64.close ();
+				factory64 = null;
+			}
+
+			_resource_store = null;
+		}
+
+		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			var helper = yield obtain_for_path (path);
+			return yield helper.spawn (path, argv, envp);
+		}
+
+		public async void resume (uint pid) throws IOError {
+			var helper = yield obtain_for_pid (pid);
+			yield helper.resume (pid);
+		}
+
+		public async void kill (uint pid) throws IOError {
+			var helper = yield obtain_for_pid (pid);
+			yield helper.kill (pid);
+		}
+
+		public async uint inject (uint pid, string filename, string data_string) throws IOError {
+			var helper = yield obtain_for_pid (pid);
+			return yield helper.inject (pid, filename, data_string, resource_store.tempdir.path);
+		}
+
+		private async Helper obtain_for_path (string path) throws IOError {
+			try {
+				return yield obtain_for_cpu_type (Gum.Linux.cpu_type_from_file (path));
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		private async Helper obtain_for_pid (uint pid) throws IOError {
+			try {
+				return yield obtain_for_cpu_type (Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid));
+			} catch (Error e) {
+				throw new IOError.FAILED (e.message);
+			}
+		}
+
+		private async Helper obtain_for_cpu_type (Gum.CpuType cpu_type) throws IOError {
+			HelperFactory factory = null;
+			switch (cpu_type) {
+				case Gum.CpuType.IA32:
+				case Gum.CpuType.ARM:
+					if (factory32 == null) {
+						factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
+						factory32.lost.connect (on_factory_lost);
+						factory32.uninjected.connect (on_factory_uninjected);
+					}
+					factory = factory32;
+					break;
+				case Gum.CpuType.AMD64:
+				case Gum.CpuType.ARM64:
+					if (factory64 == null) {
+						factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
+						factory64.lost.connect (on_factory_lost);
+						factory64.uninjected.connect (on_factory_uninjected);
+					}
+					factory = factory64;
+					break;
+				default:
+					assert_not_reached ();
+			}
+			return yield factory.obtain ();
+		}
+
+		private void on_factory_lost (HelperFactory factory) {
+			factory.lost.disconnect (on_factory_lost);
+			factory.uninjected.disconnect (on_factory_uninjected);
+			if (factory == factory32) {
+				factory32 = null;
+			} else if (factory == factory64) {
+				factory64 = null;
+			}
+		}
+
+		private void on_factory_uninjected (uint id) {
+			uninjected (id);
+		}
+	}
+
+	private class HelperFactory {
+		public signal void lost (HelperFactory factory);
+		public signal void uninjected (uint id);
+
+		private TemporaryFile helper_file;
+		private ResourceStore resource_store;
+		private MainContext main_context;
+		private DBusConnection connection;
+		private Helper proxy;
+		private Gee.Promise<Helper> obtain_request;
+
+		public HelperFactory (TemporaryFile helper_file, ResourceStore resource_store, MainContext main_context) {
+			this.helper_file = helper_file;
+			this.resource_store = resource_store;
+			this.main_context = main_context;
+		}
+
+		public async void close () {
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
@@ -47,39 +159,7 @@ namespace Frida {
 				}
 				connection = null;
 			}
-
-			_resource_store = null;
 		}
-
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			var helper = yield obtain_for_path (path);
-			return yield helper.spawn (path, argv, envp);
-		}
-
-		public async void resume (uint pid) throws IOError {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.resume (pid);
-		}
-
-		public async uint inject (uint pid, string filename, string data_string) throws IOError {
-			var helper = yield obtain_for_pid (pid);
-			return yield helper.inject (pid, filename, data_string);
-		}
-
-		private async Helper obtain_for_path (string path) throws IOError {
-		}
-
-		private async Helper obtain_for_pid (uint pid) throws IOError {
-		}
-	}
-
-	private class HelperFactory {
-		public signal void lost ();
-		public signal void uninjected (uint id);
-
-		private DBusConnection connection;
-		private Helper proxy;
-		private Gee.Promise<Helper> obtain_request;
 
 		public async Helper obtain () throws IOError {
 			if (obtain_request != null) {
@@ -102,7 +182,7 @@ namespace Frida {
 				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 				server.start ();
 				var tokens = server.client_address.split ("=", 2);
-				resource_store.pipe = new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir);
+				resource_store.manage (new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir));
 				var connection_handler = server.new_connection.connect ((c) => {
 					pending_connection = c;
 					obtain.callback ();
@@ -115,8 +195,8 @@ namespace Frida {
 					return false;
 				});
 				timeout_source.attach (main_context);
-				string[] argv = { resource_store.helper.path, server.client_address };
-				spawn_helper (resource_store.helper.path, argv);
+				string[] argv = { helper_file.path, server.client_address };
+				spawn_helper (helper_file.path, argv);
 				yield;
 				server.disconnect (connection_handler);
 				server.stop ();
@@ -151,7 +231,7 @@ namespace Frida {
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			proxy.uninjected.disconnect (on_uninjected);
 			connection.closed.disconnect (on_connection_closed);
-			lost ();
+			lost (this);
 		}
 
 		private void on_uninjected (uint id) {

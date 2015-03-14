@@ -54,13 +54,15 @@ namespace Frida {
 	}
 
 	public class LinuxHostSession : BaseDBusHostSession {
-		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
-
-		private Linjector injector = new Linjector ();
+		private HelperProcess helper;
+		private Linjector injector;
 		private AgentDescriptor agent_desc;
 
 		construct {
-			var blob = Frida.Data.Agent.get_libfrida_agent_so_blob ();
+			helper = new HelperProcess ();
+			injector = new Linjector.with_helper (helper);
+
+			var blob = Frida.Data.Agent.get_frida_agent_32_so_blob ();
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
 
@@ -71,6 +73,7 @@ namespace Frida {
 			while (injector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+			yield injector.close ();
 			injector = null;
 
 			yield helper.close ();
@@ -94,7 +97,7 @@ namespace Frida {
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError {
-			PipeTransport.set_temp_directory (injector.temp_directory);
+			PipeTransport.set_temp_directory (helper.tempdir.path);
 			var pipe_transport = new PipeTransport ();
 			var stream = new Pipe (pipe_transport.local_address);
 			yield injector.inject (pid, agent_desc, pipe_transport.remote_address);
