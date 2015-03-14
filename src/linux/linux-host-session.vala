@@ -72,6 +72,9 @@ namespace Frida {
 				yield;
 			injector.disconnect (uninjected_handler);
 			injector = null;
+
+			yield helper.close ();
+			helper = null;
 		}
 
 		public override async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
@@ -79,24 +82,15 @@ namespace Frida {
 		}
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-			return _do_spawn (path, argv, envp);
+			return yield helper.spawn (path, argv, envp);
 		}
 
 		public override async void resume (uint pid) throws IOError {
-			void * instance;
-			bool instance_found = instance_by_pid.unset (pid, out instance);
-			if (!instance_found)
-				throw new IOError.FAILED ("no such pid");
-			_resume_instance (instance);
-			_free_instance (instance);
+			yield helper.resume (pid);
 		}
 
 		public override async void kill (uint pid) throws IOError {
-			void * instance;
-			bool instance_found = instance_by_pid.unset (pid, out instance);
-			if (instance_found)
-				_free_instance (instance);
-			System.kill (pid);
+			yield helper.kill (pid);
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError {
@@ -107,10 +101,6 @@ namespace Frida {
 			transport = pipe_transport;
 			return stream;
 		}
-
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
-		public extern void _resume_instance (void * instance);
-		public extern void _free_instance (void * instance);
 	}
 }
 #endif

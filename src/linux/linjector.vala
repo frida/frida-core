@@ -5,154 +5,65 @@ namespace Frida {
 	public class Linjector : Object {
 		public signal void uninjected (uint id);
 
-		public string temp_directory {
-			owned get {
-				return resource_store.tempdir.path;
-			}
+		private HelperProcess helper;
+		private bool close_helper;
+		private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
+		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
+
+		public Linjector () {
+			helper = new HelperProcess ();
+			close_helper = true;
+			helper.uninjected.connect (on_uninjected);
 		}
 
-		private ResourceStore resource_store {
-			get {
-				if (_resource_store == null) {
-					try {
-						_resource_store = new ResourceStore ();
-					} catch (IOError e) {
-						assert_not_reached ();
-					}
-				}
-				return _resource_store;
-			}
-		}
-		private ResourceStore _resource_store;
-
-		/* these should be private, but must be accessible to glue code */
-		private MainContext main_context;
-		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
-		public uint last_id = 1;
-
-		construct {
-			main_context = MainContext.get_thread_default ();
+		internal Linjector.with_helper (HelperProcess helper) {
+			this.helper = helper;
+			close_helper = false;
+			this.helper.uninjected.connect (on_uninjected);
 		}
 
-		~Linjector () {
-			foreach (var instance in instance_by_id.values)
-				_free_instance (instance);
+		public async void close () {
+			helper.uninjected.disconnect (on_uninjected);
+			if (close_helper)
+				yield helper.close ();
+
+			foreach (var tempfile in agents.values)
+				tempfile.destroy ();
+			agents.clear ();
 		}
 
 		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
-			var filename = resource_store.ensure_copy_of (desc);
-
-			var id = _do_inject (pid, filename, data_string, resource_store.tempdir.path);
-
-			var fifo = _get_fifo_for_instance (instance_by_id[id]);
-			var buf = new uint8[1];
-			var cancellable = new Cancellable ();
-			var cancelled = new IOError.CANCELLED ("");
-			var timeout_source = new TimeoutSource (2000);
-			timeout_source.set_callback (() => {
-				cancellable.cancel ();
-				return false;
-			});
-			timeout_source.attach (main_context);
-			ssize_t size;
-			try {
-				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
-			} catch (Error e) {
-				if (e is IOError && e.code == cancelled.code)
-					throw new IOError.TIMED_OUT ("timed out");
-				else
-					throw new IOError.FAILED (e.message);
-			}
-			timeout_source.destroy ();
-			if (size == 0) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					_on_uninject (id);
-					return false;
-				});
-				source.attach (main_context);
-			} else {
-				_monitor_instance.begin (id);
-			}
-
+			var filename = ensure_copy_of (desc);
+			var id = yield helper.inject (pid, filename, data_string);
+			pid_by_id[id] = pid;
 			return id;
 		}
 
-		private async void _monitor_instance (uint id) {
-			var fifo = _get_fifo_for_instance (instance_by_id[id]);
-			while (true) {
-				var buf = new uint8[1];
-				try {
-					var size = yield fifo.read_async (buf);
-					if (size == 0) {
-						/*
-						 * Give it some time to execute its final instructions before we free the memory being executed
-						 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
-						 */
-						var timeout_source = new TimeoutSource (50);
-						timeout_source.set_callback (() => {
-							_on_uninject (id);
-							return false;
-						});
-						timeout_source.attach (main_context);
-						return;
-					}
-				} catch (IOError e) {
-					_on_uninject (id);
-					return;
-				}
-			}
-		}
-
-		private void _on_uninject (uint id) {
-			void * instance;
-			bool found = instance_by_id.unset (id, out instance);
-			assert (found);
-			_free_instance (instance);
-			uninjected (id);
-		}
-
 		public bool any_still_injected () {
-			return !instance_by_id.is_empty;
+			return !pid_by_id.is_empty;
 		}
 
 		public bool is_still_injected (uint id) {
-			return instance_by_id.has_key (id);
+			return pid_by_id.has_key (id);
 		}
 
-		public extern InputStream _get_fifo_for_instance (void * instance);
-		public extern void _free_instance (void * instance);
-		public extern uint _do_inject (uint pid, string so_path, string data_string, string temp_path) throws IOError;
-
-		private class ResourceStore {
-			public TemporaryDirectory tempdir {
-				get;
-				private set;
-			}
-
-			private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
-
-			public ResourceStore () throws IOError {
-				tempdir = new TemporaryDirectory ();
-				FileUtils.chmod (tempdir.path, 0755);
-			}
-
-			~ResourceStore () {
-				foreach (var tempfile in agents.values)
-					tempfile.destroy ();
-				tempdir.destroy ();
-			}
-
-			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
-				var temp_agent = agents[desc.name];
-				if (temp_agent == null) {
-					temp_agent = new TemporaryFile.from_stream (desc.name, desc.sofile, tempdir);
-					FileUtils.chmod (temp_agent.path, 0755);
-					agents[desc.name] = temp_agent;
-				}
-				return temp_agent.path;
-			}
+		private void on_uninjected (uint id) {
+			pid_by_id.unset (id);
+			uninjected (id);
 		}
+
+		private string ensure_copy_of (AgentDescriptor desc) throws IOError {
+			var temp_agent = agents[desc.name];
+			if (temp_agent == null) {
+				var dylib = _clone_so (desc.sofile);
+				temp_agent = new TemporaryFile.from_stream (desc.name, dylib, helper.tempdir);
+				FileUtils.chmod (temp_agent.path, 0755);
+				agents[desc.name] = temp_agent;
+			}
+			return temp_agent.path;
+		}
+
+		public static extern InputStream _clone_so (InputStream dylib);
 	}
 
 	public class AgentDescriptor : Object {

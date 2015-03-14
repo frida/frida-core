@@ -19,14 +19,12 @@ namespace Frida {
 		private uint registration_id = 0;
 
 		/* these should be private, but must be accessible to glue code */
-		public void * context;
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
 		public uint last_id = 1;
 
 		public HelperService (string parent_address) {
 			Object (parent_address: parent_address);
-			_create_context ();
 		}
 
 		~HelperService () {
@@ -34,7 +32,6 @@ namespace Frida {
 				_free_spawn_instance (instance);
 			foreach (var instance in inject_instance_by_id.values)
 				_free_inject_instance (instance);
-			_destroy_context ();
 		}
 
 		public int run () {
@@ -85,26 +82,101 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+			return _do_spawn (path, argv, envp);
 		}
 
 		public async void resume (uint pid) throws IOError {
+			void * instance;
+			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
+			if (!instance_found)
+				throw new IOError.FAILED ("no such pid");
+			_resume_spawn_instance (instance);
+			_free_spawn_instance (instance);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string) throws IOError {
+		public async void kill (uint pid) throws IOError {
+			void * instance;
+			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
+			if (instance_found)
+				_free_spawn_instance (instance);
+			Posix.kill ((Posix.pid_t) pid, Posix.SIGKILL);
+		}
+
+		public async uint inject (uint pid, string filename, string data_string, string temp_path) throws IOError {
+			var id = _do_inject (pid, filename, data_string, temp_path);
+
+			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
+			var buf = new uint8[1];
+			var cancellable = new Cancellable ();
+			var cancelled = new IOError.CANCELLED ("");
+			var timeout = Timeout.add_seconds (2, () => {
+				cancellable.cancel ();
+				return false;
+			});
+			ssize_t size;
+			try {
+				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
+			} catch (Error e) {
+				if (e is IOError && e.code == cancelled.code)
+					throw new IOError.TIMED_OUT ("timed out");
+				else
+					throw new IOError.FAILED (e.message);
+			}
+			Source.remove (timeout);
+			if (size == 0) {
+				Idle.add (() => {
+					_on_uninject (id);
+					return false;
+				});
+			} else {
+				_monitor_inject_instance.begin (id);
+			}
+
+			return id;
+		}
+
+		private async void _monitor_inject_instance (uint id) {
+			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
+			while (true) {
+				var buf = new uint8[1];
+				try {
+					var size = yield fifo.read_async (buf);
+					if (size == 0) {
+						/*
+						 * Give it some time to execute its final instructions before we free the memory being executed
+						 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
+						 */
+						Timeout.add (50, () => {
+							_on_uninject (id);
+							return false;
+						});
+						return;
+					}
+				} catch (IOError e) {
+					_on_uninject (id);
+					return;
+				}
+			}
+		}
+
+		private void _on_uninject (uint id) {
+			void * instance;
+			bool found = inject_instance_by_id.unset (id, out instance);
+			assert (found);
+			_free_inject_instance (instance);
+			uninjected (id);
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			shutdown.begin ();
 		}
 
-		public extern void _create_context ();
-		public extern void _destroy_context ();
-
 		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
+		public extern uint _do_inject (uint pid, string dylib_path, string data_string, string temp_path) throws IOError;
+		public extern InputStream _get_fifo_for_inject_instance (void * instance);
 		public extern void _free_inject_instance (void * instance);
 	}
 }
