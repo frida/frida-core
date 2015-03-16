@@ -35,7 +35,6 @@ backend_sources += \
 	linux/frida-helper-process.vala
 glue_sources += \
 	linux/system-linux.c \
-	linux/linux-host-session-glue.c \
 	linux/linjector-glue.c \
 	linux/frida-helper-process-glue.c
 backend_libadd += \
