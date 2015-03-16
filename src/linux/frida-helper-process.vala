@@ -112,6 +112,8 @@ namespace Frida {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
 					if (factory32 == null) {
+						if (resource_store.helper32 == null)
+							throw new IOError.NOT_SUPPORTED ("built without 32-bit support");
 						factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
 						factory32.lost.connect (on_factory_lost);
 						factory32.uninjected.connect (on_factory_uninjected);
@@ -122,6 +124,8 @@ namespace Frida {
 				case Gum.CpuType.AMD64:
 				case Gum.CpuType.ARM64:
 					if (factory64 == null) {
+						if (resource_store.helper64 == null)
+							throw new IOError.NOT_SUPPORTED ("built without 64-bit support");
 						factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
 						factory64.lost.connect (on_factory_lost);
 						factory64.uninjected.connect (on_factory_uninjected);
@@ -273,12 +277,12 @@ namespace Frida {
 			private set;
 		}
 
-		public TemporaryFile helper32 {
+		public TemporaryFile? helper32 {
 			get;
 			private set;
 		}
 
-		public TemporaryFile helper64 {
+		public TemporaryFile? helper64 {
 			get;
 			private set;
 		}
@@ -290,23 +294,29 @@ namespace Frida {
 			FileUtils.chmod (tempdir.path, 0755);
 
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
-			helper32 = new TemporaryFile.from_stream ("frida-helper-32",
-				new MemoryInputStream.from_data (blob32.data, null),
-				tempdir);
-			FileUtils.chmod (helper32.path, 0700);
+			if (blob32.data.length > 0) {
+				helper32 = new TemporaryFile.from_stream ("frida-helper-32",
+					new MemoryInputStream.from_data (blob32.data, null),
+					tempdir);
+				FileUtils.chmod (helper32.path, 0700);
+			}
 
 			var blob64 = Frida.Data.Helper.get_frida_helper_64_blob ();
-			helper64 = new TemporaryFile.from_stream ("frida-helper-64",
-				new MemoryInputStream.from_data (blob64.data, null),
-				tempdir);
-			FileUtils.chmod (helper64.path, 0700);
+			if (blob64.data.length > 0) {
+				helper64 = new TemporaryFile.from_stream ("frida-helper-64",
+					new MemoryInputStream.from_data (blob64.data, null),
+					tempdir);
+				FileUtils.chmod (helper64.path, 0700);
+			}
 		}
 
 		~ResourceStore () {
 			foreach (var file in files)
 				file.destroy ();
-			helper64.destroy ();
-			helper32.destroy ();
+			if (helper64 != null)
+				helper64.destroy ();
+			if (helper32 != null)
+				helper32.destroy ();
 			tempdir.destroy ();
 		}
 

@@ -54,20 +54,36 @@ namespace Frida {
 
 		private string ensure_copy_of (AgentDescriptor desc) throws IOError {
 			var name32 = desc.name_template.printf (32);
-			var temp_agent = agents[name32];
-			if (temp_agent == null) {
-				var so32 = _clone_so (desc.so32);
-				temp_agent = new TemporaryFile.from_stream (name32, so32, helper.tempdir);
-				FileUtils.chmod (temp_agent.path, 0755);
-				agents[name32] = temp_agent;
-
-				var name64 = desc.name_template.printf (64);
-				var so64 = _clone_so (desc.so64);
-				temp_agent = new TemporaryFile.from_stream (name64, so64, helper.tempdir);
-				FileUtils.chmod (temp_agent.path, 0755);
-				agents[name64] = temp_agent;
+			var name64 = desc.name_template.printf (64);
+			if (agents[name32] == null && agents[name64] == null) {
+				if (byte_size (desc.so32) > 0) {
+					var so32 = _clone_so (desc.so32);
+					var temp_agent = new TemporaryFile.from_stream (name32, so32, helper.tempdir);
+					FileUtils.chmod (temp_agent.path, 0755);
+					agents[name32] = temp_agent;
+				}
+				if (byte_size (desc.so64) > 0) {
+					var so64 = _clone_so (desc.so64);
+					var temp_agent = new TemporaryFile.from_stream (name64, so64, helper.tempdir);
+					FileUtils.chmod (temp_agent.path, 0755);
+					agents[name64] = temp_agent;
+				}
 			}
 			return Path.build_filename (helper.tempdir.path, desc.name_template);
+		}
+
+		private static int64 byte_size (InputStream stream) {
+			assert (stream is Seekable);
+			var seekable = stream as Seekable;
+			try {
+				var previous_offset = seekable.tell ();
+				seekable.seek (0, SeekType.END);
+				var size = seekable.tell ();
+				seekable.seek (previous_offset, SeekType.SET);
+				return size;
+			} catch (Error e) {
+				assert_not_reached ();
+			}
 		}
 
 		public static extern InputStream _clone_so (InputStream dylib);

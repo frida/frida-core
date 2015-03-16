@@ -102,7 +102,16 @@ namespace Frida.LinjectorTest {
 
 				try {
 					var file = File.new_for_path (sofile).read (null);
-					desc = new AgentDescriptor (name + "-%u.so", file, file);
+					var stub = new MemoryInputStream ();
+					InputStream so32, so64;
+					if (sizeof (void *) == 4) {
+						so32 = file;
+						so64 = stub;
+					} else {
+						so32 = stub;
+						so64 = file;
+					}
+					desc = new AgentDescriptor (name + "-%u.so", so32, so64);
 				} catch (Error io_error) {
 					assert_not_reached ();
 				}
