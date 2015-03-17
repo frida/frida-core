@@ -116,6 +116,7 @@ struct _FridaTrampolineData
 struct _FridaProbeElfContext
 {
   pid_t pid;
+  gchar path[PATH_MAX + 1];
   GumAddress entry_point;
   gsize word_size;
 };
@@ -309,7 +310,7 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   ret = chmod (instance->fifo_path, mode);
   g_assert_cmpint (ret, ==, 0);
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
-  g_assert_cmpint (instance->fifo, !=, -1);
+  g_assert (instance->fifo != -1);
 
   return instance;
 }
@@ -796,6 +797,8 @@ frida_wait_for_child_breakpoint (pid_t pid)
 static gboolean
 frida_run_to_entry_point (pid_t pid, GError ** error)
 {
+  gchar * exe_link;
+  ssize_t length;
   FridaProbeElfContext ctx;
   gpointer entry_point_address;
   long original_entry_code, patched_entry_code;
@@ -805,6 +808,12 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   gboolean success;
 
   ctx.pid = pid;
+  exe_link = g_strdup_printf ("/proc/%d/exe", pid);
+  length = readlink (exe_link, ctx.path, sizeof (ctx.path) - 1);
+  g_free (exe_link);
+  if (length == -1)
+    goto handle_probe_error;
+  ctx.path[length] = '\0';
   ctx.entry_point = 0;
   gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_elf_header, &ctx);
   if (ctx.entry_point == 0)
@@ -888,25 +897,18 @@ frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer us
   {
     long word;
     guint8 u8;
-    guint16 u16;
     guint32 u32;
     guint64 u64;
-    gchar magic[SELFMAG];
   } value;
 
-  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address), NULL);
-  if (memcmp (value.magic, ELFMAG, SELFMAG) != 0)
-    return TRUE;
-
-  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_NIDENT), NULL);
-  if (value.u16 != ET_EXEC)
+  if (details->file == NULL || details->file->offset != 0 || strcmp (details->file->path, ctx->path) != 0)
     return TRUE;
 
   value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_CLASS), NULL);
   ctx->word_size = value.u8 == ELFCLASS32 ? 4 : 8;
 
   value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + FRIDA_OFFSET_E_ENTRY), NULL);
-  ctx->entry_point = ctx->word_size == 4 ? value.u32 : value.u64;
+  ctx->entry_point = details->range->base_address + (ctx->word_size == 4 ? value.u32 : value.u64);
 
   return FALSE;
 }
