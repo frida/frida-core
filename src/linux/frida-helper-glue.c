@@ -27,6 +27,8 @@
 #endif
 #include <sys/wait.h>
 
+#define FRIDA_STACK_ALIGNMENT 16
+#define FRIDA_RED_ZONE_SIZE 128
 #define FRIDA_OFFSET_E_ENTRY 0x18
 #if defined (HAVE_I386)
 # define FRIDA_SIGBKPT SIGTRAP
@@ -1004,9 +1006,9 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
-  /* FIXME: ensure stack alignment */
-
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.esp -= (regs.esp - (args_length * 4)) % FRIDA_STACK_ALIGNMENT;
+
   regs.orig_eax = -1;
 
   regs.eip = func;
@@ -1023,6 +1025,9 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.esp), GSIZE_TO_POINTER (FRIDA_DUMMY_RETURN_ADDRESS));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+  regs.rsp -= FRIDA_RED_ZONE_SIZE;
+  regs.rsp -= (regs.rsp - (MAX (args_length - 6, 0) * 8)) % FRIDA_STACK_ALIGNMENT;
+
   regs.orig_rax = -1;
 
   regs.rip = func;
@@ -1066,6 +1071,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.rsp), GSIZE_TO_POINTER (FRIDA_DUMMY_RETURN_ADDRESS));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_ARM)
+  regs.ARM_sp -= (regs.ARM_sp - (MAX (args_length - 4, 0) * 4)) % FRIDA_STACK_ALIGNMENT;
+
   if ((func & 1) != 0)
   {
     regs.ARM_pc = (func & ~1);
