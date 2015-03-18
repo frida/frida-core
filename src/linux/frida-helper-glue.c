@@ -898,18 +898,25 @@ frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer us
   {
     long word;
     guint8 u8;
+    guint16 u16;
     guint32 u32;
     guint64 u64;
   } value;
+  guint16 type;
 
   if (details->file == NULL || details->file->offset != 0 || strcmp (details->file->path, ctx->path) != 0)
     return TRUE;
+
+  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_NIDENT), NULL);
+  type = value.u16;
 
   value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_CLASS), NULL);
   ctx->word_size = value.u8 == ELFCLASS32 ? 4 : 8;
 
   value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + FRIDA_OFFSET_E_ENTRY), NULL);
-  ctx->entry_point = details->range->base_address + (ctx->word_size == 4 ? value.u32 : value.u64);
+  ctx->entry_point = ctx->word_size == 4 ? value.u32 : value.u64;
+  if (type == ET_DYN)
+    ctx->entry_point += details->range->base_address;
 
   return FALSE;
 }
