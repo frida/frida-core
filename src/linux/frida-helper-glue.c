@@ -30,11 +30,6 @@
 #define FRIDA_STACK_ALIGNMENT 16
 #define FRIDA_RED_ZONE_SIZE 128
 #define FRIDA_OFFSET_E_ENTRY 0x18
-#if defined (HAVE_I386)
-# define FRIDA_SIGBKPT SIGTRAP
-#elif defined (HAVE_ARM)
-# define FRIDA_SIGBKPT SIGBUS
-#endif
 #define FRIDA_RTLD_DLOPEN (0x80000000)
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
@@ -839,12 +834,12 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
     if ((ctx.entry_point & 1) == 0)
     {
       /* ARM */
-      patched_entry_code = 0xe1200070;
+      patched_entry_code = 0xe7f001f0;
     }
     else
     {
       /* Thumb */
-      patched_entry_code = 0xbe00;
+      patched_entry_code = 0xde01;
     }
   }
   else
@@ -862,8 +857,8 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_signal (pid, FRIDA_SIGBKPT, NULL);
-  CHECK_OS_RESULT (success, !=, FALSE, "WAIT(FRIDA_SIGBKPT)");
+  success = frida_wait_for_child_signal (pid, SIGTRAP, NULL);
+  CHECK_OS_RESULT (success, !=, FALSE, "WAIT(SIGTRAP)");
 
   ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (original_entry_code));
 
