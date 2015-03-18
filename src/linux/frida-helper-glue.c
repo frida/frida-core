@@ -131,12 +131,11 @@ static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * ser
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_regs, GError ** error);
 static gboolean frida_inject_instance_detach (FridaInjectInstance * instance, const regs_t * saved_regs, GError ** error);
-static gboolean frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, GError ** error);
+static gboolean frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error);
 static void frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
 static gboolean frida_wait_for_attach_signal (pid_t pid);
-static gboolean frida_wait_for_child_signal (pid_t pid, int signal);
-static gboolean frida_wait_for_child_breakpoint (pid_t pid);
+static gboolean frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited);
 
 static gboolean frida_run_to_entry_point (pid_t pid, GError ** error);
 static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer user_data);
@@ -144,8 +143,8 @@ static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * deta
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
 static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
-static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error);
-static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, GError ** error);
+static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, gboolean * exited, GError ** error);
+static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, gboolean * exited, GError ** error);
 
 static GumAddress frida_resolve_libc_function (pid_t pid, const gchar * function_name);
 #ifdef HAVE_ANDROID
@@ -182,7 +181,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   ret = ptrace (PTRACE_CONT, instance->pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_signal (instance->pid, SIGTRAP);
+  success = frida_wait_for_child_signal (instance->pid, SIGTRAP, NULL);
   CHECK_OS_RESULT (success, !=, FALSE, "wait(SIGTRAP)");
 
   if (!frida_run_to_entry_point (instance->pid, error))
@@ -222,6 +221,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   FridaInjectInstance * instance;
   FridaInjectParams params = { pid, so_path, data_string };
   regs_t saved_regs;
+  gboolean exited;
 
   if (self->last_id == 0 || self->last_id >= G_MAXINT)
   {
@@ -240,11 +240,18 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     goto beach;
   instance->remote_payload = params.remote_address;
 
-  if (!frida_inject_instance_emit_and_remote_execute (frida_inject_instance_emit_payload_code, &params, NULL, error))
+  if (!frida_inject_instance_emit_and_remote_execute (frida_inject_instance_emit_payload_code, &params, NULL, &exited, error) && !exited)
     goto beach;
 
-  if (!frida_inject_instance_detach (instance, &saved_regs, error))
-    goto beach;
+  if (!exited)
+  {
+    if (!frida_inject_instance_detach (instance, &saved_regs, error))
+      goto beach;
+  }
+  else
+  {
+    g_clear_error (error);
+  }
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (instance->id), instance);
 
@@ -408,7 +415,7 @@ handle_os_error:
 }
 
 static gboolean
-frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, GError ** error)
+frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error)
 {
   FridaCodeChunk code;
   guint padding = 0;
@@ -434,7 +441,7 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   }
 #endif
 
-  func (params, GUM_ADDRESS (params->remote_address), &code);
+  func (params, params->remote_address, &code);
 
   data = (FridaTrampolineData *) (code.bytes + FRIDA_REMOTE_DATA_OFFSET);
   strcpy (data->pthread_so, "libpthread.so.0");
@@ -447,7 +454,7 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
 
-  if (!frida_remote_exec (params->pid, (params->remote_address + padding) | address_mask, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, error))
+  if (!frida_remote_exec (params->pid, (params->remote_address + padding) | address_mask, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, exited, error))
     return FALSE;
 
   return TRUE;
@@ -519,9 +526,6 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       1,
       GUM_ARG_REGISTER, GUM_REG_XBP);
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 12);
 #endif
 
   gum_x86_writer_put_breakpoint (&cw);
@@ -748,7 +752,7 @@ frida_wait_for_attach_signal (pid_t pid)
     case SIGTRAP:
       if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
         return FALSE;
-      if (!frida_wait_for_child_signal (pid, SIGSTOP))
+      if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
         return FALSE;
       /* fall through */
     case SIGSTOP:
@@ -758,7 +762,7 @@ frida_wait_for_attach_signal (pid_t pid)
           return FALSE;
         sleep (1);
         kill (pid, SIGSTOP);
-        if (!frida_wait_for_child_signal (pid, SIGSTOP))
+        if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
           return FALSE;
         return frida_find_library_base (pid, "libc", NULL) != 0;
       }
@@ -771,29 +775,29 @@ frida_wait_for_attach_signal (pid_t pid)
 }
 
 static gboolean
-frida_wait_for_child_signal (pid_t pid, int signal)
+frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited)
 {
+  gboolean success = FALSE;
+  gboolean child_did_exit = TRUE;
   int status = 0;
   pid_t res;
 
   res = waitpid (pid, &status, 0);
-  if (res != pid || !WIFSTOPPED (status))
-    return FALSE;
+  if (res != pid || WIFEXITED (status))
+    goto beach;
 
-  return WSTOPSIG (status) == signal;
-}
+  child_did_exit = FALSE;
 
-static gboolean
-frida_wait_for_child_breakpoint (pid_t pid)
-{
-  int status = 0;
-  pid_t res;
+  if (!WIFSTOPPED (status))
+    goto beach;
 
-  res = waitpid (pid, &status, 0);
-  if (res != pid || !WIFSTOPPED (status))
-    return FALSE;
+  success = WSTOPSIG (status) == signal;
 
-  return (WSTOPSIG (status) == SIGTRAP) || (WSTOPSIG (status) == SIGBUS);
+beach:
+  if (exited != NULL)
+    *exited = child_did_exit;
+
+  return success;
 }
 
 static gboolean
@@ -858,7 +862,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_signal (pid, FRIDA_SIGBKPT);
+  success = frida_wait_for_child_signal (pid, FRIDA_SIGBKPT, NULL);
   CHECK_OS_RESULT (success, !=, FALSE, "WAIT(FRIDA_SIGBKPT)");
 
   ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (original_entry_code));
@@ -928,7 +932,7 @@ frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
   };
   GumAddress retval = 0;
 
-  if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "mmap"), args, G_N_ELEMENTS (args), &retval, error))
+  if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "mmap"), args, G_N_ELEMENTS (args), &retval, NULL, error))
     return 0;
 
   if (retval == G_GUINT64_CONSTANT (0xffffffffffffffff))
@@ -946,7 +950,7 @@ frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** erro
   };
   GumAddress retval;
 
-  if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "munmap"), args, G_N_ELEMENTS (args), &retval, error))
+  if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "munmap"), args, G_N_ELEMENTS (args), &retval, NULL, error))
     return -1;
 
   return retval;
@@ -995,7 +999,7 @@ handle_os_error:
 }
 
 static gboolean
-frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error)
+frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, gboolean * exited, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -1106,7 +1110,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_signal (pid, SIGSEGV);
+  success = frida_wait_for_child_signal (pid, SIGSEGV, exited);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
@@ -1130,7 +1134,7 @@ handle_os_error:
 }
 
 static gboolean
-frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, GError ** error)
+frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, gboolean * exited, GError ** error)
 {
   long ret;
   const gchar * failed_operation;
@@ -1170,11 +1174,14 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
-  success = frida_wait_for_child_breakpoint (pid);
+  success = frida_wait_for_child_signal (pid, SIGTRAP, exited);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
   if (result != NULL)
   {
+    ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
     *result = regs.eax;
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
