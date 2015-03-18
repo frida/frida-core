@@ -231,6 +231,7 @@ namespace Frida {
 
 			assert (entry_to_remove != null);
 			entries.remove (entry_to_remove);
+			entry_to_remove.close.begin ();
 
 			agent_session_closed (entry_to_remove.id, error);
 		}
@@ -261,6 +262,8 @@ namespace Frida {
 				private set;
 			}
 
+			private Gee.Promise<bool> close_request;
+
 			private DBusServer server;
 			private Gee.ArrayList<DBusConnection> client_connections = new Gee.ArrayList<DBusConnection> ();
 			private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
@@ -274,6 +277,16 @@ namespace Frida {
 			}
 
 			public async void close () {
+				if (close_request != null) {
+					try {
+						yield close_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+					return;
+				}
+				close_request = new Gee.Promise<bool> ();
+
 				if (server != null) {
 					server.stop ();
 					server = null;
@@ -295,6 +308,8 @@ namespace Frida {
 				} catch (Error agent_conn_error) {
 				}
 				agent_connection = null;
+
+				close_request.set_value (true);
 			}
 
 			public void serve (string listen_address) throws Error {
