@@ -524,7 +524,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
     gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 12);
 #endif
 
-  gum_x86_writer_put_int3 (&cw);
+  gum_x86_writer_put_breakpoint (&cw);
   gum_x86_writer_flush (&cw);
   g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, worker_offset);
   while (gum_x86_writer_offset (&cw) != worker_offset - code->size)

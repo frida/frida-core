@@ -664,7 +664,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_ret (&cw);
 
   gum_x86_writer_put_label (&cw, loadlibrary_failed_label);
-  gum_x86_writer_put_int3 (&cw);
+  gum_x86_writer_put_breakpoint (&cw);
 
   gum_x86_writer_flush (&cw);
   code_size = gum_x86_writer_offset (&cw);

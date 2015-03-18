@@ -1091,7 +1091,7 @@ frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code
   frida_agent_context_emit_pthread_setup (self, &ctx);
   frida_agent_context_emit_pthread_create_and_join (self, &ctx);
   frida_agent_context_emit_thread_terminate (self, &ctx);
-  gum_x86_writer_put_int3 (&ctx.cw);
+  gum_x86_writer_put_breakpoint (&ctx.cw);
 
   gum_x86_writer_free (&ctx.cw);
 }
