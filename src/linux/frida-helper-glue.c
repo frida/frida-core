@@ -239,14 +239,9 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     goto beach;
 
   if (!exited)
-  {
-    if (!frida_inject_instance_detach (instance, &saved_regs, error))
-      goto beach;
-  }
+    frida_inject_instance_detach (instance, &saved_regs, NULL);
   else
-  {
     g_clear_error (error);
-  }
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (instance->id), instance);
 
@@ -325,17 +320,12 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->remote_payload != 0)
   {
     regs_t saved_regs;
-    GError * error = NULL;
 
-    if (frida_inject_instance_attach (instance, &saved_regs, &error))
+    if (frida_inject_instance_attach (instance, &saved_regs, NULL))
     {
-      frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
-      g_clear_error (&error);
-
-      frida_inject_instance_detach (instance, &saved_regs, &error);
+      frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, NULL);
+      frida_inject_instance_detach (instance, &saved_regs, NULL);
     }
-
-    g_clear_error (&error);
   }
 
   close (instance->fifo);
