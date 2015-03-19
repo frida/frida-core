@@ -47,10 +47,12 @@ frida_test_environment_init (int * args_length1, char *** args)
 void
 frida_test_environment_deinit (void)
 {
+#if DEBUG_HEAP_LEAKS
   gum_deinit ();
-#if GLIB_CHECK_VERSION (2, 42, 0)
+# if GLIB_CHECK_VERSION (2, 42, 0)
   gio_deinit ();
   glib_deinit ();
+# endif
 #endif
 
 #if defined (G_OS_WIN32) && !DEBUG_HEAP_LEAKS
