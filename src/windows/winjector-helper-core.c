@@ -576,7 +576,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   const gsize data_alignment = 4;
   const gchar * loadlibrary_failed_label = "loadlibrary_failed";
 
-  gum_init_with_features ((GumFeatureFlags) (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
+  gum_init ();
 
   code = gum_alloc_n_pages (1, GUM_PAGE_RWX); /* executable so debugger can be used to inspect code */
   gum_x86_writer_init (&cw, code);

@@ -49,8 +49,7 @@ frida_agent_environment_init (void)
 #endif
   glib_init ();
   gio_init ();
-  gum_init_with_features ((GumFeatureFlags)
-      (GUM_FEATURE_ALL & ~GUM_FEATURE_SYMBOL_LOOKUP));
+  gum_init ();
 }
 
 void
