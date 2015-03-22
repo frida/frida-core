@@ -74,9 +74,16 @@ namespace Frida {
 		construct {
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_dll_blob ();
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_dll_blob ();
-			agent_desc = new AgentDescriptor ("frida-agent-%u.dll",
+			var dbghelp32 = Frida.Data.Agent.get_dbghelp_32_dll_blob ();
+			var dbghelp64 = Frida.Data.Agent.get_dbghelp_64_dll_blob ();
+			agent_desc = new AgentDescriptor.with_resources ("frida-agent-%u.dll",
 				new MemoryInputStream.from_data (blob32.data, null),
-				new MemoryInputStream.from_data (blob64.data, null));
+				new MemoryInputStream.from_data (blob64.data, null),
+				new AgentResource[] {
+					new AgentResource ("dbghelp-32.dll", new MemoryInputStream.from_data (dbghelp32.data, null)),
+					new AgentResource ("dbghelp-64.dll", new MemoryInputStream.from_data (dbghelp64.data, null))
+				}
+			);
 		}
 
 		public override async void close () {

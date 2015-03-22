@@ -1,6 +1,4 @@
 #if WINDOWS
-using Gee;
-
 namespace Frida {
 	public class Winjector : Object {
 		private ResourceStore normal_resource_store;
@@ -129,7 +127,7 @@ namespace Frida {
 			private PrivilegeLevel level;
 			private MainContext main_context;
 			private HelperInstance helper;
-			private ArrayList<ObtainRequest> obtain_requests = new ArrayList<ObtainRequest> ();
+			private Gee.ArrayList<ObtainRequest> obtain_requests = new Gee.ArrayList<ObtainRequest> ();
 
 			public ResourceStore resource_store {
 				get;
@@ -249,7 +247,8 @@ namespace Frida {
 				private set;
 			}
 
-			private HashMap<string, TemporaryAgent> agents = new HashMap<string, TemporaryAgent> ();
+			private Gee.HashMap<string, TemporaryAgent> agents = new Gee.HashMap<string, TemporaryAgent> ();
+			private Gee.HashMap<string, TemporaryFile> resources = new Gee.HashMap<string, TemporaryFile> ();
 
 			public ResourceStore () throws IOError {
 				tempdir = new TemporaryDirectory ();
@@ -276,6 +275,14 @@ namespace Frida {
 				if (temp_agent == null) {
 					temp_agent = new TemporaryAgent (desc, tempdir);
 					agents[desc.name_template] = temp_agent;
+				}
+
+				foreach (var resource in desc.resources) {
+					var temp_resource = resources[resource.name];
+					if (temp_resource == null) {
+						temp_resource = new TemporaryFile.from_stream (resource.name, resource.data, tempdir);
+						resources[resource.name] = temp_resource;
+					}
 				}
 
 				return temp_agent.filename_template;
@@ -345,11 +352,55 @@ namespace Frida {
 		}
 		private InputStream _dll64;
 
+		public AgentResource[] resources {
+			get;
+			private set;
+		}
+
 		public AgentDescriptor (string name_template, InputStream dll32, InputStream dll64) {
+			AgentDescriptor.with_resources (name_template, dll32, dll64, new AgentResource[] {});
+		}
+
+		public AgentDescriptor.with_resources (string name_template, InputStream dll32, InputStream dll64, AgentResource[] resources) {
 			Object (name_template: name_template, dll32: dll32, dll64: dll64);
 
 			assert (dll32 is Seekable);
 			assert (dll64 is Seekable);
+
+			this.resources = resources;
+		}
+
+		private void reset_stream (InputStream stream) {
+			try {
+				(stream as Seekable).seek (0, SeekType.SET);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+	}
+
+	public class AgentResource : Object {
+		public string name {
+			get;
+			construct;
+		}
+
+		public InputStream data {
+			get {
+				reset_stream (_data);
+				return _data;
+			}
+
+			construct {
+				_data = value;
+			}
+		}
+		private InputStream _data;
+
+		public AgentResource (string name, InputStream data) {
+			Object (name: name, data: data);
+
+			assert (data is Seekable);
 		}
 
 		private void reset_stream (InputStream stream) {
