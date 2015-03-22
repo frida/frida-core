@@ -137,19 +137,19 @@
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Serializing Agent resources</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)data\agent.stamp</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\Win32\dbghelp.dll!dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\x64\dbghelp.dll!dbghelp-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\Win32\dbghelp.dll!dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\x64\dbghelp.dll!dbghelp-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\Win32\dbghelp.dll!dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\x64\dbghelp.dll!dbghelp-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
-"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\Win32\dbghelp.dll!dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\x64\dbghelp.dll!dbghelp-64.dll" || exit 1
+"$(IntDir)..\resource-compiler\resource-compiler.exe" -m $(PlatformTarget) -c "$(ProjectDir)src\agent.resources" -o "$(IntDir)data\frida-data-agent" "$(SolutionDir)build\tmp-windows\Win32-$(ConfigurationName)\frida-agent-32\frida-agent-32.dll" "$(SolutionDir)build\tmp-windows\x64-$(ConfigurationName)\frida-agent-64\frida-agent-64.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" || exit 1
 REM. &gt; "$(IntDir)data\agent.stamp"
 </Command>
     </CustomBuild>
