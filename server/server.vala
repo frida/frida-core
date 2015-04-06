@@ -6,8 +6,6 @@ namespace Frida {
 		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
 
 		private MainLoop loop;
-		private int timeout;
-		private uint shutdown_source = 0;
 
 		construct {
 #if LINUX
@@ -22,9 +20,7 @@ namespace Frida {
 			host_session.forward_agent_sessions = true;
 		}
 
-		public void run (string address, int timeout) throws Error {
-			this.timeout = timeout;
-
+		public void run (string address) throws Error {
 			server = new DBusServer.sync (address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			server.new_connection.connect ((connection) => {
 				if (server == null)
@@ -42,15 +38,10 @@ namespace Frida {
 
 				connections.add (connection);
 
-				if (connections.size == 1)
-					cancel_shutdown ();
-
 				return true;
 			});
 
 			server.start ();
-
-			schedule_shutdown ();
 
 			loop = new MainLoop ();
 			loop.run ();
@@ -61,52 +52,21 @@ namespace Frida {
 			if (closed_by_us)
 				return;
 
-			unregister.begin (connection);
+			unregister (connection);
 			connections.remove (connection);
-
-			if (connections.is_empty)
-				schedule_shutdown ();
 		}
 
-		private async void unregister (DBusConnection connection) {
+		private void unregister (DBusConnection connection) {
 			uint registration_id;
 			if (registration_id_by_connection.unset (connection, out registration_id))
 				connection.unregister_object (registration_id);
 		}
 
-		private void schedule_shutdown () {
-			cancel_shutdown ();
-			if (timeout > 0) {
-				shutdown_source = Timeout.add (timeout, () => {
-					server.stop ();
-					server = null;
-					perform_shutdown.begin ();
-					return false;
-				});
-			}
-		}
-
-		private void cancel_shutdown () {
-			if (shutdown_source != 0) {
-				Source.remove (shutdown_source);
-				shutdown_source = 0;
-			}
-		}
-
-		private async void perform_shutdown () {
-			yield host_session.close ();
-			host_session = null;
-
-			loop.quit ();
-		}
-
 		private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
 		[CCode (array_length = false, array_null_terminated = true)]
 		private static string[] listen_addresses;
-		private static int idle_timeout = 3000;
 
 		static const OptionEntry[] options = {
-			{ "timeout", 't', 0, OptionArg.INT, ref idle_timeout, "Set idle timeout to TIMEOUT milliseconds", "TIMEOUT" },
 			{ "", 0, 0, OptionArg.STRING_ARRAY, ref listen_addresses, null, "[LISTEN_ADDRESS]" },
 			{ null }
 		};
@@ -130,7 +90,7 @@ namespace Frida {
 			var app = new Application ();
 
 			try {
-				app.run (listen_address, idle_timeout);
+				app.run (listen_address);
 			} catch (Error e) {
 				printerr ("ERROR: %s\n", e.message);
 				return 1;
