@@ -73,7 +73,7 @@ namespace Frida {
 
 		private static int main (string[] args) {
 			try {
-				var ctx = new OptionContext ("- zed-server");
+				var ctx = new OptionContext ();
 				ctx.set_help_enabled (true);
 				ctx.add_main_entries (options, null);
 				ctx.parse (ref args);
