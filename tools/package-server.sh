@@ -40,8 +40,6 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/sbin/frida-server</string>
-		<string>-t</string>
-		<string>0</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -58,8 +56,8 @@ Package: re.frida.server
 Name: Frida
 Version: $FRIDA_VERSION
 Priority: optional
-Size: 12288000
-Installed-Size: 12000
+Size: 20942682
+Installed-Size: 51000
 Architecture: iphoneos-arm
 Description: Inject JavaScript to explore iOS apps over USB.
 Homepage: http://frida.github.io/
