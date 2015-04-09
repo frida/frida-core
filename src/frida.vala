@@ -874,7 +874,7 @@ namespace Frida {
 			private const size_t CHUNK_SIZE = 512;
 			private const size_t MAX_MESSAGE_SIZE = 2048;
 
-			private weak AgentSession session;
+			private weak AgentSession agent_session;
 
 			private IOStream stream;
 			private InputStream input;
@@ -886,12 +886,14 @@ namespace Frida {
 
 			private Queue<string> outgoing = new Queue<string> ();
 
-			public DebugSession (AgentSession session, IOStream stream) {
-				this.session = session;
+			public DebugSession (AgentSession agent_session, IOStream stream) {
+				this.agent_session = agent_session;
 
 				this.stream = stream;
 				this.input = stream.get_input_stream ();
 				this.output = stream.get_output_stream ();
+
+				agent_session.message_from_debugger.connect (on_message_from_debugger);
 			}
 
 			~DebugSession () {
@@ -908,19 +910,25 @@ namespace Frida {
 					"Embedding-Host", "Frida v4.0.0" // FIXME
 				};
 				var body = "";
-				send.begin (headers, body);
+				send (headers, body);
 
 				process_incoming_messages.begin ();
 			}
 
 			public void close () {
+				agent_session.message_from_debugger.disconnect (on_message_from_debugger);
+
 				if (stream != null) {
 					stream.close_async.begin ();
 					stream = null;
 				}
 			}
 
-			public async void send (string[] headers, string content) {
+			private void on_message_from_debugger (string message) {
+				send (new string[] {}, message);
+			}
+
+			private void send (string[] headers, string content) {
 				assert (headers.length % 2 == 0);
 
 				var message = new StringBuilder ("");
@@ -933,9 +941,22 @@ namespace Frida {
 
 				var write_now = outgoing.is_empty ();
 				outgoing.push_tail (message.str);
-				if (!write_now)
-					return;
+				if (write_now)
+					process_outgoing_messages.begin ();
+			}
 
+			private async void process_incoming_messages () {
+				try {
+					while (true) {
+						var message = yield read_message ();
+						yield agent_session.post_message_to_debugger (message);
+					}
+				} catch (IOError e) {
+					ended (this);
+				}
+			}
+
+			private async void process_outgoing_messages () {
 				try {
 					do {
 						var m = outgoing.peek_head ();
@@ -944,17 +965,6 @@ namespace Frida {
 						outgoing.pop_head ();
 					} while (!outgoing.is_empty ());
 				} catch (Error e) {
-				}
-			}
-
-			private async void process_incoming_messages () {
-				try {
-					while (true) {
-						var message = yield read_message ();
-						yield session.post_message_to_debugger (message);
-					}
-				} catch (IOError e) {
-					ended (this);
 				}
 			}
 
