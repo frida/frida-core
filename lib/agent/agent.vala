@@ -15,6 +15,7 @@ namespace Frida.Agent {
 			Object (pipe_address: pipe_address);
 			script_engine = new ScriptEngine (agent_range);
 			script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+			script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 		}
 
 		public async void close () throws IOError {
@@ -65,15 +66,15 @@ namespace Frida.Agent {
 		}
 
 		public async void enable_debugger () throws IOError {
-			// TODO
+			script_engine.enable_debugger ();
 		}
 
 		public async void disable_debugger () throws IOError {
-			// TODO
+			script_engine.disable_debugger ();
 		}
 
 		public async void post_message_to_debugger (string message) throws IOError {
-			// TODO
+			script_engine.post_message_to_debugger (message);
 		}
 
 		private void validate_state () throws IOError {

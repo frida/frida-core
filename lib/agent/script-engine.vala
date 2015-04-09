@@ -3,6 +3,7 @@ using Gee;
 namespace Frida.Agent {
 	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
+		public signal void message_from_debugger (string message);
 
 		private Gum.MemoryRange agent_range;
 		private uint last_script_id = 0;
@@ -55,6 +56,22 @@ namespace Frida.Agent {
 			if (instance == null)
 				throw new IOError.FAILED ("invalid script id");
 			instance.script.post_message (message);
+		}
+
+		public void enable_debugger () throws IOError {
+			Gum.Script.set_debug_message_handler (on_debug_message);
+		}
+
+		public void disable_debugger () throws IOError {
+			Gum.Script.set_debug_message_handler (null);
+		}
+
+		public void post_message_to_debugger (string message) {
+			Gum.Script.post_message_to_debugger (message);
+		}
+
+		private void on_debug_message (string message) {
+			message_from_debugger (message);
 		}
 
 		public class ScriptInstance : Object {
