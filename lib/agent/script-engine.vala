@@ -20,8 +20,8 @@ namespace Frida.Agent {
 			instance_by_id.clear ();
 		}
 
-		public ScriptInstance create_script (string source) throws IOError {
-			var script = Gum.Script.from_string (source);
+		public ScriptInstance create_script (string name, string source) throws IOError {
+			var script = Gum.Script.from_string (name, source);
 			var sid = AgentScriptId (++last_script_id);
 			script.get_stalker ().exclude (agent_range);
 			script.set_message_handler ((script, message, data) => {

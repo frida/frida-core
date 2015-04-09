@@ -564,25 +564,27 @@ namespace Frida {
 			}
 		}
 
-		public async Script create_script (string source) throws Error {
+		public async Script create_script (string name, string source) throws Error {
 			check_open ();
-			var sid = yield session.create_script (source);
+			var sid = yield session.create_script (name, source);
 			var script = new Script (this, sid);
 			script_by_id[sid.handle] = script;
 			return script;
 		}
 
-		public Script create_script_sync (string source) throws Error {
+		public Script create_script_sync (string name, string source) throws Error {
 			var task = create<CreateScriptTask> () as CreateScriptTask;
+			task.name = name;
 			task.source = source;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class CreateScriptTask : ProcessTask<Script> {
+			public string name;
 			public string source;
 
 			protected override async Script perform_operation () throws Error {
-				return yield parent.create_script (source);
+				return yield parent.create_script (name, source);
 			}
 		}
 
