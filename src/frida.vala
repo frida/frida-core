@@ -884,6 +884,8 @@ namespace Frida {
 			private size_t length;
 			private size_t capacity;
 
+			private Queue<string> outgoing = new Queue<string> ();
+
 			public DebugSession (AgentSession session, IOStream stream) {
 				this.session = session;
 
@@ -919,7 +921,30 @@ namespace Frida {
 			}
 
 			public async void send (string[] headers, string content) {
-				// TODO
+				assert (headers.length % 2 == 0);
+
+				var message = new StringBuilder ("");
+				for (var i = 0; i != headers.length; i += 2) {
+					var key = headers[i];
+					var val = headers[i + 1];
+					message.append_printf ("%s: %s\r\n", key, val);
+				}
+				message.append_printf ("Content-Length: %ld\r\n\r\n%s", content.length, content);
+
+				var write_now = outgoing.is_empty ();
+				outgoing.push_tail (message.str);
+				if (!write_now)
+					return;
+
+				try {
+					do {
+						var m = outgoing.peek_head ();
+						unowned uint8[] buf = (uint8[]) m;
+						yield output.write_all_async (buf[0:m.length], Priority.DEFAULT, null, null);
+						outgoing.pop_head ();
+					} while (!outgoing.is_empty ());
+				} catch (Error e) {
+				}
 			}
 
 			private async void process_incoming_messages () {
