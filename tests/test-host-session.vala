@@ -161,37 +161,38 @@ namespace Frida.HostSessionTest {
 					return;
 				}
 
-				stdout.printf ("\nEnter PID: ");
-				stdout.flush ();
-				int pid = int.parse(stdin.read_line());
-
-#if LINUX
-				var backend = new LinuxHostSessionBackend ();
-#endif
-#if DARWIN
-				var backend = new DarwinHostSessionBackend ();
-#endif
-#if WINDOWS
-				var backend = new WindowsHostSessionBackend ();
-#endif
-				h.service.add_backend (backend);
-				yield h.service.start ();
-				yield h.process_events ();
-				var prov = h.first_provider ();
-
 				try {
-					var host_session = yield prov.create ();
-					var id = yield host_session.attach_to (pid);
-					yield prov.obtain_agent_session (id);
-				} catch (IOError e) {
-					stderr.printf ("ERROR: %s\n", e.message);
+					var device_manager = new DeviceManager ();
+
+					var devices = yield device_manager.enumerate_devices ();
+					Device device = null;
+					var num_devices = devices.size ();
+					for (var i = 0; i != num_devices && device == null; i++) {
+						var d = devices.get (i);
+						if (d.dtype == DeviceType.LOCAL)
+							device = d;
+					}
+					assert (device != null);
+
+					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
+					stdout.printf ("Enter PID: ");
+					stdout.flush ();
+					uint pid = (uint) int.parse(stdin.read_line());
+
+					stdout.printf ("Attaching...\n");
+					var session = yield device.attach (pid);
+					stdout.printf ("Attached!\n");
+
+					stdout.printf ("Enabling debugger...\n");
+					yield session.enable_debugger (5858);
+					stdout.printf ("Debugger listening on port 5858\n");
+
+					while (true)
+						yield h.process_events ();
+				} catch (Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
-
-				yield h.service.stop ();
-				h.service.remove_backend (backend);
-
-				h.done ();
 			}
 
 		}

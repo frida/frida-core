@@ -531,6 +531,8 @@ namespace Frida {
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
 
+		private Debugger debugger;
+
 		public Session (Device device, uint pid, AgentSession agent_session) {
 			this.device = device;
 			this.pid = pid;
@@ -584,6 +586,57 @@ namespace Frida {
 			}
 		}
 
+		public async void enable_debugger (uint16 port) throws Error {
+			check_open ();
+
+			if (debugger != null)
+				throw new IOError.FAILED ("already enabled");
+
+			debugger = new Debugger (port, session);
+			var enabled = false;
+			try {
+				yield debugger.enable ();
+				enabled = true;
+			} finally {
+				if (!enabled)
+					debugger = null;
+			}
+		}
+
+		public void enable_debugger_sync (uint16 port) throws Error {
+			var task = create<EnableScriptDebuggerTask> () as EnableScriptDebuggerTask;
+			task.port = port;
+			task.start_and_wait_for_completion ();
+		}
+
+		private class EnableScriptDebuggerTask : ProcessTask<void> {
+			public uint16 port;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.enable_debugger (port);
+			}
+		}
+
+		public async void disable_debugger () throws Error {
+			check_open ();
+
+			if (debugger == null)
+				return;
+
+			debugger.disable ();
+			debugger = null;
+		}
+
+		public void disable_debugger_sync () throws Error {
+			(create<DisableScriptDebuggerTask> () as DisableScriptDebuggerTask).start_and_wait_for_completion ();
+		}
+
+		private class DisableScriptDebuggerTask : ProcessTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.disable_debugger ();
+			}
+		}
+
 		private void on_message_from_script (AgentScriptId sid, string message, uint8[] data) {
 			var script = script_by_id[sid.handle];
 			if (script != null)
@@ -610,6 +663,11 @@ namespace Frida {
 				return;
 			}
 			close_request = new Gee.Promise<bool> ();
+
+			if (debugger != null) {
+				debugger.disable ();
+				debugger = null;
+			}
 
 			foreach (var script in script_by_id.values.to_array ())
 				yield script._do_close (may_block);
@@ -747,6 +805,200 @@ namespace Frida {
 			public weak Script parent {
 				get;
 				construct;
+			}
+		}
+	}
+
+	private class Debugger : Object {
+		private uint16 port;
+		private AgentSession session;
+
+		private SocketService service;
+		private Gee.HashSet<DebugSession> sessions = new Gee.HashSet<DebugSession> ();
+
+		public Debugger (uint16 port, AgentSession session) {
+			this.port = port;
+			this.session = session;
+		}
+
+		public async void enable () throws IOError {
+			if (service != null)
+				throw new IOError.FAILED ("already enabled");
+			service = new SocketService ();
+			try {
+				service.add_inet_port (port, null);
+			} catch (Error e) {
+				service = null;
+				throw new IOError.FAILED (e.message);
+			}
+			service.incoming.connect (on_incoming_connection);
+			service.start ();
+			bool enabled = false;
+			try {
+				yield session.enable_debugger ();
+				enabled = true;
+			} finally {
+				if (!enabled) {
+					service.stop ();
+					service = null;
+				}
+			}
+		}
+
+		public void disable () {
+			if (service == null)
+				return;
+			if (session != null) {
+				session.disable_debugger.begin ();
+				session = null;
+			}
+			service.stop ();
+		}
+
+		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
+			var session = new DebugSession (session, connection);
+			session.ended.connect (on_session_ended);
+			sessions.add (session);
+			session.open ();
+			return true;
+		}
+
+		private void on_session_ended (DebugSession session) {
+			sessions.remove (session);
+			session.close ();
+		}
+
+		private class DebugSession : Object {
+			public signal void ended (DebugSession session);
+
+			private const size_t CHUNK_SIZE = 512;
+			private const size_t MAX_MESSAGE_SIZE = 2048;
+
+			private weak AgentSession session;
+
+			private IOStream stream;
+			private InputStream input;
+			private OutputStream output;
+
+			private char * buffer;
+			private size_t length;
+			private size_t capacity;
+
+			public DebugSession (AgentSession session, IOStream stream) {
+				this.session = session;
+
+				this.stream = stream;
+				this.input = stream.get_input_stream ();
+				this.output = stream.get_output_stream ();
+			}
+
+			~DebugSession () {
+				free (buffer);
+
+				close ();
+			}
+
+			public void open () {
+				var headers = new string[] {
+					"Type", "connect",
+					"V8-Version", "4.3.62", // FIXME
+					"Protocol-Version", "1",
+					"Embedding-Host", "Frida v4.0.0" // FIXME
+				};
+				var body = "";
+				send.begin (headers, body);
+
+				process_incoming_messages.begin ();
+			}
+
+			public void close () {
+				if (stream != null) {
+					stream.close_async.begin ();
+					stream = null;
+				}
+			}
+
+			public async void send (string[] headers, string content) {
+				// TODO
+			}
+
+			private async void process_incoming_messages () {
+				try {
+					while (true) {
+						var message = yield read_message ();
+						yield session.post_message_to_debugger (message);
+					}
+				} catch (IOError e) {
+					ended (this);
+				}
+			}
+
+			private async string read_message () throws IOError {
+				long message_length = 0;
+				long header_length = 0;
+				long content_length = 0;
+
+				while (true) {
+					if (length > 0) {
+						unowned string message = (string) buffer;
+
+						if (message_length == 0) {
+							int header_end = message.index_of ("\r\n\r\n");
+							if (header_end != -1) {
+								header_length = header_end + 4;
+
+								var headers = message[0:header_end];
+								var lines = headers.split ("\r\n");
+								foreach (var line in lines) {
+									var tokens = line.split (": ", 2);
+									if (tokens.length != 2)
+										throw new IOError.FAILED ("malformed header");
+									var key = tokens[0];
+									var val = tokens[1];
+									if (key == "Content-Length") {
+										uint64 l;
+										if (uint64.try_parse (val, out l)) {
+											content_length = (long) l;
+
+											message_length = header_length + content_length;
+										}
+									}
+								}
+
+								if (message_length == 0)
+									throw new IOError.FAILED ("missing content length");
+							}
+						}
+
+						if (message_length != 0 && length >= message_length) {
+							var content = message[header_length:message_length];
+							length -= message_length;
+							if (length > 0) {
+								Memory.move (buffer, buffer + message_length, length);
+								buffer[length] = 0;
+							}
+							return content;
+						}
+					}
+
+					var available = capacity - length;
+					if (available < CHUNK_SIZE) {
+						capacity = size_t.min (capacity + (CHUNK_SIZE - available), MAX_MESSAGE_SIZE);
+						buffer = realloc (buffer, capacity + 1);
+
+						available = capacity - length;
+					}
+
+					if (available == 0)
+						throw new IOError.FAILED ("maximum message size exceeded");
+
+					buffer[length + available] = 0;
+					unowned uint8[] buf = (uint8[]) buffer;
+					ssize_t n = yield input.read_async (buf[length:length + available]);
+					if (n == 0)
+						throw new IOError.CLOSED ("connection closed");
+					length += n;
+				}
 			}
 		}
 	}

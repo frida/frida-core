@@ -64,6 +64,18 @@ namespace Frida.Agent {
 			script_engine.post_message_to_script (sid, message);
 		}
 
+		public async void enable_debugger () throws IOError {
+			// TODO
+		}
+
+		public async void disable_debugger () throws IOError {
+			// TODO
+		}
+
+		public async void post_message_to_debugger (string message) throws IOError {
+			// TODO
+		}
+
 		private void validate_state () throws IOError {
 			if (closing)
 				throw new IOError.FAILED ("close in progress");

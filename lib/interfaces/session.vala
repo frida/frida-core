@@ -18,6 +18,11 @@ namespace Frida {
 		public abstract async void load_script (AgentScriptId sid) throws IOError;
 		public abstract async void post_message_to_script (AgentScriptId sid, string message) throws IOError;
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
+
+		public abstract async void enable_debugger () throws IOError;
+		public abstract async void disable_debugger () throws IOError;
+		public abstract async void post_message_to_debugger (string message) throws IOError;
+		public signal void message_from_debugger (string message);
 	}
 
 	public struct HostProcessInfo {
