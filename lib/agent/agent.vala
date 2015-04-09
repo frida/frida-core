@@ -44,7 +44,7 @@ namespace Frida.Agent {
 			});
 		}
 
-		public async AgentScriptId create_script (string name, string source) throws IOError {
+		public async AgentScriptId create_script (string? name, string source) throws IOError {
 			validate_state ();
 			var instance = script_engine.create_script (name, source);
 			return instance.sid;

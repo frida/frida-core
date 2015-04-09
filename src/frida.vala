@@ -564,7 +564,7 @@ namespace Frida {
 			}
 		}
 
-		public async Script create_script (string name, string source) throws Error {
+		public async Script create_script (string? name, string source) throws Error {
 			check_open ();
 			var sid = yield session.create_script (name, source);
 			var script = new Script (this, sid);
@@ -572,7 +572,7 @@ namespace Frida {
 			return script;
 		}
 
-		public Script create_script_sync (string name, string source) throws Error {
+		public Script create_script_sync (string? name, string source) throws Error {
 			var task = create<CreateScriptTask> () as CreateScriptTask;
 			task.name = name;
 			task.source = source;
@@ -580,7 +580,7 @@ namespace Frida {
 		}
 
 		private class CreateScriptTask : ProcessTask<Script> {
-			public string name;
+			public string? name;
 			public string source;
 
 			protected override async Script perform_operation () throws Error {
