@@ -67,7 +67,7 @@ namespace Frida.Agent {
 		}
 
 		public void post_message_to_debugger (string message) {
-			Gum.Script.post_message_to_debugger (message);
+			Gum.Script.post_debug_message (message);
 		}
 
 		private void on_debug_message (string message) {
