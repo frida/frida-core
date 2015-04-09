@@ -946,59 +946,69 @@ namespace Frida {
 							int header_end = message.index_of ("\r\n\r\n");
 							if (header_end != -1) {
 								header_length = header_end + 4;
-
 								var headers = message[0:header_end];
-								var lines = headers.split ("\r\n");
-								foreach (var line in lines) {
-									var tokens = line.split (": ", 2);
-									if (tokens.length != 2)
-										throw new IOError.FAILED ("malformed header");
-									var key = tokens[0];
-									var val = tokens[1];
-									if (key == "Content-Length") {
-										uint64 l;
-										if (uint64.try_parse (val, out l)) {
-											content_length = (long) l;
-
-											message_length = header_length + content_length;
-										}
-									}
-								}
-
-								if (message_length == 0)
-									throw new IOError.FAILED ("missing content length");
+								parse_headers (headers, out content_length);
+								message_length = header_length + content_length;
 							}
 						}
 
 						if (message_length != 0 && length >= message_length) {
 							var content = message[header_length:message_length];
-							length -= message_length;
-							if (length > 0) {
-								Memory.move (buffer, buffer + message_length, length);
-								buffer[length] = 0;
-							}
+							consume_buffer (message_length);
 							return content;
 						}
 					}
 
-					var available = capacity - length;
-					if (available < CHUNK_SIZE) {
-						capacity = size_t.min (capacity + (CHUNK_SIZE - available), MAX_MESSAGE_SIZE);
-						buffer = realloc (buffer, capacity + 1);
-
-						available = capacity - length;
-					}
-
-					if (available == 0)
-						throw new IOError.FAILED ("maximum message size exceeded");
-
-					buffer[length + available] = 0;
-					unowned uint8[] buf = (uint8[]) buffer;
-					ssize_t n = yield input.read_async (buf[length:length + available]);
-					if (n == 0)
-						throw new IOError.CLOSED ("connection closed");
-					length += n;
+					yield fill_buffer ();
 				}
+			}
+
+			private async void fill_buffer () throws IOError {
+				var available = capacity - length;
+				if (available < CHUNK_SIZE) {
+					capacity = size_t.min (capacity + (CHUNK_SIZE - available), MAX_MESSAGE_SIZE);
+					buffer = realloc (buffer, capacity + 1);
+
+					available = capacity - length;
+				}
+
+				if (available == 0)
+					throw new IOError.FAILED ("maximum message size exceeded");
+
+				buffer[length + available] = 0;
+				unowned uint8[] buf = (uint8[]) buffer;
+				ssize_t n = yield input.read_async (buf[length:length + available]);
+				if (n == 0)
+					throw new IOError.CLOSED ("connection closed");
+				length += n;
+			}
+
+			private void consume_buffer (long n) {
+				length -= n;
+				if (length > 0) {
+					Memory.move (buffer, buffer + n, length);
+					buffer[length] = 0;
+				}
+			}
+
+			private void parse_headers (string headers, out long content_length) throws IOError {
+				var lines = headers.split ("\r\n");
+				foreach (var line in lines) {
+					var tokens = line.split (": ", 2);
+					if (tokens.length != 2)
+						throw new IOError.FAILED ("malformed header");
+					var key = tokens[0];
+					var val = tokens[1];
+					if (key == "Content-Length") {
+						uint64 l;
+						if (uint64.try_parse (val, out l)) {
+							content_length = (long) l;
+							return;
+						}
+					}
+				}
+
+				throw new IOError.FAILED ("missing content length");
 			}
 		}
 	}
