@@ -20,7 +20,7 @@ namespace Frida.Agent {
 			instance_by_id.clear ();
 		}
 
-		public ScriptInstance create_script (string? name, string source) throws IOError {
+		public async ScriptInstance create_script (string? name, string source) throws IOError {
 			var sid = AgentScriptId (++last_script_id);
 
 			string script_name;
@@ -29,13 +29,10 @@ namespace Frida.Agent {
 			else
 				script_name = "script%u".printf (sid.handle);
 
-			var script = Gum.Script.from_string (script_name, source);
+			var script = yield Gum.Script.from_string (script_name, source);
 			script.get_stalker ().exclude (agent_range);
 			script.set_message_handler ((script, message, data) => {
-				Idle.add (() => {
-					this.message_from_script (sid, message, data);
-					return false;
-				});
+				this.message_from_script (sid, message, data);
 			});
 
 			var instance = new ScriptInstance (sid, script);
@@ -51,11 +48,11 @@ namespace Frida.Agent {
 			yield instance.destroy ();
 		}
 
-		public void load_script (AgentScriptId sid) throws IOError {
+		public async void load_script (AgentScriptId sid) throws IOError {
 			var instance = instance_by_id[sid.handle];
 			if (instance == null)
 				throw new IOError.FAILED ("invalid script id");
-			instance.script.load ();
+			yield instance.script.load ();
 		}
 
 		public void post_message_to_script (AgentScriptId sid, string message) throws IOError {
@@ -98,7 +95,7 @@ namespace Frida.Agent {
 
 			public async void destroy () {
 				Gum.Stalker stalker = script.get_stalker ();
-				script.unload ();
+				yield script.unload ();
 				while (stalker.garbage_collect ()) {
 					var source = new TimeoutSource (50);
 					source.set_callback (() => {

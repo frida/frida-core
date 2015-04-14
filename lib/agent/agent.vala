@@ -46,7 +46,7 @@ namespace Frida.Agent {
 
 		public async AgentScriptId create_script (string? name, string source) throws IOError {
 			validate_state ();
-			var instance = script_engine.create_script (name, source);
+			var instance = yield script_engine.create_script (name, source);
 			return instance.sid;
 		}
 
@@ -57,7 +57,7 @@ namespace Frida.Agent {
 
 		public async void load_script (AgentScriptId sid) throws IOError {
 			validate_state ();
-			script_engine.load_script (sid);
+			yield script_engine.load_script (sid);
 		}
 
 		public async void post_message_to_script (AgentScriptId sid, string message) throws IOError {
