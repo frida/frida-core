@@ -526,6 +526,8 @@ namespace Frida {
 			private set;
 		}
 
+		private const uint16 DEFAULT_DEBUG_PORT = 5858;
+
 		private weak Device device;
 		private Gee.Promise<bool> close_request;
 
@@ -588,13 +590,13 @@ namespace Frida {
 			}
 		}
 
-		public async void enable_debugger (uint16 port) throws Error {
+		public async void enable_debugger (uint16 port = 0) throws Error {
 			check_open ();
 
 			if (debugger != null)
 				throw new IOError.FAILED ("already enabled");
 
-			debugger = new Debugger (port, session);
+			debugger = new Debugger ((port != 0) ? port : DEFAULT_DEBUG_PORT, session);
 			var enabled = false;
 			try {
 				yield debugger.enable ();
@@ -605,7 +607,7 @@ namespace Frida {
 			}
 		}
 
-		public void enable_debugger_sync (uint16 port) throws Error {
+		public void enable_debugger_sync (uint16 port = 0) throws Error {
 			var task = create<EnableScriptDebuggerTask> () as EnableScriptDebuggerTask;
 			task.port = port;
 			task.start_and_wait_for_completion ();
