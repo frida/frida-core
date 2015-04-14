@@ -566,7 +566,7 @@ namespace Frida {
 
 		public async Script create_script (string? name, string source) throws Error {
 			check_open ();
-			var sid = yield session.create_script (name, source);
+			var sid = yield session.create_script ((name == null) ? "" : name, source);
 			var script = new Script (this, sid);
 			script_by_id[sid.handle] = script;
 			return script;

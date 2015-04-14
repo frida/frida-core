@@ -13,7 +13,7 @@ namespace Frida {
 	public interface AgentSession : Object {
 		public abstract async void close () throws IOError;
 
-		public abstract async AgentScriptId create_script (string? name, string source) throws IOError;
+		public abstract async AgentScriptId create_script (string name, string source) throws IOError;
 		public abstract async void destroy_script (AgentScriptId sid) throws IOError;
 		public abstract async void load_script (AgentScriptId sid) throws IOError;
 		public abstract async void post_message_to_script (AgentScriptId sid, string message) throws IOError;
