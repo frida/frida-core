@@ -225,7 +225,7 @@ namespace Frida.HostSessionTest {
 					received_message = message;
 					spawn.callback ();
 				});
-				var script_id = yield session.create_script (
+				var script_id = yield session.create_script ("spawn",
 					"Process.enumerateModules({" +
 					"  onMatch: function (m) {" +
 					"    if (m.name.indexOf('libc') === 0) {" +
@@ -325,7 +325,7 @@ namespace Frida.HostSessionTest {
 					received_message = message;
 					spawn.callback ();
 				});
-				var script_id = yield session.create_script (
+				var script_id = yield session.create_script ("spawn",
 					"Interceptor.attach (Module.findExportByName('libSystem.B.dylib', 'sleep'), {" +
 					"  onEnter: function (args) {" +
 					"    send({ seconds: args[0].toInt32() });" +
