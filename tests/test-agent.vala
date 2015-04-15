@@ -19,7 +19,7 @@ namespace Frida.AgentTest {
 
 			AgentScriptId sid;
 			try {
-				sid = yield session.create_script (
+				sid = yield session.create_script ("load-and-receive-messages",
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter: function(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: Memory.readUtf8String(args[1]) });" +
@@ -49,7 +49,7 @@ namespace Frida.AgentTest {
 
 			AgentScriptId sid;
 			try {
-				sid = yield session.create_script (
+				sid = yield session.create_script ("performance",
 					("var buf = Memory.readByteArray(ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), %d);" +
 					 "var startTime = new Date();" +
 					 "var sendNext = function sendNext() {" +

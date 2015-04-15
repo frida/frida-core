@@ -456,7 +456,7 @@ namespace Frida.HostSessionTest {
 					received_message = message;
 					spawn.callback ();
 				});
-				var script_id = yield session.create_script (
+				var script_id = yield session.create_script ("spawn",
 					"Interceptor.attach (Module.findExportByName('user32.dll', 'GetMessageW'), {" +
 					"  onEnter: function (args) {" +
 					"    send('GetMessage');" +
@@ -567,7 +567,7 @@ namespace Frida.HostSessionTest {
 					large_messages.callback ();
 				});
 				stdout.printf ("creating script\n");
-				var script_id = yield session.create_script (
+				var script_id = yield session.create_script ("large-messages",
 					"function onMessage(message) {" +
 					"  send(\"ACK: \" + message.length);" +
 					"  recv(onMessage);" +
