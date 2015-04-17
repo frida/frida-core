@@ -82,6 +82,28 @@ frida_get_main_context (void)
   return main_context;
 }
 
+void
+frida_version (guint * major, guint * minor, guint * micro, guint * nano)
+{
+  if (major != NULL)
+    *major = FRIDA_MAJOR_VERSION;
+
+  if (minor != NULL)
+    *minor = FRIDA_MINOR_VERSION;
+
+  if (micro != NULL)
+    *micro = FRIDA_MICRO_VERSION;
+
+  if (nano != NULL)
+    *nano = FRIDA_NANO_VERSION;
+}
+
+const gchar *
+frida_version_string (void)
+{
+  return FRIDA_VERSION;
+}
+
 static gpointer
 run_main_loop (gpointer data)
 {

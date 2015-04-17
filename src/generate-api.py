@@ -234,6 +234,10 @@ if __name__ == '__main__':
                 output_header_file.write("\n\n/* Object lifetime */")
                 output_header_file.write("\nvoid frida_unref (gpointer obj);")
 
+                output_header_file.write("\n\n/* Library versioning */")
+                output_header_file.write("\nvoid frida_version (guint * major, guint * minor, guint * micro, guint * nano);")
+                output_header_file.write("\nconst gchar * frida_version_string (void);")
+
                 for klass in api_classes:
                     output_header_file.write("\n\n/* %s */" % klass.name)
                     sections = []

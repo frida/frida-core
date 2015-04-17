@@ -6,6 +6,9 @@ namespace Frida {
 
 	public extern void unref (void * obj);
 
+	public extern void version (out uint major, out uint minor, out uint micro, out uint nano);
+	public extern unowned string version_string ();
+
 	public class DeviceManager : Object {
 		public signal void added (Device device);
 		public signal void removed (Device device);
