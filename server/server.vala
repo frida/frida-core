@@ -63,10 +63,12 @@ namespace Frida {
 		}
 
 		private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+		private static bool output_version;
 		[CCode (array_length = false, array_null_terminated = true)]
 		private static string[] listen_addresses;
 
 		static const OptionEntry[] options = {
+			{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 			{ "", 0, 0, OptionArg.STRING_ARRAY, ref listen_addresses, null, "[LISTEN_ADDRESS]" },
 			{ null }
 		};
@@ -77,6 +79,10 @@ namespace Frida {
 				ctx.set_help_enabled (true);
 				ctx.add_main_entries (options, null);
 				ctx.parse (ref args);
+				if (output_version) {
+					stdout.printf ("%s\n", version_string ());
+					return 0;
+				}
 			} catch (OptionError e) {
 				stdout.printf ("%s\n", e.message);
 				stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
