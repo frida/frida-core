@@ -64,7 +64,7 @@ namespace Frida {
 
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
-			agent_desc = new AgentDescriptor ("frida-agent-%u.dll",
+			agent_desc = new AgentDescriptor ("frida-agent-%u.so",
 				new MemoryInputStream.from_data (blob32.data, null),
 				new MemoryInputStream.from_data (blob64.data, null));
 		}
