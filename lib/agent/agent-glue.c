@@ -12,6 +12,14 @@
 # include <pthread.h>
 #endif
 
+#ifdef HAVE_ANDROID
+# include <android/log.h>
+#else
+# include <stdio.h>
+#endif
+
+static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
+
 void
 frida_agent_environment_init (void)
 {
@@ -43,11 +51,12 @@ frida_agent_environment_init (void)
 
   gum_memory_init ();
   g_mem_set_vtable (&mem_vtable);
-  g_setenv ("G_DEBUG", "fatal-warnings:fatal-criticals", TRUE);
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
   glib_init ();
+  g_log_set_default_handler (frida_agent_on_log_message, NULL);
+  g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
   gum_init ();
 }
@@ -59,6 +68,70 @@ frida_agent_environment_deinit (void)
   gio_deinit ();
   glib_deinit ();
   gum_memory_deinit ();
+}
+
+static void
+frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data)
+{
+#ifdef HAVE_ANDROID
+  int priority;
+
+  switch (log_level & G_LOG_LEVEL_MASK)
+  {
+    case G_LOG_LEVEL_ERROR:
+    case G_LOG_LEVEL_CRITICAL:
+    case G_LOG_LEVEL_WARNING:
+      priority = ANDROID_LOG_FATAL;
+      break;
+    case G_LOG_LEVEL_MESSAGE:
+    case G_LOG_LEVEL_INFO:
+      priority = ANDROID_LOG_INFO;
+      break;
+    case G_LOG_LEVEL_DEBUG:
+      priority = ANDROID_LOG_DEBUG;
+      break;
+    default:
+      g_assert_not_reached ();
+  }
+
+  __android_log_write (priority, log_domain, message);
+#else
+  FILE * file;
+  const gchar * severity;
+
+  switch (log_level & G_LOG_LEVEL_MASK)
+  {
+    case G_LOG_LEVEL_ERROR:
+      file = stderr;
+      severity = "ERROR";
+      break;
+    case G_LOG_LEVEL_CRITICAL:
+      file = stderr;
+      severity = "CRITICAL";
+      break;
+    case G_LOG_LEVEL_WARNING:
+      file = stderr;
+      severity = "WARNING";
+      break;
+    case G_LOG_LEVEL_MESSAGE:
+      file = stderr;
+      severity = "MESSAGE";
+      break;
+    case G_LOG_LEVEL_INFO:
+      file = stdout;
+      severity = "INFO";
+      break;
+    case G_LOG_LEVEL_DEBUG:
+      file = stdout;
+      severity = "DEBUG";
+      break;
+    default:
+      g_assert_not_reached ();
+  }
+
+  fprintf (file, "[%s %s] %s\n", log_domain, severity, message);
+  fflush (file);
+#endif
 }
 
 typedef struct _FridaAutoInterceptContext FridaAutoInterceptContext;

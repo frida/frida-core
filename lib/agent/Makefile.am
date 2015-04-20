@@ -1,4 +1,9 @@
+extra_libs =
 extra_ldflags =
+
+if OS_ANDROID
+extra_libs += -llog
+endif
 
 if OS_LINUX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-agent.version
@@ -20,6 +25,7 @@ libfrida_agent_la_LIBADD = \
 	$(builddir)/libfrida-agent-glue.la \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
+	$(extra_libs) \
 	$(FRIDA_LIBS)
 libfrida_agent_la_LDFLAGS = \
 	-no-undefined \
