@@ -76,6 +76,8 @@ frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, 
 #ifdef HAVE_ANDROID
   int priority;
 
+  (void) user_data;
+
   switch (log_level & G_LOG_LEVEL_MASK)
   {
     case G_LOG_LEVEL_ERROR:
@@ -98,6 +100,8 @@ frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, 
 #else
   FILE * file;
   const gchar * severity;
+
+  (void) user_data;
 
   switch (log_level & G_LOG_LEVEL_MASK)
   {
