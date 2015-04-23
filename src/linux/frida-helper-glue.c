@@ -303,7 +303,7 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   instance->id = id;
   instance->pid = pid;
   instance->already_attached = FALSE;
-  instance->fifo_path = g_strdup_printf ("%s/linjector-%d", temp_path, pid);
+  instance->fifo_path = g_strdup_printf ("%s/linjector-%u", temp_path, id);
   ret = mkfifo (instance->fifo_path, mode);
   g_assert_cmpint (ret, ==, 0);
   ret = chmod (instance->fifo_path, mode);
