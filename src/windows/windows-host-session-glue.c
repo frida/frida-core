@@ -24,8 +24,10 @@ static FridaSpawnInstance * frida_spawn_instance_new (FridaWindowsHostSession * 
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
-static WCHAR * command_line_from_argv (gchar ** argv, gint argv_length);
-static WCHAR * environment_block_from_envp (gchar ** envp, gint envp_length);
+static WCHAR * command_line_from_argv (const gchar ** argv, gint argv_length);
+static WCHAR * environment_block_from_envp (const gchar ** envp, gint envp_length);
+
+static void append_n_backslashes (GString * str, guint n);
 
 FridaImageData *
 _frida_windows_host_session_provider_extract_icon (GError ** error)
@@ -169,7 +171,7 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
 }
 
 static WCHAR *
-command_line_from_argv (gchar ** argv, gint argv_length)
+command_line_from_argv (const gchar ** argv, gint argv_length)
 {
   GString * line;
   WCHAR * line_utf16;
@@ -179,14 +181,57 @@ command_line_from_argv (gchar ** argv, gint argv_length)
 
   for (i = 0; i != argv_length; i++)
   {
-    gchar * arg;
+    const gchar * arg = argv[i];
+    gboolean no_quotes_needed;
 
     if (i > 0)
       g_string_append_c (line, ' ');
 
-    arg = g_shell_quote (argv[i]);
-    g_string_append (line, arg);
-    g_free (arg);
+    no_quotes_needed = arg[0] != '\0' &&
+        g_utf8_strchr (arg, -1, ' ') == NULL &&
+        g_utf8_strchr (arg, -1, '\t') == NULL &&
+        g_utf8_strchr (arg, -1, '\n') == NULL &&
+        g_utf8_strchr (arg, -1, '\v') == NULL &&
+        g_utf8_strchr (arg, -1, '"') == NULL;
+    if (no_quotes_needed)
+    {
+      g_string_append (line, arg);
+    }
+    else
+    {
+      const gchar * c;
+
+      g_string_append_c (line, '"');
+
+      for (c = arg; *c != '\0'; c = g_utf8_next_char (c))
+      {
+        guint num_backslashes = 0;
+
+        while (*c != '\0' && *c == '\\')
+        {
+          num_backslashes++;
+          c++;
+        }
+
+        if (*c == '\0')
+        {
+          append_n_backslashes (line, num_backslashes * 2);
+          break;
+        }
+        else if (*c == '"')
+        {
+          append_n_backslashes (line, (num_backslashes * 2) + 1);
+          g_string_append_c (line, *c);
+        }
+        else
+        {
+          append_n_backslashes (line, num_backslashes);
+          g_string_append_unichar (line, g_utf8_get_char (c));
+        }
+      }
+
+      g_string_append_c (line, '"');
+    }
   }
 
   line_utf16 = (WCHAR *) g_utf8_to_utf16 (line->str, -1, NULL, NULL, NULL);
@@ -197,7 +242,7 @@ command_line_from_argv (gchar ** argv, gint argv_length)
 }
 
 static WCHAR *
-environment_block_from_envp (gchar ** envp, gint envp_length)
+environment_block_from_envp (const gchar ** envp, gint envp_length)
 {
   GString * block;
   gint i;
@@ -224,4 +269,13 @@ environment_block_from_envp (gchar ** envp, gint envp_length)
   g_string_append_c (block, '\0');
 
   return (WCHAR *) g_string_free (block, FALSE);
+}
+
+static void
+append_n_backslashes (GString * str, guint n)
+{
+  guint i;
+
+  for (i = 0; i != n; i++)
+    g_string_append_c (str, '\\');
 }
