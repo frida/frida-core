@@ -98,8 +98,8 @@ frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, 
 
   __android_log_write (priority, log_domain, message);
 #else
-  FILE * file;
-  const gchar * severity;
+  FILE * file = NULL;
+  const gchar * severity = NULL;
 
   (void) user_data;
 
