@@ -13,8 +13,6 @@ if OS_LINUX
 libfrida_pipe_la_CFLAGS = \
 	-w
 endif
-libfrida_pipe_la_LIBADD = \
-	$(FRIDA_LIBS)
 libfrida_pipe_la_DEPENDENCIES = \
 	$(builddir)/libfrida-pipe-autogen.la
 
