@@ -243,8 +243,6 @@ frida-api-stamp: libfrida-core-1.0.la $(srcdir)/generate-api.py
 
 libfrida_core_1_0_la_SOURCES = \
 	$(NULL)
-libfrida_core_1_0_la_LDFLAGS = \
-	$(FRIDA_LDFLAGS)
 libfrida_core_1_0_la_LIBADD = \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
