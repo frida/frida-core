@@ -251,8 +251,7 @@ libfrida_core_1_0_la_LIBADD = \
 	libfrida-data-agent.la \
 	$(backend_libadd) \
 	libfrida-core.la \
-	libfrida-core-glue.la \
-	$(FRIDA_LIBS)
+	libfrida-core-glue.la
 libfrida_core_1_0_la_LIBTOOLFLAGS = \
 	--tag=disable-shared
 
