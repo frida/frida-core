@@ -71,6 +71,9 @@
   </ItemDefinitionGroup>
   <Import Project="frida-agent-common.props" />
   <ItemGroup>
+    <ProjectReference Include="..\..\..\frida-gum\bindings\gumjs\gumjs-32.vcxproj">
+      <Project>{8381538f-3cb5-480b-bfa4-960299af6485}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\..\..\frida-gum\gum-32.vcxproj">
       <Project>{b31c7d42-54b6-49bb-b30c-11745c48b062}</Project>
       <Private>false</Private>

@@ -31,9 +31,11 @@ frida_tests_SOURCES = \
 frida_tests_LDADD = \
 	$(builddir)/libfrida-tests.la \
 	$(top_builddir)/src/libfrida-core-1.0.la \
-	$(FRIDA_LIBS)
+	$(FRIDA_LIBS) \
+	$(FRIDA_TEST_LIBS)
 frida_tests_LDFLAGS = \
 	$(FRIDA_LDFLAGS) \
+	$(FRIDA_TEST_LDFLAGS) \
 	-static
 frida_tests_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
@@ -42,7 +44,7 @@ frida_tests_VALAFLAGS = \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
 	--pkg=frida-tests \
-	@FRIDA_PACKAGES@ \
+	@FRIDA_TEST_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 if OS_MAC
 frida_tests_LDFLAGS += \
@@ -74,7 +76,7 @@ libfrida_tests_la_VALAFLAGS = \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
-	@FRIDA_PACKAGES@ \
+	@FRIDA_TEST_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 libfrida_tests_glue_la_SOURCES = \
