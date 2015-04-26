@@ -1,13 +1,13 @@
 prefix=@prefix@
 exec_prefix=${prefix}
-libdir=${exec_prefix}/lib
 includedir=${prefix}/include
+libdir=${exec_prefix}/lib
 
 Name: Frida Core
-Description: Frida Core
+Description: Frida core library intended for static linking into bindings
 Version: @VERSION@
 Requires: glib-2.0 gobject-2.0 gio-2.0
 Requires.private: gee-0.8 frida-gum-1.0
-Libs: -L${libdir} -lfrida-core-1.0
-Libs.private: @FRIDA_LIBS@ @FRIDA_BACKEND_LIBS@
 Cflags: -I${includedir}/frida-1.0
+Libs: -L${libdir} -lfrida-core-1.0
+Libs.private: @FRIDA_BACKEND_LIBS@

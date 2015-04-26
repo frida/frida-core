@@ -23,7 +23,8 @@ libfrida_pipe_autogen_la_CFLAGS = \
 libfrida_pipe_autogen_la_VALAFLAGS = \
 	--library=frida-pipe \
 	--header=frida-pipe.h \
-	@FRIDA_PACKAGES@
+	--pkg glib-2.0 \
+	--pkg gio-2.0
 
 AM_CPPFLAGS = \
 	-include config.h \

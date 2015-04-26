@@ -26,7 +26,7 @@ libfrida_agent_la_LIBADD = \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
 	$(extra_libs) \
-	$(FRIDA_LIBS)
+	$(FRIDA_AGENT_LIBS)
 libfrida_agent_la_LDFLAGS = \
 	-no-undefined \
 	-avoid-version \
@@ -39,13 +39,13 @@ libfrida_agent_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--pkg frida-interfaces \
 	--pkg frida-pipe \
-	@FRIDA_PACKAGES@
+	@FRIDA_AGENT_PACKAGES@
 
 libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
 
 AM_CPPFLAGS = \
 	-include config.h \
-	$(FRIDA_CFLAGS) \
+	$(FRIDA_AGENT_CFLAGS) \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe
