@@ -176,12 +176,12 @@ if __name__ == '__main__':
                 for klass in api_classes:
                     klass.sort_members()
 
-            with open(os.path.join(sys.argv[4], 'frida-core-1.0.deps'), 'wb') as output_deps_file:
+            with open(os.path.join(sys.argv[4], 'frida-core-1.0.deps'), 'wt') as output_deps_file:
                 output_deps_file.write("glib-2.0\n")
                 output_deps_file.write("gobject-2.0\n")
                 output_deps_file.write("gio-2.0\n")
 
-            with open(os.path.join(sys.argv[4], 'frida-core-1.0.vapi'), 'wb') as output_vapi_file:
+            with open(os.path.join(sys.argv[4], 'frida-core-1.0.vapi'), 'wt') as output_vapi_file:
                 output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
                 output_vapi_file.write("\nnamespace Frida {")
                 output_vapi_file.write("\n\tpublic static void init ();")
@@ -210,7 +210,7 @@ if __name__ == '__main__':
 
                 output_vapi_file.write("\n}\n")
 
-            with open(os.path.join(sys.argv[4], 'frida-core.h'), 'wb') as output_header_file:
+            with open(os.path.join(sys.argv[4], 'frida-core.h'), 'wt') as output_header_file:
                 output_header_file.write("#ifndef __FRIDA_CORE_H__\n#define __FRIDA_CORE_H__\n\n")
 
                 output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n")
