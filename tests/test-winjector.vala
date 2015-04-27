@@ -8,7 +8,7 @@ namespace Frida.WinjectorTest {
 				long exitcode = rat.wait_for_process_to_exit ();
 				rat.close ();
 				assert (exitcode == 12345);
-			} catch (IOError e) {
+			} catch (Error e) {
 				stdout.printf ("ERROR: '%s'\n", e.message);
 				assert_not_reached ();
 			}
@@ -21,7 +21,7 @@ namespace Frida.WinjectorTest {
 				long exitcode = rat.wait_for_process_to_exit ();
 				rat.close ();
 				assert (exitcode == 54321);
-			} catch (IOError e) {
+			} catch (Error e) {
 				printerr ("(skipping; requires a 64 bit system) ");
 			}
 		});
@@ -41,7 +41,7 @@ namespace Frida.WinjectorTest {
 		private string rat_directory;
 		private Winjector injector;
 
-		public LabRat (string name) throws IOError {
+		public LabRat (string name) throws Error {
 			Object (name: name);
 
 			var self_filename = Frida.Test.Process.current.filename;
@@ -71,12 +71,9 @@ namespace Frida.WinjectorTest {
 
 			try {
 				exitcode = process.join (1000);
-			} catch (IOError e) {
-				var timed_out_error = new IOError.TIMED_OUT ("");
-				if (e.code == timed_out_error.code)
-					wait_for_exit_timed_out = true;
-				else
-					assert_not_reached ();
+			} catch (Error e) {
+				assert (e is Error.TIMED_OUT);
+				wait_for_exit_timed_out = true;
 			}
 
 			assert (!wait_for_exit_timed_out);
@@ -105,13 +102,13 @@ namespace Frida.WinjectorTest {
 				var dll32 = File.new_for_path (Path.build_filename (rat_directory, name.printf (32))).read (null);
 				var dll64 = File.new_for_path (Path.build_filename (rat_directory, name.printf (64))).read (null);
 				desc = new AgentDescriptor (name, dll32, dll64);
-			} catch (Error io_error) {
+			} catch (GLib.Error io_error) {
 				assert_not_reached ();
 			}
 
 			try {
 				yield injector.inject ((uint32) process.id, desc, data_string);
-			} catch (IOError e) {
+			} catch (Error e) {
 				inject_error = e.message;
 			}
 

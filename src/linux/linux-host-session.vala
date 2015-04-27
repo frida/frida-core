@@ -38,17 +38,17 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create () throws IOError {
+		public async HostSession create () throws Error {
 			if (host_session != null)
-				throw new IOError.FAILED ("may only create one HostSession");
+				throw new Error.INVALID_OPERATION ("Unable to create more than one host session");
 			host_session = new LinuxHostSession ();
 			host_session.agent_session_closed.connect ((id, error) => this.agent_session_closed (id, error));
 			return host_session;
 		}
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
 			if (host_session == null)
-				throw new IOError.FAILED ("no such id");
+				throw new Error.INVALID_ARGUMENT ("Invalid agent session ID");
 			return yield host_session.obtain_agent_session (id);
 		}
 	}
@@ -83,28 +83,34 @@ namespace Frida {
 			helper = null;
 		}
 
-		public override async Frida.HostProcessInfo[] enumerate_processes () throws IOError {
+		public override async Frida.HostProcessInfo[] enumerate_processes () throws Error {
 			return System.enumerate_processes ();
 		}
 
-		public override async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			return yield helper.spawn (path, argv, envp);
 		}
 
-		public override async void resume (uint pid) throws IOError {
+		public override async void resume (uint pid) throws Error {
 			yield helper.resume (pid);
 		}
 
-		public override async void kill (uint pid) throws IOError {
+		public override async void kill (uint pid) throws Error {
 			yield helper.kill (pid);
 		}
 
-		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError {
+		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
 			PipeTransport.set_temp_directory (helper.tempdir.path);
-			var pipe_transport = new PipeTransport ();
-			var stream = new Pipe (pipe_transport.local_address);
-			yield injector.inject (pid, agent_desc, pipe_transport.remote_address);
-			transport = pipe_transport;
+			PipeTransport t;
+			Pipe stream;
+			try {
+				t = new PipeTransport ();
+				stream = new Pipe (t.local_address);
+			} catch (IOError stream_error) {
+				throw new Error.PROCESS_GONE (stream_error.message);
+			}
+			yield injector.inject (pid, agent_desc, t.remote_address);
+			transport = t;
 			return stream;
 		}
 	}

@@ -170,7 +170,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   details.process_handle = NULL;
 
   if (!file_exists_and_is_readable (details.dll_path))
-    goto file_does_not_exist;
+    goto handle_path_error;
 
   enable_debug_privilege ();
 
@@ -195,7 +195,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
     if (*error != NULL)
       goto beach;
     else if (thread_handle == NULL)
-      goto no_usable_thread_found;
+      goto no_suitable_thread_found;
 
     trick_thread_into_spawning_worker_thread (details.process_handle, thread_handle, &rwc, error);
 
@@ -224,38 +224,47 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   goto beach;
 
   /* ERRORS */
-file_does_not_exist:
+handle_path_error:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_FOUND,
-        "specified DLL path '%s' does not exist or cannot be opened",
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to find DLL at “%s”",
         dll_path);
     goto beach;
   }
-no_usable_thread_found:
+no_suitable_thread_found:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_FOUND,
-        "no usable thread found in pid=%u", process_id);
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to locate a suitable thread in process with pid %u",
+        process_id);
     goto beach;
   }
 handle_os_error:
   {
     DWORD os_error;
-    gint code;
 
     os_error = GetLastError ();
 
-    if (os_error == ERROR_ACCESS_DENIED)
-      code = G_IO_ERROR_PERMISSION_DENIED;
+    if (details.process_handle == NULL && os_error == ERROR_INVALID_PARAMETER)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_INVALID_ARGUMENT,
+          "Unable to find process with pid %u",
+          process_id);
+    }
     else
-      code = G_IO_ERROR_FAILED;
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          (os_error == ERROR_ACCESS_DENIED) ? FRIDA_ERROR_PERMISSION_DENIED : FRIDA_ERROR_NOT_SUPPORTED,
+          "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
+          process_id, failed_operation, os_error);
+    }
 
-    g_set_error (error, G_IO_ERROR, code,
-        "%s(pid=%u) failed: %d",
-        failed_operation, process_id, os_error);
     goto beach;
   }
 handle_nt_error:
@@ -263,13 +272,15 @@ handle_nt_error:
     gint code;
 
     if (nt_status == 0xC0000022) /* STATUS_ACCESS_DENIED */
-      code = G_IO_ERROR_PERMISSION_DENIED;
+      code = FRIDA_ERROR_PERMISSION_DENIED;
     else
-      code = G_IO_ERROR_FAILED;
+      code = FRIDA_ERROR_NOT_SUPPORTED;
 
-    g_set_error (error, G_IO_ERROR, code,
-        "%s(pid=%u) failed: 0x%08lx",
-        failed_operation, process_id, nt_status);
+    g_set_error (error,
+        FRIDA_ERROR,
+        code,
+        "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
+        process_id, failed_operation, nt_status);
     goto beach;
   }
 
@@ -701,27 +712,27 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 failed_to_resolve_kernel32_functions:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_FOUND,
-        "failed to resolve needed kernel32 functions");
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while resolving kernel32 functions");
     goto error_common;
   }
 virtual_alloc_failed:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_FAILED,
-        "VirtualAlloc failed: %d",
-        (gint) GetLastError ());
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error allocating memory in target process (VirtualAlloc returned 0x%08lx)",
+        GetLastError ());
     goto error_common;
   }
 write_process_memory_failed:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_FAILED,
-        "WriteProcessMemory failed: %d",
-        (gint) GetLastError ());
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error writing to memory in target process (WriteProcessMemory returned 0x%08lx)",
+        GetLastError ());
     goto error_common;
   }
 error_common:
@@ -787,9 +798,9 @@ static void
 set_grab_thread_error_from_os_error (const gchar * func_name, GError ** error)
 {
   g_set_error (error,
-      G_IO_ERROR,
-      G_IO_ERROR_FAILED,
-      "%s failed while trying to grab thread: %d",
+      FRIDA_ERROR,
+      FRIDA_ERROR_PERMISSION_DENIED,
+      "Unexpected error while trying to grab thread in target process (%s returned 0x%08lx)",
       func_name, GetLastError ());
 }
 
@@ -797,8 +808,8 @@ static void
 set_trick_thread_error_from_os_error (const gchar * func_name, GError ** error)
 {
   g_set_error (error,
-      G_IO_ERROR,
-      G_IO_ERROR_FAILED,
-      "%s failed while trying to trick thread: %d",
+      FRIDA_ERROR,
+      FRIDA_ERROR_PERMISSION_DENIED,
+      "Unexpected error while trying to trick thread in target process (%s returned 0x%08lx)",
       func_name, GetLastError ());
 }

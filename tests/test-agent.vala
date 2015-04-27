@@ -26,7 +26,7 @@ namespace Frida.AgentTest {
 					 "  }" +
 					 "});").printf ((size_t) func));
 				yield session.load_script (sid);
-			} catch (IOError attach_error) {
+			} catch (Error attach_error) {
 				assert_not_reached ();
 			}
 
@@ -63,7 +63,7 @@ namespace Frida.AgentTest {
 					 "sendNext();"
 					).printf ((size_t) buf, size));
 				yield session.load_script (sid);
-			} catch (IOError attach_error) {
+			} catch (Error attach_error) {
 				assert_not_reached ();
 			}
 
@@ -142,7 +142,7 @@ namespace Frida.AgentTest {
 			try {
 				transport = new PipeTransport ();
 			} catch (IOError transport_error) {
-				printerr ("failed to create transport: %s\n", transport_error.message);
+				printerr ("Unable to create transport: %s\n", transport_error.message);
 				assert_not_reached ();
 			}
 
@@ -151,7 +151,7 @@ namespace Frida.AgentTest {
 			try {
 				connection = yield DBusConnection.new (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
 				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
-			} catch (Error dbus_error) {
+			} catch (GLib.Error dbus_error) {
 				assert_not_reached ();
 			}
 
@@ -163,14 +163,14 @@ namespace Frida.AgentTest {
 		public async void unload_agent () {
 			try {
 				yield session.close ();
-			} catch (IOError session_error) {
+			} catch (Error session_error) {
 				assert_not_reached ();
 			}
 			session = null;
 
 			try {
 				yield connection.close ();
-			} catch (Error connection_error) {
+			} catch (GLib.Error connection_error) {
 				assert_not_reached ();
 			}
 			connection = null;

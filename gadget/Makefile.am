@@ -1,7 +1,14 @@
-platform_libs =
+extra_libs =
+extra_ldflags =
 
 if OS_ANDROID
-platform_libs += -llog
+extra_libs += -llog
+endif
+
+if OS_LINUX
+extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-gadget.version
+else
+extra_ldflags += -export-symbols-regex "^(JNI_OnLoad|JNI_OnUnload)$$"
 endif
 
 lib_LTLIBRARIES = \
@@ -10,19 +17,20 @@ noinst_LTLIBRARIES = \
 	libfrida-gadget-glue.la
 
 libfrida_gadget_1_0_la_SOURCES = \
-	gadget.vala
+	gadget.vala \
+	dummy.cpp
 libfrida_gadget_1_0_la_CFLAGS = \
 	-w
 libfrida_gadget_1_0_la_LIBADD = \
 	$(builddir)/libfrida-gadget-glue.la \
 	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(top_builddir)/lib/agent/.libs/libfrida-agent.a \
-	$(platform_libs) \
-	$(FRIDA_LIBS)
+	$(extra_libs) \
+	$(FRIDA_AGENT_LIBS)
 libfrida_gadget_1_0_la_LDFLAGS = \
-	-export-symbols-regex '^(JNI_OnLoad|JNI_OnUnload)$$' \
 	-no-undefined \
-	-avoid-version
+	-avoid-version \
+	$(extra_ldflags)
 libfrida_gadget_1_0_la_VALAFLAGS = \
 	--library=frida-gadget \
 	--header=frida-gadget.h \
@@ -34,8 +42,7 @@ libfrida_gadget_1_0_la_VALAFLAGS = \
 	--pkg=frida-interfaces \
 	--pkg=frida-core \
 	--pkg=frida-agent \
-	@FRIDA_PACKAGES@ \
-	@FRIDA_VALAFLAGS@
+	@FRIDA_AGENT_PACKAGES@
 
 libfrida_gadget_glue_la_SOURCES = \
 	gadget-glue.c
@@ -45,6 +52,6 @@ AM_CPPFLAGS = \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/agent \
 	-I $(top_srcdir)/src \
-	$(FRIDA_CFLAGS) \
+	$(FRIDA_AGENT_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"

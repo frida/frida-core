@@ -58,8 +58,11 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
   }
   else
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "CreateProcess failed: 0x%08x\n", GetLastError ());
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to spawn executable at “%s”: 0x%08x\n",
+        path, GetLastError ());
   }
 
   g_free (path_utf16);
@@ -74,7 +77,10 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
   if (WaitForSingleObject (handle,
       (timeout_msec != 0) ? timeout_msec : INFINITE) == WAIT_TIMEOUT)
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "timed out");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_TIMED_OUT,
+        "Timed out while waiting for process to exit");
     return -1;
   }
 

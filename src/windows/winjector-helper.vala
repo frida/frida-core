@@ -94,7 +94,7 @@ namespace Winjector {
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
-				} catch (Error connection_error) {
+				} catch (GLib.Error connection_error) {
 				}
 				connection = null;
 			}
@@ -121,14 +121,14 @@ namespace Winjector {
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
-			} catch (Error e) {
-				stderr.printf ("start failed: %s\n", e.message);
+			} catch (GLib.Error e) {
+				printerr ("Unable to start: %s\n", e.message);
 				run_result = 1;
 				shutdown.begin ();
 			}
 		}
 
-		public async void stop () throws IOError {
+		public async void stop () throws Frida.Error {
 			if (System.is_x64 ())
 				yield helper64.proxy.stop ();
 			yield helper32.proxy.stop ();
@@ -139,11 +139,16 @@ namespace Winjector {
 			});
 		}
 
-		public async void inject (uint pid, string filename_template, string data_string) throws IOError {
-			if (Process.is_x64 (pid))
-				yield helper64.proxy.inject (pid, filename_template.printf (64), data_string);
-			else
-				yield helper32.proxy.inject (pid, filename_template.printf (32), data_string);
+		public async void inject (uint pid, string filename_template, string data_string) throws Frida.Error {
+			try {
+				if (Process.is_x64 (pid))
+					yield helper64.proxy.inject (pid, filename_template.printf (64), data_string);
+				else
+					yield helper32.proxy.inject (pid, filename_template.printf (32), data_string);
+			} catch (Frida.Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -160,18 +165,27 @@ namespace Winjector {
 			private Pipe pipe;
 			private DBusConnection connection;
 
-			public HelperService (string name) throws IOError {
+			public HelperService (string name) throws Frida.Error {
 				this.name = name;
-				this.pipe = new Pipe ("pipe:role=server,name=" + name);
+				try {
+					this.pipe = new Pipe ("pipe:role=server,name=" + name);
+				} catch (IOError e) {
+					throw new Frida.Error.ADDRESS_IN_USE (e.message);
+				}
 			}
 
-			public async void start () throws IOError {
+			public async void start () throws Frida.Error {
 				try {
 					connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
+				} catch (GLib.Error e) {
+					throw new Frida.Error.PERMISSION_DENIED (e.message);
 				}
-				proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
+
+				try {
+					proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
+				} catch (IOError e) {
+					throw new Frida.Error.PROTOCOL (e.message);
+				}
 			}
 		}
 
@@ -202,31 +216,31 @@ namespace Winjector {
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
-			} catch (Error e) {
-				stderr.printf ("start failed: %s\n", e.message);
+			} catch (GLib.Error e) {
+				printerr ("Unable to start: %s\n", e.message);
 				shutdown ();
 			}
 		}
 
-		public async void stop () throws IOError {
+		public async void stop () throws Frida.Error {
 			Timeout.add (20, () => {
 				do_stop.begin ();
 				return false;
 			});
 		}
 
-		private async void do_stop () throws IOError {
+		private async void do_stop () throws Frida.Error {
 			connection.unregister_object (registration_id);
 			try {
 				yield connection.close ();
-			} catch (Error connection_error) {
+			} catch (GLib.Error connection_error) {
 			}
 			connection = null;
 
 			shutdown ();
 		}
 
-		public async void inject (uint pid, string filename, string data_string) throws IOError {
+		public async void inject (uint pid, string filename, string data_string) throws Frida.Error {
 			for (int i = 0; thread_handle_by_pid.has_key (pid) && i != 40; i++) {
 				Timeout.add (50, () => {
 					inject.callback ();
@@ -236,7 +250,7 @@ namespace Winjector {
 			}
 
 			if (thread_handle_by_pid.has_key (pid))
-				throw new IOError.TIMED_OUT ("timed out while waiting for existing agent to unload");
+				throw new Frida.Error.TIMED_OUT ("Unexpectedly timed out while waiting for existing agent to unload");
 
 			var waitable_thread_handle = Process.inject (pid, filename, data_string);
 			if (waitable_thread_handle != null) {
@@ -290,7 +304,7 @@ namespace Winjector {
 
 	namespace Process {
 		public static extern bool is_x64 (uint32 process_id);
-		public static extern void * inject (uint32 process_id, string dll_path, string ipc_server_address) throws IOError;
+		public static extern void * inject (uint32 process_id, string dll_path, string ipc_server_address) throws Frida.Error;
 	}
 
 	namespace WaitHandleSource {

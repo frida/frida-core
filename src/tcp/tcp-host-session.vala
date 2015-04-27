@@ -49,15 +49,14 @@ namespace Frida {
 			entries.clear ();
 		}
 
-		public async HostSession create () throws IOError {
+		public async HostSession create () throws Error {
 			DBusConnection connection = null;
-			IOError error = null;
-			for (int i = 1; connection == null && error == null; i++) {
+			Error connection_error = null;
+			for (int i = 1; connection == null && connection_error == null; i++) {
 				try {
 					connection = yield DBusConnection.new_for_address (server_address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-				} catch (Error e) {
-					var refused = new IOError.CONNECTION_REFUSED ("Connection refused");
-					if (e.domain == refused.domain && e.code == refused.code) {
+				} catch (GLib.Error e) {
+					if (e is IOError.CONNECTION_REFUSED) {
 						if (i != 2 * 20) {
 							var source = new TimeoutSource (50);
 							source.set_callback (() => {
@@ -67,18 +66,23 @@ namespace Frida {
 							source.attach (MainContext.get_thread_default ());
 							yield;
 						} else {
-							error = new IOError.TIMED_OUT ("timed out");
+							connection_error = new Error.SERVER_NOT_RUNNING ("timed out");
 						}
 					} else {
-						error = new IOError.FAILED (e.message);
+						connection_error = new Error.SERVER_NOT_RUNNING (e.message);
 					}
 				}
 			}
 
-			if (error != null)
-				throw error;
+			if (connection_error != null)
+				throw connection_error;
 
-			HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+			HostSession session;
+			try {
+				session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+			} catch (IOError proxy_error) {
+				throw new Error.PROTOCOL (proxy_error.message);
+			}
 
 			var entry = new Entry (0, connection, session);
 			entries.add (entry);
@@ -88,17 +92,22 @@ namespace Frida {
 			return session;
 		}
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
 			var address = AGENT_ADDRESS_TEMPLATE.printf (id.handle);
 
 			DBusConnection connection;
 			try {
 				connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (Error connection_error) {
-				throw new IOError.FAILED (connection_error.message);
+			} catch (GLib.Error connection_error) {
+				throw new Error.PROCESS_NOT_RESPONDING (connection_error.message);
 			}
 
-			AgentSession session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
+			AgentSession session;
+			try {
+				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
+			} catch (IOError proxy_error) {
+				throw new Error.PROTOCOL (proxy_error.message);
+			}
 
 			var entry = new Entry (id.handle, connection, session);
 			entries.add (entry);
@@ -124,8 +133,13 @@ namespace Frida {
 
 			entries.remove (entry_to_remove);
 
-			if (entry_to_remove.id != 0) /* otherwise it's a HostSession */
-				agent_session_closed (AgentSessionId (entry_to_remove.id), error);
+			if (entry_to_remove.id != 0) {
+				/* otherwise it's a HostSession */
+				Error e = null;
+				if (error != null)
+					e = new Error.PROCESS_GONE (error.message);
+				agent_session_closed (AgentSessionId (entry_to_remove.id), e);
+			}
 		}
 
 		private class Entry : Object {
@@ -155,7 +169,7 @@ namespace Frida {
 
 				try {
 					yield connection.close ();
-				} catch (Error conn_error) {
+				} catch (GLib.Error conn_error) {
 				}
 				connection = null;
 			}

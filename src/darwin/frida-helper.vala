@@ -58,7 +58,7 @@ namespace Frida {
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
-				} catch (Error connection_error) {
+				} catch (GLib.Error connection_error) {
 				}
 				connection = null;
 			}
@@ -73,27 +73,27 @@ namespace Frida {
 				Helper helper = this;
 				registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 				connection.start_message_processing ();
-			} catch (Error e) {
-				stderr.printf ("start failed: %s\n", e.message);
+			} catch (GLib.Error e) {
+				printerr ("Unable to start: %s\n", e.message);
 				run_result = 1;
 				shutdown.begin ();
 			}
 		}
 
-		public async void stop () throws IOError {
+		public async void stop () throws Error {
 			Timeout.add (20, () => {
 				shutdown.begin ();
 				return false;
 			});
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			string error = null;
 
 			uint child_pid = _do_spawn (path, argv, envp);
 			var death_handler = child_dead.connect ((pid) => {
 				if (pid == child_pid) {
-					error = "child died prematurely";
+					error = "Unexpected error while spawning child process “%s” (child process crashed)".printf (path);
 					spawn.callback ();
 				}
 			});
@@ -107,25 +107,25 @@ namespace Frida {
 			disconnect (ready_handler);
 
 			if (error != null)
-				throw new IOError.FAILED (error);
+				throw new Error.NOT_SUPPORTED (error);
 
 			return child_pid;
 		}
 
-		public async void resume (uint pid) throws IOError {
+		public async void resume (uint pid) throws Error {
 			void * instance;
 			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
 			if (!instance_found)
-				throw new IOError.FAILED ("no such pid");
+				throw new Error.INVALID_ARGUMENT ("Invalid pid");
 			_resume_spawn_instance (instance);
 			_free_spawn_instance (instance);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string) throws IOError {
+		public async uint inject (uint pid, string filename, string data_string) throws Error {
 			return _do_inject (pid, filename, data_string);
 		}
 
-		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError {
+		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error {
 			return _do_make_pipe_endpoints (local_pid, remote_pid);
 		}
 
@@ -165,14 +165,14 @@ namespace Frida {
 		public extern void _create_context ();
 		public extern void _destroy_context ();
 
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws IOError;
+		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws Error;
 		public extern void _free_inject_instance (void * instance);
 
-		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
+		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error;
 	}
 }
 #endif

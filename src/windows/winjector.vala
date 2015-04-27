@@ -15,7 +15,7 @@ namespace Frida {
 			elevated_resource_store = null;
 		}
 
-		public async void inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
+		public async void inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
 			if (normal_resource_store == null) {
 				normal_resource_store = new ResourceStore ();
 				normal_helper_factory.resource_store = normal_resource_store;
@@ -29,9 +29,8 @@ namespace Frida {
 			try {
 				yield normal_helper.inject (pid, filename, data_string);
 				injected = true;
-			} catch (IOError inject_error) {
-				var permission_error = new IOError.PERMISSION_DENIED ("");
-				if (inject_error.code != permission_error.code)
+			} catch (Error inject_error) {
+				if (!(inject_error is Error.PERMISSION_DENIED))
 					throw inject_error;
 			}
 
@@ -43,7 +42,12 @@ namespace Frida {
 
 				filename = elevated_resource_store.ensure_copy_of (desc);
 
-				var elevated_helper = yield elevated_helper_factory.obtain ();
+				HelperInstance elevated_helper;
+				try {
+					elevated_helper = yield elevated_helper_factory.obtain ();
+				} catch (Error elevate_error) {
+					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
+				}
 				yield elevated_helper.inject (pid, filename, data_string);
 			}
 		}
@@ -70,19 +74,24 @@ namespace Frida {
 					close_process_handle (process);
 			}
 
-			public async void open () throws IOError {
+			public async void open () throws Error {
 				try {
 					connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE);
-				} catch (Error e) {
-					throw new IOError.FAILED (e.message);
+				} catch (GLib.Error e) {
+					throw new Error.PERMISSION_DENIED (e.message);
 				}
-				proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
+
+				try {
+					proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
+				} catch (IOError e) {
+					throw new Error.PROTOCOL (e.message);
+				}
 			}
 
 			public async void close () {
 				try {
 					yield proxy.stop ();
-				} catch (IOError e) {
+				} catch (Error e) {
 				}
 
 				if (is_process_still_running (process)) {
@@ -110,7 +119,7 @@ namespace Frida {
 				yield;
 			}
 
-			public async void inject (uint pid, string filename_template, string data_string) throws IOError {
+			public async void inject (uint pid, string filename_template, string data_string) throws Error {
 				yield proxy.inject (pid, filename_template, data_string);
 			}
 
@@ -148,7 +157,7 @@ namespace Frida {
 				resource_store = null;
 			}
 
-			public async HelperInstance obtain () throws IOError {
+			public async HelperInstance obtain () throws Error {
 				if (helper != null)
 					return helper;
 
@@ -165,7 +174,7 @@ namespace Frida {
 
 			private bool obtain_worker () {
 				HelperInstance instance = null;
-				IOError error = null;
+				Error error = null;
 
 				try {
 					var transport = new PipeTransport ();
@@ -173,8 +182,10 @@ namespace Frida {
 					var level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
 					void * process = spawn (resource_store.helper32.path, "MANAGER %s %s".printf (level_str, transport.remote_address), level);
 					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, pipe, process);
-				} catch (IOError e) {
+				} catch (Error e) {
 					error = e;
+				} catch (IOError e) {
+					error = new Error.PERMISSION_DENIED (e.message);
 				}
 
 				var source = new IdleSource ();
@@ -187,14 +198,14 @@ namespace Frida {
 				return error == null;
 			}
 
-			private async void complete_obtain (HelperInstance? instance, IOError? error) {
+			private async void complete_obtain (HelperInstance? instance, Error? error) {
 				HelperInstance completed_instance = instance;
-				IOError completed_error = error;
+				Error completed_error = error;
 
 				if (instance != null) {
 					try {
 						yield instance.open ();
-					} catch (IOError e) {
+					} catch (Error e) {
 						completed_instance = null;
 						completed_error = e;
 					}
@@ -212,26 +223,26 @@ namespace Frida {
 				private CompletionHandler handler;
 
 				private HelperInstance helper;
-				private IOError error;
+				private Error error;
 
 				public ObtainRequest (owned CompletionHandler handler) {
 					this.handler = (owned) handler;
 				}
 
-				public void complete (HelperInstance? helper, IOError? error) {
+				public void complete (HelperInstance? helper, Error? error) {
 					this.helper = helper;
 					this.error = error;
 					handler ();
 				}
 
-				public HelperInstance get_result () throws IOError {
+				public HelperInstance get_result () throws Error {
 					if (helper == null)
 						throw error;
 					return helper;
 				}
 			}
 
-			private static extern void * spawn (string path, string parameters, PrivilegeLevel level) throws IOError;
+			private static extern void * spawn (string path, string parameters, PrivilegeLevel level) throws Error;
 		}
 
 		private class ResourceStore {
@@ -250,7 +261,7 @@ namespace Frida {
 			private Gee.HashMap<string, TemporaryAgent> agents = new Gee.HashMap<string, TemporaryAgent> ();
 			private Gee.HashMap<string, TemporaryFile> resources = new Gee.HashMap<string, TemporaryFile> ();
 
-			public ResourceStore () throws IOError {
+			public ResourceStore () throws Error {
 				tempdir = new TemporaryDirectory ();
 
 				var blob32 = Frida.Data.Winjector.get_winjector_helper_32_exe_blob ();
@@ -270,7 +281,7 @@ namespace Frida {
 				tempdir.destroy ();
 			}
 
-			public string ensure_copy_of (AgentDescriptor desc) throws IOError {
+			public string ensure_copy_of (AgentDescriptor desc) throws Error {
 				var temp_agent = agents[desc.name_template];
 				if (temp_agent == null) {
 					temp_agent = new TemporaryAgent (desc, tempdir);
@@ -298,7 +309,7 @@ namespace Frida {
 			private TemporaryFile dll32;
 			private TemporaryFile dll64;
 
-			public TemporaryAgent (AgentDescriptor desc, TemporaryDirectory tempdir) throws IOError {
+			public TemporaryAgent (AgentDescriptor desc, TemporaryDirectory tempdir) throws Error {
 				filename_template = Path.build_filename (tempdir.path, desc.name_template);
 
 				dll32 = new TemporaryFile.from_stream (desc.name_template.printf (32), desc.dll32, tempdir);
@@ -373,7 +384,7 @@ namespace Frida {
 		private void reset_stream (InputStream stream) {
 			try {
 				(stream as Seekable).seek (0, SeekType.SET);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}
@@ -406,7 +417,7 @@ namespace Frida {
 		private void reset_stream (InputStream stream) {
 			try {
 				(stream as Seekable).seek (0, SeekType.SET);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}

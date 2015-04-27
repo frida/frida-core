@@ -21,7 +21,7 @@ namespace Frida.FruitjectorTest {
 		var logfile = File.new_for_path (Path.build_filename (tests_dir, "unixattacker.log"));
 		try {
 			logfile.delete ();
-		} catch (Error delete_error) {
+		} catch (GLib.Error delete_error) {
 		}
 		var envp = new string[] {
 			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
@@ -45,7 +45,7 @@ namespace Frida.FruitjectorTest {
 
 		try {
 			logfile.delete ();
-		} catch (Error delete_error) {
+		} catch (GLib.Error delete_error) {
 			assert_not_reached ();
 		}
 
@@ -58,7 +58,7 @@ namespace Frida.FruitjectorTest {
 			file.load_contents (null, out contents, null);
 			unowned string str = (string) contents;
 			return str;
-		} catch (Error load_error) {
+		} catch (GLib.Error load_error) {
 			stderr.printf ("%s: %s\n", file.get_path (), load_error.message);
 			assert_not_reached ();
 		}
@@ -83,7 +83,7 @@ namespace Frida.FruitjectorTest {
 
 			try {
 				process = Frida.Test.Process.start (rat_file, argv, envp, arch);
-			} catch (IOError e) {
+			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
@@ -143,7 +143,7 @@ namespace Frida.FruitjectorTest {
 
 				try {
 					desc = new AgentDescriptor (name, File.new_for_path (dylib).read (null));
-				} catch (Error io_error) {
+				} catch (GLib.Error file_error) {
 					assert_not_reached ();
 				}
 
@@ -182,7 +182,7 @@ namespace Frida.FruitjectorTest {
 
 			try {
 				exitcode = process.join (1000);
-			} catch (IOError e) {
+			} catch (Error e) {
 				stdout.printf ("\n\nunexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}

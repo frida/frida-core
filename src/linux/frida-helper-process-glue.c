@@ -31,8 +31,11 @@ frida_helper_factory_spawn_helper (const gchar * path, gchar ** argv, int argv_l
 handle_vfork_error:
   {
     g_strfreev (envp);
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "posix_spawn failed: %s (%d)", strerror (errno), errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to spawn helper executable at “%s”: %s",
+        path, g_strerror (errno));
     return 0;
   }
 }

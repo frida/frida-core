@@ -106,8 +106,11 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
 
     if (result != 0)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-          "posix_spawn failed: %d", errno);
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unable to spawn executable at “%s”: %s",
+          path, g_strerror (errno));
       return;
     }
 #else
@@ -119,8 +122,11 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
     }
     else if (pid < 0)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-          "vfork failed: %d", errno);
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unable to spawn executable at “%s”: %s",
+          path, g_strerror (errno));
       return;
     }
 #endif
@@ -152,8 +158,10 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
       }
       else
       {
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-            "child crashed");
+        g_set_error (error,
+            FRIDA_ERROR,
+            FRIDA_ERROR_PROCESS_GONE,
+            "Unexpected error while waiting for process to exit (child process crashed)");
         status = -1;
       }
 
@@ -161,14 +169,19 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
     }
     else if (ret < 0 && errno != ETIMEDOUT)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-          "waitpid failed: %d", errno);
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unexpected error while waiting for process to exit (waitpid returned “%s”)",
+          g_strerror (errno));
       break;
     }
     else if (g_timer_elapsed (timer, NULL) * 1000.0 >= timeout_msec)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
-          "waitpid timed out");
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_TIMED_OUT,
+          "Timed out while waiting for process to exit");
       break;
     }
 

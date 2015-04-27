@@ -77,13 +77,13 @@ namespace Frida {
 			}
 		}
 
-		public TemporaryDirectory () throws IOError {
+		public TemporaryDirectory () throws Error {
 			this.file = File.new_for_path (Path.build_filename (get_system_tmp (), make_name ()));
 			this.remove_on_dispose = true;
 			try {
 				this.file.make_directory ();
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
+			} catch (GLib.Error e) {
+				throw new Error.PERMISSION_DENIED (e.message);
 			}
 		}
 
@@ -100,7 +100,7 @@ namespace Frida {
 			if (remove_on_dispose) {
 				try {
 					this.file.delete ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 				}
 			}
 		}
@@ -124,7 +124,7 @@ namespace Frida {
 		private File file;
 		private TemporaryDirectory directory;
 
-		public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory? directory = null) throws IOError {
+		public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory? directory = null) throws Error {
 			if (directory != null)
 				this.directory = directory;
 			else
@@ -148,8 +148,8 @@ namespace Frida {
 				}
 
 				ostream.close (null);
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
+			} catch (GLib.Error e) {
+				throw new Error.PERMISSION_DENIED (e.message);
 			}
 		}
 
@@ -166,7 +166,7 @@ namespace Frida {
 			if (file != null) {
 				try {
 					file.delete (null);
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 				}
 				file = null;
 			}

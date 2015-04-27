@@ -14,7 +14,7 @@ namespace Frida {
 				if (_resource_store == null) {
 					try {
 						_resource_store = new ResourceStore ();
-					} catch (IOError e) {
+					} catch (Error e) {
 						assert_not_reached ();
 					}
 				}
@@ -36,7 +36,7 @@ namespace Frida {
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
-				} catch (IOError proxy_error) {
+				} catch (GLib.Error proxy_error) {
 				}
 				proxy.uninjected.disconnect (on_uninjected);
 				proxy = null;
@@ -46,7 +46,7 @@ namespace Frida {
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
-				} catch (Error connection_error) {
+				} catch (GLib.Error connection_error) {
 				}
 				connection = null;
 			}
@@ -54,39 +54,39 @@ namespace Frida {
 			_resource_store = null;
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain ();
 			return yield helper.spawn (path, argv, envp);
 		}
 
-		public async void resume (uint pid) throws IOError {
+		public async void resume (uint pid) throws Error {
 			var helper = yield obtain ();
 			yield helper.resume (pid);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string) throws IOError {
+		public async uint inject (uint pid, string filename, string data_string) throws Error {
 			var helper = yield obtain ();
 			return yield helper.inject (pid, filename, data_string);
 		}
 
-		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError {
+		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error {
 			var helper = yield obtain ();
 			return yield helper.make_pipe_endpoints (local_pid, remote_pid);
 		}
 
-		private async Helper obtain () throws IOError {
+		private async Helper obtain () throws Error {
 			if (obtain_request != null) {
 				try {
 					return yield obtain_request.future.wait_async ();
 				} catch (Gee.FutureError future_error) {
-					throw new IOError.FAILED (future_error.message);
+					throw new Error.INVALID_OPERATION (future_error.message);
 				}
 			}
 			obtain_request = new Gee.Promise<Helper> ();
 
 			DBusConnection pending_connection = null;
 			Helper pending_proxy = null;
-			IOError pending_error = null;
+			Error pending_error = null;
 
 			DBusServer server = null;
 			TimeoutSource timeout_source = null;
@@ -103,7 +103,7 @@ namespace Frida {
 				});
 				timeout_source = new TimeoutSource.seconds (2);
 				timeout_source.set_callback (() => {
-					pending_error = new IOError.TIMED_OUT ("timed out");
+					pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
 					obtain.callback ();
 					return false;
 				});
@@ -119,12 +119,12 @@ namespace Frida {
 				if (pending_error == null) {
 					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				if (timeout_source != null)
 					timeout_source.destroy ();
 				if (server != null)
 					server.stop ();
-				pending_error = new IOError.FAILED (e.message);
+				pending_error = new Error.PERMISSION_DENIED (e.message);
 			}
 
 			if (pending_error == null) {
@@ -137,7 +137,7 @@ namespace Frida {
 				return proxy;
 			} else {
 				obtain_request.set_exception (pending_error);
-				throw new IOError.FAILED (pending_error.message);
+				throw new Error.PERMISSION_DENIED (pending_error.message);
 			}
 		}
 
@@ -150,7 +150,7 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private static extern uint spawn_helper (string path, string[] argv) throws IOError;
+		private static extern uint spawn_helper (string path, string[] argv) throws Error;
 	}
 
 	private class ResourceStore {
@@ -169,7 +169,7 @@ namespace Frida {
 			set;
 		}
 
-		public ResourceStore () throws IOError {
+		public ResourceStore () throws Error {
 			tempdir = new TemporaryDirectory ();
 			FileUtils.chmod (tempdir.path, 0755);
 			var blob = Frida.Data.Helper.get_frida_helper_blob ();

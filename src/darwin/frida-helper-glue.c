@@ -246,11 +246,11 @@ guint
 _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
 {
   FridaHelperContext * ctx = self->context;
-  FridaSpawnInstance * instance;
+  FridaSpawnInstance * instance = NULL;
   pid_t pid;
   posix_spawnattr_t attr;
   sigset_t signal_mask_set;
-  int result;
+  int spawn_errno, result;
   const gchar * failed_operation;
   kern_return_t ret;
   mach_port_name_t task;
@@ -264,6 +264,9 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   mach_port_name_t name;
   dispatch_source_t source;
 
+  if (!g_file_test (path, G_FILE_TEST_EXISTS))
+    goto handle_path_error;
+
   instance = frida_spawn_instance_new (self);
 
   posix_spawnattr_init (&attr);
@@ -272,6 +275,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED);
 
   result = posix_spawn (&pid, path, NULL, &attr, argv, envp);
+  spawn_errno = errno;
 
   posix_spawnattr_destroy (&attr);
 
@@ -358,37 +362,71 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
 
   return pid;
 
+handle_path_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to find executable at “%s”",
+        path);
+    goto error_epilogue;
+  }
 handle_spawn_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "posix_spawn failed: %s (%d)", strerror (errno), errno);
+    if (spawn_errno == EAGAIN)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_INVALID_ARGUMENT,
+          "Unable to spawn executable at “%s”: unsupported file format",
+          path);
+    }
+    else
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unable to spawn executable at “%s”: %s",
+          path, g_strerror (spawn_errno));
+    }
     goto error_epilogue;
   }
-
 handle_cpu_type_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe cpu type");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing CPU type of child process “%s”",
+        path);
     goto error_epilogue;
   }
-
 handle_entrypoint_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to find entrypoint");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing entrypoint of child process “%s”",
+        path);
     goto error_epilogue;
   }
-
 handle_mach_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed: %s (%d)", failed_operation, mach_error_string (ret), ret);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while spawning child process “%s” (%s returned “%s”)",
+        path, failed_operation, mach_error_string (ret));
     goto error_epilogue;
   }
-
 error_epilogue:
   {
-    if (instance->pid != 0)
-      kill (instance->pid, SIGKILL);
-    frida_spawn_instance_free (instance);
+    if (instance != NULL)
+    {
+      if (instance->pid != 0)
+        kill (instance->pid, SIGKILL);
+      frida_spawn_instance_free (instance);
+    }
+
     return 0;
   }
 }
@@ -574,13 +612,20 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
 handle_cpu_type_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe cpu type");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing CPU type of process with pid %u",
+        pid);
     goto error_epilogue;
   }
 handle_mach_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed while trying to inject: %s (%d)", failed_operation, mach_error_string (ret), ret);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while attaching to process with pid %u (%s returned “%s”)",
+        pid, failed_operation, mach_error_string (ret));
     goto error_epilogue;
   }
 error_epilogue:
@@ -606,6 +651,7 @@ _frida_helper_service_free_inject_instance (FridaHelperService * self, void * in
 void
 _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, FridaPipeEndpoints * result, GError ** error)
 {
+  gboolean remote_pid_exists;
   mach_port_t self_task;
   mach_port_t local_task = MACH_PORT_NULL;
   mach_port_t remote_task = MACH_PORT_NULL;
@@ -618,6 +664,10 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   const gchar * failed_operation;
   mach_msg_type_name_t acquired_type;
   gchar * local_address, * remote_address;
+
+  remote_pid_exists = kill (remote_pid, 0) == 0 || errno == EPERM;
+  if (!remote_pid_exists)
+    goto handle_pid_error;
 
   self_task = mach_task_self ();
 
@@ -667,10 +717,33 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
 
   goto beach;
 
+handle_pid_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to find process with pid %u",
+        remote_pid);
+    goto beach;
+  }
 handle_mach_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed while trying to make pipe endpoints: %s (%d)", failed_operation, mach_error_string (ret), ret);
+    if (remote_task == MACH_PORT_NULL && ret == KERN_FAILURE)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_PERMISSION_DENIED,
+          "Unable to access process with pid %u from the current user account",
+          remote_pid);
+    }
+    else
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned “%s”)",
+          remote_pid, failed_operation, mach_error_string (ret));
+    }
 
     if (tx != MACH_PORT_NULL)
       mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
@@ -795,8 +868,10 @@ frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaSpawnApi *
 
   if (fill_ctx.remaining > 0)
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "failed to resolve one or more functions");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while resolving functions");
     return FALSE;
   }
 
@@ -833,14 +908,20 @@ frida_spawn_fill_context_process_export (const GumExportDetails * details, gpoin
 static gboolean
 frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
 {
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented for ARM");
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not yet implemented for ARM");
   return FALSE;
 }
 
 static gboolean
 frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
 {
-  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "not yet implemented for ARM");
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not yet implemented for ARM");
   return FALSE;
 }
 
@@ -1035,8 +1116,10 @@ frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDe
 
   if (!resolved_all && !resolved_all_except_cthread_set_self)
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "failed to resolve one or more functions");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while resolving functions");
     return FALSE;
   }
 

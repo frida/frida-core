@@ -69,7 +69,9 @@ libfrida_helper_main_la_LIBADD = \
 	$(FRIDA_LIBS)
 libfrida_helper_main_la_VALAFLAGS = \
 	--header=frida-helper.h \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_srcdir) \
+	--pkg=frida-interfaces \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
@@ -81,10 +83,14 @@ libfrida_helper_types_la_SOURCES = \
 	linux/frida-helper-types.vala
 libfrida_helper_types_la_CFLAGS = \
 	-w
+libfrida_helper_types_la_LIBADD = \
+	$(top_builddir)/lib/interfaces/libfrida-interfaces.la
 libfrida_helper_types_la_VALAFLAGS = \
 	--vapi=frida-helper-types.vapi \
 	--library=frida-helper-types \
 	--header=frida-helper-types.h \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--pkg=frida-interfaces \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
@@ -159,7 +165,9 @@ libfrida_helper_main_la_LIBADD = \
 	$(FRIDA_LIBS)
 libfrida_helper_main_la_VALAFLAGS = \
 	--header=frida-helper.h \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_srcdir) \
+	--pkg=frida-interfaces \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
@@ -173,10 +181,14 @@ libfrida_helper_types_la_SOURCES = \
 	darwin/frida-helper-types.vala
 libfrida_helper_types_la_CFLAGS = \
 	-w
+libfrida_helper_types_la_LIBADD = \
+	$(top_builddir)/lib/interfaces/libfrida-interfaces.la
 libfrida_helper_types_la_VALAFLAGS = \
 	--vapi=frida-helper-types.vapi \
 	--library=frida-helper-types \
 	--header=frida-helper-types.h \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--pkg=frida-interfaces \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 

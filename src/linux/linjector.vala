@@ -32,7 +32,7 @@ namespace Frida {
 			agents.clear ();
 		}
 
-		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws IOError {
+		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
 			var filename_template = ensure_copy_of (desc);
 			var id = yield helper.inject (pid, filename_template, data_string);
 			pid_by_id[id] = pid;
@@ -52,7 +52,7 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private string ensure_copy_of (AgentDescriptor desc) throws IOError {
+		private string ensure_copy_of (AgentDescriptor desc) throws Error {
 			var name32 = desc.name_template.printf (32);
 			var name64 = desc.name_template.printf (64);
 			if (agents[name32] == null && agents[name64] == null) {
@@ -81,7 +81,7 @@ namespace Frida {
 				var size = seekable.tell ();
 				seekable.seek (previous_offset, SeekType.SET);
 				return size;
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}
@@ -129,7 +129,7 @@ namespace Frida {
 		private void reset_stream (InputStream stream) {
 			try {
 				(stream as Seekable).seek (0, SeekType.SET);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}

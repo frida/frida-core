@@ -20,7 +20,7 @@ main (gint argc, gchar * argv[])
   FridaMapperDestructor destructor;
   UnixAttackerEntrypoint entrypoint;
 
-#if GLIB_CHECK_VERSION (2, 42, 0)
+#if GLIB_CHECK_VERSION (2, 46, 0)
   glib_init ();
 #endif
 

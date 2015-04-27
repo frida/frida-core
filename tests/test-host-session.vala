@@ -15,6 +15,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Manual/error-feedback", () => {
+			var h = new Harness.without_timeout ((h) => Service.Manual.error_feedback.begin (h as Harness));
+			h.run ();
+		});
+
 #if !LINUX
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
@@ -143,12 +148,12 @@ namespace Frida.HostSessionTest {
 				get { return HostSessionProviderKind.LOCAL_SYSTEM; }
 			}
 
-			public async HostSession create () throws IOError {
-				throw new IOError.FAILED ("not implemented");
+			public async HostSession create () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
-				throw new IOError.FAILED ("not implemented");
+			public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 		}
 
@@ -177,7 +182,7 @@ namespace Frida.HostSessionTest {
 					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
 					stdout.printf ("Enter PID: ");
 					stdout.flush ();
-					uint pid = (uint) int.parse(stdin.read_line());
+					uint pid = (uint) int.parse (stdin.read_line ());
 
 					stdout.printf ("Attaching...\n");
 					var session = yield device.attach (pid);
@@ -189,6 +194,102 @@ namespace Frida.HostSessionTest {
 
 					while (true)
 						yield h.process_events ();
+				} catch (Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+					assert_not_reached ();
+				}
+			}
+
+			private static async void error_feedback (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode> ");
+					h.done ();
+					return;
+				}
+
+				try {
+					var device_manager = new DeviceManager ();
+
+					var devices = yield device_manager.enumerate_devices ();
+					Device device = null;
+					var num_devices = devices.size ();
+					for (var i = 0; i != num_devices && device == null; i++) {
+						var d = devices.get (i);
+						if (d.dtype == DeviceType.LOCAL)
+							device = d;
+					}
+					assert (device != null);
+
+					stdout.printf ("\n\nEnter an absolute path that does not exist: ");
+					stdout.flush ();
+					var inexistent_path = stdin.read_line ();
+					try {
+						stdout.printf ("Trying to spawn program at inexistent path “%s”...", inexistent_path);
+						yield device.spawn (inexistent_path, new string[] { inexistent_path }, new string[] {});
+						assert_not_reached ();
+					} catch (Error e) {
+						stdout.printf ("\nResult: \"%s\"\n", e.message);
+						assert (e is Error.INVALID_ARGUMENT);
+						assert (e.message == "Unable to find executable at “%s”".printf (inexistent_path));
+					}
+
+					stdout.printf ("\nEnter an absolute path that exists but is not a valid executable: ");
+					stdout.flush ();
+					var nonexec_path = stdin.read_line ();
+					try {
+						stdout.printf ("Trying to spawn program at non-executable path “%s”...", nonexec_path);
+						yield device.spawn (nonexec_path, new string[] { nonexec_path }, new string[] {});
+						assert_not_reached ();
+					} catch (Error e) {
+						stdout.printf ("\nResult: \"%s\"\n", e.message);
+						assert (e is Error.INVALID_ARGUMENT);
+						assert (e.message == "Unable to spawn executable at “%s”: unsupported file format".printf (nonexec_path));
+					}
+
+					var processes = yield device.enumerate_processes ();
+					uint inexistent_pid = 100000;
+					bool exists = false;
+					do {
+						exists = false;
+						var num_processes = processes.size ();
+						for (var i = 0; i != num_processes && !exists; i++) {
+							var process = processes.get (i);
+							if (process.pid == inexistent_pid) {
+								exists = true;
+								inexistent_pid++;
+							}
+						}
+					} while (exists);
+
+					try {
+						stdout.printf ("\nTrying to attach to inexistent pid %u...", inexistent_pid);
+						stdout.flush ();
+						yield device.attach (inexistent_pid);
+						assert_not_reached ();
+					} catch (Error e) {
+						stdout.printf ("\nResult: \"%s\"\n", e.message);
+						assert (e is Error.INVALID_ARGUMENT);
+						assert (e.message == "Unable to find process with pid %u".printf (inexistent_pid));
+					}
+
+					stdout.printf ("\nEnter PID of a process that you don't have access to: ");
+					stdout.flush ();
+					uint privileged_pid = (uint) int.parse (stdin.read_line ());
+
+					try {
+						stdout.printf ("Trying to attach to %u...", privileged_pid);
+						stdout.flush ();
+						yield device.attach (privileged_pid);
+						assert_not_reached ();
+					} catch (Error e) {
+						stdout.printf ("\nResult: \"%s\"\n\n", e.message);
+						assert (e is Error.PERMISSION_DENIED);
+						assert (e.message == "Unable to access process with pid %u from the current user account".printf (privileged_pid));
+					}
+
+					yield device_manager.close ();
+
+					h.done ();
 				} catch (Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
@@ -244,7 +345,7 @@ namespace Frida.HostSessionTest {
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				yield host_session.kill (pid);
-			} catch (IOError e) {
+			} catch (Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
@@ -287,7 +388,7 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
-			} catch (IOError e) {
+			} catch (Error e) {
 				assert_not_reached ();
 			}
 
@@ -337,7 +438,7 @@ namespace Frida.HostSessionTest {
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				yield host_session.kill (pid);
-			} catch (IOError e) {
+			} catch (Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
@@ -377,7 +478,7 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create ();
 					var id = yield host_session.attach_to (pid);
 					yield prov.obtain_agent_session (id);
-				} catch (IOError e) {
+				} catch (Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
@@ -421,7 +522,7 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
-			} catch (IOError e) {
+			} catch (Error e) {
 				assert_not_reached ();
 			}
 
@@ -468,7 +569,7 @@ namespace Frida.HostSessionTest {
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
 				yield host_session.kill (pid);
-			} catch (IOError e) {
+			} catch (Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
@@ -517,7 +618,7 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
-			} catch (IOError e) {
+			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
@@ -593,7 +694,7 @@ namespace Frida.HostSessionTest {
 
 				yield session.destroy_script (script_id);
 				yield session.close ();
-			} catch (IOError e) {
+			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}

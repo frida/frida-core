@@ -7,7 +7,7 @@ namespace Frida.LinjectorTest {
 			var logfile = File.new_for_path (Path.build_filename (tests_dir, "inject-attacker.log"));
 			try {
 				logfile.delete ();
-			} catch (Error delete_error) {
+			} catch (GLib.Error delete_error) {
 			}
 			var envp = new string[] {
 				"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
@@ -38,7 +38,7 @@ namespace Frida.LinjectorTest {
 
 			try {
 				logfile.delete ();
-			} catch (Error delete_error) {
+			} catch (GLib.Error delete_error) {
 				assert_not_reached ();
 			}
 		});
@@ -50,7 +50,7 @@ namespace Frida.LinjectorTest {
 			file.load_contents (null, out contents, null);
 			unowned string str = (string) contents;
 			return str;
-		} catch (Error load_error) {
+		} catch (GLib.Error load_error) {
 			stderr.printf ("%s: %s\n", file.get_path (), load_error.message);
 			assert_not_reached ();
 		}
@@ -75,7 +75,7 @@ namespace Frida.LinjectorTest {
 
 			try {
 				process = Frida.Test.Process.start (rat_file, argv, envp, Frida.Test.Arch.CURRENT);
-			} catch (IOError e) {
+			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
@@ -112,7 +112,7 @@ namespace Frida.LinjectorTest {
 						so64 = file;
 					}
 					desc = new AgentDescriptor (name + "-%u.so", so32, so64);
-				} catch (Error io_error) {
+				} catch (GLib.Error io_error) {
 					assert_not_reached ();
 				}
 
@@ -151,7 +151,7 @@ namespace Frida.LinjectorTest {
 
 			try {
 				exitcode = process.join (1000);
-			} catch (IOError e) {
+			} catch (Error e) {
 				stdout.printf ("\n\nunexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}

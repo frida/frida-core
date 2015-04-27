@@ -13,7 +13,7 @@ frida_init (void)
 {
   static gsize frida_initialized = FALSE;
 
-#if GLIB_CHECK_VERSION (2, 42, 0)
+#if GLIB_CHECK_VERSION (2, 46, 0)
   glib_init ();
   gio_init ();
 #endif
@@ -70,7 +70,7 @@ frida_deinit (void)
   g_main_context_unref (main_context);
   main_context = NULL;
 
-#if GLIB_CHECK_VERSION (2, 42, 0)
+#if GLIB_CHECK_VERSION (2, 46, 0)
   gio_deinit ();
   glib_deinit ();
 #endif

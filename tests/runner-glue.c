@@ -36,7 +36,7 @@ frida_test_environment_init (int * args_length1, char *** args)
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
-#if GLIB_CHECK_VERSION (2, 42, 0)
+#if GLIB_CHECK_VERSION (2, 46, 0)
   glib_init ();
   gio_init ();
 #endif
@@ -49,7 +49,7 @@ frida_test_environment_deinit (void)
 {
 #if DEBUG_HEAP_LEAKS
   gum_deinit ();
-# if GLIB_CHECK_VERSION (2, 42, 0)
+# if GLIB_CHECK_VERSION (2, 46, 0)
   gio_deinit ();
   glib_deinit ();
 # endif
