@@ -267,6 +267,9 @@ if __name__ == '__main__':
 
         if len(errors) > 0:
             output_header_file.write("\n\n/* Errors */\n")
+            output_header_file.write("\n\n".join(map(lambda enum: "GQuark frida_%(name_lc)s_quark (void);\n" \
+                % { 'name_lc': enum.name_lc }, errors)))
+            output_header_file.write("\n")
             output_header_file.write("\n\n".join(map(lambda enum: enum.c_definition, errors)))
 
         output_header_file.write("\n\n/* GTypes */")
