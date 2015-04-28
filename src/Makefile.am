@@ -250,7 +250,7 @@ vapi_DATA = \
 
 frida-api-stamp: libfrida-core-1.0.la $(srcdir)/generate-api.py
 	mkdir -p $(builddir)/api
-	python $(srcdir)/generate-api.py $(srcdir)/frida.vala $(srcdir)/frida-core.vapi $(srcdir)/frida-core.h $(builddir)/api
+	python $(srcdir)/generate-api.py $(srcdir)/frida.vala $(srcdir)/frida-core.vapi $(srcdir)/frida-core.h $(top_srcdir)/lib/interfaces/frida-interfaces.vapi $(top_srcdir)/lib/interfaces/frida-interfaces.h $(builddir)/api
 	touch $@
 
 libfrida_core_1_0_la_SOURCES = \
