@@ -128,7 +128,7 @@ handle_create_error:
     {
       g_set_error (error,
           FRIDA_ERROR,
-          FRIDA_ERROR_INVALID_ARGUMENT,
+          FRIDA_ERROR_EXECUTABLE_NOT_SUPPORTED,
           "Unable to spawn executable at “%s”: unsupported file format",
           path);
     }
