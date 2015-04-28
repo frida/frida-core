@@ -17,7 +17,7 @@ namespace Frida {
 				if (_resource_store == null) {
 					try {
 						_resource_store = new ResourceStore ();
-					} catch (IOError e) {
+					} catch (Error e) {
 						assert_not_reached ();
 					}
 				}
@@ -46,28 +46,23 @@ namespace Frida {
 			_resource_store = null;
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain_for_path (path);
 			return yield helper.spawn (path, argv, envp);
 		}
 
-		public async void resume (uint pid) throws IOError {
+		public async void resume (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
 			yield helper.resume (pid);
 		}
 
-		public async void kill (uint pid) throws IOError {
+		public async void kill (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
 			yield helper.kill (pid);
 		}
 
-		public async uint inject (uint pid, string filename_template, string data_string) throws IOError {
-			Gum.CpuType cpu_type;
-			try {
-				cpu_type = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
-			}
+		public async uint inject (uint pid, string filename_template, string data_string) throws Error {
+			var cpu_type = cpu_type_from_pid (pid);
 
 			string filename;
 			switch (cpu_type) {
@@ -90,30 +85,22 @@ namespace Frida {
 			return yield helper.inject (pid, filename, data_string, resource_store.tempdir.path);
 		}
 
-		private async Helper obtain_for_path (string path) throws IOError {
-			try {
-				return yield obtain_for_cpu_type (Gum.Linux.cpu_type_from_file (path));
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
-			}
+		private async Helper obtain_for_path (string path) throws Error {
+			return yield obtain_for_cpu_type (cpu_type_from_file (path));
 		}
 
-		private async Helper obtain_for_pid (uint pid) throws IOError {
-			try {
-				return yield obtain_for_cpu_type (Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid));
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
-			}
+		private async Helper obtain_for_pid (uint pid) throws Error {
+			return yield obtain_for_cpu_type (cpu_type_from_pid (pid));
 		}
 
-		private async Helper obtain_for_cpu_type (Gum.CpuType cpu_type) throws IOError {
+		private async Helper obtain_for_cpu_type (Gum.CpuType cpu_type) throws Error {
 			HelperFactory factory = null;
 			switch (cpu_type) {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
 					if (factory32 == null) {
 						if (resource_store.helper32 == null)
-							throw new IOError.NOT_SUPPORTED ("built without 32-bit support");
+							throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
 						factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
 						factory32.lost.connect (on_factory_lost);
 						factory32.uninjected.connect (on_factory_uninjected);
@@ -125,7 +112,7 @@ namespace Frida {
 				case Gum.CpuType.ARM64:
 					if (factory64 == null) {
 						if (resource_store.helper64 == null)
-							throw new IOError.NOT_SUPPORTED ("built without 64-bit support");
+							throw new Error.NOT_SUPPORTED ("Unable to handle 64-bit processes due to build configuration");
 						factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
 						factory64.lost.connect (on_factory_lost);
 						factory64.uninjected.connect (on_factory_uninjected);
@@ -137,6 +124,32 @@ namespace Frida {
 					assert_not_reached ();
 			}
 			return yield factory.obtain ();
+		}
+
+		private static Gum.CpuType cpu_type_from_file (string path) throws Error {
+			try {
+				return Gum.Linux.cpu_type_from_file (path);
+			} catch (GLib.Error e) {
+				if (e is IOError.NOT_FOUND)
+					throw new Error.INVALID_ARGUMENT ("Unable to find executable at “%s”".printf (path));
+				else if (e is IOError.NOT_SUPPORTED)
+					throw new Error.INVALID_ARGUMENT ("Unable to spawn executable at “%s”: unsupported file format".printf (path));
+				else
+					throw new Error.PERMISSION_DENIED (e.message);
+			}
+		}
+
+		private static Gum.CpuType cpu_type_from_pid (uint pid) throws Error {
+			try {
+				return Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
+			} catch (GLib.Error e) {
+				if (e is FileError.NOENT)
+					throw new Error.INVALID_ARGUMENT ("Unable to find process with pid %u".printf (pid));
+				else if (e is FileError.ACCES)
+					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
+				else
+					throw new Error.NOT_SUPPORTED (e.message);
+			}
 		}
 
 		private void on_factory_lost (HelperFactory factory) {
@@ -175,7 +188,7 @@ namespace Frida {
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
-				} catch (IOError proxy_error) {
+				} catch (Error proxy_error) {
 				}
 				proxy.uninjected.disconnect (on_uninjected);
 				proxy = null;
@@ -185,25 +198,25 @@ namespace Frida {
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
-				} catch (Error connection_error) {
+				} catch (GLib.Error connection_error) {
 				}
 				connection = null;
 			}
 		}
 
-		public async Helper obtain () throws IOError {
+		public async Helper obtain () throws Error {
 			if (obtain_request != null) {
 				try {
 					return yield obtain_request.future.wait_async ();
 				} catch (Gee.FutureError future_error) {
-					throw new IOError.FAILED (future_error.message);
+					throw new Error.INVALID_OPERATION (future_error.message);
 				}
 			}
 			obtain_request = new Gee.Promise<Helper> ();
 
 			DBusConnection pending_connection = null;
 			Helper pending_proxy = null;
-			IOError pending_error = null;
+			Error pending_error = null;
 
 			DBusServer server = null;
 			TimeoutSource timeout_source = null;
@@ -220,7 +233,7 @@ namespace Frida {
 				});
 				timeout_source = new TimeoutSource.seconds (2);
 				timeout_source.set_callback (() => {
-					pending_error = new IOError.TIMED_OUT ("timed out");
+					pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
 					obtain.callback ();
 					return false;
 				});
@@ -236,12 +249,12 @@ namespace Frida {
 				if (pending_error == null) {
 					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				if (timeout_source != null)
 					timeout_source.destroy ();
 				if (server != null)
 					server.stop ();
-				pending_error = new IOError.FAILED (e.message);
+				pending_error = new Error.PERMISSION_DENIED (e.message);
 			}
 
 			if (pending_error == null) {
@@ -254,7 +267,7 @@ namespace Frida {
 				return proxy;
 			} else {
 				obtain_request.set_exception (pending_error);
-				throw new IOError.FAILED (pending_error.message);
+				throw new Error.PERMISSION_DENIED (pending_error.message);
 			}
 		}
 
@@ -268,7 +281,7 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private static extern uint spawn_helper (string path, string[] argv) throws IOError;
+		private static extern uint spawn_helper (string path, string[] argv) throws Error;
 	}
 
 	private class ResourceStore {
@@ -289,7 +302,7 @@ namespace Frida {
 
 		private Gee.ArrayList<TemporaryFile> files = new Gee.ArrayList<TemporaryFile> ();
 
-		public ResourceStore () throws IOError {
+		public ResourceStore () throws Error {
 			tempdir = new TemporaryDirectory ();
 			FileUtils.chmod (tempdir.path, 0755);
 

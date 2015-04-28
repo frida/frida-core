@@ -85,9 +85,12 @@ beach:
 guint
 _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
 {
-  FridaSpawnInstance * instance;
+  FridaSpawnInstance * instance = NULL;
   WCHAR * application_name, * command_line, * environment;
   STARTUPINFO startup_info;
+
+  if (!g_file_test (path, G_FILE_TEST_EXISTS))
+    goto handle_path_error;
 
   instance = frida_spawn_instance_new (self);
 
@@ -109,15 +112,40 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
 
   return instance->process_info.dwProcessId;
 
-handle_create_error:
+handle_path_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "CreateProcessW failed: %d", GetLastError ());
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to find executable at “%s”",
+        path);
     goto error_epilogue;
   }
-
+handle_create_error:
+  {
+    DWORD last_error = GetLastError ();
+    if (last_error == ERROR_BAD_EXE_FORMAT)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_INVALID_ARGUMENT,
+          "Unable to spawn executable at “%s”: unsupported file format",
+          path);
+    }
+    else
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unable to spawn executable at “%s”: 0x%08lx",
+          path, GetLastError ());
+    }
+    goto error_epilogue;
+  }
 error_epilogue:
   {
-    frida_spawn_instance_free (instance);
+    if (instance != NULL)
+      frida_spawn_instance_free (instance);
     return 0;
   }
 }

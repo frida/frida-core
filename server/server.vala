@@ -21,7 +21,12 @@ namespace Frida {
 		}
 
 		public void run (string address) throws Error {
-			server = new DBusServer.sync (address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+			try {
+				server = new DBusServer.sync (address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+			} catch (GLib.Error listen_error) {
+				throw new Error.ADDRESS_IN_USE (listen_error.message);
+			}
+
 			server.new_connection.connect ((connection) => {
 				if (server == null)
 					return false;
@@ -32,7 +37,7 @@ namespace Frida {
 					var registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session as HostSession);
 					registration_id_by_connection[connection] = registration_id;
 				} catch (IOError e) {
-					printerr ("failed to register object: %s\n", e.message);
+					printerr ("Unable to register object: %s\n", e.message);
 					return false;
 				}
 
@@ -98,7 +103,7 @@ namespace Frida {
 			try {
 				app.run (listen_address);
 			} catch (Error e) {
-				printerr ("ERROR: %s\n", e.message);
+				printerr ("Unable to start server: %s\n", e.message);
 				return 1;
 			}
 

@@ -129,7 +129,7 @@ namespace Frida {
 				yield provider.open ();
 
 				provider_available (provider);
-			} catch (IOError e) {
+			} catch (Error e) {
 				provider_by_device_id.unset (provider.device_id);
 			}
 		}
@@ -183,13 +183,13 @@ namespace Frida {
 			Object (backend: backend, device_id: device_id, device_product_id: device_product_id, device_udid: device_udid);
 		}
 
-		public async void open () throws IOError {
+		public async void open () throws Error {
 			bool got_details = false;
 			for (int i = 1; !got_details; i++) {
 				try {
 					_extract_details_for_device (device_product_id, device_udid, out _name, out _icon);
 					got_details = true;
-				} catch (IOError e) {
+				} catch (Error e) {
 					if (i != 60) {
 						var source = new TimeoutSource (1000);
 						source.set_callback (() => {
@@ -205,7 +205,7 @@ namespace Frida {
 			}
 
 			if (!got_details)
-				throw new IOError.TIMED_OUT ("timed out");
+				throw new Error.TIMED_OUT ("Timed out while waiting for USB device to appear");
 
 			is_open = true;
 		}
@@ -216,19 +216,23 @@ namespace Frida {
 			entries.clear ();
 		}
 
-		public async HostSession create () throws IOError {
-			var client = yield backend.create_client ();
-			yield client.establish ();
-			yield client.connect_to_port (device_id, SERVER_PORT);
-
+		public async HostSession create () throws Error {
+			Fruity.Client client = yield backend.create_client ();
 			DBusConnection connection;
 			try {
+				yield client.establish ();
+				yield client.connect_to_port (device_id, SERVER_PORT);
 				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (Error e) {
-				throw new IOError.FAILED (e.message);
+			} catch (GLib.Error connection_error) {
+				throw new Error.SERVER_NOT_RUNNING (connection_error.message);
 			}
 
-			HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+			HostSession session;
+			try {
+				session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+			} catch (IOError proxy_error) {
+				throw new Error.PROTOCOL (proxy_error.message);
+			}
 
 			var entry = new Entry (0, client, connection, session);
 			entries.add (entry);
@@ -238,19 +242,23 @@ namespace Frida {
 			return session;
 		}
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
 			Fruity.Client client = yield backend.create_client ();
-			yield client.establish ();
-			yield client.connect_to_port (device_id, id.handle);
-
 			DBusConnection connection;
 			try {
+				yield client.establish ();
+				yield client.connect_to_port (device_id, id.handle);
 				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (Error dbus_error) {
-				throw new IOError.FAILED (dbus_error.message);
+			} catch (GLib.Error connection_error) {
+				throw new Error.PROCESS_NOT_RESPONDING (connection_error.message);
 			}
 
-			AgentSession session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
+			AgentSession session;
+			try {
+				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
+			} catch (IOError proxy_error) {
+				throw new Error.PROTOCOL (proxy_error.message);
+			}
 
 			var entry = new Entry (id.handle, client, connection, session);
 			entries.add (entry);
@@ -260,7 +268,7 @@ namespace Frida {
 			return session;
 		}
 
-		public static extern void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon) throws IOError;
+		public static extern void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon) throws Error;
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
@@ -278,8 +286,13 @@ namespace Frida {
 
 			entries.remove (entry_to_remove);
 
-			if (entry_to_remove.id != 0) /* otherwise it's a HostSession */
-				agent_session_closed (AgentSessionId (entry_to_remove.id), error);
+			if (entry_to_remove.id != 0) {
+				/* otherwise it's a HostSession */
+				Error e = null;
+				if (error != null)
+					e = new Error.PROCESS_GONE (error.message);
+				agent_session_closed (AgentSessionId (entry_to_remove.id), e);
+			}
 		}
 
 		private class Entry : Object {
@@ -315,7 +328,7 @@ namespace Frida {
 
 				try {
 					yield connection.close ();
-				} catch (Error conn_error) {
+				} catch (GLib.Error conn_error) {
 				}
 				connection = null;
 

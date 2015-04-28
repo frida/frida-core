@@ -61,9 +61,10 @@ frida_winjector_helper_factory_spawn (const gchar * path, const gchar * paramete
     process_handle = NULL;
 
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_FAILED,
-        "ShellExecuteExW failed: %d", GetLastError ());
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to spawn helper executable at “%s”: 0x%08lx",
+        path, GetLastError ());
   }
 
   g_free (parameters_utf16);

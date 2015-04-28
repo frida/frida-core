@@ -18,9 +18,9 @@ namespace Frida.Agent {
 			script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 		}
 
-		public async void close () throws IOError {
+		public async void close () throws Error {
 			if (closing)
-				throw new IOError.FAILED ("close already in progress");
+				throw new Error.INVALID_OPERATION ("Agent is already closing");
 			closing = true;
 			perform_close.begin ();
 		}
@@ -44,42 +44,42 @@ namespace Frida.Agent {
 			});
 		}
 
-		public async AgentScriptId create_script (string name, string source) throws IOError {
-			validate_state ();
+		public async AgentScriptId create_script (string name, string source) throws Error {
+			check_open ();
 			var instance = yield script_engine.create_script ((name != "") ? name : null, source);
 			return instance.sid;
 		}
 
-		public async void destroy_script (AgentScriptId sid) throws IOError {
-			validate_state ();
+		public async void destroy_script (AgentScriptId sid) throws Error {
+			check_open ();
 			yield script_engine.destroy_script (sid);
 		}
 
-		public async void load_script (AgentScriptId sid) throws IOError {
-			validate_state ();
+		public async void load_script (AgentScriptId sid) throws Error {
+			check_open ();
 			yield script_engine.load_script (sid);
 		}
 
-		public async void post_message_to_script (AgentScriptId sid, string message) throws IOError {
-			validate_state ();
+		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
+			check_open ();
 			script_engine.post_message_to_script (sid, message);
 		}
 
-		public async void enable_debugger () throws IOError {
+		public async void enable_debugger () throws Error {
 			script_engine.enable_debugger ();
 		}
 
-		public async void disable_debugger () throws IOError {
+		public async void disable_debugger () throws Error {
 			script_engine.disable_debugger ();
 		}
 
-		public async void post_message_to_debugger (string message) throws IOError {
+		public async void post_message_to_debugger (string message) throws Error {
 			script_engine.post_message_to_debugger (message);
 		}
 
-		private void validate_state () throws IOError {
+		private void check_open () throws Error {
 			if (closing)
-				throw new IOError.FAILED ("close in progress");
+				throw new Error.INVALID_OPERATION ("Agent is closing");
 		}
 
 		public void run () throws Error {
@@ -91,8 +91,8 @@ namespace Frida.Agent {
 		private async void setup_connection () {
 			try {
 				connection = yield DBusConnection.new (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
-			} catch (Error error) {
-				printerr ("failed to create connection: %s\n", error.message);
+			} catch (GLib.Error connection_error) {
+				printerr ("Unable to create connection: %s\n", connection_error.message);
 				return;
 			}
 			connection.closed.connect (on_connection_closed);
@@ -101,7 +101,7 @@ namespace Frida.Agent {
 				registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, session);
 				connection.start_message_processing ();
 			} catch (IOError io_error) {
-				printerr ("failed to register object: %s\n", io_error.message);
+				printerr ("Unable to register object: %s\n", io_error.message);
 				close.begin ();
 			}
 		}
@@ -113,7 +113,7 @@ namespace Frida.Agent {
 				}
 				try {
 					yield connection.close ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 				}
 				connection.closed.disconnect (on_connection_closed);
 				connection = null;
@@ -181,7 +181,7 @@ namespace Frida.Agent {
 			try {
 				server.run ();
 			} catch (Error e) {
-				printerr ("error: %s\n", e.message);
+				printerr ("Unable to start agent server: %s\n", e.message);
 			}
 
 			ignorer.disable ();

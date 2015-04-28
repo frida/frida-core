@@ -38,6 +38,9 @@
     <ClCompile Include="$(IntDir)winjector-types.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)session.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">

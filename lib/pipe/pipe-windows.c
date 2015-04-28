@@ -166,8 +166,10 @@ frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellab
 
 handle_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "ConnectNamedPipe failed: 0x%08x", last_error);
+    g_set_error (error,
+        G_IO_ERROR,
+        g_io_error_from_win32_error (last_error),
+        "Error opening named pipe");
     goto beach;
   }
 beach:
@@ -228,8 +230,10 @@ _frida_pipe_close (FridaPipe * self, GError ** error)
 
 handle_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "CloseHandle failed: 0x%08x", GetLastError ());
+    g_set_error (error,
+        G_IO_ERROR,
+        g_io_error_from_win32_error (GetLastError ()),
+        "Error closing named pipe");
     return FALSE;
   }
 }
@@ -263,8 +267,10 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
 
 handle_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "ReadFile failed: 0x%08x", GetLastError ());
+    g_set_error (error,
+        G_IO_ERROR,
+        g_io_error_from_win32_error (GetLastError ()),
+        "Error reading from named pipe");
     goto beach;
   }
 beach:
@@ -302,8 +308,10 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
 
 handle_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "WriteFile failed: 0x%08x", GetLastError ());
+    g_set_error (error,
+        G_IO_ERROR,
+        g_io_error_from_win32_error (GetLastError ()),
+        "Error writing to named pipe");
     goto beach;
   }
 beach:
@@ -390,8 +398,9 @@ handle_winapi_error:
     DWORD last_error = GetLastError ();
     g_set_error (error,
         G_IO_ERROR,
-        last_error == ERROR_FILE_NOT_FOUND ? G_IO_ERROR_NOT_FOUND : G_IO_ERROR_FAILED,
-        "%s failed: 0x%08x", failed_operation, last_error);
+        g_io_error_from_win32_error (last_error),
+        "Error opening named pipe (%s returned 0x%08lx)",
+        failed_operation, last_error);
     goto beach;
   }
 

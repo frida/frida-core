@@ -11,16 +11,17 @@ namespace Frida.Gadget {
 		}
 
 		public async void start () throws Error {
-			server = new DBusServer.sync (LISTEN_ADDRESS, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+			try {
+				server = new DBusServer.sync (LISTEN_ADDRESS, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+			} catch (GLib.Error listen_error) {
+				throw new Error.ADDRESS_IN_USE (listen_error.message);
+			}
+
 			server.new_connection.connect ((connection) => {
 				if (server == null)
 					return false;
 
-				try {
-					sessions[connection] = new Session (connection, agent_range);
-				} catch (IOError e) {
-					return false;
-				}
+				sessions[connection] = new Session (connection, agent_range);
 				connection.closed.connect (on_connection_closed);
 
 				return true;
@@ -55,10 +56,15 @@ namespace Frida.Gadget {
 			private Frida.Agent.ScriptEngine script_engine;
 			private bool close_requested = false;
 
-			public Session (DBusConnection c, Gum.MemoryRange agent_range) throws IOError {
+			public Session (DBusConnection c, Gum.MemoryRange agent_range) {
 				connection = c;
-				host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
-				agent_registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, this as AgentSession);
+
+				try {
+					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
+					agent_registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, this as AgentSession);
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 
 				this_process = get_process_info ();
 
@@ -86,33 +92,33 @@ namespace Frida.Gadget {
 				}
 			}
 
-			public async HostProcessInfo[] enumerate_processes () throws IOError {
+			public async HostProcessInfo[] enumerate_processes () throws Error {
 				return new HostProcessInfo[] { this_process };
 			}
 
-			public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
-				throw new IOError.NOT_SUPPORTED ("Gadget cannot spawn processes");
+			public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+				throw new Error.NOT_SUPPORTED ("Unable to spawn processes when embedded");
 			}
 
-			public async void resume (uint pid) throws IOError {
+			public async void resume (uint pid) throws Error {
 				validate_pid (pid);
 			}
 
-			public async void kill (uint pid) throws IOError {
+			public async void kill (uint pid) throws Error {
 				validate_pid (pid);
 			}
 
-			public async AgentSessionId attach_to (uint pid) throws IOError {
+			public async AgentSessionId attach_to (uint pid) throws Error {
 				validate_pid (pid);
 				return AgentSessionId (27042);
 			}
 
-			private void validate_pid (uint pid) throws IOError {
+			private void validate_pid (uint pid) throws Error {
 				if (pid != this_process.pid)
-					throw new IOError.NOT_SUPPORTED ("Gadget cannot act on other processes");
+					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
 			}
 
-			public async void close () throws IOError {
+			public async void close () throws Error {
 				if (close_requested)
 					return;
 				close_requested = true;
@@ -125,21 +131,33 @@ namespace Frida.Gadget {
 				source.attach (Frida.get_main_context ());
 			}
 
-			public async AgentScriptId create_script (string source) throws IOError {
-				var instance = script_engine.create_script (source);
+			public async AgentScriptId create_script (string name, string source) throws Error {
+				var instance = yield script_engine.create_script (name, source);
 				return instance.sid;
 			}
 
-			public async void destroy_script (AgentScriptId sid) throws IOError {
+			public async void destroy_script (AgentScriptId sid) throws Error {
 				yield script_engine.destroy_script (sid);
 			}
 
-			public async void load_script (AgentScriptId sid) throws IOError {
-				script_engine.load_script (sid);
+			public async void load_script (AgentScriptId sid) throws Error {
+				yield script_engine.load_script (sid);
 			}
 
-			public async void post_message_to_script (AgentScriptId sid, string message) throws IOError {
+			public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
 				script_engine.post_message_to_script (sid, message);
+			}
+
+			public async void enable_debugger () throws Error {
+				script_engine.enable_debugger ();
+			}
+
+			public async void disable_debugger () throws Error {
+				script_engine.disable_debugger ();
+			}
+
+			public async void post_message_to_debugger (string message) throws Error {
+				script_engine.post_message_to_debugger (message);
 			}
 		}
 	}
@@ -195,7 +213,7 @@ namespace Frida.Gadget {
 	}
 
 	private async void create_server () {
-		Gum.init_with_features (Gum.FeatureFlags.ALL & ~Gum.FeatureFlags.SYMBOL_LOOKUP);
+		Gum.init ();
 
 		var agent_range = memory_range ();
 

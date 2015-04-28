@@ -9,7 +9,7 @@ namespace Frida.Fruity {
 
 			var result = yield query (MessageType.LISTEN);
 			if (result != ResultCode.SUCCESS)
-				throw new IOError.FAILED ("failed to enable listen mode, result %d", result);
+				throw new IOError.FAILED ("Unexpected error while trying to enable listen mode: %d", result);
 		}
 
 		public override async void connect_to_port (uint device_id, uint port) throws IOError {
@@ -32,14 +32,14 @@ namespace Frida.Fruity {
 			switch (msg.type) {
 				case MessageType.RESULT:
 					if (msg.body_size != 4)
-						throw new IOError.FAILED ("unexpected payload size for RESULT");
+						throw new IOError.FAILED ("Unexpected payload size for RESULT");
 					int result = body_i32[0];
 					handle_result_message (msg, result);
 					break;
 
 				case MessageType.DEVICE_ATTACHED:
 					if (msg.body_size < 4)
-						throw new IOError.FAILED ("unexpected payload size for ATTACHED");
+						throw new IOError.FAILED ("Unexpected payload size for ATTACHED");
 
 					uint attached_id = body_u32[0];
 					unowned string udid = (string) (msg.body + 6);
@@ -48,13 +48,13 @@ namespace Frida.Fruity {
 
 				case MessageType.DEVICE_DETACHED:
 					if (msg.body_size != 4)
-						throw new IOError.FAILED ("unexpected payload size for DETACHED");
+						throw new IOError.FAILED ("Unexpected payload size for DETACHED");
 					uint detached_id = body_u32[0];
 					device_detached (detached_id);
 					break;
 
 				default:
-					throw new IOError.FAILED ("unexpected message type: %u", (uint) msg.type);
+					throw new IOError.FAILED ("Unexpected message type: %u", (uint) msg.type);
 			}
 		}
 	}
@@ -69,7 +69,7 @@ namespace Frida.Fruity {
 
 			var result = yield query_with_plist (create_plist ("Listen"));
 			if (result != ResultCode.SUCCESS)
-				throw new IOError.FAILED ("failed to enable listen mode, result %d", result);
+				throw new IOError.FAILED ("Unexpected error while trying to enable listen mode: %d", result);
 		}
 
 		public override async void connect_to_port (uint device_id, uint port) throws IOError {
@@ -85,9 +85,9 @@ namespace Frida.Fruity {
 
 		protected override void dispatch_message (Client.Message msg) throws IOError {
 			if (msg.type != MessageType.PROPERTY_LIST)
-				throw new IOError.FAILED ("unexpected message type: %u", (uint) msg.type);
+				throw new IOError.FAILED ("Unexpected message type %u, was expecting a property list", (uint) msg.type);
 			else if (msg.body_size == 0)
-				throw new IOError.FAILED ("message has empty body");
+				throw new IOError.FAILED ("Unexpected message with empty body");
 
 			unowned string xml = (string) msg.body;
 			var plist = new PropertyList.from_xml (xml);
@@ -105,7 +105,7 @@ namespace Frida.Fruity {
 				var detached_id = (uint) plist.get_int ("DeviceID");
 				device_detached (detached_id);
 			} else {
-				throw new IOError.FAILED ("unexpected message type: %s", message_type);
+				throw new IOError.FAILED ("Unexpected message type: %s", message_type);
 			}
 		}
 
@@ -187,7 +187,7 @@ namespace Frida.Fruity {
 				is_processing_messages = true;
 
 				process_incoming_messages.begin ();
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				reset ();
 				throw new IOError.FAILED (e.message);
 			}
@@ -198,7 +198,7 @@ namespace Frida.Fruity {
 
 		public async void close () throws IOError {
 			if (!is_processing_messages)
-				throw new IOError.FAILED ("not processing messages");
+				throw new IOError.FAILED ("Client is already closed");
 			is_processing_messages = false;
 
 			input_cancellable.cancel ();
@@ -217,7 +217,7 @@ namespace Frida.Fruity {
 				var conn = this.connection;
 				if (conn != null)
 					yield conn.close_async (Priority.DEFAULT);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 			}
 			connection = null;
 			input = null;
@@ -264,7 +264,7 @@ namespace Frida.Fruity {
 			}
 
 			if (match == null)
-				throw new IOError.FAILED ("response to unknown tag");
+				throw new IOError.FAILED ("Unexpected response with unknown tag");
 			pending_responses.remove (match);
 			match.complete (result);
 
@@ -281,11 +281,11 @@ namespace Frida.Fruity {
 				case ResultCode.SUCCESS:
 					break;
 				case ResultCode.CONNECTION_REFUSED:
-					throw new IOError.FAILED ("connect failed (connection refused)");
+					throw new IOError.FAILED ("Unable to connect (connection refused)");
 				case ResultCode.INVALID_REQUEST:
-					throw new IOError.FAILED ("connect failed (invalid request)");
+					throw new IOError.FAILED ("Unable to connect (invalid request)");
 				default:
-					throw new IOError.FAILED ("connect failed (error code: %d)", result);
+					throw new IOError.FAILED ("Unable to connect (error code: %d)", result);
 			}
 		}
 
@@ -294,7 +294,7 @@ namespace Frida.Fruity {
 			yield read (&size, 4);
 			size = uint.from_little_endian (size);
 			if (size < 16 || size > MAX_MESSAGE_SIZE)
-				throw new IOError.FAILED ("protocol error: invalid size");
+				throw new IOError.FAILED ("Invalid message size");
 
 			uint32 protocol_version;
 			yield read (&protocol_version, 4);
@@ -326,13 +326,13 @@ namespace Frida.Fruity {
 					uint8[] slice = new uint8[remaining];
 					ssize_t len = yield input.read_async (slice, Priority.DEFAULT, input_cancellable);
 					if (len == 0)
-						throw new IOError.CLOSED ("socket closed");
+						throw new IOError.CLOSED ("Socket is closed");
 					Memory.copy (dst, slice, len);
 
 					dst += len;
 					remaining -= len;
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				throw new IOError.FAILED (e.message);
 			}
 		}
@@ -352,7 +352,7 @@ namespace Frida.Fruity {
 					offset += len;
 					remaining -= len;
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				throw new IOError.FAILED (e.message);
 			}
 		}

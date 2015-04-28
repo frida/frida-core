@@ -85,8 +85,11 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
 
 handle_mach_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "%s failed while trying to make pipe transport: %s (%d)", failed_operation, mach_error_string (ret), ret);
+    g_set_error (error,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
+        "Unexpected error while setting up mach ports (%s returned “%s”)",
+        failed_operation, mach_error_string (ret));
 
     if (remote_tx != MACH_PORT_NULL)
       mach_port_mod_refs (self_task, remote_tx, MACH_PORT_RIGHT_SEND, -1);
@@ -176,8 +179,11 @@ frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
   ret = ret_tx != 0 ? ret_tx : ret_rx;
   if (ret != 0)
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "mach_port_mod_refs failed: %s (%d)", mach_error_string (ret), ret);
+    g_set_error (error,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
+        "Error closing mach ports: %s",
+        mach_error_string (ret));
     return FALSE;
   }
 
@@ -277,8 +283,11 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
 handle_error:
   {
     g_free (msg);
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "mach_msg failed: %s (%d)", mach_error_string (ret), ret);
+    g_set_error (error,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
+        "Error reading from mach port: %s",
+        mach_error_string (ret));
     return -1;
   }
 
@@ -335,8 +344,11 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
 
 handle_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "mach_msg_send failed: %s (%d)", mach_error_string (ret), ret);
+    g_set_error (error,
+        G_IO_ERROR,
+        G_IO_ERROR_FAILED,
+        "Error writing to mach port: %s",
+        mach_error_string (ret));
     return -1;
   }
 }

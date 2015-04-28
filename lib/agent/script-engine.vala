@@ -20,7 +20,7 @@ namespace Frida.Agent {
 			instance_by_id.clear ();
 		}
 
-		public async ScriptInstance create_script (string? name, string source) throws IOError {
+		public async ScriptInstance create_script (string? name, string source) throws Error {
 			var sid = AgentScriptId (++last_script_id);
 
 			string script_name;
@@ -29,7 +29,12 @@ namespace Frida.Agent {
 			else
 				script_name = "script%u".printf (sid.handle);
 
-			var script = yield Gum.Script.from_string (script_name, source);
+			Gum.Script script;
+			try {
+				script = yield Gum.Script.from_string (script_name, source);
+			} catch (IOError create_error) {
+				throw new Error.INVALID_ARGUMENT (create_error.message);
+			}
 			script.get_stalker ().exclude (agent_range);
 			script.set_message_handler ((script, message, data) => {
 				this.message_from_script (sid, message, data);
@@ -41,32 +46,32 @@ namespace Frida.Agent {
 			return instance;
 		}
 
-		public async void destroy_script (AgentScriptId sid) throws IOError {
+		public async void destroy_script (AgentScriptId sid) throws Error {
 			ScriptInstance instance;
 			if (!instance_by_id.unset (sid.handle, out instance))
-				throw new IOError.FAILED ("invalid script id");
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			yield instance.destroy ();
 		}
 
-		public async void load_script (AgentScriptId sid) throws IOError {
+		public async void load_script (AgentScriptId sid) throws Error {
 			var instance = instance_by_id[sid.handle];
 			if (instance == null)
-				throw new IOError.FAILED ("invalid script id");
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			yield instance.script.load ();
 		}
 
-		public void post_message_to_script (AgentScriptId sid, string message) throws IOError {
+		public void post_message_to_script (AgentScriptId sid, string message) throws Error {
 			var instance = instance_by_id[sid.handle];
 			if (instance == null)
-				throw new IOError.FAILED ("invalid script id");
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			instance.script.post_message (message);
 		}
 
-		public void enable_debugger () throws IOError {
+		public void enable_debugger () throws Error {
 			Gum.Script.set_debug_message_handler (on_debug_message);
 		}
 
-		public void disable_debugger () throws IOError {
+		public void disable_debugger () throws Error {
 			Gum.Script.set_debug_message_handler (null);
 		}
 

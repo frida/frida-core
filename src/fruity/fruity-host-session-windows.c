@@ -108,7 +108,12 @@ _frida_fruity_host_session_provider_extract_details_for_device (gint product_id,
 
 beach:
   if (!result)
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Failed to extract details for device by UDID");
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to extract details for device by UDID “%s”", udid);
+  }
 
   frida_image_device_info_free (idev);
   frida_mobile_device_info_free (mdev);

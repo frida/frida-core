@@ -69,7 +69,7 @@ namespace Frida {
 			assert (device_did_exist);
 		}
 
-		private async void ensure_service () throws IOError {
+		private async void ensure_service () throws Error {
 			if (ensure_request != null) {
 				try {
 					yield ensure_request.future.wait_async ();
@@ -110,7 +110,7 @@ namespace Frida {
 
 		private void check_open () throws Error {
 			if (close_request != null)
-				throw new IOError.FAILED ("invalid operation (device manager is closed)");
+				throw new Error.INVALID_OPERATION ("Device manager is closed");
 		}
 
 		private async void _do_close () {
@@ -127,7 +127,7 @@ namespace Frida {
 			if (ensure_request != null) {
 				try {
 					yield ensure_service ();
-				} catch (IOError io_error) {
+				} catch (Error ensure_error) {
 					assert_not_reached ();
 				}
 			}
@@ -240,8 +240,16 @@ namespace Frida {
 
 		public async ProcessList enumerate_processes () throws Error {
 			check_open ();
-			yield ensure_host_session ();
-			var processes = yield host_session.enumerate_processes ();
+
+			HostProcessInfo[] processes;
+			try {
+				yield ensure_host_session ();
+				processes = yield host_session.enumerate_processes ();
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
+
 			var result = new Gee.ArrayList<Process> ();
 			foreach (var p in processes) {
 				result.add (new Process (p.pid, p.name, icon_from_image_data (p.small_icon), icon_from_image_data (p.large_icon)));
@@ -267,8 +275,17 @@ namespace Frida {
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			check_open ();
-			yield ensure_host_session ();
-			return yield host_session.spawn (path, argv, envp);
+
+			uint pid;
+			try {
+				yield ensure_host_session ();
+				pid = yield host_session.spawn (path, argv, envp);
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
+
+			return pid;
 		}
 
 		public uint spawn_sync (string path, string[] argv, string[] envp) throws Error {
@@ -291,8 +308,14 @@ namespace Frida {
 
 		public async void resume (uint pid) throws Error {
 			check_open ();
-			yield ensure_host_session ();
-			yield host_session.resume (pid);
+
+			try {
+				yield ensure_host_session ();
+				yield host_session.resume (pid);
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
 		}
 
 		public void resume_sync (uint pid) throws Error {
@@ -311,8 +334,14 @@ namespace Frida {
 
 		public async void kill (uint pid) throws Error {
 			check_open ();
-			yield ensure_host_session ();
-			yield host_session.kill (pid);
+
+			try {
+				yield ensure_host_session ();
+				yield host_session.kill (pid);
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
 		}
 
 		public void kill_sync (uint pid) throws Error {
@@ -333,13 +362,18 @@ namespace Frida {
 			check_open ();
 			var session = session_by_pid[pid];
 			if (session == null) {
-				yield ensure_host_session ();
+				try {
+					yield ensure_host_session ();
 
-				var agent_session_id = yield host_session.attach_to (pid);
-				var agent_session = yield provider.obtain_agent_session (agent_session_id);
-				session = new Session (this, pid, agent_session);
-				session_by_pid[pid] = session;
-				session_by_handle[agent_session_id.handle] = session;
+					var agent_session_id = yield host_session.attach_to (pid);
+					var agent_session = yield provider.obtain_agent_session (agent_session_id);
+					session = new Session (this, pid, agent_session);
+					session_by_pid[pid] = session;
+					session_by_handle[agent_session_id.handle] = session;
+				} catch (Error e) {
+					DBusError.strip_remote_error (e);
+					throw e;
+				}
 			}
 			return session;
 		}
@@ -360,7 +394,7 @@ namespace Frida {
 
 		private void check_open () throws Error {
 			if (close_request != null)
-				throw new IOError.FAILED ("invalid operation (device is gone)");
+				throw new Error.INVALID_OPERATION ("Device is gone");
 		}
 
 		public async void _do_close (bool may_block) {
@@ -407,7 +441,7 @@ namespace Frida {
 			session_by_handle.unset (handle);
 		}
 
-		private async void ensure_host_session () throws IOError {
+		private async void ensure_host_session () throws Error {
 			if (host_session == null) {
 				host_session = yield provider.create ();
 			}
@@ -571,9 +605,17 @@ namespace Frida {
 
 		public async Script create_script (string? name, string source) throws Error {
 			check_open ();
-			var sid = yield session.create_script ((name == null) ? "" : name, source);
-			var script = new Script (this, sid);
-			script_by_id[sid.handle] = script;
+
+			Script script;
+			try {
+				var sid = yield session.create_script ((name == null) ? "" : name, source);
+				script = new Script (this, sid);
+				script_by_id[sid.handle] = script;
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
+
 			return script;
 		}
 
@@ -597,7 +639,7 @@ namespace Frida {
 			check_open ();
 
 			if (debugger != null)
-				throw new IOError.FAILED ("already enabled");
+				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
 
 			debugger = new Debugger ((port != 0) ? port : DEFAULT_DEBUG_PORT, session);
 			var enabled = false;
@@ -657,7 +699,7 @@ namespace Frida {
 
 		private void check_open () throws Error {
 			if (close_request != null)
-				throw new IOError.FAILED ("invalid operation (detached from session)");
+				throw new Error.INVALID_OPERATION ("Session is detached");
 		}
 
 		public async void _do_close (bool may_block) {
@@ -682,7 +724,7 @@ namespace Frida {
 			if (may_block) {
 				try {
 					yield session.close ();
-				} catch (IOError ignored_error) {
+				} catch (Error ignored_error) {
 				}
 			}
 			session.message_from_script.disconnect (on_message_from_script);
@@ -731,7 +773,13 @@ namespace Frida {
 
 		public async void load () throws Error {
 			check_open ();
-			yield session.session.load_script (script_id);
+
+			try {
+				yield session.session.load_script (script_id);
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
 		}
 
 		public void load_sync () throws Error {
@@ -746,6 +794,7 @@ namespace Frida {
 
 		public async void unload () throws Error {
 			check_open ();
+
 			yield _do_close (true);
 		}
 
@@ -761,7 +810,13 @@ namespace Frida {
 
 		public async void post_message (string message) throws Error {
 			check_open ();
-			yield session.session.post_message_to_script (script_id, message);
+
+			try {
+				yield session.session.post_message_to_script (script_id, message);
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
+			}
 		}
 
 		public void post_message_sync (string message) throws Error {
@@ -780,7 +835,7 @@ namespace Frida {
 
 		private void check_open () throws Error {
 			if (session == null)
-				throw new IOError.FAILED ("invalid operation (script is destroyed)");
+				throw new Error.INVALID_OPERATION ("Script is destroyed");
 		}
 
 		public async void _do_close (bool may_block) {
@@ -797,7 +852,7 @@ namespace Frida {
 			if (may_block) {
 				try {
 					yield p.session.destroy_script (sid);
-				} catch (IOError ignored_error) {
+				} catch (Error ignored_error) {
 				}
 			}
 
@@ -828,15 +883,15 @@ namespace Frida {
 			this.session = session;
 		}
 
-		public async void enable () throws IOError {
+		public async void enable () throws Error {
 			if (service != null)
-				throw new IOError.FAILED ("already enabled");
+				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
 			service = new SocketService ();
 			try {
 				service.add_inet_port (port, null);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				service = null;
-				throw new IOError.FAILED (e.message);
+				throw new Error.ADDRESS_IN_USE (e.message);
 			}
 			service.incoming.connect (on_incoming_connection);
 			service.start ();
@@ -844,6 +899,9 @@ namespace Frida {
 			try {
 				yield session.enable_debugger ();
 				enabled = true;
+			} catch (Error e) {
+				DBusError.strip_remote_error (e);
+				throw e;
 			} finally {
 				if (!enabled) {
 					service.stop ();
@@ -958,7 +1016,7 @@ namespace Frida {
 						var message = yield read_message ();
 						yield agent_session.post_message_to_debugger (message);
 					}
-				} catch (IOError e) {
+				} catch (GLib.Error e) {
 					ended (this);
 				}
 			}
@@ -971,7 +1029,7 @@ namespace Frida {
 						yield output.write_all_async (buf[0:m.length], Priority.DEFAULT, null, null);
 						outgoing.pop_head ();
 					} while (!outgoing.is_empty ());
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 				}
 			}
 
@@ -1015,13 +1073,13 @@ namespace Frida {
 				}
 
 				if (available == 0)
-					throw new IOError.FAILED ("maximum message size exceeded");
+					throw new IOError.FAILED ("Maximum message size exceeded");
 
 				buffer[length + available] = 0;
 				unowned uint8[] buf = (uint8[]) buffer;
 				ssize_t n = yield input.read_async (buf[length:length + available]);
 				if (n == 0)
-					throw new IOError.CLOSED ("connection closed");
+					throw new IOError.CLOSED ("Connection is closed");
 				length += n;
 			}
 
@@ -1038,7 +1096,7 @@ namespace Frida {
 				foreach (var line in lines) {
 					var tokens = line.split (": ", 2);
 					if (tokens.length != 2)
-						throw new IOError.FAILED ("malformed header");
+						throw new IOError.FAILED ("Malformed header");
 					var key = tokens[0];
 					var val = tokens[1];
 					if (key == "Content-Length") {
@@ -1050,7 +1108,7 @@ namespace Frida {
 					}
 				}
 
-				throw new IOError.FAILED ("missing content length");
+				throw new IOError.FAILED ("Missing content length");
 			}
 		}
 	}
@@ -1067,7 +1125,7 @@ namespace Frida {
 		private Cond cond;
 
 		private T result;
-		private Error error;
+		private Error? error;
 
 		public T start_and_wait_for_completion () throws Error {
 			if (main_context.is_owner ())
@@ -1099,7 +1157,7 @@ namespace Frida {
 			try {
 				result = yield perform_operation ();
 			} catch (Error e) {
-				error = new IOError.FAILED (e.message);
+				error = e;
 			}
 
 			if (loop != null) {

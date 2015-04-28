@@ -71,9 +71,9 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create () throws IOError;
+		public abstract async HostSession create () throws Error;
 
-		public abstract async AgentSession obtain_agent_session (AgentSessionId id) throws IOError;
+		public abstract async AgentSession obtain_agent_session (AgentSessionId id) throws Error;
 		public signal void agent_session_closed (AgentSessionId id, Error? error);
 	}
 
@@ -110,15 +110,15 @@ namespace Frida {
 			entries.clear ();
 		}
 
-		public abstract async HostProcessInfo[] enumerate_processes () throws IOError;
+		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
 
-		public abstract async uint spawn (string path, string[] argv, string[] envp) throws IOError;
+		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 
-		public abstract async void resume (uint pid) throws IOError;
+		public abstract async void resume (uint pid) throws Error;
 
-		public abstract async void kill (uint pid) throws IOError;
+		public abstract async void kill (uint pid) throws Error;
 
-		public async Frida.AgentSessionId attach_to (uint pid) throws IOError {
+		public async Frida.AgentSessionId attach_to (uint pid) throws Error {
 			foreach (var e in entries) {
 				if (e.pid == pid)
 					return e.id;
@@ -128,7 +128,6 @@ namespace Frida {
 			var stream = yield perform_attach_to (pid, out transport);
 
 			var cancellable = new Cancellable ();
-			var cancelled = new IOError.CANCELLED ("");
 			var timeout_source = new TimeoutSource (2000);
 			timeout_source.set_callback (() => {
 				cancellable.cancel ();
@@ -141,14 +140,14 @@ namespace Frida {
 			try {
 				connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
-			} catch (Error establish_error) {
-				if (establish_error is IOError && establish_error.code == cancelled.code)
-					throw new IOError.TIMED_OUT ("timed out");
+			} catch (GLib.Error establish_error) {
+				if (establish_error is IOError.CANCELLED)
+					throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
 				else
-					throw new IOError.FAILED (establish_error.message);
+					throw new Error.PROCESS_NOT_RESPONDING (establish_error.message);
 			}
 			if (cancellable.is_cancelled ())
-				throw new IOError.TIMED_OUT ("timed out");
+				throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
 
 			timeout_source.destroy ();
 
@@ -157,7 +156,6 @@ namespace Frida {
 				port = DEFAULT_AGENT_PORT;
 				bool found_available = false;
 				var loopback = new InetAddress.loopback (SocketFamily.IPV4);
-				var address_in_use = new IOError.ADDRESS_IN_USE ("");
 				while (!found_available) {
 					bool used_by_us = false;
 					foreach (var existing_entry in entries) {
@@ -174,8 +172,8 @@ namespace Frida {
 							socket.bind (new InetSocketAddress (loopback, (uint16) port), false);
 							socket.close ();
 							found_available = true;
-						} catch (Error probe_error) {
-							if (probe_error.code == address_in_use.code)
+						} catch (GLib.Error probe_error) {
+							if (probe_error is IOError.ADDRESS_IN_USE)
 								port++;
 							else
 								found_available = true;
@@ -194,26 +192,26 @@ namespace Frida {
 			if (forward_agent_sessions) {
 				try {
 					entry.serve (LISTEN_ADDRESS_TEMPLATE.printf (port));
-				} catch (Error serve_error) {
+				} catch (GLib.Error serve_error) {
 					try {
 						yield connection.close ();
-					} catch (Error cleanup_error) {
+					} catch (GLib.Error cleanup_error) {
 					}
-					throw new IOError.FAILED (serve_error.message);
+					throw new Error.ADDRESS_IN_USE (serve_error.message);
 				}
 			}
 
 			return AgentSessionId (port);
 		}
 
-		protected abstract async IOStream perform_attach_to (uint pid, out Object? transport) throws IOError;
+		protected abstract async IOStream perform_attach_to (uint pid, out Object? transport) throws Error;
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws IOError {
+		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
 			foreach (var entry in entries) {
 				if (entry.id.handle == id.handle)
 					return entry.agent_session;
 			}
-			throw new IOError.NOT_FOUND ("no such session");
+			throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -233,7 +231,10 @@ namespace Frida {
 			entries.remove (entry_to_remove);
 			entry_to_remove.close.begin ();
 
-			agent_session_closed (entry_to_remove.id, error);
+			Error e = null;
+			if (error != null)
+				e = new Error.PROCESS_GONE (error.message);
+			agent_session_closed (entry_to_remove.id, e);
 		}
 
 		private class Entry : Object {
@@ -295,7 +296,7 @@ namespace Frida {
 				foreach (var connection in client_connections.slice (0, client_connections.size)) {
 					try {
 						yield connection.close ();
-					} catch (Error client_conn_error) {
+					} catch (GLib.Error client_conn_error) {
 					}
 				}
 				client_connections.clear ();
@@ -305,14 +306,14 @@ namespace Frida {
 
 				try {
 					yield agent_connection.close ();
-				} catch (Error agent_conn_error) {
+				} catch (GLib.Error agent_conn_error) {
 				}
 				agent_connection = null;
 
 				close_request.set_value (true);
 			}
 
-			public void serve (string listen_address) throws Error {
+			public void serve (string listen_address) throws GLib.Error {
 				server = new DBusServer.sync (listen_address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 				server.new_connection.connect ((connection) => {
 					connection.closed.connect (on_client_connection_closed);
@@ -321,7 +322,6 @@ namespace Frida {
 						var registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, agent_session);
 						registration_id_by_connection[connection] = registration_id;
 					} catch (IOError e) {
-						printerr ("failed to register object: %s\n", e.message);
 						close.begin ();
 						return false;
 					}

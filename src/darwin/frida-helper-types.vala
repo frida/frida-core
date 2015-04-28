@@ -3,11 +3,11 @@ namespace Frida {
 	[DBus (name = "re.frida.Helper")]
 	public interface Helper : Object {
 		public signal void uninjected (uint id);
-		public abstract async void stop () throws IOError;
-		public abstract async uint spawn (string path, string[] argv, string[] envp) throws IOError;
-		public abstract async void resume (uint pid) throws IOError;
-		public abstract async uint inject (uint pid, string filename, string data_string) throws IOError;
-		public abstract async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws IOError;
+		public abstract async void stop () throws Error;
+		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
+		public abstract async void resume (uint pid) throws Error;
+		public abstract async uint inject (uint pid, string filename, string data_string) throws Error;
+		public abstract async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error;
 	}
 
 	public struct PipeEndpoints {

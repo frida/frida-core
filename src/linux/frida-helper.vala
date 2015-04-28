@@ -52,7 +52,7 @@ namespace Frida {
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
-				} catch (Error connection_error) {
+				} catch (GLib.Error connection_error) {
 				}
 				connection = null;
 			}
@@ -67,34 +67,34 @@ namespace Frida {
 				Helper helper = this;
 				registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 				connection.start_message_processing ();
-			} catch (Error e) {
-				stderr.printf ("start failed: %s\n", e.message);
+			} catch (GLib.Error e) {
+				printerr ("Unable to start: %s\n", e.message);
 				run_result = 1;
 				shutdown.begin ();
 			}
 		}
 
-		public async void stop () throws IOError {
+		public async void stop () throws Error {
 			Timeout.add (20, () => {
 				shutdown.begin ();
 				return false;
 			});
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws IOError {
+		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			return _do_spawn (path, argv, envp);
 		}
 
-		public async void resume (uint pid) throws IOError {
+		public async void resume (uint pid) throws Error {
 			void * instance;
 			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
 			if (!instance_found)
-				throw new IOError.FAILED ("no such pid");
+				throw new Error.INVALID_ARGUMENT ("Invalid pid");
 			_resume_spawn_instance (instance);
 			_free_spawn_instance (instance);
 		}
 
-		public async void kill (uint pid) throws IOError {
+		public async void kill (uint pid) throws Error {
 			void * instance;
 			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
 			if (instance_found)
@@ -102,13 +102,12 @@ namespace Frida {
 			Posix.kill ((Posix.pid_t) pid, Posix.SIGKILL);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string, string temp_path) throws IOError {
+		public async uint inject (uint pid, string filename, string data_string, string temp_path) throws Error {
 			var id = _do_inject (pid, filename, data_string, temp_path);
 
 			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
 			var buf = new uint8[1];
 			var cancellable = new Cancellable ();
-			var cancelled = new IOError.CANCELLED ("");
 			var timeout = Timeout.add_seconds (2, () => {
 				cancellable.cancel ();
 				return false;
@@ -116,11 +115,11 @@ namespace Frida {
 			ssize_t size;
 			try {
 				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
-			} catch (Error e) {
-				if (e is IOError && e.code == cancelled.code)
-					throw new IOError.TIMED_OUT ("timed out");
+			} catch (IOError e) {
+				if (e is IOError.CANCELLED)
+					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while waiting for FIFO to establish");
 				else
-					throw new IOError.FAILED (e.message);
+					throw new Error.PROCESS_NOT_RESPONDING (e.message);
 			}
 			Source.remove (timeout);
 			if (size == 0) {
@@ -171,11 +170,11 @@ namespace Frida {
 			shutdown.begin ();
 		}
 
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws IOError;
+		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string dylib_path, string data_string, string temp_path) throws IOError;
+		public extern uint _do_inject (uint pid, string dylib_path, string data_string, string temp_path) throws Error;
 		public extern InputStream _get_fifo_for_inject_instance (void * instance);
 		public extern void _free_inject_instance (void * instance);
 	}

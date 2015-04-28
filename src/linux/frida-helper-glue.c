@@ -166,7 +166,8 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
     kill (getpid (), SIGSTOP);
     if (execve (path, argv, envp) == -1)
     {
-      g_printerr ("execve failed: %s (%d)\n", strerror (errno), errno);
+      g_printerr ("Unexpected error while spawning process (execve failed: %s)\n",
+          g_strerror (errno));
       abort ();
     }
   }
@@ -188,7 +189,12 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    (void) failed_operation;
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to spawn executable at “%s”",
+        path);
     goto error_epilogue;
   }
 error_epilogue:
@@ -340,10 +346,12 @@ frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_reg
 {
   const pid_t pid = instance->pid;
   long ret;
+  int attach_errno;
   const gchar * failed_operation;
   gboolean maybe_already_attached, success;
 
   ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
+  attach_errno = errno;
   maybe_already_attached = (ret != 0 && errno == EPERM);
   if (maybe_already_attached)
   {
@@ -369,7 +377,24 @@ frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_reg
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "attach_to_process %s failed: %d", failed_operation, errno);
+    if (attach_errno == EPERM)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_PERMISSION_DENIED,
+          "Unable to access process with pid %u due to system restrictions;"
+          " try `sudo sysctl kernel.yama.ptrace_scope=0`, or run Frida as root",
+          pid);
+    }
+    else
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unexpected error while attaching to process with pid %u (%s returned “%s”)",
+          pid, failed_operation, g_strerror (errno));
+    }
+
     return FALSE;
   }
 }
@@ -394,7 +419,11 @@ frida_inject_instance_detach (FridaInjectInstance * instance, const regs_t * sav
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "detach_from_process %s failed: %d", failed_operation, errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_GONE,
+        "detach_from_process %s failed: %d",
+        failed_operation, errno);
     return FALSE;
   }
 }
@@ -870,12 +899,19 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 
 handle_probe_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "failed to probe process");
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "failed to probe process");
     return FALSE;
   }
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "%s failed: %d", failed_operation, errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "%s failed: %d",
+        failed_operation, errno);
     return FALSE;
   }
 }
@@ -985,7 +1021,11 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_write %s failed: %d", failed_operation, errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "remote_write %s failed: %d",
+        failed_operation, errno);
     return FALSE;
   }
 }
@@ -1120,7 +1160,11 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_call %s failed: %d", failed_operation, errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "remote_call %s failed: %d",
+        failed_operation, errno);
     return FALSE;
   }
 }
@@ -1187,7 +1231,11 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 
 handle_os_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_exec %s failed: %d", failed_operation, errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "remote_exec %s failed: %d",
+        failed_operation, errno);
     return FALSE;
   }
 }

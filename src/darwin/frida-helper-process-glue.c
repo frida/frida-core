@@ -23,8 +23,11 @@ frida_helper_process_spawn_helper (const gchar * path, gchar ** argv, int argv_l
 
 handle_spawn_error:
   {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-        "posix_spawn failed: %s (%d)", strerror (errno), errno);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to spawn helper executable at “%s”: %s",
+        path, g_strerror (errno));
     return 0;
   }
 }

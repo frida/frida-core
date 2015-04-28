@@ -113,8 +113,9 @@ handle_posix_error:
   {
     g_set_error (error,
         G_IO_ERROR,
-        G_IO_ERROR_FAILED,
-        "%s failed: %s (%d)", failed_operation, strerror (errno), errno);
+        g_io_error_from_errno (errno),
+        "Error creating FIFO with %s: %s",
+        failed_operation, g_strerror (errno));
     _frida_pipe_transport_destroy_backend (backend);
     backend = NULL;
     goto beach;
@@ -159,14 +160,14 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   backend->tx_name = g_strdup (tokens[3]);
 
   fd = open (backend->rx_name, O_RDONLY | O_NONBLOCK);
-  CHECK_POSIX_RESULT (fd, !=, -1, "open rx");
+  CHECK_POSIX_RESULT (fd, !=, -1, "rx");
   frida_pipe_fd_enable_blocking (fd);
   backend->input = G_INPUT_STREAM (g_unix_input_stream_new (fd, TRUE));
 
   if (backend->role == FRIDA_PIPE_CLIENT)
   {
     fd = open (backend->tx_name, O_WRONLY | O_NONBLOCK);
-    CHECK_POSIX_RESULT (fd, !=, -1, "open tx");
+    CHECK_POSIX_RESULT (fd, !=, -1, "tx");
     frida_pipe_fd_enable_blocking (fd);
     backend->output = G_OUTPUT_STREAM (g_unix_output_stream_new (fd, TRUE));
     unlink (backend->tx_name);
@@ -180,8 +181,9 @@ handle_posix_error:
   {
     g_set_error (error,
         G_IO_ERROR,
-        G_IO_ERROR_FAILED,
-        "%s failed: %s (%d)", failed_operation, strerror (errno), errno);
+        g_io_error_from_errno (errno),
+        "Error opening %s FIFO: %s",
+        failed_operation, g_strerror (errno));
     _frida_pipe_destroy_backend (backend);
     backend = NULL;
     goto beach;

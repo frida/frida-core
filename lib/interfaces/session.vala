@@ -1,28 +1,42 @@
 namespace Frida {
 	[DBus (name = "re.frida.HostSession")]
 	public interface HostSession : Object {
-		public abstract async HostProcessInfo[] enumerate_processes () throws IOError;
+		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
 
-		public abstract async uint spawn (string path, string[] argv, string[] envp) throws IOError;
-		public abstract async void resume (uint pid) throws IOError;
-		public abstract async void kill (uint pid) throws IOError;
-		public abstract async AgentSessionId attach_to (uint pid) throws IOError;
+		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
+		public abstract async void resume (uint pid) throws Error;
+		public abstract async void kill (uint pid) throws Error;
+		public abstract async AgentSessionId attach_to (uint pid) throws Error;
 	}
 
 	[DBus (name = "re.frida.AgentSession")]
 	public interface AgentSession : Object {
-		public abstract async void close () throws IOError;
+		public abstract async void close () throws Error;
 
-		public abstract async AgentScriptId create_script (string name, string source) throws IOError;
-		public abstract async void destroy_script (AgentScriptId sid) throws IOError;
-		public abstract async void load_script (AgentScriptId sid) throws IOError;
-		public abstract async void post_message_to_script (AgentScriptId sid, string message) throws IOError;
+		public abstract async AgentScriptId create_script (string name, string source) throws Error;
+		public abstract async void destroy_script (AgentScriptId sid) throws Error;
+		public abstract async void load_script (AgentScriptId sid) throws Error;
+		public abstract async void post_message_to_script (AgentScriptId sid, string message) throws Error;
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
 
-		public abstract async void enable_debugger () throws IOError;
-		public abstract async void disable_debugger () throws IOError;
-		public abstract async void post_message_to_debugger (string message) throws IOError;
+		public abstract async void enable_debugger () throws Error;
+		public abstract async void disable_debugger () throws Error;
+		public abstract async void post_message_to_debugger (string message) throws Error;
 		public signal void message_from_debugger (string message);
+	}
+
+	[DBus (name = "re.frida.Error")]
+	public errordomain Error {
+		SERVER_NOT_RUNNING,
+		PROCESS_NOT_RESPONDING,
+		PROCESS_GONE,
+		INVALID_ARGUMENT,
+		INVALID_OPERATION,
+		PERMISSION_DENIED,
+		ADDRESS_IN_USE,
+		TIMED_OUT,
+		NOT_SUPPORTED,
+		PROTOCOL
 	}
 
 	public struct HostProcessInfo {
