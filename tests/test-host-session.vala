@@ -268,7 +268,7 @@ namespace Frida.HostSessionTest {
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
-						assert (e is Error.INVALID_ARGUMENT);
+						assert (e is Error.PROCESS_NOT_FOUND);
 						assert (e.message == "Unable to find process with pid %u".printf (inexistent_pid));
 					}
 

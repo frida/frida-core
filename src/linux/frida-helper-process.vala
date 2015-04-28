@@ -144,7 +144,7 @@ namespace Frida {
 				return Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
 			} catch (GLib.Error e) {
 				if (e is FileError.NOENT)
-					throw new Error.INVALID_ARGUMENT ("Unable to find process with pid %u".printf (pid));
+					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
 				else if (e is FileError.ACCES)
 					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
 				else

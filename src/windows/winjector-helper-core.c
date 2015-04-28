@@ -252,7 +252,7 @@ handle_os_error:
     {
       g_set_error (error,
           FRIDA_ERROR,
-          FRIDA_ERROR_INVALID_ARGUMENT,
+          FRIDA_ERROR_PROCESS_NOT_FOUND,
           "Unable to find process with pid %u",
           process_id);
     }
