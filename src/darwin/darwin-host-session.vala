@@ -47,7 +47,7 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_OPERATION ("Unable to create more than one host session");
 			host_session = new DarwinHostSession ();
-			host_session.agent_session_closed.connect ((id, error) => this.agent_session_closed (id, error));
+			host_session.agent_session_closed.connect ((id) => this.agent_session_closed (id));
 			return host_session;
 		}
 
@@ -110,7 +110,7 @@ namespace Frida {
 			try {
 				stream = new Pipe (local_address);
 			} catch (IOError stream_error) {
-				throw new Error.PROCESS_GONE (stream_error.message);
+				throw new Error.NOT_SUPPORTED (stream_error.message);
 			}
 			yield injector.inject (pid, agent_desc, remote_address);
 			transport = null;

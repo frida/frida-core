@@ -447,7 +447,7 @@ namespace Frida {
 			}
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, Error? error) {
+		private void on_agent_session_closed (AgentSessionId id) {
 			var session = session_by_handle[id.handle];
 			if (session != null)
 				session._do_close.begin (false);

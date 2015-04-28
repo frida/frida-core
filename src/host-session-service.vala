@@ -74,7 +74,7 @@ namespace Frida {
 		public abstract async HostSession create () throws Error;
 
 		public abstract async AgentSession obtain_agent_session (AgentSessionId id) throws Error;
-		public signal void agent_session_closed (AgentSessionId id, Error? error);
+		public signal void agent_session_closed (AgentSessionId id);
 	}
 
 	public enum HostSessionProviderKind {
@@ -92,7 +92,7 @@ namespace Frida {
 	}
 
 	public abstract class BaseDBusHostSession : Object, HostSession {
-		public signal void agent_session_closed (AgentSessionId id, Error? error);
+		public signal void agent_session_closed (AgentSessionId id);
 
 		public bool forward_agent_sessions {
 			get;
@@ -231,10 +231,7 @@ namespace Frida {
 			entries.remove (entry_to_remove);
 			entry_to_remove.close.begin ();
 
-			Error e = null;
-			if (error != null)
-				e = new Error.PROCESS_GONE (error.message);
-			agent_session_closed (entry_to_remove.id, e);
+			agent_session_closed (entry_to_remove.id);
 		}
 
 		private class Entry : Object {

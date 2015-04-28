@@ -286,13 +286,8 @@ namespace Frida {
 
 			entries.remove (entry_to_remove);
 
-			if (entry_to_remove.id != 0) {
-				/* otherwise it's a HostSession */
-				Error e = null;
-				if (error != null)
-					e = new Error.PROCESS_GONE (error.message);
-				agent_session_closed (AgentSessionId (entry_to_remove.id), e);
-			}
+			if (entry_to_remove.id != 0) /* otherwise it's a HostSession */
+				agent_session_closed (AgentSessionId (entry_to_remove.id));
 		}
 
 		private class Entry : Object {

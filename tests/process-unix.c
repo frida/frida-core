@@ -160,7 +160,7 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
       {
         g_set_error (error,
             FRIDA_ERROR,
-            FRIDA_ERROR_PROCESS_GONE,
+            FRIDA_ERROR_NOT_SUPPORTED,
             "Unexpected error while waiting for process to exit (child process crashed)");
         status = -1;
       }

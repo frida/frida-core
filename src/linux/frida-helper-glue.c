@@ -421,7 +421,7 @@ handle_os_error:
   {
     g_set_error (error,
         FRIDA_ERROR,
-        FRIDA_ERROR_PROCESS_GONE,
+        FRIDA_ERROR_INVALID_OPERATION,
         "detach_from_process %s failed: %d",
         failed_operation, errno);
     return FALSE;
