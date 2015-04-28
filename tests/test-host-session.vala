@@ -229,7 +229,7 @@ namespace Frida.HostSessionTest {
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
-						assert (e is Error.INVALID_ARGUMENT);
+						assert (e is Error.EXECUTABLE_NOT_FOUND);
 						assert (e.message == "Unable to find executable at “%s”".printf (inexistent_path));
 					}
 

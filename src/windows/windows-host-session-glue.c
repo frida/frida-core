@@ -116,7 +116,7 @@ handle_path_error:
   {
     g_set_error (error,
         FRIDA_ERROR,
-        FRIDA_ERROR_INVALID_ARGUMENT,
+        FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
         "Unable to find executable at “%s”",
         path);
     goto error_epilogue;

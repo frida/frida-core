@@ -131,7 +131,7 @@ namespace Frida {
 				return Gum.Linux.cpu_type_from_file (path);
 			} catch (GLib.Error e) {
 				if (e is IOError.NOT_FOUND)
-					throw new Error.INVALID_ARGUMENT ("Unable to find executable at “%s”".printf (path));
+					throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at “%s”".printf (path));
 				else if (e is IOError.NOT_SUPPORTED)
 					throw new Error.INVALID_ARGUMENT ("Unable to spawn executable at “%s”: unsupported file format".printf (path));
 				else

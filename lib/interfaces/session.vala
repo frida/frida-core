@@ -28,6 +28,7 @@ namespace Frida {
 	[DBus (name = "re.frida.Error")]
 	public errordomain Error {
 		SERVER_NOT_RUNNING,
+		EXECUTABLE_NOT_FOUND,
 		PROCESS_NOT_RESPONDING,
 		PROCESS_GONE,
 		INVALID_ARGUMENT,
