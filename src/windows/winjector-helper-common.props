@@ -16,9 +16,10 @@
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message>Compiling vala code</Message>
       <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)winjector-types.vala;$(ProjectDir)..\..\lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
     <None Include="winjector-types.vala" />
+    <None Include="$(ProjectDir)..\..\lib\interfaces\session.vala" />
   </ItemGroup>
 
   <ItemGroup>

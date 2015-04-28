@@ -16,6 +16,12 @@
     <Filter Include="Source Files\generated">
       <UniqueIdentifier>{f283d6dd-63c1-4dcb-9266-90ee33c2cab1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\lib">
+      <UniqueIdentifier>{f96926e0-a5c2-4480-aee8-abbcce02ba16}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\lib\interfaces">
+      <UniqueIdentifier>{830a4efc-516d-4bde-8050-a86453e9d656}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)winjector-helper.h">
@@ -50,6 +56,9 @@
   <ItemGroup>
     <None Include="winjector-types.vala">
       <Filter>Source Files</Filter>
+    </None>
+    <None Include="$(ProjectDir)..\..\lib\interfaces\session.vala">
+      <Filter>Source Files\lib\interfaces</Filter>
     </None>
   </ItemGroup>
 </Project>
