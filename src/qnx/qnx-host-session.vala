@@ -1,11 +1,11 @@
-#if LINUX
+#if QNX
 namespace Frida {
-	public class QNXHostSessionBackend : Object, HostSessionBackend {
-		private QNXHostSessionProvider local_provider;
+	public class QnxHostSessionBackend : Object, HostSessionBackend {
+		private QnxHostSessionProvider local_provider;
 
 		public async void start () {
 			assert (local_provider == null);
-			local_provider = new QNXHostSessionProvider ();
+			local_provider = new QnxHostSessionProvider ();
 			provider_available (local_provider);
 		}
 
@@ -17,7 +17,7 @@ namespace Frida {
 		}
 	}
 
-	public class QNXHostSessionProvider : Object, HostSessionProvider {
+	public class QnxHostSessionProvider : Object, HostSessionProvider {
 		public string name {
 			get { return "Local System"; }
 		}
@@ -30,7 +30,7 @@ namespace Frida {
 			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
 		}
 
-		private QNXHostSession host_session;
+		private QnxHostSession host_session;
 
 		public async void close () {
 			if (host_session != null)
@@ -41,8 +41,8 @@ namespace Frida {
 		public async HostSession create () throws Error {
 			if (host_session != null)
 				throw new Error.NOT_SUPPORTED ("may only create one HostSession");
-			host_session = new QNXHostSession ();
-			host_session.agent_session_closed.connect ((id, error) => this.agent_session_closed (id, error));
+			host_session = new QnxHostSession ();
+			host_session.agent_session_closed.connect ((id) => this.agent_session_closed (id));
 			return host_session;
 		}
 
@@ -53,7 +53,7 @@ namespace Frida {
 		}
 	}
 
-	public class QNXHostSession : BaseDBusHostSession {
+	public class QnxHostSession : BaseDBusHostSession {
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
 		private Qinjector injector = new Qinjector ();
@@ -107,7 +107,7 @@ namespace Frida {
 				t = new PipeTransport ();
 				stream = new Pipe (t.local_address);
 			} catch (IOError stream_error) {
-				throw new Error.PROCESS_GONE (stream_error.message);
+				throw new Error.NOT_SUPPORTED (stream_error.message);
 			}
 			yield injector.inject (pid, agent_desc, t.remote_address);
 			transport = t;

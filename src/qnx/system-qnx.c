@@ -26,8 +26,8 @@ frida_system_enumerate_processes (int * result_length1)
   while ((proc_name = g_dir_read_name (proc_dir)) != NULL)
   {
     guint pid;
-    gchar * tmp = NULL, * cmdline = NULL, * name;
-    gboolean is_process;
+    gchar * tmp = NULL, * name;
+    gint fd;
     FridaHostProcessInfo * process_info;
 
     pid = strtoul (proc_name, &tmp, 10);
@@ -40,9 +40,9 @@ frida_system_enumerate_processes (int * result_length1)
     g_assert (fd != -1);
 
     g_assert (devctl (fd, DCMD_PROC_MAPDEBUG_BASE, &procfs_name,
-      sizeof (procfs_name), 0) == EOK)
+      sizeof (procfs_name), 0) == EOK);
 
-    name = g_path_get_basename (profcs_name.info.path);
+    name = g_path_get_basename (procfs_name.info.path);
 
     g_array_set_size (processes, processes->len + 1);
     process_info = &g_array_index (processes, FridaHostProcessInfo, processes->len - 1);

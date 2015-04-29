@@ -9,7 +9,6 @@
 # include <gum/arch-arm/gumthumbwriter.h>
 #endif
 #include <gum/gum.h>
-#include <gum/gumlinux.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -25,6 +24,8 @@
 #endif
 #include <sys/wait.h>
 
+#define PSR_T_BIT 1<<5
+
 #define FRIDA_RTLD_DLOPEN (0x80000000)
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
@@ -33,14 +34,6 @@
     failed_operation = op; \
     goto handle_os_error; \
   }
-
-#if defined (HAVE_I386)
-# define regs_t struct user_regs_struct
-#elif defined (HAVE_ARM)
-# define regs_t struct pt_regs
-#else
-# error Unsupported architecture
-#endif
 
 #define FRIDA_REMOTE_PAYLOAD_SIZE (8192)
 #define FRIDA_REMOTE_DATA_OFFSET (512)
@@ -108,18 +101,11 @@ static gboolean frida_emit_and_remote_execute (FridaEmitFunc func, const FridaIn
 
 static void frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
-static gboolean frida_attach_to_process (FridaInjectionInstance * instance, regs_t * saved_regs, GError ** error);
-static gboolean frida_detach_from_process (FridaInjectionInstance * instance, const regs_t * saved_regs, GError ** error);
-
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
 static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error);
 static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, GError ** error);
-
-static gboolean frida_wait_for_attach_signal (pid_t pid);
-static gboolean frida_wait_for_child_signal (pid_t pid, int signal);
-static gboolean frida_wait_for_child_breakpoint (pid_t pid);
 
 static GumAddress frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
 
@@ -154,9 +140,7 @@ frida_injection_instance_free (FridaInjectionInstance * instance)
 {
   if (instance->remote_payload != 0)
   {
-    regs_t saved_regs;
     GError * error = NULL;
-    printf ("%08x %08x %s\n", (gint)mapinfos[i].vaddr, (gint)mapinfos[i].size, details.path);
 
     frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
     g_clear_error (&error);
@@ -257,192 +241,7 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   return TRUE;
 }
 
-#if defined (HAVE_I386)
-
-static void
-frida_x86_commit_code (GumX86Writer * cw, FridaCodeChunk * code)
-{
-  gum_x86_writer_flush (cw);
-  code->cur = gum_x86_writer_cur (cw);
-  code->size += gum_x86_writer_offset (cw);
-}
-
-static void
-frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code)
-{
-  GumX86Writer cw;
-  const guint worker_offset = 128;
-  gssize fd_offset;
-  gssize library_offset;
-
-  gum_x86_writer_init (&cw, code->cur);
-
-#ifdef HAVE_ANDROID
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "pthread_create"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      4,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (worker_thread),
-      GUM_ARG_POINTER, NULL,
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (remote_address + worker_offset),
-      GUM_ARG_POINTER, NULL);
-#else
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 8);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (pthread_so),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "__libc_dlsym"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_REGISTER, GUM_REG_XBP,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (pthread_create));
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 8);
-
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      4,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (worker_thread),
-      GUM_ARG_POINTER, NULL,
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (remote_address + worker_offset),
-      GUM_ARG_POINTER, NULL);
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 12);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "__libc_dlclose"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_REGISTER, GUM_REG_XBP);
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 12);
-#endif
-
-  gum_x86_writer_put_int3 (&cw);
-  gum_x86_writer_flush (&cw);
-  g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, worker_offset);
-  while (gum_x86_writer_offset (&cw) != worker_offset - code->size)
-    gum_x86_writer_put_nop (&cw);
-  frida_x86_commit_code (&cw, code);
-  gum_x86_writer_free (&cw);
-
-  gum_x86_writer_init (&cw, code->cur);
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XSP);
-  gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 16);
-
-  fd_offset = -4;
-  library_offset = (cw.target_cpu == GUM_CPU_IA32) ? -8 : -16;
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "open"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (fifo_path),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (O_WRONLY));
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, fd_offset,
-      GUM_REG_EAX);
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 4);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX,
-      frida_resolve_remote_libc_function (params->pid, "write"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XCX,
-      3,
-      GUM_ARG_REGISTER, GUM_REG_EAX,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_name),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (1));
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 4);
-
-#ifdef HAVE_ANDROID
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "dlopen"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (RTLD_GLOBAL | RTLD_LAZY));
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, library_offset,
-      GUM_REG_XAX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX,
-      frida_resolve_remote_libc_function (params->pid, "dlsym"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XCX,
-      2,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
-#else
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "__libc_dlopen_mode"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, library_offset,
-      GUM_REG_XAX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX,
-      frida_resolve_remote_libc_function (params->pid, "__libc_dlsym"));
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XCX,
-      2,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
-#endif
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&cw, GUM_REG_XSP, 4);
-
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      3,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (data_string),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (0),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (0));
-
-  if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 8);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-#ifdef HAVE_ANDROID
-      frida_resolve_remote_libc_function (params->pid, "dlclose")
-#else
-      frida_resolve_remote_libc_function (params->pid, "__libc_dlclose")
-#endif
-  );
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_XCX,
-      GUM_REG_XBP, library_offset);
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_remote_libc_function (params->pid, "close"));
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_ECX,
-      GUM_REG_XBP, fd_offset);
-  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_REGISTER, GUM_REG_ECX);
-
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSP, GUM_REG_XBP);
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
-  gum_x86_writer_put_ret (&cw);
-
-  frida_x86_commit_code (&cw, code);
-  gum_x86_writer_free (&cw);
-}
-
-#elif defined (HAVE_ARM)
+#if defined (HAVE_ARM)
 
 static void
 frida_arm_commit_code (GumThumbWriter * cw, FridaCodeChunk * code)
@@ -533,70 +332,6 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 
 #endif
 
-static gboolean
-frida_attach_to_process (FridaInjectionInstance * instance, regs_t * saved_regs, GError ** error)
-{
-  const pid_t pid = instance->pid;
-  long ret;
-  const gchar * failed_operation;
-  gboolean maybe_already_attached, success;
-
-  ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
-  maybe_already_attached = (ret != 0 && errno == EPERM);
-  if (maybe_already_attached)
-  {
-    ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
-
-    instance->already_attached = TRUE;
-  }
-  else
-  {
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
-
-    instance->already_attached = FALSE;
-
-    success = frida_wait_for_attach_signal (pid);
-    CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
-
-    ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
-  }
-
-  return TRUE;
-
-handle_os_error:
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "attach_to_process %s failed: %d", failed_operation, errno);
-    return FALSE;
-  }
-}
-
-static gboolean
-frida_detach_from_process (FridaInjectionInstance * instance, const regs_t * saved_regs, GError ** error)
-{
-  const pid_t pid = instance->pid;
-  long ret;
-  const gchar * failed_operation;
-
-  ret = ptrace (PTRACE_SETREGS, pid, NULL, (void *) saved_regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
-
-  if (!instance->already_attached)
-  {
-    ret = ptrace (PTRACE_DETACH, pid, NULL, NULL);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_DETACH");
-  }
-
-  return TRUE;
-
-handle_os_error:
-  {
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "detach_from_process %s failed: %d", failed_operation, errno);
-    return FALSE;
-  }
-}
-
 static GumAddress
 frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
 {
@@ -639,6 +374,7 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
 {
   FILE * fp;
   long ret;
+  gchar as_path[PATH_MAX];
   const gchar * failed_operation;
 
   sprintf(as_path, "/proc/%d/as", pid);
@@ -668,13 +404,13 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   gint ret;
   const gchar * failed_operation;
   gint fd;
+  gint i;
   gchar as_path[PATH_MAX];
   pthread_t tid;
   debug_thread_t thread;
   procfs_greg saved_registers, modified_registers;
   procfs_status status;
   procfs_run run;
-  procfs_break brk;
   sigset_t * run_fault = (sigset_t *) &run.fault;
 
   sprintf(as_path, "/proc/%d/as", pid);
@@ -731,8 +467,12 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   {
     modified_registers.arm.gpr[ARM_REG_SP] -= 4;
 
-    frida_remote_write (pid, GSIZE_TO_POINTER (modified_registers.arm.gpr[ARM_REG_SP]),
-        GSIZE_TO_POINTER (args[i]), 4, error);
+    if (!frida_remote_write (pid, modified_registers.arm.gpr[ARM_REG_SP], &args[i],
+          4, error))
+    {
+      close (fd);
+      return FALSE;
+    }
   }
 
   /*
@@ -760,9 +500,6 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = devctl (fd, DCMD_PROC_WAITSTOP, &status, sizeof (status), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_WAITSTOP");
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
-
   /*
    * Get the thread's registers:
    */
@@ -784,10 +521,14 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
+  close(fd);
+
   return TRUE;
 
 handle_os_error:
   {
+    if (fd != -1)
+      close (fd);
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_call %s failed: %d", failed_operation, errno);
     return FALSE;
   }
@@ -805,7 +546,6 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   procfs_greg saved_registers, modified_registers;
   procfs_status status;
   procfs_run run;
-  procfs_break brk;
   sigset_t * run_fault = (sigset_t *) &run.fault;
 
   sprintf(as_path, "/proc/%d/as", pid);
@@ -857,7 +597,6 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
       sizeof (modified_registers), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_SETGREG");
 
-
   /*
    * Continue the process, watching for the breakpoint.
    */
@@ -867,7 +606,7 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   sigaddset (run_fault, FLTBPT);
   run.flags |= _DEBUG_RUN_ARM | _DEBUG_RUN_TRACE | _DEBUG_RUN_FAULT ;
   sigfillset (&run.trace);
-  res = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
+  ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
   /*
@@ -897,10 +636,14 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
+  close (fd);
+
   return TRUE;
 
 handle_os_error:
   {
+    if (fd != -1)
+      close (fd);
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_exec %s failed: %d", failed_operation, errno);
     return FALSE;
   }
@@ -956,6 +699,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   gint num_mapinfos;
   procfs_debuginfo * debuginfo;
   gint i;
+  gchar * path;
 
   if (library_path != NULL)
     *library_path = NULL;
@@ -1000,7 +744,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
 
         gchar * s = strrchr (p, '.');
         gboolean has_numeric_suffix = FALSE;
-        if (s != NULL && g_ascii_isdigit (s + 1))
+        if (s != NULL && g_ascii_isdigit (*(s + 1)))
         {
           has_numeric_suffix = TRUE;
           *s = '\0';

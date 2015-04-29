@@ -1,9 +1,8 @@
 #include "frida-core.h"
 
-#include <gum/gumlinux.h>
-#include <elf.h>
+#include <gum/gum.h>
 #include <errno.h>
-#include <sys/ptrace.h>
+#include <sys/elf.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #ifdef HAVE_SYS_USER_H
@@ -37,7 +36,7 @@ typedef struct _FridaProbeElfContext FridaProbeElfContext;
 
 struct _FridaSpawnInstance
 {
-  FridaQNXHostSession * host_session;
+  FridaQnxHostSession * host_session;
   pid_t pid;
 };
 
@@ -48,7 +47,7 @@ struct _FridaProbeElfContext
   gsize word_size;
 };
 
-static FridaSpawnInstance * frida_spawn_instance_new (FridaQNXHostSession * host_session);
+static FridaSpawnInstance * frida_spawn_instance_new (FridaQnxHostSession * host_session);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
@@ -58,7 +57,7 @@ static gboolean frida_run_to_entry_point (pid_t pid, GError ** error);
 static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer user_data);
 
 guint
-_frida_linux_host_session_do_spawn (FridaQNXHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
+_frida_linux_host_session_do_spawn (FridaQnxHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
 {
   FridaSpawnInstance * instance;
   int status;
@@ -68,10 +67,12 @@ _frida_linux_host_session_do_spawn (FridaQNXHostSession * self, const gchar * pa
 
   instance = frida_spawn_instance_new (self);
 
+  g_assert_not_reached ();
+
   instance->pid = fork ();
   if (instance->pid == 0)
   {
-    ptrace (PTRACE_TRACEME, 0, NULL, NULL);
+   // ptrace (PTRACE_TRACEME, 0, NULL, NULL);
     kill (getpid (), SIGSTOP);
     if (execve (path, argv, envp) == -1)
     {
@@ -82,8 +83,8 @@ _frida_linux_host_session_do_spawn (FridaQNXHostSession * self, const gchar * pa
 
   waitpid (instance->pid, &status, 0);
 
-  ret = ptrace (PTRACE_CONT, instance->pid, NULL, NULL);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
+  //ret = ptrace (PTRACE_CONT, instance->pid, NULL, NULL);
+  //CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
   success = frida_wait_for_child_signal (instance->pid, SIGTRAP);
   CHECK_OS_RESULT (success, !=, FALSE, "wait(SIGTRAP)");
@@ -108,19 +109,19 @@ error_epilogue:
 }
 
 void
-_frida_linux_host_session_resume_instance (FridaQNXHostSession * self, void * instance)
+_frida_linux_host_session_resume_instance (FridaQnxHostSession * self, void * instance)
 {
   frida_spawn_instance_resume (instance);
 }
 
 void
-_frida_linux_host_session_free_instance (FridaQNXHostSession * self, void * instance)
+_frida_linux_host_session_free_instance (FridaQnxHostSession * self, void * instance)
 {
   frida_spawn_instance_free (instance);
 }
 
 static FridaSpawnInstance *
-frida_spawn_instance_new (FridaQNXHostSession * host_session)
+frida_spawn_instance_new (FridaQnxHostSession * host_session)
 {
   FridaSpawnInstance * instance;
 
@@ -141,7 +142,7 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 static void
 frida_spawn_instance_resume (FridaSpawnInstance * self)
 {
-  ptrace (PTRACE_DETACH, self->pid, NULL, NULL);
+  //ptrace (PTRACE_DETACH, self->pid, NULL, NULL);
 }
 
 static gboolean
@@ -164,7 +165,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   gpointer entry_point_address;
   long original_entry_code, patched_entry_code;
   long ret;
-  regs_t regs;
+  //regs_t regs;
   const gchar * failed_operation;
   gboolean success;
 
@@ -180,7 +181,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   entry_point_address = GSIZE_TO_POINTER (ctx.entry_point);
 #endif
 
-  original_entry_code = ptrace (PTRACE_PEEKDATA, pid, entry_point_address, NULL);
+  //original_entry_code = ptrace (PTRACE_PEEKDATA, pid, entry_point_address, NULL);
 
 #ifdef HAVE_ARM
   if (ctx.word_size == 4)
@@ -206,17 +207,17 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   patched_entry_code = 0xcc;
 #endif
 
-  ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (patched_entry_code));
+  //ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (patched_entry_code));
 
-  ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
+  //ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
 
   success = frida_wait_for_child_signal (pid, FRIDA_SIGBKPT);
   CHECK_OS_RESULT (success, !=, FALSE, "WAIT(FRIDA_SIGBKPT)");
 
-  ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (original_entry_code));
+  //ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (original_entry_code));
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
+  //ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
@@ -224,10 +225,10 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   regs.rip = GPOINTER_TO_SIZE (entry_point_address);
 #elif defined (HAVE_ARM)
-  regs.ARM_pc = GPOINTER_TO_SIZE (entry_point_address);
+  //regs.ARM_pc = GPOINTER_TO_SIZE (entry_point_address);
 #endif
 
-  ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
+  //ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
 
   return TRUE;
@@ -258,18 +259,18 @@ frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer us
     gchar magic[SELFMAG];
   } value;
 
-  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address), NULL);
+  //value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address), NULL);
   if (memcmp (value.magic, ELFMAG, SELFMAG) != 0)
     return TRUE;
 
-  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_NIDENT), NULL);
+  //value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_NIDENT), NULL);
   if (value.u16 != ET_EXEC)
     return TRUE;
 
-  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_CLASS), NULL);
+  //value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + EI_CLASS), NULL);
   ctx->word_size = value.u8 == ELFCLASS32 ? 4 : 8;
 
-  value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + FRIDA_OFFSET_E_ENTRY), NULL);
+  //value.word = ptrace (PTRACE_PEEKDATA, ctx->pid, GSIZE_TO_POINTER (details->range->base_address + FRIDA_OFFSET_E_ENTRY), NULL);
   ctx->entry_point = ctx->word_size == 4 ? value.u32 : value.u64;
 
   return FALSE;

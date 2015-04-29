@@ -234,7 +234,7 @@ backend_sources += \
 	qnx/qinjector.vala
 glue_sources += \
 	qnx/system-qnx.c \
-	qnx/qnx-host-sesion-glue.c \
+	qnx/qnx-host-session-glue.c \
 	qnx/qinjector-glue.c
 endif
 

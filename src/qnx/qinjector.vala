@@ -1,4 +1,4 @@
-#if LINUX
+#if QNX
 using Gee;
 
 namespace Frida {
