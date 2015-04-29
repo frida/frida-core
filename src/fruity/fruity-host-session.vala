@@ -191,7 +191,7 @@ namespace Frida {
 					got_details = true;
 				} catch (Error e) {
 					if (i != 60) {
-						var source = new TimeoutSource (1000);
+						var source = new TimeoutSource.seconds (1);
 						source.set_callback (() => {
 							open.callback ();
 							return false;
