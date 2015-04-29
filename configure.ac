@@ -58,7 +58,7 @@ AM_CONDITIONAL(ARCH_64BIT, test "$HAVE_64BIT" = "yes")
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
   darwin*) HAVE_DARWIN=yes ;;
-  qnx*) HAVE_QNX=yes ;;
+  nto-qnx*) HAVE_QNX=yes ;;
   *)                       ;;
 esac
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
