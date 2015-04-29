@@ -148,11 +148,15 @@ namespace Frida.HostSessionTest {
 				get { return HostSessionProviderKind.LOCAL_SYSTEM; }
 			}
 
-			public async HostSession create () throws Error {
+			public async HostSession create (string? location = null) throws Error {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+			public async void destroy (HostSession session) throws Error {
+				throw new Error.NOT_SUPPORTED ("Not implemented");
+			}
+
+			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 		}
@@ -320,7 +324,7 @@ namespace Frida.HostSessionTest {
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
 				var session_id = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (session_id);
+				var session = yield prov.obtain_agent_session (host_session, session_id);
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
@@ -420,7 +424,7 @@ namespace Frida.HostSessionTest {
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
 				var session_id = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (session_id);
+				var session = yield prov.obtain_agent_session (host_session, session_id);
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
@@ -477,7 +481,7 @@ namespace Frida.HostSessionTest {
 				try {
 					var host_session = yield prov.create ();
 					var id = yield host_session.attach_to (pid);
-					yield prov.obtain_agent_session (id);
+					yield prov.obtain_agent_session (host_session, id);
 				} catch (Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();
@@ -551,7 +555,7 @@ namespace Frida.HostSessionTest {
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
 				var session_id = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (session_id);
+				var session = yield prov.obtain_agent_session (host_session, session_id);
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
@@ -661,7 +665,7 @@ namespace Frida.HostSessionTest {
 
 				stdout.printf ("attaching to target process\n");
 				var session_id = yield host_session.attach_to (process.pid);
-				var session = yield prov.obtain_agent_session (session_id);
+				var session = yield prov.obtain_agent_session (host_session, session_id);
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;

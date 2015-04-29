@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession")]
+	[DBus (name = "re.frida.HostSession1")]
 	public interface HostSession : Object {
 		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
 
@@ -7,9 +7,11 @@ namespace Frida {
 		public abstract async void resume (uint pid) throws Error;
 		public abstract async void kill (uint pid) throws Error;
 		public abstract async AgentSessionId attach_to (uint pid) throws Error;
+
+		public signal void agent_session_destroyed (AgentSessionId id);
 	}
 
-	[DBus (name = "re.frida.AgentSession")]
+	[DBus (name = "re.frida.AgentSession1")]
 	public interface AgentSession : Object {
 		public abstract async void close () throws Error;
 
@@ -122,7 +124,11 @@ namespace Frida {
 	}
 
 	namespace ObjectPath {
-		public const string HOST_SESSION = "/re/frida/HostSession";
-		public const string AGENT_SESSION = "/re/frida/AgentSession";
+		public const string HOST_SESSION = "/re/frida/HostSession1";
+		public const string AGENT_SESSION = "/re/frida/AgentSession1";
+
+		public static string from_agent_session_id (AgentSessionId id) {
+			return "%s/%u".printf (AGENT_SESSION, id.handle);
+		}
 	}
 }

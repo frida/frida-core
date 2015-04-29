@@ -177,7 +177,7 @@ namespace Frida {
 
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
-		private const uint SERVER_PORT = 27042;
+		private const uint DEFAULT_SERVER_PORT = 27042;
 
 		public FruityHostSessionProvider (FruityHostSessionBackend backend, uint device_id, int device_product_id, string device_udid) {
 			Object (backend: backend, device_id: device_id, device_product_id: device_product_id, device_udid: device_udid);
@@ -212,29 +212,39 @@ namespace Frida {
 
 		public async void close () {
 			foreach (var entry in entries)
-				yield entry.close ();
+				yield entry.destroy ();
 			entries.clear ();
 		}
 
-		public async HostSession create () throws Error {
+		public async HostSession create (string? location = null) throws Error {
+			uint port = (location != null) ? (uint) int.parse (location) : DEFAULT_SERVER_PORT;
+			foreach (var entry in entries) {
+				if (entry.port == port)
+					throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+			}
+
 			Fruity.Client client = yield backend.create_client ();
 			DBusConnection connection;
 			try {
 				yield client.establish ();
-				yield client.connect_to_port (device_id, SERVER_PORT);
+				yield client.connect_to_port (device_id, port);
 				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (GLib.Error connection_error) {
-				throw new Error.SERVER_NOT_RUNNING (connection_error.message);
+			} catch (GLib.Error e) {
+				if (e is IOError.CONNECTION_REFUSED)
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
+				else
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: " + e.message);
 			}
 
 			HostSession session;
 			try {
 				session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
-			} catch (IOError proxy_error) {
-				throw new Error.PROTOCOL (proxy_error.message);
+			} catch (IOError e) {
+				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
 
-			var entry = new Entry (0, client, connection, session);
+			var entry = new Entry (port, client, connection, session);
+			entry.agent_session_closed.connect (on_agent_session_closed);
 			entries.add (entry);
 
 			connection.closed.connect (on_connection_closed);
@@ -242,30 +252,23 @@ namespace Frida {
 			return session;
 		}
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			Fruity.Client client = yield backend.create_client ();
-			DBusConnection connection;
-			try {
-				yield client.establish ();
-				yield client.connect_to_port (device_id, id.handle);
-				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (GLib.Error connection_error) {
-				throw new Error.PROCESS_NOT_RESPONDING (connection_error.message);
+		public async void destroy (HostSession host_session) throws Error {
+			foreach (var entry in entries) {
+				if (entry.host_session == host_session) {
+					entries.remove (entry);
+					yield entry.destroy ();
+					return;
+				}
 			}
+			throw new Error.INVALID_ARGUMENT ("Invalid host session");
+		}
 
-			AgentSession session;
-			try {
-				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
-			} catch (IOError proxy_error) {
-				throw new Error.PROTOCOL (proxy_error.message);
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+			foreach (var entry in entries) {
+				if (entry.host_session == host_session)
+					return yield entry.obtain_agent_session (agent_session_id);
 			}
-
-			var entry = new Entry (id.handle, client, connection, session);
-			entries.add (entry);
-
-			connection.closed.connect (on_connection_closed);
-
-			return session;
+			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
 		public static extern void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon) throws Error;
@@ -285,53 +288,74 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			entries.remove (entry_to_remove);
+			entry_to_remove.destroy.begin ();
+			entry_to_remove.agent_session_closed.disconnect (on_agent_session_closed);
+		}
 
-			if (entry_to_remove.id != 0) /* otherwise it's a HostSession */
-				agent_session_closed (AgentSessionId (entry_to_remove.id));
+		private void on_agent_session_closed (AgentSessionId id) {
+			agent_session_closed (id);
 		}
 
 		private class Entry : Object {
-			public uint id {
+			public signal void agent_session_closed (AgentSessionId id);
+
+			public uint port {
 				get;
-				private set;
+				construct;
 			}
 
 			public Fruity.Client client {
 				get;
-				private set;
+				construct;
 			}
 
 			public DBusConnection connection {
 				get;
-				private set;
+				construct;
 			}
 
-			public Object proxy {
+			public HostSession host_session {
 				get;
-				private set;
+				construct;
 			}
 
-			public Entry (uint id, Fruity.Client client, DBusConnection connection, Object proxy) {
-				this.id = id;
-				this.client = client;
-				this.connection = connection;
-				this.proxy = proxy;
+			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id = new Gee.HashMap<AgentSessionId?, AgentSession> ();
+
+			public Entry (uint port, Fruity.Client client, DBusConnection connection, HostSession host_session) {
+				Object (port: port, client: client, connection: connection, host_session: host_session);
+
+				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
 			}
 
-			public async void close () {
-				proxy = null;
+			public async void destroy () {
+				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
+
+				foreach (var agent_session_id in agent_session_by_id.keys)
+					agent_session_closed (agent_session_id);
+				agent_session_by_id.clear ();
 
 				try {
 					yield connection.close ();
-				} catch (GLib.Error conn_error) {
+				} catch (GLib.Error e) {
 				}
-				connection = null;
+			}
 
-				try {
-					yield client.close ();
-				} catch (IOError client_error) {
+			public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+				AgentSession session = agent_session_by_id[id];
+				if (session == null) {
+					try {
+						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id));
+						agent_session_by_id[id] = session;
+					} catch (IOError proxy_error) {
+						throw new Error.INVALID_ARGUMENT (proxy_error.message);
+					}
 				}
-				client = null;
+				return session;
+			}
+
+			private void on_agent_session_destroyed (AgentSessionId id) {
+				agent_session_by_id.unset (id);
+				agent_session_closed (id);
 			}
 		}
 	}

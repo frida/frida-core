@@ -366,7 +366,7 @@ namespace Frida {
 					yield ensure_host_session ();
 
 					var agent_session_id = yield host_session.attach_to (pid);
-					var agent_session = yield provider.obtain_agent_session (agent_session_id);
+					var agent_session = yield provider.obtain_agent_session (host_session, agent_session_id);
 					session = new Session (this, pid, agent_session);
 					session_by_pid[pid] = session;
 					session_by_handle[agent_session_id.handle] = session;

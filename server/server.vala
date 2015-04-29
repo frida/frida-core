@@ -1,9 +1,9 @@
 namespace Frida {
-	public class Application : Object {
+	public class Server : Object {
 		private BaseDBusHostSession host_session;
+		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions = new Gee.HashMap<AgentSessionId?, AgentSession> ();
 		private DBusServer server;
-		private Gee.ArrayList<DBusConnection> connections = new Gee.ArrayList<DBusConnection> ();
-		private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
+		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
 		private MainLoop loop;
 
@@ -17,7 +17,8 @@ namespace Frida {
 #if WINDOWS
 			host_session = new WindowsHostSession ();
 #endif
-			host_session.forward_agent_sessions = true;
+			host_session.agent_session_opened.connect (on_agent_session_opened);
+			host_session.agent_session_closed.connect (on_agent_session_closed);
 		}
 
 		public void run (string address) throws Error {
@@ -26,30 +27,37 @@ namespace Frida {
 			} catch (GLib.Error listen_error) {
 				throw new Error.ADDRESS_IN_USE (listen_error.message);
 			}
-
-			server.new_connection.connect ((connection) => {
-				if (server == null)
-					return false;
-
-				connection.closed.connect (on_connection_closed);
-
-				try {
-					var registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session as HostSession);
-					registration_id_by_connection[connection] = registration_id;
-				} catch (IOError e) {
-					printerr ("Unable to register object: %s\n", e.message);
-					return false;
-				}
-
-				connections.add (connection);
-
-				return true;
-			});
-
+			server.new_connection.connect (on_connection_opened);
 			server.start ();
 
 			loop = new MainLoop ();
 			loop.run ();
+		}
+
+		private void on_agent_session_opened (AgentSessionId id, AgentSession session) {
+			agent_sessions.set (id, session);
+
+			foreach (var entry in clients.entries)
+				entry.value.register_agent_session (id, session);
+		}
+
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
+			foreach (var entry in clients.entries)
+				entry.value.unregister_agent_session (id, session);
+
+			agent_sessions.unset (id);
+		}
+
+		private bool on_connection_opened (DBusConnection connection) {
+			connection.closed.connect (on_connection_closed);
+
+			var client = new Client (connection);
+			client.register_host_session (host_session);
+			foreach (var entry in agent_sessions.entries)
+				client.register_agent_session (entry.key, entry.value);
+			clients.set (connection, client);
+
+			return true;
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -57,14 +65,55 @@ namespace Frida {
 			if (closed_by_us)
 				return;
 
-			unregister (connection);
-			connections.remove (connection);
+			Client client;
+			clients.unset (connection, out client);
+			client.close ();
 		}
 
-		private void unregister (DBusConnection connection) {
-			uint registration_id;
-			if (registration_id_by_connection.unset (connection, out registration_id))
+		private class Client : Object {
+			public DBusConnection connection {
+				get;
+				construct;
+			}
+
+			private Gee.HashSet<uint> registrations = new Gee.HashSet<uint> ();
+			private Gee.HashMap<AgentSessionId?, uint> agent_registration_by_id = new Gee.HashMap<AgentSessionId?, uint> ();
+
+			public Client (DBusConnection connection) {
+				Object (connection: connection);
+			}
+
+			public void close () {
+				foreach (var registration_id in registrations)
+					connection.unregister_object (registration_id);
+				registrations.clear ();
+				agent_registration_by_id.clear ();
+			}
+
+			public void register_host_session (HostSession session) {
+				try {
+					registrations.add (connection.register_object (ObjectPath.HOST_SESSION, session));
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+			}
+
+			public void register_agent_session (AgentSessionId id, AgentSession session) {
+				try {
+					var registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
+					registrations.add (registration_id);
+					agent_registration_by_id.set (id, registration_id);
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+			}
+
+			public void unregister_agent_session (AgentSessionId id, AgentSession session) {
+				uint registration_id;
+				agent_registration_by_id.unset (id, out registration_id);
+				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
+			}
 		}
 
 		private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
@@ -98,10 +147,10 @@ namespace Frida {
 			if (listen_addresses.length > 0)
 				listen_address = listen_addresses[0];
 
-			var app = new Application ();
+			var server = new Server ();
 
 			try {
-				app.run (listen_address);
+				server.run (listen_address);
 			} catch (Error e) {
 				printerr ("Unable to start server: %s\n", e.message);
 				return 1;
