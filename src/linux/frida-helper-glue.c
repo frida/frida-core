@@ -193,7 +193,7 @@ handle_os_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
-        "Unable to spawn executable at “%s”",
+        "Unable to spawn executable at '%s'",
         path);
     goto error_epilogue;
   }
@@ -391,7 +391,7 @@ handle_os_error:
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unexpected error while attaching to process with pid %u (%s returned “%s”)",
+          "Unexpected error while attaching to process with pid %u (%s returned '%s')",
           pid, failed_operation, g_strerror (errno));
     }
 

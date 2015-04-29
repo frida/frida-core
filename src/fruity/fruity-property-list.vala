@@ -65,9 +65,9 @@ namespace Frida.Fruity {
 		private Value get_value (string key, Type expected_type = Type.INVALID) throws IOError {
 			var val = value_by_key[key];
 			if (val == null)
-				throw new IOError.FAILED ("Property list key “%s” does not exist".printf (key));
+				throw new IOError.FAILED ("Property list key '%s' does not exist".printf (key));
 			if (expected_type != Type.INVALID && !val.holds (expected_type))
-				throw new IOError.FAILED ("Property list key “%s” does not have the expected type".printf (key));
+				throw new IOError.FAILED ("Property list key '%s' does not have the expected type".printf (key));
 			return val;
 		}
 

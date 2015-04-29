@@ -112,7 +112,7 @@ beach:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to extract details for device by UDID “%s”", udid);
+        "Unable to extract details for device by UDID '%s'", udid);
   }
 
   frida_image_device_info_free (idev);

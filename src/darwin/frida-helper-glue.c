@@ -363,7 +363,7 @@ handle_path_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
-        "Unable to find executable at “%s”",
+        "Unable to find executable at '%s'",
         path);
     goto error_epilogue;
   }
@@ -374,7 +374,7 @@ handle_spawn_error:
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_EXECUTABLE_NOT_SUPPORTED,
-          "Unable to spawn executable at “%s”: unsupported file format",
+          "Unable to spawn executable at '%s': unsupported file format",
           path);
     }
     else
@@ -382,7 +382,7 @@ handle_spawn_error:
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to spawn executable at “%s”: %s",
+          "Unable to spawn executable at '%s': %s",
           path, g_strerror (spawn_errno));
     }
     goto error_epilogue;
@@ -392,7 +392,7 @@ handle_cpu_type_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing CPU type of child process “%s”",
+        "Unexpected error while probing CPU type of child process '%s'",
         path);
     goto error_epilogue;
   }
@@ -401,7 +401,7 @@ handle_entrypoint_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing entrypoint of child process “%s”",
+        "Unexpected error while probing entrypoint of child process '%s'",
         path);
     goto error_epilogue;
   }
@@ -410,7 +410,7 @@ handle_mach_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while spawning child process “%s” (%s returned “%s”)",
+        "Unexpected error while spawning child process '%s' (%s returned '%s')",
         path, failed_operation, mach_error_string (ret));
     goto error_epilogue;
   }
@@ -620,7 +620,7 @@ handle_mach_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while attaching to process with pid %u (%s returned “%s”)",
+        "Unexpected error while attaching to process with pid %u (%s returned '%s')",
         pid, failed_operation, mach_error_string (ret));
     goto error_epilogue;
   }
@@ -737,7 +737,7 @@ handle_mach_error:
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned “%s”)",
+          "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
           remote_pid, failed_operation, mach_error_string (ret));
     }
 

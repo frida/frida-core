@@ -109,7 +109,7 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to spawn executable at “%s”: %s",
+          "Unable to spawn executable at '%s': %s",
           path, g_strerror (errno));
       return;
     }
@@ -125,7 +125,7 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to spawn executable at “%s”: %s",
+          "Unable to spawn executable at '%s': %s",
           path, g_strerror (errno));
       return;
     }
@@ -172,7 +172,7 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unexpected error while waiting for process to exit (waitpid returned “%s”)",
+          "Unexpected error while waiting for process to exit (waitpid returned '%s')",
           g_strerror (errno));
       break;
     }

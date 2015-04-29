@@ -63,7 +63,7 @@ frida_winjector_helper_factory_spawn (const gchar * path, const gchar * paramete
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
-        "Unable to spawn helper executable at “%s”: 0x%08lx",
+        "Unable to spawn helper executable at '%s': 0x%08lx",
         path, GetLastError ());
   }
 

@@ -229,7 +229,7 @@ handle_path_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
-        "Unable to find DLL at “%s”",
+        "Unable to find DLL at '%s'",
         dll_path);
     goto beach;
   }

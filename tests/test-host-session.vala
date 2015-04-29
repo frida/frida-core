@@ -228,26 +228,26 @@ namespace Frida.HostSessionTest {
 					stdout.flush ();
 					var inexistent_path = stdin.read_line ();
 					try {
-						stdout.printf ("Trying to spawn program at inexistent path “%s”...", inexistent_path);
+						stdout.printf ("Trying to spawn program at inexistent path '%s'...", inexistent_path);
 						yield device.spawn (inexistent_path, new string[] { inexistent_path }, new string[] {});
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
 						assert (e is Error.EXECUTABLE_NOT_FOUND);
-						assert (e.message == "Unable to find executable at “%s”".printf (inexistent_path));
+						assert (e.message == "Unable to find executable at '%s'".printf (inexistent_path));
 					}
 
 					stdout.printf ("\nEnter an absolute path that exists but is not a valid executable: ");
 					stdout.flush ();
 					var nonexec_path = stdin.read_line ();
 					try {
-						stdout.printf ("Trying to spawn program at non-executable path “%s”...", nonexec_path);
+						stdout.printf ("Trying to spawn program at non-executable path '%s'...", nonexec_path);
 						yield device.spawn (nonexec_path, new string[] { nonexec_path }, new string[] {});
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
 						assert (e is Error.EXECUTABLE_NOT_SUPPORTED);
-						assert (e.message == "Unable to spawn executable at “%s”: unsupported file format".printf (nonexec_path));
+						assert (e.message == "Unable to spawn executable at '%s': unsupported file format".printf (nonexec_path));
 					}
 
 					var processes = yield device.enumerate_processes ();

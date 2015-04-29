@@ -117,7 +117,7 @@ handle_path_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
-        "Unable to find executable at “%s”",
+        "Unable to find executable at '%s'",
         path);
     goto error_epilogue;
   }
@@ -129,7 +129,7 @@ handle_create_error:
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_EXECUTABLE_NOT_SUPPORTED,
-          "Unable to spawn executable at “%s”: unsupported file format",
+          "Unable to spawn executable at '%s': unsupported file format",
           path);
     }
     else
@@ -137,7 +137,7 @@ handle_create_error:
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to spawn executable at “%s”: 0x%08lx",
+          "Unable to spawn executable at '%s': 0x%08lx",
           path, GetLastError ());
     }
     goto error_epilogue;

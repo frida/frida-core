@@ -26,7 +26,7 @@ handle_spawn_error:
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
-        "Unable to spawn helper executable at “%s”: %s",
+        "Unable to spawn helper executable at '%s': %s",
         path, g_strerror (errno));
     return 0;
   }

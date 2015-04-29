@@ -88,7 +88,7 @@ handle_mach_error:
     g_set_error (error,
         G_IO_ERROR,
         G_IO_ERROR_FAILED,
-        "Unexpected error while setting up mach ports (%s returned “%s”)",
+        "Unexpected error while setting up mach ports (%s returned '%s')",
         failed_operation, mach_error_string (ret));
 
     if (remote_tx != MACH_PORT_NULL)

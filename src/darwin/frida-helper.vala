@@ -93,7 +93,7 @@ namespace Frida {
 			uint child_pid = _do_spawn (path, argv, envp);
 			var death_handler = child_dead.connect ((pid) => {
 				if (pid == child_pid) {
-					error = "Unexpected error while spawning child process “%s” (child process crashed)".printf (path);
+					error = "Unexpected error while spawning child process '%s' (child process crashed)".printf (path);
 					spawn.callback ();
 				}
 			});
