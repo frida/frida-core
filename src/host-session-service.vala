@@ -71,9 +71,10 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create () throws Error;
+		public abstract async HostSession create (string? location = null) throws Error;
+		public abstract async void destroy (HostSession session) throws Error;
 
-		public abstract async AgentSession obtain_agent_session (AgentSessionId id) throws Error;
+		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error;
 		public signal void agent_session_closed (AgentSessionId id);
 	}
 
@@ -92,16 +93,10 @@ namespace Frida {
 	}
 
 	public abstract class BaseDBusHostSession : Object, HostSession {
-		public signal void agent_session_closed (AgentSessionId id);
+		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
+		public signal void agent_session_closed (AgentSessionId id, AgentSession session);
 
-		public bool forward_agent_sessions {
-			get;
-			set;
-		}
-
-		private const string LISTEN_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
-		private const uint DEFAULT_AGENT_PORT = 27043;
-		private uint last_agent_port = DEFAULT_AGENT_PORT;
+		private uint last_session_id = 0;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
 		public virtual async void close () {
@@ -151,57 +146,15 @@ namespace Frida {
 
 			timeout_source.destroy ();
 
-			uint port;
-			if (forward_agent_sessions) {
-				port = DEFAULT_AGENT_PORT;
-				bool found_available = false;
-				var loopback = new InetAddress.loopback (SocketFamily.IPV4);
-				while (!found_available) {
-					bool used_by_us = false;
-					foreach (var existing_entry in entries) {
-						if (existing_entry.id.handle == port) {
-							used_by_us = true;
-							break;
-						}
-					}
-					if (used_by_us) {
-						port++;
-					} else {
-						try {
-							var socket = new Socket (SocketFamily.IPV4, SocketType.STREAM, SocketProtocol.TCP);
-							socket.bind (new InetSocketAddress (loopback, (uint16) port), false);
-							socket.close ();
-							found_available = true;
-						} catch (GLib.Error probe_error) {
-							if (probe_error is IOError.ADDRESS_IN_USE)
-								port++;
-							else
-								found_available = true;
-						}
-					}
-				}
-			} else {
-				port = last_agent_port++;
-			}
-			AgentSessionId id = AgentSessionId (port);
+			AgentSessionId id = AgentSessionId (++last_session_id);
 
 			var entry = new Entry (id, pid, transport, connection, session);
 			entries.add (entry);
 			connection.closed.connect (on_connection_closed);
 
-			if (forward_agent_sessions) {
-				try {
-					entry.serve (LISTEN_ADDRESS_TEMPLATE.printf (port));
-				} catch (GLib.Error serve_error) {
-					try {
-						yield connection.close ();
-					} catch (GLib.Error cleanup_error) {
-					}
-					throw new Error.ADDRESS_IN_USE (serve_error.message);
-				}
-			}
+			agent_session_opened (id, session);
 
-			return AgentSessionId (port);
+			return id;
 		}
 
 		protected abstract async IOStream perform_attach_to (uint pid, out Object? transport) throws Error;
@@ -230,48 +183,41 @@ namespace Frida {
 			assert (entry_to_remove != null);
 			entries.remove (entry_to_remove);
 			entry_to_remove.close.begin ();
+			agent_session_closed (entry_to_remove.id, entry_to_remove.agent_session);
 
-			agent_session_closed (entry_to_remove.id);
+			agent_session_destroyed (entry_to_remove.id);
 		}
 
 		private class Entry : Object {
 			public AgentSessionId id {
 				get;
-				private set;
+				construct;
 			}
 
 			public uint pid {
 				get;
-				private set;
+				construct;
 			}
 
 			public Object? transport {
 				get;
-				private set;
+				construct;
 			}
 
 			public DBusConnection agent_connection {
 				get;
-				private set;
+				construct;
 			}
 
 			public AgentSession agent_session {
 				get;
-				private set;
+				construct;
 			}
 
 			private Gee.Promise<bool> close_request;
 
-			private DBusServer server;
-			private Gee.ArrayList<DBusConnection> client_connections = new Gee.ArrayList<DBusConnection> ();
-			private Gee.HashMap<DBusConnection, uint> registration_id_by_connection = new Gee.HashMap<DBusConnection, uint> ();
-
 			public Entry (AgentSessionId id, uint pid, Object? transport, DBusConnection agent_connection, AgentSession agent_session) {
-				this.id = id;
-				this.pid = pid;
-				this.transport = transport;
-				this.agent_connection = agent_connection;
-				this.agent_session = agent_session;
+				Object (id: id, pid: pid, transport: transport, agent_connection: agent_connection, agent_session: agent_session);
 			}
 
 			public async void close () {
@@ -285,55 +231,12 @@ namespace Frida {
 				}
 				close_request = new Gee.Promise<bool> ();
 
-				if (server != null) {
-					server.stop ();
-					server = null;
-				}
-
-				foreach (var connection in client_connections.slice (0, client_connections.size)) {
-					try {
-						yield connection.close ();
-					} catch (GLib.Error client_conn_error) {
-					}
-				}
-				client_connections.clear ();
-				registration_id_by_connection.clear ();
-
-				agent_session = null;
-
 				try {
 					yield agent_connection.close ();
 				} catch (GLib.Error agent_conn_error) {
 				}
-				agent_connection = null;
 
 				close_request.set_value (true);
-			}
-
-			public void serve (string listen_address) throws GLib.Error {
-				server = new DBusServer.sync (listen_address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
-				server.new_connection.connect ((connection) => {
-					connection.closed.connect (on_client_connection_closed);
-
-					try {
-						var registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, agent_session);
-						registration_id_by_connection[connection] = registration_id;
-					} catch (IOError e) {
-						close.begin ();
-						return false;
-					}
-
-					client_connections.add (connection);
-					return true;
-				});
-				server.start ();
-			}
-
-			private void on_client_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-				uint registration_id;
-				if (registration_id_by_connection.unset (connection, out registration_id))
-					connection.unregister_object (registration_id);
-				client_connections.remove (connection);
 			}
 		}
 	}

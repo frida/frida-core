@@ -30,91 +30,65 @@ namespace Frida {
 		}
 
 		private const string DEFAULT_SERVER_ADDRESS = "tcp:host=127.0.0.1,port=27042";
-		private const string AGENT_ADDRESS_TEMPLATE = "tcp:host=127.0.0.1,port=%u";
 
-		private string server_address;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
-
-		public TcpHostSessionProvider () {
-			server_address = DEFAULT_SERVER_ADDRESS;
-		}
-
-		public TcpHostSessionProvider.for_address (string address) {
-			server_address = address;
-		}
 
 		public async void close () {
 			foreach (var entry in entries)
-				yield entry.close ();
+				yield entry.destroy ();
 			entries.clear ();
 		}
 
-		public async HostSession create () throws Error {
-			DBusConnection connection = null;
-			Error connection_error = null;
-			for (int i = 1; connection == null && connection_error == null; i++) {
-				try {
-					connection = yield DBusConnection.new_for_address (server_address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-				} catch (GLib.Error e) {
-					if (e is IOError.CONNECTION_REFUSED) {
-						if (i != 2 * 20) {
-							var source = new TimeoutSource (50);
-							source.set_callback (() => {
-								create.callback ();
-								return false;
-							});
-							source.attach (MainContext.get_thread_default ());
-							yield;
-						} else {
-							connection_error = new Error.SERVER_NOT_RUNNING ("timed out");
-						}
-					} else {
-						connection_error = new Error.SERVER_NOT_RUNNING (e.message);
-					}
-				}
+		public async HostSession create (string? location = null) throws Error {
+			var address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
+			foreach (var entry in entries) {
+				if (entry.address == address)
+					throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
 			}
-
-			if (connection_error != null)
-				throw connection_error;
-
-			HostSession session;
-			try {
-				session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
-			} catch (IOError proxy_error) {
-				throw new Error.PROTOCOL (proxy_error.message);
-			}
-
-			var entry = new Entry (0, connection, session);
-			entries.add (entry);
-
-			connection.closed.connect (on_connection_closed);
-
-			return session;
-		}
-
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			var address = AGENT_ADDRESS_TEMPLATE.printf (id.handle);
 
 			DBusConnection connection;
 			try {
 				connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
-			} catch (GLib.Error connection_error) {
-				throw new Error.PROCESS_NOT_RESPONDING (connection_error.message);
+			} catch (GLib.Error e) {
+				if (e is IOError.CONNECTION_REFUSED)
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
+				else
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: " + e.message);
 			}
 
-			AgentSession session;
+			HostSession host_session;
 			try {
-				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
-			} catch (IOError proxy_error) {
-				throw new Error.PROTOCOL (proxy_error.message);
+				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+			} catch (IOError e) {
+				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
 
-			var entry = new Entry (id.handle, connection, session);
+			var entry = new Entry (address, connection, host_session);
+			entry.agent_session_closed.connect (on_agent_session_closed);
 			entries.add (entry);
 
 			connection.closed.connect (on_connection_closed);
 
-			return session;
+			return host_session;
+		}
+
+		public async void destroy (HostSession host_session) throws Error {
+			foreach (var entry in entries) {
+				if (entry.host_session == host_session) {
+					entries.remove (entry);
+					yield entry.destroy ();
+					return;
+				}
+			}
+			throw new Error.INVALID_ARGUMENT ("Invalid host session");
+		}
+
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+			foreach (var entry in entries) {
+				if (entry.host_session == host_session)
+					return yield entry.obtain_agent_session (agent_session_id);
+			}
+			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -132,41 +106,69 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			entries.remove (entry_to_remove);
+			entry_to_remove.destroy.begin ();
+			entry_to_remove.agent_session_closed.disconnect (on_agent_session_closed);
+		}
 
-			if (entry_to_remove.id != 0) /* otherwise it's a HostSession */
-				agent_session_closed (AgentSessionId (entry_to_remove.id));
+		private void on_agent_session_closed (AgentSessionId id) {
+			agent_session_closed (id);
 		}
 
 		private class Entry : Object {
-			public uint id {
+			public signal void agent_session_closed (AgentSessionId id);
+
+			public string address {
 				get;
-				private set;
+				construct;
 			}
 
 			public DBusConnection connection {
 				get;
-				private set;
+				construct;
 			}
 
-			public Object proxy {
+			public HostSession host_session {
 				get;
-				private set;
+				construct;
 			}
 
-			public Entry (uint id, DBusConnection connection, Object proxy) {
-				this.id = id;
-				this.connection = connection;
-				this.proxy = proxy;
+			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id = new Gee.HashMap<AgentSessionId?, AgentSession> ();
+
+			public Entry (string address, DBusConnection connection, HostSession host_session) {
+				Object (address: address, connection: connection, host_session: host_session);
+
+				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
 			}
 
-			public async void close () {
-				proxy = null;
+			public async void destroy () {
+				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
+
+				foreach (var agent_session_id in agent_session_by_id.keys)
+					agent_session_closed (agent_session_id);
+				agent_session_by_id.clear ();
 
 				try {
 					yield connection.close ();
-				} catch (GLib.Error conn_error) {
+				} catch (GLib.Error e) {
 				}
-				connection = null;
+			}
+
+			public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+				AgentSession session = agent_session_by_id[id];
+				if (session == null) {
+					try {
+						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id));
+						agent_session_by_id[id] = session;
+					} catch (IOError proxy_error) {
+						throw new Error.INVALID_ARGUMENT (proxy_error.message);
+					}
+				}
+				return session;
+			}
+
+			private void on_agent_session_destroyed (AgentSessionId id) {
+				agent_session_by_id.unset (id);
+				agent_session_closed (id);
 			}
 		}
 	}

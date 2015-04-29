@@ -101,8 +101,7 @@ namespace Frida.Agent {
 				registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, session);
 				connection.start_message_processing ();
 			} catch (IOError io_error) {
-				printerr ("Unable to register object: %s\n", io_error.message);
-				close.begin ();
+				assert_not_reached ();
 			}
 		}
 
