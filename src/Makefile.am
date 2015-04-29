@@ -225,6 +225,19 @@ glue_sources += \
 	fruity/fruity-host-session-darwin.m
 endif
 
+
+if OS_QNX
+AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent.so
+AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
+backend_sources += \
+	qnx/qnx-host-session.vala \
+	qnx/qinjector.vala
+glue_sources += \
+	qnx/system-qnx.c \
+	qnx/qnx-host-sesion-glue.c \
+	qnx/qinjector-glue.c
+endif
+
 BUILT_SOURCES = frida-api-stamp
 
 lib_LTLIBRARIES = \

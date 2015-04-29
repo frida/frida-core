@@ -58,6 +58,7 @@ AM_CONDITIONAL(ARCH_64BIT, test "$HAVE_64BIT" = "yes")
 case $host_os in
   linux*)  HAVE_LINUX=yes  ;;
   darwin*) HAVE_DARWIN=yes ;;
+  qnx*) HAVE_QNX=yes ;;
   *)                       ;;
 esac
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
@@ -66,8 +67,12 @@ fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   AC_DEFINE(HAVE_DARWIN, 1, [Define to 1 if OS is Darwin based.])
 fi
+if [[ "x$HAVE_QNX" = "xyes" ]]; then
+  AC_DEFINE(HAVE_QNX, 1, [Define to 1 if OS is qnx based.])
+fi
 AM_CONDITIONAL(OS_LINUX, [test "x$HAVE_LINUX" = "xyes"])
 AM_CONDITIONAL(OS_DARWIN, [test "x$HAVE_DARWIN" = "xyes"])
+AM_CONDITIONAL(OS_QNX, [test "x$HAVE_QNX" = "xyes"])
 
 case $host_os in
   darwin*)
@@ -109,6 +114,9 @@ if [[ "x$HAVE_LINUX" = "xyes" ]]; then
 fi
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D ANDROID"
+fi
+if [[ "x$HAVE_QNX" = "xyes" ]]; then
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D QNX"
 fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D DARWIN"
