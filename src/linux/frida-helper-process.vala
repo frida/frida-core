@@ -227,7 +227,7 @@ namespace Frida {
 				pending_connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE);
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 			} catch (GLib.Error e) {
-				pending_error = new Error.NOT_SUPPORTED ("Unexpectedly error while spawning helper process: " + e.message);
+				pending_error = new Error.NOT_SUPPORTED ("Unexpected error while spawning helper process: " + e.message);
 			}
 
 			if (pending_error == null) {
