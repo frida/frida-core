@@ -125,7 +125,6 @@ glue_sources += \
 	darwin/system-darwin.m \
 	darwin/darwin-host-session-glue.c \
 	darwin/fruitjector-glue.c \
-	darwin/frida-helper-process-glue.c \
 	darwin/icon-helpers.h \
 	darwin/icon-helpers.m
 backend_libadd += \
