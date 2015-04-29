@@ -57,11 +57,11 @@ static gboolean frida_run_to_entry_point (pid_t pid, GError ** error);
 static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer user_data);
 
 guint
-_frida_linux_host_session_do_spawn (FridaQnxHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
+_frida_qnx_host_session_do_spawn (FridaQnxHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
 {
   FridaSpawnInstance * instance;
   int status;
-  long ret;
+  //long ret;
   gboolean success;
   const gchar * failed_operation;
 
@@ -109,13 +109,13 @@ error_epilogue:
 }
 
 void
-_frida_linux_host_session_resume_instance (FridaQnxHostSession * self, void * instance)
+_frida_qnx_host_session_resume_instance (FridaQnxHostSession * self, void * instance)
 {
   frida_spawn_instance_resume (instance);
 }
 
 void
-_frida_linux_host_session_free_instance (FridaQnxHostSession * self, void * instance)
+_frida_qnx_host_session_free_instance (FridaQnxHostSession * self, void * instance)
 {
   frida_spawn_instance_free (instance);
 }
@@ -169,9 +169,10 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   const gchar * failed_operation;
   gboolean success;
 
+  g_assert_not_reached ();
   ctx.pid = pid;
   ctx.entry_point = 0;
-  gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_elf_header, &ctx);
+  //gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_elf_header, &ctx);
   if (ctx.entry_point == 0)
     goto handle_probe_error;
 
