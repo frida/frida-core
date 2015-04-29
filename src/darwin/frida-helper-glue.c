@@ -1,8 +1,4 @@
-#ifdef HAVE_MAC
-# define ENABLE_MAPPER 1
-#else
-# define ENABLE_MAPPER 0
-#endif
+#define ENABLE_MAPPER 1
 
 #include "frida-helper.h"
 
