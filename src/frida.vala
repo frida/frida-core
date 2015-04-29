@@ -972,7 +972,7 @@ namespace Frida {
 					"Type", "connect",
 					"V8-Version", "4.3.62", // FIXME
 					"Protocol-Version", "1",
-					"Embedding-Host", "Frida v4.0.0" // FIXME
+					"Embedding-Host", "Frida " + Frida.version_string ()
 				};
 				var body = "";
 				send (headers, body);
