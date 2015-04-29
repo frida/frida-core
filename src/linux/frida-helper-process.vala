@@ -174,6 +174,7 @@ namespace Frida {
 		private TemporaryFile helper_file;
 		private ResourceStore resource_store;
 		private MainContext? main_context;
+		private Subprocess process;
 		private DBusConnection connection;
 		private Helper proxy;
 		private Gee.Promise<Helper> obtain_request;
@@ -214,50 +215,23 @@ namespace Frida {
 			}
 			obtain_request = new Gee.Promise<Helper> ();
 
+			Subprocess pending_process = null;
 			DBusConnection pending_connection = null;
 			Helper pending_proxy = null;
 			Error pending_error = null;
 
-			DBusServer server = null;
-			TimeoutSource timeout_source = null;
-
 			try {
-				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
-				server.start ();
-				var tokens = server.client_address.split ("=", 2);
-				resource_store.manage (new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir));
-				var connection_handler = server.new_connection.connect ((c) => {
-					pending_connection = c;
-					obtain.callback ();
-					return true;
-				});
-				timeout_source = new TimeoutSource.seconds (2);
-				timeout_source.set_callback (() => {
-					pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
-					obtain.callback ();
-					return false;
-				});
-				timeout_source.attach (main_context);
-				string[] argv = { helper_file.path, server.client_address };
-				spawn_helper (helper_file.path, argv);
-				yield;
-				server.disconnect (connection_handler);
-				server.stop ();
-				server = null;
-				timeout_source.destroy ();
-
-				if (pending_error == null) {
-					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
-				}
+				string[] argv = { helper_file.path };
+				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_PIPE | SubprocessFlags.STDOUT_PIPE);
+				var stream = new SimpleIOStream (pending_process.get_stdout_pipe (), pending_process.get_stdin_pipe ());
+				pending_connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE);
+				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 			} catch (GLib.Error e) {
-				if (timeout_source != null)
-					timeout_source.destroy ();
-				if (server != null)
-					server.stop ();
-				pending_error = new Error.PERMISSION_DENIED (e.message);
+				pending_error = new Error.NOT_SUPPORTED ("Unexpectedly error while spawning helper process: " + e.message);
 			}
 
 			if (pending_error == null) {
+				process = pending_process;
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
 				proxy = pending_proxy;
@@ -266,8 +240,10 @@ namespace Frida {
 				obtain_request.set_value (proxy);
 				return proxy;
 			} else {
+				if (pending_process != null)
+					pending_process.force_exit ();
 				obtain_request.set_exception (pending_error);
-				throw new Error.PERMISSION_DENIED (pending_error.message);
+				throw pending_error;
 			}
 		}
 
@@ -280,8 +256,6 @@ namespace Frida {
 		private void on_uninjected (uint id) {
 			uninjected (id);
 		}
-
-		private static extern uint spawn_helper (string path, string[] argv) throws Error;
 	}
 
 	private class ResourceStore {
@@ -331,10 +305,6 @@ namespace Frida {
 			if (helper32 != null)
 				helper32.destroy ();
 			tempdir.destroy ();
-		}
-
-		public void manage (TemporaryFile file) {
-			files.add (file);
 		}
 	}
 }
