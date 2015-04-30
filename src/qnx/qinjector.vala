@@ -39,7 +39,7 @@ namespace Frida {
 				_free_instance (instance);
 		}
 
-		public async uint inject (uint pid, QAgentDescriptor desc, string data_string) throws Error {
+		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
 			var filename = resource_store.ensure_copy_of (desc);
 
 			var id = _do_inject (pid, filename, data_string, resource_store.tempdir.path);
@@ -142,7 +142,7 @@ namespace Frida {
 				tempdir.destroy ();
 			}
 
-			public string ensure_copy_of (QAgentDescriptor desc) throws Error {
+			public string ensure_copy_of (AgentDescriptor desc) throws Error {
 				var temp_agent = agents[desc.name];
 				if (temp_agent == null) {
 					temp_agent = new TemporaryFile.from_stream (desc.name, desc.sofile, tempdir);
@@ -154,7 +154,7 @@ namespace Frida {
 		}
 	}
 
-	public class QAgentDescriptor : Object {
+	public class AgentDescriptor : Object {
 		public string name {
 			get;
 			construct;
@@ -172,17 +172,18 @@ namespace Frida {
 		}
 		private InputStream _sofile;
 
-		public QAgentDescriptor (string name, InputStream sofile) {
+		public AgentDescriptor (string name, InputStream sofile) {
 			Object (name: name, sofile: sofile);
 
 			assert (sofile is Seekable);
+			stdout.printf ("AD sofile: %s\n", name);
 		}
 
 		private void reset_stream (InputStream stream) {
 			try {
-				(stream as Seekable).seek (0, SeekType.SET);
+				(stream as Seekable).seek (0, SeekType.END);
 			} catch (GLib.Error e) {
-				assert_not_reached ();
+				//assert_not_reached ();
 			}
 		}
 	}

@@ -57,11 +57,11 @@ namespace Frida {
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
 		private Qinjector injector = new Qinjector ();
-		private QAgentDescriptor agent_desc;
+		private AgentDescriptor agent_desc;
 
 		construct {
 			var blob = Frida.Data.Agent.get_frida_agent_so_blob ();
-			agent_desc = new QAgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
+			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
 
 		public override async void close () {
