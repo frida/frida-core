@@ -26,7 +26,7 @@ namespace Frida.AgentTest {
 					 "  }" +
 					 "});").printf ((size_t) func));
 				yield session.load_script (sid);
-			} catch (Error attach_error) {
+			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
 
@@ -63,7 +63,7 @@ namespace Frida.AgentTest {
 					 "sendNext();"
 					).printf ((size_t) buf, size));
 				yield session.load_script (sid);
-			} catch (Error attach_error) {
+			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
 
@@ -163,7 +163,7 @@ namespace Frida.AgentTest {
 		public async void unload_agent () {
 			try {
 				yield session.close ();
-			} catch (Error session_error) {
+			} catch (GLib.Error session_error) {
 				assert_not_reached ();
 			}
 			session = null;

@@ -48,17 +48,29 @@ namespace Frida {
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain_for_path (path);
-			return yield helper.spawn (path, argv, envp);
+			try {
+				return yield helper.spawn (path, argv, envp);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async void resume (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			yield helper.resume (pid);
+			try {
+				yield helper.resume (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async void kill (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			yield helper.kill (pid);
+			try {
+				yield helper.kill (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async uint inject (uint pid, string filename_template, string data_string) throws Error {
@@ -81,8 +93,11 @@ namespace Frida {
 			}
 
 			var helper = yield obtain_for_cpu_type (cpu_type);
-
-			return yield helper.inject (pid, filename, data_string, resource_store.tempdir.path);
+			try {
+				return yield helper.inject (pid, filename, data_string, resource_store.tempdir.path);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		private async Helper obtain_for_path (string path) throws Error {
@@ -189,7 +204,7 @@ namespace Frida {
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
-				} catch (Error proxy_error) {
+				} catch (GLib.Error proxy_error) {
 				}
 				proxy.uninjected.disconnect (on_uninjected);
 				proxy = null;

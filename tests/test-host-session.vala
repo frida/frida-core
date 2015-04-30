@@ -349,7 +349,7 @@ namespace Frida.HostSessionTest {
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				yield host_session.kill (pid);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
@@ -392,7 +392,7 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
@@ -442,7 +442,7 @@ namespace Frida.HostSessionTest {
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				yield host_session.kill (pid);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
@@ -482,7 +482,7 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create ();
 					var id = yield host_session.attach_to (pid);
 					yield prov.obtain_agent_session (host_session, id);
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
@@ -526,7 +526,7 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
@@ -573,7 +573,7 @@ namespace Frida.HostSessionTest {
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
 				yield host_session.kill (pid);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
@@ -622,7 +622,7 @@ namespace Frida.HostSessionTest {
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
@@ -698,7 +698,7 @@ namespace Frida.HostSessionTest {
 
 				yield session.destroy_script (script_id);
 				yield session.close ();
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}

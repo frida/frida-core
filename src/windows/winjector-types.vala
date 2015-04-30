@@ -2,8 +2,8 @@
 namespace Frida {
 	[DBus (name = "re.frida.WinjectorHelper")]
 	public interface WinjectorHelper : Object {
-		public abstract async void stop () throws Error;
-		public abstract async void inject (uint pid, string filename_template, string data_string) throws Error;
+		public abstract async void stop () throws GLib.Error;
+		public abstract async void inject (uint pid, string filename_template, string data_string) throws GLib.Error;
 	}
 
 	namespace WinjectorObjectPath {

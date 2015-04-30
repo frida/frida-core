@@ -91,7 +91,7 @@ namespace Frida {
 			public async void close () {
 				try {
 					yield proxy.stop ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 				}
 
 				if (is_process_still_running (process)) {
@@ -120,7 +120,11 @@ namespace Frida {
 			}
 
 			public async void inject (uint pid, string filename_template, string data_string) throws Error {
-				yield proxy.inject (pid, filename_template, data_string);
+				try {
+					yield proxy.inject (pid, filename_template, data_string);
+				} catch (GLib.Error e) {
+					throw Marshal.from_dbus (e);
+				}
 			}
 
 			private static extern bool is_process_still_running (void * handle);

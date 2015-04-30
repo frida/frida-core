@@ -129,9 +129,16 @@ namespace Winjector {
 		}
 
 		public async void stop () throws Frida.Error {
-			if (System.is_x64 ())
-				yield helper64.proxy.stop ();
-			yield helper32.proxy.stop ();
+			if (System.is_x64 ()) {
+				try {
+					yield helper64.proxy.stop ();
+				} catch (GLib.Error e) {
+				}
+			}
+			try {
+				yield helper32.proxy.stop ();
+			} catch (GLib.Error e) {
+			}
 
 			Timeout.add (20, () => {
 				shutdown.begin ();
@@ -145,9 +152,8 @@ namespace Winjector {
 					yield helper64.proxy.inject (pid, filename_template.printf (64), data_string);
 				else
 					yield helper32.proxy.inject (pid, filename_template.printf (32), data_string);
-			} catch (Frida.Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 		}
 

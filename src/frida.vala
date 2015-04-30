@@ -245,9 +245,8 @@ namespace Frida {
 			try {
 				yield ensure_host_session ();
 				processes = yield host_session.enumerate_processes ();
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 
 			var result = new Gee.ArrayList<Process> ();
@@ -280,9 +279,8 @@ namespace Frida {
 			try {
 				yield ensure_host_session ();
 				pid = yield host_session.spawn (path, argv, envp);
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 
 			return pid;
@@ -312,9 +310,8 @@ namespace Frida {
 			try {
 				yield ensure_host_session ();
 				yield host_session.resume (pid);
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 		}
 
@@ -338,9 +335,8 @@ namespace Frida {
 			try {
 				yield ensure_host_session ();
 				yield host_session.kill (pid);
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 		}
 
@@ -370,9 +366,8 @@ namespace Frida {
 					session = new Session (this, pid, agent_session);
 					session_by_pid[pid] = session;
 					session_by_handle[agent_session_id.handle] = session;
-				} catch (Error e) {
-					DBusError.strip_remote_error (e);
-					throw e;
+				} catch (GLib.Error e) {
+					throw Marshal.from_dbus (e);
 				}
 			}
 			return session;
@@ -611,9 +606,8 @@ namespace Frida {
 				var sid = yield session.create_script ((name == null) ? "" : name, source);
 				script = new Script (this, sid);
 				script_by_id[sid.handle] = script;
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 
 			return script;
@@ -724,7 +718,7 @@ namespace Frida {
 			if (may_block) {
 				try {
 					yield session.close ();
-				} catch (Error ignored_error) {
+				} catch (GLib.Error ignored_error) {
 				}
 			}
 			session.message_from_script.disconnect (on_message_from_script);
@@ -776,9 +770,8 @@ namespace Frida {
 
 			try {
 				yield session.session.load_script (script_id);
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 		}
 
@@ -813,9 +806,8 @@ namespace Frida {
 
 			try {
 				yield session.session.post_message_to_script (script_id, message);
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			}
 		}
 
@@ -852,7 +844,7 @@ namespace Frida {
 			if (may_block) {
 				try {
 					yield p.session.destroy_script (sid);
-				} catch (Error ignored_error) {
+				} catch (GLib.Error ignored_error) {
 				}
 			}
 
@@ -899,9 +891,8 @@ namespace Frida {
 			try {
 				yield session.enable_debugger ();
 				enabled = true;
-			} catch (Error e) {
-				DBusError.strip_remote_error (e);
-				throw e;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
 			} finally {
 				if (!enabled) {
 					service.stop ();

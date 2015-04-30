@@ -1,29 +1,29 @@
 namespace Frida {
 	[DBus (name = "re.frida.HostSession1")]
 	public interface HostSession : Object {
-		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
+		public abstract async HostProcessInfo[] enumerate_processes () throws GLib.Error;
 
-		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
-		public abstract async void resume (uint pid) throws Error;
-		public abstract async void kill (uint pid) throws Error;
-		public abstract async AgentSessionId attach_to (uint pid) throws Error;
+		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
+		public abstract async void resume (uint pid) throws GLib.Error;
+		public abstract async void kill (uint pid) throws GLib.Error;
+		public abstract async AgentSessionId attach_to (uint pid) throws GLib.Error;
 
 		public signal void agent_session_destroyed (AgentSessionId id);
 	}
 
 	[DBus (name = "re.frida.AgentSession1")]
 	public interface AgentSession : Object {
-		public abstract async void close () throws Error;
+		public abstract async void close () throws GLib.Error;
 
-		public abstract async AgentScriptId create_script (string name, string source) throws Error;
-		public abstract async void destroy_script (AgentScriptId sid) throws Error;
-		public abstract async void load_script (AgentScriptId sid) throws Error;
-		public abstract async void post_message_to_script (AgentScriptId sid, string message) throws Error;
+		public abstract async AgentScriptId create_script (string name, string source) throws GLib.Error;
+		public abstract async void destroy_script (AgentScriptId sid) throws GLib.Error;
+		public abstract async void load_script (AgentScriptId sid) throws GLib.Error;
+		public abstract async void post_message_to_script (AgentScriptId sid, string message) throws GLib.Error;
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
 
-		public abstract async void enable_debugger () throws Error;
-		public abstract async void disable_debugger () throws Error;
-		public abstract async void post_message_to_debugger (string message) throws Error;
+		public abstract async void enable_debugger () throws GLib.Error;
+		public abstract async void disable_debugger () throws GLib.Error;
+		public abstract async void post_message_to_debugger (string message) throws GLib.Error;
 		public signal void message_from_debugger (string message);
 	}
 
@@ -40,7 +40,18 @@ namespace Frida {
 		ADDRESS_IN_USE,
 		TIMED_OUT,
 		NOT_SUPPORTED,
-		PROTOCOL
+		PROTOCOL,
+		TRANSPORT
+	}
+
+	namespace Marshal {
+		public static Frida.Error from_dbus (GLib.Error e) {
+			DBusError.strip_remote_error (e);
+			if (e is Frida.Error)
+				return (Frida.Error) e;
+			else
+				return new Frida.Error.TRANSPORT (e.message);
+		}
 	}
 
 	public struct HostProcessInfo {

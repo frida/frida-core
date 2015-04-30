@@ -57,22 +57,38 @@ namespace Frida {
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain ();
-			return yield helper.spawn (path, argv, envp);
+			try {
+				return yield helper.spawn (path, argv, envp);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async void resume (uint pid) throws Error {
 			var helper = yield obtain ();
-			yield helper.resume (pid);
+			try {
+				yield helper.resume (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async uint inject (uint pid, string filename, string data_string) throws Error {
 			var helper = yield obtain ();
-			return yield helper.inject (pid, filename, data_string);
+			try {
+				return yield helper.inject (pid, filename, data_string);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error {
 			var helper = yield obtain ();
-			return yield helper.make_pipe_endpoints (local_pid, remote_pid);
+			try {
+				return yield helper.make_pipe_endpoints (local_pid, remote_pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		private async Helper obtain () throws Error {
