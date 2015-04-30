@@ -17,6 +17,7 @@ frida_init (void)
   glib_init ();
   gio_init ();
 #endif
+  frida_error_quark (); /* initialize early so GDBus will pick it up */
 
   if (g_once_init_enter (&frida_initialized))
   {

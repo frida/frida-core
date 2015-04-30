@@ -42,6 +42,7 @@ frida_test_environment_init (int * args_length1, char *** args)
 #endif
   g_test_init (args_length1, args, NULL);
   gum_init ();
+  frida_error_quark (); /* Initialize early so GDBus will pick it up */
 }
 
 void
