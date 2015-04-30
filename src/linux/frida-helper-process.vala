@@ -258,6 +258,7 @@ namespace Frida {
 				if (pending_process != null)
 					pending_process.force_exit ();
 				obtain_request.set_exception (pending_error);
+				obtain_request = null;
 				throw pending_error;
 			}
 		}
