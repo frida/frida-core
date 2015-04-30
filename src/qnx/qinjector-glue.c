@@ -104,6 +104,7 @@ static void frida_emit_payload_code (const FridaInjectionParams * params, GumAdd
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
 static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
+static gboolean frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error);
 static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, GError ** error);
 
@@ -171,6 +172,7 @@ _frida_qinjector_do_inject (FridaQinjector * self, guint pid, const char * so_pa
 {
   FridaInjectionInstance * instance;
   FridaInjectionParams params = { pid, so_path, data_string };
+  printf ("do_inject pid: %d, so_path: %s, data_string: %s\n", pid, so_path, data_string);
 
   instance = frida_injection_instance_new (self, self->last_id++, pid, temp_path);
 
@@ -372,28 +374,40 @@ frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** erro
 static gboolean
 frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error)
 {
-  FILE * fp;
+  gint fd;
   long ret;
   gchar as_path[PATH_MAX];
   const gchar * failed_operation;
+  gboolean result;
 
   sprintf(as_path, "/proc/%d/as", pid);
-  fp = fopen (as_path, "rw");
+  fd = open (as_path, O_RDWR);
+  g_assert (fd != -1);
 
-  ret = fseek (fp, GPOINTER_TO_SIZE (remote_address), SEEK_SET);
-  CHECK_OS_RESULT (ret, ==, 0, "seek to address");
+  result = frida_remote_write_fd (fd, remote_address, data, size, error);
 
-  ret = fwrite (data, 1, size, fp);
+  close (fd);
+
+  return result;
+}
+
+static gboolean
+frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, gsize size, GError ** error)
+{
+  long ret;
+  const gchar * failed_operation;
+
+
+  ret = lseek (fd, GPOINTER_TO_SIZE (remote_address), SEEK_SET);
+  CHECK_OS_RESULT (ret, ==, remote_address, "seek to address");
+
+  ret = write (fd, data, size);
   CHECK_OS_RESULT (ret, ==, size, "write data");
-
-  fclose (fp);
 
   return TRUE;
 handle_os_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_write %s failed: %d", failed_operation, errno);
-    if (fp)
-      fclose (fp);
     return FALSE;
   }
 }
@@ -413,6 +427,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   procfs_run run;
   sigset_t * run_fault = (sigset_t *) &run.fault;
 
+  printf ("ENTER remote_call\n");
   sprintf(as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
   g_assert (fd != -1);
@@ -443,7 +458,10 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
 
   memcpy(&modified_registers, &saved_registers, sizeof (saved_registers));
+  printf ("old_pc: %08x\n", saved_registers.arm.gpr[ARM_REG_PC]);
+  printf ("old_spsr: %08x\n", saved_registers.arm.spsr);
 
+  printf ("func: %08x\n", func);
   /*
    * Set the PC to be the function address and SP to the stack address.
    */
@@ -461,13 +479,15 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   for (i = 0; i < args_length && i < 4; i++)
   {
     modified_registers.arm.gpr[i] = args[i];
+    printf ("args[%d] = %08x\n", i, args[i]);
   }
 
   for (i = args_length - 1; i >= 4; i--)
   {
     modified_registers.arm.gpr[ARM_REG_SP] -= 4;
 
-    if (!frida_remote_write (pid, modified_registers.arm.gpr[ARM_REG_SP], &args[i],
+    printf ("args[%d] = %08x\n", i, args[i]);
+    if (!frida_remote_write_fd (fd, modified_registers.arm.gpr[ARM_REG_SP], &args[i],
           4, error))
     {
       close (fd);
@@ -478,7 +498,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   /*
    * Set the LR to be a dummy address which will trigger a pagefault.
    */
-  modified_registers.arm.gpr[ARM_REG_LR] = 0xffffffff;
+  modified_registers.arm.gpr[ARM_REG_LR] = 0xfffffff0;
 
   ret = devctl (fd, DCMD_PROC_SETGREG, &modified_registers, sizeof (modified_registers), 0);
   CHECK_OS_RESULT (ret, ==, 0, "DCMD_PROC_SETGREG");
@@ -490,7 +510,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   memset(&run, 0, sizeof (run));
   sigemptyset (run_fault);
   sigaddset (run_fault, FLTPAGE);
-  run.flags |= _DEBUG_RUN_ARM | _DEBUG_RUN_FAULT ;
+  run.flags |= _DEBUG_RUN_FAULT ;
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, 0, "DCMD_PROC_RUN");
 
@@ -510,6 +530,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   if (retval != NULL)
     *retval = modified_registers.arm.gpr[ARM_REG_R0];
 
+  printf ("retval: %08x\n", *retval);
   /*
    * Restore the registers and continue the process:
    */
@@ -517,11 +538,12 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_SETGREG");
 
   memset(&run, 0, sizeof (run));
-  run.flags |= _DEBUG_RUN_CLRFLT;
+  run.flags |= _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG;
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
   close(fd);
+  printf ("EXIT remote_call\n\n");
 
   return TRUE;
 
@@ -547,6 +569,8 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   procfs_status status;
   procfs_run run;
   sigset_t * run_fault = (sigset_t *) &run.fault;
+
+  printf ("\nENTER remote_exec \n");
 
   sprintf(as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
@@ -604,16 +628,20 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   sigemptyset (run_fault);
   sigaddset (run_fault, FLTTRACE);
   sigaddset (run_fault, FLTBPT);
-  run.flags |= _DEBUG_RUN_ARM | _DEBUG_RUN_TRACE | _DEBUG_RUN_FAULT ;
-  sigfillset (&run.trace);
+  sigaddset (run_fault, FLTILL);
+  run.flags |=  _DEBUG_RUN_TRACE | _DEBUG_RUN_FAULT ;
+  //sigfillset (&run.trace);
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
+  printf ("waiting for breakpoint...\n");
   /*
    * Wait for the process to stop at the breakpoint.
    */
   ret = devctl (fd, DCMD_PROC_WAITSTOP, &status, sizeof (status), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_WAITSTOP");
+
+  printf("back status why: %d what: %08x\n", status.why, status.what);
 
   /*
    * Get the thread's registers:
@@ -622,6 +650,7 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
       sizeof (modified_registers), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
 
+  printf ("stopped pc: %08x\n", modified_registers.arm.gpr[ARM_REG_PC]);
   if (result != NULL)
     *result = modified_registers.arm.gpr[ARM_REG_R0];
 
@@ -632,12 +661,13 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_SETGREG");
 
   memset(&run, 0, sizeof (run));
-  run.flags |= _DEBUG_RUN_CLRFLT;
+  run.flags |= _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG;
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
   close (fd);
 
+  printf ("EXIT remote_exec\n\n");
   return TRUE;
 
 handle_os_error:
@@ -760,6 +790,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
               if (has_numeric_suffix)
                 *s = '.';
               *library_path = g_strdup (path);
+              break;
             }
           }
         }
