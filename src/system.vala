@@ -87,7 +87,7 @@ namespace Frida {
 			}
 		}
 
-		protected TemporaryDirectory.with_file (File file, bool remove_on_dispose) {
+		public TemporaryDirectory.with_file (File file, bool remove_on_dispose) {
 			this.file = file;
 			this.remove_on_dispose = remove_on_dispose;
 		}
@@ -105,7 +105,7 @@ namespace Frida {
 			}
 		}
 
-		private static string make_name () {
+		public static string make_name () {
 			var builder = new StringBuilder (".frida-");
 			for (var i = 0; i != 16; i++)
 				builder.append_printf ("%02x", Random.int_range (0, 256));
