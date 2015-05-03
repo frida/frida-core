@@ -123,7 +123,7 @@ namespace Frida {
 			var stream = yield perform_attach_to (pid, out transport);
 
 			var cancellable = new Cancellable ();
-			var timeout_source = new TimeoutSource.seconds (2);
+			var timeout_source = new TimeoutSource.seconds (10);
 			timeout_source.set_callback (() => {
 				cancellable.cancel ();
 				return false;
