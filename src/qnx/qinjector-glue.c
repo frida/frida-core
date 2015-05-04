@@ -24,7 +24,7 @@
 #endif
 #include <sys/wait.h>
 
-#define PSR_T_BIT 1<<5
+#define PSR_T_BIT (1<<5)
 
 #define FRIDA_RTLD_DLOPEN (0x80000000)
 
@@ -39,7 +39,7 @@
 #define FRIDA_REMOTE_DATA_OFFSET (512)
 #define FRIDA_REMOTE_STACK_OFFSET (FRIDA_REMOTE_PAYLOAD_SIZE - 512)
 #define FRIDA_REMOTE_DATA_FIELD(n) \
-  GSIZE_TO_POINTER (remote_address -1 + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
+  GSIZE_TO_POINTER ((remote_address & 0xfffffffe) + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
 
 #define FRIDA_DUMMY_RETURN_ADDRESS 0x320
 
@@ -104,6 +104,7 @@ static void frida_emit_payload_code (const FridaInjectionParams * params, GumAdd
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
 static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
 static int frida_remote_pthread_create (pid_t pid, GumAddress address, GError ** error);
+static int frida_remote_msync (pid_t pid, GumAddress remote_address, gint size, gint flags, GError ** error);
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error);
@@ -209,22 +210,6 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   code.cur = code.bytes;
   code.size = 0;
 
-#if defined (HAVE_ARM)
-  {
-    GumThumbWriter cw;
-
-    padding = 2;
-    address_mask = 1;
-
-    gum_thumb_writer_init (&cw, code.cur);
-    gum_thumb_writer_put_nop (&cw);
-    gum_thumb_writer_flush (&cw);
-    code.cur = gum_thumb_writer_cur (&cw);
-    code.size += gum_thumb_writer_offset (&cw);
-    gum_thumb_writer_free (&cw);
-  }
-#endif
-
   func (params, GUM_ADDRESS (params->remote_address), &code);
 
   data = (FridaTrampolineData *) (code.bytes + FRIDA_REMOTE_DATA_OFFSET);
@@ -238,17 +223,16 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
 
-  frida_remote_pthread_create (params->pid, params->remote_address | address_mask, error);
-  /*if (!frida_remote_exec (params->pid, (params->remote_address + padding) | address_mask, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, error))
+  frida_remote_msync (params->pid, params->remote_address, FRIDA_REMOTE_PAYLOAD_SIZE, MS_SYNC | MS_INVALIDATE_ICACHE, error);
+
+  if (frida_remote_pthread_create (params->pid, params->remote_address, error) != 0)
     return FALSE;
-  */
+
   return TRUE;
 }
 
-#if defined (HAVE_ARM)
-
 static void
-frida_arm_commit_code (GumThumbWriter * cw, FridaCodeChunk * code)
+frida_thumb_commit_code (GumThumbWriter * cw, FridaCodeChunk * code)
 {
   gum_thumb_writer_flush (cw);
   code->cur = gum_thumb_writer_cur (cw);
@@ -259,26 +243,28 @@ static void
 frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
   GumThumbWriter cw;
+  GumArmWriter caw;
   const guint worker_offset = 64;
 
-  /*gum_thumb_writer_init (&cw, code->cur);
 
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_remote_libc_function (params->pid, "pthread_create"),
-      4,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset + 1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+  /*
+   * We need a 'thunk' to transfer from arm mode to thumb mode as pthread_create
+   * is being unpleasant about starting a thumb address.
+   */
+  gum_arm_writer_init (&caw, code->cur);
 
-  gum_thumb_writer_put_breakpoint (&cw);
-  gum_thumb_writer_flush (&cw);
-  g_assert_cmpuint (gum_thumb_writer_offset (&cw), <=, worker_offset);
-  while (gum_thumb_writer_offset (&cw) != worker_offset - code->size)
-    gum_thumb_writer_put_nop (&cw);
-  frida_arm_commit_code (&cw, code);
-  gum_thumb_writer_free (&cw);
-*/
+  gum_arm_writer_put_ldr_reg_u32 (&caw, GUM_AREG_PC, (params->remote_address + worker_offset) | 1);
+  while (gum_arm_writer_offset (&caw) != worker_offset - code->size - 4)
+    gum_arm_writer_put_nop (&caw);
+
+  gum_arm_writer_flush(&caw);
+  code->cur = gum_arm_writer_cur (&caw);
+  code->size += gum_arm_writer_offset (&caw);
+  gum_arm_writer_free (&caw);
+
+  /*
+   * The actual (thumb) payload starts here:
+   */
   gum_thumb_writer_init (&cw, code->cur);
 
   gum_thumb_writer_put_push_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
@@ -330,11 +316,9 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
 
   gum_thumb_writer_put_pop_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
 
-  frida_arm_commit_code (&cw, code);
+  frida_thumb_commit_code (&cw, code);
   gum_thumb_writer_free (&cw);
 }
-
-#endif
 
 static GumAddress
 frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
@@ -377,14 +361,48 @@ static int
 frida_remote_pthread_create (pid_t pid, GumAddress remote_address, GError ** error)
 {
   GumAddress args[] = {
-    FRIDA_REMOTE_DATA_FIELD (worker_thread),
+    0, //FRIDA_REMOTE_DATA_FIELD (worker_thread),
     0,
     remote_address,
     0
   };
   GumAddress retval;
 
+ // if (!frida_remote_call (pid, remote_address, args, G_N_ELEMENTS (args), &retval, error))
+
   if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "pthread_create"), args, G_N_ELEMENTS (args), &retval, error))
+    return -1;
+
+  return retval;
+}
+
+static int
+frida_remote_msync (pid_t pid, GumAddress remote_address, gint size, gint flags, GError ** error)
+{
+  GumAddress args[] = {
+    remote_address,
+    size,
+    flags
+  };
+  GumAddress retval;
+
+  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "msync"), args, G_N_ELEMENTS (args), &retval, error))
+    return -1;
+
+  return retval;
+}
+
+static int
+frida_remote_mprotect (pid_t pid, GumAddress remote_address, gint size, gint prot, GError ** error)
+{
+  GumAddress args[] = {
+    remote_address,
+    size,
+    prot
+  };
+  GumAddress retval;
+
+  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "mprotect"), args, G_N_ELEMENTS (args), &retval, error))
     return -1;
 
   return retval;
@@ -487,7 +505,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
    */
   if ((func & 1) != 0)
   {
-    modified_registers.arm.gpr[ARM_REG_PC] = (func & ~1);
+    printf ("in thumb pc set\n");
+    modified_registers.arm.gpr[ARM_REG_PC] = func; //(func & ~1);
     modified_registers.arm.spsr |= PSR_T_BIT;
   }
   else
@@ -496,6 +515,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     modified_registers.arm.spsr &= ~PSR_T_BIT;
   }
 
+  printf ("new_spsr: %08x\n", modified_registers.arm.spsr);
   for (i = 0; i < args_length && i < 4; i++)
   {
     modified_registers.arm.gpr[i] = args[i];
