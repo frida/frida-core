@@ -223,6 +223,10 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
 
+  /*
+   * We need to flush the data cache and invalidate the instruction cache before
+   * trying to run the generated code.
+   */
   frida_remote_msync (params->pid, params->remote_address, FRIDA_REMOTE_PAYLOAD_SIZE, MS_SYNC | MS_INVALIDATE_ICACHE, error);
 
   if (frida_remote_pthread_create (params->pid, params->remote_address, error) != 0)
@@ -245,7 +249,6 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   GumThumbWriter cw;
   GumArmWriter caw;
   const guint worker_offset = 64;
-
 
   /*
    * We need a 'thunk' to transfer from arm mode to thumb mode as pthread_create
@@ -392,22 +395,6 @@ frida_remote_msync (pid_t pid, GumAddress remote_address, gint size, gint flags,
   return retval;
 }
 
-static int
-frida_remote_mprotect (pid_t pid, GumAddress remote_address, gint size, gint prot, GError ** error)
-{
-  GumAddress args[] = {
-    remote_address,
-    size,
-    prot
-  };
-  GumAddress retval;
-
-  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "mprotect"), args, G_N_ELEMENTS (args), &retval, error))
-    return -1;
-
-  return retval;
-}
-
 static gboolean
 frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error)
 {
@@ -465,7 +452,6 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   procfs_info info;
   sigset_t * run_fault = (sigset_t *) &run.fault;
 
-  printf ("ENTER remote_call\n");
   sprintf(as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
   g_assert (fd != -1);
@@ -496,17 +482,13 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
 
   memcpy(&modified_registers, &saved_registers, sizeof (saved_registers));
-  printf ("old_pc: %08x\n", saved_registers.arm.gpr[ARM_REG_PC]);
-  printf ("old_spsr: %08x\n", saved_registers.arm.spsr);
 
-  printf ("func: %08x\n", func);
   /*
    * Set the PC to be the function address and SP to the stack address.
    */
   if ((func & 1) != 0)
   {
-    printf ("in thumb pc set\n");
-    modified_registers.arm.gpr[ARM_REG_PC] = func; //(func & ~1);
+    modified_registers.arm.gpr[ARM_REG_PC] = (func & ~1);
     modified_registers.arm.spsr |= PSR_T_BIT;
   }
   else
@@ -515,18 +497,15 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     modified_registers.arm.spsr &= ~PSR_T_BIT;
   }
 
-  printf ("new_spsr: %08x\n", modified_registers.arm.spsr);
   for (i = 0; i < args_length && i < 4; i++)
   {
     modified_registers.arm.gpr[i] = args[i];
-    printf ("args[%d] = %08x\n", i, args[i]);
   }
 
   for (i = args_length - 1; i >= 4; i--)
   {
     modified_registers.arm.gpr[ARM_REG_SP] -= 4;
 
-    printf ("args[%d] = %08x\n", i, args[i]);
     if (!frida_remote_write_fd (fd, modified_registers.arm.gpr[ARM_REG_SP], &args[i],
           4, error))
     {
@@ -547,7 +526,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   {
     /*
      * Continue the process, watching for FLTPAGE which should trigger when
-     * the dummy LR value (0xffffffff) is reached.
+     * the dummy LR value (0xfffffff0) is reached.
      */
     memset(&run, 0, sizeof (run));
     sigemptyset (run_fault);
@@ -557,31 +536,10 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     CHECK_OS_RESULT (ret, ==, 0, "DCMD_PROC_RUN");
 
     /*
-     * Wait for the process to stop at the breakpoint.
+     * Wait for the process to stop at the fault.
      */
     ret = devctl (fd, DCMD_PROC_WAITSTOP, &status, sizeof (status), 0);
     CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_WAITSTOP");
-
-    printf ("after wait: tid: %d, why: %d, what: %d, stkbase: %08x, sp: %08x\n", status.tid, status.why, status.what, (int)status.stkbase, (int)status.sp);
-
-    ret = devctl (fd, DCMD_PROC_INFO, &info, sizeof (info), 0);
-    printf ("num_threads: %d\n", info.num_threads);
-
-    /*
-     * Find the first active thread:
-     */
-    for (tid = 1;; tid++)
-    {
-      thread.tid = tid;
-      if (devctl (fd, DCMD_PROC_TIDSTATUS, &thread, sizeof (thread), 0) == EOK)
-        break;
-    }
-
-    /*
-     * Set current thread and freeze our target thread:
-     */
-    //ret = devctl (fd, DCMD_PROC_CURTHREAD, &tid, sizeof (tid), 0);
-    //CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_CURTHREAD");
 
     /*
      * Get the thread's registers:
@@ -589,17 +547,11 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     ret = devctl (fd, DCMD_PROC_GETGREG, &modified_registers,
         sizeof (modified_registers), 0);
     CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
-
-    printf ("current pc: %08x\n", modified_registers.arm.gpr[ARM_REG_PC]);
-    printf ("current sp: %08x\n", modified_registers.arm.gpr[ARM_REG_SP]);
-    printf ("current r12: %08x\n", modified_registers.arm.gpr[ARM_REG_R12]);
-
   }
 
   if (retval != NULL)
     *retval = modified_registers.arm.gpr[ARM_REG_R0];
 
-  printf ("retval: %08x\n", *retval);
   /*
    * Restore the registers and continue the process:
    */
@@ -612,7 +564,6 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
   close(fd);
-  printf ("EXIT remote_call\n\n");
 
   return TRUE;
 
