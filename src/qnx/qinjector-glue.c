@@ -174,7 +174,6 @@ _frida_qinjector_do_inject (FridaQinjector * self, guint pid, const char * so_pa
 {
   FridaInjectionInstance * instance;
   FridaInjectionParams params = { pid, so_path, data_string };
-  printf ("do_inject pid: %d, so_path: %s, data_string: %s\n", pid, so_path, data_string);
 
   instance = frida_injection_instance_new (self, self->last_id++, pid, temp_path);
 
@@ -572,130 +571,6 @@ handle_os_error:
     if (fd != -1)
       close (fd);
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_call %s failed: %d", failed_operation, errno);
-    return FALSE;
-  }
-}
-
-static gboolean
-frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, GError ** error)
-{
-  long ret;
-  const gchar * failed_operation;
-  int fd;
-  char as_path[PATH_MAX];
-  pthread_t tid;
-  debug_thread_t thread;
-  procfs_greg saved_registers, modified_registers;
-  procfs_status status;
-  procfs_run run;
-  sigset_t * run_fault = (sigset_t *) &run.fault;
-
-  printf ("\nENTER remote_exec \n");
-
-  sprintf(as_path, "/proc/%d/as", pid);
-  fd = open (as_path, O_RDWR);
-
-  /*
-   * Find the first active thread:
-   */
-  for (tid = 1;; tid++)
-  {
-    thread.tid = tid;
-    if (devctl (fd, DCMD_PROC_TIDSTATUS, &thread, sizeof (thread), 0) == EOK)
-      break;
-  }
-
-  /*
-   * Set current thread and freeze our target thread:
-   */
-  ret = devctl (fd, DCMD_PROC_CURTHREAD, &tid, sizeof (tid), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_CURTHREAD");
-
-  ret = devctl (fd, DCMD_PROC_STOP, &status, sizeof (status), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_STOP");
-
-  /*
-   * Get the thread's registers:
-   */
-  ret = devctl (fd, DCMD_PROC_GETGREG, &saved_registers, sizeof (saved_registers), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
-
-  memcpy(&modified_registers, &saved_registers, sizeof (saved_registers));
-
-  printf ("remote_address: %08x\n", remote_address);
-  /*
-   * Set the PC to be the function address and SP to the stack address.
-   */
-  if ((remote_address & 1) != 0)
-  {
-    modified_registers.arm.gpr[ARM_REG_PC] = (remote_address & ~1);
-    modified_registers.arm.spsr |= PSR_T_BIT;
-  }
-  else
-  {
-    modified_registers.arm.gpr[ARM_REG_PC] = remote_address;
-    modified_registers.arm.spsr &= ~PSR_T_BIT;
-  }
-  modified_registers.arm.gpr[ARM_REG_SP] = remote_stack;
-
-  ret = devctl (fd, DCMD_PROC_SETGREG, &modified_registers,
-      sizeof (modified_registers), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_SETGREG");
-
-  /*
-   * Continue the process, watching for the breakpoint.
-   */
-  memset(&run, 0, sizeof (run));
-  sigemptyset (run_fault);
-  sigaddset (run_fault, FLTTRACE);
-  sigaddset (run_fault, FLTBPT);
-  sigaddset (run_fault, FLTILL);
-  run.flags |=  _DEBUG_RUN_TRACE | _DEBUG_RUN_FAULT ;
-  //sigfillset (&run.trace);
-  ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
-
-  printf ("waiting for breakpoint...\n");
-  /*
-   * Wait for the process to stop at the breakpoint.
-   */
-  ret = devctl (fd, DCMD_PROC_WAITSTOP, &status, sizeof (status), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_WAITSTOP");
-
-  printf("back status why: %d what: %08x\n", status.why, status.what);
-
-  /*
-   * Get the thread's registers:
-   */
-  ret = devctl (fd, DCMD_PROC_GETGREG, &modified_registers,
-      sizeof (modified_registers), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
-
-  printf ("stopped pc: %08x\n", modified_registers.arm.gpr[ARM_REG_PC]);
-  if (result != NULL)
-    *result = modified_registers.arm.gpr[ARM_REG_R0];
-
-  /*
-   * Restore the registers and continue the process:
-   */
-  ret = devctl (fd, DCMD_PROC_SETGREG, &saved_registers, sizeof (saved_registers), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_SETGREG");
-
-  memset(&run, 0, sizeof (run));
-  run.flags |= _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG;
-  ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
-  CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
-
-  close (fd);
-
-  printf ("EXIT remote_exec\n\n");
-  return TRUE;
-
-handle_os_error:
-  {
-    if (fd != -1)
-      close (fd);
-    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_exec %s failed: %d", failed_operation, errno);
     return FALSE;
   }
 }

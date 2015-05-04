@@ -176,7 +176,6 @@ namespace Frida {
 			Object (name: name, sofile: sofile);
 
 			assert (sofile is Seekable);
-			stdout.printf ("AD sofile: %s\n", name);
 		}
 
 		private void reset_stream (InputStream stream) {

@@ -97,7 +97,6 @@ namespace Frida.QinjectorTest {
 
 			try {
 				var sofile = Path.build_filename (data_directory, name + Frida.Test.arch_suffix () + ".so");
-				stdout.printf ("sofile: %s\n", sofile);
 				assert (FileUtils.test (sofile, FileTest.EXISTS));
 
 				AgentDescriptor desc;
