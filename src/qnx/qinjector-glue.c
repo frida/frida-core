@@ -18,6 +18,7 @@
 #include <sys/debug.h>
 #include <sys/procfs.h>
 #include <sys/stat.h>
+#include <sys/states.h>
 #include <sys/types.h>
 #ifdef HAVE_SYS_USER_H
 # include <sys/user.h>
@@ -108,7 +109,6 @@ static int frida_remote_msync (pid_t pid, GumAddress remote_address, gint size, 
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error);
-static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, GError ** error);
 
 static GumAddress frida_resolve_remote_libc_function (int remote_pid, const gchar * function_name);
 
@@ -438,6 +438,7 @@ handle_os_error:
 static gboolean
 frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, GError ** error)
 {
+  gboolean success = FALSE;
   gint ret;
   const gchar * failed_operation;
   gint fd;
@@ -448,7 +449,6 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   procfs_greg saved_registers, modified_registers;
   procfs_status status;
   procfs_run run;
-  procfs_info info;
   sigset_t * run_fault = (sigset_t *) &run.fault;
 
   sprintf(as_path, "/proc/%d/as", pid);
@@ -473,6 +473,39 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   ret = devctl (fd, DCMD_PROC_STOP, &status, sizeof (status), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_STOP");
+
+  if (status.state == STATE_DEAD)
+    goto beach;
+
+  if (status.state != STATE_STOPPED)
+  {
+    /*
+     * If the thread was not in the STOPPED state, it's probably
+     * blocked in a NANOSLEEP or some syscall. We'll SIGHUP
+     * it to kick it out of the blocker and WAITSTOP until the
+     * signal is delivered.
+     */
+    memset(&run, 0, sizeof (run));
+    run.flags |= _DEBUG_RUN_TRACE;
+    sigemptyset (&run.trace);
+    sigaddset (&run.trace, SIGHUP);
+    ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
+    CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
+
+    kill (pid, SIGHUP);
+
+    ret = devctl (fd, DCMD_PROC_WAITSTOP, &status, sizeof (status), 0);
+    CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_WAITSTOP");
+    if (status.why == _DEBUG_WHY_TERMINATED)
+      goto beach;
+
+    /*
+     * We need the extra PROC_STOP because status.state is not
+     * properly reported by WAITSTOP.
+     */
+    ret = devctl (fd, DCMD_PROC_STOP, &status, sizeof (status), 0);
+    CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_STOP");
+  }
 
   /*
    * Get the thread's registers:
@@ -562,9 +595,12 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
 
+  success = TRUE;
+
+beach:
   close(fd);
 
-  return TRUE;
+  return success;
 
 handle_os_error:
   {
