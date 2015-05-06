@@ -1,21 +1,16 @@
 #include "frida-core.h"
 
 #include <gio/gunixinputstream.h>
-#ifdef HAVE_I386
-# include <gum/arch-x86/gumx86writer.h>
-#endif
-#ifdef HAVE_ARM
-# include <gum/arch-arm/gumarmwriter.h>
-# include <gum/arch-arm/gumthumbwriter.h>
-#endif
+#include <gum/arch-arm/gumarmwriter.h>
+#include <gum/arch-arm/gumthumbwriter.h>
 #include <gum/gum.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
-#include <sys/mman.h>
 #include <sys/debug.h>
+#include <sys/mman.h>
 #include <sys/procfs.h>
 #include <sys/stat.h>
 #include <sys/states.h>
@@ -25,9 +20,7 @@
 #endif
 #include <sys/wait.h>
 
-#define PSR_T_BIT (1<<5)
-
-#define FRIDA_RTLD_DLOPEN (0x80000000)
+#define PSR_T_BIT (1 << 5)
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
@@ -40,9 +33,7 @@
 #define FRIDA_REMOTE_DATA_OFFSET (512)
 #define FRIDA_REMOTE_STACK_OFFSET (FRIDA_REMOTE_PAYLOAD_SIZE - 512)
 #define FRIDA_REMOTE_DATA_FIELD(n) \
-  GSIZE_TO_POINTER ((remote_address & 0xfffffffe) + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
-
-#define FRIDA_DUMMY_RETURN_ADDRESS 0x320
+    GSIZE_TO_POINTER ((remote_address & 0xfffffffe) + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
 
 typedef struct _FridaInjectionInstance FridaInjectionInstance;
 typedef struct _FridaInjectionParams FridaInjectionParams;
@@ -202,8 +193,6 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
     GError ** error)
 {
   FridaCodeChunk code;
-  guint padding = 0;
-  GumAddress address_mask = 0;
   FridaTrampolineData * data;
 
   code.cur = code.bytes;
@@ -259,7 +248,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   while (gum_arm_writer_offset (&caw) != worker_offset - code->size - 4)
     gum_arm_writer_put_nop (&caw);
 
-  gum_arm_writer_flush(&caw);
+  gum_arm_writer_flush (&caw);
   code->cur = gum_arm_writer_cur (&caw);
   code->size += gum_arm_writer_offset (&caw);
   gum_arm_writer_free (&caw);
@@ -363,14 +352,12 @@ static int
 frida_remote_pthread_create (pid_t pid, GumAddress remote_address, GError ** error)
 {
   GumAddress args[] = {
-    0, //FRIDA_REMOTE_DATA_FIELD (worker_thread),
+    GPOINTER_TO_SIZE (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
     0,
     remote_address,
     0
   };
   GumAddress retval;
-
- // if (!frida_remote_call (pid, remote_address, args, G_N_ELEMENTS (args), &retval, error))
 
   if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "pthread_create"), args, G_N_ELEMENTS (args), &retval, error))
     return -1;
@@ -398,12 +385,10 @@ static gboolean
 frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error)
 {
   gint fd;
-  long ret;
   gchar as_path[PATH_MAX];
-  const gchar * failed_operation;
   gboolean result;
 
-  sprintf(as_path, "/proc/%d/as", pid);
+  sprintf (as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
   g_assert (fd != -1);
 
@@ -420,7 +405,6 @@ frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, g
   long ret;
   const gchar * failed_operation;
 
-
   ret = lseek (fd, GPOINTER_TO_SIZE (remote_address), SEEK_SET);
   CHECK_OS_RESULT (ret, ==, remote_address, "seek to address");
 
@@ -428,6 +412,7 @@ frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, g
   CHECK_OS_RESULT (ret, ==, size, "write data");
 
   return TRUE;
+
 handle_os_error:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_write %s failed: %d", failed_operation, errno);
@@ -451,7 +436,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   procfs_run run;
   sigset_t * run_fault = (sigset_t *) &run.fault;
 
-  sprintf(as_path, "/proc/%d/as", pid);
+  sprintf (as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
   g_assert (fd != -1);
 
@@ -485,7 +470,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
      * it to kick it out of the blocker and WAITSTOP until the
      * signal is delivered.
      */
-    memset(&run, 0, sizeof (run));
+    memset (&run, 0, sizeof (run));
     run.flags |= _DEBUG_RUN_TRACE;
     sigemptyset (&run.trace);
     sigaddset (&run.trace, SIGHUP);
@@ -513,7 +498,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = devctl (fd, DCMD_PROC_GETGREG, &saved_registers, sizeof (saved_registers), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_GETGREG");
 
-  memcpy(&modified_registers, &saved_registers, sizeof (saved_registers));
+  memcpy (&modified_registers, &saved_registers, sizeof (saved_registers));
 
   /*
    * Set the PC to be the function address and SP to the stack address.
@@ -539,11 +524,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     modified_registers.arm.gpr[ARM_REG_SP] -= 4;
 
     if (!frida_remote_write_fd (fd, modified_registers.arm.gpr[ARM_REG_SP], &args[i],
-          4, error))
-    {
-      close (fd);
-      return FALSE;
-    }
+        4, error))
+      goto beach;
   }
 
   /*
@@ -560,7 +542,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
      * Continue the process, watching for FLTPAGE which should trigger when
      * the dummy LR value (0xfffffff0) is reached.
      */
-    memset(&run, 0, sizeof (run));
+    memset (&run, 0, sizeof (run));
     sigemptyset (run_fault);
     sigaddset (run_fault, FLTPAGE);
     run.flags |= _DEBUG_RUN_FAULT | _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG;
@@ -590,7 +572,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = devctl (fd, DCMD_PROC_SETGREG, &saved_registers, sizeof (saved_registers), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_SETGREG");
 
-  memset(&run, 0, sizeof (run));
+  memset (&run, 0, sizeof (run));
   run.flags |= _DEBUG_RUN_CLRFLT | _DEBUG_RUN_CLRSIG;
   ret = devctl (fd, DCMD_PROC_RUN, &run, sizeof (run), 0);
   CHECK_OS_RESULT (ret, ==, EOK, "DCMD_PROC_RUN");
@@ -598,7 +580,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   success = TRUE;
 
 beach:
-  close(fd);
+  close (fd);
 
   return success;
 
@@ -668,7 +650,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
 
   as_path = g_strdup_printf ("/proc/%d/as", pid);
 
-  fd = open(as_path, O_RDONLY);
+  fd = open (as_path, O_RDONLY);
   g_assert (fd != -1);
 
   g_free (as_path);

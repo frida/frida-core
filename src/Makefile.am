@@ -225,7 +225,6 @@ glue_sources += \
 	fruity/fruity-host-session-darwin.m
 endif
 
-
 if OS_QNX
 AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent.so
 AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')

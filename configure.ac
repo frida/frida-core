@@ -115,9 +115,6 @@ fi
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D ANDROID"
 fi
-if [[ "x$HAVE_QNX" = "xyes" ]]; then
-  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D QNX"
-fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D DARWIN"
 fi
@@ -126,6 +123,9 @@ if [[ "x$HAVE_MAC" = "xyes" ]]; then
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D IOS"
+fi
+if [[ "x$HAVE_QNX" = "xyes" ]]; then
+  FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D QNX"
 fi
 AC_SUBST(FRIDA_VALAFLAGS)
 

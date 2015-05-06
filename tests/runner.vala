@@ -15,7 +15,7 @@ namespace Frida.Test {
 		Frida.FruitjectorTest.add_tests ();
 #endif
 
-#if ! QNX
+#if !QNX
 		Frida.AgentTest.add_tests ();
 #endif
 		Frida.HostSessionTest.add_tests ();
@@ -43,9 +43,9 @@ namespace Frida.Test {
 			case OS.ANDROID:
 				os_name = "android";
 				break;
-            case OS.QNX:
-                os_name = "qnx";
-                break;
+			case OS.QNX:
+				os_name = "qnx";
+				break;
 			default:
 				assert_not_reached ();
 		}
@@ -77,7 +77,7 @@ namespace Frida.Test {
 		LINUX,
 		IOS,
 		ANDROID,
-        QNX
+		 QNX
 	}
 
 	public enum CPU {

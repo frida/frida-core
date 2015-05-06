@@ -38,7 +38,8 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create () throws Error {
+		public async HostSession create (string? location = null) throws Error {
+			assert (location == null);
 			if (host_session != null)
 				throw new Error.NOT_SUPPORTED ("may only create one HostSession");
 			host_session = new QnxHostSession ();
@@ -46,10 +47,22 @@ namespace Frida {
 			return host_session;
 		}
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			if (host_session == null)
-				throw new Error.NOT_SUPPORTED ("no such id");
-			return yield host_session.obtain_agent_session (id);
+		public async void destroy (HostSession session) throws Error {
+			if (session != host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			yield host_session.close ();
+			host_session = null;
+		}
+
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+			return yield this.host_session.obtain_agent_session (agent_session_id);
+		}
+
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
+			agent_session_closed (id);
 		}
 	}
 

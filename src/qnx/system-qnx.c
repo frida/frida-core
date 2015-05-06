@@ -12,7 +12,8 @@ frida_system_enumerate_processes (int * result_length1)
   GDir * proc_dir;
   const gchar * proc_name;
 
-  static struct {
+  static struct
+  {
     procfs_debuginfo    info;
     char                buff [PATH_MAX];
   } procfs_name;
@@ -68,9 +69,5 @@ frida_system_kill (guint pid)
 gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
-#ifdef HAVE_ANDROID
-  return g_strdup ("/data/local/tmp");
-#else
   return g_strdup (g_get_tmp_dir ());
-#endif
 }

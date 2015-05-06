@@ -16,14 +16,12 @@
 
 /* FIXME: this transport is not secure */
 
-#ifdef HAVE_ANDROID
+#if defined (HAVE_ANDROID)
 # define FRIDA_TEMP_PATH "/data/local/tmp"
-#else
-#ifdef HAVE_QNX
-# define FRIDA_TEMP_PATH "/fs/tmpfs"
+#elif defined (HAVE_QNX)
+# define FRIDA_TEMP_PATH "/fs/tmp"
 #else
 # define FRIDA_TEMP_PATH "/tmp"
-#endif
 #endif
 #define FRIDA_PIPE_CONNECT_INTERVAL 50
 
