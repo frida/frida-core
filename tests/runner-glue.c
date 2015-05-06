@@ -78,6 +78,8 @@ frida_test_os (void)
   return FRIDA_TEST_OS_ANDROID;
 #elif defined (HAVE_LINUX)
   return FRIDA_TEST_OS_LINUX;
+#elif defined (HAVE_QNX)
+  return FRIDA_TEST_OS_QNX;
 #endif
 }
 

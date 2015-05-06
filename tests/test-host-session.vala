@@ -20,7 +20,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-#if !LINUX
+#if !LINUX && !QNX
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
 		});
@@ -586,7 +586,7 @@ namespace Frida.HostSessionTest {
 	}
 #endif
 
-#if !LINUX
+#if !LINUX && !QNX
 	namespace Fruity {
 
 		private static async void backend (Harness h) {

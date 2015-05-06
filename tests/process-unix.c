@@ -9,6 +9,17 @@
 # include <mach-o/dyld.h>
 #endif
 
+#ifdef HAVE_QNX
+# include <dlfcn.h>
+# include <sys/link.h>
+struct dlopen_handle
+{
+    struct unk0 * p_next;
+    struct unk0 * p_prev;
+    Link_map * p_lm;
+};
+#endif
+
 static int frida_magic_self_handle = -1;
 
 #ifdef HAVE_DARWIN
@@ -38,9 +49,16 @@ frida_test_process_backend_filename_of (void * handle)
 char *
 frida_test_process_backend_filename_of (void * handle)
 {
+#ifdef HAVE_QNX
   g_assert (handle == &frida_magic_self_handle);
 
+  struct dlopen_handle ** _handle = dlopen (NULL, RTLD_NOW);
+  struct dlopen_handle * p_u = *(_handle);
+
+  return g_strdup (p_u->p_lm->l_path);
+#else
   return g_file_read_link ("/proc/self/exe", NULL);
+#endif
 }
 
 #endif
