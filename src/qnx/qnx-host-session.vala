@@ -41,7 +41,7 @@ namespace Frida {
 		public async HostSession create (string? location = null) throws Error {
 			assert (location == null);
 			if (host_session != null)
-				throw new Error.NOT_SUPPORTED ("may only create one HostSession");
+				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
 			host_session = new QnxHostSession ();
 			host_session.agent_session_closed.connect ((id) => this.agent_session_closed (id));
 			return host_session;
