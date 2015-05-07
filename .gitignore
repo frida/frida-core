@@ -81,6 +81,8 @@
 /src/linux/frida-helper.c
 /src/linux/linjector.c
 /src/linux/linux-host-session.c
+/src/qnx/qinjector.c
+/src/qnx/qnx-host-session.c
 /src/server.c
 /src/system.c
 /src/tcp/tcp-host-session.c
