@@ -19,7 +19,7 @@
 #if defined (HAVE_ANDROID)
 # define FRIDA_TEMP_PATH "/data/local/tmp"
 #elif defined (HAVE_QNX)
-# define FRIDA_TEMP_PATH "/fs/tmp"
+# define FRIDA_TEMP_PATH "/fs/tmpfs"
 #else
 # define FRIDA_TEMP_PATH "/tmp"
 #endif
