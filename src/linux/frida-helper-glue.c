@@ -24,6 +24,7 @@
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #ifdef HAVE_SYS_USER_H
 # include <sys/user.h>
@@ -41,6 +42,16 @@
     failed_operation = op; \
     goto handle_os_error; \
   }
+
+#ifndef PTRACE_GETREGSET
+# define PTRACE_GETREGSET 0x4204
+#endif
+#ifndef PTRACE_SETREGSET
+# define PTRACE_SETREGSET 0x4205
+#endif
+#ifndef NT_PRSTATUS
+# define NT_PRSTATUS 1
+#endif
 
 #if defined (HAVE_I386)
 # define FridaRegs struct user_regs_struct
