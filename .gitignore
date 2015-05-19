@@ -109,6 +109,7 @@
 /tests/test-fruitjector.c
 /tests/test-host-session.c
 /tests/test-linjector.c
+/tests/test-qinjector.c
 /tests/test-suite.log
 /tests/test-system.c
 /tools/Makefile
