@@ -8,6 +8,9 @@
 # include <gum/arch-arm/gumarmwriter.h>
 # include <gum/arch-arm/gumthumbwriter.h>
 #endif
+#ifdef HAVE_ARM64
+# include <gum/arch-arm64/gumarm64writer.h>
+#endif
 #include <gum/gum.h>
 #include <gum/gumlinux.h>
 #include <dlfcn.h>
@@ -40,9 +43,11 @@
   }
 
 #if defined (HAVE_I386)
-# define regs_t struct user_regs_struct
+# define FridaRegs struct user_regs_struct
 #elif defined (HAVE_ARM)
-# define regs_t struct pt_regs
+# define FridaRegs struct pt_regs
+#elif defined (HAVE_ARM64)
+# define FridaRegs struct user_pt_regs
 #else
 # error Unsupported architecture
 #endif
@@ -124,13 +129,15 @@ static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
-static gboolean frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_regs, GError ** error);
-static gboolean frida_inject_instance_detach (FridaInjectInstance * instance, const regs_t * saved_regs, GError ** error);
+static gboolean frida_inject_instance_attach (FridaInjectInstance * instance, FridaRegs * saved_regs, GError ** error);
+static gboolean frida_inject_instance_detach (FridaInjectInstance * instance, const FridaRegs * saved_regs, GError ** error);
 static gboolean frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error);
 static void frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
 static gboolean frida_wait_for_attach_signal (pid_t pid);
 static gboolean frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited);
+static gint frida_get_regs (pid_t pid, FridaRegs * regs);
+static gint frida_set_regs (pid_t pid, const FridaRegs * regs);
 
 static gboolean frida_run_to_entry_point (pid_t pid, GError ** error);
 static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer user_data);
@@ -221,7 +228,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 {
   FridaInjectInstance * instance;
   FridaInjectParams params = { pid, so_path, data_string };
-  regs_t saved_regs;
+  FridaRegs saved_regs;
   gboolean exited;
 
   if (self->last_id == 0 || self->last_id >= G_MAXINT)
@@ -325,7 +332,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
 {
   if (instance->remote_payload != 0)
   {
-    regs_t saved_regs;
+    FridaRegs saved_regs;
 
     if (frida_inject_instance_attach (instance, &saved_regs, NULL))
     {
@@ -342,7 +349,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
 }
 
 static gboolean
-frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_regs, GError ** error)
+frida_inject_instance_attach (FridaInjectInstance * instance, FridaRegs * saved_regs, GError ** error)
 {
   const pid_t pid = instance->pid;
   long ret;
@@ -355,8 +362,8 @@ frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_reg
   maybe_already_attached = (ret != 0 && errno == EPERM);
   if (maybe_already_attached)
   {
-    ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+    ret = frida_get_regs (pid, saved_regs);
+    CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
     instance->already_attached = TRUE;
   }
@@ -369,8 +376,8 @@ frida_inject_instance_attach (FridaInjectInstance * instance, regs_t * saved_reg
     success = frida_wait_for_attach_signal (pid);
     CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
 
-    ret = ptrace (PTRACE_GETREGS, pid, NULL, saved_regs);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+    ret = frida_get_regs (pid, saved_regs);
+    CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
   }
 
   return TRUE;
@@ -400,14 +407,14 @@ handle_os_error:
 }
 
 static gboolean
-frida_inject_instance_detach (FridaInjectInstance * instance, const regs_t * saved_regs, GError ** error)
+frida_inject_instance_detach (FridaInjectInstance * instance, const FridaRegs * saved_regs, GError ** error)
 {
   const pid_t pid = instance->pid;
   long ret;
   const gchar * failed_operation;
 
-  ret = ptrace (PTRACE_SETREGS, pid, NULL, (void *) saved_regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
+  ret = frida_set_regs (pid, saved_regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_set_regs");
 
   if (!instance->already_attached)
   {
@@ -749,6 +756,100 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 #endif
 }
 
+#elif defined (HAVE_ARM64)
+
+static void
+frida_inject_instance_commit_arm64_code (GumArm64Writer * cw, FridaCodeChunk * code)
+{
+  gum_arm64_writer_flush (cw);
+  code->cur = gum_arm64_writer_cur (cw);
+  code->size += gum_arm64_writer_offset (cw);
+}
+
+static void
+frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
+{
+#ifdef HAVE_ANDROID
+  GumArm64Writer cw;
+  const guint worker_offset = 64;
+
+  gum_arm64_writer_init (&cw, code->cur);
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "pthread_create"),
+      4,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_ADDRESS, remote_address + worker_offset,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_arm64_writer_put_brk_imm (&cw, 0);
+  gum_arm64_writer_flush (&cw);
+  g_assert_cmpuint (gum_arm64_writer_offset (&cw), <=, worker_offset);
+  while (gum_arm64_writer_offset (&cw) != worker_offset - code->size)
+    gum_arm64_writer_put_nop (&cw);
+  frida_inject_instance_commit_arm64_code (&cw, code);
+  gum_arm64_writer_free (&cw);
+
+  gum_arm64_writer_init (&cw, code->cur);
+
+  gum_arm64_writer_put_push_reg_reg (&cw, GUM_A64REG_FP, GUM_A64REG_LR);
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "open"),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY));
+  gum_arm64_writer_put_mov_reg_reg (&cw, GUM_A64REG_X7, GUM_A64REG_X0);
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "write"),
+      3,
+      GUM_ARG_REGISTER, GUM_A64REG_X7,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlopen),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+  gum_arm64_writer_put_mov_reg_reg (&cw, GUM_A64REG_X6, GUM_A64REG_X0);
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlsym),
+      2,
+      GUM_ARG_REGISTER, GUM_A64REG_X6,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  gum_arm64_writer_put_mov_reg_reg (&cw, GUM_A64REG_X5, GUM_A64REG_X0);
+
+  gum_arm64_writer_put_call_reg_with_arguments (&cw,
+      GUM_A64REG_X5,
+      3,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlclose),
+      1,
+      GUM_ARG_REGISTER, GUM_A64REG_X6);
+
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "close"),
+      1,
+      GUM_ARG_REGISTER, GUM_A64REG_X7);
+
+  gum_arm64_writer_put_pop_reg_reg (&cw, GUM_A64REG_FP, GUM_A64REG_LR);
+  gum_arm64_writer_put_ret (&cw);
+
+  frida_inject_instance_commit_arm64_code (&cw, code);
+  gum_arm64_writer_free (&cw);
+#else
+# error Not yet ported to Linux/ARM64
+#endif
+}
+
 #endif
 
 static gboolean
@@ -814,6 +915,26 @@ beach:
   return success;
 }
 
+static gint
+frida_get_regs (pid_t pid, FridaRegs * regs)
+{
+  struct iovec io = {
+    .iov_base = regs,
+    .iov_len = sizeof (FridaRegs)
+  };
+  return ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &io);
+}
+
+static gint
+frida_set_regs (pid_t pid, const FridaRegs * regs)
+{
+  struct iovec io = {
+    .iov_base = (void *) regs,
+    .iov_len = sizeof (FridaRegs)
+  };
+  return ptrace (PTRACE_SETREGSET, pid, NT_PRSTATUS, &io);
+}
+
 static gboolean
 frida_run_to_entry_point (pid_t pid, GError ** error)
 {
@@ -823,7 +944,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   gpointer entry_point_address;
   long original_entry_code, patched_entry_code;
   long ret;
-  regs_t regs;
+  FridaRegs regs;
   const gchar * failed_operation;
   gboolean success;
 
@@ -847,7 +968,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 
   original_entry_code = ptrace (PTRACE_PEEKDATA, pid, entry_point_address, NULL);
 
-#ifdef HAVE_ARM
+#if defined (HAVE_ARM) || defined (HAVE_ARM64)
   if (ctx.word_size == 4)
   {
     if ((ctx.entry_point & 1) == 0)
@@ -881,8 +1002,8 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 
   ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (original_entry_code));
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+  ret = frida_get_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   regs.eip = GPOINTER_TO_SIZE (entry_point_address);
@@ -890,10 +1011,12 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   regs.rip = GPOINTER_TO_SIZE (entry_point_address);
 #elif defined (HAVE_ARM)
   regs.ARM_pc = GPOINTER_TO_SIZE (entry_point_address);
+#elif defined (HAVE_ARM64)
+  regs.pc = GPOINTER_TO_SIZE (entry_point_address);
 #endif
 
-  ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
+  ret = frida_set_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_set_regs");
 
   return TRUE;
 
@@ -1035,12 +1158,12 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 {
   long ret;
   const gchar * failed_operation;
-  regs_t regs;
+  FridaRegs regs;
   gint i;
   gboolean success;
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+  ret = frida_get_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   regs.esp -= (regs.esp - (args_length * 4)) % FRIDA_STACK_ALIGNMENT;
@@ -1134,10 +1257,20 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   }
 
   regs.ARM_lr = FRIDA_DUMMY_RETURN_ADDRESS;
+#elif defined (HAVE_ARM64)
+  regs.sp -= regs.sp % FRIDA_STACK_ALIGNMENT;
+
+  regs.pc = func;
+
+  g_assert_cmpuint (args_length, <=, 8);
+  for (i = 0; i != args_length; i++)
+    regs.regs[i] = args[i];
+
+  regs.regs[30] = FRIDA_DUMMY_RETURN_ADDRESS;
 #endif
 
-  ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
+  ret = frida_set_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_set_regs");
 
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
@@ -1145,8 +1278,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   success = frida_wait_for_child_signal (pid, SIGSEGV, exited);
   CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_CONT wait");
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+  ret = frida_get_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   *retval = regs.eax;
@@ -1154,6 +1287,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   *retval = regs.rax;
 #elif defined (HAVE_ARM)
   *retval = regs.ARM_r0;
+#elif defined (HAVE_ARM64)
+  *retval = regs.regs[0];
 #endif
 
   return TRUE;
@@ -1174,11 +1309,11 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 {
   long ret;
   const gchar * failed_operation;
-  regs_t regs;
+  FridaRegs regs;
   gboolean success;
 
-  ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+  ret = frida_get_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   regs.orig_eax = -1;
@@ -1202,10 +1337,13 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
     regs.ARM_cpsr &= ~PSR_T_BIT;
   }
   regs.ARM_sp = remote_stack;
+#elif defined (HAVE_ARM64)
+  regs.pc = remote_address;
+  regs.sp = remote_stack;
 #endif
 
-  ret = ptrace (PTRACE_SETREGS, pid, NULL, &regs);
-  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_SETREGS");
+  ret = frida_set_regs (pid, &regs);
+  CHECK_OS_RESULT (ret, ==, 0, "frida_set_regs");
 
   ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
@@ -1215,8 +1353,8 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 
   if (result != NULL)
   {
-    ret = ptrace (PTRACE_GETREGS, pid, NULL, &regs);
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_GETREGS");
+    ret = frida_get_regs (pid, &regs);
+    CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
     *result = regs.eax;
@@ -1224,6 +1362,8 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
     *result = regs.rax;
 #elif defined (HAVE_ARM)
     *result = regs.ARM_r0;
+#elif defined (HAVE_ARM64)
+    *result = regs.regs[0];
 #endif
   }
 
