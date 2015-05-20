@@ -66,6 +66,30 @@ check-gdb: $(top_builddir)/tests/android-gdb.setup
 	${ANDROID_NDK_ROOT}/toolchains/arm-linux-androideabi-4.8/prebuilt/darwin-x86_64/bin/arm-linux-androideabi-gdb -x "$(top_builddir)/tests/android-gdb.setup"
 endif
 
+if ARCH_ARM64
+ANDROID_SYSROOT = $(ANDROID_NDK_ROOT)/platforms/android-21/arch-arm64
+
+check: all
+	adb shell "${MKDIR} -p \"${RPFX}/tests/data/\" \"${RPFX}/lib/frida/\""
+	cp "$(top_builddir)/tests/frida-tests" "$(top_builddir)/tests/frida-tests.stripped"
+	$$STRIP --strip-all "$(top_builddir)/tests/frida-tests.stripped"
+	adb push "$(top_builddir)/tests/frida-tests.stripped" "${RPFX}/tests/frida-tests"
+	cp "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "$(top_builddir)/lib/agent/.libs/libfrida-agent.so.stripped"
+	$$STRIP --strip-all "$(top_builddir)/lib/agent/.libs/libfrida-agent.so.stripped"
+	adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so.stripped" "${RPFX}/lib/frida/libfrida-agent.so"
+	adb push "$(top_builddir)/tests/data/unixvictim-android-arm64" "${RPFX}/tests/data/unixvictim-android-arm64"
+	adb push "$(top_builddir)/tests/data/unixattacker-android-arm64.so" "${RPFX}/tests/data/unixattacker-android-arm64.so"
+	adb shell "su -c \"${RPFX}/tests/frida-tests\""
+
+check-gdb: $(top_builddir)/tests/android-gdb.setup
+	adb shell "${RM} -f /data/local/tmp/tests/debug-socket"
+	adb push "${ANDROID_NDK_ROOT}/prebuilt/android-arm64/gdbserver/gdbserver" "${RPFX}/tests/"
+	adb shell "${RPFX}/tests/gdbserver +${RPFX}/tests/debug-socket ${RPFX}/tests/frida-tests" &
+	sleep 1
+	adb forward tcp:${DEBUG_PORT} localfilesystem:${RPFX}/tests/debug-socket
+	${ANDROID_NDK_ROOT}/toolchains/aarch64-linux-android-4.9/prebuilt/darwin-x86_64/bin/aarch64-linux-android-gdb -x "$(top_builddir)/tests/android-gdb.setup"
+endif
+
 $(top_builddir)/tests/android-gdb.setup: $(top_builddir)/tests/frida-tests $(top_builddir)/system/.stamp
 	echo "set solib-search-path $(abs_top_builddir)/tests:$(abs_top_builddir)/lib/agent/.libs:$(abs_top_builddir)/system/lib:${ANDROID_SYSROOT}/usr/lib" > $@
 	echo "directory ${ANDROID_SYSROOT}/usr/include" >> $@
