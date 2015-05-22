@@ -43,6 +43,12 @@
     goto handle_os_error; \
   }
 
+#ifndef PTRACE_GETREGS
+# define PTRACE_GETREGS 12
+#endif
+#ifndef PTRACE_SETREGS
+# define PTRACE_SETREGS 13
+#endif
 #ifndef PTRACE_GETREGSET
 # define PTRACE_GETREGSET 0x4204
 #endif
@@ -165,6 +171,8 @@ static GumAddress frida_resolve_linker_function (pid_t pid, gpointer func);
 #endif
 static GumAddress frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
+
+static gboolean frida_is_regset_supported = TRUE;
 
 guint
 _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
@@ -931,21 +939,43 @@ beach:
 static gint
 frida_get_regs (pid_t pid, FridaRegs * regs)
 {
-  struct iovec io = {
-    .iov_base = regs,
-    .iov_len = sizeof (FridaRegs)
-  };
-  return ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &io);
+  if (frida_is_regset_supported)
+  {
+    struct iovec io = {
+      .iov_base = regs,
+      .iov_len = sizeof (FridaRegs)
+    };
+    long ret = ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &io);
+    if (ret >= 0)
+      return ret;
+    else if (errno == EPERM || errno == ESRCH)
+      return ret;
+    else
+      frida_is_regset_supported = FALSE;
+  }
+
+  return ptrace (PTRACE_GETREGS, pid, NULL, regs);
 }
 
 static gint
 frida_set_regs (pid_t pid, const FridaRegs * regs)
 {
-  struct iovec io = {
-    .iov_base = (void *) regs,
-    .iov_len = sizeof (FridaRegs)
-  };
-  return ptrace (PTRACE_SETREGSET, pid, NT_PRSTATUS, &io);
+  if (frida_is_regset_supported)
+  {
+    struct iovec io = {
+      .iov_base = (void *) regs,
+      .iov_len = sizeof (FridaRegs)
+    };
+    long ret = ptrace (PTRACE_SETREGSET, pid, NT_PRSTATUS, &io);
+    if (ret >= 0)
+      return ret;
+    else if (errno == EPERM || errno == ESRCH)
+      return ret;
+    else
+      frida_is_regset_supported = FALSE;
+  }
+
+  return ptrace (PTRACE_SETREGS, pid, NULL, (void *) regs);
 }
 
 static gboolean
