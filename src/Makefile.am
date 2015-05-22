@@ -29,6 +29,59 @@ AGENT_TARGETS = \
 	$(shell echo $(AGENT32) | cut -f1 -d'!') \
 	$(shell echo $(AGENT64) | cut -f1 -d'!')
 
+libselinux_sources = \
+	linux/libselinux/include/selinux/android.h \
+	linux/libselinux/include/selinux/avc.h \
+	linux/libselinux/include/selinux/context.h \
+	linux/libselinux/include/selinux/label.h \
+	linux/libselinux/include/selinux/selinux.h \
+	##linux/libselinux/src/android.c \
+	linux/libselinux/src/avc.c \
+	linux/libselinux/src/avc_internal.c \
+	linux/libselinux/src/avc_internal.h \
+	linux/libselinux/src/avc_sidtab.c \
+	linux/libselinux/src/avc_sidtab.h \
+	linux/libselinux/src/booleans.c \
+	linux/libselinux/src/callbacks.c \
+	linux/libselinux/src/callbacks.h \
+	linux/libselinux/src/canonicalize_context.c \
+	linux/libselinux/src/checkAccess.c \
+	linux/libselinux/src/check_context.c \
+	linux/libselinux/src/compute_av.c \
+	linux/libselinux/src/compute_create.c \
+	linux/libselinux/src/context.c \
+	linux/libselinux/src/context_internal.h \
+	linux/libselinux/src/deny_unknown.c \
+	linux/libselinux/src/disable.c \
+	linux/libselinux/src/dso.h \
+	linux/libselinux/src/enabled.c \
+	linux/libselinux/src/fgetfilecon.c \
+	linux/libselinux/src/freecon.c \
+	linux/libselinux/src/fsetfilecon.c \
+	linux/libselinux/src/get_initial_context.c \
+	linux/libselinux/src/getenforce.c \
+	linux/libselinux/src/getfilecon.c \
+	linux/libselinux/src/getpeercon.c \
+	linux/libselinux/src/init.c \
+	linux/libselinux/src/label.c \
+	linux/libselinux/src/label_android_property.c \
+	##linux/libselinux/src/label_file.c \
+	linux/libselinux/src/label_internal.h \
+	linux/libselinux/src/lgetfilecon.c \
+	linux/libselinux/src/load_policy.c \
+	linux/libselinux/src/lsetfilecon.c \
+	linux/libselinux/src/mapping.c \
+	linux/libselinux/src/mapping.h \
+	linux/libselinux/src/policy.h \
+	linux/libselinux/src/policyvers.c \
+	linux/libselinux/src/procattr.c \
+	linux/libselinux/src/selinux_internal.h \
+	linux/libselinux/src/selinux_netlink.h \
+	linux/libselinux/src/sestatus.c \
+	linux/libselinux/src/setenforce.c \
+	linux/libselinux/src/setfilecon.c \
+	linux/libselinux/src/stringrep.c
+
 backend_sources += \
 	linux/linux-host-session.vala \
 	linux/linjector.vala \
@@ -36,7 +89,8 @@ backend_sources += \
 	linux/supersu.vala
 glue_sources += \
 	linux/system-linux.c \
-	linux/linjector-glue.c
+	linux/linjector-glue.c \
+	$(libselinux_sources)
 backend_libadd += \
 	libfrida-helper-types.la \
 	libfrida-data-helper-process.la
@@ -343,6 +397,7 @@ AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe \
+	-I $(srcdir)/linux/libselinux/include \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\"
