@@ -43,16 +43,16 @@ struct _FridaPipeBackend
 
 enum _FridaPipeRole
 {
-  FRIDA_PIPE_SERVER = 1,
-  FRIDA_PIPE_CLIENT
+  FRIDA_ROLE_SERVER = 1,
+  FRIDA_ROLE_CLIENT
 };
 
 enum _FridaPipeState
 {
-  FRIDA_PIPE_CREATED,
-  FRIDA_PIPE_CONNECTING,
-  FRIDA_PIPE_CONNECTED,
-  FRIDA_PIPE_ERROR
+  FRIDA_STATE_CREATED,
+  FRIDA_STATE_CONNECTING,
+  FRIDA_STATE_CONNECTED,
+  FRIDA_STATE_ERROR
 };
 
 static gboolean frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error);
@@ -115,13 +115,13 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   tokens = g_regex_split_simple ("^pipe:role=(.+?),path=(.+?)$", address, 0, 0);
   g_assert_cmpuint (g_strv_length (tokens), ==, 4);
 
-  backend->role = strcmp (tokens[1], "server") == 0 ? FRIDA_PIPE_SERVER : FRIDA_PIPE_CLIENT;
+  backend->role = strcmp (tokens[1], "server") == 0 ? FRIDA_ROLE_SERVER : FRIDA_ROLE_CLIENT;
   backend->address = g_unix_socket_address_new (tokens[2]);
   backend->socket = g_socket_new (G_SOCKET_FAMILY_UNIX, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_DEFAULT, error);
   if (backend->socket == NULL)
     goto handle_error;
 
-  if (backend->role == FRIDA_PIPE_SERVER)
+  if (backend->role == FRIDA_ROLE_SERVER)
   {
     if (!g_socket_bind (backend->socket, backend->address, TRUE, error))
       goto handle_error;
@@ -132,7 +132,7 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
     chmod (tokens[2], S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
   }
 
-  backend->state = FRIDA_PIPE_CREATED;
+  backend->state = FRIDA_STATE_CREATED;
 
   goto beach;
 
@@ -207,12 +207,12 @@ frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancell
   g_mutex_lock (&backend->mutex);
   switch (backend->state)
   {
-    case FRIDA_PIPE_CREATED:
+    case FRIDA_STATE_CREATED:
     {
       GError * e = NULL;
 
-      backend->state = FRIDA_PIPE_CONNECTING;
-      if (backend->role == FRIDA_PIPE_SERVER)
+      backend->state = FRIDA_STATE_CONNECTING;
+      if (backend->role == FRIDA_ROLE_SERVER)
       {
         GSocket * client;
 
@@ -221,7 +221,7 @@ frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancell
         g_mutex_lock (&backend->mutex);
         if (client != NULL)
         {
-          backend->state = FRIDA_PIPE_CONNECTED;
+          backend->state = FRIDA_STATE_CONNECTED;
           g_object_unref (backend->socket);
           backend->socket = client;
         }
@@ -235,7 +235,7 @@ frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancell
         g_mutex_lock (&backend->mutex);
         if (connected)
         {
-          backend->state = FRIDA_PIPE_CONNECTED;
+          backend->state = FRIDA_STATE_CONNECTED;
         }
       }
 
@@ -243,14 +243,14 @@ frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancell
       {
         if (!g_cancellable_is_cancelled (cancellable))
         {
-          backend->state = FRIDA_PIPE_ERROR;
-          backend->error = e;
+          backend->state = FRIDA_STATE_ERROR;
+          backend->error = g_error_copy (e);
         }
         else
         {
-          backend->state = FRIDA_PIPE_CREATED;
-          g_propagate_error (error, e);
+          backend->state = FRIDA_STATE_CREATED;
         }
+        g_propagate_error (error, e);
       }
 
       g_cond_broadcast (&backend->cond);
@@ -258,14 +258,14 @@ frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancell
 
       return e == NULL;
     }
-    case FRIDA_PIPE_CONNECTING:
-      while (backend->state == FRIDA_PIPE_CONNECTING)
+    case FRIDA_STATE_CONNECTING:
+      while (backend->state == FRIDA_STATE_CONNECTING)
         g_cond_wait (&backend->cond, &backend->mutex);
       g_mutex_unlock (&backend->mutex);
       return frida_pipe_backend_establish (backend, cancellable, error);
-    case FRIDA_PIPE_CONNECTED:
+    case FRIDA_STATE_CONNECTED:
       break;
-    case FRIDA_PIPE_ERROR:
+    case FRIDA_STATE_ERROR:
       if (error != NULL)
         *error = g_error_copy (backend->error);
       success = FALSE;
