@@ -7,11 +7,7 @@
 # pragma clang diagnostic pop
 #endif
 
-#include <errno.h>
-#include <fcntl.h>
-#include <gio/gunixinputstream.h>
-#include <gio/gunixoutputstream.h>
-#include <sys/socket.h>
+#include <gio/gunixsocketaddress.h>
 #include <sys/stat.h>
 
 /* FIXME: this transport is not secure */
@@ -23,34 +19,26 @@
 #else
 # define FRIDA_TEMP_PATH "/tmp"
 #endif
-#define FRIDA_PIPE_CONNECT_INTERVAL 50
-
-#define CHECK_POSIX_RESULT(n1, cmp, n2, op) \
-  if (!(n1 cmp n2)) \
-  { \
-    failed_operation = op; \
-    goto handle_posix_error; \
-  }
 
 typedef struct _FridaPipeTransportBackend FridaPipeTransportBackend;
 typedef struct _FridaPipeBackend FridaPipeBackend;
 typedef guint FridaPipeRole;
+typedef guint FridaPipeState;
 
 struct _FridaPipeTransportBackend
 {
-  gchar * local_name;
-  gchar * remote_name;
+  gchar * path;
 };
 
 struct _FridaPipeBackend
 {
   GMutex mutex;
+  GCond cond;
   FridaPipeRole role;
-  gchar * rx_name;
-  gchar * tx_name;
-  GInputStream * input;
-  GOutputStream * output;
-  volatile gboolean connecting;
+  GSocketAddress * address;
+  GSocket * socket;
+  GError * error;
+  volatile FridaPipeState state;
 };
 
 enum _FridaPipeRole
@@ -59,8 +47,15 @@ enum _FridaPipeRole
   FRIDA_PIPE_CLIENT
 };
 
-static gboolean frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error);
-static void frida_pipe_fd_enable_blocking (int fd);
+enum _FridaPipeState
+{
+  FRIDA_PIPE_CREATED,
+  FRIDA_PIPE_CONNECTING,
+  FRIDA_PIPE_CONNECTED,
+  FRIDA_PIPE_ERROR
+};
+
+static gboolean frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error);
 static gchar * frida_pipe_generate_name (void);
 
 static gchar * temp_directory = NULL;
@@ -85,47 +80,14 @@ void *
 _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   FridaPipeTransportBackend * backend;
-  const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  int ret;
-  const gchar * failed_operation;
 
   backend = g_slice_new (FridaPipeTransportBackend);
+  backend->path = frida_pipe_generate_name ();
 
-  backend->local_name = frida_pipe_generate_name ();
-  backend->remote_name = frida_pipe_generate_name ();
+  *local_address = g_strdup_printf ("pipe:role=server,path=%s", backend->path);
+  *remote_address = g_strdup_printf ("pipe:role=client,path=%s", backend->path);
 
-  ret = mkfifo (backend->local_name, mode);
-  CHECK_POSIX_RESULT (ret, ==, 0, "mkfifo");
-
-  ret = chmod (backend->local_name, mode);
-  CHECK_POSIX_RESULT (ret, ==, 0, "chmod");
-
-  ret = mkfifo (backend->remote_name, mode);
-  CHECK_POSIX_RESULT (ret, ==, 0, "mkfifo");
-
-  ret = chmod (backend->remote_name, mode);
-  CHECK_POSIX_RESULT (ret, ==, 0, "chmod");
-
-  *local_address = g_strdup_printf ("pipe:role=server,rx=%s,tx=%s", backend->local_name, backend->remote_name);
-  *remote_address = g_strdup_printf ("pipe:role=client,rx=%s,tx=%s", backend->remote_name, backend->local_name);
-
-  goto beach;
-
-handle_posix_error:
-  {
-    g_set_error (error,
-        G_IO_ERROR,
-        g_io_error_from_errno (errno),
-        "Error creating FIFO with %s: %s",
-        failed_operation, g_strerror (errno));
-    _frida_pipe_transport_destroy_backend (backend);
-    backend = NULL;
-    goto beach;
-  }
-beach:
-  {
-    return backend;
-  }
+  return backend;
 }
 
 void
@@ -133,11 +95,8 @@ _frida_pipe_transport_destroy_backend (void * b)
 {
   FridaPipeTransportBackend * backend = (FridaPipeTransportBackend *) b;
 
-  unlink (backend->local_name);
-  g_free (backend->local_name);
-
-  unlink (backend->remote_name);
-  g_free (backend->remote_name);
+  unlink (backend->path);
+  g_free (backend->path);
 
   g_slice_free (FridaPipeTransportBackend, backend);
 }
@@ -147,45 +106,38 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
 {
   FridaPipeBackend * backend;
   gchar ** tokens;
-  int fd;
-  const gchar * failed_operation;
 
   backend = g_slice_new0 (FridaPipeBackend);
 
   g_mutex_init (&backend->mutex);
+  g_cond_init (&backend->cond);
 
-  tokens = g_regex_split_simple ("^pipe:role=(.+?),rx=(.+?),tx=(.+?)$", address, 0, 0);
-  g_assert_cmpuint (g_strv_length (tokens), ==, 5);
+  tokens = g_regex_split_simple ("^pipe:role=(.+?),path=(.+?)$", address, 0, 0);
+  g_assert_cmpuint (g_strv_length (tokens), ==, 4);
 
   backend->role = strcmp (tokens[1], "server") == 0 ? FRIDA_PIPE_SERVER : FRIDA_PIPE_CLIENT;
-  backend->rx_name = g_strdup (tokens[2]);
-  backend->tx_name = g_strdup (tokens[3]);
+  backend->address = g_unix_socket_address_new (tokens[2]);
+  backend->socket = g_socket_new (G_SOCKET_FAMILY_UNIX, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_DEFAULT, error);
+  if (backend->socket == NULL)
+    goto handle_error;
 
-  fd = open (backend->rx_name, O_RDONLY | O_NONBLOCK);
-  CHECK_POSIX_RESULT (fd, !=, -1, "rx");
-  frida_pipe_fd_enable_blocking (fd);
-  backend->input = G_INPUT_STREAM (g_unix_input_stream_new (fd, TRUE));
-
-  if (backend->role == FRIDA_PIPE_CLIENT)
+  if (backend->role == FRIDA_PIPE_SERVER)
   {
-    fd = open (backend->tx_name, O_WRONLY | O_NONBLOCK);
-    CHECK_POSIX_RESULT (fd, !=, -1, "tx");
-    frida_pipe_fd_enable_blocking (fd);
-    backend->output = G_OUTPUT_STREAM (g_unix_output_stream_new (fd, TRUE));
-    unlink (backend->tx_name);
+    if (!g_socket_bind (backend->socket, backend->address, TRUE, error))
+      goto handle_error;
+
+    if (!g_socket_listen (backend->socket, error))
+      goto handle_error;
+
+    chmod (tokens[2], S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
   }
 
-  backend->connecting = FALSE;
+  backend->state = FRIDA_PIPE_CREATED;
 
   goto beach;
 
-handle_posix_error:
+handle_error:
   {
-    g_set_error (error,
-        G_IO_ERROR,
-        g_io_error_from_errno (errno),
-        "Error opening %s FIFO: %s",
-        failed_operation, g_strerror (errno));
     _frida_pipe_destroy_backend (backend);
     backend = NULL;
     goto beach;
@@ -203,14 +155,13 @@ _frida_pipe_destroy_backend (void * b)
 {
   FridaPipeBackend * backend = (FridaPipeBackend *) b;
 
-  if (backend->input != NULL)
-    g_object_unref (backend->input);
-  if (backend->output != NULL)
-    g_object_unref (backend->output);
+  if (backend->error != NULL)
+    g_error_free (backend->error);
+  if (backend->socket != NULL)
+    g_object_unref (backend->socket);
+  g_object_unref (backend->address);
 
-  g_free (backend->rx_name);
-  g_free (backend->tx_name);
-
+  g_cond_clear (&backend->cond);
   g_mutex_clear (&backend->mutex);
 
   g_slice_free (FridaPipeBackend, backend);
@@ -221,13 +172,7 @@ _frida_pipe_close (FridaPipe * self, GError ** error)
 {
   FridaPipeBackend * backend = self->_backend;
 
-  if (!g_input_stream_close (backend->input, NULL, error))
-    return FALSE;
-
-  if (backend->output != NULL)
-    return g_output_stream_close (backend->output, NULL, error);
-
-  return TRUE;
+  return g_socket_close (backend->socket, error);
 }
 
 static gssize
@@ -236,10 +181,10 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
   FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
 
-  if (!frida_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_pipe_backend_establish (backend, cancellable, error))
     return -1;
 
-  return g_input_stream_read (backend->input, buffer, buffer_length, cancellable, error);
+  return g_socket_receive (backend->socket, (gchar *) buffer, buffer_length, cancellable, error);
 }
 
 static gssize
@@ -248,71 +193,87 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
   FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
   FridaPipeBackend * backend = self->_backend;
 
-  if (!frida_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_pipe_backend_establish (backend, cancellable, error))
     return -1;
 
-  return g_output_stream_write (backend->output, buffer, buffer_length, cancellable, error);
+  return g_socket_send (backend->socket, (gchar *) buffer, buffer_length, cancellable, error);
 }
 
 static gboolean
-frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error)
+frida_pipe_backend_establish (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error)
 {
-  gboolean connected, is_master;
-  GPollFD cancel;
-  gboolean have_cancel_pollfd;
-
-  if (backend->output != NULL)
-    return TRUE;
-
-  connected = FALSE;
+  gboolean success = TRUE;
 
   g_mutex_lock (&backend->mutex);
-  is_master = !backend->connecting;
-  backend->connecting = TRUE;
+  switch (backend->state)
+  {
+    case FRIDA_PIPE_CREATED:
+    {
+      GError * e = NULL;
+
+      backend->state = FRIDA_PIPE_CONNECTING;
+      if (backend->role == FRIDA_PIPE_SERVER)
+      {
+        GSocket * client;
+
+        g_mutex_unlock (&backend->mutex);
+        client = g_socket_accept (backend->socket, cancellable, &e);
+        g_mutex_lock (&backend->mutex);
+        if (client != NULL)
+        {
+          backend->state = FRIDA_PIPE_CONNECTED;
+          g_object_unref (backend->socket);
+          backend->socket = client;
+        }
+      }
+      else
+      {
+        gboolean connected;
+
+        g_mutex_unlock (&backend->mutex);
+        connected = g_socket_connect (backend->socket, backend->address, cancellable, &e);
+        g_mutex_lock (&backend->mutex);
+        if (connected)
+        {
+          backend->state = FRIDA_PIPE_CONNECTED;
+        }
+      }
+
+      if (e != NULL)
+      {
+        if (!g_cancellable_is_cancelled (cancellable))
+        {
+          backend->state = FRIDA_PIPE_ERROR;
+          backend->error = e;
+        }
+        else
+        {
+          backend->state = FRIDA_PIPE_CREATED;
+          g_propagate_error (error, e);
+        }
+      }
+
+      g_cond_broadcast (&backend->cond);
+      g_mutex_unlock (&backend->mutex);
+
+      return e == NULL;
+    }
+    case FRIDA_PIPE_CONNECTING:
+      while (backend->state == FRIDA_PIPE_CONNECTING)
+        g_cond_wait (&backend->cond, &backend->mutex);
+      g_mutex_unlock (&backend->mutex);
+      return frida_pipe_backend_establish (backend, cancellable, error);
+    case FRIDA_PIPE_CONNECTED:
+      break;
+    case FRIDA_PIPE_ERROR:
+      if (error != NULL)
+        *error = g_error_copy (backend->error);
+      success = FALSE;
+      break;
+  }
   g_mutex_unlock (&backend->mutex);
 
-  have_cancel_pollfd = cancellable != NULL ? g_cancellable_make_pollfd (cancellable, &cancel) : FALSE;
-
-  do
-  {
-    if (is_master)
-    {
-      int fd = open (backend->tx_name, O_WRONLY | O_NONBLOCK);
-      if (fd != -1)
-      {
-        frida_pipe_fd_enable_blocking (fd);
-        g_mutex_lock (&backend->mutex);
-        backend->output = G_OUTPUT_STREAM (g_unix_output_stream_new (fd, TRUE));
-        g_mutex_unlock (&backend->mutex);
-        unlink (backend->tx_name);
-      }
-    }
-
-    g_mutex_lock (&backend->mutex);
-    connected = backend->output != NULL;
-    g_mutex_unlock (&backend->mutex);
-
-    if (!connected)
-    {
-      if (have_cancel_pollfd)
-        g_poll (&cancel, 1, FRIDA_PIPE_CONNECT_INTERVAL);
-      else
-        g_usleep (FRIDA_PIPE_CONNECT_INTERVAL * 1000);
-    }
-
-    if (g_cancellable_set_error_if_cancelled (cancellable, error))
-      return FALSE;
-  }
-  while (!connected);
-
-  return TRUE;
-}
-
-static void
-frida_pipe_fd_enable_blocking (int fd)
-{
-  int flags = fcntl (fd, F_GETFL);
-  fcntl (fd, F_SETFL, flags & ~O_NONBLOCK);
+  return success;
 }
 
 static gchar *
