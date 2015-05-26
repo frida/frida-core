@@ -15,9 +15,7 @@ namespace Frida.Test {
 		Frida.FruitjectorTest.add_tests ();
 #endif
 
-#if !QNX
 		Frida.AgentTest.add_tests ();
-#endif
 		Frida.HostSessionTest.add_tests ();
 
 		GLib.Test.run ();
