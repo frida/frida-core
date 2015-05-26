@@ -17,6 +17,9 @@ namespace Frida {
 #if WINDOWS
 			host_session = new WindowsHostSession ();
 #endif
+#if QNX
+			host_session = new QnxHostSession ();
+#endif
 			host_session.agent_session_opened.connect (on_agent_session_opened);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
 		}
