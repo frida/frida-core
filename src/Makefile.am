@@ -80,7 +80,9 @@ libselinux_sources = \
 	linux/libselinux/src/sestatus.c \
 	linux/libselinux/src/setenforce.c \
 	linux/libselinux/src/setfilecon.c \
-	linux/libselinux/src/stringrep.c
+	linux/libselinux/src/stringrep.c \
+	linux/libselinux/src/xattr.c \
+	linux/libselinux/src/xattr.h
 
 backend_sources += \
 	linux/linux-host-session.vala \

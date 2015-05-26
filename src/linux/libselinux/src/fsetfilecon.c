@@ -3,9 +3,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <sys/xattr.h>
 #include "selinux_internal.h"
 #include "policy.h"
+#include "xattr.h"
 
 int fsetfilecon(int fd, const char *context)
 {

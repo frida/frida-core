@@ -168,7 +168,7 @@ if [[ "x$HAVE_MAC" = "xyes" ]]; then
 fi
 AC_SUBST(FRIDA_TEST_LIBS)
 
-AC_CHECK_HEADERS([spawn.h sys/user.h])
+AC_CHECK_HEADERS([spawn.h sys/user.h sys/xattr.h])
 
 AC_CONFIG_FILES([
   frida-core-1.0.pc

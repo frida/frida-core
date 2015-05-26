@@ -4,8 +4,8 @@
 #include "selinux_internal.h"
 #include <stdlib.h>
 #include <errno.h>
-#include <sys/xattr.h>
 #include "policy.h"
+#include "xattr.h"
 
 int getfilecon(const char *path, char ** context)
 {

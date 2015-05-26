@@ -24,6 +24,10 @@
 #include "selinux_netlink.h"
 #include "avc_internal.h"
 
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC O_CLOEXEC
+#endif
+
 #ifndef NETLINK_SELINUX
 #define NETLINK_SELINUX 7
 #endif
