@@ -1,6 +1,7 @@
 bin_PROGRAMS = frida-server
 
 frida_server_SOURCES = \
+	dummy.cpp \
 	server.vala
 frida_server_CFLAGS = \
 	-w
