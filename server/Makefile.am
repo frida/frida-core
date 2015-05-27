@@ -6,8 +6,7 @@ frida_server_SOURCES = \
 frida_server_CFLAGS = \
 	-w
 frida_server_LDFLAGS = \
-	$(FRIDA_LDFLAGS) \
-	-static
+	$(FRIDA_LDFLAGS)
 frida_server_LDADD = \
 	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(FRIDA_LIBS)
