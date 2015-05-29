@@ -129,6 +129,11 @@ glue_sources += \
 	darwin/fruitjector-glue.c \
 	darwin/icon-helpers.h \
 	darwin/icon-helpers.m
+if OS_IOS
+glue_sources += \
+	darwin/springboard.h \
+	darwin/springboard.m
+endif
 backend_libadd += \
 	libfrida-helper-types.la \
 	libfrida-data-helper-process.la \

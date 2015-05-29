@@ -183,15 +183,19 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async uint launch (string name) throws Error {
+		public async uint launch (string identifier) throws Error {
 			var plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
 			if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
 				throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
 
-			var loader_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
-			var loader_path = Path.build_filename (plugin_directory, loader_blob.name);
+			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
+			var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
+			var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
 			try {
-				FileUtils.set_data (loader_path, generate_loader_dylib (loader_blob, service_address.path));
+				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, service_address.path));
+				FileUtils.chmod (dylib_path, 0755);
+				FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
+				FileUtils.chmod (plist_path, 0644);
 			} catch (GLib.FileError e) {
 				throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
 			}
@@ -200,6 +204,22 @@ namespace Frida {
 			yield;
 
 			throw new Error.NOT_SUPPORTED ("DERPRRRR");
+		}
+
+		private string generate_loader_plist (string identifier) {
+			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+				"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">" +
+				"<plist version=\"1.0\">" +
+				"<dict>" +
+					"<key>Filter</key>" +
+					"<dict>" +
+						"<key>Bundles</key>" +
+						"<array>" +
+							"<string>" + identifier + "</string>" +
+						"</array>" +
+					"</dict>" +
+				"</dict>" +
+			"</plist>";
 		}
 
 		private uint8[] generate_loader_dylib (Frida.Data.Loader.Blob blob, string callback_path) {

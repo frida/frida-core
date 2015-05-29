@@ -513,7 +513,7 @@ namespace Frida.HostSessionTest {
 
 				try {
 					var host_session = yield prov.create ();
-					var pid = yield host_session.spawn ("Safari", new string[] { "Safari" }, new string[] {});
+					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, new string[] {});
 					var id = yield host_session.attach_to (pid);
 					yield prov.obtain_agent_session (host_session, id);
 					yield host_session.resume (pid);
