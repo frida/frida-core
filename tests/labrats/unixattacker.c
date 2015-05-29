@@ -29,7 +29,7 @@ frida_agent_main (const char * data_string)
 static void
 append_to_log (char c)
 {
-  FILE *f;
+  FILE * f;
 
   f = fopen (getenv ("FRIDA_LABRAT_LOGFILE"), "ab");
   assert (f != NULL);
