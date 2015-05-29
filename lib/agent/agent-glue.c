@@ -20,37 +20,6 @@
 
 static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
-#ifdef HAVE_IOS
-
-#include <assert.h>
-#include <unistd.h>
-
-static void
-frida_log (const gchar * format, ...)
-{
-  char buf[256];
-  FILE * f;
-  va_list vl;
-
-  sprintf (buf, "/var/tmp/agent-%d.log", getpid ());
-  f = fopen (buf, "ab");
-  if (f != NULL)
-  {
-    va_start (vl, format);
-    vfprintf (f, format, vl);
-    va_end (vl);
-    fclose (f);
-  }
-}
-
-__attribute__ ((constructor)) static void
-frida_agent_on_load (void)
-{
-  frida_log ("frida_agent_on_load\n");
-}
-
-#endif
-
 void
 frida_agent_environment_init (void)
 {

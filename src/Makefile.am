@@ -116,6 +116,8 @@ if OS_DARWIN
 HELPER = frida-helper
 AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib!frida-agent.dylib
 AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
+LOADER ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.dylib!FridaLoader.dylib
+LOADER_TARGETS = $(shell echo $(LOADER) | cut -f1 -d'!')
 
 backend_sources += \
 	darwin/darwin-host-session.vala \
@@ -129,10 +131,12 @@ glue_sources += \
 	darwin/icon-helpers.m
 backend_libadd += \
 	libfrida-helper-types.la \
-	libfrida-data-helper-process.la
+	libfrida-data-helper-process.la \
+	libfrida-data-loader.la
 backend_valaflags += \
 	--pkg=frida-helper-types \
-	--pkg=frida-data-helper-process
+	--pkg=frida-data-helper-process \
+	--pkg=frida-data-loader
 
 backend_programs += \
 	frida-helper
@@ -223,6 +227,19 @@ backend_sources += \
 	fruity/fruity-property-list.vala
 glue_sources += \
 	fruity/fruity-host-session-darwin.m
+
+backend_libraries += \
+	libfrida-data-loader.la
+libfrida_data_loader_la_SOURCES = \
+	frida-data-loader.c \
+	frida-data-loader-blob.S \
+	$(NULL)
+frida-data-loader.c frida-data-loader-blob.S: $(LOADER_TARGETS)
+	$(AM_V_GEN) \
+		$(RESOURCE_COMPILER) \
+			-c "$(srcdir)/loader.resources" \
+			-o "$(builddir)/frida-data-loader" \
+			$(LOADER)
 endif
 
 if OS_QNX

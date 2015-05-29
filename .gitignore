@@ -48,6 +48,8 @@
 /lib/interfaces/frida-interfaces.h
 /lib/interfaces/frida-interfaces.vapi
 /lib/interfaces/session.c
+/lib/loader/Makefile
+/lib/loader/Makefile.in
 /lib/pipe/Makefile
 /lib/pipe/Makefile.in
 /lib/pipe/frida-pipe.h
