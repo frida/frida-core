@@ -62,3 +62,13 @@ _frida_darwin_host_session_provider_extract_icon (void)
   return NULL;
 #endif
 }
+
+gboolean
+_frida_darwin_host_session_is_running_on_ios (void)
+{
+#ifdef HAVE_IOS
+  return TRUE;
+#else
+  return FALSE;
+#endif
+}

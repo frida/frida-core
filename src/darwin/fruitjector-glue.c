@@ -14,7 +14,7 @@ _frida_fruitjector_get_pid (void)
 }
 
 GInputStream *
-_frida_fruitjector_clone_dylib (GInputStream * dylib)
+_frida_agent_resource_clone_dylib (GInputStream * dylib)
 {
   GSeekable * seekable = G_SEEKABLE (dylib);
   goffset previous_offset, size;

@@ -62,6 +62,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/Manual/spawn-ios-app", () => {
+			var h = new Harness ((h) => Darwin.Manual.spawn_ios_app.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if WINDOWS
@@ -482,6 +487,36 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create ();
 					var id = yield host_session.attach_to (pid);
 					yield prov.obtain_agent_session (host_session, id);
+				} catch (GLib.Error e) {
+					stderr.printf ("ERROR: %s\n", e.message);
+					assert_not_reached ();
+				}
+
+				yield h.service.stop ();
+				h.service.remove_backend (backend);
+
+				h.done ();
+			}
+
+			private static async void spawn_ios_app (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode on iOS device> ");
+					h.done ();
+					return;
+				}
+
+				var backend = new DarwinHostSessionBackend ();
+				h.service.add_backend (backend);
+				yield h.service.start ();
+				yield h.process_events ();
+				var prov = h.first_provider ();
+
+				try {
+					var host_session = yield prov.create ();
+					var pid = yield host_session.spawn ("Safari", new string[] { "Safari" }, new string[] {});
+					var id = yield host_session.attach_to (pid);
+					yield prov.obtain_agent_session (host_session, id);
+					yield host_session.resume (pid);
 				} catch (GLib.Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();
