@@ -114,10 +114,10 @@ endif
 
 if OS_DARWIN
 HELPER = frida-helper
-AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib!frida-agent.dylib
-AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
 LOADER ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.dylib!FridaLoader.dylib
 LOADER_TARGETS = $(shell echo $(LOADER) | cut -f1 -d'!')
+AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib!frida-agent.dylib
+AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
 
 springboard_sources = $(NULL)
 if OS_IOS
