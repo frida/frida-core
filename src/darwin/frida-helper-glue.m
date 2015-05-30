@@ -441,7 +441,7 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
 
   res = _frida_get_springboard_api ()->SBSLaunchApplicationWithIdentifier (
       [NSString stringWithUTF8String:identifier],
-      SBSApplicationLaunchUnlockDevice);
+      NO);
   if (res != 0)
   {
     g_printerr ("SBSLaunchApplicationWithIdentifier(%s) failed: %u\n", identifier, (guint) res);
