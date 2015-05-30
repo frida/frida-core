@@ -44,8 +44,56 @@ frida_system_init (void)
   }
 }
 
+FridaHostApplicationInfo *
+frida_system_enumerate_applications (int * result_length)
+{
+#ifdef HAVE_IOS
+  NSAutoreleasePool * pool;
+  FridaSpringboardApi * api;
+  NSArray * identifiers;
+  NSUInteger count, i;
+  FridaHostApplicationInfo * result;
+
+  frida_system_init ();
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  api = _frida_get_springboard_api ();
+
+  identifiers = api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
+
+  count = [identifiers count];
+  result = g_new0 (FridaHostApplicationInfo, count);
+  *result_length = count;
+
+  for (i = 0; i != count; i++)
+  {
+    NSString * identifier, * name;
+    FridaHostApplicationInfo * info = &result[i];
+
+    identifier = [identifiers objectAtIndex:i];
+    name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+    info->_identifier = g_strdup ([identifier UTF8String]);
+    info->_name = g_strdup ([name UTF8String]);
+    [name release];
+
+    extract_icons_from_identifier (identifier, &info->_small_icon, &info->_large_icon);
+  }
+
+  [identifiers release];
+
+  [pool release];
+
+  return result;
+#else
+  *result_length = 0;
+
+  return NULL;
+#endif
+}
+
 FridaHostProcessInfo *
-frida_system_enumerate_processes (int * result_length1)
+frida_system_enumerate_processes (int * result_length)
 {
   NSAutoreleasePool * pool;
   int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
@@ -69,7 +117,7 @@ frida_system_enumerate_processes (int * result_length1)
   count = length / sizeof (struct kinfo_proc);
 
   result = g_new0 (FridaHostProcessInfo, count);
-  *result_length1 = count;
+  *result_length = count;
 
 #ifdef HAVE_IOS
   FridaSpringboardApi * api = _frida_get_springboard_api ();

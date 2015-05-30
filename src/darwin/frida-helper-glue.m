@@ -447,7 +447,7 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while trying to launch iOS app: %u :(", (guint) res);
+        "Unexpected error while trying to launch iOS app: %u", (guint) res);
   }
 
   [pool release];

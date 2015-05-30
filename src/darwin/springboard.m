@@ -16,6 +16,9 @@ _frida_get_springboard_api (void)
     api->module = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY | RTLD_GLOBAL);
     g_assert (api->module != NULL);
 
+    api->SBSCopyApplicationDisplayIdentifiers = dlsym (api->module, "SBSCopyApplicationDisplayIdentifiers");
+    g_assert (api->SBSCopyApplicationDisplayIdentifiers != NULL);
+
     api->SBSCopyDisplayIdentifierForProcessID = dlsym (api->module, "SBSCopyDisplayIdentifierForProcessID");
     g_assert (api->SBSCopyDisplayIdentifierForProcessID != NULL);
 

@@ -8,8 +8,16 @@
 
 static gboolean get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity);
 
+FridaHostApplicationInfo *
+frida_system_enumerate_applications (int * result_length)
+{
+  *result_length = 0;
+
+  return NULL;
+}
+
 FridaHostProcessInfo *
-frida_system_enumerate_processes (int * result_length1)
+frida_system_enumerate_processes (int * result_length)
 {
   GArray * processes;
   DWORD * pids = NULL;
@@ -68,7 +76,8 @@ frida_system_enumerate_processes (int * result_length1)
 
   g_free (pids);
 
-  *result_length1 = processes->len;
+  *result_length = processes->len;
+
   return (FridaHostProcessInfo *) g_array_free (processes, FALSE);
 }
 

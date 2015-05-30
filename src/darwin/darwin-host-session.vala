@@ -79,6 +79,9 @@ namespace Frida {
 		private AgentResource agent;
 		private FruitLauncher fruit_launcher;
 
+		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
+		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
+
 		construct {
 			helper = new HelperProcess ();
 			injector = new Fruitjector.with_helper (helper);
@@ -108,8 +111,12 @@ namespace Frida {
 			helper = null;
 		}
 
-		public override async Frida.HostProcessInfo[] enumerate_processes () throws Error {
-			return System.enumerate_processes ();
+		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+			return yield application_enumerator.enumerate_applications ();
+		}
+
+		public override async HostProcessInfo[] enumerate_processes () throws Error {
+			return yield process_enumerator.enumerate_processes ();
 		}
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {

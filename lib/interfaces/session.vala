@@ -1,6 +1,7 @@
 namespace Frida {
 	[DBus (name = "re.frida.HostSession1")]
 	public interface HostSession : Object {
+		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
 		public abstract async HostProcessInfo[] enumerate_processes () throws GLib.Error;
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
@@ -51,6 +52,35 @@ namespace Frida {
 				return (Frida.Error) e;
 			else
 				return new Frida.Error.TRANSPORT (e.message);
+		}
+	}
+
+	public struct HostApplicationInfo {
+		public string identifier {
+			get;
+			private set;
+		}
+
+		public string name {
+			get;
+			private set;
+		}
+
+		public ImageData small_icon {
+			get;
+			private set;
+		}
+
+		public ImageData large_icon {
+			get;
+			private set;
+		}
+
+		public HostApplicationInfo (string identifier, string name, ImageData small_icon, ImageData large_icon) {
+			this.identifier = identifier;
+			this.name = name;
+			this.small_icon = small_icon;
+			this.large_icon = large_icon;
 		}
 	}
 

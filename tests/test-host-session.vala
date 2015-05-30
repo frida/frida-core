@@ -390,10 +390,14 @@ namespace Frida.HostSessionTest {
 
 			try {
 				var session = yield prov.create ();
+				var applications = yield session.enumerate_applications ();
 				var processes = yield session.enumerate_processes ();
 				assert (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
+					foreach (var app in applications)
+						stdout.printf ("identifier='%s' name='%s'\n", app.identifier, app.name);
+
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}

@@ -4,8 +4,16 @@
 #include <fcntl.h>
 #include <sys/procfs.h>
 
+FridaHostApplicationInfo *
+frida_system_enumerate_applications (int * result_length)
+{
+  *result_length = 0;
+
+  return NULL;
+}
+
 FridaHostProcessInfo *
-frida_system_enumerate_processes (int * result_length1)
+frida_system_enumerate_processes (int * result_length)
 {
   GArray * processes;
   FridaImageData no_icon;
@@ -56,7 +64,8 @@ frida_system_enumerate_processes (int * result_length1)
 
   frida_image_data_destroy (&no_icon);
 
-  *result_length1 = processes->len;
+  *result_length = processes->len;
+
   return (FridaHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
