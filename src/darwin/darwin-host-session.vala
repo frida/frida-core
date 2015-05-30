@@ -123,6 +123,10 @@ namespace Frida {
 		}
 
 		public override async void resume (uint pid) throws Error {
+			if (fruit_launcher != null) {
+				if (yield fruit_launcher.resume (pid))
+					return;
+			}
 			yield helper.resume (pid);
 		}
 
@@ -252,11 +256,12 @@ namespace Frida {
 			return loader.pipe;
 		}
 
-		public async void resume (uint pid) throws Error {
+		public async bool resume (uint pid) throws Error {
 			Loader loader;
 			if (!loader_by_pid.unset (pid, out loader))
-				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
+				return false;
 			yield loader.send_string ("go");
+			return true;
 		}
 
 		private string generate_loader_plist (string identifier) {
@@ -337,7 +342,7 @@ namespace Frida {
 				} catch (GLib.Error e) {
 					throw new Error.TRANSPORT ("Unable to communicate with loader");
 				}
-				if (bytes_written != v.length)
+				if (bytes_written != data_buf.length)
 					throw new Error.TRANSPORT ("Unable to communicate with loader");
 			}
 		}

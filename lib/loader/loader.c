@@ -103,13 +103,16 @@ frida_loader_run (void * user_data)
   asprintf (&agent_path, "%s/frida-agent.dylib", frida_data_dir);
 
   agent = dlopen (agent_path, RTLD_GLOBAL | RTLD_LAZY);
+  frida_log ("agent=%p\n", agent);
   if (agent == NULL)
     goto beach;
 
   agent_main = (FridaAgentMainFunc) dlsym (agent, "frida_agent_main");
   assert (agent_main != NULL);
 
+  frida_log ("calling main\n");
   agent_main (pipe_address, NULL, 0);
+  frida_log ("called main\n");
 
   dlclose (agent);
 
