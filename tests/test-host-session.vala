@@ -521,8 +521,26 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create ();
 					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, new string[] {});
 					var id = yield host_session.attach_to (pid);
-					yield prov.obtain_agent_session (host_session, id);
+					var session = yield prov.obtain_agent_session (host_session, id);
+					string received_message = null;
+					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+						received_message = message;
+						spawn_ios_app.callback ();
+					});
+					var script_id = yield session.create_script ("spawn-ios-app",
+						"Interceptor.attach (Module.findExportByName('UIKit', 'UIApplicationMain'), {" +
+						"  onEnter: function (args) {" +
+						"    send('UIApplicationMain');" +
+						"  }" +
+						"});" +
+						"setTimeout(function () { send('ready'); }, 1);");
+					yield session.load_script (script_id);
+					yield;
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
 					yield host_session.resume (pid);
+					yield;
+					session.disconnect (message_handler);
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
 				} catch (GLib.Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();
