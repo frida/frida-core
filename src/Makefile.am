@@ -119,21 +119,24 @@ AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
 LOADER ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.dylib!FridaLoader.dylib
 LOADER_TARGETS = $(shell echo $(LOADER) | cut -f1 -d'!')
 
+springboard_sources = $(NULL)
+if OS_IOS
+springboard_sources += \
+	darwin/springboard.h \
+	darwin/springboard.m
+endif
+
 backend_sources += \
 	darwin/darwin-host-session.vala \
 	darwin/fruitjector.vala \
 	darwin/frida-helper-process.vala
 glue_sources += \
 	darwin/system-darwin.m \
-	darwin/darwin-host-session-glue.c \
+	darwin/darwin-host-session-glue.m \
 	darwin/fruitjector-glue.c \
 	darwin/icon-helpers.h \
-	darwin/icon-helpers.m
-if OS_IOS
-glue_sources += \
-	darwin/springboard.h \
-	darwin/springboard.m
-endif
+	darwin/icon-helpers.m \
+	$(springboard_sources)
 backend_libadd += \
 	libfrida-helper-types.la \
 	libfrida-data-helper-process.la \
@@ -180,7 +183,8 @@ libfrida_helper_main_la_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_glue_la_SOURCES = \
-	darwin/frida-helper-glue.c \
+	darwin/frida-helper-glue.m \
+	$(springboard_sources) \
 	darwin/mapper.h \
 	darwin/mapper.c
 

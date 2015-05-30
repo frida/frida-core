@@ -71,6 +71,10 @@ frida_system_enumerate_processes (int * result_length1)
   result = g_new0 (FridaHostProcessInfo, count);
   *result_length1 = count;
 
+#ifdef HAVE_IOS
+  FridaSpringboardApi * api = _frida_get_springboard_api ();
+#endif
+
   for (i = 0; i != count; i++)
   {
     struct kinfo_proc * e = &entries[i];
@@ -79,7 +83,6 @@ frida_system_enumerate_processes (int * result_length1)
     info->_pid = e->kp_proc.p_pid;
 
 #ifdef HAVE_IOS
-    FridaSpringboardApi * api = _frida_get_springboard_api ();
     NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
     if (identifier != nil)
     {

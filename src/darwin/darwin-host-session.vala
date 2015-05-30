@@ -206,13 +206,13 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
 
 			yield helper.preload ();
+			(void) agent.file; // Make sure it's written to disk
 
 			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 			var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
 			var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
 			try {
 				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
-				(void) agent.file; // Make sure it's written to disk
 				FileUtils.chmod (dylib_path, 0755);
 				FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
 				FileUtils.chmod (plist_path, 0644);
@@ -226,8 +226,9 @@ namespace Frida {
 				spawn.callback ();
 				return true;
 			});
-			// TODO: ask SpringBoard to launch this app
 			stderr.printf ("waiting for loader on '%s'\n", service_address.path);
+			kill (identifier);
+			helper.launch.begin (identifier);
 			yield;
 			stderr.printf ("got loader!\n");
 			this.service.disconnect (on_incoming);
@@ -295,6 +296,8 @@ namespace Frida {
 			}
 			return result;
 		}
+
+		private static extern void kill (string identifier);
 
 		private class Loader {
 			private SocketConnection connection;

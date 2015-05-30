@@ -68,6 +68,15 @@ namespace Frida {
 			}
 		}
 
+		public async void launch (string identifier) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.launch (identifier);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async void resume (uint pid) throws Error {
 			var helper = yield obtain ();
 			try {

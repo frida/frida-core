@@ -72,3 +72,65 @@ _frida_darwin_host_session_is_running_on_ios (void)
   return FALSE;
 #endif
 }
+
+#ifdef HAVE_IOS
+
+#import "springboard.h"
+
+void
+frida_fruit_launcher_kill (const gchar * identifier)
+{
+  NSAutoreleasePool * pool;
+  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+  struct kinfo_proc * entries;
+  size_t length;
+  gint err;
+  FridaSpringboardApi * api;
+  gboolean found;
+  guint count, i;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
+  g_assert_cmpint (err, !=, -1);
+
+  entries = g_malloc0 (length);
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
+  g_assert_cmpint (err, !=, -1);
+  count = length / sizeof (struct kinfo_proc);
+
+  api = _frida_get_springboard_api ();
+
+  for (i = 0, found = FALSE; i != count && !found; i++)
+  {
+    struct kinfo_proc * e = &entries[i];
+    UInt32 pid = e->kp_proc.p_pid;
+    NSString * cur;
+
+    cur = api->SBSCopyDisplayIdentifierForProcessID (pid);
+    if (cur != nil)
+    {
+      if (strcmp ([cur UTF8String], identifier) == 0)
+      {
+        kill (pid, SIGKILL);
+        found = TRUE;
+      }
+
+      [cur release];
+    }
+  }
+
+  g_free (entries);
+
+  [pool release];
+}
+
+#else
+
+void
+frida_fruit_launcher_kill (const gchar * identifier)
+{
+}
+
+#endif

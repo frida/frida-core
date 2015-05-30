@@ -25,6 +25,9 @@ _frida_get_springboard_api (void)
     api->SBSCopyIconImagePNGDataForDisplayIdentifier = dlsym (api->module, "SBSCopyIconImagePNGDataForDisplayIdentifier");
     g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
 
+    api->SBSLaunchApplicationWithIdentifier = dlsym (api->module, "SBSLaunchApplicationWithIdentifier");
+    g_assert (api->SBSLaunchApplicationWithIdentifier != NULL);
+
     frida_springboard_api = api;
   }
 
