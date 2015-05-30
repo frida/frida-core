@@ -78,6 +78,30 @@ _frida_darwin_host_session_is_running_on_ios (void)
 #import "springboard.h"
 
 void
+frida_fruit_launcher_check_identifier (const gchar * identifier, GError ** error)
+{
+  NSAutoreleasePool * pool;
+  NSString * name;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  name = _frida_get_springboard_api ()->SBSCopyLocalizedApplicationNameForDisplayIdentifier ([NSString stringWithUTF8String:identifier]);
+  if (name != nil)
+  {
+    [name release];
+  }
+  else
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
+        "Unable to find application with identifier '%s'", identifier);
+  }
+
+  [pool release];
+}
+
+void
 frida_fruit_launcher_kill (const gchar * identifier)
 {
   NSAutoreleasePool * pool;

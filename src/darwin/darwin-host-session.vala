@@ -217,6 +217,8 @@ namespace Frida {
 			yield helper.preload ();
 			(void) agent.file; // Make sure it's written to disk
 
+			check_identifier (identifier);
+
 			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 			var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
 			var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
@@ -305,6 +307,7 @@ namespace Frida {
 			return result;
 		}
 
+		private static extern void check_identifier (string identifier) throws Error;
 		private static extern void kill (string identifier);
 
 		private class Loader {
