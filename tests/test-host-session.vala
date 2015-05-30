@@ -505,6 +505,8 @@ namespace Frida.HostSessionTest {
 					return;
 				}
 
+				h.disable_timeout (); /* this is a manual test after all */
+
 				var backend = new DarwinHostSessionBackend ();
 				h.service.add_backend (backend);
 				yield h.service.start ();
