@@ -226,17 +226,13 @@ namespace Frida {
 				spawn.callback ();
 				return true;
 			});
-			stderr.printf ("waiting for loader on '%s'\n", service_address.path);
 			kill (identifier);
 			helper.launch.begin (identifier);
 			yield;
-			stderr.printf ("got loader!\n");
 			this.service.disconnect (on_incoming);
 
-			stderr.printf ("reading pid message\n");
 			string pid_message = yield loader.recv_string ();
 			uint pid = (uint) uint64.parse (pid_message);
-			stderr.printf ("got pid_message: '%s'\n", pid_message);
 
 			var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
 			try {
