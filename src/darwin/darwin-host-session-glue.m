@@ -153,6 +153,11 @@ frida_fruit_launcher_kill (const gchar * identifier)
 #else
 
 void
+frida_fruit_launcher_check_identifier (const gchar * identifier, GError ** error)
+{
+}
+
+void
 frida_fruit_launcher_kill (const gchar * identifier)
 {
 }
