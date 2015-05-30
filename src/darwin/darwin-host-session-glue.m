@@ -138,6 +138,16 @@ frida_fruit_launcher_kill (const gchar * identifier)
       if (strcmp ([cur UTF8String], identifier) == 0)
       {
         kill (pid, SIGKILL);
+
+        while (TRUE)
+        {
+          NSString * identifier_of_dying_process = api->SBSCopyDisplayIdentifierForProcessID (pid);
+          if (identifier_of_dying_process == nil)
+            break;
+          [identifier_of_dying_process release];
+          g_usleep (10000);
+        }
+
         found = TRUE;
       }
 
