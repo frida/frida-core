@@ -96,7 +96,11 @@ namespace Frida {
 			helper = null;
 		}
 
-		public override async Frida.HostProcessInfo[] enumerate_processes () throws Error {
+		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+			return System.enumerate_applications ();
+		}
+
+		public override async HostProcessInfo[] enumerate_processes () throws Error {
 			return System.enumerate_processes ();
 		}
 

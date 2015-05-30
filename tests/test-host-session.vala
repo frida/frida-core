@@ -62,6 +62,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/Manual/spawn-ios-app", () => {
+			var h = new Harness ((h) => Darwin.Manual.spawn_ios_app.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if WINDOWS
@@ -385,10 +390,14 @@ namespace Frida.HostSessionTest {
 
 			try {
 				var session = yield prov.create ();
+				var applications = yield session.enumerate_applications ();
 				var processes = yield session.enumerate_processes ();
 				assert (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
+					foreach (var app in applications)
+						stdout.printf ("identifier='%s' name='%s'\n", app.identifier, app.name);
+
 					foreach (var process in processes)
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
@@ -482,6 +491,56 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create ();
 					var id = yield host_session.attach_to (pid);
 					yield prov.obtain_agent_session (host_session, id);
+				} catch (GLib.Error e) {
+					stderr.printf ("ERROR: %s\n", e.message);
+					assert_not_reached ();
+				}
+
+				yield h.service.stop ();
+				h.service.remove_backend (backend);
+
+				h.done ();
+			}
+
+			private static async void spawn_ios_app (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode on iOS device> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout (); /* this is a manual test after all */
+
+				var backend = new DarwinHostSessionBackend ();
+				h.service.add_backend (backend);
+				yield h.service.start ();
+				yield h.process_events ();
+				var prov = h.first_provider ();
+
+				try {
+					var host_session = yield prov.create ();
+					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, new string[] {});
+					var id = yield host_session.attach_to (pid);
+					var session = yield prov.obtain_agent_session (host_session, id);
+					string received_message = null;
+					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+						received_message = message;
+						spawn_ios_app.callback ();
+					});
+					var script_id = yield session.create_script ("spawn-ios-app",
+						"Interceptor.attach (Module.findExportByName('UIKit', 'UIApplicationMain'), {" +
+						"  onEnter: function (args) {" +
+						"    send('UIApplicationMain');" +
+						"  }" +
+						"});" +
+						"setTimeout(function () { send('ready'); }, 1);");
+					yield session.load_script (script_id);
+					yield;
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
+					yield host_session.resume (pid);
+					yield;
+					session.disconnect (message_handler);
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
 				} catch (GLib.Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();

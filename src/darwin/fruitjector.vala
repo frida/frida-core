@@ -7,7 +7,6 @@ namespace Frida {
 
 		private HelperProcess helper;
 		private bool close_helper;
-		private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
 		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
 
 		public Fruitjector () {
@@ -26,15 +25,10 @@ namespace Frida {
 			helper.uninjected.disconnect (on_uninjected);
 			if (close_helper)
 				yield helper.close ();
-
-			foreach (var tempfile in agents.values)
-				tempfile.destroy ();
-			agents.clear ();
 		}
 
-		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
-			var filename = ensure_copy_of (desc);
-			var id = yield helper.inject (pid, filename, data_string);
+		public async uint inject (uint pid, AgentResource resource, string data_string) throws Error {
+			var id = yield helper.inject (pid, resource.file.path, data_string);
 			pid_by_id[id] = pid;
 			return id;
 		}
@@ -48,7 +42,7 @@ namespace Frida {
 		}
 
 		public async void make_pipe_endpoints (uint pid, out string local_address, out string remote_address) throws Error {
-			var endpoints = yield helper.make_pipe_endpoints (_get_pid (), pid);
+			var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
 			local_address = endpoints.local_address;
 			remote_address = endpoints.remote_address;
 		}
@@ -57,23 +51,9 @@ namespace Frida {
 			pid_by_id.unset (id);
 			uninjected (id);
 		}
-
-		private string ensure_copy_of (AgentDescriptor desc) throws Error {
-			var temp_agent = agents[desc.name];
-			if (temp_agent == null) {
-				var dylib = _clone_dylib (desc.dylib);
-				temp_agent = new TemporaryFile.from_stream (desc.name, dylib, helper.tempdir);
-				FileUtils.chmod (temp_agent.path, 0755);
-				agents[desc.name] = temp_agent;
-			}
-			return temp_agent.path;
-		}
-
-		public static extern uint _get_pid ();
-		public static extern InputStream _clone_dylib (InputStream dylib);
 	}
 
-	public class AgentDescriptor : Object {
+	public class AgentResource : Object {
 		public string name {
 			get;
 			construct;
@@ -91,8 +71,28 @@ namespace Frida {
 		}
 		private InputStream _dylib;
 
-		public AgentDescriptor (string name, InputStream dylib) {
-			Object (name: name, dylib: dylib);
+		public TemporaryDirectory? tempdir {
+			get;
+			construct;
+		}
+
+		public TemporaryFile file {
+			get {
+				if (_file == null) {
+					try {
+						_file = new TemporaryFile.from_stream (name, _clone_dylib (dylib), tempdir);
+					} catch (Error e) {
+						assert_not_reached ();
+					}
+					FileUtils.chmod (_file.path, 0755);
+				}
+				return _file;
+			}
+		}
+		private TemporaryFile _file;
+
+		public AgentResource (string name, InputStream dylib, TemporaryDirectory? tempdir = null) {
+			Object (name: name, dylib: dylib, tempdir: tempdir);
 
 			assert (dylib is Seekable);
 		}
@@ -104,6 +104,8 @@ namespace Frida {
 				assert_not_reached ();
 			}
 		}
+
+		public static extern InputStream _clone_dylib (InputStream dylib);
 	}
 }
 #endif

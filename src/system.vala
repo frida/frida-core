@@ -1,7 +1,65 @@
 namespace Frida {
 	namespace System {
+		public static extern Frida.HostApplicationInfo[] enumerate_applications ();
 		public static extern Frida.HostProcessInfo[] enumerate_processes ();
 		public static extern void kill (uint pid);
+	}
+
+	public class ApplicationEnumerator {
+		private MainContext current_main_context;
+		private Gee.ArrayList<EnumerateRequest> pending_requests = new Gee.ArrayList<EnumerateRequest> ();
+
+		public async HostApplicationInfo[] enumerate_applications () {
+			bool is_first_request = pending_requests.is_empty;
+
+			var request = new EnumerateRequest (() => enumerate_applications.callback ());
+			if (is_first_request) {
+				current_main_context = MainContext.get_thread_default ();
+				new Thread<bool> ("frida-enumerate-applications", enumerate_applications_worker);
+			}
+			pending_requests.add (request);
+			yield;
+
+			return request.result;
+		}
+
+		private bool enumerate_applications_worker () {
+			var applications = System.enumerate_applications ();
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				current_main_context = null;
+				var requests = pending_requests;
+				pending_requests = new Gee.ArrayList<EnumerateRequest> ();
+
+				foreach (var request in requests)
+					request.complete (applications);
+
+				return false;
+			});
+			source.attach (current_main_context);
+
+			return true;
+		}
+
+		private class EnumerateRequest {
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
+
+			public HostApplicationInfo[] result {
+				get;
+				private set;
+			}
+
+			public EnumerateRequest (owned CompletionHandler handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete (HostApplicationInfo[] applications) {
+				this.result = applications;
+				handler ();
+			}
+		}
 	}
 
 	public class ProcessEnumerator {

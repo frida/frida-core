@@ -139,15 +139,15 @@ namespace Frida.FruitjectorTest {
 				var dylib = Path.build_filename (data_directory, name + os_suffix () + ".dylib");
 				assert (FileUtils.test (dylib, FileTest.EXISTS));
 
-				AgentDescriptor desc;
+				AgentResource agent;
 
 				try {
-					desc = new AgentDescriptor (name, File.new_for_path (dylib).read (null));
+					agent = new AgentResource (name, File.new_for_path (dylib).read (null));
 				} catch (GLib.Error file_error) {
 					assert_not_reached ();
 				}
 
-				yield injector.inject (process.id, desc, data_string);
+				yield injector.inject (process.id, agent, data_string);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();

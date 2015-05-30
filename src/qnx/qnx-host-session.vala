@@ -87,6 +87,10 @@ namespace Frida {
 			injector = null;
 		}
 
+		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+			return System.enumerate_applications ();
+		}
+
 		public override async Frida.HostProcessInfo[] enumerate_processes () throws Error {
 			return System.enumerate_processes ();
 		}

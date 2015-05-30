@@ -55,10 +55,23 @@ namespace Frida {
 			_resource_store = null;
 		}
 
+		public async void preload () throws Error {
+			yield obtain ();
+		}
+
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain ();
 			try {
 				return yield helper.spawn (path, argv, envp);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void launch (string identifier) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.launch (identifier);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

@@ -2,7 +2,6 @@
 
 #include "icon-helpers.h"
 
-#include <dlfcn.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
@@ -18,22 +17,9 @@ static void extract_icons_from_image (NSImage * image, FridaImageData * small_ic
 
 #ifdef HAVE_IOS
 
-# import <UIKit/UIKit.h>
-
-typedef struct _FridaSpringboardApi FridaSpringboardApi;
-
-struct _FridaSpringboardApi
-{
-  void * module;
-
-  NSString * (* SBSCopyDisplayIdentifierForProcessID) (UInt32 pid);
-  NSString * (* SBSCopyLocalizedApplicationNameForDisplayIdentifier) (NSString * identifier);
-  NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifier) (NSString * identifier);
-};
+# import "springboard.h"
 
 static void extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon);
-
-static FridaSpringboardApi * frida_springboard_api = NULL;
 
 #endif
 
@@ -52,36 +38,62 @@ static GHashTable * icon_pair_by_identifier = NULL;
 static void
 frida_system_init (void)
 {
-#ifdef HAVE_IOS
-  if (frida_springboard_api == NULL)
-#endif
+  if (icon_pair_by_identifier == NULL)
   {
-#ifdef HAVE_IOS
-    FridaSpringboardApi * api;
-
-    api = g_new (FridaSpringboardApi, 1);
-
-    api->module = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY | RTLD_GLOBAL);
-    g_assert (api->module != NULL);
-
-    api->SBSCopyDisplayIdentifierForProcessID = dlsym (api->module, "SBSCopyDisplayIdentifierForProcessID");
-    g_assert (api->SBSCopyDisplayIdentifierForProcessID != NULL);
-
-    api->SBSCopyLocalizedApplicationNameForDisplayIdentifier = dlsym (api->module, "SBSCopyLocalizedApplicationNameForDisplayIdentifier");
-    g_assert (api->SBSCopyLocalizedApplicationNameForDisplayIdentifier != NULL);
-
-    api->SBSCopyIconImagePNGDataForDisplayIdentifier = dlsym (api->module, "SBSCopyIconImagePNGDataForDisplayIdentifier");
-    g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
-
-    frida_springboard_api = api;
-#endif
-
     icon_pair_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) frida_icon_pair_free);
   }
 }
 
+FridaHostApplicationInfo *
+frida_system_enumerate_applications (int * result_length)
+{
+#ifdef HAVE_IOS
+  NSAutoreleasePool * pool;
+  FridaSpringboardApi * api;
+  NSArray * identifiers;
+  NSUInteger count, i;
+  FridaHostApplicationInfo * result;
+
+  frida_system_init ();
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  api = _frida_get_springboard_api ();
+
+  identifiers = api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
+
+  count = [identifiers count];
+  result = g_new0 (FridaHostApplicationInfo, count);
+  *result_length = count;
+
+  for (i = 0; i != count; i++)
+  {
+    NSString * identifier, * name;
+    FridaHostApplicationInfo * info = &result[i];
+
+    identifier = [identifiers objectAtIndex:i];
+    name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+    info->_identifier = g_strdup ([identifier UTF8String]);
+    info->_name = g_strdup ([name UTF8String]);
+    [name release];
+
+    extract_icons_from_identifier (identifier, &info->_small_icon, &info->_large_icon);
+  }
+
+  [identifiers release];
+
+  [pool release];
+
+  return result;
+#else
+  *result_length = 0;
+
+  return NULL;
+#endif
+}
+
 FridaHostProcessInfo *
-frida_system_enumerate_processes (int * result_length1)
+frida_system_enumerate_processes (int * result_length)
 {
   NSAutoreleasePool * pool;
   int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
@@ -105,7 +117,11 @@ frida_system_enumerate_processes (int * result_length1)
   count = length / sizeof (struct kinfo_proc);
 
   result = g_new0 (FridaHostProcessInfo, count);
-  *result_length1 = count;
+  *result_length = count;
+
+#ifdef HAVE_IOS
+  FridaSpringboardApi * api = _frida_get_springboard_api ();
+#endif
 
   for (i = 0; i != count; i++)
   {
@@ -115,12 +131,12 @@ frida_system_enumerate_processes (int * result_length1)
     info->_pid = e->kp_proc.p_pid;
 
 #ifdef HAVE_IOS
-    NSString * identifier = frida_springboard_api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
+    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
     if (identifier != nil)
     {
       NSString * app_name;
 
-      app_name = frida_springboard_api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+      app_name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
       info->_name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
@@ -213,7 +229,7 @@ extract_icons_from_identifier (NSString * identifier, FridaImageData * small_ico
     NSData * png_data;
     UIImage * image;
 
-    png_data = frida_springboard_api->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
+    png_data = _frida_get_springboard_api ()->SBSCopyIconImagePNGDataForDisplayIdentifier (identifier);
 
     pair = g_new (FridaIconPair, 1);
     image = [UIImage imageWithData:png_data];

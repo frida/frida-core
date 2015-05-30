@@ -238,6 +238,34 @@ namespace Frida {
 			return close_request != null;
 		}
 
+		public async ApplicationList enumerate_applications () throws Error {
+			check_open ();
+
+			HostApplicationInfo[] applications;
+			try {
+				yield ensure_host_session ();
+				applications = yield host_session.enumerate_applications ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			var result = new Gee.ArrayList<Application> ();
+			foreach (var p in applications) {
+				result.add (new Application (p.identifier, p.name, icon_from_image_data (p.small_icon), icon_from_image_data (p.large_icon)));
+			}
+			return new ApplicationList (result);
+		}
+
+		public ApplicationList enumerate_applications_sync () throws Error {
+			return (create<EnumerateApplicationsTask> () as EnumerateApplicationsTask).start_and_wait_for_completion ();
+		}
+
+		private class EnumerateApplicationsTask : DeviceTask<ApplicationList> {
+			protected override async ApplicationList perform_operation () throws Error {
+				return yield parent.enumerate_applications ();
+			}
+		}
+
 		public async ProcessList enumerate_processes () throws Error {
 			check_open ();
 
@@ -256,12 +284,6 @@ namespace Frida {
 			return new ProcessList (result);
 		}
 
-		private Icon? icon_from_image_data (ImageData? img) {
-			if (img == null || img.width == 0)
-				return null;
-			return new Icon (img.width, img.height, img.rowstride, Base64.decode (img.pixels));
-		}
-
 		public ProcessList enumerate_processes_sync () throws Error {
 			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
 		}
@@ -270,6 +292,12 @@ namespace Frida {
 			protected override async ProcessList perform_operation () throws Error {
 				return yield parent.enumerate_processes ();
 			}
+		}
+
+		private Icon? icon_from_image_data (ImageData? img) {
+			if (img == null || img.width == 0)
+				return null;
+			return new Icon (img.width, img.height, img.rowstride, Base64.decode (img.pixels));
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -464,6 +492,51 @@ namespace Frida {
 		LOCAL,
 		TETHER,
 		REMOTE
+	}
+
+	public class ApplicationList : Object {
+		private Gee.List<Application> items;
+
+		public ApplicationList (Gee.List<Application> items) {
+			this.items = items;
+		}
+
+		public int size () {
+			return items.size;
+		}
+
+		public new Application get (int index) {
+			return items.get (index);
+		}
+	}
+
+	public class Application : Object {
+		public string identifier {
+			get;
+			private set;
+		}
+
+		public string name {
+			get;
+			private set;
+		}
+
+		public Icon? small_icon {
+			get;
+			private set;
+		}
+
+		public Icon? large_icon {
+			get;
+			private set;
+		}
+
+		public Application (string identifier, string name, Icon? small_icon, Icon? large_icon) {
+			this.identifier = identifier;
+			this.name = name;
+			this.small_icon = small_icon;
+			this.large_icon = large_icon;
+		}
 	}
 
 	public class ProcessList : Object {

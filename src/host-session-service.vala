@@ -108,6 +108,8 @@ namespace Frida {
 			entries.clear ();
 		}
 
+		public abstract async HostApplicationInfo[] enumerate_applications () throws Error;
+
 		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;

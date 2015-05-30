@@ -427,6 +427,45 @@ error_epilogue:
   }
 }
 
+#ifdef HAVE_IOS
+
+#import "springboard.h"
+
+void
+_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, GError ** error)
+{
+  NSAutoreleasePool * pool;
+  UInt32 res;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  res = _frida_get_springboard_api ()->SBSLaunchApplicationWithIdentifier (
+      [NSString stringWithUTF8String:identifier],
+      NO);
+  if (res != 0)
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while trying to launch iOS app: %u", (guint) res);
+  }
+
+  [pool release];
+}
+
+#else
+
+void
+_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, GError ** error)
+{
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not yet able to launch apps on Mac");
+}
+
+#endif
+
 void
 _frida_helper_service_resume_spawn_instance (FridaHelperService * self, void * instance)
 {

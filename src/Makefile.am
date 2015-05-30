@@ -116,6 +116,15 @@ if OS_DARWIN
 HELPER = frida-helper
 AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib!frida-agent.dylib
 AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
+LOADER ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.dylib!FridaLoader.dylib
+LOADER_TARGETS = $(shell echo $(LOADER) | cut -f1 -d'!')
+
+springboard_sources = $(NULL)
+if OS_IOS
+springboard_sources += \
+	darwin/springboard.h \
+	darwin/springboard.m
+endif
 
 backend_sources += \
 	darwin/darwin-host-session.vala \
@@ -123,16 +132,19 @@ backend_sources += \
 	darwin/frida-helper-process.vala
 glue_sources += \
 	darwin/system-darwin.m \
-	darwin/darwin-host-session-glue.c \
+	darwin/darwin-host-session-glue.m \
 	darwin/fruitjector-glue.c \
 	darwin/icon-helpers.h \
-	darwin/icon-helpers.m
+	darwin/icon-helpers.m \
+	$(springboard_sources)
 backend_libadd += \
 	libfrida-helper-types.la \
-	libfrida-data-helper-process.la
+	libfrida-data-helper-process.la \
+	libfrida-data-loader.la
 backend_valaflags += \
 	--pkg=frida-helper-types \
-	--pkg=frida-data-helper-process
+	--pkg=frida-data-helper-process \
+	--pkg=frida-data-loader
 
 backend_programs += \
 	frida-helper
@@ -171,7 +183,8 @@ libfrida_helper_main_la_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_glue_la_SOURCES = \
-	darwin/frida-helper-glue.c \
+	darwin/frida-helper-glue.m \
+	$(springboard_sources) \
 	darwin/mapper.h \
 	darwin/mapper.c
 
@@ -223,6 +236,19 @@ backend_sources += \
 	fruity/fruity-property-list.vala
 glue_sources += \
 	fruity/fruity-host-session-darwin.m
+
+backend_libraries += \
+	libfrida-data-loader.la
+libfrida_data_loader_la_SOURCES = \
+	frida-data-loader.c \
+	frida-data-loader-blob.S \
+	$(NULL)
+frida-data-loader.c frida-data-loader-blob.S: $(LOADER_TARGETS)
+	$(AM_V_GEN) \
+		$(RESOURCE_COMPILER) \
+			-c "$(srcdir)/loader.resources" \
+			-o "$(builddir)/frida-data-loader" \
+			$(LOADER)
 endif
 
 if OS_QNX

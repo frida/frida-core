@@ -178,6 +178,7 @@ AC_CONFIG_FILES([
   lib/interfaces/Makefile
   lib/pipe/Makefile
   lib/agent/Makefile
+  lib/loader/Makefile
   src/Makefile
   server/Makefile
   gadget/Makefile

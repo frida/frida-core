@@ -77,12 +77,13 @@ namespace Frida {
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
-		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
-
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
 		private Winjector winjector = new Winjector ();
 		private AgentDescriptor agent_desc;
+
+		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
+		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
 		construct {
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_dll_blob ();
@@ -115,6 +116,10 @@ namespace Frida {
 
 			yield winjector.close ();
 			winjector = null;
+		}
+
+		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+			return yield application_enumerator.enumerate_applications ();
 		}
 
 		public override async HostProcessInfo[] enumerate_processes () throws Error {
