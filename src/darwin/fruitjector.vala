@@ -42,7 +42,7 @@ namespace Frida {
 		}
 
 		public async void make_pipe_endpoints (uint pid, out string local_address, out string remote_address) throws Error {
-			var endpoints = yield helper.make_pipe_endpoints (_get_pid (), pid);
+			var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
 			local_address = endpoints.local_address;
 			remote_address = endpoints.remote_address;
 		}
@@ -51,8 +51,6 @@ namespace Frida {
 			pid_by_id.unset (id);
 			uninjected (id);
 		}
-
-		public static extern uint _get_pid ();
 	}
 
 	public class AgentResource : Object {

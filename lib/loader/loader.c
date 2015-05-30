@@ -16,10 +16,10 @@
 typedef void (* FridaAgentMainFunc) (const char * data_string, void * mapped_range, size_t parent_thread_id);
 
 static void * frida_loader_run (void * user_data);
-static bool frida_loader_send (int s, const char * format, ...);
-static bool frida_loader_send_value (int s, const char * v);
+static bool frida_loader_send_printf (int s, const char * format, ...);
+static bool frida_loader_send_string (int s, const char * v);
 static bool frida_loader_send_bytes (int s, const void * bytes, size_t size);
-static char * frida_loader_recv_value (int s);
+static char * frida_loader_recv_string (int s);
 static bool frida_loader_recv_bytes (int s, void * bytes, size_t size);
 
 static char frida_data_dir[256] = FRIDA_LOADER_DATA_DIR_MAGIC;
@@ -51,10 +51,9 @@ frida_loader_on_load (void)
   char * pipe_address, * permission_to_resume;
   pthread_t thread;
 
-  frida_log ("frida_loader_on_load\n");
-
   asprintf (&callback_path, "%s/callback", frida_data_dir);
 
+  frida_log ("creating socket\n");
   s = socket (AF_UNIX, SOCK_STREAM, 0);
   if (s == -1)
     goto beach;
@@ -62,23 +61,31 @@ frida_loader_on_load (void)
   callback.sun_len = sizeof (callback.sun_len) + sizeof (callback.sun_family) + strlen (callback_path);
   callback.sun_family = AF_UNIX;
   strcpy (callback.sun_path, callback_path);
+  frida_log ("connecting to '%s'\n", callback_path);
   if (connect (s, (struct sockaddr *) &callback, callback.sun_len) == -1)
     goto beach;
 
-  if (!frida_loader_send (s, "%d", getpid ()))
+  frida_log ("sending pid\n");
+  if (!frida_loader_send_printf (s, "%d", getpid ()))
     goto beach;
 
-  pipe_address = frida_loader_recv_value (s);
+  frida_log ("waiting for pipe address\n");
+  pipe_address = frida_loader_recv_string (s);
   if (pipe_address == NULL)
     goto beach;
 
+  frida_log ("loading agent with pipe address '%s'\n", pipe_address);
   pthread_create (&thread, NULL, frida_loader_run, pipe_address);
   pthread_detach (thread);
 
-  permission_to_resume = frida_loader_recv_value (s);
+  frida_log ("waiting for permission to resume\n");
+  permission_to_resume = frida_loader_recv_string (s);
+  frida_log ("got permission to resume: '%s'\n", permission_to_resume);
   free (permission_to_resume);
 
 beach:
+  frida_log ("went to beach\n");
+
   if (s != -1)
     close (s);
 
@@ -115,7 +122,7 @@ beach:
 }
 
 static bool
-frida_loader_send (int s, const char * format, ...)
+frida_loader_send_printf (int s, const char * format, ...)
 {
   bool success;
   va_list vl;
@@ -123,7 +130,7 @@ frida_loader_send (int s, const char * format, ...)
 
   va_start (vl, format);
   vasprintf (&v, format, vl);
-  success = frida_loader_send_value (s, v);
+  success = frida_loader_send_string (s, v);
   free (v);
   va_end (vl);
 
@@ -131,7 +138,7 @@ frida_loader_send (int s, const char * format, ...)
 }
 
 static bool
-frida_loader_send_value (int s, const char * v)
+frida_loader_send_string (int s, const char * v)
 {
   uint8_t size = strlen (v);
   if (!frida_loader_send_bytes (s, &size, sizeof (size)))
@@ -160,7 +167,7 @@ frida_loader_send_bytes (int s, const void * bytes, size_t size)
 }
 
 static char *
-frida_loader_recv_value (int s)
+frida_loader_recv_string (int s)
 {
   uint8_t size;
   char * buf;

@@ -55,6 +55,10 @@ namespace Frida {
 			_resource_store = null;
 		}
 
+		public async void preload () throws Error {
+			yield obtain ();
+		}
+
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain ();
 			try {

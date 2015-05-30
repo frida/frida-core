@@ -115,8 +115,8 @@ namespace Frida {
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			if (_is_running_on_ios () && !path.has_prefix ("/")) {
 				if (fruit_launcher == null)
-					fruit_launcher = new FruitLauncher (this, agent);
-				return yield fruit_launcher.launch (path);
+					fruit_launcher = new FruitLauncher (this, helper, agent);
+				return yield fruit_launcher.spawn (path);
 			} else {
 				return yield helper.spawn (path, argv, envp);
 			}
@@ -131,17 +131,26 @@ namespace Frida {
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
+			transport = null;
+
+			Pipe pipe;
+
+			if (fruit_launcher != null) {
+				pipe = fruit_launcher.get_pipe (pid);
+				if (pipe != null)
+					return pipe;
+			}
+
 			string local_address, remote_address;
 			yield injector.make_pipe_endpoints (pid, out local_address, out remote_address);
-			Pipe stream;
 			try {
-				stream = new Pipe (local_address);
-			} catch (IOError stream_error) {
-				throw new Error.NOT_SUPPORTED (stream_error.message);
+				pipe = new Pipe (local_address);
+			} catch (IOError pipe_error) {
+				throw new Error.NOT_SUPPORTED (pipe_error.message);
 			}
 			yield injector.inject (pid, agent, remote_address);
-			transport = null;
-			return stream;
+
+			return pipe;
 		}
 
 		// TODO: use Vala's preprocessor when the build system has been fixed
@@ -152,12 +161,16 @@ namespace Frida {
 		private const string LOADER_DATA_DIR_MAGIC = "3zPLi3BupiesaB9diyimME74fJw4jvj6";
 
 		private DarwinHostSession host_session;
+		private HelperProcess helper;
 		private AgentResource agent;
 		private UnixSocketAddress service_address;
 		private SocketService service;
 
-		internal FruitLauncher (DarwinHostSession host_session, AgentResource agent) {
+		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
+
+		internal FruitLauncher (DarwinHostSession host_session, HelperProcess helper, AgentResource agent) {
 			this.host_session = host_session;
+			this.helper = helper;
 			this.agent = agent;
 
 			this.service = new SocketService ();
@@ -171,7 +184,6 @@ namespace Frida {
 			assert (effective_address is UnixSocketAddress);
 			this.service_address = effective_address as UnixSocketAddress;
 			FileUtils.chmod (this.service_address.path, 0777);
-			this.service.incoming.connect (on_incoming_connection);
 			this.service.start ();
 		}
 
@@ -184,16 +196,18 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async uint launch (string identifier) throws Error {
+		public async uint spawn (string identifier) throws Error {
 			var plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
 			if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
 				throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+
+			yield helper.preload ();
 
 			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 			var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
 			var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
 			try {
-				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, service_address.path));
+				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
 				FileUtils.chmod (dylib_path, 0755);
 				FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
 				FileUtils.chmod (plist_path, 0644);
@@ -201,10 +215,48 @@ namespace Frida {
 				throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
 			}
 
+			Loader loader = null;
+			var on_incoming = this.service.incoming.connect ((connection, source_object) => {
+				loader = new Loader (connection);
+				spawn.callback ();
+				return true;
+			});
 			// TODO: ask SpringBoard to launch this app
+			stderr.printf ("waiting for loader on '%s'\n", service_address.path);
 			yield;
+			stderr.printf ("got loader!\n");
+			this.service.disconnect (on_incoming);
 
-			throw new Error.NOT_SUPPORTED ("DERPRRRR");
+			stderr.printf ("reading pid message\n");
+			string pid_message = yield loader.recv_string ();
+			uint pid = (uint) uint64.parse (pid_message);
+			stderr.printf ("got pid_message: '%s'\n", pid_message);
+
+			var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
+			try {
+				loader.pipe = new Pipe (endpoints.local_address);
+			} catch (IOError stream_error) {
+				throw new Error.NOT_SUPPORTED (stream_error.message);
+			}
+			yield loader.send_string (endpoints.remote_address);
+
+			loader_by_pid[pid] = loader;
+
+			return pid;
+		}
+
+		public Pipe? get_pipe (uint pid) {
+			Loader loader = loader_by_pid[pid];
+			if (loader == null)
+				return null;
+			return loader.pipe;
+		}
+
+		public async void resume (uint pid) throws Error {
+			Loader loader;
+			if (!loader_by_pid.unset (pid, out loader))
+				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
+			yield loader.send_string ("go");
 		}
 
 		private string generate_loader_plist (string identifier) {
@@ -238,9 +290,56 @@ namespace Frida {
 			return result;
 		}
 
-		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
-			stderr.printf ("Incoming connection! %p\n", connection);
-			return false;
+		private class Loader {
+			private SocketConnection connection;
+			private InputStream input;
+			private OutputStream output;
+
+			public Pipe pipe {
+				get;
+				set;
+			}
+
+			public Loader (SocketConnection connection) {
+				this.connection = connection;
+				this.input = connection.input_stream;
+				this.output = connection.output_stream;
+			}
+
+			public async string recv_string () throws Error {
+				try {
+					var size_buf = new uint8[1];
+					var n = yield input.read_async (size_buf);
+					if (n == 0)
+						throw new Error.TRANSPORT ("Unable to communicate with loader");
+					var size = size_buf[0];
+
+					var data_buf = new uint8[size];
+					size_t bytes_read;
+					yield input.read_all_async (data_buf, Priority.DEFAULT, null, out bytes_read);
+					if (bytes_read != size)
+						throw new Error.TRANSPORT ("Unable to communicate with loader");
+
+					char * v = data_buf;
+					return (string) v;
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to communicate with loader");
+				}
+			}
+
+			public async void send_string (string v) throws Error {
+				var data_buf = new uint8[1 + v.length];
+				data_buf[0] = (uint8) v.length;
+				Memory.copy (data_buf + 1, v, v.length);
+				size_t bytes_written;
+				try {
+					yield output.write_all_async (data_buf, Priority.DEFAULT, null, out bytes_written);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to communicate with loader");
+				}
+				if (bytes_written != v.length)
+					throw new Error.TRANSPORT ("Unable to communicate with loader");
+			}
 		}
 	}
 }

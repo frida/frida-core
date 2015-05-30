@@ -7,12 +7,6 @@ static void update_mach_uuid_32 (struct mach_header * mach_header);
 static void update_mach_uuid_64 (struct mach_header_64 * mach_header);
 static void update_uuid (struct uuid_command * uc);
 
-guint
-_frida_fruitjector_get_pid (void)
-{
-  return getpid ();
-}
-
 GInputStream *
 _frida_agent_resource_clone_dylib (GInputStream * dylib)
 {
