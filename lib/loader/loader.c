@@ -178,7 +178,8 @@ frida_loader_recv_string (int s)
   if (!frida_loader_recv_bytes (s, &size, sizeof (size)))
     return NULL;
 
-  buf = malloc (size);
+  buf = malloc (size + 1);
+  buf[size] = '\0';
   if (!frida_loader_recv_bytes (s, buf, size))
   {
     free (buf);
