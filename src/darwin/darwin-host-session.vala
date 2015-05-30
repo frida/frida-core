@@ -149,7 +149,7 @@ namespace Frida {
 	}
 
 	private class FruitLauncher {
-		private const string LOADER_CALLBACK_PATH_MAGIC = "3zPLi3BupiesaB9diyimME74fJw4jvj6";
+		private const string LOADER_DATA_DIR_MAGIC = "3zPLi3BupiesaB9diyimME74fJw4jvj6";
 
 		private DarwinHostSession host_session;
 		private AgentResource agent;
@@ -170,6 +170,7 @@ namespace Frida {
 			}
 			assert (effective_address is UnixSocketAddress);
 			this.service_address = effective_address as UnixSocketAddress;
+			FileUtils.chmod (this.service_address.path, 0777);
 			this.service.incoming.connect (on_incoming_connection);
 			this.service.start ();
 		}
@@ -224,11 +225,11 @@ namespace Frida {
 
 		private uint8[] generate_loader_dylib (Frida.Data.Loader.Blob blob, string callback_path) {
 			var result = blob.data[0:blob.data.length];
-			uint8 first_byte = LOADER_CALLBACK_PATH_MAGIC[0];
+			uint8 first_byte = LOADER_DATA_DIR_MAGIC[0];
 			for (var i = 0; i != result.length; i++) {
 				if (result[i] == first_byte) {
 					uint8 * p = &result[i];
-					if (Memory.cmp (p, LOADER_CALLBACK_PATH_MAGIC, LOADER_CALLBACK_PATH_MAGIC.length) == 0) {
+					if (Memory.cmp (p, LOADER_DATA_DIR_MAGIC, LOADER_DATA_DIR_MAGIC.length) == 0) {
 						Memory.copy (p, callback_path, callback_path.length + 1);
 						break;
 					}
