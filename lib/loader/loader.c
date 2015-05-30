@@ -103,7 +103,7 @@ frida_loader_run (void * user_data)
   asprintf (&agent_path, "%s/frida-agent.dylib", frida_data_dir);
 
   agent = dlopen (agent_path, RTLD_GLOBAL | RTLD_LAZY);
-  frida_log ("agent=%p\n", agent);
+  frida_log ("tried to load '%s', agent=%p\n", agent_path, agent);
   if (agent == NULL)
     goto beach;
 

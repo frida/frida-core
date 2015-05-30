@@ -212,6 +212,7 @@ namespace Frida {
 			var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
 			try {
 				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
+				(void) agent.file; // Make sure it's written to disk
 				FileUtils.chmod (dylib_path, 0755);
 				FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
 				FileUtils.chmod (plist_path, 0644);
