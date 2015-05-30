@@ -195,6 +195,8 @@ namespace Frida {
 			service.stop ();
 			service = null;
 
+			FileUtils.unlink (service_address.path);
+
 			agent = null;
 
 			host_session = null;
@@ -230,6 +232,9 @@ namespace Frida {
 			helper.launch.begin (identifier);
 			yield;
 			this.service.disconnect (on_incoming);
+
+			FileUtils.unlink (plist_path);
+			FileUtils.unlink (dylib_path);
 
 			string pid_message = yield loader.recv_string ();
 			uint pid = (uint) uint64.parse (pid_message);
