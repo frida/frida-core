@@ -300,7 +300,9 @@ namespace Frida {
 					uint8 * p = &result[i];
 					if (Memory.cmp (p, LOADER_DATA_DIR_MAGIC, LOADER_DATA_DIR_MAGIC.length) == 0) {
 						Memory.copy (p, callback_path, callback_path.length + 1);
-						break;
+						i += callback_path.length;
+						// We need to keep going due to universal binaries.
+						// Note that we omit the `+ 1` as the for-loop does it for us.
 					}
 				}
 			}
