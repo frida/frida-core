@@ -77,6 +77,8 @@ libfrida_helper_main_la_VALAFLAGS = \
 
 libfrida_helper_glue_la_SOURCES = \
 	linux/frida-helper-glue.c
+libfrida_helper_glue_la_LIBTOOLFLAGS = \
+	--tag=CC
 
 libfrida_helper_types_la_SOURCES = \
 	linux/frida-helper-types.vala
@@ -187,6 +189,8 @@ libfrida_helper_glue_la_SOURCES = \
 	$(springboard_sources) \
 	darwin/mapper.h \
 	darwin/mapper.c
+libfrida_helper_glue_la_LIBTOOLFLAGS = \
+	--tag=CC
 
 libfrida_helper_types_la_SOURCES = \
 	darwin/frida-helper-types.vala
