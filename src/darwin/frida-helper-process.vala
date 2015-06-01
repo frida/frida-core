@@ -119,14 +119,44 @@ namespace Frida {
 			Helper pending_proxy = null;
 			Error pending_error = null;
 
+			DBusServer server = null;
+			TimeoutSource timeout_source = null;
+
 			try {
-				string[] argv = { resource_store.helper.path };
-				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_PIPE | SubprocessFlags.STDOUT_PIPE);
-				var stream = new SimpleIOStream (pending_process.get_stdout_pipe (), pending_process.get_stdin_pipe ());
-				pending_connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE);
-				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
+				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server.start ();
+				var tokens = server.client_address.split ("=", 2);
+				resource_store.pipe = new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir);
+				var connection_handler = server.new_connection.connect ((c) => {
+					pending_connection = c;
+					obtain.callback ();
+					return true;
+				});
+				timeout_source = new TimeoutSource.seconds (2);
+				timeout_source.set_callback (() => {
+					pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
+					obtain.callback ();
+					return false;
+				});
+				timeout_source.attach (main_context);
+				string[] argv = { resource_store.helper.path, server.client_address };
+				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
+				yield;
+				server.disconnect (connection_handler);
+				server.stop ();
+				server = null;
+				timeout_source.destroy ();
+				timeout_source = null;
+
+				if (pending_error == null) {
+					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
+				}
 			} catch (GLib.Error e) {
-				pending_error = new Error.NOT_SUPPORTED ("Unexpected error while spawning helper process: " + e.message);
+				if (timeout_source != null)
+					timeout_source.destroy ();
+				if (server != null)
+					server.stop ();
+				pending_error = new Error.PERMISSION_DENIED (e.message);
 			}
 
 			if (pending_error == null) {

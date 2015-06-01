@@ -1,13 +1,19 @@
 #if DARWIN
 namespace Frida {
 	public int main (string[] args) {
-		var service = new HelperService ();
+		var parent_address = args[1];
+		var service = new HelperService (parent_address);
 		return service.run ();
 	}
 
 	public class HelperService : Object, Helper {
 		public signal void child_dead (uint pid);
 		public signal void child_ready (uint pid);
+
+		public string parent_address {
+			get;
+			construct;
+		}
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
@@ -21,8 +27,8 @@ namespace Frida {
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
 		public uint last_id = 1;
 
-		public HelperService () {
-			Object ();
+		public HelperService (string parent_address) {
+			Object (parent_address: parent_address);
 			_create_context ();
 		}
 
@@ -62,8 +68,7 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				var stream = new SimpleIOStream (new UnixInputStream (0, false), new UnixOutputStream (1, false));
-				connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield DBusConnection.new_for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
 				Helper helper = this;
 				registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
