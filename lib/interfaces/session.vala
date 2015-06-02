@@ -66,6 +66,11 @@ namespace Frida {
 			private set;
 		}
 
+		public uint pid {
+			get;
+			private set;
+		}
+
 		public ImageData small_icon {
 			get;
 			private set;
@@ -76,9 +81,10 @@ namespace Frida {
 			private set;
 		}
 
-		public HostApplicationInfo (string identifier, string name, ImageData small_icon, ImageData large_icon) {
+		public HostApplicationInfo (string identifier, string name, uint pid, ImageData small_icon, ImageData large_icon) {
 			this.identifier = identifier;
 			this.name = name;
+			this.pid = pid;
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
 		}

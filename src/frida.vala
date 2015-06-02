@@ -251,7 +251,7 @@ namespace Frida {
 
 			var result = new Gee.ArrayList<Application> ();
 			foreach (var p in applications) {
-				result.add (new Application (p.identifier, p.name, icon_from_image_data (p.small_icon), icon_from_image_data (p.large_icon)));
+				result.add (new Application (p.identifier, p.name, p.pid, icon_from_image_data (p.small_icon), icon_from_image_data (p.large_icon)));
 			}
 			return new ApplicationList (result);
 		}
@@ -521,6 +521,11 @@ namespace Frida {
 			private set;
 		}
 
+		public uint pid {
+			get;
+			private set;
+		}
+
 		public Icon? small_icon {
 			get;
 			private set;
@@ -531,9 +536,10 @@ namespace Frida {
 			private set;
 		}
 
-		public Application (string identifier, string name, Icon? small_icon, Icon? large_icon) {
+		public Application (string identifier, string name, uint pid, Icon? small_icon, Icon? large_icon) {
 			this.identifier = identifier;
 			this.name = name;
+			this.pid = pid;
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
 		}

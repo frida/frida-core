@@ -50,6 +50,11 @@ frida_system_enumerate_applications (int * result_length)
 #ifdef HAVE_IOS
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
+  GHashTable * pid_by_identifier;
+  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+  size_t length;
+  gint err;
+  struct kinfo_proc * entries;
   NSArray * identifiers;
   NSUInteger count, i;
   FridaHostApplicationInfo * result;
@@ -59,6 +64,33 @@ frida_system_enumerate_applications (int * result_length)
   pool = [[NSAutoreleasePool alloc] init];
 
   api = _frida_get_springboard_api ();
+
+  pid_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
+  g_assert_cmpint (err, !=, -1);
+
+  entries = g_malloc0 (length);
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
+  g_assert_cmpint (err, !=, -1);
+  count = length / sizeof (struct kinfo_proc);
+
+  for (i = 0; i != count; i++)
+  {
+    struct kinfo_proc * e = &entries[i];
+    guint pid = e->kp_proc.p_pid;
+    NSString * identifier;
+
+    identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
+    if (identifier != nil)
+    {
+      g_hash_table_insert (pid_by_identifier, g_strdup ([identifier UTF8String]), GUINT_TO_POINTER (pid));
+      [identifier release];
+    }
+  }
+
+  g_free (entries);
 
   identifiers = api->SBSCopyApplicationDisplayIdentifiers (NO, NO);
 
@@ -75,12 +107,15 @@ frida_system_enumerate_applications (int * result_length)
     name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
     info->_identifier = g_strdup ([identifier UTF8String]);
     info->_name = g_strdup ([name UTF8String]);
+    info->_pid = GPOINTER_TO_UINT (g_hash_table_lookup (pid_by_identifier, info->_identifier));
     [name release];
 
     extract_icons_from_identifier (identifier, &info->_small_icon, &info->_large_icon);
   }
 
   [identifiers release];
+
+  g_hash_table_unref (pid_by_identifier);
 
   [pool release];
 
