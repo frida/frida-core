@@ -29,7 +29,7 @@ namespace Frida.Agent {
 			yield script_engine.shutdown ();
 			script_engine = null;
 
-			Timeout.add (30, () => {
+			Idle.add (() => {
 				teardown_connection_and_schedule_shutdown.begin ();
 				return false;
 			});
@@ -38,7 +38,7 @@ namespace Frida.Agent {
 		private async void teardown_connection_and_schedule_shutdown () {
 			yield teardown_connection ();
 
-			Timeout.add (20, () => {
+			Idle.add (() => {
 				main_loop.quit ();
 				return false;
 			});
