@@ -180,9 +180,9 @@ namespace Frida {
 
 		private void reset_stream (InputStream stream) {
 			try {
-				(stream as Seekable).seek (0, SeekType.END);
+				(stream as Seekable).seek (0, SeekType.SET);
 			} catch (GLib.Error e) {
-				//assert_not_reached ();
+				assert_not_reached ();
 			}
 		}
 	}
