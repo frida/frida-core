@@ -1,11 +1,12 @@
 namespace Frida {
 	public class Server : Object {
 		private BaseDBusHostSession host_session;
-		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions = new Gee.HashMap<AgentSessionId?, AgentSession> ();
+		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
 		private MainLoop loop;
+		private bool stopping;
 
 		construct {
 #if LINUX
@@ -37,8 +38,65 @@ namespace Frida {
 			loop.run ();
 		}
 
+		public void stop () {
+			Idle.add (() => {
+				perform_stop.begin ();
+				return false;
+			});
+		}
+
+		public async void perform_stop () {
+			if (stopping)
+				return;
+			stopping = true;
+
+			server.new_connection.disconnect (on_connection_opened);
+
+			while (clients.size != 0) {
+				foreach (var entry in clients.entries) {
+					var connection = entry.key;
+					var client = entry.value;
+					clients.unset (connection);
+					try {
+						yield connection.flush ();
+					} catch (GLib.Error e) {
+					}
+					client.close ();
+					try {
+						yield connection.close ();
+					} catch (GLib.Error e) {
+					}
+					break;
+				}
+			}
+
+			server.stop ();
+
+			while (agent_sessions.size != 0) {
+				foreach (var entry in agent_sessions.entries) {
+					var id = entry.key;
+					var session = entry.value;
+					agent_sessions.unset (id);
+					try {
+						yield session.close ();
+					} catch (GLib.Error e) {
+					}
+					break;
+				}
+			}
+
+			yield host_session.close ();
+
+			agent_sessions.clear ();
+
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
+		}
+
 		private void on_agent_session_opened (AgentSessionId id, AgentSession session) {
-			agent_sessions.set (id, session);
+			agent_sessions.set (id.handle, session);
 
 			foreach (var entry in clients.entries)
 				entry.value.register_agent_session (id, session);
@@ -48,7 +106,7 @@ namespace Frida {
 			foreach (var entry in clients.entries)
 				entry.value.unregister_agent_session (id, session);
 
-			agent_sessions.unset (id);
+			agent_sessions.unset (id.handle);
 		}
 
 		private bool on_connection_opened (DBusConnection connection) {
@@ -57,7 +115,7 @@ namespace Frida {
 			var client = new Client (connection);
 			client.register_host_session (host_session);
 			foreach (var entry in agent_sessions.entries)
-				client.register_agent_session (entry.key, entry.value);
+				client.register_agent_session (AgentSessionId (entry.key), entry.value);
 			clients.set (connection, client);
 
 			return true;
@@ -80,7 +138,7 @@ namespace Frida {
 			}
 
 			private Gee.HashSet<uint> registrations = new Gee.HashSet<uint> ();
-			private Gee.HashMap<AgentSessionId?, uint> agent_registration_by_id = new Gee.HashMap<AgentSessionId?, uint> ();
+			private Gee.HashMap<uint, uint> agent_registration_by_id = new Gee.HashMap<uint, uint> ();
 
 			public Client (DBusConnection connection) {
 				Object (connection: connection);
@@ -105,7 +163,7 @@ namespace Frida {
 				try {
 					var registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
 					registrations.add (registration_id);
-					agent_registration_by_id.set (id, registration_id);
+					agent_registration_by_id.set (id.handle, registration_id);
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -113,11 +171,13 @@ namespace Frida {
 
 			public void unregister_agent_session (AgentSessionId id, AgentSession session) {
 				uint registration_id;
-				agent_registration_by_id.unset (id, out registration_id);
+				agent_registration_by_id.unset (id.handle, out registration_id);
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
 			}
 		}
+
+		private static Server frida_server;
 
 		private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
 		private static bool output_version;
@@ -131,6 +191,10 @@ namespace Frida {
 		};
 
 		private static int main (string[] args) {
+#if !WINDOWS
+			Posix.setsid ();
+#endif
+
 			try {
 				var ctx = new OptionContext ();
 				ctx.set_help_enabled (true);
@@ -150,10 +214,19 @@ namespace Frida {
 			if (listen_addresses.length > 0)
 				listen_address = listen_addresses[0];
 
-			var server = new Server ();
+			frida_server = new Server ();
+
+#if !WINDOWS
+			Posix.signal (Posix.SIGINT, (sig) => {
+				frida_server.stop ();
+			});
+			Posix.signal (Posix.SIGTERM, (sig) => {
+				frida_server.stop ();
+			});
+#endif
 
 			try {
-				server.run (listen_address);
+				frida_server.run (listen_address);
 			} catch (Error e) {
 				printerr ("Unable to start server: %s\n", e.message);
 				return 1;
