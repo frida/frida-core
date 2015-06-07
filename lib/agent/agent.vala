@@ -29,13 +29,6 @@ namespace Frida.Agent {
 			yield script_engine.shutdown ();
 			script_engine = null;
 
-			Idle.add (() => {
-				teardown_connection_and_schedule_shutdown.begin ();
-				return false;
-			});
-		}
-
-		private async void teardown_connection_and_schedule_shutdown () {
 			yield teardown_connection ();
 
 			Idle.add (() => {
@@ -107,14 +100,22 @@ namespace Frida.Agent {
 
 		private async void teardown_connection () {
 			if (connection != null) {
+				connection.closed.disconnect (on_connection_closed);
+
+				try {
+					yield connection.flush ();
+				} catch (GLib.Error e) {
+				}
+
 				if (registration_id != 0) {
 					connection.unregister_object (registration_id);
 				}
+
 				try {
 					yield connection.close ();
 				} catch (GLib.Error e) {
 				}
-				connection.closed.disconnect (on_connection_closed);
+
 				connection = null;
 			}
 		}
