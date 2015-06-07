@@ -171,7 +171,6 @@ namespace Frida.AgentTest {
 			try {
 				yield connection.close ();
 			} catch (GLib.Error connection_error) {
-				assert_not_reached ();
 			}
 			connection = null;
 
