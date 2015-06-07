@@ -80,6 +80,7 @@ struct _FridaTrampolineData
   gchar entrypoint_name[32];
   gchar data_string[256];
 
+  pthread_attr_t create_thread_attr;
   pthread_t worker_thread;
 };
 
@@ -207,6 +208,9 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   strcpy (data->so_path, params->so_path);
   strcpy (data->entrypoint_name, "frida_agent_main");
   strcpy (data->data_string, params->data_string);
+
+  pthread_attr_init (&data->create_thread_attr);
+  pthread_attr_setstacksize (&data->create_thread_attr, 2 * 1024 * 1024);
 
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
@@ -353,7 +357,7 @@ frida_remote_pthread_create (pid_t pid, GumAddress remote_address, GError ** err
 {
   GumAddress args[] = {
     GPOINTER_TO_SIZE (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
-    0,
+    GPOINTER_TO_SIZE (FRIDA_REMOTE_DATA_FIELD (create_thread_attr)),
     remote_address,
     0
   };
