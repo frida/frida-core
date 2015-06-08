@@ -60,9 +60,12 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+			/* FIXME: workaround for Vala compiler bug */
+			var argv_copy = argv;
+			var envp_copy = envp;
 			var helper = yield obtain ();
 			try {
-				return yield helper.spawn (path, argv, envp);
+				return yield helper.spawn (path, argv_copy, envp_copy);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
