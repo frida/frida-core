@@ -53,14 +53,16 @@ namespace Frida {
 				return false;
 			});
 			timeout_source.attach (main_context);
-			ssize_t size;
-			try {
-				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
-			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for FIFO to establish");
-				else
-					throw new Error.NOT_SUPPORTED ("Unexpected error while waiting for FIFO to establish (child process crashed?)");
+			ssize_t size = 0;
+			while (size == 0) {
+				try {
+					size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
+				} catch (IOError e) {
+					if (e is IOError.CANCELLED)
+						throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for FIFO to establish");
+					else
+						throw new Error.NOT_SUPPORTED ("Unexpected error while waiting for FIFO to establish (child process crashed?)");
+				}
 			}
 			timeout_source.destroy ();
 			if (size == 0) {
