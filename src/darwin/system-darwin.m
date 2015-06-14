@@ -176,6 +176,8 @@ frida_system_enumerate_applications (int * result_length)
     i++;
   }
 
+  result = g_renew (FridaHostApplicationInfo, result, i);
+
   [pool release];
 
   *result_length = i;
