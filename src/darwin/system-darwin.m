@@ -47,7 +47,7 @@ frida_system_init (void)
 FridaHostApplicationInfo *
 frida_system_enumerate_applications (int * result_length)
 {
-#ifdef HAVE_IOS
+#if defined HAVE_IOS
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
   GHashTable * pid_by_identifier;
@@ -118,6 +118,67 @@ frida_system_enumerate_applications (int * result_length)
   g_hash_table_unref (pid_by_identifier);
 
   [pool release];
+
+  return result;
+#elif defined HAVE_MAC
+  NSAutoreleasePool * pool;
+  NSUInteger count, i;
+  NSMetadataQuery * query = [[NSMetadataQuery alloc] init];
+  NSPredicate * predicate = [NSPredicate predicateWithFormat:@"kMDItemKind == 'Application'"];
+  FridaHostApplicationInfo * result;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  [query setPredicate:predicate];
+  //dispatch_sync (dispatch_get_main_queue (), ^{
+  [query startQuery];
+  //});
+
+  while ([query isGathering]) {
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+  }
+
+  [query stopQuery];
+
+  count = query.resultCount;
+  result = g_new0 (FridaHostApplicationInfo, count);
+
+  i = 0;
+
+  for (NSMetadataItem * item in query.results) {
+    NSString * path, * identifier, * name;
+    NSArray * apps;
+    NSImage * icon;
+    FridaHostApplicationInfo * info = &result[i];
+
+    path = [item valueForAttribute:NSMetadataItemPathKey];
+    identifier = [item valueForAttribute:@"kMDItemCFBundleIdentifier"];
+    name = [item valueForAttribute:NSMetadataItemDisplayNameKey];
+
+    if (!identifier) {
+      continue;
+    }
+
+    info->_identifier = g_strdup ([identifier UTF8String]);
+    info->_name = g_strdup ([name UTF8String]);
+
+    apps = [NSRunningApplication runningApplicationsWithBundleIdentifier:identifier];
+    if (apps.count == 0) {
+      info->_pid = 0;
+    } else {
+      info->_pid = ((NSRunningApplication *)apps[0]).processIdentifier;
+    }
+
+    icon = [[NSWorkspace sharedWorkspace] iconForFile:path];
+
+    extract_icons_from_image (icon, &info->_small_icon, &info->_large_icon);
+
+    i++;
+  }
+
+  [pool release];
+
+  *result_length = i;
 
   return result;
 #else
