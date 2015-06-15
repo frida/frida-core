@@ -136,8 +136,19 @@ frida_injection_instance_free (FridaInjectionInstance * instance)
   if (instance->remote_payload != 0)
   {
     GError * error = NULL;
+    gint fd;
+    gchar as_path[PATH_MAX];
+    gboolean result;
 
-    frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
+    /* check to see if the target process is still alive before trying
+     * to dealloc: */
+    sprintf (as_path, "/proc/%d/as", instance->pid);
+    fd = open (as_path, O_RDWR);
+    if (fd != -1)
+    {
+      close(fd);
+      frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
+    }
     g_clear_error (&error);
   }
 
