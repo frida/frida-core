@@ -138,6 +138,7 @@ frida_injection_instance_free (FridaInjectionInstance * instance)
     GError * error = NULL;
 
     frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, &error);
+
     g_clear_error (&error);
   }
 
@@ -219,7 +220,8 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
    * We need to flush the data cache and invalidate the instruction cache before
    * trying to run the generated code.
    */
-  frida_remote_msync (params->pid, params->remote_address, FRIDA_REMOTE_PAYLOAD_SIZE, MS_SYNC | MS_INVALIDATE_ICACHE, error);
+  if (frida_remote_msync (params->pid, params->remote_address, FRIDA_REMOTE_PAYLOAD_SIZE, MS_SYNC | MS_INVALIDATE_ICACHE, error) != 0)
+    return FALSE;
 
   if (frida_remote_pthread_create (params->pid, params->remote_address, error) != 0)
     return FALSE;
@@ -327,8 +329,16 @@ frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
     0
   };
   GumAddress retval = 0;
+  GumAddress function = frida_resolve_remote_libc_function (pid, "mmap");
 
-  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "mmap"), args, G_N_ELEMENTS (args), &retval, error))
+  if (function == -1)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_alloc failed on pid: %d, errno: %d", pid, errno);
+    return -1;
+  }
+
+
+  if (!frida_remote_call (pid, function, args, G_N_ELEMENTS (args), &retval, error))
     return 0;
 
   if (retval == G_GUINT64_CONSTANT (0xffffffffffffffff))
@@ -345,8 +355,15 @@ frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** erro
     size
   };
   GumAddress retval;
+  GumAddress function = frida_resolve_remote_libc_function (pid, "munmap");
 
-  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "munmap"), args, G_N_ELEMENTS (args), &retval, error))
+  if (function == -1)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_dealloc failed on pid: %d, errno: %d", pid, errno);
+    return -1;
+  }
+
+  if (!frida_remote_call (pid, function, args, G_N_ELEMENTS (args), &retval, error))
     return -1;
 
   return retval;
@@ -362,8 +379,15 @@ frida_remote_pthread_create (pid_t pid, GumAddress remote_address, GError ** err
     0
   };
   GumAddress retval;
+  GumAddress function = frida_resolve_remote_libc_function (pid, "pthread_create");
 
-  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "pthread_create"), args, G_N_ELEMENTS (args), &retval, error))
+  if (function == -1)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_pthread_create failed on pid: %d, errno: %d", pid, errno);
+    return -1;
+  }
+
+  if (!frida_remote_call (pid, function, args, G_N_ELEMENTS (args), &retval, error))
     return -1;
 
   return retval;
@@ -378,8 +402,15 @@ frida_remote_msync (pid_t pid, GumAddress remote_address, gint size, gint flags,
     flags
   };
   GumAddress retval;
+  GumAddress function = frida_resolve_remote_libc_function (pid, "msync");
 
-  if (!frida_remote_call (pid, frida_resolve_remote_libc_function (pid, "msync"), args, G_N_ELEMENTS (args), &retval, error))
+  if (function == -1)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_msync failed on pid: %d, errno: %d", pid, errno);
+    return -1;
+  }
+
+  if (!frida_remote_call (pid, function, args, G_N_ELEMENTS (args), &retval, error))
     return -1;
 
   return retval;
@@ -394,7 +425,8 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
 
   sprintf (as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
-  g_assert (fd != -1);
+  if (fd == -1)
+    return FALSE;
 
   result = frida_remote_write_fd (fd, remote_address, data, size, error);
 
@@ -442,7 +474,11 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   sprintf (as_path, "/proc/%d/as", pid);
   fd = open (as_path, O_RDWR);
-  g_assert (fd != -1);
+  if (fd == -1)
+  {
+    g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_call failed to open process %d, errno: %d", pid, errno);
+    return FALSE;
+  }
 
   /*
    * Find the first active thread:
@@ -611,9 +647,13 @@ frida_resolve_remote_library_function (int remote_pid, const gchar * library_nam
   gpointer module, local_address;
 
   local_base = frida_find_library_base (getpid (), library_name, &local_library_path);
+  if (local_base == -1)
+    return -1;
   g_assert (local_base != 0);
 
   remote_base = frida_find_library_base (remote_pid, library_name, &remote_library_path);
+  if (remote_base == -1)
+    return -1;
   g_assert (remote_base != 0);
 
   g_assert_cmpstr (local_library_path, ==, remote_library_path);
@@ -655,9 +695,11 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   as_path = g_strdup_printf ("/proc/%d/as", pid);
 
   fd = open (as_path, O_RDONLY);
-  g_assert (fd != -1);
 
   g_free (as_path);
+
+  if (fd == -1)
+    return -1;
 
   res = devctl (fd, DCMD_PROC_PAGEDATA, 0, 0, &num_mapinfos);
   g_assert (res == 0);
