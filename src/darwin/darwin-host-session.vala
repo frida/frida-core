@@ -165,9 +165,6 @@ namespace Frida {
 		}
 
 		protected override async AgentSession obtain_kernel_session () throws Error {
-			if (!_is_running_on_ios ())
-				throw new Error.NOT_SUPPORTED ("Current backend does not support attaching to the kernel");
-
 			return yield helper.obtain_kernel_session ();
 		}
 
