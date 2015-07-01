@@ -124,38 +124,47 @@ namespace Frida {
 					return e.id;
 			}
 
-			Object transport;
-			var stream = yield perform_attach_to (pid, out transport);
-
-			var cancellable = new Cancellable ();
-			var timeout_source = new TimeoutSource.seconds (10);
-			timeout_source.set_callback (() => {
-				cancellable.cancel ();
-				return false;
-			});
-			timeout_source.attach (MainContext.get_thread_default ());
-
-			DBusConnection connection;
+			AgentSessionId id;
 			AgentSession session;
-			try {
-				connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
-				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
-			} catch (GLib.Error establish_error) {
-				if (establish_error is IOError.CANCELLED)
+			Entry entry;
+
+			if (pid == 0) {
+				id = Frida.AgentSessionId (0);
+				session = yield obtain_kernel_session ();
+				entry = new Entry (id, pid, null, null, session);
+			} else {
+				Object transport;
+				var stream = yield perform_attach_to (pid, out transport);
+
+				var cancellable = new Cancellable ();
+				var timeout_source = new TimeoutSource.seconds (10);
+				timeout_source.set_callback (() => {
+					cancellable.cancel ();
+					return false;
+				});
+				timeout_source.attach (MainContext.get_thread_default ());
+
+				DBusConnection connection;
+				try {
+					connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+					session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
+				} catch (GLib.Error establish_error) {
+					if (establish_error is IOError.CANCELLED)
+						throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
+					else
+						throw new Error.PROCESS_NOT_RESPONDING (establish_error.message);
+				}
+				if (cancellable.is_cancelled ())
 					throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
-				else
-					throw new Error.PROCESS_NOT_RESPONDING (establish_error.message);
+
+				timeout_source.destroy ();
+
+				id = AgentSessionId (++last_session_id);
+
+				entry = new Entry (id, pid, transport, connection, session);
+				connection.closed.connect (on_connection_closed);
 			}
-			if (cancellable.is_cancelled ())
-				throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
-
-			timeout_source.destroy ();
-
-			AgentSessionId id = AgentSessionId (++last_session_id);
-
-			var entry = new Entry (id, pid, transport, connection, session);
 			entries.add (entry);
-			connection.closed.connect (on_connection_closed);
 
 			agent_session_opened (id, session);
 
@@ -170,6 +179,10 @@ namespace Frida {
 					return entry.agent_session;
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+		}
+
+		protected virtual async AgentSession obtain_kernel_session () throws Error {
+			throw new Error.NOT_SUPPORTED ("This backend does not yet support attaching to the kernel");
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -209,7 +222,7 @@ namespace Frida {
 				construct;
 			}
 
-			public DBusConnection agent_connection {
+			public DBusConnection? agent_connection {
 				get;
 				construct;
 			}
@@ -221,7 +234,7 @@ namespace Frida {
 
 			private Gee.Promise<bool> close_request;
 
-			public Entry (AgentSessionId id, uint pid, Object? transport, DBusConnection agent_connection, AgentSession agent_session) {
+			public Entry (AgentSessionId id, uint pid, Object? transport, DBusConnection? agent_connection, AgentSession agent_session) {
 				Object (id: id, pid: pid, transport: transport, agent_connection: agent_connection, agent_session: agent_session);
 			}
 
@@ -236,9 +249,11 @@ namespace Frida {
 				}
 				close_request = new Gee.Promise<bool> ();
 
-				try {
-					yield agent_connection.close ();
-				} catch (GLib.Error agent_conn_error) {
+				if (agent_connection != null) {
+					try {
+						yield agent_connection.close ();
+					} catch (GLib.Error agent_conn_error) {
+					}
 				}
 
 				close_request.set_value (true);

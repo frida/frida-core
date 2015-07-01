@@ -31,7 +31,7 @@ namespace Frida.Agent {
 
 			Gum.Script script;
 			try {
-				script = yield Gum.Script.from_string (script_name, source);
+				script = yield Gum.Script.from_string (script_name, source, Gum.Script.Flavor.USER);
 			} catch (IOError create_error) {
 				throw new Error.INVALID_ARGUMENT (create_error.message);
 			}

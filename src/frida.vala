@@ -453,14 +453,16 @@ namespace Frida {
 			var session_did_exist = session_by_pid.unset (session.pid);
 			assert (session_did_exist);
 
+			bool session_exists = false;
 			uint handle = 0;
 			foreach (var entry in session_by_handle.entries) {
 				if (entry.value == session) {
+					session_exists = true;
 					handle = entry.key;
 					break;
 				}
 			}
-			assert (handle != 0);
+			assert (session_exists);
 			session_by_handle.unset (handle);
 		}
 

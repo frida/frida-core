@@ -151,13 +151,14 @@ backend_valaflags += \
 backend_programs += \
 	frida-helper
 frida_helper_SOURCES = \
-	$(NULL)
+	dummy.cpp
 frida_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_helper_LDADD = \
 	libfrida-helper-main.la \
 	libfrida-helper-glue.la \
-	$(FRIDA_LIBS)
+	$(FRIDA_LIBS) \
+	$(FRIDA_AGENT_LIBS)
 if OS_MAC
 frida_helper_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/frida-helper.plist"
@@ -182,6 +183,7 @@ libfrida_helper_main_la_VALAFLAGS = \
 	--pkg=frida-interfaces \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
+	@FRIDA_AGENT_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_glue_la_SOURCES = \

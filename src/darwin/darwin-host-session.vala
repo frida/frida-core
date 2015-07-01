@@ -164,6 +164,13 @@ namespace Frida {
 			return pipe;
 		}
 
+		protected override async AgentSession obtain_kernel_session () throws Error {
+			if (!_is_running_on_ios ())
+				throw new Error.NOT_SUPPORTED ("Current backend does not support attaching to the kernel");
+
+			return yield helper.obtain_kernel_session ();
+		}
+
 		// TODO: use Vala's preprocessor when the build system has been fixed
 		public static extern bool _is_running_on_ios ();
 	}

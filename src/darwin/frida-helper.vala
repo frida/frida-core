@@ -17,11 +17,14 @@ namespace Frida {
 			construct;
 		}
 
+		private KernelSession kernel_session = new KernelSession ();
+
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
 
 		private DBusConnection connection;
-		private uint registration_id = 0;
+		private uint helper_registration_id = 0;
+		private uint kernel_session_registration_id = 0;
 
 		/* these should be private, but must be accessible to glue code */
 		public void * context;
@@ -55,8 +58,10 @@ namespace Frida {
 
 		private async void shutdown () {
 			if (connection != null) {
-				if (registration_id != 0)
-					connection.unregister_object (registration_id);
+				if (kernel_session_registration_id != 0)
+					connection.unregister_object (kernel_session_registration_id);
+				if (helper_registration_id != 0)
+					connection.unregister_object (helper_registration_id);
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
@@ -72,8 +77,13 @@ namespace Frida {
 			try {
 				connection = yield DBusConnection.new_for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
+
 				Helper helper = this;
-				registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
+				helper_registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
+
+				AgentSession ks = kernel_session;
+				kernel_session_registration_id = connection.register_object (Frida.ObjectPath.KERNEL_SESSION, ks);
+
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
 				printerr ("Unable to start: %s\n", e.message);
@@ -180,6 +190,75 @@ namespace Frida {
 		public extern void _free_inject_instance (void * instance);
 
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error;
+	}
+
+	private class KernelSession : Object, AgentSession {
+		private Gee.HashMap<uint, Gum.Script> script_by_id = new Gee.HashMap<uint, Gum.Script> ();
+		private uint last_script_id = 0;
+
+		public async void close () throws Error {
+		}
+
+		public async AgentScriptId create_script (string name, string source) throws Error {
+			var sid = AgentScriptId (++last_script_id);
+
+			string script_name;
+			if (name != "")
+				script_name = name;
+			else
+				script_name = "script%u".printf (sid.handle);
+
+			Gum.Script script;
+			try {
+				script = yield Gum.Script.from_string (script_name, source, Gum.Script.Flavor.KERNEL);
+			} catch (IOError create_error) {
+				throw new Error.INVALID_ARGUMENT (create_error.message);
+			}
+			script.set_message_handler ((script, message, data) => {
+				this.message_from_script (sid, message, data);
+			});
+
+			script_by_id[sid.handle] = script;
+
+			return sid;
+		}
+
+		public async void destroy_script (AgentScriptId sid) throws Error {
+			Gum.Script script;
+			if (!script_by_id.unset (sid.handle, out script))
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			yield script.unload ();
+		}
+
+		public async void load_script (AgentScriptId sid) throws Error {
+			var script = script_by_id[sid.handle];
+			if (script == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			yield script.load ();
+		}
+
+		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
+			var script = script_by_id[sid.handle];
+			if (script == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			script.post_message (message);
+		}
+
+		public async void enable_debugger () throws Error {
+			Gum.Script.set_debug_message_handler (on_debug_message);
+		}
+
+		public async void disable_debugger () throws Error {
+			Gum.Script.set_debug_message_handler (null);
+		}
+
+		public async void post_message_to_debugger (string message) throws Error {
+			Gum.Script.post_debug_message (message);
+		}
+
+		private void on_debug_message (string message) {
+			message_from_debugger (message);
+		}
 	}
 }
 #endif

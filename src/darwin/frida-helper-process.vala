@@ -27,6 +27,7 @@ namespace Frida {
 		private Subprocess process;
 		private DBusConnection connection;
 		private Helper proxy;
+		private AgentSession kernel_session;
 		private Gee.Promise<Helper> obtain_request;
 
 		public HelperProcess () {
@@ -34,6 +35,8 @@ namespace Frida {
 		}
 
 		public async void close () {
+			kernel_session = null;
+
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
@@ -107,6 +110,12 @@ namespace Frida {
 			}
 		}
 
+		public async AgentSession obtain_kernel_session () throws Error {
+			yield obtain ();
+
+			return kernel_session;
+		}
+
 		private async Helper obtain () throws Error {
 			if (obtain_request != null) {
 				try {
@@ -120,6 +129,7 @@ namespace Frida {
 			Subprocess pending_process = null;
 			DBusConnection pending_connection = null;
 			Helper pending_proxy = null;
+			AgentSession pending_kernel_session = null;
 			Error pending_error = null;
 
 			DBusServer server = null;
@@ -153,6 +163,7 @@ namespace Frida {
 
 				if (pending_error == null) {
 					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
+					pending_kernel_session = yield pending_connection.get_proxy (null, ObjectPath.KERNEL_SESSION);
 				}
 			} catch (GLib.Error e) {
 				if (timeout_source != null)
@@ -168,6 +179,7 @@ namespace Frida {
 				connection.closed.connect (on_connection_closed);
 				proxy = pending_proxy;
 				proxy.uninjected.connect (on_uninjected);
+				kernel_session = pending_kernel_session;
 
 				obtain_request.set_value (proxy);
 				return proxy;
