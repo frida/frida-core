@@ -37,7 +37,8 @@ namespace Frida.Agent {
 			}
 			script.get_stalker ().exclude (agent_range);
 			script.set_message_handler ((script, message, data) => {
-				this.message_from_script (sid, message, data);
+				var data_param = (data != null) ? data.get_data () : new uint8[] {};
+				this.message_from_script (sid, message, data_param);
 			});
 
 			var instance = new ScriptInstance (sid, script);

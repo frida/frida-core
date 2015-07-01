@@ -215,7 +215,8 @@ namespace Frida {
 				throw new Error.INVALID_ARGUMENT (create_error.message);
 			}
 			script.set_message_handler ((script, message, data) => {
-				this.message_from_script (sid, message, data);
+				var data_param = (data != null) ? data.get_data () : new uint8[] {};
+				this.message_from_script (sid, message, data_param);
 			});
 
 			script_by_id[sid.handle] = script;
