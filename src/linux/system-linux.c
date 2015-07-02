@@ -66,7 +66,7 @@ frida_system_enumerate_applications (int * result_length)
     }
 
     g_array_set_size (applications, applications->len + 1);
-    info = &g_array_index (applications, FridaHostProcessInfo, applications->len - 1);
+    info = &g_array_index (applications, FridaHostApplicationInfo, applications->len - 1);
     info->_identifier = app_id;
     info->_name = app_name;
     info->_pid = pid;
@@ -78,7 +78,7 @@ frida_system_enumerate_applications (int * result_length)
 
   *result_length = applications->len;
 
-  return g_array_free (applications, FALSE);
+  return (FridaHostApplicationInfo *) g_array_free (applications, FALSE);
 }
 
 FridaHostProcessInfo *
@@ -136,7 +136,7 @@ frida_system_enumerate_processes (int * result_length)
 
   *result_length = processes->len;
 
-  return g_array_free (processes, FALSE);
+  return (FridaHostProcessInfo *) g_array_free (processes, FALSE);
 }
 
 void
