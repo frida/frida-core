@@ -326,25 +326,7 @@ namespace Frida {
 		private Gee.ArrayList<TemporaryFile> files = new Gee.ArrayList<TemporaryFile> ();
 
 		public ResourceStore () throws Error {
-#if ANDROID
-			/*
-			 * We used to write our temporary files to /data/local/tmp, but it turns out that this
-			 * filesystem is mounted `noexec` on some devices. Because of this constraint we instead
-			 * write to a .frida-<random-id> directory next to the application, which we know resides
-			 * on a filesystem without `noexec`. The user or packager will have to guarantee that the
-			 * enclosing directory is o+rx so apps can access the FIFOs.
-			 */
-			try {
-				string exe_dir = Path.get_dirname (FileUtils.read_link ("/proc/self/exe"));
-				File f = File.new_for_path (Path.build_filename (exe_dir, TemporaryDirectory.make_name ()));
-				f.make_directory ();
-				tempdir = new TemporaryDirectory.with_file (f, true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-#else
 			tempdir = new TemporaryDirectory ();
-#endif
 			FileUtils.chmod (tempdir.path, 0755);
 
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
