@@ -75,7 +75,7 @@ namespace Frida.Test {
 		LINUX,
 		IOS,
 		ANDROID,
-		 QNX
+		QNX
 	}
 
 	public enum CPU {
