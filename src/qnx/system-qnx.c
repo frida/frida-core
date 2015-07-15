@@ -4,6 +4,15 @@
 #include <fcntl.h>
 #include <sys/procfs.h>
 
+void
+frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
+{
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented");
+}
+
 FridaHostApplicationInfo *
 frida_system_enumerate_applications (int * result_length)
 {

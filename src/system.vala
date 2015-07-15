@@ -1,5 +1,6 @@
 namespace Frida {
 	namespace System {
+		public static extern Frida.HostApplicationInfo get_frontmost_application () throws Error;
 		public static extern Frida.HostApplicationInfo[] enumerate_applications ();
 		public static extern Frida.HostProcessInfo[] enumerate_processes ();
 		public static extern void kill (uint pid);

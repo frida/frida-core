@@ -8,6 +8,17 @@
 
 static gboolean get_process_filename (HANDLE process, WCHAR * name, DWORD name_capacity);
 
+void
+frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
+{
+  (void) result;
+
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented");
+}
+
 FridaHostApplicationInfo *
 frida_system_enumerate_applications (int * result_length)
 {

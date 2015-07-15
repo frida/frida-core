@@ -238,6 +238,32 @@ namespace Frida {
 			return close_request != null;
 		}
 
+		public async Application? get_frontmost_application () throws Error {
+			check_open ();
+
+			HostApplicationInfo app;
+			try {
+				yield ensure_host_session ();
+				app = yield host_session.get_frontmost_application ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			if (app.pid == 0)
+				return null;
+			return new Application (app.identifier, app.name, app.pid, icon_from_image_data (app.small_icon), icon_from_image_data (app.large_icon));
+		}
+
+		public Application? get_frontmost_application_sync () throws Error {
+			return (create<GetFrontmostApplicationTask> () as GetFrontmostApplicationTask).start_and_wait_for_completion ();
+		}
+
+		private class GetFrontmostApplicationTask : DeviceTask<Application?> {
+			protected override async Application? perform_operation () throws Error {
+				return yield parent.get_frontmost_application ();
+			}
+		}
+
 		public async ApplicationList enumerate_applications () throws Error {
 			check_open ();
 

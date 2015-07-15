@@ -87,6 +87,10 @@ namespace Frida {
 			injector = null;
 		}
 
+		public override async HostApplicationInfo get_frontmost_application () throws Error {
+			return System.get_frontmost_application ();
+		}
+
 		public override async HostApplicationInfo[] enumerate_applications () throws Error {
 			return System.enumerate_applications ();
 		}

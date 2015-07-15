@@ -1,6 +1,7 @@
 namespace Frida {
 	[DBus (name = "re.frida.HostSession1")]
 	public interface HostSession : Object {
+		public abstract async HostApplicationInfo get_frontmost_application () throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
 		public abstract async HostProcessInfo[] enumerate_processes () throws GLib.Error;
 

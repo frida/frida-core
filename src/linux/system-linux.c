@@ -3,6 +3,15 @@
 static gchar * b2g_get_app_id (const gchar * fd);
 static gchar * b2g_get_app_name (const gchar * str);
 
+void
+frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
+{
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented");
+}
+
 FridaHostApplicationInfo *
 frida_system_enumerate_applications (int * result_length)
 {

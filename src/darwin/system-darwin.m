@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <sys/sysctl.h>
 
+static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
+
 #ifdef HAVE_MAC
 
 # include <libproc.h>
@@ -44,6 +46,70 @@ frida_system_init (void)
   }
 }
 
+void
+frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GError ** error)
+{
+#ifdef HAVE_IOS
+  NSAutoreleasePool * pool;
+  FridaSpringboardApi * api;
+  NSString * identifier;
+
+  frida_system_init ();
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  api = _frida_get_springboard_api ();
+
+  identifier = api->SBSCopyFrontmostApplicationDisplayIdentifier ();
+  if (identifier != nil)
+  {
+    NSString * name;
+    struct kinfo_proc * entries;
+    guint count, i;
+
+    result->_identifier = g_strdup ([identifier UTF8String]);
+    name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
+    result->_name = g_strdup ([name UTF8String]);
+    [name release];
+
+    entries = frida_system_query_kinfo_procs (&count);
+    for (result->_pid = 0, i = 0; result->_pid == 0 && i != count; i++)
+    {
+      guint pid = entries[i].kp_proc.p_pid;
+      NSString * cur_identifier;
+
+      cur_identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
+      if (cur_identifier != nil)
+      {
+        if ([cur_identifier isEqualToString:identifier])
+          result->_pid = pid;
+        [cur_identifier release];
+      }
+    }
+    g_free (entries);
+
+    extract_icons_from_identifier (identifier, &result->_small_icon, &result->_large_icon);
+
+    [identifier release];
+  }
+  else
+  {
+    result->_identifier = g_strdup ("");
+    result->_name = g_strdup ("");
+    result->_pid = 0;
+    frida_image_data_init (&result->_small_icon, 0, 0, 0, "");
+    frida_image_data_init (&result->_large_icon, 0, 0, 0, "");
+  }
+
+  [pool release];
+#else
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented");
+#endif
+}
+
 FridaHostApplicationInfo *
 frida_system_enumerate_applications (int * result_length)
 {
@@ -51,12 +117,9 @@ frida_system_enumerate_applications (int * result_length)
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
   GHashTable * pid_by_identifier;
-  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
-  size_t length;
-  gint err;
   struct kinfo_proc * entries;
   NSArray * identifiers;
-  NSUInteger count, i;
+  guint count, i;
   FridaHostApplicationInfo * result;
 
   frida_system_init ();
@@ -67,14 +130,7 @@ frida_system_enumerate_applications (int * result_length)
 
   pid_by_identifier = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
-  g_assert_cmpint (err, !=, -1);
-
-  entries = g_malloc0 (length);
-
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
-  g_assert_cmpint (err, !=, -1);
-  count = length / sizeof (struct kinfo_proc);
+  entries = frida_system_query_kinfo_procs (&count);
 
   for (i = 0; i != count; i++)
   {
@@ -131,10 +187,7 @@ FridaHostProcessInfo *
 frida_system_enumerate_processes (int * result_length)
 {
   NSAutoreleasePool * pool;
-  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
   struct kinfo_proc * entries;
-  size_t length;
-  gint err;
   guint count, i;
   FridaHostProcessInfo * result;
 
@@ -142,14 +195,7 @@ frida_system_enumerate_processes (int * result_length)
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
-  g_assert_cmpint (err, !=, -1);
-
-  entries = g_malloc0 (length);
-
-  err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
-  g_assert_cmpint (err, !=, -1);
-  count = length / sizeof (struct kinfo_proc);
+  entries = frida_system_query_kinfo_procs (&count);
 
   result = g_new0 (FridaHostProcessInfo, count);
   *result_length = count;
@@ -213,6 +259,27 @@ frida_system_enumerate_processes (int * result_length)
   [pool release];
 
   return result;
+}
+
+static struct kinfo_proc *
+frida_system_query_kinfo_procs (guint * count)
+{
+  struct kinfo_proc * entries;
+  int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+  size_t size;
+  gint err;
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &size, NULL, 0);
+  g_assert_cmpint (err, !=, -1);
+
+  entries = g_malloc0 (size);
+
+  err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &size, NULL, 0);
+  g_assert_cmpint (err, !=, -1);
+
+  *count = size / sizeof (struct kinfo_proc);
+
+  return entries;
 }
 
 void

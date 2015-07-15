@@ -111,6 +111,10 @@ namespace Frida {
 			helper = null;
 		}
 
+		public override async HostApplicationInfo get_frontmost_application () throws Error {
+			return System.get_frontmost_application ();
+		}
+
 		public override async HostApplicationInfo[] enumerate_applications () throws Error {
 			return yield application_enumerator.enumerate_applications ();
 		}
