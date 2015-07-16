@@ -185,6 +185,9 @@ namespace Frida {
 		private UnixSocketAddress service_address;
 		private SocketService service;
 
+		private Gee.Promise<bool> spawn_request;
+		private delegate void LaunchErrorHandler (Error e);
+		private LaunchErrorHandler on_launch_error;
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
 		internal FruitLauncher (DarwinHostSession host_session, HelperProcess helper, AgentResource agent) {
@@ -218,55 +221,97 @@ namespace Frida {
 		}
 
 		public async uint spawn (string identifier) throws Error {
-			var plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
-			if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
-				throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
-
-			yield helper.preload ();
-			(void) agent.file; // Make sure it's written to disk
-
-			check_identifier (identifier);
-
-			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
-			var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
-			var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
-			try {
-				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
-				FileUtils.chmod (dylib_path, 0755);
-				FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
-				FileUtils.chmod (plist_path, 0644);
-			} catch (GLib.FileError e) {
-				throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
+			while (spawn_request != null) {
+				try {
+					yield spawn_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 			}
 
-			Loader loader = null;
-			var on_incoming = this.service.incoming.connect ((connection, source_object) => {
-				loader = new Loader (connection);
-				spawn.callback ();
-				return true;
-			});
-			kill (identifier);
-			helper.launch.begin (identifier);
-			yield;
-			this.service.disconnect (on_incoming);
+			spawn_request = new Gee.Promise<bool> ();
 
-			FileUtils.unlink (plist_path);
-			FileUtils.unlink (dylib_path);
-
-			string pid_message = yield loader.recv_string ();
-			uint pid = (uint) uint64.parse (pid_message);
-
-			var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
 			try {
-				loader.pipe = new Pipe (endpoints.local_address);
-			} catch (IOError stream_error) {
-				throw new Error.NOT_SUPPORTED (stream_error.message);
+				var plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
+				if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
+					throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+
+				yield helper.preload ();
+				(void) agent.file; // Make sure it's written to disk
+
+				check_identifier (identifier);
+
+				var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
+				var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
+				var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
+				try {
+					FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
+					FileUtils.chmod (dylib_path, 0755);
+					FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
+					FileUtils.chmod (plist_path, 0644);
+				} catch (GLib.FileError e) {
+					throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
+				}
+
+				Loader loader = null;
+				Error error = null;
+				on_launch_error = (e) => {
+					error = e;
+					spawn.callback ();
+				};
+				var on_incoming = this.service.incoming.connect ((connection, source_object) => {
+					loader = new Loader (connection);
+					spawn.callback ();
+					return true;
+				});
+				var timeout = Timeout.add_seconds (10, () => {
+					spawn.callback ();
+					return false;
+				});
+				kill (identifier);
+				perform_launch.begin (identifier);
+				yield;
+				Source.remove (timeout);
+				this.service.disconnect (on_incoming);
+				on_launch_error = null;
+
+				FileUtils.unlink (plist_path);
+				FileUtils.unlink (dylib_path);
+
+				if (loader == null) {
+					if (error != null)
+						throw error;
+					else
+						throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch");
+				}
+
+				string pid_message = yield loader.recv_string ();
+				uint pid = (uint) uint64.parse (pid_message);
+
+				var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
+				try {
+					loader.pipe = new Pipe (endpoints.local_address);
+				} catch (IOError stream_error) {
+					throw new Error.NOT_SUPPORTED (stream_error.message);
+				}
+				yield loader.send_string (endpoints.remote_address);
+
+				loader_by_pid[pid] = loader;
+
+				return pid;
+			} finally {
+				spawn_request.set_value (true);
+				spawn_request = null;
 			}
-			yield loader.send_string (endpoints.remote_address);
+		}
 
-			loader_by_pid[pid] = loader;
-
-			return pid;
+		private async void perform_launch (string identifier) {
+			try {
+				yield helper.launch (identifier);
+			} catch (Error e) {
+				if (on_launch_error != null)
+					on_launch_error (e);
+			}
 		}
 
 		public Pipe? get_pipe (uint pid) {

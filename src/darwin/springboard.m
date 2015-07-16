@@ -10,6 +10,7 @@ _frida_get_springboard_api (void)
   if (frida_springboard_api == NULL)
   {
     FridaSpringboardApi * api;
+    NSString ** str;
 
     api = g_new (FridaSpringboardApi, 1);
 
@@ -31,8 +32,15 @@ _frida_get_springboard_api (void)
     api->SBSCopyIconImagePNGDataForDisplayIdentifier = dlsym (api->module, "SBSCopyIconImagePNGDataForDisplayIdentifier");
     g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
 
-    api->SBSLaunchApplicationWithIdentifier = dlsym (api->module, "SBSLaunchApplicationWithIdentifier");
-    g_assert (api->SBSLaunchApplicationWithIdentifier != NULL);
+    api->SBSLaunchApplicationWithIdentifierAndLaunchOptions = dlsym (api->module, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
+    g_assert (api->SBSLaunchApplicationWithIdentifierAndLaunchOptions != NULL);
+
+    api->SBSApplicationLaunchingErrorString = dlsym (api->module, "SBSApplicationLaunchingErrorString");
+    g_assert (api->SBSApplicationLaunchingErrorString != NULL);
+
+    str = dlsym (api->module, "SBSApplicationLaunchOptionUnlockDeviceKey");
+    g_assert (str != NULL);
+    api->SBSApplicationLaunchOptionUnlockDeviceKey = *str;
 
     frida_springboard_api = api;
   }

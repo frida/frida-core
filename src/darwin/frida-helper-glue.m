@@ -1,4 +1,4 @@
-#define ENABLE_MAPPER 1
+#define ENABLE_MAPPER 0
 
 #include "frida-helper.h"
 
@@ -435,19 +435,27 @@ void
 _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, GError ** error)
 {
   NSAutoreleasePool * pool;
+  FridaSpringboardApi * api;
+  NSDictionary * options;
   UInt32 res;
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  res = _frida_get_springboard_api ()->SBSLaunchApplicationWithIdentifier (
+  api = _frida_get_springboard_api ();
+
+  options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
+
+  res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
       [NSString stringWithUTF8String:identifier],
+      options,
       NO);
   if (res != 0)
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while trying to launch iOS app: %u", (guint) res);
+        "Unable to launch iOS app: %s",
+        [api->SBSApplicationLaunchingErrorString (res) UTF8String]);
   }
 
   [pool release];
