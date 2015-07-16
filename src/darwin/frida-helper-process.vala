@@ -74,10 +74,10 @@ namespace Frida {
 			}
 		}
 
-		public async void launch (string identifier) throws Error {
+		public async void launch (string identifier, string? url) throws Error {
 			var helper = yield obtain ();
 			try {
-				yield helper.launch (identifier);
+				yield helper.launch (identifier, (url != null) ? url : "");
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

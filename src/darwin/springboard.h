@@ -15,7 +15,8 @@ struct _FridaSpringboardApi
   NSString * (* SBSCopyDisplayIdentifierForProcessID) (UInt32 pid);
   NSString * (* SBSCopyLocalizedApplicationNameForDisplayIdentifier) (NSString * identifier);
   NSData * (* SBSCopyIconImagePNGDataForDisplayIdentifier) (NSString * identifier);
-  UInt32 (* SBSLaunchApplicationWithIdentifierAndLaunchOptions) (NSString * identifier, NSDictionary * launch_options, BOOL suspended);
+  UInt32 (* SBSLaunchApplicationWithIdentifierAndLaunchOptions) (NSString * identifier, NSDictionary * options, BOOL suspended);
+  UInt32 (* SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions) (NSString * identifier, NSURL * url, NSDictionary * params, NSDictionary * options, BOOL suspended);
   NSString * (* SBSApplicationLaunchingErrorString) (UInt32 error);
 
   NSString * SBSApplicationLaunchOptionUnlockDeviceKey;

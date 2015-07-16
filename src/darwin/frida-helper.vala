@@ -124,8 +124,8 @@ namespace Frida {
 			return child_pid;
 		}
 
-		public async void launch (string identifier) throws Error {
-			_do_launch (identifier);
+		public async void launch (string identifier, string url) throws Error {
+			_do_launch (identifier, (url.length > 0) ? url : null);
 		}
 
 		public async void resume (uint pid) throws Error {
@@ -182,7 +182,7 @@ namespace Frida {
 		public extern void _destroy_context ();
 
 		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
-		public extern void _do_launch (string identifier) throws Error;
+		public extern void _do_launch (string identifier, string? url) throws Error;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 

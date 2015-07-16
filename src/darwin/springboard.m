@@ -35,6 +35,9 @@ _frida_get_springboard_api (void)
     api->SBSLaunchApplicationWithIdentifierAndLaunchOptions = dlsym (api->module, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
     g_assert (api->SBSLaunchApplicationWithIdentifierAndLaunchOptions != NULL);
 
+    api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions = dlsym (api->module, "SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions");
+    g_assert (api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions != NULL);
+
     api->SBSApplicationLaunchingErrorString = dlsym (api->module, "SBSApplicationLaunchingErrorString");
     g_assert (api->SBSApplicationLaunchingErrorString != NULL);
 

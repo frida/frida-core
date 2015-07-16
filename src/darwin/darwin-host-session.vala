@@ -125,9 +125,16 @@ namespace Frida {
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			if (_is_running_on_ios () && !path.has_prefix ("/")) {
+				string identifier = path;
+				string? url = null;
+				if (argv.length == 2)
+					url = argv[1];
+				else if (argv.length > 2)
+					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
+
 				if (fruit_launcher == null)
 					fruit_launcher = new FruitLauncher (this, helper, agent);
-				return yield fruit_launcher.spawn (path);
+				return yield fruit_launcher.spawn (identifier, url);
 			} else {
 				return yield helper.spawn (path, argv, envp);
 			}
@@ -220,7 +227,7 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async uint spawn (string identifier) throws Error {
+		public async uint spawn (string identifier, string? url) throws Error {
 			while (spawn_request != null) {
 				try {
 					yield spawn_request.future.wait_async ();
@@ -269,7 +276,7 @@ namespace Frida {
 					return false;
 				});
 				kill (identifier);
-				perform_launch.begin (identifier);
+				perform_launch.begin (identifier, url);
 				yield;
 				Source.remove (timeout);
 				this.service.disconnect (on_incoming);
@@ -305,9 +312,9 @@ namespace Frida {
 			}
 		}
 
-		private async void perform_launch (string identifier) {
+		private async void perform_launch (string identifier, string? url) {
 			try {
-				yield helper.launch (identifier);
+				yield helper.launch (identifier, url);
 			} catch (Error e) {
 				if (on_launch_error != null)
 					on_launch_error (e);

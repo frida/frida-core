@@ -432,23 +432,38 @@ error_epilogue:
 #import "springboard.h"
 
 void
-_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, GError ** error)
+_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, const gchar * url, GError ** error)
 {
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
-  NSDictionary * options;
+  NSDictionary * params, * options;
   UInt32 res;
 
   pool = [[NSAutoreleasePool alloc] init];
 
   api = _frida_get_springboard_api ();
 
+  params = [NSDictionary dictionary];
+
   options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
-  res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
-      [NSString stringWithUTF8String:identifier],
-      options,
-      NO);
+  if (url != NULL)
+  {
+    res = api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions (
+        [NSString stringWithUTF8String:identifier],
+        [NSURL URLWithString:[NSString stringWithUTF8String:url]],
+        params,
+        options,
+        NO);
+  }
+  else
+  {
+    res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
+        [NSString stringWithUTF8String:identifier],
+        options,
+        NO);
+  }
+
   if (res != 0)
   {
     g_set_error (error,
@@ -464,7 +479,7 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
 #else
 
 void
-_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, GError ** error)
+_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, const gchar * url, GError ** error)
 {
   g_set_error (error,
       FRIDA_ERROR,
