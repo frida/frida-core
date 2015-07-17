@@ -16,8 +16,36 @@
 # include <android/log.h>
 #else
 # include <stdio.h>
+# ifdef HAVE_DARWIN
+#  include <CoreFoundation/CoreFoundation.h>
+#  include <dlfcn.h>
+
+typedef struct _FridaCFApi FridaCFApi;
+typedef gint32 CFLogLevel;
+
+enum _CFLogLevel
+{
+  kCFLogLevelEmergency = 0,
+  kCFLogLevelAlert     = 1,
+  kCFLogLevelCritical  = 2,
+  kCFLogLevelError     = 3,
+  kCFLogLevelWarning   = 4,
+  kCFLogLevelNotice    = 5,
+  kCFLogLevelInfo      = 6,
+  kCFLogLevelDebug     = 7
+};
+
+struct _FridaCFApi
+{
+  CFStringRef (* CFStringCreateWithCString) (CFAllocatorRef alloc, const char * c_str, CFStringEncoding encoding);
+  void (* CFRelease) (CFTypeRef cf);
+  void (* CFLog) (CFLogLevel level, CFStringRef format, ...);
+};
+
+# endif
 #endif
 
+static void frida_agent_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
 static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
 void
@@ -55,6 +83,7 @@ frida_agent_environment_init (void)
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
   glib_init ();
+  g_assertion_set_handler (frida_agent_on_assert_failure, NULL);
   g_log_set_default_handler (frida_agent_on_log_message, NULL);
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
@@ -68,6 +97,23 @@ frida_agent_environment_deinit (void)
   gio_deinit ();
   glib_deinit ();
   gum_memory_deinit ();
+}
+
+static void
+frida_agent_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data)
+{
+  gchar * full_message;
+
+  while (g_str_has_prefix (file, ".." G_DIR_SEPARATOR_S))
+    file += 3;
+  if (message == NULL)
+    message = "code should not be reached";
+
+  full_message = g_strdup_printf ("%s:%d:%s%s %s", file, line, func, (func[0] != '\0') ? ":" : "", message);
+  frida_agent_on_log_message (log_domain, G_LOG_LEVEL_ERROR, full_message, user_data);
+  g_free (full_message);
+
+  abort ();
 }
 
 static void
@@ -98,6 +144,94 @@ frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, 
 
   __android_log_write (priority, log_domain, message);
 #else
+# ifdef HAVE_DARWIN
+  static gsize api_value = 0;
+  FridaCFApi * api;
+
+  if (g_once_init_enter (&api_value))
+  {
+    void * cf;
+
+    /*
+     * CoreFoundation must be loaded by the main thread, so we should avoid loading it.
+     */
+    cf = dlopen ("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY | RTLD_GLOBAL | RTLD_NOLOAD);
+    if (cf != NULL)
+    {
+      api = g_slice_new (FridaCFApi);
+
+      api->CFStringCreateWithCString = dlsym (cf, "CFStringCreateWithCString");
+      g_assert (api->CFStringCreateWithCString != NULL);
+
+      api->CFRelease = dlsym (cf, "CFRelease");
+      g_assert (api->CFRelease != NULL);
+
+      api->CFLog = dlsym (cf, "CFLog");
+      g_assert (api->CFLog != NULL);
+
+      dlclose (cf);
+    }
+    else
+    {
+      api = NULL;
+    }
+
+    g_once_init_leave (&api_value, 1 + GPOINTER_TO_SIZE (api));
+  }
+
+  api = GSIZE_TO_POINTER (api_value - 1);
+  if (api != NULL)
+  {
+    CFLogLevel cf_log_level;
+    CFStringRef message_str, template_str;
+
+    switch (log_level & G_LOG_LEVEL_MASK)
+    {
+      case G_LOG_LEVEL_ERROR:
+        cf_log_level = kCFLogLevelError;
+        break;
+      case G_LOG_LEVEL_CRITICAL:
+        cf_log_level = kCFLogLevelCritical;
+        break;
+      case G_LOG_LEVEL_WARNING:
+        cf_log_level = kCFLogLevelWarning;
+        break;
+      case G_LOG_LEVEL_MESSAGE:
+        cf_log_level = kCFLogLevelNotice;
+        break;
+      case G_LOG_LEVEL_INFO:
+        cf_log_level = kCFLogLevelInfo;
+        break;
+      case G_LOG_LEVEL_DEBUG:
+        cf_log_level = kCFLogLevelDebug;
+        break;
+      default:
+        g_assert_not_reached ();
+    }
+
+    message_str = api->CFStringCreateWithCString (NULL, message, kCFStringEncodingUTF8);
+    if (log_domain != NULL)
+    {
+      CFStringRef log_domain_str;
+
+      template_str = api->CFStringCreateWithCString (NULL, "%@: %@", kCFStringEncodingUTF8);
+      log_domain_str = api->CFStringCreateWithCString (NULL, log_domain, kCFStringEncodingUTF8);
+      api->CFLog (cf_log_level, template_str, log_domain_str, message_str);
+      api->CFRelease (log_domain_str);
+    }
+    else
+    {
+      template_str = api->CFStringCreateWithCString (NULL, "%@", kCFStringEncodingUTF8);
+      api->CFLog (cf_log_level, template_str, message_str);
+    }
+    api->CFRelease (template_str);
+    api->CFRelease (message_str);
+
+    return;
+  }
+  /* else: fall through to stdout/stderr logging */
+# endif
+
   FILE * file = NULL;
   const gchar * severity = NULL;
 

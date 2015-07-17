@@ -59,6 +59,8 @@
 /m4/libtool.m4
 /m4/lt*.m4
 /server/Makefile.in
+/server/frida-server.h
+/server/frida-server.vapi
 /server/server.c
 /src/Makefile
 /src/Makefile.in

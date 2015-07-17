@@ -1,5 +1,69 @@
-namespace Frida {
-	public class Server : Object {
+namespace Frida.Server {
+	private static Application application;
+
+	private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+	private static bool output_version;
+	[CCode (array_length = false, array_null_terminated = true)]
+	private static string[] listen_addresses;
+
+	static const OptionEntry[] options = {
+		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
+		{ "", 0, 0, OptionArg.STRING_ARRAY, ref listen_addresses, null, "[LISTEN_ADDRESS]" },
+		{ null }
+	};
+
+	private static int main (string[] args) {
+#if !WINDOWS
+		Posix.setsid ();
+#endif
+
+		Environment.init ();
+
+		try {
+			var ctx = new OptionContext ();
+			ctx.set_help_enabled (true);
+			ctx.add_main_entries (options, null);
+			ctx.parse (ref args);
+			if (output_version) {
+				stdout.printf ("%s\n", version_string ());
+				return 0;
+			}
+		} catch (OptionError e) {
+			stdout.printf ("%s\n", e.message);
+			stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
+			return 1;
+		}
+
+		var listen_address = DEFAULT_LISTEN_ADDRESS;
+		if (listen_addresses.length > 0)
+			listen_address = listen_addresses[0];
+
+		application = new Application ();
+
+#if !WINDOWS
+		Posix.signal (Posix.SIGINT, (sig) => {
+			application.stop ();
+		});
+		Posix.signal (Posix.SIGTERM, (sig) => {
+			application.stop ();
+		});
+#endif
+
+		try {
+			application.run (listen_address);
+		} catch (Error e) {
+			printerr ("Unable to start server: %s\n", e.message);
+			return 1;
+		}
+
+		return 0;
+	}
+
+	namespace Environment {
+		public extern void init ();
+	}
+
+	public class Application : Object {
 		private BaseDBusHostSession host_session;
 		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
 		private DBusServer server;
@@ -175,64 +239,6 @@ namespace Frida {
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
 			}
-		}
-
-		private static Server frida_server;
-
-		private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
-		private static bool output_version;
-		[CCode (array_length = false, array_null_terminated = true)]
-		private static string[] listen_addresses;
-
-		static const OptionEntry[] options = {
-			{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
-			{ "", 0, 0, OptionArg.STRING_ARRAY, ref listen_addresses, null, "[LISTEN_ADDRESS]" },
-			{ null }
-		};
-
-		private static int main (string[] args) {
-#if !WINDOWS
-			Posix.setsid ();
-#endif
-
-			try {
-				var ctx = new OptionContext ();
-				ctx.set_help_enabled (true);
-				ctx.add_main_entries (options, null);
-				ctx.parse (ref args);
-				if (output_version) {
-					stdout.printf ("%s\n", version_string ());
-					return 0;
-				}
-			} catch (OptionError e) {
-				stdout.printf ("%s\n", e.message);
-				stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
-				return 1;
-			}
-
-			var listen_address = DEFAULT_LISTEN_ADDRESS;
-			if (listen_addresses.length > 0)
-				listen_address = listen_addresses[0];
-
-			frida_server = new Server ();
-
-#if !WINDOWS
-			Posix.signal (Posix.SIGINT, (sig) => {
-				frida_server.stop ();
-			});
-			Posix.signal (Posix.SIGTERM, (sig) => {
-				frida_server.stop ();
-			});
-#endif
-
-			try {
-				frida_server.run (listen_address);
-			} catch (Error e) {
-				printerr ("Unable to start server: %s\n", e.message);
-				return 1;
-			}
-
-			return 0;
 		}
 	}
 }
