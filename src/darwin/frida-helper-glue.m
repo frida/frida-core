@@ -1,4 +1,4 @@
-#define ENABLE_MAPPER 0
+#define ENABLE_MAPPER 1
 
 #include "frida-helper.h"
 
