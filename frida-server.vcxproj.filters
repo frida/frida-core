@@ -21,7 +21,7 @@
     <CustomBuild Include="server\server.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
-    <ClCompile Include="server-glue.c">
+    <ClCompile Include="server\server-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -1,3 +1,9 @@
+extra_libs =
+
+if OS_ANDROID
+extra_libs += -llog
+endif
+
 bin_PROGRAMS = frida-server
 
 frida_server_SOURCES = \
@@ -10,7 +16,8 @@ frida_server_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_server_LDADD = \
 	$(top_builddir)/src/libfrida-core-1.0.la \
-	$(FRIDA_LIBS)
+	$(FRIDA_LIBS) \
+	$(extra_libs)
 frida_server_VALAFLAGS = \
 	--library=frida-server \
 	--header=frida-server.h \
