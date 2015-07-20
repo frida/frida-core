@@ -118,6 +118,8 @@ namespace Frida.Server {
 
 			server.new_connection.disconnect (on_connection_opened);
 
+			session_resources.clear ();
+
 			while (clients.size != 0) {
 				foreach (var entry in clients.entries) {
 					var connection = entry.key;
@@ -172,7 +174,9 @@ namespace Frida.Server {
 			foreach (var entry in clients.entries)
 				entry.value.unregister_agent_session (id, session);
 
-			agent_sessions.unset (id.handle);
+			var raw_id = id.handle;
+			agent_sessions.unset (raw_id);
+			session_resources.unset (raw_id);
 		}
 
 		private bool on_connection_opened (DBusConnection connection) {
@@ -211,27 +215,32 @@ namespace Frida.Server {
 
 		private void on_session_closed (uint session_id, DBusConnection connection) {
 			var resources = session_resources[session_id];
-			prune_session.begin (resources, connection);
+			if (resources != null)
+				prune_session.begin (resources, connection);
 		}
 
 		private void on_script_created (uint script_id, uint session_id, DBusConnection connection) {
 			var resources = session_resources[session_id];
-			resources.scripts[script_id] = connection;
+			if (resources != null)
+				resources.scripts[script_id] = connection;
 		}
 
 		private void on_script_destroyed (uint script_id, uint session_id, DBusConnection connection) {
 			var resources = session_resources[session_id];
-			resources.scripts.unset (script_id);
+			if (resources != null)
+				resources.scripts.unset (script_id);
 		}
 
 		private void on_debugger_enabled (uint session_id, DBusConnection connection) {
 			var resources = session_resources[session_id];
-			resources.debugger = connection;
+			if (resources != null)
+				resources.debugger = connection;
 		}
 
 		private void on_debugger_disabled (uint session_id, DBusConnection connection) {
 			var resources = session_resources[session_id];
-			resources.debugger = null;
+			if (resources != null)
+				resources.debugger = null;
 		}
 
 		private async void prune_sessions (DBusConnection connection) {
