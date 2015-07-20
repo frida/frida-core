@@ -199,6 +199,9 @@ namespace Frida {
 		public async void close () throws Error {
 		}
 
+		public async void ping () throws Error {
+		}
+
 		public async AgentScriptId create_script (string name, string source) throws Error {
 			var sid = AgentScriptId (++last_script_id);
 
