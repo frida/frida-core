@@ -17,6 +17,8 @@ namespace Frida {
 	public interface AgentSession : Object {
 		public abstract async void close () throws GLib.Error;
 
+		public abstract async void ping () throws GLib.Error;
+
 		public abstract async AgentScriptId create_script (string name, string source) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId sid) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId sid) throws GLib.Error;

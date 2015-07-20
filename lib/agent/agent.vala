@@ -37,6 +37,9 @@ namespace Frida.Agent {
 			});
 		}
 
+		public async void ping () throws Error {
+		}
+
 		public async AgentScriptId create_script (string name, string source) throws Error {
 			check_open ();
 			var instance = yield script_engine.create_script ((name != "") ? name : null, source);

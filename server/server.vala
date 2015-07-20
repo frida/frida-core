@@ -68,6 +68,8 @@ namespace Frida.Server {
 		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+		private Gee.HashMap<uint, SessionResources> session_resources = new Gee.HashMap<uint, SessionResources> ();
+		private Gee.HashMap<uint32, DBusMessage> method_calls = new Gee.HashMap<uint32, DBusMessage> ();
 
 		private MainLoop loop;
 		private bool stopping;
@@ -175,6 +177,7 @@ namespace Frida.Server {
 
 		private bool on_connection_opened (DBusConnection connection) {
 			connection.closed.connect (on_connection_closed);
+			connection.add_filter (on_connection_message);
 
 			var client = new Client (connection);
 			client.register_host_session (host_session);
@@ -193,6 +196,179 @@ namespace Frida.Server {
 			Client client;
 			clients.unset (connection, out client);
 			client.close ();
+
+			prune_sessions.begin (connection);
+		}
+
+		private void on_session_opened (uint session_id, DBusConnection connection) {
+			var resources = session_resources[session_id];
+			if (resources == null) {
+				resources = new SessionResources (session_id);
+				session_resources[session_id] = resources;
+			}
+			resources.connections.add (connection);
+		}
+
+		private void on_session_closed (uint session_id, DBusConnection connection) {
+			var resources = session_resources[session_id];
+			prune_session.begin (resources, connection);
+		}
+
+		private void on_script_created (uint script_id, uint session_id, DBusConnection connection) {
+			var resources = session_resources[session_id];
+			resources.scripts[script_id] = connection;
+		}
+
+		private void on_script_destroyed (uint script_id, uint session_id, DBusConnection connection) {
+			var resources = session_resources[session_id];
+			resources.scripts.unset (script_id);
+		}
+
+		private void on_debugger_enabled (uint session_id, DBusConnection connection) {
+			var resources = session_resources[session_id];
+			resources.debugger = connection;
+		}
+
+		private void on_debugger_disabled (uint session_id, DBusConnection connection) {
+			var resources = session_resources[session_id];
+			resources.debugger = null;
+		}
+
+		private async void prune_sessions (DBusConnection connection) {
+			foreach (var resources in session_resources.values.to_array ())
+				yield prune_session (resources, connection);
+		}
+
+		private async void prune_session (SessionResources resources, DBusConnection connection) {
+			var session_id = resources.session_id;
+			var session = agent_sessions[session_id];
+
+			resources.connections.remove (connection);
+
+			var scripts_to_destroy = new Gee.ArrayList<uint> ();
+			var scripts = resources.scripts;
+			foreach (var entry in scripts.entries) {
+				if (entry.value == connection) {
+					scripts_to_destroy.add (entry.key);
+				}
+			}
+			foreach (var id in scripts_to_destroy)
+				scripts.unset (id);
+
+			foreach (var id in scripts_to_destroy) {
+				try {
+					yield session.destroy_script (AgentScriptId (id));
+				} catch (GLib.Error e) {
+				}
+			}
+
+			if (resources.debugger == connection) {
+				resources.debugger = null;
+
+				try {
+					yield session.disable_debugger ();
+				} catch (GLib.Error e) {
+				}
+			}
+
+			if (resources.connections.is_empty) {
+				session_resources.unset (session_id);
+
+				try {
+					yield session.close ();
+				} catch (GLib.Error e) {
+				}
+			}
+		}
+
+		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
+			DBusMessage result = message;
+
+			var type = message.get_message_type ();
+			DBusMessage call = null;
+			switch (type) {
+				case DBusMessageType.METHOD_CALL:
+					method_calls[message.get_serial ()] = message;
+					break;
+				case DBusMessageType.METHOD_RETURN:
+					method_calls.unset (message.get_reply_serial (), out call);
+					break;
+				case DBusMessageType.ERROR:
+					method_calls.unset (message.get_reply_serial (), out call);
+					break;
+				case DBusMessageType.SIGNAL:
+					break;
+				default:
+					assert_not_reached ();
+			}
+
+			if (type == DBusMessageType.SIGNAL || type == DBusMessageType.ERROR)
+				return result;
+
+			string path, iface, member;
+			if (call == null) {
+				path = message.get_path ();
+				iface = message.get_interface ();
+				member = message.get_member ();
+			} else {
+				path = call.get_path ();
+				iface = call.get_interface ();
+				member = call.get_member ();
+			}
+			if (iface == "re.frida.HostSession1") {
+				if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
+					uint32 session_id;
+					message.get_body ().get ("((u))", out session_id);
+					Idle.add (() => {
+						on_session_opened (session_id, connection);
+						return false;
+					});
+				}
+			} else if (iface == "re.frida.AgentSession1") {
+				uint session_id;
+				path.scanf ("/re/frida/AgentSession1/%u", out session_id);
+				if (member == "Close") {
+					if (type == DBusMessageType.METHOD_CALL) {
+						try {
+							result = message.copy ();
+						} catch (GLib.Error e) {
+							assert_not_reached ();
+						}
+						result.set_member ("Ping");
+					} else {
+						Idle.add (() => {
+							on_session_closed (session_id, connection);
+							return false;
+						});
+					}
+				} else if (member == "CreateScript" && type == DBusMessageType.METHOD_RETURN) {
+					uint32 script_id;
+					message.get_body ().get ("((u))", out script_id);
+					Idle.add (() => {
+						on_script_created (script_id, session_id, connection);
+						return false;
+					});
+				} else if (member == "DestroyScript" && type == DBusMessageType.METHOD_RETURN) {
+					uint32 script_id;
+					call.get_body ().get ("((u))", out script_id);
+					Idle.add (() => {
+						on_script_destroyed (script_id, session_id, connection);
+						return false;
+					});
+				} else if (member == "EnableDebugger" && type == DBusMessageType.METHOD_RETURN) {
+					Idle.add (() => {
+						on_debugger_enabled (session_id, connection);
+						return false;
+					});
+				} else if (member == "DisableDebugger" && type == DBusMessageType.METHOD_RETURN) {
+					Idle.add (() => {
+						on_debugger_disabled (session_id, connection);
+						return false;
+					});
+				}
+			}
+
+			return result;
 		}
 
 		private class Client : Object {
@@ -209,10 +385,11 @@ namespace Frida.Server {
 			}
 
 			public void close () {
+				agent_registration_by_id.clear ();
+
 				foreach (var registration_id in registrations)
 					connection.unregister_object (registration_id);
 				registrations.clear ();
-				agent_registration_by_id.clear ();
 			}
 
 			public void register_host_session (HostSession session) {
@@ -238,6 +415,36 @@ namespace Frida.Server {
 				agent_registration_by_id.unset (id.handle, out registration_id);
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
+			}
+		}
+
+		private class SessionResources : Object {
+			public uint session_id {
+				get;
+				construct;
+			}
+
+			public Gee.HashSet<DBusConnection> connections {
+				get;
+				construct;
+			}
+
+			public Gee.HashMap<uint, DBusConnection> scripts {
+				get;
+				construct;
+			}
+
+			public DBusConnection? debugger {
+				get;
+				set;
+			}
+
+			public SessionResources (uint session_id) {
+				Object (
+					session_id: session_id,
+					connections: new Gee.HashSet<DBusConnection> (),
+					scripts: new Gee.HashMap<uint, DBusConnection> ()
+				);
 			}
 		}
 	}
