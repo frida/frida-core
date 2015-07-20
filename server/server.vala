@@ -242,6 +242,10 @@ namespace Frida.Server {
 		private async void prune_session (SessionResources resources, DBusConnection connection) {
 			var session_id = resources.session_id;
 			var session = agent_sessions[session_id];
+			if (session == null) {
+				session_resources.unset (session_id);
+				return;
+			}
 
 			resources.connections.remove (connection);
 
