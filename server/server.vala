@@ -75,14 +75,14 @@ namespace Frida.Server {
 		private bool stopping;
 
 		construct {
-#if LINUX
-			host_session = new LinuxHostSession ();
+#if WINDOWS
+			host_session = new WindowsHostSession ();
 #endif
 #if DARWIN
 			host_session = new DarwinHostSession ();
 #endif
-#if WINDOWS
-			host_session = new WindowsHostSession ();
+#if LINUX
+			host_session = new LinuxHostSession ();
 #endif
 #if QNX
 			host_session = new QnxHostSession ();

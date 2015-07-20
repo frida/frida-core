@@ -22,17 +22,17 @@ namespace Frida {
 		}
 
 		private void add_local_backends () {
+#if WINDOWS
+			add_backend (new WindowsHostSessionBackend ());
+#endif
+#if DARWIN
+			add_backend (new DarwinHostSessionBackend ());
+#endif
 #if LINUX
 			add_backend (new LinuxHostSessionBackend ());
 #endif
 #if QNX
 			add_backend (new QnxHostSessionBackend ());
-#endif
-#if DARWIN
-			add_backend (new DarwinHostSessionBackend ());
-#endif
-#if WINDOWS
-			add_backend (new WindowsHostSessionBackend ());
 #endif
 		}
 
