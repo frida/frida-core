@@ -185,6 +185,5 @@ AC_CONFIG_FILES([
   tests/Makefile
   tests/mapper/Makefile
   tests/pipe/Makefile
-  tests/supersu/Makefile
 ])
 AC_OUTPUT

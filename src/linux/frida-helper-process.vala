@@ -192,7 +192,7 @@ namespace Frida {
 		private TemporaryFile helper_file;
 		private ResourceStore resource_store;
 		private MainContext? main_context;
-		private Subprocess process;
+		private Object process;
 		private DBusConnection connection;
 		private Helper proxy;
 		private Gee.Promise<Helper> obtain_request;
@@ -233,7 +233,8 @@ namespace Frida {
 			}
 			obtain_request = new Gee.Promise<Helper> ();
 
-			Subprocess pending_process = null;
+			SuperSU.Process pending_superprocess = null;
+			Subprocess pending_subprocess = null;
 			DBusConnection pending_connection = null;
 			Helper pending_proxy = null;
 			Error pending_error = null;
@@ -258,8 +259,12 @@ namespace Frida {
 					return false;
 				});
 				timeout_source.attach (main_context);
-				string[] argv = { helper_file.path, server.client_address };
-				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
+				try {
+					pending_superprocess = yield SuperSU.spawn ("/", new string[] { "su", "-c", helper_file.path, server.client_address });
+				} catch (Error e) {
+					string[] argv = { helper_file.path, server.client_address };
+					pending_subprocess = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
+				}
 				yield;
 				server.disconnect (connection_handler);
 				server.stop ();
@@ -279,7 +284,10 @@ namespace Frida {
 			}
 
 			if (pending_error == null) {
-				process = pending_process;
+				if (pending_superprocess != null)
+					process = pending_superprocess;
+				else
+					process = pending_subprocess;
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
 				proxy = pending_proxy;
@@ -288,8 +296,8 @@ namespace Frida {
 				obtain_request.set_value (proxy);
 				return proxy;
 			} else {
-				if (pending_process != null)
-					pending_process.force_exit ();
+				if (pending_subprocess != null)
+					pending_subprocess.force_exit ();
 				obtain_request.set_exception (pending_error);
 				obtain_request = null;
 				throw pending_error;

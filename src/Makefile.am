@@ -32,7 +32,8 @@ AGENT_TARGETS = \
 backend_sources += \
 	linux/linux-host-session.vala \
 	linux/linjector.vala \
-	linux/frida-helper-process.vala
+	linux/frida-helper-process.vala \
+	linux/supersu.vala
 glue_sources += \
 	linux/system-linux.c \
 	linux/linjector-glue.c

@@ -3,7 +3,6 @@ SUBDIRS = \
 	pipe
 
 if OS_ANDROID
-SUBDIRS += supersu
 else
 if OS_IOS
 else

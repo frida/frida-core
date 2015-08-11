@@ -85,6 +85,7 @@
 /src/linux/frida-helper.c
 /src/linux/linjector.c
 /src/linux/linux-host-session.c
+/src/linux/supersu.c
 /src/qnx/qinjector.c
 /src/qnx/qnx-host-session.c
 /src/server.c
@@ -107,8 +108,6 @@
 /tests/pipe/Makefile
 /tests/pipe/Makefile.in
 /tests/pipe/pipe-test
-/tests/supersu/Makefile.in
-/tests/supersu/main.c
 /tests/process.c
 /tests/runner.c
 /tests/test-agent.c
