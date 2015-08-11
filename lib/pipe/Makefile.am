@@ -12,6 +12,8 @@ if OS_LINUX
 # temporary suppressions.
 libfrida_pipe_la_CFLAGS = \
 	-w
+endif
+if OS_ANDROID
 libfrida_pipe_la_LIBADD = \
 	$(top_builddir)/lib/selinux/libfrida-selinux.la
 endif

@@ -55,8 +55,11 @@ frida_helper_LDFLAGS = \
 frida_helper_LDADD = \
 	libfrida-helper-main.la \
 	libfrida-helper-glue.la \
-	$(top_builddir)/lib/selinux/libfrida-selinux.la \
 	$(FRIDA_LIBS)
+if OS_ANDROID
+frida_helper_LDADD += \
+	$(top_builddir)/lib/selinux/libfrida-selinux.la
+endif
 
 backend_libraries += \
 	libfrida-helper-types.la \

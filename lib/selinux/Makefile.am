@@ -1,4 +1,4 @@
-if OS_LINUX
+if OS_ANDROID
 noinst_LTLIBRARIES = \
 	libfrida-selinux.la
 
