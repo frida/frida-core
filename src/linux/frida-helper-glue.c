@@ -1434,7 +1434,11 @@ frida_resolve_libc_function (pid_t pid, const gchar * function_name)
 static GumAddress
 frida_resolve_linker_function (pid_t pid, gpointer func)
 {
+#if GLIB_SIZEOF_VOID_P == 4
   const gchar * linker_path = "/system/bin/linker";
+#else
+  const gchar * linker_path = "/system/bin/linker64";
+#endif
   GumAddress local_base, remote_base, remote_address;
 
   local_base = frida_find_library_base (getpid (), linker_path, NULL);
