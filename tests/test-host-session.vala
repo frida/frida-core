@@ -189,11 +189,26 @@ namespace Frida.HostSessionTest {
 					assert (device != null);
 
 					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
-					stdout.printf ("Enter PID: ");
-					stdout.flush ();
-					uint pid = (uint) int.parse (stdin.read_line ());
 
-					stdout.printf ("Attaching...\n");
+					var processes = yield device.enumerate_processes ();
+					Process process = null;
+					var num_processes = processes.size ();
+					for (var i = 0; i != num_processes && process == null; i++) {
+						var p = processes.get (i);
+						if (p.name == "re.frida.helloworld")
+							process = p;
+					}
+
+					uint pid;
+					if (process != null) {
+						pid = process.pid;
+					} else {
+						stdout.printf ("Enter PID: ");
+						stdout.flush ();
+						pid = (uint) int.parse (stdin.read_line ());
+					}
+
+					stdout.printf ("Attaching to pid %u...\n", pid);
 					var session = yield device.attach (pid);
 					stdout.printf ("Attached!\n");
 
