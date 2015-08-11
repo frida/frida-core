@@ -313,6 +313,12 @@ namespace Frida.HostSessionTest {
 	namespace Linux {
 
 		private static async void spawn (Harness h) {
+			if (Frida.Test.os () == Frida.Test.OS.ANDROID && !GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
 			var backend = new LinuxHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
