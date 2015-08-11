@@ -55,6 +55,8 @@
 /lib/pipe/frida-pipe.h
 /lib/pipe/frida-pipe.vapi
 /lib/pipe/pipe.c
+/lib/selinux/Makefile
+/lib/selinux/Makefile.in
 /libtool
 /m4/libtool.m4
 /m4/lt*.m4

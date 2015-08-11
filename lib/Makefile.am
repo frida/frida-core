@@ -1,1 +1,6 @@
-SUBDIRS = interfaces pipe agent loader
+SUBDIRS = \
+	selinux \
+	interfaces \
+	pipe \
+	agent \
+	loader

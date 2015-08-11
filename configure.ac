@@ -175,6 +175,7 @@ AC_CONFIG_FILES([
   Makefile
   tools/Makefile
   lib/Makefile
+  lib/selinux/Makefile
   lib/interfaces/Makefile
   lib/pipe/Makefile
   lib/agent/Makefile
