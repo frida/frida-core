@@ -8,6 +8,9 @@
 #endif
 
 #include <gio/gunixsocketaddress.h>
+#ifdef HAVE_ANDROID
+# include <selinux/selinux.h>
+#endif
 #include <sys/stat.h>
 
 /* FIXME: this transport is not secure */
@@ -130,6 +133,9 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
       goto handle_error;
 
     chmod (tokens[2], S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+#ifdef HAVE_ANDROID
+    setfilecon (tokens[2], "u:object_r:app_data_file:s0");
+#endif
   }
 
   backend->state = FRIDA_STATE_CREATED;

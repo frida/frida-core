@@ -42,7 +42,9 @@ backend_libadd += \
 	libfrida-data-helper-process.la
 backend_valaflags += \
 	--pkg=frida-helper-types \
-	--pkg=frida-data-helper-process
+	--pkg=frida-data-helper-process \
+	--vapidir=$(abs_top_srcdir)/lib/selinux/vapi \
+	--pkg=libselinux
 
 backend_programs += \
 	frida-helper
@@ -53,6 +55,7 @@ frida_helper_LDFLAGS = \
 frida_helper_LDADD = \
 	libfrida-helper-main.la \
 	libfrida-helper-glue.la \
+	$(top_builddir)/lib/selinux/libfrida-selinux.la \
 	$(FRIDA_LIBS)
 
 backend_libraries += \

@@ -19,6 +19,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#ifdef HAVE_ANDROID
+# include <selinux/selinux.h>
+#endif
 #include <stdio.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
@@ -340,6 +343,9 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   g_assert_cmpint (ret, ==, 0);
   ret = chmod (instance->fifo_path, mode);
   g_assert_cmpint (ret, ==, 0);
+#ifdef HAVE_ANDROID
+  setfilecon (instance->fifo_path, "u:object_r:app_data_file:s0");
+#endif
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
   g_assert (instance->fifo != -1);
 

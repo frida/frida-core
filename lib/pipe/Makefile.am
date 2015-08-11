@@ -12,6 +12,8 @@ if OS_LINUX
 # temporary suppressions.
 libfrida_pipe_la_CFLAGS = \
 	-w
+libfrida_pipe_la_LIBADD = \
+	$(top_builddir)/lib/selinux/libfrida-selinux.la
 endif
 libfrida_pipe_la_DEPENDENCIES = \
 	$(builddir)/libfrida-pipe-autogen.la
@@ -29,4 +31,5 @@ libfrida_pipe_autogen_la_VALAFLAGS = \
 AM_CPPFLAGS = \
 	-include config.h \
 	$(FRIDA_CFLAGS) \
-	-I $(top_builddir)/lib/interfaces
+	-I $(top_builddir)/lib/interfaces \
+	-I $(top_srcdir)/lib/selinux/include

@@ -60,12 +60,14 @@ namespace Frida {
 					var so32 = _clone_so (desc.so32);
 					var temp_agent = new TemporaryFile.from_stream (name32, so32, helper.tempdir);
 					FileUtils.chmod (temp_agent.path, 0755);
+					SELinux.setfilecon (temp_agent.path, "u:object_r:system_file:s0");
 					agents[name32] = temp_agent;
 				}
 				if (byte_size (desc.so64) > 0) {
 					var so64 = _clone_so (desc.so64);
 					var temp_agent = new TemporaryFile.from_stream (name64, so64, helper.tempdir);
 					FileUtils.chmod (temp_agent.path, 0755);
+					SELinux.setfilecon (temp_agent.path, "u:object_r:system_file:s0");
 					agents[name64] = temp_agent;
 				}
 			}
