@@ -1,5 +1,5 @@
 namespace Frida.SuperSU {
-	public async Process spawn (string working_directory, string[] argv, string[]? envp = null) throws Error {
+	public async Process spawn (string working_directory, string[] argv, string[]? envp = null, bool capture_output = false) throws Error {
 		/* FIXME: workaround for Vala compiler bug */
 		var argv_copy = argv;
 		var envp_copy = envp;
@@ -19,11 +19,19 @@ namespace Frida.SuperSU {
 			throw new Error.PROTOCOL ("Unable to spawn: " + e.message);
 		}
 
-		return new Process (connection);
+		return new Process (connection, capture_output);
 	}
 
 	public class Process : Object {
 		private Connection connection;
+
+		public InputStream output {
+			get {
+				return output_in;
+			}
+		}
+		private UnixInputStream output_in;
+		private UnixOutputStream output_out;
 
 		public int exit_status {
 			get {
@@ -33,8 +41,22 @@ namespace Frida.SuperSU {
 
 		private Gee.Promise<int> exit_promise;
 
-		internal Process (Connection connection) {
+		internal Process (Connection connection, bool capture_output) {
 			this.connection = connection;
+
+			if (capture_output) {
+				var fds = new int[2];
+				try {
+					open_pipe (fds, 0);
+					Unix.set_fd_nonblocking (fds[0], true);
+					Unix.set_fd_nonblocking (fds[1], true);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				output_in = new UnixInputStream (fds[0], true);
+				output_out = new UnixOutputStream (fds[1], true);
+			}
 
 			this.exit_promise = new Gee.Promise<int> ();
 
@@ -59,13 +81,19 @@ namespace Frida.SuperSU {
 					switch (command) {
 						case 1: {
 							var data = yield connection.read_byte_array ();
-							stdout.write (data);
+							if (output_out != null)
+								yield output_out.write_bytes_async (data);
+							else
+								stdout.write (data.get_data ());
 							break;
 						}
 
 						case 2: {
 							var data = yield connection.read_byte_array ();
-							stderr.write (data);
+							if (output_out != null)
+								yield output_out.write_bytes_async (data);
+							else
+								stderr.write (data.get_data ());
 							break;
 						}
 
@@ -90,6 +118,10 @@ namespace Frida.SuperSU {
 				exit_promise.set_exception (e);
 			}
 		}
+
+		/* FIXME: working around vapi bug */
+		[CCode (cheader_filename = "glib-unix.h", cname = "g_unix_open_pipe")]
+		public static extern bool open_pipe (int * fds, int flags) throws GLib.Error;
 	}
 
 	private class Connection : Object {
@@ -183,18 +215,16 @@ namespace Frida.SuperSU {
 				yield write_string (s);
 		}
 
-		public async uint8[] read_byte_array () throws GLib.Error {
+		public async Bytes read_byte_array () throws GLib.Error {
 			var size = yield read_size ();
 			if (size == 0)
-				return new uint8[0];
+				return new Bytes (new uint8[0]);
 
-			var data_buf = new uint8[size];
-			size_t bytes_read;
-			yield input.read_all_async (data_buf, Priority.DEFAULT, null, out bytes_read);
-			if (bytes_read != size)
+			var data = yield input.read_bytes_async (size);
+			if (data.length != size)
 				throw new IOError.FAILED ("Unable to read byte array");
 
-			return data_buf;
+			return data;
 		}
 
 		public async size_t read_size () throws GLib.Error {
