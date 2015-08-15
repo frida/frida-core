@@ -11,7 +11,8 @@ endif
 endif
 
 noinst_PROGRAMS = \
-	frida-tests
+	frida-tests \
+	sepol
 noinst_LTLIBRARIES = \
 	libfrida-tests.la \
 	libfrida-tests-glue.la
@@ -89,6 +90,15 @@ libfrida_tests_glue_la_SOURCES = \
 	process-unix.c \
 	runner-glue.c
 
+sepol_SOURCES = \
+	sepol.c
+sepol_LDADD = \
+	$(top_builddir)/lib/selinux/libfrida-selinux.la \
+	$(FRIDA_LIBS)
+sepol_LDFLAGS = \
+	$(FRIDA_LDFLAGS) \
+	-static
+
 data/.stamp:
 	mkdir -p $(@D)
 	cp $(srcdir)/labrats/unixvictim-* $(@D)
@@ -100,6 +110,7 @@ AM_CPPFLAGS = \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe \
 	-I $(top_srcdir)/src \
+	-I $(top_srcdir)/lib/selinux/include \
 	$(FRIDA_CFLAGS) \
 	-DPKGDATADIR=\""$(pkgdatadir)"\" \
 	-DPKGLIBDIR=\""$(pkglibdir)"\" \
