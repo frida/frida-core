@@ -32,7 +32,6 @@ static int load_users(struct policydb *policydb, const char *path)
 {
 	FILE *fp;
 	char *buffer = NULL, *p, *q, oldc;
-	size_t len = 0;
 	ssize_t nread;
 	unsigned lineno = 0, islist = 0, bit;
 	user_datum_t *usrdatum;
@@ -51,7 +50,8 @@ static int load_users(struct policydb *policydb, const char *path)
 	while(fgets(buffer, 255, fp) != NULL) {
 
 		lineno++;
-		if (buffer[nread - 1] == '\n')
+		nread = strlen(buffer);
+		if (nread > 0 && buffer[nread - 1] == '\n')
 			buffer[nread - 1] = 0;
 		p = buffer;
 		while (*p && isspace(*p))
