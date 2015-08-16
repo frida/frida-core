@@ -11,7 +11,7 @@ typedef enum _FridaSELinuxErrorEnum FridaSELinuxErrorEnum;
 
 struct _FridaSELinuxRule
 {
-  const gchar * source;
+  const gchar * sources[4];
   const gchar * target;
   const gchar * klass;
   const gchar * permissions[16];
@@ -32,8 +32,9 @@ static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, cons
 
 static const FridaSELinuxRule frida_selinux_rules[] =
 {
-  { "untrusted_app", "frida_file", "fifo_file", { "open", "write", NULL } },
-  { "untrusted_app", "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
+  { { "untrusted_app", "zygote", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
+  { { "untrusted_app", "zygote", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
+  { { "untrusted_app", "zygote", NULL }, "frida_file", "sock_file", { "write", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
@@ -85,14 +86,18 @@ frida_patch_policy (void)
   for (rule_index = 0; rule_index != G_N_ELEMENTS (frida_selinux_rules); rule_index++)
   {
     const FridaSELinuxRule * rule = &frida_selinux_rules[rule_index];
+    const gchar * const * source;
     const gchar * const * perm;
 
-    for (perm = rule->permissions; *perm != NULL; perm++)
+    for (source = rule->sources; *source != NULL; source++)
     {
-      if (frida_ensure_rule (&db, rule->source, rule->target, rule->klass, *perm, &error) == NULL)
+      for (perm = rule->permissions; *perm != NULL; perm++)
       {
-        g_printerr ("Unable to add SELinux rule: %s\n", error->message);
-        g_clear_error (&error);
+        if (frida_ensure_rule (&db, *source, rule->target, rule->klass, *perm, &error) == NULL)
+        {
+          g_printerr ("Unable to add SELinux rule: %s\n", error->message);
+          g_clear_error (&error);
+        }
       }
     }
   }
