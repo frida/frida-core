@@ -115,7 +115,7 @@ frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GErro
 
   policydb_init (db);
 
-  res = policydb_read (db, &file, TRUE);
+  res = policydb_read (db, &file, FALSE);
   g_assert_cmpint (res, ==, 0);
 
   *data = file.data;
