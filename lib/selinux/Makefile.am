@@ -86,6 +86,7 @@ libsepol_la_SOURCES = \
 	include/sepol/iface_record.h \
 	include/sepol/interfaces.h \
 	include/sepol/module.h \
+	include/sepol/module_to_cil.h \
 	include/sepol/node_record.h \
 	include/sepol/nodes.h \
 	include/sepol/policydb.h \
@@ -137,6 +138,7 @@ libsepol_la_SOURCES = \
 	src/sepol/link.c \
 	src/sepol/mls.c \
 	src/sepol/module.c \
+	src/sepol/module_to_cil.c \
 	src/sepol/node_record.c \
 	src/sepol/nodes.c \
 	src/sepol/polcaps.c \

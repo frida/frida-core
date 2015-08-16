@@ -1,4 +1,3 @@
-
 /* Author : Stephen Smalley, <sds@epoch.ncsc.mil> */
 
 /* FLASK */
@@ -20,6 +19,9 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <sys/cdefs.h>
+
+__BEGIN_DECLS
 
 #define MAPTYPE uint64_t	/* portion of bitmap in each node */
 #define MAPSIZE (sizeof(MAPTYPE) * 8)	/* number of bits in node bitmap */
@@ -84,11 +86,13 @@ extern unsigned int ebitmap_cardinality(ebitmap_t *e1);
 extern int ebitmap_hamming_distance(ebitmap_t * e1, ebitmap_t * e2);
 extern int ebitmap_cpy(ebitmap_t * dst, const ebitmap_t * src);
 extern int ebitmap_contains(const ebitmap_t * e1, const ebitmap_t * e2);
+extern int ebitmap_match_any(const ebitmap_t *e1, const ebitmap_t *e2);
 extern int ebitmap_get_bit(const ebitmap_t * e, unsigned int bit);
 extern int ebitmap_set_bit(ebitmap_t * e, unsigned int bit, int value);
 extern void ebitmap_destroy(ebitmap_t * e);
 extern int ebitmap_read(ebitmap_t * e, void *fp);
 
+__END_DECLS
 #endif				/* _EBITMAP_H_ */
 
 /* FLASK */
