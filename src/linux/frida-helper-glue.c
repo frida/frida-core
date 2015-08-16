@@ -344,7 +344,7 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   ret = chmod (instance->fifo_path, mode);
   g_assert_cmpint (ret, ==, 0);
 #ifdef HAVE_ANDROID
-  setfilecon (instance->fifo_path, "u:object_r:app_data_file:s0");
+  setfilecon (instance->fifo_path, "u:object_r:frida_file:s0");
 #endif
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
   g_assert (instance->fifo != -1);

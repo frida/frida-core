@@ -134,7 +134,7 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
 
     chmod (tokens[2], S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 #ifdef HAVE_ANDROID
-    setfilecon (tokens[2], "u:object_r:app_data_file:s0");
+    setfilecon (tokens[2], "u:object_r:frida_file:s0");
 #endif
   }
 

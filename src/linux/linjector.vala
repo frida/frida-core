@@ -61,7 +61,7 @@ namespace Frida {
 					var temp_agent = new TemporaryFile.from_stream (name32, so32, helper.tempdir);
 					FileUtils.chmod (temp_agent.path, 0755);
 #if ANDROID
-					SELinux.setfilecon (temp_agent.path, "u:object_r:system_file:s0");
+					SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
 #endif
 					agents[name32] = temp_agent;
 				}
@@ -70,7 +70,7 @@ namespace Frida {
 					var temp_agent = new TemporaryFile.from_stream (name64, so64, helper.tempdir);
 					FileUtils.chmod (temp_agent.path, 0755);
 #if ANDROID
-					SELinux.setfilecon (temp_agent.path, "u:object_r:system_file:s0");
+					SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
 #endif
 					agents[name64] = temp_agent;
 				}
