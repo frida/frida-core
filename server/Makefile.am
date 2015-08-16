@@ -1,7 +1,9 @@
 extra_libs =
 
 if OS_ANDROID
-extra_libs += -llog
+extra_libs += \
+	$(top_builddir)/lib/selinux/libfrida-selinux.la \
+	-llog
 endif
 
 bin_PROGRAMS = frida-server
@@ -32,6 +34,7 @@ frida_server_VALAFLAGS = \
 
 AM_CPPFLAGS = \
 	-include config.h \
+	-I $(top_srcdir)/lib/selinux/include \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/src \
 	$(FRIDA_CFLAGS) \

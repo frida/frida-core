@@ -1,5 +1,9 @@
 #include "frida-server.h"
 
+#ifdef HAVE_ANDROID
+# include "frida-selinux.h"
+#endif
+
 #include <gio/gio.h>
 
 #if defined (HAVE_DARWIN)
@@ -37,6 +41,10 @@ frida_server_environment_init (void)
   g_log_set_default_handler (frida_server_on_log_message, NULL);
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
+
+#ifdef HAVE_ANDROID
+  frida_selinux_patch_policy ();
+#endif
 }
 
 static void
