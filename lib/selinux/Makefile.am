@@ -49,8 +49,8 @@ libselinux_la_SOURCES = \
 	src/selinux/getfilecon.c \
 	src/selinux/getpeercon.c \
 	src/selinux/init.c \
-	src/selinux/label.c \
-	src/selinux/label_android_property.c \
+	##src/selinux/label.c \
+	##src/selinux/label_android_property.c \
 	##src/selinux/label_file.c \
 	src/selinux/label_internal.h \
 	src/selinux/lgetfilecon.c \
