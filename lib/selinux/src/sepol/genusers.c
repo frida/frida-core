@@ -7,7 +7,7 @@
 
 #include <sepol/policydb/policydb.h>
 
-#ifndef DARWIN
+#if !defined(DARWIN) && !defined(__ANDROID__)
 #include <stdio_ext.h>
 #endif
 
@@ -36,7 +36,9 @@ static int load_users(struct policydb *policydb, const char *path)
 {
 	FILE *fp;
 	char *buffer = NULL, *p, *q, oldc;
+#if !defined(DARWIN) && !defined(__ANDROID__)
 	size_t len = 0;
+#endif
 	ssize_t nread;
 	unsigned lineno = 0, islist = 0, bit;
 	user_datum_t *usrdatum;
@@ -47,20 +49,21 @@ static int load_users(struct policydb *policydb, const char *path)
 	if (fp == NULL)
 		return -1;
 
-#ifdef DARWIN
+#if defined(DARWIN) || defined(__ANDROID__)
 	if ((buffer = (char *)malloc(255 * sizeof(char))) == NULL) {
 	  ERR(NULL, "out of memory");
 	  return -1;
 	}
 
 	while(fgets(buffer, 255, fp) != NULL) {
+		nread = strlen(buffer);
 #else
 	__fsetlocking(fp, FSETLOCKING_BYCALLER);
 	while ((nread = getline(&buffer, &len, fp)) > 0) {
 #endif
 
 		lineno++;
-		if (buffer[nread - 1] == '\n')
+		if (nread > 0 && buffer[nread - 1] == '\n')
 			buffer[nread - 1] = 0;
 		p = buffer;
 		while (*p && isspace(*p))
