@@ -27,12 +27,13 @@ enum _FridaSELinuxErrorEnum
 static void frida_patch_policy (void);
 static gboolean frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GError ** error);
 static gboolean frida_save_policy (const gchar * filename, policydb_t * db, GError ** error);
-static type_datum_t * frida_ensure_type (policydb_t * db, const gchar * type_name);
+static type_datum_t * frida_ensure_type (policydb_t * db, const gchar * type_name, guint num_attributes, ...);
 static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error);
 
 static const FridaSELinuxRule frida_selinux_rules[] =
 {
-  { "zygote", "frida", "sock_file", { "write", NULL } },
+  { "untrusted_app", "frida_file", "fifo_file", { "open", "write", NULL } },
+  { "untrusted_app", "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
@@ -74,7 +75,12 @@ frida_patch_policy (void)
   res = policydb_load_isids (&db, &sidtab);
   g_assert_cmpint (res, ==, 0);
 
-  frida_ensure_type (&db, "frida");
+  if (frida_ensure_type (&db, "frida_file", 1, "file_type", &error) == NULL)
+  {
+    g_printerr ("Unable to add SELinux type: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
 
   for (rule_index = 0; rule_index != G_N_ELEMENTS (frida_selinux_rules); rule_index++)
   {
@@ -97,6 +103,7 @@ frida_patch_policy (void)
     g_clear_error (&error);
   }
 
+beach:
   policydb_destroy (&db);
   g_free (db_data);
 }
@@ -149,39 +156,72 @@ frida_save_policy (const gchar * filename, policydb_t * db, GError ** error)
 }
 
 static type_datum_t *
-frida_ensure_type (policydb_t * db, const gchar * type_name)
+frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes, ...)
 {
   type_datum_t * type;
-  uint32_t id;
-  gchar * name;
+  ebitmap_t * attr_map;
+  va_list vl;
+  guint i;
+  GError * pending_error, ** error;
 
   type = hashtab_search (db->p_types.table, (char *) type_name);
-  if (type != NULL)
+  if (type == NULL)
   {
-    g_print ("Already added: %s\n", type_name);
-    return type;
+    uint32_t id;
+    gchar * name;
+
+    id = ++db->p_types.nprim;
+    name = strdup (type_name);
+
+    type = malloc (sizeof (type_datum_t));
+
+    type_datum_init (type);
+    type->s.value = id;
+    type->primary = TRUE;
+    type->flavor = TYPE_TYPE;
+
+    hashtab_insert (db->p_types.table, name, type);
+
+    policydb_index_others (NULL, db, FALSE);
+
+    attr_map = &db->type_attr_map[id - 1];
+
+    /* We also need to add the type itself as the degenerate case. */
+    ebitmap_set_bit (attr_map, id - 1, 1);
+  }
+  else
+  {
+    attr_map = &db->type_attr_map[type->s.value - 1];
   }
 
-  g_print ("Adding: %s\n", type_name);
+  va_start (vl, n_attributes);
 
-  id = ++db->p_types.nprim;
-  name = strdup (type_name);
+  pending_error = NULL;
+  for (i = 0; i != n_attributes; i++)
+  {
+    const gchar * attribute_name;
+    type_datum_t * attribute_type;
 
-  type = malloc (sizeof (type_datum_t));
+    attribute_name = va_arg (vl, const gchar *);
+    attribute_type = hashtab_search (db->p_types.table, (char *) attribute_name);
+    if (attribute_type != NULL)
+    {
+      uint32_t attribute_id = attribute_type->s.value;
+      ebitmap_set_bit (attr_map, attribute_id - 1, 1);
+    }
+    else if (pending_error == NULL)
+    {
+      g_set_error (&pending_error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "attribute type %s does not exist", attribute_name);
+    }
+  }
 
-  type_datum_init (type);
-  type->s.value = id;
-  type->primary = TRUE;
-  type->flavor = TYPE_TYPE;
+  error = va_arg (vl, GError **);
+  if (pending_error != NULL)
+    g_propagate_error (error, pending_error);
 
-  hashtab_insert (db->p_types.table, name, type);
+  va_end (vl);
 
-  policydb_index_others (NULL, db, FALSE);
-
-  /* We also need to add the type itself as the degenerate case. */
-  ebitmap_set_bit (&db->type_attr_map[id - 1], id - 1, 1);
-
-  return type;
+  return (pending_error == NULL) ? type : NULL;
 }
 
 static avtab_datum_t *
@@ -233,17 +273,11 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
   {
     int res;
 
-    g_print ("Adding: %s %s %s %s\n", s, t, c, p);
-
     av = malloc (sizeof (avtab_datum_t));
     av->data = 1U << (perm->s.value - 1);
 
     res = avtab_insert (&db->te_avtab, &key, av);
     g_assert_cmpint (res, ==, 0);
-  }
-  else
-  {
-    g_print ("Already got: %s %s %s %s\n", s, t, c, p);
   }
 
   av->data |= 1U << (perm->s.value - 1);
