@@ -28,6 +28,7 @@ static void frida_patch_policy (void);
 static gboolean frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GError ** error);
 static gboolean frida_save_policy (const gchar * filename, policydb_t * db, GError ** error);
 static type_datum_t * frida_ensure_type (policydb_t * db, const gchar * type_name, guint num_attributes, ...);
+static gboolean frida_ensure_permissive (policydb_t * db, const gchar * type_name, gboolean permissive, GError ** error);
 static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error);
 
 static const FridaSELinuxRule frida_selinux_rules[] =
@@ -75,6 +76,20 @@ frida_patch_policy (void)
 
   res = policydb_load_isids (&db, &sidtab);
   g_assert_cmpint (res, ==, 0);
+
+  if (frida_ensure_type (&db, "frida", 1, "domain", &error) == NULL)
+  {
+    g_printerr ("Unable to add SELinux type: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
+
+  if (!frida_ensure_permissive (&db, "frida", TRUE, &error))
+  {
+    g_printerr ("Unable to make SELinux type permissive: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
 
   if (frida_ensure_type (&db, "frida_file", 1, "file_type", &error) == NULL)
   {
@@ -227,6 +242,23 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
   va_end (vl);
 
   return (pending_error == NULL) ? type : NULL;
+}
+
+static gboolean
+frida_ensure_permissive (policydb_t * db, const gchar * type_name, gboolean permissive, GError ** error)
+{
+  type_datum_t * type;
+
+  type = hashtab_search (db->p_types.table, (char *) type_name);
+  if (type == NULL)
+  {
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "type %s does not exist", type_name);
+    return FALSE;
+  }
+
+  ebitmap_set_bit (&db->permissive_map, type->s.value, permissive);
+
+  return TRUE;
 }
 
 static avtab_datum_t *
