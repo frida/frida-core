@@ -152,7 +152,7 @@ static type_datum_t *
 frida_ensure_type (policydb_t * db, const gchar * type_name)
 {
   type_datum_t * type;
-  uint32_t id, i, n;
+  uint32_t id;
   gchar * name;
 
   type = hashtab_search (db->p_types.table, (char *) type_name);
@@ -174,18 +174,12 @@ frida_ensure_type (policydb_t * db, const gchar * type_name)
   type->primary = TRUE;
   type->flavor = TYPE_TYPE;
 
-  i = id - 1;
-  n = db->p_types.nprim;
-  db->p_type_val_to_name = realloc (db->p_type_val_to_name, n * sizeof (char *));
-  db->p_type_val_to_name[i] = name;
-  db->type_val_to_struct = realloc (db->type_val_to_struct, n * sizeof (type_datum_t *));
-  db->type_val_to_struct[i] = type;
-  db->type_attr_map = realloc (db->type_attr_map, n * sizeof (ebitmap_t));
-  ebitmap_init (&db->type_attr_map[i]);
-  db->attr_type_map = realloc (db->attr_type_map, n * sizeof (ebitmap_t));
-  ebitmap_init (&db->attr_type_map[i]);
-
   hashtab_insert (db->p_types.table, name, type);
+
+  policydb_index_others (NULL, db, FALSE);
+
+  /* We also need to add the type itself as the degenerate case. */
+  ebitmap_set_bit (&db->type_attr_map[id - 1], id - 1, 1);
 
   return type;
 }
