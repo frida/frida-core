@@ -5,10 +5,15 @@ noinst_LTLIBRARIES = \
 	libsepol.la
 
 libfrida_selinux_la_SOURCES = \
+	src/policy.c \
 	$(NULL)
 libfrida_selinux_la_LIBADD = \
 	libselinux.la \
 	libsepol.la
+libfrida_selinux_la_CPPFLAGS = \
+	-include config.h \
+	$(FRIDA_CFLAGS) \
+	-I $(srcdir)/include
 
 libselinux_la_SOURCES = \
 	include/selinux/android.h \
