@@ -68,7 +68,9 @@ static int load_booleans(struct policydb *policydb, const char *path,
 {
 	FILE *boolf;
 	char *buffer = NULL;
+#if !defined(DARWIN) && !defined(__ANDROID__)
 	size_t size = 0;
+#endif
 	char localbools[BUFSIZ];
 	char name[BUFSIZ];
 	int val;
@@ -79,7 +81,7 @@ static int load_booleans(struct policydb *policydb, const char *path,
 	if (boolf == NULL)
 		goto localbool;
 
-#ifdef DARWIN
+#if defined(DARWIN) || defined(__ANDROID__)
         if ((buffer = (char *)malloc(255 * sizeof(char))) == NULL) {
           ERR(NULL, "out of memory");
 	  return -1;
@@ -111,7 +113,7 @@ static int load_booleans(struct policydb *policydb, const char *path,
 	boolf = fopen(localbools, "r");
 	if (boolf != NULL) {
 
-#ifdef DARWIN
+#if defined(DARWIN) || defined(__ANDROID__)
 
 	  while(fgets(buffer, 255, boolf) != NULL) {
 #else
