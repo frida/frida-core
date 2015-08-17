@@ -57,7 +57,7 @@ frida_selinux_patch_policy (void)
 
   if (!frida_load_policy (system_policy, &db, &db_data, &error))
   {
-    g_warning ("Unable to load SELinux policy: %s", error->message);
+    g_warning ("Unable to load SELinux policy from the kernel: %s", error->message);
     g_error_free (error);
     return;
   }
@@ -93,7 +93,7 @@ frida_selinux_patch_policy (void)
 
   if (!frida_save_policy ("/sys/fs/selinux/load", &db, &error))
   {
-    g_warning ("Unable to save SELinux policy: %s", error->message);
+    g_warning ("Unable to save SELinux policy to the kernel: %s", error->message);
     g_clear_error (&error);
   }
 
@@ -113,12 +113,12 @@ frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GErro
   if (!g_file_get_contents (filename, &file.data, &file.len, error))
     return FALSE;
 
+  *data = file.data;
+
   policydb_init (db);
 
   res = policydb_read (db, &file, FALSE);
   g_assert_cmpint (res, ==, 0);
-
-  *data = file.data;
 
   return TRUE;
 }
@@ -135,18 +135,28 @@ frida_save_policy (const gchar * filename, policydb_t * db, GError ** error)
 
   fd = open (filename, O_RDWR);
   if (fd == -1)
-  {
-    perror ("open failed");
-    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno), "unable to save policy to '%s'", filename);
-    return FALSE;
-  }
+    goto error;
 
   res = write (fd, data, size);
-  g_assert_cmpuint (res, ==, size);
+  if (res == -1)
+    goto error;
 
   close (fd);
 
   return TRUE;
+
+error:
+  {
+    int e;
+
+    e = errno;
+    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (e), "%s", strerror (e));
+
+    if (fd != -1)
+      close (fd);
+
+    return FALSE;
+  }
 }
 
 static type_datum_t *
@@ -161,7 +171,7 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
   type = hashtab_search (db->p_types.table, (char *) type_name);
   if (type == NULL)
   {
-    uint32_t id;
+    uint32_t id, i, n;
     gchar * name;
 
     id = ++db->p_types.nprim;
@@ -178,10 +188,17 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
 
     policydb_index_others (NULL, db, FALSE);
 
-    attr_map = &db->type_attr_map[id - 1];
+    i = id - 1;
+    n = db->p_types.nprim;
+    db->type_attr_map = realloc (db->type_attr_map, n * sizeof (ebitmap_t));
+    db->attr_type_map = realloc (db->attr_type_map, n * sizeof (ebitmap_t));
+    ebitmap_init (&db->type_attr_map[i]);
+    ebitmap_init (&db->attr_type_map[i]);
+
+    attr_map = &db->type_attr_map[i];
 
     /* We also need to add the type itself as the degenerate case. */
-    ebitmap_set_bit (attr_map, id - 1, 1);
+    ebitmap_set_bit (attr_map, i, 1);
   }
   else
   {
