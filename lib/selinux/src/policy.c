@@ -123,7 +123,7 @@ frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GErro
   {
     g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_POLICY_FORMAT_NOT_SUPPORTED, "unsupported policy database format");
     policydb_destroy (db);
-    g_free (file.data);
+    g_free (*data);
     return FALSE;
   }
 
