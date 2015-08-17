@@ -1,13 +1,11 @@
 #include "frida-tests.h"
 
 #include <errno.h>
-#ifdef HAVE_SPAWN_H
-# include <spawn.h>
-#endif
 #include <stdio.h>
 #include <sys/wait.h>
 #ifdef HAVE_DARWIN
 # include <mach-o/dyld.h>
+# include <spawn.h>
 #endif
 
 #ifdef HAVE_QNX
@@ -21,11 +19,11 @@ struct dlopen_handle
 };
 #endif
 
-#ifdef HAVE_ANDROID
-typedef struct _FridaTestSpawnContext FridaTestSpawnContext;
+#ifndef HAVE_DARWIN
+typedef struct _FridaTestSuperSUSpawnContext FridaTestSuperSUSpawnContext;
 typedef struct _FridaTestWaitContext FridaTestWaitContext;
 
-struct _FridaTestSpawnContext
+struct _FridaTestSuperSUSpawnContext
 {
   GMainLoop * loop;
   FridaSuperSUProcess * process;
@@ -37,17 +35,19 @@ struct _FridaTestSpawnContext
 struct _FridaTestWaitContext
 {
   gint ref_count;
-  FridaSuperSUProcess * process;
+  gpointer process;
   GMainLoop * loop;
   gboolean timed_out;
 };
 
-static void frida_test_process_backend_on_spawn_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
-static void frida_test_process_backend_on_read_line_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
+# ifdef HAVE_ANDROID
+static void frida_test_process_backend_on_super_su_spawn_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
+static void frida_test_process_backend_on_super_su_read_line_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
+# endif
 static void frida_test_process_backend_on_wait_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
 static gboolean frida_test_process_backend_on_wait_timeout (gpointer user_data);
 
-static FridaTestWaitContext * frida_test_wait_context_new (FridaSuperSUProcess * process);
+static FridaTestWaitContext * frida_test_wait_context_new (gpointer process);
 static FridaTestWaitContext * frida_test_wait_context_ref (FridaTestWaitContext * context);
 static void frida_test_wait_context_unref (FridaTestWaitContext * context);
 #endif
@@ -120,66 +120,29 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
   }
   else
   {
-#ifdef HAVE_ANDROID
-    FridaTestSpawnContext ctx;
-    gchar * args, * wrapper_argv[] = { "su", "-c", NULL, NULL };
-
-    args = g_strjoinv (" ", argv);
-
-    wrapper_argv[0] = "su";
-    wrapper_argv[1] = "-c";
-    wrapper_argv[2] = g_strconcat ("echo $BASHPID; exec ", args, NULL);
-
-    g_free (args);
-
-    ctx.loop = g_main_loop_new (NULL, FALSE);
-    ctx.process = NULL;
-    ctx.output = NULL;
-    ctx.pid = 0;
-    ctx.error = error;
-
-    frida_super_su_spawn ("/", wrapper_argv, 3, envp, envp_length, TRUE, frida_test_process_backend_on_spawn_ready, &ctx);
-
-    g_free (wrapper_argv[2]);
-
-    g_main_loop_run (ctx.loop);
-
-    *handle = ctx.process;
-    *id = ctx.pid;
-
-    if (ctx.output != NULL)
-      g_object_unref (ctx.output);
-    g_main_loop_unref (ctx.loop);
-#else
-    pid_t pid;
-# ifdef HAVE_SPAWN_H
+#ifdef HAVE_DARWIN
     posix_spawnattr_t attr;
     sigset_t signal_mask_set;
     int result;
+    cpu_type_t pref;
+    size_t ocount;
+    pid_t pid;
 
     posix_spawnattr_init (&attr);
     sigemptyset (&signal_mask_set);
     posix_spawnattr_setsigmask (&attr, &signal_mask_set);
     posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK);
 
-#  if defined (HAVE_DARWIN)
-    {
-      cpu_type_t pref;
-      size_t ocount;
-
-#   if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
-      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86 : CPU_TYPE_X86_64;
-#   elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
-      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86_64 : CPU_TYPE_X86;
-#   elif defined (HAVE_ARM)
-      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM : CPU_TYPE_ARM64;
-#   elif defined (HAVE_ARM64)
-      pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM64 : CPU_TYPE_ARM;
-#   endif
-
-      posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
-    }
-#  endif
+# if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+    pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86 : CPU_TYPE_X86_64;
+# elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+    pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86_64 : CPU_TYPE_X86;
+# elif defined (HAVE_ARM)
+    pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM : CPU_TYPE_ARM64;
+# elif defined (HAVE_ARM64)
+    pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM64 : CPU_TYPE_ARM;
+# endif
+    posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
 
     result = posix_spawn (&pid, path, NULL, &attr, argv, envp);
 
@@ -189,32 +152,75 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
     {
       g_set_error (error,
           FRIDA_ERROR,
-          FRIDA_ERROR_NOT_SUPPORTED,
+          FRIDA_ERROR_INVALID_ARGUMENT,
           "Unable to spawn executable at '%s': %s",
           path, g_strerror (errno));
       return;
     }
-# else
-    pid = vfork ();
-    if (pid == 0)
-    {
-      execve (path, argv, envp);
-      perror ("execve failed");
-      _exit (1);
-    }
-    else if (pid < 0)
-    {
-      g_set_error (error,
-          FRIDA_ERROR,
-          FRIDA_ERROR_NOT_SUPPORTED,
-          "Unable to spawn executable at '%s': %s",
-          path, g_strerror (errno));
-      return;
-    }
-# endif
 
     *handle = GSIZE_TO_POINTER (pid);
     *id = pid;
+#else
+    GSubprocessLauncher * launcher;
+    GSubprocess * subprocess;
+    GError * spawn_error = NULL;
+
+    launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDIN_INHERIT);
+    g_subprocess_launcher_set_environ (launcher, envp);
+    subprocess = g_subprocess_launcher_spawnv (launcher, (const char * const *) argv, &spawn_error);
+    g_object_unref (launcher);
+
+    if (subprocess != NULL)
+    {
+      *handle = subprocess;
+      *id = atoi (g_subprocess_get_identifier (subprocess));
+    }
+    else
+    {
+# ifdef HAVE_ANDROID
+      if (spawn_error->domain == G_SPAWN_ERROR && spawn_error->code == G_SPAWN_ERROR_ACCES)
+      {
+        FridaTestSuperSUSpawnContext ctx;
+        gchar * args, * wrapper_argv[] = { "su", "-c", NULL, NULL };
+
+        args = g_strjoinv (" ", argv);
+
+        wrapper_argv[0] = "su";
+        wrapper_argv[1] = "-c";
+        wrapper_argv[2] = g_strconcat ("echo $BASHPID; exec ", args, NULL);
+
+        g_free (args);
+
+        ctx.loop = g_main_loop_new (NULL, FALSE);
+        ctx.process = NULL;
+        ctx.output = NULL;
+        ctx.pid = 0;
+        ctx.error = error;
+
+        frida_super_su_spawn ("/", wrapper_argv, 3, envp, envp_length, TRUE, frida_test_process_backend_on_super_su_spawn_ready, &ctx);
+
+        g_free (wrapper_argv[2]);
+
+        g_main_loop_run (ctx.loop);
+
+        *handle = ctx.process;
+        *id = ctx.pid;
+
+        if (ctx.output != NULL)
+          g_object_unref (ctx.output);
+        g_main_loop_unref (ctx.loop);
+      }
+      else
+# endif
+      {
+        g_set_error_literal (error,
+            FRIDA_ERROR,
+            FRIDA_ERROR_INVALID_ARGUMENT,
+            spawn_error->message);
+      }
+
+      g_error_free (spawn_error);
+    }
 #endif
   }
 }
@@ -225,34 +231,7 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
 {
   int status = -1;
 
-#ifdef HAVE_ANDROID
-  FridaSuperSUProcess * process = handle;
-  FridaTestWaitContext * context;
-  guint timeout;
-
-  context = frida_test_wait_context_new (process);
-
-  frida_super_su_process_wait (process, frida_test_process_backend_on_wait_ready, frida_test_wait_context_ref (context));
-  timeout = g_timeout_add (timeout_msec, frida_test_process_backend_on_wait_timeout, frida_test_wait_context_ref (context));
-
-  g_main_loop_run (context->loop);
-
-  if (!context->timed_out)
-  {
-    g_source_remove (timeout);
-
-    status = frida_super_su_process_get_exit_status (process);
-  }
-  else
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_TIMED_OUT,
-        "Timed out while waiting for process to exit");
-  }
-
-  frida_test_wait_context_unref (context);
-#else
+#ifdef HAVE_DARWIN
   GTimer * timer;
 
   timer = g_timer_new ();
@@ -301,17 +280,71 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
   }
 
   g_timer_destroy (timer);
+#else
+  FridaTestWaitContext * context;
+
+  context = frida_test_wait_context_new (handle);
+
+# ifdef HAVE_ANDROID
+  if (FRIDA_SUPER_SU_IS_PROCESS (handle))
+  {
+    FridaSuperSUProcess * process = handle;
+    guint timeout;
+
+    frida_super_su_process_wait (process, frida_test_process_backend_on_wait_ready, frida_test_wait_context_ref (context));
+    timeout = g_timeout_add (timeout_msec, frida_test_process_backend_on_wait_timeout, frida_test_wait_context_ref (context));
+
+    g_main_loop_run (context->loop);
+
+    if (!context->timed_out)
+    {
+      g_source_remove (timeout);
+
+      status = frida_super_su_process_get_exit_status (process);
+    }
+  }
+  else
+# endif
+  {
+    GSubprocess * subprocess = handle;
+    guint timeout;
+
+    g_subprocess_wait_async (subprocess, NULL, frida_test_process_backend_on_wait_ready, frida_test_wait_context_ref (context));
+    timeout = g_timeout_add (timeout_msec, frida_test_process_backend_on_wait_timeout, frida_test_wait_context_ref (context));
+
+    g_main_loop_run (context->loop);
+
+    if (!context->timed_out)
+    {
+      g_source_remove (timeout);
+
+      if (g_subprocess_get_if_exited (subprocess))
+        status = g_subprocess_get_exit_status (subprocess);
+    }
+  }
+
+  if (context->timed_out)
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_TIMED_OUT,
+        "Timed out while waiting for process to exit");
+  }
+
+  frida_test_wait_context_unref (context);
 #endif
 
   return status;
 }
 
-#ifdef HAVE_ANDROID
+#ifndef HAVE_DARWIN
+
+# ifdef HAVE_ANDROID
 
 static void
-frida_test_process_backend_on_spawn_ready (GObject * source_object, GAsyncResult * res, gpointer user_data)
+frida_test_process_backend_on_super_su_spawn_ready (GObject * source_object, GAsyncResult * res, gpointer user_data)
 {
-  FridaTestSpawnContext * ctx = user_data;
+  FridaTestSuperSUSpawnContext * ctx = user_data;
 
   ctx->process = frida_super_su_spawn_finish (res, ctx->error);
   if (ctx->process == NULL)
@@ -321,13 +354,13 @@ frida_test_process_backend_on_spawn_ready (GObject * source_object, GAsyncResult
   }
 
   ctx->output = g_data_input_stream_new (frida_super_su_process_get_output (ctx->process));
-  g_data_input_stream_read_line_async (ctx->output, G_PRIORITY_DEFAULT, NULL, frida_test_process_backend_on_read_line_ready, ctx);
+  g_data_input_stream_read_line_async (ctx->output, G_PRIORITY_DEFAULT, NULL, frida_test_process_backend_on_super_su_read_line_ready, ctx);
 }
 
 static void
-frida_test_process_backend_on_read_line_ready (GObject * source_object, GAsyncResult * res, gpointer user_data)
+frida_test_process_backend_on_super_su_read_line_ready (GObject * source_object, GAsyncResult * res, gpointer user_data)
 {
-  FridaTestSpawnContext * ctx = user_data;
+  FridaTestSuperSUSpawnContext * ctx = user_data;
   gsize length;
   gchar * line;
 
@@ -340,6 +373,8 @@ frida_test_process_backend_on_read_line_ready (GObject * source_object, GAsyncRe
 
   g_main_loop_quit (ctx->loop);
 }
+
+# endif
 
 static void
 frida_test_process_backend_on_wait_ready (GObject * source_object, GAsyncResult * res, gpointer user_data)
@@ -365,7 +400,7 @@ frida_test_process_backend_on_wait_timeout (gpointer user_data)
 }
 
 static FridaTestWaitContext *
-frida_test_wait_context_new (FridaSuperSUProcess * process)
+frida_test_wait_context_new (gpointer process)
 {
   FridaTestWaitContext * context;
 
