@@ -19,6 +19,7 @@ struct _FridaSELinuxRule
 
 enum _FridaSELinuxErrorEnum
 {
+  FRIDA_SELINUX_ERROR_POLICY_FORMAT_NOT_SUPPORTED,
   FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND,
   FRIDA_SELINUX_ERROR_CLASS_NOT_FOUND,
   FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND
@@ -118,7 +119,13 @@ frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GErro
   policydb_init (db);
 
   res = policydb_read (db, &file, FALSE);
-  g_assert_cmpint (res, ==, 0);
+  if (res != 0)
+  {
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_POLICY_FORMAT_NOT_SUPPORTED, "unsupported policy database format");
+    policydb_destroy (db);
+    g_free (file.data);
+    return FALSE;
+  }
 
   return TRUE;
 }
