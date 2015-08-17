@@ -58,7 +58,7 @@ frida_selinux_patch_policy (void)
 
   if (!frida_load_policy (system_policy, &db, &db_data, &error))
   {
-    g_warning ("Unable to load SELinux policy from the kernel: %s", error->message);
+    g_printerr ("Unable to load SELinux policy from the kernel: %s\n", error->message);
     g_error_free (error);
     return;
   }
@@ -68,7 +68,7 @@ frida_selinux_patch_policy (void)
 
   if (frida_ensure_type (&db, "frida_file", 1, "file_type", &error) == NULL)
   {
-    g_warning ("Unable to add SELinux type: %s", error->message);
+    g_printerr ("Unable to add SELinux type: %s\n", error->message);
     g_clear_error (&error);
     goto beach;
   }
@@ -85,7 +85,7 @@ frida_selinux_patch_policy (void)
       {
         if (frida_ensure_rule (&db, *source, rule->target, rule->klass, *perm, &error) == NULL)
         {
-          g_warning ("Unable to add SELinux rule: %s", error->message);
+          g_printerr ("Unable to add SELinux rule: %s\n", error->message);
           g_clear_error (&error);
         }
       }
@@ -94,7 +94,7 @@ frida_selinux_patch_policy (void)
 
   if (!frida_save_policy ("/sys/fs/selinux/load", &db, &error))
   {
-    g_warning ("Unable to save SELinux policy to the kernel: %s", error->message);
+    g_printerr ("Unable to save SELinux policy to the kernel: %s\n", error->message);
     g_clear_error (&error);
   }
 
