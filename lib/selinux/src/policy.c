@@ -293,6 +293,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
 
     av = malloc (sizeof (avtab_datum_t));
     av->data = 1U << (perm->s.value - 1);
+    av->ops = NULL;
 
     res = avtab_insert (&db->te_avtab, &key, av);
     g_assert_cmpint (res, ==, 0);
