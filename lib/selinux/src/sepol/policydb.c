@@ -180,7 +180,7 @@ static struct policydb_compat_info policydb_compat[] = {
 	},
 	{
 	 .type = POLICY_KERN,
-	 .version = POLICYDB_VERSION_XPERMS_IOCTL,
+	 .version = POLICYDB_VERSION_IOCTL_OPERATIONS,
 	 .sym_num = SYM_NUM,
 	 .ocon_num = OCON_NODE6 + 1,
 	 .target_platform = SEPOL_TARGET_SELINUX,
@@ -3936,10 +3936,6 @@ int policydb_read(policydb_t * p, struct policy_file *fp, unsigned verbose)
 			/* add the type itself as the degenerate case */
 			if (ebitmap_set_bit(&p->type_attr_map[i], i, 1))
 				goto bad;
-			if (p->type_val_to_struct[i] && p->type_val_to_struct[i]->flavor != TYPE_ATTRIB) {
-				if (ebitmap_set_bit(&p->attr_type_map[i], i, 1))
-					goto bad;
-			}
 		}
 	}
 

@@ -1604,25 +1604,24 @@ static int expand_range_trans(expand_state_t * state,
 static avtab_ptr_t find_avtab_node(sepol_handle_t * handle,
 				   avtab_t * avtab, avtab_key_t * key,
 				   cond_av_list_t ** cond,
-				   av_extended_perms_t *xperms)
+				   av_operations_t *operations)
 {
 	avtab_ptr_t node;
 	avtab_datum_t avdatum;
 	cond_av_list_t *nl;
-	int match = 0;
+	int type_match = 0;
 
-	/* AVTAB_XPERMS entries are not necessarily unique */
-	if (key->specified & AVTAB_XPERMS) {
+	/* AVTAB_OPNUM entries are not necessarily unique */
+	if (key->specified & AVTAB_OPNUM) {
 		node = avtab_search_node(avtab, key);
 		while (node) {
-			if ((node->datum.xperms->specified == xperms->specified) &&
-				(node->datum.xperms->driver == xperms->driver)) {
-				match = 1;
+			if (node->datum.ops->type == operations->type) {
+				type_match = 1;
 				break;
 			}
 			node = avtab_search_node_next(node, key->specified);
 		}
-		if (!match)
+		if (!type_match)
 			node = NULL;
 	} else {
 		node = avtab_search_node(avtab, key);
@@ -1781,11 +1780,11 @@ static int expand_avrule_helper(sepol_handle_t * handle,
 				cond_av_list_t ** cond,
 				uint32_t stype, uint32_t ttype,
 				class_perm_node_t * perms, avtab_t * avtab,
-				int enabled, av_extended_perms_t *extended_perms)
+				int enabled, av_operations_t *operations)
 {
 	avtab_key_t avkey;
 	avtab_datum_t *avdatump;
-	avtab_extended_perms_t *xperms;
+	avtab_operations_t *ops;
 	avtab_ptr_t node;
 	class_perm_node_t *cur;
 	uint32_t spec = 0;
@@ -1803,14 +1802,22 @@ static int expand_avrule_helper(sepol_handle_t * handle,
 		spec = AVTAB_AUDITDENY;
 	} else if (specified & AVRULE_NEVERALLOW) {
 		spec = AVTAB_NEVERALLOW;
-	} else if (specified & AVRULE_XPERMS_ALLOWED) {
-		spec = AVTAB_XPERMS_ALLOWED;
-	} else if (specified & AVRULE_XPERMS_AUDITALLOW) {
-		spec = AVTAB_XPERMS_AUDITALLOW;
-	} else if (specified & AVRULE_XPERMS_DONTAUDIT) {
+	} else if (specified & AVRULE_OPNUM_ALLOWED) {
+		spec = AVTAB_OPNUM_ALLOWED;
+	} else if (specified & AVRULE_OPNUM_AUDITALLOW) {
+		spec = AVTAB_OPNUM_AUDITALLOW;
+	} else if (specified & AVRULE_OPNUM_DONTAUDIT) {
 		if (handle && handle->disable_dontaudit)
 			return EXPAND_RULE_SUCCESS;
-		spec = AVTAB_XPERMS_DONTAUDIT;
+		spec = AVTAB_OPNUM_DONTAUDIT;
+	} else if (specified & AVRULE_OPTYPE_ALLOWED) {
+		spec = AVTAB_OPTYPE_ALLOWED;
+	} else if (specified & AVRULE_OPTYPE_AUDITALLOW) {
+		spec = AVTAB_OPTYPE_AUDITALLOW;
+	} else if (specified & AVRULE_OPTYPE_DONTAUDIT) {
+		if (handle && handle->disable_dontaudit)
+			return EXPAND_RULE_SUCCESS;
+		spec = AVTAB_OPTYPE_DONTAUDIT;
 	} else {
 		assert(0);	/* unreachable */
 	}
@@ -1822,7 +1829,7 @@ static int expand_avrule_helper(sepol_handle_t * handle,
 		avkey.target_class = cur->tclass;
 		avkey.specified = spec;
 
-		node = find_avtab_node(handle, avtab, &avkey, cond, extended_perms);
+		node = find_avtab_node(handle, avtab, &avkey, cond, operations);
 		if (!node)
 			return EXPAND_RULE_ERROR;
 		if (enabled) {
@@ -1852,21 +1859,20 @@ static int expand_avrule_helper(sepol_handle_t * handle,
 				avdatump->data &= ~cur->data;
 			else
 				avdatump->data = ~cur->data;
-		} else if (specified & AVRULE_XPERMS) {
-			if (!avdatump->xperms) {
-				xperms = (avtab_extended_perms_t *)
-					calloc(1, sizeof(avtab_extended_perms_t));
-				if (!xperms) {
+		} else if (specified & AVRULE_OP) {
+			if (!avdatump->ops) {
+				ops = (avtab_operations_t *)
+					calloc(1, sizeof(avtab_operations_t));
+				if (!ops) {
 					ERR(handle, "Out of memory!");
 					return -1;
 				}
-				node->datum.xperms = xperms;
+				node->datum.ops = ops;
 			}
-			node->datum.xperms->specified = extended_perms->specified;
-			node->datum.xperms->driver = extended_perms->driver;
-
-			for (i = 0; i < ARRAY_SIZE(xperms->perms); i++)
-				node->datum.xperms->perms[i] |= extended_perms->perms[i];
+			node->datum.ops->type = operations->type;
+			for (i = 0; i < ARRAY_SIZE(operations->perms); i++) {
+				node->datum.ops->perms[i] |= operations->perms[i];
+			}
 		} else {
 			assert(0);	/* should never occur */
 		}
@@ -1891,10 +1897,10 @@ static int expand_rule_helper(sepol_handle_t * handle,
 		if (!ebitmap_node_get_bit(snode, i))
 			continue;
 		if (source_rule->flags & RULE_SELF) {
-			if (source_rule->specified & (AVRULE_AV | AVRULE_XPERMS)) {
+			if (source_rule->specified & (AVRULE_AV | AVRULE_OP)) {
 				retval = expand_avrule_helper(handle, source_rule->specified,
 							      cond, i, i, source_rule->perms,
-							      dest_avtab, enabled, source_rule->xperms);
+							      dest_avtab, enabled, source_rule->ops);
 				if (retval != EXPAND_RULE_SUCCESS)
 					return retval;
 			} else {
@@ -1909,10 +1915,10 @@ static int expand_rule_helper(sepol_handle_t * handle,
 		ebitmap_for_each_bit(ttypes, tnode, j) {
 			if (!ebitmap_node_get_bit(tnode, j))
 				continue;
-			if (source_rule->specified & (AVRULE_AV | AVRULE_XPERMS)) {
+			if (source_rule->specified & (AVRULE_AV | AVRULE_OP)) {
 				retval = expand_avrule_helper(handle, source_rule->specified,
 							      cond, i, j, source_rule->perms,
-							      dest_avtab, enabled, source_rule->xperms);
+							      dest_avtab, enabled, source_rule->ops);
 				if (retval != EXPAND_RULE_SUCCESS)
 					return retval;
 			} else {
@@ -2311,33 +2317,25 @@ static int type_attr_map(hashtab_key_t key
 	policydb_t *p = state->out;
 	unsigned int i;
 	ebitmap_node_t *tnode;
-	int value;
 
 	type = (type_datum_t *) datum;
-	value = type->s.value;
-
 	if (type->flavor == TYPE_ATTRIB) {
-		if (ebitmap_cpy(&p->attr_type_map[value - 1], &type->types)) {
-			goto oom;
+		if (ebitmap_cpy(&p->attr_type_map[type->s.value - 1],
+				&type->types)) {
+			ERR(state->handle, "Out of memory!");
+			return -1;
 		}
 		ebitmap_for_each_bit(&type->types, tnode, i) {
 			if (!ebitmap_node_get_bit(tnode, i))
 				continue;
-			if (ebitmap_set_bit(&p->type_attr_map[i], value - 1, 1)) {
-				goto oom;
+			if (ebitmap_set_bit(&p->type_attr_map[i],
+					    type->s.value - 1, 1)) {
+				ERR(state->handle, "Out of memory!");
+				return -1;
 			}
 		}
-	} else {
-		if (ebitmap_set_bit(&p->attr_type_map[value - 1], value - 1, 1)) {
-			goto oom;
-		}
 	}
-
 	return 0;
-
-oom:
-	ERR(state->handle, "Out of memory!");
-	return -1;
 }
 
 /* converts typeset using typemap and expands into ebitmap_t types using the attributes in the passed in policy.
@@ -3157,25 +3155,24 @@ static int expand_avtab_insert(avtab_t * a, avtab_key_t * k, avtab_datum_t * d)
 {
 	avtab_ptr_t node;
 	avtab_datum_t *avd;
-	avtab_extended_perms_t *xperms;
+	avtab_operations_t *ops;
 	unsigned int i;
-	unsigned int match = 0;
+	unsigned int type_match = 0;
 
-	if (k->specified & AVTAB_XPERMS) {
+	if (k->specified & AVTAB_OPNUM) {
 		/*
-		 * AVTAB_XPERMS entries are not necessarily unique.
-		 * find node with matching xperms
+		 * AVTAB_OPNUM entries are not necessarily unique.
+		 * find node with matching ops->type
 		 */
 		node = avtab_search_node(a, k);
 		while (node) {
-			if ((node->datum.xperms->specified == d->xperms->specified) &&
-				(node->datum.xperms->driver == d->xperms->driver)) {
-				match = 1;
+			if (node->datum.ops->type == d->ops->type) {
+				type_match = 1;
 				break;
 			}
 			node = avtab_search_node_next(node, k->specified);
 		}
-		if (!match)
+		if (!type_match)
 			node = NULL;
 	} else {
 		node = avtab_search_node(a, k);
@@ -3192,7 +3189,7 @@ static int expand_avtab_insert(avtab_t * a, avtab_key_t * k, avtab_datum_t * d)
 	}
 
 	avd = &node->datum;
-	xperms = node->datum.xperms;
+	ops = node->datum.ops;
 	switch (k->specified & ~AVTAB_ENABLED) {
 	case AVTAB_ALLOWED:
 	case AVTAB_AUDITALLOW:
@@ -3201,11 +3198,14 @@ static int expand_avtab_insert(avtab_t * a, avtab_key_t * k, avtab_datum_t * d)
 	case AVTAB_AUDITDENY:
 		avd->data &= d->data;
 		break;
-	case AVTAB_XPERMS_ALLOWED:
-	case AVTAB_XPERMS_AUDITALLOW:
-	case AVTAB_XPERMS_DONTAUDIT:
-		for (i = 0; i < ARRAY_SIZE(xperms->perms); i++)
-			xperms->perms[i] |= d->xperms->perms[i];
+	case AVTAB_OPNUM_ALLOWED:
+	case AVTAB_OPNUM_AUDITALLOW:
+	case AVTAB_OPNUM_DONTAUDIT:
+	case AVTAB_OPTYPE_ALLOWED:
+	case AVTAB_OPTYPE_AUDITALLOW:
+	case AVTAB_OPTYPE_DONTAUDIT:
+		for (i = 0; i < ARRAY_SIZE(ops->perms); i++)
+			ops->perms[i] |= d->ops->perms[i];
 		break;
 	default:
 		ERR(NULL, "Type conflict!");
