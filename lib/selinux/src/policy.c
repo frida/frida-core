@@ -28,6 +28,7 @@ enum _FridaSELinuxErrorEnum
 static gboolean frida_load_policy (const gchar * filename, policydb_t * db, gchar ** data, GError ** error);
 static gboolean frida_save_policy (const gchar * filename, policydb_t * db, GError ** error);
 static type_datum_t * frida_ensure_type (policydb_t * db, const gchar * type_name, guint num_attributes, ...);
+static void frida_add_type_to_class_constraints_referencing_attribute (policydb_t * db, uint32_t type_id, uint32_t attribute_id);
 static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error);
 
 static const FridaSELinuxRule frida_selinux_rules[] =
@@ -226,6 +227,8 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
       ebitmap_set_bit (&attribute_type->types, type_id - 1, 1);
       ebitmap_set_bit (&db->type_attr_map[type_id - 1], attribute_id - 1, 1);
       ebitmap_set_bit (&db->attr_type_map[attribute_id - 1], type_id - 1, 1);
+
+      frida_add_type_to_class_constraints_referencing_attribute (db, type_id, attribute_id);
     }
     else if (pending_error == NULL)
     {
@@ -240,6 +243,35 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
   va_end (vl);
 
   return (pending_error == NULL) ? type : NULL;
+}
+
+static void
+frida_add_type_to_class_constraints_referencing_attribute (policydb_t * db, uint32_t type_id, uint32_t attribute_id)
+{
+  uint32_t class_index;
+
+  for (class_index = 0; class_index != db->p_classes.nprim; class_index++)
+  {
+    class_datum_t * klass = db->class_val_to_struct[class_index];
+    constraint_node_t * node;
+
+    for (node = klass->constraints; node != NULL; node = node->next)
+    {
+      constraint_expr_t * expr;
+
+      for (expr = node->expr; expr != NULL; expr = expr->next)
+      {
+        ebitmap_node_t * tnode;
+        guint i;
+
+        ebitmap_for_each_bit (&expr->type_names->types, tnode, i)
+        {
+          if (ebitmap_node_get_bit (tnode, i) && i == attribute_id - 1)
+            ebitmap_set_bit (&expr->names, type_id - 1, 1);
+        }
+      }
+    }
+  }
 }
 
 static avtab_datum_t *
