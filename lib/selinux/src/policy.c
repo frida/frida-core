@@ -170,7 +170,7 @@ static type_datum_t *
 frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes, ...)
 {
   type_datum_t * type;
-  ebitmap_t * attr_map;
+  uint32_t type_id;
   va_list vl;
   guint i;
   GError * pending_error, ** error;
@@ -178,16 +178,16 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
   type = hashtab_search (db->p_types.table, (char *) type_name);
   if (type == NULL)
   {
-    uint32_t id, i, n;
+    uint32_t i, n;
     gchar * name;
 
-    id = ++db->p_types.nprim;
+    type_id = ++db->p_types.nprim;
     name = strdup (type_name);
 
     type = malloc (sizeof (type_datum_t));
 
     type_datum_init (type);
-    type->s.value = id;
+    type->s.value = type_id;
     type->primary = TRUE;
     type->flavor = TYPE_TYPE;
 
@@ -195,21 +195,19 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
 
     policydb_index_others (NULL, db, FALSE);
 
-    i = id - 1;
+    i = type_id - 1;
     n = db->p_types.nprim;
     db->type_attr_map = realloc (db->type_attr_map, n * sizeof (ebitmap_t));
     db->attr_type_map = realloc (db->attr_type_map, n * sizeof (ebitmap_t));
     ebitmap_init (&db->type_attr_map[i]);
     ebitmap_init (&db->attr_type_map[i]);
 
-    attr_map = &db->type_attr_map[i];
-
     /* We also need to add the type itself as the degenerate case. */
-    ebitmap_set_bit (attr_map, i, 1);
+    ebitmap_set_bit (&db->type_attr_map[i], i, 1);
   }
   else
   {
-    attr_map = &db->type_attr_map[type->s.value - 1];
+    type_id = type->s.value;
   }
 
   va_start (vl, n_attributes);
@@ -225,7 +223,9 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
     if (attribute_type != NULL)
     {
       uint32_t attribute_id = attribute_type->s.value;
-      ebitmap_set_bit (attr_map, attribute_id - 1, 1);
+      ebitmap_set_bit (&attribute_type->types, type_id - 1, 1);
+      ebitmap_set_bit (&db->type_attr_map[type_id - 1], attribute_id - 1, 1);
+      ebitmap_set_bit (&db->attr_type_map[attribute_id - 1], type_id - 1, 1);
     }
     else if (pending_error == NULL)
     {
