@@ -250,6 +250,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
   perm_datum_t * perm;
   avtab_key_t key;
   avtab_datum_t * av;
+  uint32_t perm_bit;
 
   source = hashtab_search (db->p_types.table, (char *) s);
   if (source == NULL)
@@ -280,6 +281,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
     g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND, "perm %s does not exist in class %s", p, c);
     return NULL;
   }
+  perm_bit = 1U << (perm->s.value - 1);
 
   key.source_type = source->s.value;
   key.target_type = target->s.value;
@@ -292,14 +294,14 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
     int res;
 
     av = malloc (sizeof (avtab_datum_t));
-    av->data = 1U << (perm->s.value - 1);
+    av->data = perm_bit;
     av->ops = NULL;
 
     res = avtab_insert (&db->te_avtab, &key, av);
     g_assert_cmpint (res, ==, 0);
   }
 
-  av->data |= 1U << (perm->s.value - 1);
+  av->data |= perm_bit;
 
   return av;
 }
