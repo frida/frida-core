@@ -66,7 +66,7 @@ frida_selinux_patch_policy (void)
   res = policydb_load_isids (&db, &sidtab);
   g_assert_cmpint (res, ==, 0);
 
-  if (frida_ensure_type (&db, "frida_file", 1, "file_type", &error) == NULL)
+  if (frida_ensure_type (&db, "frida_file", 2, "file_type", "mlstrustedobject", &error) == NULL)
   {
     g_printerr ("Unable to add SELinux type: %s\n", error->message);
     g_clear_error (&error);
