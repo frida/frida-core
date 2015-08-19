@@ -33,9 +33,12 @@ static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, cons
 
 static const FridaSELinuxRule frida_selinux_rules[] =
 {
+  { { "untrusted_app", "zygote", NULL }, "frida_file", "dir", { "search", NULL } },
   { { "untrusted_app", "zygote", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
   { { "untrusted_app", "zygote", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
   { { "untrusted_app", "zygote", NULL }, "frida_file", "sock_file", { "write", NULL } },
+  { { "zygote", NULL }, "shell_data_file", "dir", { "search", NULL } },
+  { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
   { { "zygote", NULL }, "zygote", "process", { "execmem", NULL } },
 };
 

@@ -336,6 +336,9 @@ namespace Frida {
 		public ResourceStore () throws Error {
 			tempdir = new TemporaryDirectory ();
 			FileUtils.chmod (tempdir.path, 0755);
+#if ANDROID
+			SELinux.setfilecon (tempdir.path, "u:object_r:frida_file:s0");
+#endif
 
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
 			if (blob32.data.length > 0) {
