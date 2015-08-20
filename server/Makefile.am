@@ -33,10 +33,9 @@ frida_server_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 
 AM_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	-I $(top_srcdir)/lib/selinux/include \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/src \
-	$(FRIDA_CFLAGS) \
-	-DPKGDATADIR=\""$(pkgdatadir)"\" \
-	-DPKGLIBDIR=\""$(pkglibdir)"\"
+	$(FRIDA_CFLAGS)

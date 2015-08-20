@@ -49,6 +49,7 @@ libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
 
 AM_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	$(FRIDA_AGENT_CFLAGS) \
 	-I $(top_srcdir)/lib/interfaces \

@@ -48,10 +48,9 @@ libfrida_gadget_glue_la_SOURCES = \
 	gadget-glue.c
 
 AM_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/agent \
 	-I $(top_srcdir)/src \
-	$(FRIDA_AGENT_CFLAGS) \
-	-DPKGDATADIR=\""$(pkgdatadir)"\" \
-	-DPKGLIBDIR=\""$(pkglibdir)"\"
+	$(FRIDA_AGENT_CFLAGS)

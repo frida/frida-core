@@ -346,13 +346,12 @@ libfrida_core_glue_la_LIBTOOLFLAGS = \
 	--tag=CC
 
 AM_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe \
 	-I $(top_srcdir)/lib/selinux/include \
-	$(FRIDA_CFLAGS) \
-	-DPKGDATADIR=\""$(pkgdatadir)"\" \
-	-DPKGLIBDIR=\""$(pkglibdir)"\"
+	$(FRIDA_CFLAGS)
 
 libfrida_data_agent_la_SOURCES = \
 	frida-data-agent.c \

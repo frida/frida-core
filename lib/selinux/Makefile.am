@@ -11,6 +11,7 @@ libfrida_selinux_la_LIBADD = \
 	libselinux.la \
 	libsepol.la
 libfrida_selinux_la_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	$(FRIDA_CFLAGS) \
 	-I $(srcdir)/include

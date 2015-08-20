@@ -31,6 +31,7 @@ libfrida_pipe_autogen_la_VALAFLAGS = \
 	--pkg gio-2.0
 
 AM_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	$(FRIDA_CFLAGS) \
 	-I $(top_builddir)/lib/interfaces \

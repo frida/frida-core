@@ -100,10 +100,7 @@ AM_CPPFLAGS = \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe \
 	-I $(top_srcdir)/src \
-	$(FRIDA_CFLAGS) \
-	-DPKGDATADIR=\""$(pkgdatadir)"\" \
-	-DPKGLIBDIR=\""$(pkglibdir)"\" \
-	-DPKGTESTDIR=\""$(prefix)/tests"\"
+	$(FRIDA_CFLAGS)
 
 if OS_MAC
 all-local: frida-tests data/.stamp
