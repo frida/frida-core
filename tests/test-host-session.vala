@@ -432,8 +432,8 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn (Harness h) {
-			if (Frida.Test.os () != Frida.Test.OS.MAC || sizeof (size_t) != 8) {
-				stdout.printf ("<skipping, only available on 64-bit Mac for now> ");
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;
 			}
