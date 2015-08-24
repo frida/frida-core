@@ -46,6 +46,30 @@ backend_valaflags += \
 	--vapidir=$(abs_top_srcdir)/lib/selinux/vapi \
 	--pkg=libselinux
 
+if OS_ANDROID
+backend_libraries += \
+	libfrida-data-android.la
+backend_libadd += \
+	libfrida-data-android.la
+backend_valaflags += \
+	--pkg=frida-data-android
+libfrida_data_android_la_SOURCES = \
+	frida-data-android.c \
+	frida-data-android-blob.S \
+	$(NULL)
+frida-data-android.c frida-data-android-blob.S: linux/android-info-service.js
+	$(AM_V_GEN) \
+		$(RESOURCE_COMPILER) \
+			-c "$(srcdir)/linux/frida-android.resources" \
+			-o "$(builddir)/frida-data-android" \
+			$<
+backend_cleanfiles += \
+	frida-data-android.vapi \
+	frida-data-android.h \
+	frida-data-android.c \
+	frida-data-android-blob.S
+endif
+
 backend_programs += \
 	frida-helper
 frida_helper_SOURCES = \

@@ -135,6 +135,10 @@ FRIDA_PACKAGES="--pkg glib-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg posix --pk
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
   FRIDA_PACKAGES="$FRIDA_PACKAGES --pkg frida-gum-linux-1.0"
 fi
+if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
+  pkg_modules="$pkg_modules, json-glib-1.0"
+  FRIDA_PACKAGES="$FRIDA_PACKAGES --pkg json-glib-1.0"
+fi
 FRIDA_TEST_PACKAGES="$FRIDA_PACKAGES --pkg gmodule-2.0"
 PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
 PKG_CHECK_MODULES(FRIDA_TEST, [gmodule-2.0 >= $GLIB_VERSION])

@@ -41,6 +41,11 @@ namespace Frida.HostSessionTest {
 #endif
 
 #if LINUX
+		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
+			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Linux/spawn", () => {
 			var h = new Harness ((h) => Linux.spawn.begin (h as Harness));
 			h.run ();
@@ -327,6 +332,38 @@ namespace Frida.HostSessionTest {
 #if LINUX
 	namespace Linux {
 
+		private static async void backend (Harness h) {
+			var backend = new LinuxHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			assert (prov.name == "Local System");
+
+			try {
+				var session = yield prov.create ();
+				var applications = yield session.enumerate_applications ();
+				var processes = yield session.enumerate_processes ();
+				assert (processes.length > 0);
+
+				if (GLib.Test.verbose ()) {
+					foreach (var app in applications)
+						stdout.printf ("identifier='%s' name='%s'\n", app.identifier, app.name);
+
+					foreach (var process in processes)
+						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
+				}
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+			h.done ();
+		}
+
 		private static async void spawn (Harness h) {
 			if (Frida.Test.os () == Frida.Test.OS.ANDROID && !GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
@@ -549,7 +586,7 @@ namespace Frida.HostSessionTest {
 						spawn_ios_app.callback ();
 					});
 					var script_id = yield session.create_script ("spawn-ios-app",
-						"Interceptor.attach (Module.findExportByName('UIKit', 'UIApplicationMain'), {" +
+						"Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), {" +
 						"  onEnter: function (args) {" +
 						"    send('UIApplicationMain');" +
 						"  }" +
