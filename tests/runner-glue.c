@@ -2,14 +2,18 @@
 
 #include "frida-tests.h"
 
+#ifdef HAVE_ANDROID
+# include "frida-selinux.h"
+#endif
+
 #include <gio/gio.h>
 #include <gum/gum.h>
 
 #ifdef G_OS_WIN32
-#include <windows.h>
-#include <conio.h>
-#include <crtdbg.h>
-#include <stdio.h>
+# include <windows.h>
+# include <conio.h>
+# include <crtdbg.h>
+# include <stdio.h>
 #endif
 
 void
@@ -43,6 +47,10 @@ frida_test_environment_init (int * args_length1, char *** args)
   g_test_init (args_length1, args, NULL);
   gum_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
+
+#ifdef HAVE_ANDROID
+  frida_selinux_patch_policy ();
+#endif
 }
 
 void
