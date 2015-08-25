@@ -455,12 +455,15 @@ namespace Frida.HostSessionTest {
 						spawn_android_app.callback ();
 					});
 					var script_id = yield session.create_script ("spawn-android-app",
-						"var Activity = Java.use(\"android.app.Activity\");" +
-						"Activity.onResume.implementation = function () {" +
-						"  send('onResume');" +
-						"  this.onResume();" +
-						"};" +
-						"setTimeout(function () { send('ready'); }, 1);");
+						"\"use strict\";" +
+						"Java.perform(() => {" +
+						"  const Activity = Java.use(\"android.app.Activity\");" +
+						"  Activity.onResume.implementation = () => {" +
+						"    send('onResume');" +
+						"    this.onResume();" +
+						"  };" +
+						"});" +
+						"setTimeout(() => { send('ready'); }, 1);");
 					session.load_script.begin (script_id);
 					yield;
 					stdout.printf ("received_message: %s\n", received_message);
