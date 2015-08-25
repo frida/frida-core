@@ -67,7 +67,12 @@ Java.perform(() => {
     Process.start.implementation = () => {
         const args = Array.prototype.slice.call(arguments);
         const niceName = args[1];
+
         args[5] |= DEBUG_ENABLE_DEBUGGER;
+
+        const zygoteArgs = args[args.length - 1] || [];
+        zygoteArgs.push("-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=3001");
+        args[args.length - 1] = zygoteArgs;
 
         const result = this.start.apply(this, args);
 
