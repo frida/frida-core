@@ -446,14 +446,18 @@ namespace Frida.HostSessionTest {
 
 				try {
 					var host_session = yield prov.create ();
+					stdout.printf ("spawn(\"com.instagram.android\")\n");
 					var pid = yield host_session.spawn ("com.instagram.android", new string[] { "com.instagram.android" }, new string[] {});
+					stdout.printf ("attach(%u)\n", pid);
 					var id = yield host_session.attach_to (pid);
+					stdout.printf ("obtain_agent_session()\n");
 					var session = yield prov.obtain_agent_session (host_session, id);
 					string received_message = null;
 					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						spawn_android_app.callback ();
 					});
+					stdout.printf ("create_script()\n");
 					var script_id = yield session.create_script ("spawn-android-app",
 						"\"use strict\";" +
 						"Java.perform(() => {" +
@@ -464,12 +468,17 @@ namespace Frida.HostSessionTest {
 						"  };" +
 						"});" +
 						"setTimeout(() => { send('ready'); }, 1);");
+					stdout.printf ("load_script()\n");
 					session.load_script.begin (script_id);
+					stdout.printf ("await_message()\n");
 					yield;
 					stdout.printf ("received_message: %s\n", received_message);
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
+					stdout.printf ("resume(%u)\n", pid);
 					yield host_session.resume (pid);
+					stdout.printf ("await_message()\n");
 					yield;
+					stdout.printf ("received_message: %s\n", received_message);
 					session.disconnect (message_handler);
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"onResume\"}");
 				} catch (GLib.Error e) {
