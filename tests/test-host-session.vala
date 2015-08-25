@@ -50,6 +50,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Linux.spawn.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/HostSession/Linux/Manual/spawn-android-app", () => {
+			var h = new Harness ((h) => Linux.Manual.spawn_android_app.begin (h as Harness));
+			h.run ();
+		});
 #endif
 
 #if DARWIN
@@ -420,6 +425,61 @@ namespace Frida.HostSessionTest {
 			yield h.service.stop ();
 			h.service.remove_backend (backend);
 			h.done ();
+		}
+
+		namespace Manual {
+
+			private static async void spawn_android_app (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode on Android device> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout (); /* this is a manual test after all */
+
+				var backend = new LinuxHostSessionBackend ();
+				h.service.add_backend (backend);
+				yield h.service.start ();
+				yield h.process_events ();
+				var prov = h.first_provider ();
+
+				try {
+					var host_session = yield prov.create ();
+					var pid = yield host_session.spawn ("com.instagram.android", new string[] { "com.instagram.android" }, new string[] {});
+					var id = yield host_session.attach_to (pid);
+					var session = yield prov.obtain_agent_session (host_session, id);
+					string received_message = null;
+					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+						received_message = message;
+						spawn_android_app.callback ();
+					});
+					var script_id = yield session.create_script ("spawn-android-app",
+						"var Activity = Java.use(\"android.app.Activity\");" +
+						"Activity.onResume.implementation = function () {" +
+						"  send('onResume');" +
+						"  this.onResume();" +
+						"};" +
+						"setTimeout(function () { send('ready'); }, 1);");
+					session.load_script.begin (script_id);
+					yield;
+					stdout.printf ("received_message: %s\n", received_message);
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
+					yield host_session.resume (pid);
+					yield;
+					session.disconnect (message_handler);
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"onResume\"}");
+				} catch (GLib.Error e) {
+					stderr.printf ("ERROR: %s\n", e.message);
+					assert_not_reached ();
+				}
+
+				yield h.service.stop ();
+				h.service.remove_backend (backend);
+
+				h.done ();
+			}
+
 		}
 
 	}

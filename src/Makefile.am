@@ -57,7 +57,7 @@ libfrida_data_android_la_SOURCES = \
 	frida-data-android.c \
 	frida-data-android-blob.S \
 	$(NULL)
-frida-data-android.c frida-data-android-blob.S: linux/android-info-service.js
+frida-data-android.c frida-data-android-blob.S: linux/robo-agent.js
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
 			-c "$(srcdir)/linux/frida-android.resources" \

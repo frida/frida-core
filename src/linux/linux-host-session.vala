@@ -72,7 +72,7 @@ namespace Frida {
 		private AgentDescriptor agent_desc;
 
 #if ANDROID
-		private AndroidInfoService info_service;
+		private RoboAgent robo_agent;
 #endif
 
 		construct {
@@ -86,7 +86,7 @@ namespace Frida {
 				new MemoryInputStream.from_data (blob64.data, null));
 
 #if ANDROID
-			info_service = new AndroidInfoService (this);
+			robo_agent = new RoboAgent (this);
 #endif
 		}
 
@@ -104,8 +104,8 @@ namespace Frida {
 			helper = null;
 
 #if ANDROID
-			yield info_service.close ();
-			info_service = null;
+			yield robo_agent.close ();
+			robo_agent = null;
 #endif
 		}
 
@@ -115,7 +115,7 @@ namespace Frida {
 
 		public override async HostApplicationInfo[] enumerate_applications () throws Error {
 #if ANDROID
-			return yield info_service.enumerate_applications ();
+			return yield robo_agent.enumerate_applications ();
 #else
 			return System.enumerate_applications ();
 #endif
@@ -126,10 +126,25 @@ namespace Frida {
 		}
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
+#if ANDROID
+			if (!path.has_prefix ("/")) {
+				string package_name = path;
+				if (argv.length > 1)
+					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected package name only");
+				return yield robo_agent.spawn (package_name);
+			} else {
+				return yield helper.spawn (path, argv, envp);
+			}
+#else
 			return yield helper.spawn (path, argv, envp);
+#endif
 		}
 
 		public override async void resume (uint pid) throws Error {
+#if ANDROID
+			if (yield robo_agent.resume (pid))
+				return;
+#endif
 			yield helper.resume (pid);
 		}
 
@@ -154,10 +169,12 @@ namespace Frida {
 	}
 
 #if ANDROID
-	private class AndroidInfoService : ParasiteService {
-		public AndroidInfoService (LinuxHostSession host_session) {
-			string * source = Frida.Data.Android.get_android_info_service_js_blob ().data;
-			base (host_session, "com.android.systemui", source);
+	private class RoboAgent : ParasiteService {
+		private Gee.HashMap<uint, SpawnedApp> spawned_app_by_pid = new Gee.HashMap<uint, SpawnedApp> ();
+
+		public RoboAgent (LinuxHostSession host_session) {
+			string * source = Frida.Data.Android.get_robo_agent_js_blob ().data;
+			base (host_session, "system_server", source);
 		}
 
 		public async HostApplicationInfo[] enumerate_applications () throws Error {
@@ -174,6 +191,46 @@ namespace Frida {
 				result[i] = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 			}
 			return result;
+		}
+
+		public async uint spawn (string package_name) throws Error {
+			var installed_apps = yield enumerate_applications ();
+			foreach (var installed_app in installed_apps) {
+				if (installed_app.identifier == package_name) {
+					var running_pid = installed_app.pid;
+					if (running_pid != 0) {
+						stdout.printf ("kill %u\n", running_pid);
+						System.kill (running_pid);
+					}
+					break;
+				}
+			}
+
+			var result = yield call ("spawn", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
+			var pid = (uint) result.get_int ();
+
+			var app = new SpawnedApp (package_name);
+			spawned_app_by_pid[pid] = app;
+
+			return pid;
+		}
+
+		public async bool resume (uint pid) throws Error {
+			SpawnedApp app;
+			if (!spawned_app_by_pid.unset (pid, out app))
+				return false;
+			return true;
+		}
+
+		private class SpawnedApp : Object {
+			public string package_name {
+				get;
+				construct;
+			}
+
+			public SpawnedApp (string package_name) {
+				Object (package_name: package_name);
+			}
 		}
 	}
 
@@ -293,17 +350,20 @@ namespace Frida {
 				assert_not_reached ();
 			}
 			var message = parser.get_root ().get_object ();
-			assert (message.get_string_member ("type") == "send");
-
-			var rpc_message = message.get_array_member ("payload");
-			var request_id = rpc_message.get_int_element (1);
-			PendingResponse response;
-			pending.unset (request_id.to_string (), out response);
-			var status = rpc_message.get_string_element (2);
-			if (status == "ok")
-				response.complete_with_result (rpc_message.get_element (3));
-			else
-				response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
+			var type = message.get_string_member ("type");
+			if (type == "send") {
+				var rpc_message = message.get_array_member ("payload");
+				var request_id = rpc_message.get_int_element (1);
+				PendingResponse response;
+				pending.unset (request_id.to_string (), out response);
+				var status = rpc_message.get_string_element (2);
+				if (status == "ok")
+					response.complete_with_result (rpc_message.get_element (3));
+				else
+					response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
+			} else {
+				stderr.printf ("%s\n", raw_message);
+			}
 		}
 
 		private uint get_pid (string name) throws Error {

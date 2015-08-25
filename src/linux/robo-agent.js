@@ -1,7 +1,9 @@
 "use strict";
 
 let ApplicationInfo, RunningAppProcessInfo, GET_META_DATA;
-let app, packageManager, activityManager;
+let context, packageManager, activityManager;
+
+const pendingSpawnRequests = {};
 
 rpc.exports = {
     enumerateApplications() {
@@ -32,6 +34,16 @@ rpc.exports = {
         });
 
         return result;
+    },
+    spawn(packageName) {
+        return new Promise(resolve => {
+            pendingSpawnRequests[packageName] = resolve;
+
+            Java.perform(() => {
+                const launchIntent = packageManager.getLaunchIntentForPackage(packageName);
+                context.startActivity(launchIntent);
+            });
+        });
     }
 };
 
@@ -41,12 +53,28 @@ Java.perform(() => {
     ApplicationInfo = Java.use("android.content.pm.ApplicationInfo");
     const Context = Java.use("android.content.Context");
     const PackageManager = Java.use("android.content.pm.PackageManager");
+    const Process = Java.use("android.os.Process");
     RunningAppProcessInfo = Java.use("android.app.ActivityManager$RunningAppProcessInfo");
     const ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
     GET_META_DATA = PackageManager.GET_META_DATA.value;
 
-    const context = ActivityThread.currentApplication();
+    context = ActivityThread.currentApplication();
 
     packageManager = context.getPackageManager();
     activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
+
+    Process.start.implementation = () => {
+        const args = Array.prototype.slice.call(arguments);
+        const niceName = args[1];
+
+        const result = this.start.apply(this, args);
+
+        const resolve = pendingSpawnRequests[niceName];
+        if (resolve) {
+            delete pendingSpawnRequests[niceName];
+            resolve(result.pid.value);
+        }
+
+        return result;
+    };
 });
