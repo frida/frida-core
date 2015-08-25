@@ -194,17 +194,30 @@ namespace Frida {
 		}
 
 		public async uint spawn (string package_name) throws Error {
-			var installed_apps = yield enumerate_applications ();
-			foreach (var installed_app in installed_apps) {
-				if (installed_app.identifier == package_name) {
-					var running_pid = installed_app.pid;
-					if (running_pid != 0) {
-						stdout.printf ("kill %u\n", running_pid);
-						System.kill (running_pid);
+			bool existing_app_killed = false;
+			do {
+				existing_app_killed = false;
+				var installed_apps = yield enumerate_applications ();
+				foreach (var installed_app in installed_apps) {
+					if (installed_app.identifier == package_name) {
+						var running_pid = installed_app.pid;
+						if (running_pid != 0) {
+							System.kill (running_pid);
+
+							existing_app_killed = true;
+
+							var source = new TimeoutSource (250);
+							source.set_callback (() => {
+								spawn.callback ();
+								return false;
+							});
+							source.attach (MainContext.get_thread_default ());
+							yield;
+						}
+						break;
 					}
-					break;
 				}
-			}
+			} while (existing_app_killed);
 
 			var result = yield call ("spawn", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
 			var pid = (uint) result.get_int ();
