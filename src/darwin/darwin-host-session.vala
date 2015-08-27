@@ -142,7 +142,7 @@ namespace Frida {
 
 		public override async void resume (uint pid) throws Error {
 			if (fruit_launcher != null) {
-				if (yield fruit_launcher.resume (pid))
+				if (yield fruit_launcher.try_resume (pid))
 					return;
 			}
 			yield helper.resume (pid);
@@ -158,7 +158,7 @@ namespace Frida {
 			Pipe pipe;
 
 			if (fruit_launcher != null) {
-				pipe = fruit_launcher.get_pipe (pid);
+				pipe = fruit_launcher.try_get_pipe (pid);
 				if (pipe != null)
 					return pipe;
 			}
@@ -186,7 +186,6 @@ namespace Frida {
 	private class FruitLauncher {
 		private const string LOADER_DATA_DIR_MAGIC = "3zPLi3BupiesaB9diyimME74fJw4jvj6";
 
-		private DarwinHostSession host_session;
 		private HelperProcess helper;
 		private AgentResource agent;
 		private UnixSocketAddress service_address;
@@ -197,8 +196,7 @@ namespace Frida {
 		private LaunchErrorHandler on_launch_error;
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
-		internal FruitLauncher (DarwinHostSession host_session, HelperProcess helper, AgentResource agent) {
-			this.host_session = host_session;
+		internal FruitLauncher (HelperProcess helper, AgentResource agent) {
 			this.helper = helper;
 			this.agent = agent;
 
@@ -223,8 +221,6 @@ namespace Frida {
 			FileUtils.unlink (service_address.path);
 
 			agent = null;
-
-			host_session = null;
 		}
 
 		public async uint spawn (string identifier, string? url) throws Error {
@@ -244,7 +240,7 @@ namespace Frida {
 					throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
 
 				yield helper.preload ();
-				(void) agent.file; // Make sure it's written to disk
+				agent.ensure_written_to_disk ();
 
 				check_identifier (identifier);
 
@@ -262,6 +258,7 @@ namespace Frida {
 
 				Loader loader = null;
 				Error error = null;
+				var timed_out = false;
 				on_launch_error = (e) => {
 					error = e;
 					spawn.callback ();
@@ -272,13 +269,15 @@ namespace Frida {
 					return true;
 				});
 				var timeout = Timeout.add_seconds (10, () => {
+					timed_out = true;
 					spawn.callback ();
 					return false;
 				});
 				kill (identifier);
 				perform_launch.begin (identifier, url);
 				yield;
-				Source.remove (timeout);
+				if (!timed_out)
+					Source.remove (timeout);
 				this.service.disconnect (on_incoming);
 				on_launch_error = null;
 
@@ -321,14 +320,14 @@ namespace Frida {
 			}
 		}
 
-		public Pipe? get_pipe (uint pid) {
+		public Pipe? try_get_pipe (uint pid) {
 			Loader loader = loader_by_pid[pid];
 			if (loader == null)
 				return null;
 			return loader.pipe;
 		}
 
-		public async bool resume (uint pid) throws Error {
+		public async bool try_resume (uint pid) throws Error {
 			Loader loader;
 			if (!loader_by_pid.unset (pid, out loader))
 				return false;

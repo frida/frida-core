@@ -97,6 +97,10 @@ namespace Frida {
 			assert (dylib is Seekable);
 		}
 
+		public void ensure_written_to_disk () {
+			(void) file;
+		}
+
 		private void reset_stream (InputStream stream) {
 			try {
 				(stream as Seekable).seek (0, SeekType.SET);
