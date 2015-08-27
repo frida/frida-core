@@ -514,7 +514,7 @@ namespace Frida {
 				var pid = (uint) item.get_int_element (2);
 				return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 			} else {
-				return HostApplicationInfo ("unknown", "unknown", 0, no_icon, no_icon);
+				return HostApplicationInfo ("", "", 0, no_icon, no_icon);
 			}
 		}
 
