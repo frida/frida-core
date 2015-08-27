@@ -1,6 +1,6 @@
 "use strict";
 
-let ApplicationInfo, RunningAppProcessInfo, GET_META_DATA;
+let ApplicationInfo, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
 let context, packageManager, activityManager;
 
 const pendingSpawnRequests = {};
@@ -44,6 +44,37 @@ rpc.exports = {
                 context.startActivity(launchIntent);
             });
         });
+    },
+    getFrontmostApplication() {
+        let result = null;
+        Java.perform(() => {
+            const runningTaskInfos = activityManager.getRunningTasks(1);
+            if (runningTaskInfos != null && runningTaskInfos.size() > 0) {
+                const runningTaskInfo = Java.cast(runningTaskInfos.get(0), RunningTaskInfo);
+                if (typeof runningTaskInfo.topActivity !== 'undefined') {
+                    const topActivity = runningTaskInfo.topActivity.value;
+                    const app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
+                    const packageName = app.packageName.value;
+                    const name = app.loadLabel(packageManager).toString();
+
+                    const processes = activityManager.getRunningAppProcesses();
+                    const numProcesses = processes.size();
+                    let pid = 0;
+                    for (let i = 0; i !== numProcesses; i++) {
+                        const process = Java.cast(processes.get(i), RunningAppProcessInfo);
+                        const pkgList = process.pkgList.value;
+                        if (pkgList.indexOf(packageName) > -1) {
+                            pid = process.pid.value;
+                            break;
+                        }
+                    }
+
+                    result = [packageName, name, pid];
+                }
+            }
+        });
+
+        return result;
     }
 };
 
@@ -55,6 +86,7 @@ Java.perform(() => {
     const PackageManager = Java.use("android.content.pm.PackageManager");
     const Process = Java.use("android.os.Process");
     RunningAppProcessInfo = Java.use("android.app.ActivityManager$RunningAppProcessInfo");
+    RunningTaskInfo = Java.use("android.app.ActivityManager$RunningTaskInfo");
     const ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
     GET_META_DATA = PackageManager.GET_META_DATA.value;
 

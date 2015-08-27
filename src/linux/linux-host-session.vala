@@ -118,7 +118,11 @@ namespace Frida {
 		}
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {
+#if ANDROID
+			return yield robo_agent.get_frontmost_application ();
+#else
 			return System.get_frontmost_application ();
+#endif
 		}
 
 		public override async HostApplicationInfo[] enumerate_applications () throws Error {
@@ -498,6 +502,20 @@ namespace Frida {
 				result[i] = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 			}
 			return result;
+		}
+
+		public async HostApplicationInfo get_frontmost_application () throws Error {
+			var app = yield call ("getFrontmostApplication", new Json.Node[] {});
+			var item = app.get_array ();
+			var no_icon = ImageData (0, 0, 0, "");
+			if (app != null) {
+				var identifier = item.get_string_element (0);
+				var name = item.get_string_element (1);
+				var pid = (uint) item.get_int_element (2);
+				return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+			} else {
+				return HostApplicationInfo ("", "", 0, no_icon, no_icon);
+			}
 		}
 
 		public async uint start_activity (string package_name) throws Error {
