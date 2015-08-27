@@ -446,8 +446,8 @@ namespace Frida.HostSessionTest {
 
 				try {
 					var host_session = yield prov.create ();
-					stdout.printf ("spawn(\"com.instagram.android\")\n");
-					var pid = yield host_session.spawn ("com.instagram.android", new string[] { "com.instagram.android" }, new string[] {});
+					stdout.printf ("spawn(\"com.google.android.gm\")\n");
+					var pid = yield host_session.spawn ("com.google.android.gm", new string[] { "com.google.android.gm" }, new string[] {});
 					stdout.printf ("attach(%u)\n", pid);
 					var id = yield host_session.attach_to (pid);
 					stdout.printf ("obtain_agent_session()\n");

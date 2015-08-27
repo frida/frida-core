@@ -69,9 +69,10 @@ namespace Frida {
 	public class LinuxHostSession : BaseDBusHostSession {
 		private HelperProcess helper;
 		private Linjector injector;
-		private AgentDescriptor agent_desc;
+		private AgentResource agent;
 
 #if ANDROID
+		private RoboLauncher robo_launcher;
 		private RoboAgent robo_agent;
 #endif
 
@@ -81,9 +82,11 @@ namespace Frida {
 
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
-			agent_desc = new AgentDescriptor ("frida-agent-%u.so",
+			agent = new AgentResource ("frida-agent-%u.so",
 				new MemoryInputStream.from_data (blob32.data, null),
-				new MemoryInputStream.from_data (blob64.data, null));
+				new MemoryInputStream.from_data (blob64.data, null),
+				AgentMode.INSTANCED,
+				helper.tempdir);
 
 #if ANDROID
 			robo_agent = new RoboAgent (this);
@@ -92,6 +95,16 @@ namespace Frida {
 
 		public override async void close () {
 			yield base.close ();
+
+#if ANDROID
+			if (robo_launcher != null) {
+				yield robo_launcher.close ();
+				robo_launcher = null;
+			}
+
+			yield robo_agent.close ();
+			robo_agent = null;
+#endif
 
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			while (injector.any_still_injected ())
@@ -102,11 +115,6 @@ namespace Frida {
 
 			yield helper.close ();
 			helper = null;
-
-#if ANDROID
-			yield robo_agent.close ();
-			robo_agent = null;
-#endif
 		}
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {
@@ -131,7 +139,9 @@ namespace Frida {
 				string package_name = path;
 				if (argv.length > 1)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected package name only");
-				return yield robo_agent.spawn (package_name);
+				if (robo_launcher == null)
+					robo_launcher = new RoboLauncher (robo_agent, helper, injector, agent);
+				return yield robo_launcher.spawn (package_name);
 			} else {
 				return yield helper.spawn (path, argv, envp);
 			}
@@ -142,8 +152,10 @@ namespace Frida {
 
 		public override async void resume (uint pid) throws Error {
 #if ANDROID
-			if (yield robo_agent.resume (pid))
-				return;
+			if (robo_launcher != null) {
+				if (yield robo_launcher.try_resume (pid))
+					return;
+			}
 #endif
 			yield helper.resume (pid);
 		}
@@ -153,25 +165,320 @@ namespace Frida {
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
-			PipeTransport.set_temp_directory (helper.tempdir.path);
 			PipeTransport t;
-			Pipe stream;
+			Pipe pipe;
+
+#if ANDROID
+			if (robo_launcher != null) {
+				if (robo_launcher.try_get_pipe (pid, out pipe, out t)) {
+					transport = t;
+					return pipe;
+				}
+			}
+#endif
+
+			PipeTransport.set_temp_directory (helper.tempdir.path);
 			try {
 				t = new PipeTransport ();
-				stream = new Pipe (t.local_address);
+				pipe = new Pipe (t.local_address);
 			} catch (IOError stream_error) {
 				throw new Error.NOT_SUPPORTED (stream_error.message);
 			}
-			yield injector.inject (pid, agent_desc, t.remote_address);
+			yield injector.inject (pid, agent, t.remote_address);
 			transport = t;
-			return stream;
+			return pipe;
 		}
 	}
 
 #if ANDROID
-	private class RoboAgent : ParasiteService {
-		private Gee.HashMap<uint, SpawnedApp> spawned_app_by_pid = new Gee.HashMap<uint, SpawnedApp> ();
+	private class RoboLauncher {
+		private RoboAgent robo_agent;
+		private HelperProcess helper;
+		private Linjector injector;
+		private AgentResource agent;
+		private AgentResource loader;
+		private uint loader32;
+		private uint loader64;
+		private UnixSocketAddress service_address;
+		private SocketService service;
 
+		private Gee.HashMap<string, SpawnRequest> spawn_request_by_package_name = new Gee.HashMap<string, SpawnRequest> ();
+		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
+
+		internal RoboLauncher (RoboAgent robo_agent, HelperProcess helper, Linjector injector, AgentResource agent) {
+			this.robo_agent = robo_agent;
+			this.helper = helper;
+			this.injector = injector;
+			this.agent = agent;
+
+			var blob32 = Frida.Data.Loader.get_frida_loader_32_so_blob ();
+			var blob64 = Frida.Data.Loader.get_frida_loader_64_so_blob ();
+			this.loader = new AgentResource ("frida-loader-%u.so",
+				new MemoryInputStream.from_data (blob32.data, null),
+				new MemoryInputStream.from_data (blob64.data, null),
+				AgentMode.SINGLETON,
+				helper.tempdir);
+
+			this.service = new SocketService ();
+			var address = new UnixSocketAddress (Path.build_filename (agent.tempdir.path, "callback"));
+			SocketAddress effective_address;
+			try {
+				this.service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null, out effective_address);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			assert (effective_address is UnixSocketAddress);
+			this.service_address = effective_address as UnixSocketAddress;
+			FileUtils.chmod (this.service_address.path, 0777);
+			this.service.incoming.connect (this.on_incoming_connection);
+			this.service.start ();
+		}
+
+		public async void close () {
+			service.stop ();
+			service = null;
+
+			FileUtils.unlink (service_address.path);
+
+			agent = null;
+		}
+
+		public async uint spawn (string package_name) throws Error {
+			yield ensure_loader_injected ();
+
+			PipeTransport.set_temp_directory (helper.tempdir.path);
+			PipeTransport transport;
+			Pipe pipe;
+			try {
+				transport = new PipeTransport ();
+				pipe = new Pipe (transport.local_address);
+			} catch (IOError stream_error) {
+				throw new Error.NOT_SUPPORTED (stream_error.message);
+			}
+
+			agent.ensure_written_to_disk ();
+
+			var waiting = false;
+			var timed_out = false;
+			var request = new SpawnRequest (package_name, () => {
+				if (waiting)
+					spawn.callback ();
+			});
+			spawn_request_by_package_name[package_name] = request;
+
+			yield robo_agent.stop_activity (package_name);
+			uint pid = yield robo_agent.start_activity (package_name);
+			if (request.result == null) {
+				var timeout = Timeout.add_seconds (10, () => {
+					timed_out = true;
+					spawn.callback ();
+					return false;
+				});
+				waiting = true;
+				yield;
+				waiting = false;
+				if (timed_out) {
+					spawn_request_by_package_name.unset (package_name);
+					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch");
+				} else {
+					Source.remove (timeout);
+				}
+			}
+
+			var loader = request.result;
+			loader.transport = transport;
+			loader.pipe = pipe;
+
+			yield loader.send_string (transport.remote_address);
+
+			loader_by_pid[pid] = loader;
+
+			return pid;
+		}
+
+		public bool try_get_pipe (uint pid, out Pipe? pipe, out PipeTransport? transport) {
+			Loader loader = loader_by_pid[pid];
+			if (loader == null) {
+				pipe = null;
+				transport = null;
+				return false;
+			}
+			pipe = loader.pipe;
+			transport = loader.transport;
+			return true;
+		}
+
+		public async bool try_resume (uint pid) throws Error {
+			Loader loader;
+			if (!loader_by_pid.unset (pid, out loader))
+				return false;
+			yield loader.send_string ("go");
+			return true;
+		}
+
+		private async void ensure_loader_injected () throws Error {
+			var should_inject_32bit_loader = loader32 == 0 && loader.so32 != null;
+			var should_inject_64bit_loader = loader64 == 0 && loader.so64 != null;
+			if (!should_inject_32bit_loader && !should_inject_64bit_loader)
+				return;
+
+			var passes = new string[] { "", agent.tempdir.path };
+			foreach (var data_dir in passes) {
+				var pending = new Gee.HashSet<uint> ();
+				var waiting = false;
+				var timed_out = false;
+
+				var on_uninjected = injector.uninjected.connect ((id) => {
+					pending.remove (id);
+					if (waiting)
+						ensure_loader_injected.callback ();
+				});
+
+				try {
+					if (should_inject_32bit_loader) {
+						loader32 = yield injector.inject (LocalProcesses.get_pid ("zygote"), loader, data_dir);
+						pending.add (loader32);
+					}
+
+					if (should_inject_64bit_loader) {
+						var zygote64_pid = LocalProcesses.find_pid ("zygote64");
+						if (zygote64_pid != 0) {
+							loader64 = yield injector.inject (zygote64_pid, loader, data_dir);
+							pending.add (loader64);
+						} else {
+							loader64 = 1;
+						}
+					}
+
+					var timeout = Timeout.add_seconds (10, () => {
+						timed_out = true;
+						ensure_loader_injected.callback ();
+						return false;
+					});
+					while (!pending.is_empty) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					if (!timed_out)
+						Source.remove (timeout);
+				} finally {
+					injector.disconnect (on_uninjected);
+				}
+
+				if (timed_out)
+					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while injecting loader into zygote");
+			}
+		}
+
+		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
+			perform_handshake.begin (new Loader (connection));
+			return true;
+		}
+
+		private async void perform_handshake (Loader loader) {
+			try {
+				var package_name = yield loader.recv_string ();
+				SpawnRequest request;
+				if (!spawn_request_by_package_name.unset (package_name, out request)) {
+					loader.close ();
+					return;
+				}
+				request.complete (loader);
+			} catch (Error e) {
+			}
+		}
+
+		private class SpawnRequest : Object {
+			public delegate void CompletionHandler ();
+
+			public string package_name {
+				get;
+				construct;
+			}
+
+			private CompletionHandler handler;
+
+			public Loader? result {
+				get;
+				private set;
+			}
+
+			public SpawnRequest (string package_name, owned CompletionHandler handler) {
+				Object (package_name: package_name);
+
+				this.handler = (owned) handler;
+			}
+
+			public void complete (Loader r) {
+				result = r;
+				handler ();
+			}
+		}
+
+		private class Loader {
+			private SocketConnection connection;
+			private InputStream input;
+			private OutputStream output;
+
+			public PipeTransport? transport {
+				get;
+				set;
+			}
+
+			public Pipe? pipe {
+				get;
+				set;
+			}
+
+			public Loader (SocketConnection connection) {
+				this.connection = connection;
+				this.input = connection.input_stream;
+				this.output = connection.output_stream;
+			}
+
+			public void close () {
+				connection.close_async.begin ();
+			}
+
+			public async string recv_string () throws Error {
+				try {
+					var size_buf = new uint8[1];
+					var n = yield input.read_async (size_buf);
+					if (n == 0)
+						throw new Error.TRANSPORT ("Unable to communicate with loader");
+					var size = size_buf[0];
+
+					var data_buf = new uint8[size];
+					size_t bytes_read;
+					yield input.read_all_async (data_buf, Priority.DEFAULT, null, out bytes_read);
+					if (bytes_read != size)
+						throw new Error.TRANSPORT ("Unable to communicate with loader");
+
+					char * v = data_buf;
+					return (string) v;
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to communicate with loader");
+				}
+			}
+
+			public async void send_string (string v) throws Error {
+				var data_buf = new uint8[1 + v.length];
+				data_buf[0] = (uint8) v.length;
+				Memory.copy (data_buf + 1, v, v.length);
+				size_t bytes_written;
+				try {
+					yield output.write_all_async (data_buf, Priority.DEFAULT, null, out bytes_written);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to communicate with loader");
+				}
+				if (bytes_written != data_buf.length)
+					throw new Error.TRANSPORT ("Unable to communicate with loader");
+			}
+		}
+	}
+
+	private class RoboAgent : ParasiteService {
 		public RoboAgent (LinuxHostSession host_session) {
 			string * source = Frida.Data.Android.get_robo_agent_js_blob ().data;
 			base (host_session, "system_server", source);
@@ -193,7 +500,13 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string package_name) throws Error {
+		public async uint start_activity (string package_name) throws Error {
+			var result = yield call ("startActivity", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
+			var pid = (uint) result.get_int ();
+			return pid;
+		}
+
+		public async void stop_activity (string package_name) throws Error {
 			bool existing_app_killed = false;
 			do {
 				existing_app_killed = false;
@@ -206,9 +519,9 @@ namespace Frida {
 
 							existing_app_killed = true;
 
-							var source = new TimeoutSource (250);
+							var source = new TimeoutSource (100);
 							source.set_callback (() => {
-								spawn.callback ();
+								stop_activity.callback ();
 								return false;
 							});
 							source.attach (MainContext.get_thread_default ());
@@ -218,32 +531,6 @@ namespace Frida {
 					}
 				}
 			} while (existing_app_killed);
-
-			var result = yield call ("spawn", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
-			var pid = (uint) result.get_int ();
-
-			var app = new SpawnedApp (package_name);
-			spawned_app_by_pid[pid] = app;
-
-			return pid;
-		}
-
-		public async bool resume (uint pid) throws Error {
-			SpawnedApp app;
-			if (!spawned_app_by_pid.unset (pid, out app))
-				return false;
-			return true;
-		}
-
-		private class SpawnedApp : Object {
-			public string package_name {
-				get;
-				construct;
-			}
-
-			public SpawnedApp (string package_name) {
-				Object (package_name: package_name);
-			}
 		}
 	}
 
@@ -322,7 +609,6 @@ namespace Frida {
 			return response.result;
 		}
 
-
 		private async void post_call_request (string request, PendingResponse response, AgentSession session, AgentScriptId script) {
 			try {
 				yield session.post_message_to_script (script, request);
@@ -334,7 +620,7 @@ namespace Frida {
 		private async void get_agent (out AgentSession session, out AgentScriptId script) throws Error {
 			try {
 				if (cached_session == null) {
-					var pid = get_pid (target_process);
+					var pid = LocalProcesses.get_pid (target_process);
 					var id = yield host_session.attach_to (pid);
 					cached_session = yield host_session.obtain_agent_session (id);
 				}
@@ -379,14 +665,6 @@ namespace Frida {
 			}
 		}
 
-		private uint get_pid (string name) throws Error {
-			foreach (HostProcessInfo info in System.enumerate_processes ()) {
-				if (info.name == name)
-					return info.pid;
-			}
-			throw new Error.PROCESS_NOT_FOUND ("Unable to find process with name '%s'".printf (name));
-		}
-
 		private class PendingResponse {
 			public delegate void CompletionHandler ();
 			private CompletionHandler handler;
@@ -414,6 +692,23 @@ namespace Frida {
 				error = e;
 				handler ();
 			}
+		}
+	}
+
+	namespace LocalProcesses {
+		internal uint find_pid (string name) {
+			foreach (HostProcessInfo info in System.enumerate_processes ()) {
+				if (info.name == name)
+					return info.pid;
+			}
+			return 0;
+		}
+
+		internal uint get_pid (string name) throws Error {
+			var pid = find_pid (name);
+			if (pid == 0)
+				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with name '%s'".printf (name));
+			return pid;
 		}
 	}
 #endif

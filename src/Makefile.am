@@ -12,19 +12,27 @@ if OS_LINUX
 if ARCH_64BIT
 HELPER32 ?= $(srcdir)/null-resource.bin!frida-helper-32
 HELPER64 ?= frida-helper!frida-helper-64
+LOADER32 ?= $(srcdir)/null-resource.bin!frida-loader-32.so
+LOADER64 ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.so!frida-loader-64.so
 AGENT32 ?= $(srcdir)/null-resource.bin!frida-agent-32.so
 AGENT64 ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent-64.so
 else
 HELPER32 ?= frida-helper!frida-helper-32
 HELPER64 ?= $(srcdir)/null-resource.bin!frida-helper-64
+LOADER32 ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.so!frida-loader-32.so
+LOADER64 ?= $(srcdir)/null-resource.bin!frida-loader-64.so
 AGENT32 ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.so!frida-agent-32.so
 AGENT64 ?= $(srcdir)/null-resource.bin!frida-agent-64.so
 endif
 HELPER = $(HELPER32) $(HELPER64)
+LOADER = $(LOADER32) $(LOADER64)
 AGENT = $(AGENT32) $(AGENT64)
 HELPER_TARGETS = \
 	$(shell echo $(HELPER32) | cut -f1 -d'!') \
 	$(shell echo $(HELPER64) | cut -f1 -d'!')
+LOADER_TARGETS = \
+	$(shell echo $(LOADER32) | cut -f1 -d'!') \
+	$(shell echo $(LOADER64) | cut -f1 -d'!')
 AGENT_TARGETS = \
 	$(shell echo $(AGENT32) | cut -f1 -d'!') \
 	$(shell echo $(AGENT64) | cut -f1 -d'!')
@@ -68,6 +76,23 @@ backend_cleanfiles += \
 	frida-data-android.h \
 	frida-data-android.c \
 	frida-data-android-blob.S
+
+backend_libraries += \
+	libfrida-data-loader.la
+backend_libadd += \
+	libfrida-data-loader.la
+backend_valaflags += \
+	--pkg=frida-data-loader
+libfrida_data_loader_la_SOURCES = \
+	frida-data-loader.c \
+	frida-data-loader-blob.S \
+	$(NULL)
+frida-data-loader.c frida-data-loader-blob.S: $(LOADER_TARGETS)
+	$(AM_V_GEN) \
+		$(RESOURCE_COMPILER) \
+			-c "$(srcdir)/loader.resources" \
+			-o "$(builddir)/frida-data-loader" \
+			$(LOADER)
 endif
 
 backend_programs += \

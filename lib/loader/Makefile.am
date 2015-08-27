@@ -15,11 +15,15 @@ noinst_LTLIBRARIES = \
 
 libfrida_loader_la_SOURCES = \
 	loader.c
+libfrida_loader_la_LIBADD = \
+	$(FRIDA_LOADER_LIBS)
 libfrida_loader_la_LDFLAGS = \
 	-no-undefined \
 	-avoid-version \
 	-rpath /nowhere \
-	$(extra_ldflags)
+	$(extra_ldflags) \
+	$(FRIDA_LOADER_LDFLAGS)
 
 AM_CPPFLAGS = \
-	-include config.h
+	-include config.h \
+	$(FRIDA_LOADER_CFLAGS)

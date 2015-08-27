@@ -7,7 +7,6 @@ namespace Frida {
 
 		private HelperProcess helper;
 		private bool close_helper;
-		private HashMap<string, TemporaryFile> agents = new HashMap<string, TemporaryFile> ();
 		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
 
 		public Linjector () {
@@ -26,15 +25,10 @@ namespace Frida {
 			helper.uninjected.disconnect (on_uninjected);
 			if (close_helper)
 				yield helper.close ();
-
-			foreach (var tempfile in agents.values)
-				tempfile.destroy ();
-			agents.clear ();
 		}
 
-		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
-			var filename_template = ensure_copy_of (desc);
-			var id = yield helper.inject (pid, filename_template, data_string);
+		public async uint inject (uint pid, AgentResource agent, string data_string) throws Error {
+			var id = yield helper.inject (pid, agent.path_template, data_string);
 			pid_by_id[id] = pid;
 			return id;
 		}
@@ -51,31 +45,121 @@ namespace Frida {
 			pid_by_id.unset (id);
 			uninjected (id);
 		}
+	}
 
-		private string ensure_copy_of (AgentDescriptor desc) throws Error {
-			var name32 = desc.name_template.printf (32);
-			var name64 = desc.name_template.printf (64);
-			if (agents[name32] == null && agents[name64] == null) {
-				if (byte_size (desc.so32) > 0) {
-					var so32 = _clone_so (desc.so32);
-					var temp_agent = new TemporaryFile.from_stream (name32, so32, helper.tempdir);
-					FileUtils.chmod (temp_agent.path, 0755);
+	public enum AgentMode {
+		INSTANCED,
+		SINGLETON
+	}
+
+	public class AgentResource : Object {
+		public string name_template {
+			get;
+			construct;
+		}
+
+		public InputStream? so32 {
+			get {
+				if (_so32 != null)
+					reset_stream (_so32);
+				return _so32;
+			}
+			construct {
+				_so32 = value;
+			}
+		}
+		private InputStream? _so32;
+
+		public InputStream? so64 {
+			get {
+				if (_so64 != null)
+					reset_stream (_so64);
+				return _so64;
+			}
+			construct {
+				_so64 = value;
+			}
+		}
+		private InputStream? _so64;
+
+		public AgentMode mode {
+			get;
+			construct;
+		}
+
+		public TemporaryDirectory tempdir {
+			get;
+			construct;
+		}
+
+		public string path_template {
+			get {
+				if (_path_template == null) {
+					try {
+						var name32 = name_template.printf (32);
+						var name64 = name_template.printf (64);
+
+						if (so32 != null) {
+							var so = (mode == AgentMode.INSTANCED) ? _clone_so (so32) : so32;
+							var temp_agent = new TemporaryFile.from_stream (name32, so, tempdir);
+							FileUtils.chmod (temp_agent.path, 0755);
 #if ANDROID
-					SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
+							SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
 #endif
-					agents[name32] = temp_agent;
+							_file32 = temp_agent;
+						}
+
+						if (so64 != null) {
+							var so = (mode == AgentMode.INSTANCED) ? _clone_so (so64) : so64;
+							var temp_agent = new TemporaryFile.from_stream (name64, so, tempdir);
+							FileUtils.chmod (temp_agent.path, 0755);
+#if ANDROID
+							SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
+#endif
+							_file64 = temp_agent;
+						}
+					} catch (Error e) {
+						assert_not_reached ();
+					}
+
+					_path_template = Path.build_filename (tempdir.path, name_template);
 				}
-				if (byte_size (desc.so64) > 0) {
-					var so64 = _clone_so (desc.so64);
-					var temp_agent = new TemporaryFile.from_stream (name64, so64, helper.tempdir);
-					FileUtils.chmod (temp_agent.path, 0755);
-#if ANDROID
-					SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
-#endif
-					agents[name64] = temp_agent;
+
+				return _path_template;
+			}
+		}
+		private string _path_template;
+		private TemporaryFile _file32;
+		private TemporaryFile _file64;
+
+		public AgentResource (string name_template, InputStream stream32, InputStream stream64, AgentMode mode = AgentMode.INSTANCED, TemporaryDirectory? tempdir = null) {
+			if (tempdir == null) {
+				try {
+					tempdir = new TemporaryDirectory ();
+				} catch (Error e) {
+					assert_not_reached ();
 				}
 			}
-			return Path.build_filename (helper.tempdir.path, desc.name_template);
+
+			Object (
+				name_template: name_template,
+				so32: byte_size (stream32) > 0 ? stream32 : null,
+				so64: byte_size (stream64) > 0 ? stream64 : null,
+				mode: mode,
+				tempdir: tempdir
+			);
+		}
+
+		public void ensure_written_to_disk () {
+			(void) path_template;
+		}
+
+		private void reset_stream (InputStream stream) {
+			try {
+				(stream as Seekable).seek (0, SeekType.SET);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
 		}
 
 		private static int64 byte_size (InputStream stream) {
@@ -93,52 +177,6 @@ namespace Frida {
 		}
 
 		public static extern InputStream _clone_so (InputStream dylib);
-	}
-
-	public class AgentDescriptor : Object {
-		public string name_template {
-			get;
-			construct;
-		}
-
-		public InputStream so32 {
-			get {
-				reset_stream (_so32);
-				return _so32;
-			}
-
-			construct {
-				_so32 = value;
-			}
-		}
-		private InputStream _so32;
-
-		public InputStream so64 {
-			get {
-				reset_stream (_so64);
-				return _so64;
-			}
-
-			construct {
-				_so64 = value;
-			}
-		}
-		private InputStream _so64;
-
-		public AgentDescriptor (string name_template, InputStream so32, InputStream so64) {
-			Object (name_template: name_template, so32: so32, so64: so64);
-
-			assert (so32 is Seekable);
-			assert (so64 is Seekable);
-		}
-
-		private void reset_stream (InputStream stream) {
-			try {
-				(stream as Seekable).seek (0, SeekType.SET);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-		}
 	}
 }
 #endif

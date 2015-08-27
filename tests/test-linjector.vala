@@ -98,7 +98,7 @@ namespace Frida.LinjectorTest {
 				var sofile = Path.build_filename (data_directory, name + Frida.Test.arch_suffix () + ".so");
 				assert (FileUtils.test (sofile, FileTest.EXISTS));
 
-				AgentDescriptor desc;
+				AgentResource agent;
 
 				try {
 					var file = File.new_for_path (sofile).read (null);
@@ -111,12 +111,12 @@ namespace Frida.LinjectorTest {
 						so32 = stub;
 						so64 = file;
 					}
-					desc = new AgentDescriptor (name + "-%u.so", so32, so64);
+					agent = new AgentResource (name + "-%u.so", so32, so64);
 				} catch (GLib.Error io_error) {
 					assert_not_reached ();
 				}
 
-				yield injector.inject (process.id, desc, data_string);
+				yield injector.inject (process.id, agent, data_string);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();

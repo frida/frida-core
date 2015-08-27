@@ -1,7 +1,7 @@
 #include "frida-core.h"
 
 GInputStream *
-_frida_linjector_clone_so (GInputStream * so)
+_frida_agent_resource_clone_so (GInputStream * so)
 {
   GSeekable * seekable = G_SEEKABLE (so);
   goffset previous_offset, size;

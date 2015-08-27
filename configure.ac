@@ -162,6 +162,13 @@ AC_SUBST(FRIDA_BACKEND_LIBS)
 AC_SUBST(FRIDA_PACKAGES)
 AC_SUBST(FRIDA_TEST_PACKAGES)
 
+if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
+  loader_modules="frida-gum-1.0"
+else
+  loader_modules=""
+fi
+PKG_CHECK_MODULES(FRIDA_LOADER, [$loader_modules])
+
 PKG_CHECK_MODULES(FRIDA_AGENT, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, frida-gum-1.0, frida-gumjs-1.0])
 FRIDA_AGENT_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg frida-gum-1.0 --pkg frida-gumjs-1.0"
 AC_SUBST(FRIDA_AGENT_PACKAGES)

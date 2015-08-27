@@ -35,7 +35,7 @@ rpc.exports = {
 
         return result;
     },
-    spawn(packageName) {
+    startActivity(packageName) {
         return new Promise(resolve => {
             pendingSpawnRequests[packageName] = resolve;
 
