@@ -56,7 +56,6 @@ Java.perform(() => {
     const Process = Java.use("android.os.Process");
     RunningAppProcessInfo = Java.use("android.app.ActivityManager$RunningAppProcessInfo");
     const ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
-    const DEBUG_ENABLE_DEBUGGER = 1;
     GET_META_DATA = PackageManager.GET_META_DATA.value;
 
     context = ActivityThread.currentApplication();
@@ -65,16 +64,9 @@ Java.perform(() => {
     activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
 
     Process.start.implementation = () => {
-        const args = Array.prototype.slice.call(arguments);
-        const niceName = args[1];
+        const niceName = arguments[1];
 
-        args[5] |= DEBUG_ENABLE_DEBUGGER;
-
-        const zygoteArgs = args[args.length - 1] || [];
-        zygoteArgs.push("-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=3001");
-        args[args.length - 1] = zygoteArgs;
-
-        const result = this.start.apply(this, args);
+        const result = this.start.apply(this, arguments);
 
         const resolve = pendingSpawnRequests[niceName];
         if (resolve) {
