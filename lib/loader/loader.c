@@ -58,6 +58,7 @@ frida_loader_on_load (void)
 #endif
 
 #define FRIDA_ART_METHOD_OFFSET_JNI_CODE 32
+#define FRIDA_DVM_METHOD_OFFSET_INSNS    32
 
 #define FRIDA_TYPE_ZYGOTE_MONITOR (frida_zygote_monitor_get_type ())
 #define FRIDA_ZYGOTE_MONITOR(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_ZYGOTE_MONITOR, FridaZygoteMonitor))
@@ -197,7 +198,8 @@ frida_loader_allow_unload (void)
 static void
 frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
 {
-  gpointer art;
+  gpointer runtime;
+  gboolean is_art;
   FridaGetCreatedJavaVMsFunc get_created_java_vms;
   JavaVM * vm;
   jsize vm_count;
@@ -210,16 +212,16 @@ frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
   if (self->state != FRIDA_ZYGOTE_MONITOR_PARENT_AWAITING_FORK)
     return;
 
-  art = dlopen ("libart.so", RTLD_GLOBAL | RTLD_LAZY);
-  if (art != NULL)
+  runtime = dlopen ("libart.so", RTLD_GLOBAL | RTLD_LAZY);
+  is_art = runtime != NULL;
+  if (runtime == NULL)
   {
-    get_created_java_vms = (FridaGetCreatedJavaVMsFunc) dlsym (art, "JNI_GetCreatedJavaVMs");
+    runtime = dlopen ("libdvm.so", RTLD_GLOBAL | RTLD_LAZY);
+    g_assert (runtime != NULL);
   }
-  else
-  {
-    /* FIXME */
-    g_assert_not_reached ();
-  }
+
+  get_created_java_vms = (FridaGetCreatedJavaVMsFunc) dlsym (runtime, "JNI_GetCreatedJavaVMs");
+  g_assert (get_created_java_vms != NULL);
 
   res = get_created_java_vms (&vm, 1, &vm_count);
   g_assert_cmpint (res, ==, JNI_OK);
@@ -234,11 +236,14 @@ frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
   set_argv0 = (*env)->GetStaticMethodID (env, process, "setArgV0", "(Ljava/lang/String;)V");
   g_assert (set_argv0 != NULL);
 
-  set_argv0_impl = *((gpointer *) (GPOINTER_TO_SIZE (set_argv0) + FRIDA_ART_METHOD_OFFSET_JNI_CODE));
+  set_argv0_impl = *((gpointer *) (GPOINTER_TO_SIZE (set_argv0) +
+      (is_art ? FRIDA_ART_METHOD_OFFSET_JNI_CODE : FRIDA_DVM_METHOD_OFFSET_INSNS)));
   attach_ret = gum_interceptor_attach_listener (interceptor, set_argv0_impl, GUM_INVOCATION_LISTENER (self), set_argv0_impl);
   g_assert_cmpint (attach_ret, ==, GUM_ATTACH_OK);
 
   self->state = FRIDA_ZYGOTE_MONITOR_PARENT_READY;
+
+  dlclose (runtime);
 }
 
 static void
