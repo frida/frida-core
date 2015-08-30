@@ -133,9 +133,13 @@ namespace Frida {
 		private TemporaryFile _file64;
 
 		public AgentResource (string name_template, InputStream stream32, InputStream stream64, AgentMode mode = AgentMode.INSTANCED, TemporaryDirectory? tempdir = null) {
-			if (tempdir == null) {
+			/* FIXME: we use a new variable to work around a Vala compiler bug */
+			TemporaryDirectory? dir;
+			if (tempdir != null) {
+				dir = tempdir;
+			} else {
 				try {
-					tempdir = new TemporaryDirectory ();
+					dir = new TemporaryDirectory ();
 				} catch (Error e) {
 					assert_not_reached ();
 				}
@@ -146,7 +150,7 @@ namespace Frida {
 				so32: byte_size (stream32) > 0 ? stream32 : null,
 				so64: byte_size (stream64) > 0 ? stream64 : null,
 				mode: mode,
-				tempdir: tempdir
+				tempdir: dir
 			);
 		}
 
