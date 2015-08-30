@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <gio/gio.h>
 #include <glib.h>
+#include <selinux/selinux.h>
 #include <sepol/policydb/policydb.h>
 #include <sepol/policydb/services.h>
 
@@ -29,7 +30,10 @@ static gboolean frida_load_policy (const gchar * filename, policydb_t * db, gcha
 static gboolean frida_save_policy (const gchar * filename, policydb_t * db, GError ** error);
 static type_datum_t * frida_ensure_type (policydb_t * db, const gchar * type_name, guint num_attributes, ...);
 static void frida_add_type_to_class_constraints_referencing_attribute (policydb_t * db, uint32_t type_id, uint32_t attribute_id);
+static gboolean frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** error);
 static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error);
+
+static gboolean frida_set_file_contents (const gchar * filename, const gchar * contents, gssize length, GError ** error);
 
 static const FridaSELinuxRule frida_selinux_rules[] =
 {
@@ -40,6 +44,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
   { { "zygote", NULL }, "zygote", "process", { "execmem", NULL } },
+  { { "zygote", NULL }, "shell", "process", { "sigchld", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
@@ -99,8 +104,25 @@ frida_selinux_patch_policy (void)
 
   if (!frida_save_policy ("/sys/fs/selinux/load", &db, &error))
   {
-    g_printerr ("Unable to save SELinux policy to the kernel: %s\n", error->message);
-    g_clear_error (&error);
+    gboolean success = FALSE, probably_in_emulator;
+
+    probably_in_emulator = security_getenforce () == 1 && security_setenforce (0) == 0;
+    if (probably_in_emulator)
+    {
+      g_clear_error (&error);
+
+      success = frida_ensure_permissive (&db, "shell", &error);
+      if (success)
+        success = frida_save_policy ("/sys/fs/selinux/load", &db, &error);
+
+      security_setenforce (1);
+    }
+
+    if (!success)
+    {
+      g_printerr ("Unable to save SELinux policy to the kernel: %s\n", error->message);
+      g_clear_error (&error);
+    }
   }
 
 beach:
@@ -140,35 +162,12 @@ frida_save_policy (const gchar * filename, policydb_t * db, GError ** error)
 {
   void * data;
   size_t size;
-  int res, fd;
+  int res;
 
   res = policydb_to_image (NULL, db, &data, &size);
   g_assert_cmpint (res, ==, 0);
 
-  fd = open (filename, O_RDWR);
-  if (fd == -1)
-    goto error;
-
-  res = write (fd, data, size);
-  if (res == -1)
-    goto error;
-
-  close (fd);
-
-  return TRUE;
-
-error:
-  {
-    int e;
-
-    e = errno;
-    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (e), "%s", strerror (e));
-
-    if (fd != -1)
-      close (fd);
-
-    return FALSE;
-  }
+  return frida_set_file_contents (filename, data, size, error);
 }
 
 static type_datum_t *
@@ -278,6 +277,25 @@ frida_add_type_to_class_constraints_referencing_attribute (policydb_t * db, uint
   }
 }
 
+static gboolean
+frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** error)
+{
+  type_datum_t * type;
+  int res;
+
+  type = hashtab_search (db->p_types.table, (char *) type_name);
+  if (type == NULL)
+  {
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "type %s does not exist", type_name);
+    return FALSE;
+  }
+
+  res = ebitmap_set_bit (&db->permissive_map, type->s.value, 1);
+  g_assert_cmpint (res, ==, 0);
+
+  return TRUE;
+}
+
 static avtab_datum_t *
 frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error)
 {
@@ -340,5 +358,47 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
   av->data |= perm_bit;
 
   return av;
+}
+
+/* Just like g_file_set_contents() except there's no temporary file involved. */
+
+static gboolean
+frida_set_file_contents (const gchar * filename, const gchar * contents, gssize length, GError ** error)
+{
+  int fd, res;
+  gsize offset, size;
+
+  fd = open (filename, O_RDWR);
+  if (fd == -1)
+    goto error;
+
+  offset = 0;
+  size = (length == -1) ? strlen (contents) : length;
+
+  while (offset != size)
+  {
+    res = write (fd, contents + offset, size - offset);
+    if (res != -1)
+      offset += res;
+    else if (errno != EINTR)
+      goto error;
+  }
+
+  close (fd);
+
+  return TRUE;
+
+error:
+  {
+    int e;
+
+    e = errno;
+    g_set_error (error, G_IO_ERROR, g_io_error_from_errno (e), "%s", strerror (e));
+
+    if (fd != -1)
+      close (fd);
+
+    return FALSE;
+  }
 }
 
