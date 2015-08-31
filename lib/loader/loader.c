@@ -274,6 +274,21 @@ frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
 
   res = get_created_java_vms (&vm, 1, &vm_count);
   g_assert_cmpint (res, ==, JNI_OK);
+
+  if (vm_count == 0 && is_art)
+  {
+    dlclose (runtime);
+
+    runtime = dlopen ("libdvm.so", RTLD_GLOBAL | RTLD_LAZY);
+    g_assert (runtime != NULL);
+
+    get_created_java_vms = (FridaGetCreatedJavaVMsFunc) dlsym (runtime, "JNI_GetCreatedJavaVMs");
+    g_assert (get_created_java_vms != NULL);
+
+    res = get_created_java_vms (&vm, 1, &vm_count);
+    g_assert_cmpint (res, ==, JNI_OK);
+  }
+
   g_assert (vm_count > 0);
 
   res = (*vm)->GetEnv (vm, (void **) &env, JNI_VERSION_1_6);
