@@ -395,11 +395,12 @@ namespace Frida {
 						throw new Error.TRANSPORT ("Unable to communicate with loader");
 					var size = size_buf[0];
 
-					var data_buf = new uint8[size];
+					var data_buf = new uint8[size + 1];
 					size_t bytes_read;
-					yield input.read_all_async (data_buf, Priority.DEFAULT, null, out bytes_read);
+					yield input.read_all_async (data_buf[0:size], Priority.DEFAULT, null, out bytes_read);
 					if (bytes_read != size)
 						throw new Error.TRANSPORT ("Unable to communicate with loader");
+					data_buf[size] = 0;
 
 					char * v = data_buf;
 					return (string) v;
