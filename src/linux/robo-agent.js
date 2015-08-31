@@ -36,12 +36,15 @@ rpc.exports = {
         return result;
     },
     startActivity(packageName) {
-        return new Promise(resolve => {
-            pendingSpawnRequests[packageName] = resolve;
-
+        return new Promise((resolve, reject) => {
             Java.perform(() => {
                 const launchIntent = packageManager.getLaunchIntentForPackage(packageName);
-                context.startActivity(launchIntent);
+                if (launchIntent !== null) {
+                    pendingSpawnRequests[packageName] = resolve;
+                    context.startActivity(launchIntent);
+                } else {
+                    reject(new Error("Unable to find application with identifier '" + packageName + "'"));
+                }
             });
         });
     },
