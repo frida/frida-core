@@ -1,4 +1,9 @@
+extra_libs =
 extra_ldflags =
+
+if OS_ANDROID
+extra_libs += -llog
+endif
 
 if OS_LINUX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-loader.version
@@ -16,6 +21,7 @@ noinst_LTLIBRARIES = \
 libfrida_loader_la_SOURCES = \
 	loader.c
 libfrida_loader_la_LIBADD = \
+	$(extra_libs) \
 	$(FRIDA_LOADER_LIBS)
 libfrida_loader_la_LDFLAGS = \
 	-no-undefined \
@@ -25,5 +31,6 @@ libfrida_loader_la_LDFLAGS = \
 	$(FRIDA_LOADER_LDFLAGS)
 
 AM_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	$(FRIDA_LOADER_CFLAGS)

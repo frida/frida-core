@@ -46,6 +46,7 @@ frida_loader_on_load (void)
 
 #else
 
+#include <android/log.h>
 #include <gum/gum.h>
 #include <jni.h>
 
@@ -92,6 +93,8 @@ struct _FridaZygoteMonitorClass
 
 static void frida_loader_init (void);
 static void frida_loader_deinit (void);
+static void frida_loader_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
+static void frida_loader_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 static void frida_loader_prevent_unload (void);
 static void frida_loader_allow_unload (void);
 
@@ -148,6 +151,9 @@ frida_loader_init (void)
   gum_memory_init ();
   g_mem_set_vtable (&mem_vtable);
   glib_init ();
+  g_assertion_set_handler (frida_loader_on_assert_failure, NULL);
+  g_log_set_default_handler (frida_loader_on_log_message, NULL);
+  g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gum_init ();
 
   libc = dlopen ("libc.so", RTLD_GLOBAL | RTLD_LAZY);
@@ -179,6 +185,49 @@ frida_loader_deinit (void)
   gum_memory_deinit ();
 
   frida_loader_allow_unload ();
+}
+
+static void
+frida_loader_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data)
+{
+  gchar * full_message;
+
+  while (g_str_has_prefix (file, ".." G_DIR_SEPARATOR_S))
+    file += 3;
+  if (message == NULL)
+    message = "code should not be reached";
+
+  full_message = g_strdup_printf ("%s:%d:%s%s %s", file, line, func, (func[0] != '\0') ? ":" : "", message);
+  frida_loader_on_log_message (log_domain, G_LOG_LEVEL_ERROR, full_message, user_data);
+  g_free (full_message);
+
+  abort ();
+}
+
+static void
+frida_loader_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data)
+{
+  int priority;
+
+  switch (log_level & G_LOG_LEVEL_MASK)
+  {
+    case G_LOG_LEVEL_ERROR:
+    case G_LOG_LEVEL_CRITICAL:
+    case G_LOG_LEVEL_WARNING:
+      priority = ANDROID_LOG_FATAL;
+      break;
+    case G_LOG_LEVEL_MESSAGE:
+    case G_LOG_LEVEL_INFO:
+      priority = ANDROID_LOG_INFO;
+      break;
+    case G_LOG_LEVEL_DEBUG:
+      priority = ANDROID_LOG_DEBUG;
+      break;
+    default:
+      g_assert_not_reached ();
+  }
+
+  __android_log_write (priority, log_domain, message);
 }
 
 static void
