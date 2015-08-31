@@ -271,7 +271,7 @@ namespace Frida {
 			spawn_request_by_package_name[package_name] = request;
 
 			yield robo_agent.stop_activity (package_name);
-			uint pid = yield robo_agent.start_activity (package_name);
+			yield robo_agent.start_activity (package_name);
 			if (request.result == null) {
 				var timeout = Timeout.add_seconds (10, () => {
 					timed_out = true;
@@ -290,6 +290,7 @@ namespace Frida {
 			}
 
 			var loader = request.result;
+			var pid = loader.pid;
 			loader.transport = transport;
 			loader.pipe = pipe;
 
@@ -382,13 +383,20 @@ namespace Frida {
 
 		private async void perform_handshake (Loader loader) {
 			try {
-				var package_name = yield loader.recv_string ();
-				SpawnRequest request;
-				if (!spawn_request_by_package_name.unset (package_name, out request)) {
-					loader.close ();
-					return;
+				var identifier = yield loader.recv_string ();
+				var tokens = identifier.split (":", 2);
+				if (tokens.length == 2) {
+					loader.pid = (uint) uint64.parse (tokens[0]);
+					loader.package_name = tokens[1];
+
+					SpawnRequest request;
+					if (spawn_request_by_package_name.unset (loader.package_name, out request)) {
+						request.complete (loader);
+						return;
+					}
 				}
-				request.complete (loader);
+
+				loader.close ();
 			} catch (Error e) {
 			}
 		}
@@ -424,6 +432,16 @@ namespace Frida {
 			private SocketConnection connection;
 			private InputStream input;
 			private OutputStream output;
+
+			public uint pid {
+				get;
+				set;
+			}
+
+			public string package_name {
+				get;
+				set;
+			}
 
 			public PipeTransport? transport {
 				get;
@@ -485,7 +503,7 @@ namespace Frida {
 	private class RoboAgent : ParasiteService {
 		public RoboAgent (LinuxHostSession host_session) {
 			string * source = Frida.Data.Android.get_robo_agent_js_blob ().data;
-			base (host_session, "system_server", source);
+			base (host_session, "com.android.systemui", source);
 		}
 
 		public async HostApplicationInfo[] enumerate_applications () throws Error {
@@ -518,10 +536,8 @@ namespace Frida {
 			}
 		}
 
-		public async uint start_activity (string package_name) throws Error {
-			var result = yield call ("startActivity", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
-			var pid = (uint) result.get_int ();
-			return pid;
+		public async void start_activity (string package_name) throws Error {
+			yield call ("startActivity", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
 		}
 
 		public async void stop_activity (string package_name) throws Error {

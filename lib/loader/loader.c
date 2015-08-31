@@ -281,9 +281,13 @@ frida_zygote_monitor_on_set_argv0_leave (FridaZygoteMonitor * self, GumInvocatio
   name = *GUM_LINCTX_GET_FUNC_INVDATA (context, gchar *);
   if (self->state == FRIDA_ZYGOTE_MONITOR_CHILD_AWAITING_SETARGV0)
   {
+    gchar * identifier;
+
     self->state = FRIDA_ZYGOTE_MONITOR_CHILD_RUNNING;
 
-    frida_loader_connect (name);
+    identifier = g_strdup_printf ("%d:%s", getpid (), name);
+    frida_loader_connect (identifier);
+    g_free (identifier);
   }
 
   g_free (name);

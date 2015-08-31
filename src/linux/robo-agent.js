@@ -3,8 +3,6 @@
 let ApplicationInfo, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
 let context, packageManager, activityManager;
 
-const pendingSpawnRequests = {};
-
 rpc.exports = {
     enumerateApplications() {
         const result = [];
@@ -36,16 +34,13 @@ rpc.exports = {
         return result;
     },
     startActivity(packageName) {
-        return new Promise((resolve, reject) => {
-            Java.perform(() => {
-                const launchIntent = packageManager.getLaunchIntentForPackage(packageName);
-                if (launchIntent !== null) {
-                    pendingSpawnRequests[packageName] = resolve;
-                    context.startActivity(launchIntent);
-                } else {
-                    reject(new Error("Unable to find application with identifier '" + packageName + "'"));
-                }
-            });
+        Java.perform(() => {
+            const launchIntent = packageManager.getLaunchIntentForPackage(packageName);
+            if (launchIntent !== null) {
+                context.startActivity(launchIntent);
+            } else {
+                throw new Error("Unable to find application with identifier '" + packageName + "'");
+            }
         });
     },
     getFrontmostApplication() {
@@ -87,7 +82,6 @@ Java.perform(() => {
     ApplicationInfo = Java.use("android.content.pm.ApplicationInfo");
     const Context = Java.use("android.content.Context");
     const PackageManager = Java.use("android.content.pm.PackageManager");
-    const Process = Java.use("android.os.Process");
     RunningAppProcessInfo = Java.use("android.app.ActivityManager$RunningAppProcessInfo");
     RunningTaskInfo = Java.use("android.app.ActivityManager$RunningTaskInfo");
     const ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
@@ -97,18 +91,4 @@ Java.perform(() => {
 
     packageManager = context.getPackageManager();
     activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
-
-    Process.start.implementation = () => {
-        const niceName = arguments[1];
-
-        const result = this.start.apply(this, arguments);
-
-        const resolve = pendingSpawnRequests[niceName];
-        if (resolve) {
-            delete pendingSpawnRequests[niceName];
-            resolve(result.pid.value);
-        }
-
-        return result;
-    };
 });
