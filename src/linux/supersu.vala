@@ -183,17 +183,14 @@ namespace Frida.SuperSU {
 			if (size == 0)
 				return "";
 
-			var data_buf = new uint8[size];
+			var data_buf = new uint8[size + 1];
 			size_t bytes_read;
-			yield input.read_all_async (data_buf, Priority.DEFAULT, null, out bytes_read);
+			yield input.read_all_async (data_buf[0:size], Priority.DEFAULT, null, out bytes_read);
 			if (bytes_read != size)
 				throw new IOError.FAILED ("Unable to read string");
+			data_buf[size] = 0;
 
-			var result = new uint8[size + 1];
-			Memory.copy (result, data_buf, size);
-			result[size] = 0;
-
-			char * v = result;
+			char * v = data_buf;
 			return (string) v;
 		}
 
