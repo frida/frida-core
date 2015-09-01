@@ -133,7 +133,7 @@ namespace Frida {
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
 
 				if (fruit_launcher == null)
-					fruit_launcher = new FruitLauncher (this, helper, agent);
+					fruit_launcher = new FruitLauncher (helper, agent);
 				return yield fruit_launcher.spawn (identifier, url);
 			} else {
 				return yield helper.spawn (path, argv, envp);
