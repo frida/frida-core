@@ -282,6 +282,8 @@ frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
     runtime = dlopen ("libdvm.so", RTLD_GLOBAL | RTLD_LAZY);
     g_assert (runtime != NULL);
 
+    is_art = FALSE;
+
     get_created_java_vms = (FridaGetCreatedJavaVMsFunc) dlsym (runtime, "JNI_GetCreatedJavaVMs");
     g_assert (get_created_java_vms != NULL);
 
