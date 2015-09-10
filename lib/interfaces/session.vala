@@ -5,11 +5,15 @@ namespace Frida {
 		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
 		public abstract async HostProcessInfo[] enumerate_processes () throws GLib.Error;
 
+		public abstract async void enable_spawn_gating () throws GLib.Error;
+		public abstract async void disable_spawn_gating () throws GLib.Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws GLib.Error;
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async void kill (uint pid) throws GLib.Error;
 		public abstract async AgentSessionId attach_to (uint pid) throws GLib.Error;
 
+		public signal void spawned (HostSpawnInfo info);
 		public signal void agent_session_destroyed (AgentSessionId id);
 	}
 
@@ -119,6 +123,23 @@ namespace Frida {
 			this.name = name;
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
+		}
+	}
+
+	public struct HostSpawnInfo {
+		public uint pid {
+			get;
+			private set;
+		}
+
+		public string identifier {
+			get;
+			private set;
+		}
+
+		public HostSpawnInfo (uint pid, string identifier) {
+			this.pid = pid;
+			this.identifier = identifier;
 		}
 	}
 

@@ -55,10 +55,10 @@ namespace Frida {
 		}
 
 		public DeviceList enumerate_devices_sync () throws Error {
-			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
+			return (create<EnumerateDevicesTask> () as EnumerateDevicesTask).start_and_wait_for_completion ();
 		}
 
-		private class EnumerateTask : ManagerTask<DeviceList> {
+		private class EnumerateDevicesTask : ManagerTask<DeviceList> {
 			protected override async DeviceList perform_operation () throws Error {
 				return yield parent.enumerate_devices ();
 			}
@@ -173,6 +173,7 @@ namespace Frida {
 	}
 
 	public class Device : Object {
+		public signal void spawned (Spawn spawn);
 		public signal void lost ();
 
 		public uint id {
@@ -206,6 +207,7 @@ namespace Frida {
 		}
 
 		private weak DeviceManager manager;
+		private Gee.Promise<bool> ensure_request;
 		private Gee.Promise<bool> close_request;
 
 		protected HostSession host_session;
@@ -311,10 +313,10 @@ namespace Frida {
 		}
 
 		public ProcessList enumerate_processes_sync () throws Error {
-			return (create<EnumerateTask> () as EnumerateTask).start_and_wait_for_completion ();
+			return (create<EnumerateProcessesTask> () as EnumerateProcessesTask).start_and_wait_for_completion ();
 		}
 
-		private class EnumerateTask : DeviceTask<ProcessList> {
+		private class EnumerateProcessesTask : DeviceTask<ProcessList> {
 			protected override async ProcessList perform_operation () throws Error {
 				return yield parent.enumerate_processes ();
 			}
@@ -324,6 +326,80 @@ namespace Frida {
 			if (img == null || img.width == 0)
 				return null;
 			return new Icon (img.width, img.height, img.rowstride, Base64.decode (img.pixels));
+		}
+
+		public async void enable_spawn_gating () throws Error {
+			check_open ();
+
+			try {
+				yield ensure_host_session ();
+				yield host_session.enable_spawn_gating ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void enable_spawn_gating_sync () throws Error {
+			(create<EnableSpawnGatingTask> () as EnableSpawnGatingTask).start_and_wait_for_completion ();
+		}
+
+		private class EnableSpawnGatingTask : DeviceTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.enable_spawn_gating ();
+			}
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			check_open ();
+
+			try {
+				yield ensure_host_session ();
+				yield host_session.disable_spawn_gating ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void disable_spawn_gating_sync () throws Error {
+			(create<DisableSpawnGatingTask> () as DisableSpawnGatingTask).start_and_wait_for_completion ();
+		}
+
+		private class DisableSpawnGatingTask : DeviceTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.disable_spawn_gating ();
+			}
+		}
+
+		public async SpawnList enumerate_pending_spawns () throws Error {
+			check_open ();
+
+			HostSpawnInfo[] pending_spawns;
+			try {
+				yield ensure_host_session ();
+				pending_spawns = yield host_session.enumerate_pending_spawns ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			var result = new Gee.ArrayList<Spawn> ();
+			foreach (var p in pending_spawns)
+				result.add (spawn_from_info (p));
+			return new SpawnList (result);
+		}
+
+		public SpawnList enumerate_pending_spawns_sync () throws Error {
+			return (create<EnumeratePendingSpawnsTask> () as EnumeratePendingSpawnsTask).start_and_wait_for_completion ();
+		}
+
+		private class EnumeratePendingSpawnsTask : DeviceTask<SpawnList> {
+			protected override async SpawnList perform_operation () throws Error {
+				return yield parent.enumerate_pending_spawns ();
+			}
+		}
+
+		private Spawn spawn_from_info (HostSpawnInfo info) {
+			var identifier = info.identifier;
+			return new Spawn (info.pid, (identifier.length > 0) ? identifier : null);
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -457,6 +533,13 @@ namespace Frida {
 			}
 			close_request = new Gee.Promise<bool> ();
 
+			if (ensure_request != null) {
+				try {
+					yield ensure_host_session ();
+				} catch (Error ensure_error) {
+				}
+			}
+
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
 
 			foreach (var session in session_by_pid.values.to_array ()) {
@@ -465,7 +548,10 @@ namespace Frida {
 			session_by_pid.clear ();
 			session_by_handle.clear ();
 
-			host_session = null;
+			if (host_session != null) {
+				host_session.spawned.disconnect (on_spawned);
+				host_session = null;
+			}
 
 			manager._release_device (this);
 			manager = null;
@@ -493,9 +579,29 @@ namespace Frida {
 		}
 
 		private async void ensure_host_session () throws Error {
-			if (host_session == null) {
-				host_session = yield provider.create ();
+			if (ensure_request != null) {
+				var future = ensure_request.future;
+				try {
+					yield future.wait_async ();
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
+				}
+				return;
 			}
+			ensure_request = new Gee.Promise<bool> ();
+
+			try {
+				host_session = yield provider.create ();
+				host_session.spawned.connect (on_spawned);
+				ensure_request.set_value (true);
+			} catch (Error e) {
+				ensure_request.set_exception (e);
+				ensure_request = null;
+			}
+		}
+
+		private void on_spawned (HostSpawnInfo info) {
+			spawned (spawn_from_info (info));
 		}
 
 		private void on_agent_session_closed (AgentSessionId id) {
@@ -615,6 +721,39 @@ namespace Frida {
 			this.name = name;
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
+		}
+	}
+
+	public class SpawnList : Object {
+		private Gee.List<Spawn> items;
+
+		public SpawnList (Gee.List<Spawn> items) {
+			this.items = items;
+		}
+
+		public int size () {
+			return items.size;
+		}
+
+		public new Spawn get (int index) {
+			return items.get (index);
+		}
+	}
+
+	public class Spawn : Object {
+		public uint pid {
+			get;
+			private set;
+		}
+
+		public string? identifier {
+			get;
+			private set;
+		}
+
+		public Spawn (uint pid, string? identifier) {
+			this.pid = pid;
+			this.identifier = identifier;
 		}
 	}
 

@@ -114,6 +114,12 @@ namespace Frida {
 
 		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
 
+		public abstract async void enable_spawn_gating () throws Error;
+
+		public abstract async void disable_spawn_gating () throws Error;
+
+		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws Error;
+
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 
 		public abstract async void resume (uint pid) throws Error;

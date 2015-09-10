@@ -99,6 +99,18 @@ namespace Frida {
 			return System.enumerate_processes ();
 		}
 
+		public override async void enable_spawn_gating () throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
+		public override async void disable_spawn_gating () throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
+		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			return _do_spawn (path, argv, envp);
 		}

@@ -137,15 +137,37 @@ namespace Frida {
 			return System.enumerate_processes ();
 		}
 
+		public override async void enable_spawn_gating () throws Error {
+#if ANDROID
+			yield get_robo_launcher ().enable_spawn_gating ();
+#else
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#endif
+		}
+
+		public override async void disable_spawn_gating () throws Error {
+#if ANDROID
+			yield get_robo_launcher ().disable_spawn_gating ();
+#else
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#endif
+		}
+
+		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+#if ANDROID
+			return get_robo_launcher ().enumerate_pending_spawns ();
+#else
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#endif
+		}
+
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 #if ANDROID
 			if (!path.has_prefix ("/")) {
 				string package_name = path;
 				if (argv.length > 1)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected package name only");
-				if (robo_launcher == null)
-					robo_launcher = new RoboLauncher (robo_agent, helper, injector, agent);
-				return yield robo_launcher.spawn (package_name);
+				return yield get_robo_launcher ().spawn (package_name);
 			} else {
 				return yield helper.spawn (path, argv, envp);
 			}
@@ -169,33 +191,46 @@ namespace Frida {
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
+			PipeTransport.set_temp_directory (helper.tempdir.path);
+
 			PipeTransport t;
 			Pipe pipe;
-
-#if ANDROID
-			if (robo_launcher != null) {
-				if (robo_launcher.try_get_pipe (pid, out pipe, out t)) {
-					transport = t;
-					return pipe;
-				}
-			}
-#endif
-
-			PipeTransport.set_temp_directory (helper.tempdir.path);
 			try {
 				t = new PipeTransport ();
 				pipe = new Pipe (t.local_address);
 			} catch (IOError stream_error) {
 				throw new Error.NOT_SUPPORTED (stream_error.message);
 			}
+
+#if ANDROID
+			if (robo_launcher != null) {
+				if (yield robo_launcher.try_establish (pid, t.remote_address)) {
+					transport = t;
+					return pipe;
+				}
+			}
+#endif
+
 			yield injector.inject (pid, agent, t.remote_address);
 			transport = t;
 			return pipe;
 		}
+
+#if ANDROID
+		private RoboLauncher get_robo_launcher () {
+			if (robo_launcher == null) {
+				robo_launcher = new RoboLauncher (robo_agent, helper, injector, agent);
+				robo_launcher.spawned.connect ((info) => { spawned (info); });
+			}
+			return robo_launcher;
+		}
+#endif
 	}
 
 #if ANDROID
 	private class RoboLauncher {
+		public signal void spawned (HostSpawnInfo info);
+
 		private RoboAgent robo_agent;
 		private HelperProcess helper;
 		private Linjector injector;
@@ -206,6 +241,7 @@ namespace Frida {
 		private UnixSocketAddress service_address;
 		private SocketService service;
 
+		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, SpawnRequest> spawn_request_by_package_name = new Gee.HashMap<string, SpawnRequest> ();
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
@@ -247,20 +283,30 @@ namespace Frida {
 			agent = null;
 		}
 
+		public async void enable_spawn_gating () throws Error {
+			yield ensure_loader_injected ();
+			spawn_gating_enabled = true;
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			spawn_gating_enabled = false;
+		}
+
+		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			var result = new HostSpawnInfo[0];
+			var i = 0;
+			foreach (var loader in loader_by_pid.values) {
+				var info = loader.spawn_info;
+				if (info != null) {
+					result.resize (i + 1);
+					result[i++] = info;
+				}
+			}
+			return result;
+		}
+
 		public async uint spawn (string package_name) throws Error {
 			yield ensure_loader_injected ();
-
-			PipeTransport.set_temp_directory (helper.tempdir.path);
-			PipeTransport transport;
-			Pipe pipe;
-			try {
-				transport = new PipeTransport ();
-				pipe = new Pipe (transport.local_address);
-			} catch (IOError stream_error) {
-				throw new Error.NOT_SUPPORTED (stream_error.message);
-			}
-
-			agent.ensure_written_to_disk ();
 
 			var waiting = false;
 			var timed_out = false;
@@ -270,8 +316,14 @@ namespace Frida {
 			});
 			spawn_request_by_package_name[package_name] = request;
 
-			yield robo_agent.stop_activity (package_name);
-			yield robo_agent.start_activity (package_name);
+			try {
+				yield robo_agent.stop_activity (package_name);
+				yield robo_agent.start_activity (package_name);
+			} catch (Error e) {
+				spawn_request_by_package_name.unset (package_name);
+				throw e;
+			}
+
 			if (request.result == null) {
 				var timeout = Timeout.add_seconds (10, () => {
 					timed_out = true;
@@ -289,27 +341,14 @@ namespace Frida {
 				}
 			}
 
-			var loader = request.result;
-			var pid = loader.pid;
-			loader.transport = transport;
-			loader.pipe = pipe;
-
-			yield loader.send_string (transport.remote_address);
-
-			loader_by_pid[pid] = loader;
-
-			return pid;
+			return request.result.pid;
 		}
 
-		public bool try_get_pipe (uint pid, out Pipe? pipe, out PipeTransport? transport) {
+		public async bool try_establish (uint pid, string remote_address) throws Error {
 			Loader loader = loader_by_pid[pid];
-			if (loader == null) {
-				pipe = null;
-				transport = null;
+			if (loader == null)
 				return false;
-			}
-			pipe = loader.pipe;
-			transport = loader.transport;
+			yield loader.establish (remote_address);
 			return true;
 		}
 
@@ -317,7 +356,7 @@ namespace Frida {
 			Loader loader;
 			if (!loader_by_pid.unset (pid, out loader))
 				return false;
-			yield loader.send_string ("go");
+			yield loader.resume ();
 			return true;
 		}
 
@@ -326,6 +365,8 @@ namespace Frida {
 			var should_inject_64bit_loader = loader64 == 0 && loader.so64 != null;
 			if (!should_inject_32bit_loader && !should_inject_64bit_loader)
 				return;
+
+			agent.ensure_written_to_disk ();
 
 			var passes = new string[] { "", agent.tempdir.path };
 			foreach (var data_dir in passes) {
@@ -383,17 +424,31 @@ namespace Frida {
 
 		private async void perform_handshake (Loader loader) {
 			try {
-				var identifier = yield loader.recv_string ();
-				var tokens = identifier.split (":", 2);
+				var details = yield loader.recv_string ();
+				var tokens = details.split (":", 2);
 				if (tokens.length == 2) {
-					loader.pid = (uint) uint64.parse (tokens[0]);
-					loader.package_name = tokens[1];
+					var pid = (uint) uint64.parse (tokens[0]);
+					var package_name = tokens[1];
+
+					loader.pid = pid;
+					loader.package_name = package_name;
+
+					loader_by_pid[pid] = loader;
 
 					SpawnRequest request;
 					if (spawn_request_by_package_name.unset (loader.package_name, out request)) {
 						request.complete (loader);
 						return;
 					}
+
+					if (spawn_gating_enabled) {
+						var info = HostSpawnInfo (pid, package_name);
+						loader.spawn_info = info;
+						spawned (info);
+						return;
+					}
+
+					loader_by_pid.unset (pid);
 				}
 
 				loader.close ();
@@ -432,6 +487,7 @@ namespace Frida {
 			private SocketConnection connection;
 			private InputStream input;
 			private OutputStream output;
+			private bool established = false;
 
 			public uint pid {
 				get;
@@ -443,12 +499,7 @@ namespace Frida {
 				set;
 			}
 
-			public PipeTransport? transport {
-				get;
-				set;
-			}
-
-			public Pipe? pipe {
+			public HostSpawnInfo? spawn_info {
 				get;
 				set;
 			}
@@ -461,6 +512,18 @@ namespace Frida {
 
 			public void close () {
 				connection.close_async.begin ();
+			}
+
+			public async void establish (string remote_address) throws Error {
+				yield send_string (remote_address);
+				established = true;
+			}
+
+			public async void resume () throws Error {
+				if (established)
+					yield send_string ("go");
+				else
+					close ();
 			}
 
 			public async string recv_string () throws Error {

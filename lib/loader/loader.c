@@ -21,7 +21,7 @@
 
 typedef void (* FridaAgentMainFunc) (const char * data_string, void * mapped_range, size_t parent_thread_id);
 
-static void frida_loader_connect (const char * identifier);
+static void frida_loader_connect (const char * details);
 static void * frida_loader_run (void * user_data);
 static bool frida_loader_send_string (int s, const char * v);
 static bool frida_loader_send_bytes (int s, const void * bytes, size_t size);
@@ -32,16 +32,73 @@ static char frida_data_dir[256] = FRIDA_LOADER_DATA_DIR_MAGIC;
 
 #ifdef HAVE_IOS
 
+#define kFridaCFStringEncodingUTF8 0x08000100
+
+typedef void * FridaCFRef;
+typedef signed long FridaCFIndex;
+typedef uint32_t FridaCFStringEncoding;
+typedef unsigned char FridaCFBoolean;
+
+typedef FridaCFRef (* FridaCFBundleGetMainBundleFunc) (void);
+typedef FridaCFRef (* FridaCFBundleGetIdentifierFunc) (FridaCFRef bundle);
+typedef FridaCFIndex (* FridaCFStringGetLengthFunc) (FridaCFRef str);
+typedef FridaCFIndex (* FridaCFStringGetMaximumSizeForEncodingFunc) (FridaCFIndex length, FridaCFStringEncoding encoding);
+typedef FridaCFBoolean (* FridaCFStringGetCString) (FridaCFRef str, char * buffer, FridaCFIndex buffer_size, FridaCFStringEncoding encoding);
+
 #define FRIDA_AGENT_FILENAME "frida-agent.dylib"
 
 __attribute__ ((constructor)) static void
 frida_loader_on_load (void)
 {
-  char identifier[12];
+  char * identifier = NULL, * details;
+  FridaCFBundleGetMainBundleFunc cf_bundle_get_main_bundle;
 
-  sprintf (identifier, "%d", getpid ());
+  cf_bundle_get_main_bundle = dlsym (RTLD_DEFAULT, "CFBundleGetMainBundle");
+  if (cf_bundle_get_main_bundle != NULL)
+  {
+    FridaCFBundleGetIdentifierFunc cf_bundle_get_identifier;
+    FridaCFStringGetLengthFunc cf_string_get_length;
+    FridaCFStringGetMaximumSizeForEncodingFunc cf_string_get_maximum_size_for_encoding;
+    FridaCFStringGetCString cf_string_get_c_string;
+    FridaCFRef main_bundle;
 
-  frida_loader_connect (identifier);
+    cf_bundle_get_identifier = dlsym (RTLD_DEFAULT, "CFBundleGetIdentifier");
+    assert (cf_bundle_get_identifier != NULL);
+
+    cf_string_get_length = dlsym (RTLD_DEFAULT, "CFStringGetLength");
+    assert (cf_string_get_length != NULL);
+
+    cf_string_get_maximum_size_for_encoding = dlsym (RTLD_DEFAULT, "CFStringGetMaximumSizeForEncoding");
+    assert (cf_string_get_maximum_size_for_encoding != NULL);
+
+    cf_string_get_c_string = dlsym (RTLD_DEFAULT, "CFStringGetCString");
+    assert (cf_string_get_c_string != NULL);
+
+    main_bundle = cf_bundle_get_main_bundle ();
+    if (main_bundle != NULL)
+    {
+      FridaCFRef main_identifier;
+
+      main_identifier = cf_bundle_get_identifier (main_bundle);
+      if (main_identifier != NULL)
+      {
+        FridaCFIndex length, size;
+
+        length = cf_string_get_length (main_identifier);
+        size = cf_string_get_maximum_size_for_encoding (length, kFridaCFStringEncodingUTF8);
+        identifier = calloc (1, size + 1);
+        cf_string_get_c_string (main_identifier, identifier, size, kFridaCFStringEncodingUTF8);
+      }
+    }
+  }
+
+  asprintf (&details, "%d:%s", getpid (), (identifier != NULL) ? identifier : "");
+
+  frida_loader_connect (details);
+
+  free (details);
+  if (identifier != NULL)
+    free (identifier);
 }
 
 #else
@@ -347,13 +404,13 @@ frida_zygote_monitor_on_set_argv0_leave (FridaZygoteMonitor * self, GumInvocatio
   name = *GUM_LINCTX_GET_FUNC_INVDATA (context, gchar *);
   if (self->state == FRIDA_ZYGOTE_MONITOR_CHILD_AWAITING_SETARGV0)
   {
-    gchar * identifier;
+    gchar * details;
 
     self->state = FRIDA_ZYGOTE_MONITOR_CHILD_RUNNING;
 
-    identifier = g_strdup_printf ("%d:%s", getpid (), name);
-    frida_loader_connect (identifier);
-    g_free (identifier);
+    details = g_strdup_printf ("%d:%s", getpid (), name);
+    frida_loader_connect (details);
+    g_free (details);
   }
 
   g_free (name);

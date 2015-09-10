@@ -123,6 +123,27 @@ namespace Frida {
 			return yield process_enumerator.enumerate_processes ();
 		}
 
+		public override async void enable_spawn_gating () throws Error {
+			if (_is_running_on_ios ())
+				yield get_fruit_launcher ().enable_spawn_gating ();
+			else
+				throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
+		public override async void disable_spawn_gating () throws Error {
+			if (_is_running_on_ios ())
+				yield get_fruit_launcher ().disable_spawn_gating ();
+			else
+				throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
+		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			if (_is_running_on_ios ())
+				return get_fruit_launcher ().enumerate_pending_spawns ();
+			else
+				throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			if (_is_running_on_ios () && !path.has_prefix ("/")) {
 				string identifier = path;
@@ -132,9 +153,7 @@ namespace Frida {
 				else if (argv.length > 2)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
 
-				if (fruit_launcher == null)
-					fruit_launcher = new FruitLauncher (helper, agent);
-				return yield fruit_launcher.spawn (identifier, url);
+				return yield get_fruit_launcher ().spawn (identifier, url);
 			} else {
 				return yield helper.spawn (path, argv, envp);
 			}
@@ -155,21 +174,20 @@ namespace Frida {
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
 			transport = null;
 
-			Pipe pipe;
-
-			if (fruit_launcher != null) {
-				pipe = fruit_launcher.try_get_pipe (pid);
-				if (pipe != null)
-					return pipe;
-			}
-
 			string local_address, remote_address;
 			yield injector.make_pipe_endpoints (pid, out local_address, out remote_address);
+			Pipe pipe;
 			try {
 				pipe = new Pipe (local_address);
 			} catch (IOError pipe_error) {
 				throw new Error.NOT_SUPPORTED (pipe_error.message);
 			}
+
+			if (fruit_launcher != null) {
+				if (yield fruit_launcher.try_establish (pid, remote_address))
+					return pipe;
+			}
+
 			yield injector.inject (pid, agent, remote_address);
 
 			return pipe;
@@ -179,11 +197,21 @@ namespace Frida {
 			return yield helper.obtain_kernel_session ();
 		}
 
+		private FruitLauncher get_fruit_launcher () {
+			if (fruit_launcher == null) {
+				fruit_launcher = new FruitLauncher (helper, agent);
+				fruit_launcher.spawned.connect ((info) => { spawned (info); });
+			}
+			return fruit_launcher;
+		}
+
 		// TODO: use Vala's preprocessor when the build system has been fixed
 		public static extern bool _is_running_on_ios ();
 	}
 
 	private class FruitLauncher {
+		public signal void spawned (HostSpawnInfo info);
+
 		private const string LOADER_DATA_DIR_MAGIC = "3zPLi3BupiesaB9diyimME74fJw4jvj6";
 
 		private HelperProcess helper;
@@ -191,9 +219,12 @@ namespace Frida {
 		private UnixSocketAddress service_address;
 		private SocketService service;
 
-		private Gee.Promise<bool> spawn_request;
-		private delegate void LaunchErrorHandler (Error e);
-		private LaunchErrorHandler on_launch_error;
+		private string plugin_directory;
+		private string plist_path;
+		private string dylib_path;
+
+		private bool spawn_gating_enabled = false;
+		private Gee.HashMap<string, SpawnRequest> spawn_request_by_identifier = new Gee.HashMap<string, SpawnRequest> ();
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
 		internal FruitLauncher (HelperProcess helper, AgentResource agent) {
@@ -211,6 +242,13 @@ namespace Frida {
 			assert (effective_address is UnixSocketAddress);
 			this.service_address = effective_address as UnixSocketAddress;
 			FileUtils.chmod (this.service_address.path, 0777);
+			this.service.incoming.connect (this.on_incoming_connection);
+
+			this.plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
+			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
+			this.plist_path = Path.build_filename (this.plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
+			this.dylib_path = Path.build_filename (this.plugin_directory, dylib_blob.name);
+
 			this.service.start ();
 		}
 
@@ -218,137 +256,106 @@ namespace Frida {
 			service.stop ();
 			service = null;
 
+			FileUtils.unlink (dylib_path);
 			FileUtils.unlink (service_address.path);
 
 			agent = null;
 		}
 
-		public async uint spawn (string identifier, string? url) throws Error {
-			while (spawn_request != null) {
-				try {
-					yield spawn_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					assert_not_reached ();
+		public async void enable_spawn_gating () throws Error {
+			yield ensure_loader_deployed ();
+			spawn_gating_enabled = true;
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			spawn_gating_enabled = false;
+		}
+
+		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			var result = new HostSpawnInfo[0];
+			var i = 0;
+			foreach (var loader in loader_by_pid.values) {
+				var info = loader.spawn_info;
+				if (info != null) {
+					result.resize (i + 1);
+					result[i++] = info;
 				}
 			}
+			return result;
+		}
 
-			spawn_request = new Gee.Promise<bool> ();
+		public async uint spawn (string identifier, string? url) throws Error {
+			check_identifier (identifier);
+
+			yield ensure_loader_deployed ();
+
+			var waiting = false;
+			var timed_out = false;
+			var request = new SpawnRequest (identifier, () => {
+				if (waiting)
+					spawn.callback ();
+			});
+			spawn_request_by_identifier[identifier] = request;
 
 			try {
-				var plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
-				if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
-					throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+				kill (identifier);
+				yield helper.launch (identifier, url);
+			} catch (Error e) {
+				spawn_request_by_identifier.unset (identifier);
+				throw e;
+			}
 
-				yield helper.preload ();
-				agent.ensure_written_to_disk ();
-
-				check_identifier (identifier);
-
-				var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
-				var plist_path = Path.build_filename (plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
-				var dylib_path = Path.build_filename (plugin_directory, dylib_blob.name);
-				try {
-					FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
-					FileUtils.chmod (dylib_path, 0755);
-					FileUtils.set_contents (plist_path, generate_loader_plist (identifier));
-					FileUtils.chmod (plist_path, 0644);
-				} catch (GLib.FileError e) {
-					throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
-				}
-
-				Loader loader = null;
-				Error error = null;
-				var timed_out = false;
-				on_launch_error = (e) => {
-					error = e;
-					spawn.callback ();
-				};
-				var on_incoming = this.service.incoming.connect ((connection, source_object) => {
-					loader = new Loader (connection);
-					spawn.callback ();
-					return true;
-				});
+			if (request.result == null) {
 				var timeout = Timeout.add_seconds (10, () => {
 					timed_out = true;
 					spawn.callback ();
 					return false;
 				});
-				kill (identifier);
-				perform_launch.begin (identifier, url);
+				waiting = true;
 				yield;
-				if (!timed_out)
+				waiting = false;
+				if (timed_out) {
+					spawn_request_by_identifier.unset (identifier);
+					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch");
+				} else {
 					Source.remove (timeout);
-				this.service.disconnect (on_incoming);
-				on_launch_error = null;
-
-				FileUtils.unlink (plist_path);
-				FileUtils.unlink (dylib_path);
-
-				if (loader == null) {
-					if (error != null)
-						throw error;
-					else
-						throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch");
 				}
-
-				string pid_message = yield loader.recv_string ();
-				uint pid = (uint) uint64.parse (pid_message);
-
-				var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
-				try {
-					loader.pipe = new Pipe (endpoints.local_address);
-				} catch (IOError stream_error) {
-					throw new Error.NOT_SUPPORTED (stream_error.message);
-				}
-				yield loader.send_string (endpoints.remote_address);
-
-				loader_by_pid[pid] = loader;
-
-				return pid;
-			} finally {
-				spawn_request.set_value (true);
-				spawn_request = null;
 			}
+
+			return request.result.pid;
 		}
 
-		private async void perform_launch (string identifier, string? url) {
-			try {
-				yield helper.launch (identifier, url);
-			} catch (Error e) {
-				if (on_launch_error != null)
-					on_launch_error (e);
-			}
-		}
-
-		public Pipe? try_get_pipe (uint pid) {
+		public async bool try_establish (uint pid, string remote_address) throws Error {
 			Loader loader = loader_by_pid[pid];
 			if (loader == null)
-				return null;
-			return loader.pipe;
+				return false;
+			yield loader.establish (remote_address);
+			return true;
 		}
 
 		public async bool try_resume (uint pid) throws Error {
 			Loader loader;
 			if (!loader_by_pid.unset (pid, out loader))
 				return false;
-			yield loader.send_string ("go");
+			yield loader.resume ();
 			return true;
 		}
 
-		private string generate_loader_plist (string identifier) {
-			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-				"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">" +
-				"<plist version=\"1.0\">" +
-				"<dict>" +
-					"<key>Filter</key>" +
-					"<dict>" +
-						"<key>Bundles</key>" +
-						"<array>" +
-							"<string>" + identifier + "</string>" +
-						"</array>" +
-					"</dict>" +
-				"</dict>" +
-			"</plist>";
+		private async void ensure_loader_deployed () throws Error {
+			if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
+				throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+
+			yield helper.preload ();
+			agent.ensure_written_to_disk ();
+
+			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
+			try {
+				FileUtils.unlink (plist_path);
+				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
+				FileUtils.chmod (dylib_path, 0755);
+			} catch (GLib.FileError e) {
+				throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
+			}
 		}
 
 		private uint8[] generate_loader_dylib (Frida.Data.Loader.Blob blob, string callback_path) {
@@ -371,12 +378,89 @@ namespace Frida {
 		private static extern void check_identifier (string identifier) throws Error;
 		private static extern void kill (string identifier);
 
+		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
+			perform_handshake.begin (new Loader (connection));
+			return true;
+		}
+
+		private async void perform_handshake (Loader loader) {
+			try {
+				var details = yield loader.recv_string ();
+				var tokens = details.split (":", 2);
+				if (tokens.length == 2) {
+					var pid = (uint) uint64.parse (tokens[0]);
+					var identifier = tokens[1];
+
+					loader.pid = pid;
+					loader.identifier = identifier;
+
+					loader_by_pid[pid] = loader;
+
+					SpawnRequest request;
+					if (spawn_request_by_identifier.unset (loader.identifier, out request)) {
+						request.complete (loader);
+						return;
+					}
+
+					if (spawn_gating_enabled) {
+						var info = HostSpawnInfo (pid, identifier);
+						loader.spawn_info = info;
+						spawned (info);
+						return;
+					}
+
+					loader_by_pid.unset (pid);
+				}
+
+				loader.close ();
+			} catch (Error e) {
+			}
+		}
+
+		private class SpawnRequest : Object {
+			public delegate void CompletionHandler ();
+
+			public string identifier {
+				get;
+				construct;
+			}
+
+			private CompletionHandler handler;
+
+			public Loader? result {
+				get;
+				private set;
+			}
+
+			public SpawnRequest (string identifier, owned CompletionHandler handler) {
+				Object (identifier: identifier);
+
+				this.handler = (owned) handler;
+			}
+
+			public void complete (Loader r) {
+				result = r;
+				handler ();
+			}
+		}
+
 		private class Loader {
 			private SocketConnection connection;
 			private InputStream input;
 			private OutputStream output;
+			private bool established = false;
 
-			public Pipe pipe {
+			public uint pid {
+				get;
+				set;
+			}
+
+			public string identifier {
+				get;
+				set;
+			}
+
+			public HostSpawnInfo? spawn_info {
 				get;
 				set;
 			}
@@ -385,6 +469,22 @@ namespace Frida {
 				this.connection = connection;
 				this.input = connection.input_stream;
 				this.output = connection.output_stream;
+			}
+
+			public void close () {
+				connection.close_async.begin ();
+			}
+
+			public async void establish (string remote_address) throws Error {
+				yield send_string (remote_address);
+				established = true;
+			}
+
+			public async void resume () throws Error {
+				if (established)
+					yield send_string ("go");
+				else
+					close ();
 			}
 
 			public async string recv_string () throws Error {
