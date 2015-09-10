@@ -368,53 +368,51 @@ namespace Frida {
 
 			agent.ensure_written_to_disk ();
 
-			var passes = new string[] { "", agent.tempdir.path };
-			foreach (var data_dir in passes) {
-				var pending = new Gee.HashSet<uint> ();
-				var waiting = false;
-				var timed_out = false;
+			var data_dir = agent.tempdir.path;
+			var pending = new Gee.HashSet<uint> ();
+			var waiting = false;
+			var timed_out = false;
 
-				var on_uninjected = injector.uninjected.connect ((id) => {
-					pending.remove (id);
-					if (waiting)
-						ensure_loader_injected.callback ();
-				});
+			var on_uninjected = injector.uninjected.connect ((id) => {
+				pending.remove (id);
+				if (waiting)
+					ensure_loader_injected.callback ();
+			});
 
-				try {
-					if (should_inject_32bit_loader) {
-						loader32 = yield injector.inject (LocalProcesses.get_pid ("zygote"), loader, data_dir);
-						pending.add (loader32);
-					}
-
-					if (should_inject_64bit_loader) {
-						var zygote64_pid = LocalProcesses.find_pid ("zygote64");
-						if (zygote64_pid != 0) {
-							loader64 = yield injector.inject (zygote64_pid, loader, data_dir);
-							pending.add (loader64);
-						} else {
-							loader64 = 1;
-						}
-					}
-
-					var timeout = Timeout.add_seconds (10, () => {
-						timed_out = true;
-						ensure_loader_injected.callback ();
-						return false;
-					});
-					while (!pending.is_empty) {
-						waiting = true;
-						yield;
-						waiting = false;
-					}
-					if (!timed_out)
-						Source.remove (timeout);
-				} finally {
-					injector.disconnect (on_uninjected);
+			try {
+				if (should_inject_32bit_loader) {
+					loader32 = yield injector.inject (LocalProcesses.get_pid ("zygote"), loader, data_dir);
+					pending.add (loader32);
 				}
 
-				if (timed_out)
-					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while injecting loader into zygote");
+				if (should_inject_64bit_loader) {
+					var zygote64_pid = LocalProcesses.find_pid ("zygote64");
+					if (zygote64_pid != 0) {
+						loader64 = yield injector.inject (zygote64_pid, loader, data_dir);
+						pending.add (loader64);
+					} else {
+						loader64 = 1;
+					}
+				}
+
+				var timeout = Timeout.add_seconds (10, () => {
+					timed_out = true;
+					ensure_loader_injected.callback ();
+					return false;
+				});
+				while (!pending.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				if (!timed_out)
+					Source.remove (timeout);
+			} finally {
+				injector.disconnect (on_uninjected);
 			}
+
+			if (timed_out)
+				throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while injecting loader into zygote");
 		}
 
 		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
