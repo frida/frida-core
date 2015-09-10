@@ -597,6 +597,7 @@ namespace Frida {
 			} catch (Error e) {
 				ensure_request.set_exception (e);
 				ensure_request = null;
+				throw e;
 			}
 		}
 
