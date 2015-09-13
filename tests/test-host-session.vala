@@ -150,6 +150,10 @@ namespace Frida.HostSessionTest {
 		}
 
 		private class StubProvider : Object, HostSessionProvider {
+			public string id {
+				get { return "stub"; }
+			}
+
 			public string name {
 				get { return "Stub"; }
 			}

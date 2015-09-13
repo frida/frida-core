@@ -18,6 +18,10 @@ namespace Frida {
 	}
 
 	public class QnxHostSessionProvider : Object, HostSessionProvider {
+		public string id {
+			get { return "local"; }
+		}
+
 		public string name {
 			get { return "Local System"; }
 		}

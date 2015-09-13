@@ -24,7 +24,6 @@ namespace Frida {
 
 		private HostSessionService service = null;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
-		private uint last_device_id = 1;
 
 		public DeviceManager () {
 			this.main_context = get_main_context ();
@@ -83,7 +82,7 @@ namespace Frida {
 			bool started = false;
 			service = new HostSessionService.with_default_backends ();
 			service.provider_available.connect ((provider) => {
-				var device = new Device (this, last_device_id++, provider.name, provider.kind, provider);
+				var device = new Device (this, provider.id, provider.name, provider.kind, provider);
 				devices.add (device);
 				if (started) {
 					added (device);
@@ -176,7 +175,7 @@ namespace Frida {
 		public signal void spawned (Spawn spawn);
 		public signal void lost ();
 
-		public uint id {
+		public string id {
 			get;
 			private set;
 		}
@@ -214,7 +213,7 @@ namespace Frida {
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 
-		public Device (DeviceManager manager, uint id, string name, HostSessionProviderKind kind, HostSessionProvider provider) {
+		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider) {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;

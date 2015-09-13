@@ -15,6 +15,10 @@ namespace Frida {
 	}
 
 	public class TcpHostSessionProvider : Object, HostSessionProvider {
+		public string id {
+			get { return "tcp"; }
+		}
+
 		public string name {
 			get { return _name; }
 		}

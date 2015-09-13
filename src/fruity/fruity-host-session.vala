@@ -136,6 +136,10 @@ namespace Frida {
 	}
 
 	public class FruityHostSessionProvider : Object, HostSessionProvider {
+		public string id {
+			get { return device_udid; }
+		}
+
 		public string name {
 			get { return _name; }
 		}

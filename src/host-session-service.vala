@@ -62,6 +62,10 @@ namespace Frida {
 	}
 
 	public interface HostSessionProvider : Object {
+		public abstract string id {
+			get;
+		}
+
 		public abstract string name {
 			get;
 		}
