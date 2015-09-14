@@ -325,6 +325,10 @@ glue_sources += \
 	qnx/qinjector-glue.c
 endif
 
+backend_sources += \
+	droidy/droidy-host-session.vala \
+	droidy/droidy-client.vala
+
 BUILT_SOURCES = frida-api-stamp
 
 lib_LTLIBRARIES = \
