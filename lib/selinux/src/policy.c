@@ -12,10 +12,11 @@ typedef enum _FridaSELinuxErrorEnum FridaSELinuxErrorEnum;
 
 struct _FridaSELinuxRule
 {
+  const guint16 fields;
   const gchar * sources[4];
   const gchar * target;
   const gchar * klass;
-  const gchar * permissions[16];
+  const gchar * details[16];
 };
 
 enum _FridaSELinuxErrorEnum
@@ -23,6 +24,7 @@ enum _FridaSELinuxErrorEnum
   FRIDA_SELINUX_ERROR_POLICY_FORMAT_NOT_SUPPORTED,
   FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND,
   FRIDA_SELINUX_ERROR_CLASS_NOT_FOUND,
+  FRIDA_SELINUX_ERROR_ROLE_NOT_FOUND,
   FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND
 };
 
@@ -30,21 +32,43 @@ static gboolean frida_load_policy (const gchar * filename, policydb_t * db, gcha
 static gboolean frida_save_policy (const gchar * filename, policydb_t * db, GError ** error);
 static type_datum_t * frida_ensure_type (policydb_t * db, const gchar * type_name, guint num_attributes, ...);
 static void frida_add_type_to_class_constraints_referencing_attribute (policydb_t * db, uint32_t type_id, uint32_t attribute_id);
+static gboolean frida_ensure_role_is_authorized (policydb_t * db, const gchar * role_name, const gchar * type_name, GError ** error);
 static gboolean frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** error);
-static avtab_datum_t * frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error);
+static avtab_datum_t * frida_ensure_rule (policydb_t * db, guint16 fields, const gchar * s, const gchar * t, const gchar * c, const gchar * detail, GError ** error);
 
 static gboolean frida_set_file_contents (const gchar * filename, const gchar * contents, gssize length, GError ** error);
 
 static const FridaSELinuxRule frida_selinux_rules[] =
 {
-  { { "domain", NULL }, "frida_file", "dir", { "search", NULL } },
-  { { "domain", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
-  { { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
-  { { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
-  { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
-  { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
-  { { "zygote", NULL }, "zygote", "process", { "execmem", NULL } },
-  { { "zygote", NULL }, "shell", "process", { "sigchld", NULL } },
+  /*
+   * init -> frida transition
+   */
+
+  /* Old domain may exec the file and transition to the new domain. */
+  { AVTAB_ALLOWED, { "init", NULL }, "frida_exec", "file", { "getattr", "open", "read", "execute", NULL } },
+  { AVTAB_ALLOWED, { "init", NULL }, "frida", "process", { "transition", NULL } },
+  /* New domain is entered by executing the file. */
+  { AVTAB_ALLOWED, { "frida", NULL }, "frida_exec", "file", { "entrypoint", "getattr", "open", "read", "execute", NULL } },
+  /* New domain can send SIGCHLD to its caller. */
+  { AVTAB_ALLOWED, { "frida", NULL }, "init", "process", { "sigchld", NULL } },
+  /* Enable AT_SECURE, i.e. libc secure mode. (XXX: we use allow instead of dontaudit) */
+  { AVTAB_ALLOWED, { "init", NULL }, "frida", "process", { "noatsecure", NULL } },
+  /* XXX dontaudit candidate but requires further study. */
+  { AVTAB_ALLOWED, { "init", NULL }, "frida", "process", { "siginh", "rlimitinh", NULL } },
+  /* Make the transition occur by default. */
+  { AVTAB_TRANSITION, { "init", NULL }, "frida_exec", "process", { "frida", NULL } },
+
+  /*
+   * World permissions
+   */
+  { AVTAB_ALLOWED, { "domain", NULL }, "frida_file", "dir", { "search", NULL } },
+  { AVTAB_ALLOWED, { "domain", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
+  { AVTAB_ALLOWED, { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
+  { AVTAB_ALLOWED, { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
+  { AVTAB_ALLOWED, { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
+  { AVTAB_ALLOWED, { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
+  { AVTAB_ALLOWED, { "zygote", NULL }, "zygote", "process", { "execmem", NULL } },
+  { AVTAB_ALLOWED, { "zygote", NULL }, "shell", "process", { "sigchld", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
@@ -58,6 +82,7 @@ frida_selinux_patch_policy (void)
   sidtab_t sidtab;
   GError * error = NULL;
   int res;
+  gboolean success;
   guint rule_index;
 
   sepol_set_policydb (&db);
@@ -76,6 +101,30 @@ frida_selinux_patch_policy (void)
   res = policydb_load_isids (&db, &sidtab);
   g_assert_cmpint (res, ==, 0);
 
+  if (frida_ensure_type (&db, "frida", 4, "domain", "mlstrustedsubject", "netdomain", "appdomain", &error) == NULL)
+  {
+    g_printerr ("Unable to add SELinux type: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
+
+  if (!frida_ensure_role_is_authorized (&db, "r", "frida", &error))
+  {
+    g_printerr ("Unable to add SELinux role authorization: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
+
+  success = frida_ensure_permissive (&db, "frida", &error);
+  g_assert (success);
+
+  if (frida_ensure_type (&db, "frida_exec", 2, "exec_type", "file_type", &error) == NULL)
+  {
+    g_printerr ("Unable to add SELinux type: %s\n", error->message);
+    g_clear_error (&error);
+    goto beach;
+  }
+
   if (frida_ensure_type (&db, "frida_file", 2, "file_type", "mlstrustedobject", &error) == NULL)
   {
     g_printerr ("Unable to add SELinux type: %s\n", error->message);
@@ -87,13 +136,13 @@ frida_selinux_patch_policy (void)
   {
     const FridaSELinuxRule * rule = &frida_selinux_rules[rule_index];
     const gchar * const * source;
-    const gchar * const * perm;
+    const gchar * const * detail;
 
     for (source = rule->sources; *source != NULL; source++)
     {
-      for (perm = rule->permissions; *perm != NULL; perm++)
+      for (detail = rule->details; *detail != NULL; detail++)
       {
-        if (frida_ensure_rule (&db, *source, rule->target, rule->klass, *perm, &error) == NULL)
+        if (frida_ensure_rule (&db, rule->fields, *source, rule->target, rule->klass, *detail, &error) == NULL)
         {
           g_printerr ("Unable to add SELinux rule: %s\n", error->message);
           g_clear_error (&error);
@@ -278,6 +327,31 @@ frida_add_type_to_class_constraints_referencing_attribute (policydb_t * db, uint
 }
 
 static gboolean
+frida_ensure_role_is_authorized (policydb_t * db, const gchar * role_name, const gchar * type_name, GError ** error)
+{
+  role_datum_t * role;
+  type_datum_t * type;
+
+  role = hashtab_search (db->p_roles.table, (char *) role_name);
+  if (role == NULL)
+  {
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_ROLE_NOT_FOUND, "role %s does not exist", role_name);
+    return FALSE;
+  }
+
+  type = hashtab_search (db->p_types.table, (char *) type_name);
+  if (type == NULL)
+  {
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "type %s does not exist", type_name);
+    return FALSE;
+  }
+
+  ebitmap_set_bit (&role->types.types, type->s.value - 1, 1);
+
+  return TRUE;
+}
+
+static gboolean
 frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** error)
 {
   type_datum_t * type;
@@ -297,14 +371,14 @@ frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** err
 }
 
 static avtab_datum_t *
-frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error)
+frida_ensure_rule (policydb_t * db, guint16 fields, const gchar * s, const gchar * t, const gchar * c, const gchar * detail, GError ** error)
 {
   type_datum_t * source, * target;
   class_datum_t * klass;
-  perm_datum_t * perm;
+  perm_datum_t * perm = NULL;
+  type_datum_t * transition_to = NULL;
   avtab_key_t key;
   avtab_datum_t * av;
-  uint32_t perm_bit;
 
   source = hashtab_search (db->p_types.table, (char *) s);
   if (source == NULL)
@@ -327,35 +401,54 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
     return NULL;
   }
 
-  perm = hashtab_search (klass->permissions.table, (char *) p);
-  if (perm == NULL && klass->comdatum != NULL)
-    perm = hashtab_search (klass->comdatum->permissions.table, (char *) p);
-  if (perm == NULL)
+  if ((fields & AVTAB_TRANSITION) != AVTAB_TRANSITION)
   {
-    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND, "perm %s does not exist in class %s", p, c);
-    return NULL;
+    perm = hashtab_search (klass->permissions.table, (char *) detail);
+    if (perm == NULL && klass->comdatum != NULL)
+      perm = hashtab_search (klass->comdatum->permissions.table, (char *) detail);
+    if (perm == NULL)
+    {
+      g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND, "perm %s does not exist in class %s", detail, c);
+      return NULL;
+    }
   }
-  perm_bit = 1U << (perm->s.value - 1);
+  else
+  {
+    transition_to = hashtab_search (db->p_types.table, (char *) detail);
+    if (transition_to == NULL)
+    {
+      g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "transition target type %s does not exist", detail);
+      return NULL;
+    }
+  }
 
   key.source_type = source->s.value;
   key.target_type = target->s.value;
   key.target_class = klass->s.value;
-  key.specified = AVTAB_ALLOWED;
+  key.specified = fields;
 
   av = avtab_search (&db->te_avtab, &key);
-  if (av == NULL)
+  if (av != NULL)
+  {
+    if (perm != NULL)
+      av->data |= 1U << (perm->s.value - 1);
+    else
+      av->data = transition_to->s.value;
+  }
+  else
   {
     int res;
 
     av = malloc (sizeof (avtab_datum_t));
-    av->data = perm_bit;
+    if (perm != NULL)
+      av->data = 1U << (perm->s.value - 1);
+    else
+      av->data = transition_to->s.value;
     av->ops = NULL;
 
     res = avtab_insert (&db->te_avtab, &key, av);
     g_assert_cmpint (res, ==, 0);
   }
-
-  av->data |= perm_bit;
 
   return av;
 }
