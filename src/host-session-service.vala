@@ -5,6 +5,8 @@ namespace Frida {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);
 
+		private delegate void NotifyCompleteFunc ();
+
 		public HostSessionService.with_default_backends () {
 			add_local_backends ();
 #if !LINUX && !QNX
@@ -38,13 +40,43 @@ namespace Frida {
 		}
 
 		public async void start () {
+			var remaining = backends.size;
+
+			NotifyCompleteFunc on_complete = () => {
+				remaining--;
+				if (remaining == 0)
+					start.callback ();
+			};
+
 			foreach (var backend in backends)
-				yield backend.start ();
+				perform_start.begin (backend, on_complete);
+
+			yield;
 		}
 
 		public async void stop () {
+			var remaining = backends.size;
+
+			NotifyCompleteFunc on_complete = () => {
+				remaining--;
+				if (remaining == 0)
+					stop.callback ();
+			};
+
 			foreach (var backend in backends)
-				yield backend.stop ();
+				perform_stop.begin (backend, on_complete);
+
+			yield;
+		}
+
+		private async void perform_start (HostSessionBackend backend, NotifyCompleteFunc on_complete) {
+			yield backend.start ();
+			on_complete ();
+		}
+
+		private async void perform_stop (HostSessionBackend backend, NotifyCompleteFunc on_complete) {
+			yield backend.stop ();
+			on_complete ();
 		}
 
 		public void add_backend (HostSessionBackend backend) {
