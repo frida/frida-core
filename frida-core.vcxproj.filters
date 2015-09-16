@@ -25,6 +25,12 @@
     <Filter Include="Source Files\generated\windows">
       <UniqueIdentifier>{21f538e1-a14f-441b-9e2e-7303c1465c5b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\droidy">
+      <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25618}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\droidy">
+      <UniqueIdentifier>{2d5a13f8-9bcb-4d70-9f8a-9597707fc770}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\fruity">
       <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25619}</UniqueIdentifier>
     </Filter>
@@ -63,6 +69,9 @@
     <None Include="src\windows\winjector.vala">
       <Filter>Source Files\windows</Filter>
     </None>
+    <None Include="src\droidy\droidy-host-session.vala">
+      <Filter>Source Files\droidy</Filter>
+    </None>
     <None Include="src\fruity\fruity-host-session.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
@@ -74,6 +83,9 @@
     </None>
     <None Include="src\tcp\tcp-host-session.vala">
       <Filter>Source Files\tcp</Filter>
+    </None>
+    <None Include="src\droidy\droidy-client.vala">
+      <Filter>Source Files\droidy</Filter>
     </None>
     <None Include="src\fruity\fruity-client.vala">
       <Filter>Source Files\fruity</Filter>
@@ -94,6 +106,9 @@
     </ClCompile>
     <ClCompile Include="src\windows\windows-host-session-glue.c">
       <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\droidy-host-session.c">
+      <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\fruity-host-session.c">
       <Filter>Source Files\generated\fruity</Filter>
@@ -121,6 +136,9 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\tcp\tcp-host-session.c">
       <Filter>Source Files\generated\tcp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\droidy-client.c">
+      <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\fruity-client.c">
       <Filter>Source Files\generated\fruity</Filter>
