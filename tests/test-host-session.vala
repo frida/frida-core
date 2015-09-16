@@ -40,6 +40,13 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
+#if !QNX
+		GLib.Test.add_func ("/HostSession/Droidy/backend", () => {
+			var h = new Harness ((h) => Droidy.backend.begin (h as Harness));
+			h.run ();
+		});
+#endif
+
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
 			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
@@ -981,6 +988,54 @@ namespace Frida.HostSessionTest {
 				assert (actual_xml == expected_xml);
 			}
 
+		}
+
+	}
+#endif
+
+#if !QNX
+	namespace Droidy {
+
+		private static async void backend (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode with Android device connected> ");
+				h.done ();
+				return;
+			}
+
+			var backend = new DroidyHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			h.disable_timeout (); /* this is a manual test after all */
+			yield h.wait_for_provider ();
+			var prov = h.first_provider ();
+
+			assert (prov.name != "Android Device");
+
+			var icon = prov.icon;
+			assert (icon != null);
+			assert (icon.width == 16 && icon.height == 16);
+			assert (icon.rowstride == icon.width * 4);
+			assert (icon.pixels.length > 0);
+
+			try {
+				var session = yield prov.create ();
+				var processes = yield session.enumerate_processes ();
+				assert (processes.length > 0);
+
+				if (GLib.Test.verbose ()) {
+					foreach (var process in processes)
+						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
+				}
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+
+			h.done ();
 		}
 
 	}
