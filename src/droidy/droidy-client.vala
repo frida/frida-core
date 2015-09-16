@@ -87,14 +87,23 @@ namespace Frida.Droidy {
 		private async string get_manufacturer (string device_serial) throws Error {
 			var command = new ShellCommand ("getprop ro.product.manufacturer");
 			var output = yield command.run (device_serial);
-			var manifacturer = output.strip ();
-			return manifacturer.get_char (0).toupper ().to_string () + manifacturer.substring (manifacturer.index_of_nth_char (1));
+			var manufacturer = output.strip ();
+			var length = manufacturer.char_count ();
+			if (length == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to determine device manufacturer");
+			var result = manufacturer.get_char (0).toupper ().to_string ();
+			if (length > 1)
+				result += manufacturer.substring (manufacturer.index_of_nth_char (1));
+			return result;
 		}
 
 		private async string get_model (string device_serial) throws Error {
 			var command = new ShellCommand ("getprop ro.product.model");
 			var output = yield command.run (device_serial);
-			return output.strip ();
+			var model = output.strip ();
+			if (model.char_count () == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to determine device model");
+			return model;
 		}
 
 		private class DeviceInfo {
