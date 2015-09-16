@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession1")]
+	[DBus (name = "re.frida.HostSession2")]
 	public interface HostSession : Object {
 		public abstract async HostApplicationInfo get_frontmost_application () throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
@@ -17,7 +17,7 @@ namespace Frida {
 		public signal void agent_session_destroyed (AgentSessionId id);
 	}
 
-	[DBus (name = "re.frida.AgentSession1")]
+	[DBus (name = "re.frida.AgentSession2")]
 	public interface AgentSession : Object {
 		public abstract async void close () throws GLib.Error;
 
@@ -195,8 +195,8 @@ namespace Frida {
 	}
 
 	namespace ObjectPath {
-		public const string HOST_SESSION = "/re/frida/HostSession1";
-		public const string AGENT_SESSION = "/re/frida/AgentSession1";
+		public const string HOST_SESSION = "/re/frida/HostSession";
+		public const string AGENT_SESSION = "/re/frida/AgentSession";
 
 		public static string from_agent_session_id (AgentSessionId id) {
 			return "%s/%u".printf (AGENT_SESSION, id.handle);
