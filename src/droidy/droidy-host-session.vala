@@ -2,8 +2,29 @@ namespace Frida {
 	public class DroidyHostSessionBackend : Object, HostSessionBackend {
 		private Droidy.DeviceTracker tracker = new Droidy.DeviceTracker ();
 		private Gee.HashMap<string, DroidyHostSessionProvider> provider_by_serial = new Gee.HashMap<string, DroidyHostSessionProvider> ();
+		private Gee.Promise<bool> start_request;
+		private StartedHandler started_handler;
+		private delegate void StartedHandler ();
 
 		public async void start () {
+			started_handler = () => start.callback ();
+			var timeout_source = new TimeoutSource (100);
+			timeout_source.set_callback (() => {
+				start.callback ();
+				return false;
+			});
+			timeout_source.attach (MainContext.get_thread_default ());
+			do_start.begin ();
+			yield;
+			started_handler = null;
+			timeout_source.destroy ();
+		}
+
+		private async void do_start () {
+			start_request = new Gee.Promise<bool> ();
+
+			bool success = true;
+
 			tracker.device_attached.connect ((serial, name) => {
 				var provider = new DroidyHostSessionProvider (this, serial, name);
 				provider_by_serial[serial] = provider;
@@ -18,11 +39,22 @@ namespace Frida {
 			try {
 				yield tracker.open ();
 			} catch (Error e) {
-				stderr.printf ("ERROR: %s\n", e.message);
+				success = false;
 			}
+
+			start_request.set_value (success);
+
+			if (started_handler != null)
+				started_handler ();
 		}
 
 		public async void stop () {
+			try {
+				yield start_request.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
+
 			yield tracker.close ();
 
 			foreach (var provider in provider_by_serial.values) {
