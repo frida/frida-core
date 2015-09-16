@@ -33,7 +33,7 @@ static const FridaFruityModel fruity_models[] =
   { 0x12a4, "iPad 3",              "com.apple.ipad" },
   { 0x12a5, "iPad 3",              "com.apple.ipad" },
   { 0x12a6, "iPad 3",              "com.apple.ipad" },
-  { 0x12a8, "iPhone 5/5C/5S",       "com.apple.iphone-4-black" },
+  { 0x12a8, "iPhone",              "com.apple.iphone-4-black" },
   { 0x12a9, "iPad 2",              "com.apple.ipad" },
   { 0x12aa, "iPod Touch 5G",       "com.apple.ipod-touch-4-black" },
   { 0x12ab, "iPad 4",              "com.apple.ipad" }
