@@ -10,9 +10,7 @@ namespace Frida {
 #if !LINUX && !QNX
 			add_backend (new FruityHostSessionBackend ());
 #endif
-#if !QNX
 			add_backend (new DroidyHostSessionBackend ());
-#endif
 			add_backend (new TcpHostSessionBackend ());
 		}
 
