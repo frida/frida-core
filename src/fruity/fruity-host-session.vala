@@ -216,7 +216,7 @@ namespace Frida {
 
 		public async void close () {
 			foreach (var entry in entries)
-				yield entry.destroy ();
+				yield destroy_entry (entry);
 			entries.clear ();
 		}
 
@@ -260,7 +260,7 @@ namespace Frida {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session) {
 					entries.remove (entry);
-					yield entry.destroy ();
+					yield destroy_entry (entry);
 					return;
 				}
 			}
@@ -292,12 +292,16 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			entries.remove (entry_to_remove);
-			entry_to_remove.destroy.begin ();
-			entry_to_remove.agent_session_closed.disconnect (on_agent_session_closed);
+			destroy_entry.begin (entry_to_remove);
 		}
 
 		private void on_agent_session_closed (AgentSessionId id) {
 			agent_session_closed (id);
+		}
+
+		private async void destroy_entry (Entry entry) {
+			yield entry.destroy ();
+			entry.agent_session_closed.disconnect (on_agent_session_closed);
 		}
 
 		private class Entry : Object {
