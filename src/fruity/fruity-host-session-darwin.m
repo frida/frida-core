@@ -14,7 +14,7 @@ struct _FridaFruityModel
 
 static const FridaFruityModel fruity_models[] =
 {
-  { -1,     "Apple Mobile Device", "com.apple.iphone-4-black" },
+  { -1,     "iOS Device",          "com.apple.iphone-4-black" },
   { 0x1290, "iPhone",              "com.apple.iphone" },
   { 0x1291, "iPod Touch 1G",       "com.apple.ipod-touch" },
   { 0x1292, "iPhone 3G",           "com.apple.iphone-3g" },

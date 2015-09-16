@@ -143,7 +143,7 @@ namespace Frida {
 		public string name {
 			get { return _name; }
 		}
-		private string _name = "Apple Mobile Device";
+		private string _name = "iOS Device";
 
 		public ImageData? icon {
 			get { return _icon; }

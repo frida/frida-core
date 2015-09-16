@@ -804,7 +804,7 @@ namespace Frida.HostSessionTest {
 			var prov = h.first_provider ();
 
 #if WINDOWS
-			assert (prov.name != "Apple Mobile Device"); /* should manage to extract a user-defined name */
+			assert (prov.name != "iOS Device"); /* should manage to extract a user-defined name */
 #endif
 
 			var icon = prov.icon;
