@@ -191,7 +191,13 @@ namespace Frida {
 			this.file = File.new_for_path (Path.build_filename (this.directory.path, name));
 
 			try {
-				var ostream = file.create (FileCreateFlags.NONE, null);
+				// FIXME: REPLACE_DESTINATION doesn't work?!
+				file.delete ();
+			} catch (GLib.Error delete_error) {
+			}
+
+			try {
+				var ostream = file.create (FileCreateFlags.REPLACE_DESTINATION, null);
 
 				var buf_size = 128 * 1024;
 				var buf = new uint8[buf_size];
