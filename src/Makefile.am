@@ -244,9 +244,7 @@ libfrida_helper_main_la_VALAFLAGS = \
 
 libfrida_helper_glue_la_SOURCES = \
 	darwin/frida-helper-glue.m \
-	$(springboard_sources) \
-	darwin/mapper.h \
-	darwin/mapper.c
+	$(springboard_sources)
 libfrida_helper_glue_la_LIBTOOLFLAGS = \
 	--tag=CC
 

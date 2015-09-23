@@ -1,5 +1,4 @@
 SUBDIRS = \
-	mapper \
 	pipe
 
 if OS_ANDROID

@@ -106,9 +106,6 @@
 /tests/frida-tests.vapi
 /tests/inject-victim
 /tests/main.c
-/tests/mapper/Makefile
-/tests/mapper/Makefile.in
-/tests/mapper/mapper-test
 /tests/pipe/Makefile
 /tests/pipe/Makefile.in
 /tests/pipe/pipe-test

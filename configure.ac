@@ -192,7 +192,6 @@ AC_CONFIG_FILES([
   server/Makefile
   gadget/Makefile
   tests/Makefile
-  tests/mapper/Makefile
   tests/pipe/Makefile
 ])
 AC_OUTPUT
