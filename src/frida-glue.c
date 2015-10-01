@@ -72,6 +72,8 @@ frida_deinit (void)
   main_context = NULL;
 
 #if GLIB_CHECK_VERSION (2, 46, 0)
+  gio_shutdown ();
+  glib_shutdown ();
   gio_deinit ();
   glib_deinit ();
 #endif

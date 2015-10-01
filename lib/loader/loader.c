@@ -237,6 +237,7 @@ frida_loader_deinit (void)
   g_object_unref (interceptor);
   interceptor = NULL;
 
+  glib_shutdown ();
   gum_deinit ();
   glib_deinit ();
   gum_memory_deinit ();

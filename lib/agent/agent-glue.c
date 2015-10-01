@@ -93,6 +93,8 @@ frida_agent_environment_init (void)
 void
 frida_agent_environment_deinit (void)
 {
+  gio_shutdown ();
+  glib_shutdown ();
   gum_deinit ();
   gio_deinit ();
   glib_deinit ();

@@ -57,6 +57,10 @@ void
 frida_test_environment_deinit (void)
 {
 #if DEBUG_HEAP_LEAKS
+# if GLIB_CHECK_VERSION (2, 46, 0)
+  gio_shutdown ();
+  glib_shutdown ();
+# endif
   gum_deinit ();
 # if GLIB_CHECK_VERSION (2, 46, 0)
   gio_deinit ();
