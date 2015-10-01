@@ -1474,40 +1474,40 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
   gum_thumb_writer_init (&ctx.tw, ctx.code);
   ctx.mapper = mapper;
 
-  gum_thumb_writer_put_push_regs (&ctx.tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
-  gum_thumb_writer_put_mov_reg_reg (&ctx.tw, GUM_AREG_R7, GUM_AREG_R0);
+  gum_thumb_writer_put_push_regs (&ctx.tw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
+  gum_thumb_writer_put_mov_reg_reg (&ctx.tw, ARM_REG_R7, ARM_REG_R0);
   frida_agent_context_emit_arm_pthread_stub_body (self, &ctx);
-  gum_thumb_writer_put_pop_regs (&ctx.tw, 5, GUM_AREG_R4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
+  gum_thumb_writer_put_pop_regs (&ctx.tw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   gum_thumb_writer_free (&ctx.tw);
 }
 
 #define EMIT_ARM_LOAD(reg, field) \
-    frida_agent_context_emit_arm_load_reg_with_ctx_value (GUM_AREG_##reg, G_STRUCT_OFFSET (FridaAgentContext, field), &ctx->tw)
+    frida_agent_context_emit_arm_load_reg_with_ctx_value (ARM_REG_##reg, G_STRUCT_OFFSET (FridaAgentContext, field), &ctx->tw)
 #define EMIT_ARM_STORE(field, reg) \
-    frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), GUM_AREG_##reg, &ctx->tw)
+    frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), ARM_REG_##reg, &ctx->tw)
 #define EMIT_ARM_LOAD_U32(reg, val) \
-    gum_thumb_writer_put_ldr_reg_u32 (&ctx->tw, GUM_AREG_##reg, val)
+    gum_thumb_writer_put_ldr_reg_u32 (&ctx->tw, ARM_REG_##reg, val)
 #define EMIT_ARM_MOVE(dstreg, srcreg) \
-    gum_thumb_writer_put_mov_reg_reg (&ctx->tw, GUM_AREG_##dstreg, GUM_AREG_##srcreg)
+    gum_thumb_writer_put_mov_reg_reg (&ctx->tw, ARM_REG_##dstreg, ARM_REG_##srcreg)
 #define EMIT_ARM_CALL(reg) \
-    gum_thumb_writer_put_blx_reg (&ctx->tw, GUM_AREG_##reg)
+    gum_thumb_writer_put_blx_reg (&ctx->tw, ARM_REG_##reg)
 
 static void
 frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
   if (ctx->mapper != NULL)
   {
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, GUM_AREG_R0, gum_darwin_mapper_constructor (ctx->mapper));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_constructor (ctx->mapper));
     EMIT_ARM_CALL (R0);
 
     EMIT_ARM_LOAD (R2, thread_id);
     EMIT_ARM_LOAD (R1, mapped_range);
     EMIT_ARM_LOAD (R0, data_string);
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, GUM_AREG_R5, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
     EMIT_ARM_CALL (R5);
 
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, GUM_AREG_R0, gum_darwin_mapper_destructor (ctx->mapper));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_destructor (ctx->mapper));
     EMIT_ARM_CALL (R0);
   }
   else
@@ -1567,13 +1567,13 @@ frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, 
   EMIT_ARM_LOAD (R3, pthread_create_arg);
   EMIT_ARM_LOAD (R2, pthread_create_start_routine);
   EMIT_ARM_LOAD_U32 (R1, 0);
-  gum_thumb_writer_put_push_regs (&ctx->tw, 1, GUM_AREG_R0);
+  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
   EMIT_ARM_MOVE (R0, SP);
   EMIT_ARM_LOAD (R4, pthread_create_impl);
   EMIT_ARM_CALL (R4);
 
   EMIT_ARM_LOAD_U32 (R1, 0);
-  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, GUM_AREG_R0);
+  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
   EMIT_ARM_LOAD (R4, pthread_join_impl);
   EMIT_ARM_CALL (R4);
 }
@@ -1594,10 +1594,10 @@ frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAg
 static void
 frida_agent_context_emit_arm_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw)
 {
-  GumArmReg tmp_reg = reg != GUM_AREG_R0 ? GUM_AREG_R0 : GUM_AREG_R1;
+  GumArmReg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
-  gum_thumb_writer_put_add_reg_reg_reg (tw, reg, GUM_AREG_R7, tmp_reg);
+  gum_thumb_writer_put_add_reg_reg_reg (tw, reg, ARM_REG_R7, tmp_reg);
   gum_thumb_writer_put_ldr_reg_reg (tw, reg, reg);
   gum_thumb_writer_put_pop_regs (tw, 1, tmp_reg);
 }
@@ -1605,10 +1605,10 @@ frida_agent_context_emit_arm_load_reg_with_ctx_value (GumArmReg reg, guint field
 static void
 frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, GumArmReg reg, GumThumbWriter * tw)
 {
-  GumArmReg tmp_reg = reg != GUM_AREG_R0 ? GUM_AREG_R0 : GUM_AREG_R1;
+  GumArmReg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
-  gum_thumb_writer_put_add_reg_reg_reg (tw, tmp_reg, GUM_AREG_R7, tmp_reg);
+  gum_thumb_writer_put_add_reg_reg_reg (tw, tmp_reg, ARM_REG_R7, tmp_reg);
   gum_thumb_writer_put_str_reg_reg (tw, reg, tmp_reg);
   gum_thumb_writer_put_pop_regs (tw, 1, tmp_reg);
 }

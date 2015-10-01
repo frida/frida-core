@@ -725,19 +725,19 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_thumb_writer_init (&cw, code->cur);
 
-  gum_thumb_writer_put_push_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_LR);
+  gum_thumb_writer_put_push_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "open"),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY));
-  gum_thumb_writer_put_mov_reg_reg (&cw, GUM_AREG_R7, GUM_AREG_R0);
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R7, ARM_REG_R0);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "write"),
       3,
-      GUM_ARG_REGISTER, GUM_AREG_R7,
+      GUM_ARG_REGISTER, ARM_REG_R7,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (1));
 
@@ -746,17 +746,17 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
-  gum_thumb_writer_put_mov_reg_reg (&cw, GUM_AREG_R6, GUM_AREG_R0);
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_linker_function (params->pid, dlsym),
       2,
-      GUM_ARG_REGISTER, GUM_AREG_R6,
+      GUM_ARG_REGISTER, ARM_REG_R6,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
-  gum_thumb_writer_put_mov_reg_reg (&cw, GUM_AREG_R5, GUM_AREG_R0);
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
 
   gum_thumb_writer_put_call_reg_with_arguments (&cw,
-      GUM_AREG_R5,
+      ARM_REG_R5,
       3,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
@@ -765,14 +765,14 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_linker_function (params->pid, dlclose),
       1,
-      GUM_ARG_REGISTER, GUM_AREG_R6);
+      GUM_ARG_REGISTER, ARM_REG_R6);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "close"),
       1,
-      GUM_ARG_REGISTER, GUM_AREG_R7);
+      GUM_ARG_REGISTER, ARM_REG_R7);
 
-  gum_thumb_writer_put_pop_regs (&cw, 4, GUM_AREG_R5, GUM_AREG_R6, GUM_AREG_R7, GUM_AREG_PC);
+  gum_thumb_writer_put_pop_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   frida_inject_instance_commit_arm_code (&cw, code);
   gum_thumb_writer_free (&cw);
