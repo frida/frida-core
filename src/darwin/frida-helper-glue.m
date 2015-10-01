@@ -1414,8 +1414,8 @@ static void frida_agent_context_emit_arm_thread_id_setup (FridaAgentContext * se
 static void frida_agent_context_emit_arm_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw);
-static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, GumArmReg reg, GumThumbWriter * tw);
+static void frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw);
+static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw);
 
 static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
@@ -1592,9 +1592,9 @@ frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAg
 #undef EMIT_ARM_CALL
 
 static void
-frida_agent_context_emit_arm_load_reg_with_ctx_value (GumArmReg reg, guint field_offset, GumThumbWriter * tw)
+frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw)
 {
-  GumArmReg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
+  arm_reg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
   gum_thumb_writer_put_add_reg_reg_reg (tw, reg, ARM_REG_R7, tmp_reg);
@@ -1603,9 +1603,9 @@ frida_agent_context_emit_arm_load_reg_with_ctx_value (GumArmReg reg, guint field
 }
 
 static void
-frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, GumArmReg reg, GumThumbWriter * tw)
+frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw)
 {
-  GumArmReg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
+  arm_reg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
   gum_thumb_writer_put_add_reg_reg_reg (tw, tmp_reg, ARM_REG_R7, tmp_reg);
