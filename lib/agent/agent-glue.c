@@ -340,7 +340,7 @@ frida_agent_auto_ignorer_thread_create_proxy (void * data)
   g_object_unref (ctx->interceptor);
   g_slice_free (FridaAutoInterceptContext, ctx);
 
-  gum_script_unignore (current_thread_id);
+  gum_script_unignore_later (current_thread_id);
 
   return result;
 }
