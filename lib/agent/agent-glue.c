@@ -303,7 +303,6 @@ typedef struct _FridaTlsKeyContext FridaTlsKeyContext;
 
 struct _FridaTlsKeyContext
 {
-  pthread_key_t key;
   void (* destructor) (void *);
   gboolean replaced;
 
@@ -326,7 +325,6 @@ frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self)
   GumInterceptor * interceptor = self->interceptor;
 
   gum_interceptor_revert_function (interceptor, pthread_key_create);
-  gum_interceptor_revert_function (interceptor, pthread_key_delete);
 
   g_mutex_lock (&self->mutex);
   g_slist_foreach (self->tls_contexts, (GFunc) frida_tls_key_context_free, NULL);
@@ -434,7 +432,6 @@ frida_replacement_tls_key_create (
     gum_interceptor_ignore_current_thread (interceptor);
 
     tkc = g_slice_new (FridaTlsKeyContext);
-    tkc->key = *key;
     tkc->destructor = destructor;
     tkc->replaced = FALSE;
 
@@ -459,50 +456,6 @@ frida_replacement_tls_key_create (
   return 0;
 }
 
-static int
-frida_replacement_tls_key_delete (pthread_key_t key)
-{
-  GumInvocationContext * ctx;
-  FridaAgentAutoIgnorer * self;
-  GumInterceptor * interceptor;
-  int res;
-  GSList * cur;
-  FridaTlsKeyContext * removed_tkc;
-
-  ctx = gum_interceptor_get_current_invocation ();
-  self = FRIDA_AGENT_AUTO_IGNORER (gum_invocation_context_get_replacement_function_data (ctx));
-  interceptor = self->interceptor;
-
-  res = pthread_key_delete (key);
-  if (res != 0)
-    return res;
-
-  g_object_ref (interceptor);
-  gum_interceptor_ignore_current_thread (interceptor);
-
-  removed_tkc = NULL;
-  g_mutex_lock (&self->mutex);
-  for (cur = self->tls_contexts; removed_tkc == NULL && cur != NULL; cur = cur->next)
-  {
-    FridaTlsKeyContext * tkc = cur->data;
-
-    if (tkc->key == key)
-    {
-      self->tls_contexts = g_slist_delete_link (self->tls_contexts, cur);
-      removed_tkc = tkc;
-    }
-  }
-  g_mutex_unlock (&self->mutex);
-
-  if (removed_tkc != NULL)
-    frida_tls_key_context_free (removed_tkc);
-
-  gum_interceptor_unignore_current_thread (interceptor);
-  g_object_unref (interceptor);
-
-  return 0;
-}
-
 #endif
 
 void
@@ -517,10 +470,6 @@ frida_agent_auto_ignorer_replace_apis (FridaAgentAutoIgnorer * self)
   gum_interceptor_replace_function (self->interceptor,
       pthread_key_create,
       frida_replacement_tls_key_create,
-      self);
-  gum_interceptor_replace_function (self->interceptor,
-      pthread_key_delete,
-      frida_replacement_tls_key_delete,
       self);
 #endif
 }
