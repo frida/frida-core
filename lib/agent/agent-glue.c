@@ -314,7 +314,7 @@ static void frida_tls_key_context_free (FridaTlsKeyContext * ctx);
 #endif
 
 static gpointer frida_get_address_of_thread_create_func (void);
-static NativeThreadFuncReturnType frida_thread_create_proxy (void * data);
+static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API frida_thread_create_proxy (void * data);
 
 static void
 frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self)
@@ -463,13 +463,13 @@ frida_agent_auto_ignorer_replace_apis (FridaAgentAutoIgnorer * self)
 {
   gum_interceptor_replace_function (self->interceptor,
       frida_get_address_of_thread_create_func (),
-      frida_replacement_thread_create,
+      GUM_FUNCPTR_TO_POINTER (frida_replacement_thread_create),
       self);
 
 #ifndef G_OS_WIN32
   gum_interceptor_replace_function (self->interceptor,
       pthread_key_create,
-      frida_replacement_tls_key_create,
+      GUM_FUNCPTR_TO_POINTER (frida_replacement_tls_key_create),
       self);
 #endif
 }
@@ -490,7 +490,7 @@ frida_get_address_of_thread_create_func (void)
 #endif
 }
 
-static NativeThreadFuncReturnType
+static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API
 frida_thread_create_proxy (void * data)
 {
   GumThreadId current_thread_id;
