@@ -193,6 +193,8 @@ namespace Frida {
 	}
 
 	private class KernelSession : Object, AgentSession {
+		private Gum.ScriptBackend script_backend = Gum.ScriptBackend.obtain ();
+
 		private Gee.HashMap<uint, Gum.Script> script_by_id = new Gee.HashMap<uint, Gum.Script> ();
 		private uint last_script_id = 0;
 
@@ -213,7 +215,7 @@ namespace Frida {
 
 			Gum.Script script;
 			try {
-				script = yield Gum.Script.from_string (script_name, source, Gum.Script.Flavor.KERNEL);
+				script = yield script_backend.create (script_name, source, Gum.Script.Flavor.KERNEL);
 			} catch (IOError create_error) {
 				throw new Error.INVALID_ARGUMENT (create_error.message);
 			}
@@ -249,15 +251,15 @@ namespace Frida {
 		}
 
 		public async void enable_debugger () throws Error {
-			Gum.Script.set_debug_message_handler (on_debug_message);
+			script_backend.set_debug_message_handler (on_debug_message);
 		}
 
 		public async void disable_debugger () throws Error {
-			Gum.Script.set_debug_message_handler (null);
+			script_backend.set_debug_message_handler (null);
 		}
 
 		public async void post_message_to_debugger (string message) throws Error {
-			Gum.Script.post_debug_message (message);
+			script_backend.post_debug_message (message);
 		}
 
 		private void on_debug_message (string message) {

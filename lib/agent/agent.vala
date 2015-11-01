@@ -11,9 +11,9 @@ namespace Frida.Agent {
 		private uint registration_id = 0;
 		private ScriptEngine script_engine;
 
-		public AgentServer (string pipe_address, Gum.MemoryRange agent_range) {
+		public AgentServer (string pipe_address, Gum.ScriptBackend script_backend, Gum.MemoryRange agent_range) {
 			Object (pipe_address: pipe_address);
-			script_engine = new ScriptEngine (agent_range);
+			script_engine = new ScriptEngine (script_backend, agent_range);
 			script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 			script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 		}
@@ -131,13 +131,15 @@ namespace Frida.Agent {
 	}
 
 	public class AutoIgnorer : Object {
+		protected Gum.ScriptBackend script_backend;
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange agent_range;
 		protected SList tls_contexts;
 		protected Mutex mutex;
 		private Gum.ThreadId parent_thread_id;
 
-		public AutoIgnorer (Gum.Interceptor interceptor, Gum.MemoryRange agent_range, Gum.ThreadId parent_thread_id) {
+		public AutoIgnorer (Gum.ScriptBackend script_backend, Gum.Interceptor interceptor, Gum.MemoryRange agent_range, Gum.ThreadId parent_thread_id) {
+			this.script_backend = script_backend;
 			this.interceptor = interceptor;
 			this.agent_range = agent_range;
 			this.parent_thread_id = parent_thread_id;
@@ -145,8 +147,8 @@ namespace Frida.Agent {
 
 		public void enable () {
 			if (parent_thread_id != 0)
-				Gum.Script.ignore (parent_thread_id);
-			Gum.Script.ignore (Gum.Process.get_current_thread_id ());
+				script_backend.ignore (parent_thread_id);
+			script_backend.ignore (Gum.Process.get_current_thread_id ());
 
 			replace_apis ();
 		}
@@ -154,9 +156,9 @@ namespace Frida.Agent {
 		public void disable () {
 			revert_apis ();
 
-			Gum.Script.unignore (Gum.Process.get_current_thread_id ());
+			script_backend.unignore (Gum.Process.get_current_thread_id ());
 			if (parent_thread_id != 0)
-				Gum.Script.unignore (parent_thread_id);
+				script_backend.unignore (parent_thread_id);
 		}
 
 		private extern void replace_apis ();
@@ -168,14 +170,14 @@ namespace Frida.Agent {
 
 		AutoIgnorer ignorer;
 		{
+			var script_backend = Gum.ScriptBackend.obtain ();
+			var interceptor = Gum.Interceptor.obtain ();
 			var agent_range = memory_range (mapped_range);
 
-			var interceptor = Gum.Interceptor.obtain ();
-
-			ignorer = new AutoIgnorer (interceptor, agent_range, parent_thread_id);
+			ignorer = new AutoIgnorer (script_backend, interceptor, agent_range, parent_thread_id);
 			ignorer.enable ();
 
-			var server = new AgentServer (pipe_address, agent_range);
+			var server = new AgentServer (pipe_address, script_backend, agent_range);
 
 			try {
 				server.run ();

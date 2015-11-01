@@ -495,18 +495,19 @@ frida_thread_create_proxy (void * data)
 {
   GumThreadId current_thread_id;
   FridaThreadCreateContext * ctx = data;
+  GumScriptBackend * script_backend = ctx->ignorer->script_backend;
   NativeThreadFuncReturnType result;
 
   current_thread_id = gum_process_get_current_thread_id ();
 
-  gum_script_ignore (current_thread_id);
+  gum_script_backend_ignore (script_backend, current_thread_id);
 
   result = ctx->thread_func (ctx->thread_data);
 
   g_object_unref (ctx->ignorer);
   g_slice_free (FridaThreadCreateContext, ctx);
 
-  gum_script_unignore_later (current_thread_id);
+  gum_script_backend_unignore_later (script_backend, current_thread_id);
 
   return result;
 }

@@ -5,11 +5,13 @@ namespace Frida.Agent {
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
 		public signal void message_from_debugger (string message);
 
+		private Gum.ScriptBackend backend;
 		private Gum.MemoryRange agent_range;
 		private uint last_script_id = 0;
 		private HashMap<uint, ScriptInstance> instance_by_id = new HashMap<uint, ScriptInstance> ();
 
-		public ScriptEngine (Gum.MemoryRange agent_range) {
+		public ScriptEngine (Gum.ScriptBackend backend, Gum.MemoryRange agent_range) {
+			this.backend = backend;
 			this.agent_range = agent_range;
 		}
 
@@ -31,7 +33,7 @@ namespace Frida.Agent {
 
 			Gum.Script script;
 			try {
-				script = yield Gum.Script.from_string (script_name, source, Gum.Script.Flavor.USER);
+				script = yield backend.create (script_name, source, Gum.Script.Flavor.USER);
 			} catch (IOError create_error) {
 				throw new Error.INVALID_ARGUMENT (create_error.message);
 			}
@@ -69,15 +71,15 @@ namespace Frida.Agent {
 		}
 
 		public void enable_debugger () throws Error {
-			Gum.Script.set_debug_message_handler (on_debug_message);
+			backend.set_debug_message_handler (on_debug_message);
 		}
 
 		public void disable_debugger () throws Error {
-			Gum.Script.set_debug_message_handler (null);
+			backend.set_debug_message_handler (null);
 		}
 
 		public void post_message_to_debugger (string message) {
-			Gum.Script.post_debug_message (message);
+			backend.post_debug_message (message);
 		}
 
 		private void on_debug_message (string message) {
