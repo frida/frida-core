@@ -166,9 +166,10 @@ namespace Frida.Agent {
 	}
 
 	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
-		Environment.init ();
+		Environment.setup ();
 
 		AutoIgnorer ignorer;
+		bool can_deinit;
 		{
 			var script_backend = Gum.ScriptBackend.obtain ();
 			var interceptor = Gum.Interceptor.obtain ();
@@ -176,6 +177,7 @@ namespace Frida.Agent {
 
 			ignorer = new AutoIgnorer (script_backend, interceptor, agent_range, parent_thread_id);
 			ignorer.enable ();
+			can_deinit = script_backend.supports_unload ();
 
 			var server = new AgentServer (pipe_address, script_backend, agent_range);
 
@@ -188,7 +190,7 @@ namespace Frida.Agent {
 			ignorer.disable ();
 		}
 
-		Environment.deinit ((owned) ignorer);
+		Environment.teardown ((owned) ignorer, can_deinit);
 	}
 
 	internal Gum.MemoryRange memory_range (Gum.MemoryRange? mapped_range) {
@@ -209,8 +211,8 @@ namespace Frida.Agent {
 	}
 
 	namespace Environment {
-		public extern void init ();
-		public extern void deinit (owned AutoIgnorer ignorer);
+		public extern void setup ();
+		public extern void teardown (owned AutoIgnorer ignorer, bool can_deinit);
 	}
 
 }
