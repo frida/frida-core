@@ -49,12 +49,10 @@ struct _FridaCFApi
 static void frida_agent_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
 static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
-static void frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self, gboolean free_tls_keys);
-
-static gboolean frida_agent_is_initialized = FALSE;
+static void frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self);
 
 void
-frida_agent_environment_setup (void)
+frida_agent_environment_init (void)
 {
   GMemVTable mem_vtable = {
     gum_malloc,
@@ -67,9 +65,6 @@ frida_agent_environment_setup (void)
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   int tmp_flag;
 #endif
-
-  if (frida_agent_is_initialized)
-    return;
 
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   /*_CrtSetBreakAlloc (1337);*/
@@ -97,44 +92,33 @@ frida_agent_environment_setup (void)
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
   gum_init ();
-
-  frida_agent_is_initialized = TRUE;
 }
 
 void
-frida_agent_environment_teardown (FridaAgentAutoIgnorer * ignorer,
-                                  gboolean can_deinit)
+frida_agent_environment_deinit (FridaAgentAutoIgnorer * ignorer)
 {
-  if (can_deinit)
-  {
-    gio_shutdown ();
-    glib_shutdown ();
-    frida_agent_auto_ignorer_shutdown (ignorer, TRUE);
-    g_object_unref (ignorer);
-    gum_deinit ();
-    gio_deinit ();
-    glib_deinit ();
-    gum_memory_deinit ();
-  }
-  else
-  {
-#ifndef G_OS_WIN32
-    Dl_info info;
-    gboolean found;
-    void * leaked_library_reference_to_prevent_unload;
+  gio_shutdown ();
+  glib_shutdown ();
+  frida_agent_auto_ignorer_shutdown (ignorer);
+  g_object_unref (ignorer);
+  gum_deinit ();
+  gio_deinit ();
+  glib_deinit ();
+  gum_memory_deinit ();
+}
 
-    found = dladdr (frida_agent_environment_teardown, &info);
-    g_assert (found);
+void
+frida_agent_environment_prevent_unload (const gchar * module_name)
+{
+#ifdef G_OS_WIN32
+  /* XXX: Implement this when we need it on Windows */
+  (void) module_name;
+#else
+  void * leaked_library_reference_to_prevent_unload;
 
-    leaked_library_reference_to_prevent_unload = dlopen (info.dli_fname, RTLD_LAZY | RTLD_GLOBAL);
-    g_assert (leaked_library_reference_to_prevent_unload != NULL);
-
-    g_print ("leaked_library_reference_to_prevent_unload=%p\n", leaked_library_reference_to_prevent_unload);
+  leaked_library_reference_to_prevent_unload = dlopen (module_name, RTLD_LAZY | RTLD_GLOBAL);
+  g_assert (leaked_library_reference_to_prevent_unload != NULL);
 #endif
-
-    frida_agent_auto_ignorer_shutdown (ignorer, FALSE);
-    g_object_unref (ignorer);
-  }
 }
 
 static void
@@ -349,8 +333,7 @@ static gpointer frida_get_address_of_thread_create_func (void);
 static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API frida_thread_create_proxy (void * data);
 
 static void
-frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self,
-                                   gboolean free_tls_keys)
+frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self)
 {
 #ifdef G_OS_WIN32
   (void) self;
@@ -360,8 +343,7 @@ frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self,
   gum_interceptor_revert_function (interceptor, pthread_key_create);
 
   g_mutex_lock (&self->mutex);
-  if (free_tls_keys)
-    g_slist_foreach (self->tls_contexts, (GFunc) frida_tls_key_context_free, NULL);
+  g_slist_foreach (self->tls_contexts, (GFunc) frida_tls_key_context_free, NULL);
   g_slist_free (self->tls_contexts);
   self->tls_contexts = NULL;
   g_mutex_unlock (&self->mutex);

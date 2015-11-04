@@ -136,27 +136,29 @@ namespace Frida.Agent {
 		protected Gum.MemoryRange agent_range;
 		protected SList tls_contexts;
 		protected Mutex mutex;
-		private Gum.ThreadId parent_thread_id;
 
-		public AutoIgnorer (Gum.ScriptBackend script_backend, Gum.Interceptor interceptor, Gum.MemoryRange agent_range, Gum.ThreadId parent_thread_id) {
+		public AutoIgnorer (Gum.ScriptBackend script_backend, Gum.Interceptor interceptor, Gum.MemoryRange agent_range) {
 			this.script_backend = script_backend;
 			this.interceptor = interceptor;
 			this.agent_range = agent_range;
-			this.parent_thread_id = parent_thread_id;
 		}
 
 		public void enable () {
-			if (parent_thread_id != 0)
-				script_backend.ignore (parent_thread_id);
-			script_backend.ignore (Gum.Process.get_current_thread_id ());
-
 			replace_apis ();
 		}
 
 		public void disable () {
 			revert_apis ();
+		}
 
-			script_backend.unignore (Gum.Process.get_current_thread_id ());
+		public void ignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
+			if (parent_thread_id != 0)
+				script_backend.ignore (parent_thread_id);
+			script_backend.ignore (agent_thread_id);
+		}
+
+		public void unignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
+			script_backend.unignore (agent_thread_id);
 			if (parent_thread_id != 0)
 				script_backend.unignore (parent_thread_id);
 		}
@@ -165,18 +167,26 @@ namespace Frida.Agent {
 		private extern void revert_apis ();
 	}
 
+	private static AutoIgnorer active_ignorer = null;
+
 	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
-		Environment.setup ();
+		if (active_ignorer == null)
+			Environment.init ();
 
 		AutoIgnorer ignorer;
 		bool can_deinit;
 		{
 			var script_backend = Gum.ScriptBackend.obtain ();
-			var interceptor = Gum.Interceptor.obtain ();
 			var agent_range = memory_range (mapped_range);
+			var agent_thread_id = Gum.Process.get_current_thread_id ();
 
-			ignorer = new AutoIgnorer (script_backend, interceptor, agent_range, parent_thread_id);
-			ignorer.enable ();
+			if (active_ignorer == null) {
+				var interceptor = Gum.Interceptor.obtain ();
+				active_ignorer = new AutoIgnorer (script_backend, interceptor, agent_range);
+				active_ignorer.enable ();
+			}
+			ignorer = active_ignorer;
+			ignorer.ignore (agent_thread_id, parent_thread_id);
 			can_deinit = script_backend.supports_unload ();
 
 			var server = new AgentServer (pipe_address, script_backend, agent_range);
@@ -187,10 +197,33 @@ namespace Frida.Agent {
 				printerr ("Unable to start agent server: %s\n", e.message);
 			}
 
-			ignorer.disable ();
+			ignorer.unignore (agent_thread_id, parent_thread_id);
+			if (can_deinit) {
+				ignorer.disable ();
+				active_ignorer = null;
+			} else {
+				var name = find_agent_module_name ();
+				if (name != null)
+					Environment.prevent_unload (name);
+			}
 		}
 
-		Environment.teardown ((owned) ignorer, can_deinit);
+		if (can_deinit)
+			Environment.deinit ((owned) ignorer);
+	}
+
+	internal string? find_agent_module_name () {
+		string result = null;
+
+		Gum.Process.enumerate_modules ((details) => {
+			if (details.name.index_of ("frida-agent") != -1) {
+				result = details.path;
+				return false;
+			}
+			return true;
+		});
+
+		return result;
 	}
 
 	internal Gum.MemoryRange memory_range (Gum.MemoryRange? mapped_range) {
@@ -211,8 +244,9 @@ namespace Frida.Agent {
 	}
 
 	namespace Environment {
-		public extern void setup ();
-		public extern void teardown (owned AutoIgnorer ignorer, bool can_deinit);
+		public extern void init ();
+		public extern void deinit (owned AutoIgnorer ignorer);
+		public extern void prevent_unload (string module_name);
 	}
 
 }
