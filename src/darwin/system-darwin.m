@@ -293,8 +293,12 @@ frida_temporary_directory_get_system_tmp (void)
 {
   if (geteuid () == 0)
   {
+#ifdef HAVE_MAC
     /* Sandboxed system daemons are likely able to read from this location */
     return g_strdup ("/private/var/root");
+#else
+    return g_strdup ("/Library/Caches");
+#endif
   }
   else
   {
