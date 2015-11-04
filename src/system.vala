@@ -165,7 +165,7 @@ namespace Frida {
 		}
 
 		public static string make_name () {
-			var builder = new StringBuilder (".frida-");
+			var builder = new StringBuilder ("frida-");
 			for (var i = 0; i != 16; i++)
 				builder.append_printf ("%02x", Random.int_range (0, 256));
 			return builder.str;
