@@ -2,11 +2,13 @@ namespace Frida.Gadget {
 	private class Server : Object {
 		private const string LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
 
+		private Gum.ScriptBackend script_backend;
 		private Gum.MemoryRange agent_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Session> sessions = new Gee.HashMap<DBusConnection, Session> ();
 
-		public Server (Gum.MemoryRange agent_range) {
+		public Server (Gum.ScriptBackend script_backend, Gum.MemoryRange agent_range) {
+			this.script_backend = script_backend;
 			this.agent_range = agent_range;
 		}
 
@@ -21,7 +23,7 @@ namespace Frida.Gadget {
 				if (server == null)
 					return false;
 
-				sessions[connection] = new Session (connection, agent_range);
+				sessions[connection] = new Session (connection, script_backend, agent_range);
 				connection.closed.connect (on_connection_closed);
 
 				return true;
@@ -56,7 +58,7 @@ namespace Frida.Gadget {
 			private Frida.Agent.ScriptEngine script_engine;
 			private bool close_requested = false;
 
-			public Session (DBusConnection c, Gum.MemoryRange agent_range) {
+			public Session (DBusConnection c, Gum.ScriptBackend script_backend, Gum.MemoryRange agent_range) {
 				connection = c;
 
 				try {
@@ -68,7 +70,7 @@ namespace Frida.Gadget {
 
 				this_process = get_process_info ();
 
-				script_engine = new Frida.Agent.ScriptEngine (agent_range);
+				script_engine = new Frida.Agent.ScriptEngine (script_backend, agent_range);
 				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 			}
 
@@ -215,15 +217,16 @@ namespace Frida.Gadget {
 	private async void create_server () {
 		Gum.init ();
 
+		var script_backend = Gum.ScriptBackend.obtain ();
 		var agent_range = memory_range ();
 
 		interceptor = Gum.Interceptor.obtain ();
-		interceptor.ignore_current_thread ();
 
-		ignorer = new Frida.Agent.AutoIgnorer (interceptor, agent_range, 0);
+		ignorer = new Frida.Agent.AutoIgnorer (script_backend, interceptor, agent_range);
 		ignorer.enable ();
+		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
 
-		var s = new Server (agent_range);
+		var s = new Server (script_backend, agent_range);
 		try {
 			yield s.start ();
 		} catch (Error e) {
@@ -241,9 +244,9 @@ namespace Frida.Gadget {
 	private async void destroy_server () {
 		yield server.stop ();
 
+		ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
 		ignorer.disable ();
 		ignorer = null;
-		interceptor.unignore_current_thread ();
 		interceptor = null;
 
 		Gum.deinit ();
