@@ -1,5 +1,9 @@
 #include "frida-core.h"
 
+#ifndef HAVE_DARWIN
+# include <gum/gum.h>
+#endif
+
 static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
@@ -112,9 +116,19 @@ run_main_loop (gpointer data)
 {
   (void) data;
 
+#ifndef HAVE_DARWIN
+  gum_init ();
+#endif
+
   g_main_context_push_thread_default (main_context);
   g_main_loop_run (main_loop);
   g_main_context_pop_thread_default (main_context);
+
+#ifndef HAVE_DARWIN
+  gio_shutdown ();
+  glib_shutdown ();
+  gum_deinit ();
+#endif
 
   return NULL;
 }
