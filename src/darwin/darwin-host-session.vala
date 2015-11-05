@@ -197,8 +197,8 @@ namespace Frida {
 			return pipe;
 		}
 
-		protected override async AgentSession obtain_kernel_session () throws Error {
-			return yield helper.obtain_kernel_session ();
+		protected override async AgentSession obtain_system_session () throws Error {
+			return yield helper.obtain_system_session ();
 		}
 
 		private FruitLauncher get_fruit_launcher () {

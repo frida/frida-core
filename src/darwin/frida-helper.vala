@@ -17,14 +17,14 @@ namespace Frida {
 			construct;
 		}
 
-		private SystemSession kernel_session = new SystemSession ();
+		private SystemSession system_session = new SystemSession ();
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
-		private uint kernel_session_registration_id = 0;
+		private uint system_session_registration_id = 0;
 
 		/* these should be private, but must be accessible to glue code */
 		public void * context;
@@ -58,8 +58,8 @@ namespace Frida {
 
 		private async void shutdown () {
 			if (connection != null) {
-				if (kernel_session_registration_id != 0)
-					connection.unregister_object (kernel_session_registration_id);
+				if (system_session_registration_id != 0)
+					connection.unregister_object (system_session_registration_id);
 				if (helper_registration_id != 0)
 					connection.unregister_object (helper_registration_id);
 				connection.closed.disconnect (on_connection_closed);
@@ -81,8 +81,8 @@ namespace Frida {
 				Helper helper = this;
 				helper_registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 
-				AgentSession ks = kernel_session;
-				kernel_session_registration_id = connection.register_object (Frida.ObjectPath.KERNEL_SESSION, ks);
+				AgentSession ss = system_session;
+				system_session_registration_id = connection.register_object (Frida.ObjectPath.KERNEL_SESSION, ss);
 
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {

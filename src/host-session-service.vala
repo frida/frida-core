@@ -136,6 +136,10 @@ namespace Frida {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
 		public signal void agent_session_closed (AgentSessionId id, AgentSession session);
 
+#if !DARWIN
+		private SystemSession system_session = null;
+#endif
+
 		private uint last_session_id = 0;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
@@ -175,7 +179,7 @@ namespace Frida {
 
 			if (pid == 0) {
 				id = Frida.AgentSessionId (0);
-				session = yield obtain_kernel_session ();
+				session = yield obtain_system_session ();
 				entry = new Entry (id, pid, null, null, session);
 			} else {
 				Object transport;
@@ -226,8 +230,14 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 		}
 
-		protected virtual async AgentSession obtain_kernel_session () throws Error {
-			throw new Error.NOT_SUPPORTED ("This backend does not yet support attaching to the kernel");
+		protected virtual async AgentSession obtain_system_session () throws Error {
+#if !DARWIN
+			if (system_session == null)
+				system_session = new SystemSession ();
+			return system_session;
+#else
+			assert_not_reached ();
+#endif
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -305,4 +315,81 @@ namespace Frida {
 			}
 		}
 	}
+
+#if !DARWIN
+	private class SystemSession : Object, AgentSession {
+		private Gum.ScriptBackend script_backend = Gum.ScriptBackend.obtain ();
+
+		private Gee.HashMap<uint, Gum.Script> script_by_id = new Gee.HashMap<uint, Gum.Script> ();
+		private uint last_script_id = 0;
+
+		public async void close () throws Error {
+		}
+
+		public async void ping () throws Error {
+		}
+
+		public async AgentScriptId create_script (string name, string source) throws Error {
+			var sid = AgentScriptId (++last_script_id);
+
+			string script_name;
+			if (name != "")
+				script_name = name;
+			else
+				script_name = "script%u".printf (sid.handle);
+
+			Gum.Script script;
+			try {
+				script = yield script_backend.create (script_name, source);
+			} catch (IOError create_error) {
+				throw new Error.INVALID_ARGUMENT (create_error.message);
+			}
+			script.set_message_handler ((script, message, data) => {
+				var data_param = (data != null) ? data.get_data () : new uint8[] {};
+				this.message_from_script (sid, message, data_param);
+			});
+
+			script_by_id[sid.handle] = script;
+
+			return sid;
+		}
+
+		public async void destroy_script (AgentScriptId sid) throws Error {
+			Gum.Script script;
+			if (!script_by_id.unset (sid.handle, out script))
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			yield script.unload ();
+		}
+
+		public async void load_script (AgentScriptId sid) throws Error {
+			var script = script_by_id[sid.handle];
+			if (script == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			yield script.load ();
+		}
+
+		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
+			var script = script_by_id[sid.handle];
+			if (script == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			script.post_message (message);
+		}
+
+		public async void enable_debugger () throws Error {
+			script_backend.set_debug_message_handler (on_debug_message);
+		}
+
+		public async void disable_debugger () throws Error {
+			script_backend.set_debug_message_handler (null);
+		}
+
+		public async void post_message_to_debugger (string message) throws Error {
+			script_backend.post_debug_message (message);
+		}
+
+		private void on_debug_message (string message) {
+			message_from_debugger (message);
+		}
+	}
+#endif
 }

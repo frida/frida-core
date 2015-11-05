@@ -26,7 +26,7 @@ libfrida_gadget_1_0_la_LIBADD = \
 	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(top_builddir)/lib/agent/.libs/libfrida-agent.a \
 	$(extra_libs) \
-	$(FRIDA_AGENT_LIBS)
+	$(FRIDA_LIBS)
 libfrida_gadget_1_0_la_LDFLAGS = \
 	-no-undefined \
 	-avoid-version \
@@ -42,7 +42,7 @@ libfrida_gadget_1_0_la_VALAFLAGS = \
 	--pkg=frida-interfaces \
 	--pkg=frida-core \
 	--pkg=frida-agent \
-	@FRIDA_AGENT_PACKAGES@
+	@FRIDA_PACKAGES@
 
 libfrida_gadget_glue_la_SOURCES = \
 	gadget-glue.c
@@ -53,4 +53,4 @@ AM_CPPFLAGS = \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/agent \
 	-I $(top_srcdir)/src \
-	$(FRIDA_AGENT_CFLAGS)
+	$(FRIDA_CFLAGS)
