@@ -33,7 +33,7 @@ namespace Frida.Agent {
 
 			Gum.Script script;
 			try {
-				script = yield backend.create (script_name, source, Gum.Script.Flavor.USER);
+				script = yield backend.create (script_name, source);
 			} catch (IOError create_error) {
 				throw new Error.INVALID_ARGUMENT (create_error.message);
 			}

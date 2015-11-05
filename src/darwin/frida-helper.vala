@@ -17,7 +17,7 @@ namespace Frida {
 			construct;
 		}
 
-		private KernelSession kernel_session = new KernelSession ();
+		private SystemSession kernel_session = new SystemSession ();
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
@@ -192,7 +192,7 @@ namespace Frida {
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error;
 	}
 
-	private class KernelSession : Object, AgentSession {
+	private class SystemSession : Object, AgentSession {
 		private Gum.ScriptBackend script_backend = Gum.ScriptBackend.obtain ();
 
 		private Gee.HashMap<uint, Gum.Script> script_by_id = new Gee.HashMap<uint, Gum.Script> ();
@@ -215,7 +215,7 @@ namespace Frida {
 
 			Gum.Script script;
 			try {
-				script = yield script_backend.create (script_name, source, Gum.Script.Flavor.KERNEL);
+				script = yield script_backend.create (script_name, source);
 			} catch (IOError create_error) {
 				throw new Error.INVALID_ARGUMENT (create_error.message);
 			}
