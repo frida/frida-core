@@ -136,10 +136,6 @@ namespace Frida {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
 		public signal void agent_session_closed (AgentSessionId id, AgentSession session);
 
-#if !DARWIN
-		private SystemSession system_session = null;
-#endif
-
 		private uint last_session_id = 0;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
@@ -232,9 +228,7 @@ namespace Frida {
 
 		protected virtual async AgentSession obtain_system_session () throws Error {
 #if !DARWIN
-			if (system_session == null)
-				system_session = new SystemSession ();
-			return system_session;
+			return new SystemSession ();
 #else
 			assert_not_reached ();
 #endif
