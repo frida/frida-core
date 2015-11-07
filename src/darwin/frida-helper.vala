@@ -166,7 +166,7 @@ namespace Frida {
 					pipe_proxies.unset (proxy);
 				});
 
-				endpoints = PipeEndpoints (proxy_object_path, endpoints.remote_address);
+				return PipeEndpoints (proxy_object_path, endpoints.remote_address);
 			}
 			return endpoints;
 		}
@@ -333,7 +333,8 @@ namespace Frida {
 
 		public async void write (uint8[] data) throws GLib.Error {
 			try {
-				yield output.write_all_async (data, Priority.DEFAULT, null, null);
+				var data_copy = data; /* FIXME: workaround for Vala compiler bug */
+				yield output.write_all_async (data_copy, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
 				close.begin ();
 				throw e;

@@ -263,6 +263,10 @@ namespace Frida {
 					output.close_async.begin ();
 					return;
 				}
+				if (chunk.length == 0) {
+					output.close_async.begin ();
+					return;
+				}
 				try {
 					yield output.write_all_async (chunk, Priority.DEFAULT, null, null);
 				} catch (GLib.Error e) {
@@ -289,6 +293,10 @@ namespace Frida {
 				try {
 					n = yield input.read_async (buf);
 				} catch (GLib.Error e) {
+					stream.close.begin ();
+					return;
+				}
+				if (n == 0) {
 					stream.close.begin ();
 					return;
 				}
