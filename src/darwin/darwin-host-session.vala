@@ -178,23 +178,17 @@ namespace Frida {
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
 			transport = null;
 
-			string local_address, remote_address;
-			yield injector.make_pipe_endpoints (pid, out local_address, out remote_address);
-			Pipe pipe;
-			try {
-				pipe = new Pipe (local_address);
-			} catch (IOError pipe_error) {
-				throw new Error.NOT_SUPPORTED (pipe_error.message);
-			}
+			string remote_address;
+			var stream = yield helper.make_pipe_stream (pid, out remote_address);
 
 			if (fruit_launcher != null) {
 				if (yield fruit_launcher.try_establish (pid, remote_address))
-					return pipe;
+					return stream;
 			}
 
 			yield injector.inject (pid, agent, remote_address);
 
-			return pipe;
+			return stream;
 		}
 
 		protected override async AgentSession obtain_system_session () throws Error {

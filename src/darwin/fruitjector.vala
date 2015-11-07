@@ -41,12 +41,6 @@ namespace Frida {
 			return pid_by_id.has_key (id);
 		}
 
-		public async void make_pipe_endpoints (uint pid, out string local_address, out string remote_address) throws Error {
-			var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), pid);
-			local_address = endpoints.local_address;
-			remote_address = endpoints.remote_address;
-		}
-
 		private void on_uninjected (uint id) {
 			pid_by_id.unset (id);
 			uninjected (id);

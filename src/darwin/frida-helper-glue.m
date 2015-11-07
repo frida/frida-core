@@ -709,7 +709,7 @@ _frida_helper_service_free_inject_instance (FridaHelperService * self, void * in
 }
 
 void
-_frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, FridaPipeEndpoints * result, GError ** error)
+_frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, gboolean * need_proxy, FridaPipeEndpoints * result, GError ** error)
 {
   gboolean remote_pid_exists;
   mach_port_t self_task;
@@ -732,7 +732,15 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   self_task = mach_task_self ();
 
   ret = task_for_pid (self_task, local_pid, &local_task);
-  CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid() for local pid");
+  if (ret == 0)
+  {
+    *need_proxy = FALSE;
+  }
+  else
+  {
+    *need_proxy = TRUE;
+    local_task = self_task;
+  }
 
   ret = task_for_pid (self_task, remote_pid, &remote_task);
   CHECK_MACH_RESULT (ret, ==, 0, "task_for_pid() for remote pid");
@@ -822,7 +830,7 @@ beach:
   {
     if (remote_task != MACH_PORT_NULL)
       mach_port_deallocate (self_task, remote_task);
-    if (local_task != MACH_PORT_NULL)
+    if (local_task != MACH_PORT_NULL && local_task != self_task)
       mach_port_deallocate (self_task, local_task);
 
     return;

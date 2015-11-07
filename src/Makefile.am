@@ -213,6 +213,7 @@ frida_helper_LDFLAGS = \
 frida_helper_LDADD = \
 	libfrida-helper-main.la \
 	libfrida-helper-glue.la \
+	$(top_builddir)/lib/pipe/libfrida-pipe.la \
 	$(FRIDA_LIBS)
 if OS_MAC
 frida_helper_LDFLAGS += \
@@ -234,8 +235,10 @@ libfrida_helper_main_la_LIBADD = \
 libfrida_helper_main_la_VALAFLAGS = \
 	--header=frida-helper.h \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--vapidir=$(abs_srcdir) \
 	--pkg=frida-interfaces \
+	--pkg=frida-pipe \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@

@@ -26,6 +26,8 @@ namespace Frida {
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
 		private uint system_session_registration_id = 0;
+		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
+		private uint last_pipe_proxy_id = 1;
 
 		/* these should be private, but must be accessible to glue code */
 		public void * context;
@@ -59,10 +61,15 @@ namespace Frida {
 
 		private async void shutdown () {
 			if (connection != null) {
+				foreach (var registration_id in pipe_proxies.values)
+					connection.unregister_object (registration_id);
+				pipe_proxies.clear ();
+
 				if (system_session_registration_id != 0)
 					connection.unregister_object (system_session_registration_id);
 				if (helper_registration_id != 0)
 					connection.unregister_object (helper_registration_id);
+
 				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
@@ -83,7 +90,7 @@ namespace Frida {
 				helper_registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 
 				AgentSession ss = system_session;
-				system_session_registration_id = connection.register_object (Frida.ObjectPath.KERNEL_SESSION, ss);
+				system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION, ss);
 
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
@@ -142,8 +149,26 @@ namespace Frida {
 			return _do_inject (pid, filename, data_string);
 		}
 
-		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error {
-			return _do_make_pipe_endpoints (local_pid, remote_pid);
+		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error {
+			bool need_proxy;
+			var endpoints = _do_make_pipe_endpoints (local_pid, remote_pid, out need_proxy);
+			if (need_proxy) {
+				var pipe = new Pipe (endpoints.local_address);
+				var proxy = new PipeProxy (pipe);
+
+				var id = last_pipe_proxy_id++;
+				var proxy_object_path = Frida.ObjectPath.from_tunneled_stream_id (id);
+				TunneledStream ts = proxy;
+				var registration_id = connection.register_object (proxy_object_path, ts);
+				pipe_proxies[proxy] = registration_id;
+				proxy.closed.connect (() => {
+					connection.unregister_object (registration_id);
+					pipe_proxies.unset (proxy);
+				});
+
+				endpoints = PipeEndpoints (proxy_object_path, endpoints.remote_address);
+			}
+			return endpoints;
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
@@ -190,7 +215,7 @@ namespace Frida {
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws Error;
 		public extern void _free_inject_instance (void * instance);
 
-		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error;
+		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid, out bool need_proxy) throws Error;
 	}
 
 	private class SystemSession : Object, AgentSession {
@@ -265,6 +290,54 @@ namespace Frida {
 
 		private void on_debug_message (string message) {
 			message_from_debugger (message);
+		}
+	}
+
+	private class PipeProxy : Object, TunneledStream {
+		public signal void closed ();
+
+		public Pipe pipe {
+			get;
+			construct;
+		}
+		private InputStream input;
+		private OutputStream output;
+
+		public PipeProxy (Pipe pipe) {
+			Object (pipe: pipe);
+		}
+
+		construct {
+			input = pipe.input_stream;
+			output = pipe.output_stream;
+		}
+
+		public async void close () throws GLib.Error {
+			try {
+				yield pipe.close_async ();
+			} catch (GLib.Error e) {
+			}
+			closed ();
+		}
+
+		public async uint8[] read () throws GLib.Error {
+			try {
+				var buf = new uint8[4096];
+				var n = yield input.read_async (buf);
+				return buf[0:n];
+			} catch (GLib.Error e) {
+				close.begin ();
+				throw e;
+			}
+		}
+
+		public async void write (uint8[] data) throws GLib.Error {
+			try {
+				yield output.write_all_async (data, Priority.DEFAULT, null, null);
+			} catch (GLib.Error e) {
+				close.begin ();
+				throw e;
+			}
 		}
 	}
 }
