@@ -631,7 +631,23 @@ namespace Frida.HostSessionTest {
 				try {
 					var host_session = yield prov.create ();
 					var id = yield host_session.attach_to (pid);
-					yield prov.obtain_agent_session (host_session, id);
+					var session = yield prov.obtain_agent_session (host_session, id);
+					string received_message = null;
+					bool waiting = false;
+					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+						received_message = message;
+						if (waiting)
+							cross_arch.callback ();
+					});
+					var script_id = yield session.create_script ("test", "send('hello');");
+					yield session.load_script (script_id);
+					if (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"hello\"}");
+					session.disconnect (message_handler);
 				} catch (GLib.Error e) {
 					stderr.printf ("ERROR: %s\n", e.message);
 					assert_not_reached ();
