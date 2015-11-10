@@ -1,4 +1,49 @@
 namespace Frida.Agent {
+	private static AutoIgnorer active_ignorer = null;
+
+	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
+		if (active_ignorer == null)
+			Environment.init ();
+
+		AutoIgnorer ignorer;
+		bool can_deinit;
+		{
+			var script_backend = Gum.ScriptBackend.obtain ();
+			var agent_range = memory_range (mapped_range);
+			var agent_thread_id = Gum.Process.get_current_thread_id ();
+
+			if (active_ignorer == null) {
+				var interceptor = Gum.Interceptor.obtain ();
+				active_ignorer = new AutoIgnorer (script_backend, interceptor, agent_range);
+				active_ignorer.enable ();
+			}
+			ignorer = active_ignorer;
+			ignorer.ignore (agent_thread_id, parent_thread_id);
+			can_deinit = script_backend.supports_unload ();
+
+			var server = new AgentServer (pipe_address, script_backend, agent_range);
+
+			try {
+				server.run ();
+			} catch (Error e) {
+				printerr ("Unable to start agent server: %s\n", e.message);
+			}
+
+			ignorer.unignore (agent_thread_id, parent_thread_id);
+			if (can_deinit) {
+				ignorer.disable ();
+				active_ignorer = null;
+			} else {
+				var name = find_agent_module_name ();
+				if (name != null)
+					Environment.prevent_unload (name);
+			}
+		}
+
+		if (can_deinit)
+			Environment.deinit ((owned) ignorer);
+	}
+
 	public class AgentServer : Object, AgentSession {
 		public string pipe_address {
 			get;
@@ -165,51 +210,6 @@ namespace Frida.Agent {
 
 		private extern void replace_apis ();
 		private extern void revert_apis ();
-	}
-
-	private static AutoIgnorer active_ignorer = null;
-
-	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
-		if (active_ignorer == null)
-			Environment.init ();
-
-		AutoIgnorer ignorer;
-		bool can_deinit;
-		{
-			var script_backend = Gum.ScriptBackend.obtain ();
-			var agent_range = memory_range (mapped_range);
-			var agent_thread_id = Gum.Process.get_current_thread_id ();
-
-			if (active_ignorer == null) {
-				var interceptor = Gum.Interceptor.obtain ();
-				active_ignorer = new AutoIgnorer (script_backend, interceptor, agent_range);
-				active_ignorer.enable ();
-			}
-			ignorer = active_ignorer;
-			ignorer.ignore (agent_thread_id, parent_thread_id);
-			can_deinit = script_backend.supports_unload ();
-
-			var server = new AgentServer (pipe_address, script_backend, agent_range);
-
-			try {
-				server.run ();
-			} catch (Error e) {
-				printerr ("Unable to start agent server: %s\n", e.message);
-			}
-
-			ignorer.unignore (agent_thread_id, parent_thread_id);
-			if (can_deinit) {
-				ignorer.disable ();
-				active_ignorer = null;
-			} else {
-				var name = find_agent_module_name ();
-				if (name != null)
-					Environment.prevent_unload (name);
-			}
-		}
-
-		if (can_deinit)
-			Environment.deinit ((owned) ignorer);
 	}
 
 	internal string? find_agent_module_name () {
