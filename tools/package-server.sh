@@ -92,9 +92,8 @@ exit 0
 EOF
 chmod 755 "$tmpdir/DEBIAN/prerm"
 
-fakeroot sh -s <<FAKEROOT_SCRIPT
-chown -R 0:0 "$tmpdir"
-$FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$OUTPUT_DEB"
-FAKEROOT_SCRIPT
+sudo chown -R 0:0 "$tmpdir"
+sudo $FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$OUTPUT_DEB"
+sudo chown -R $(whoami) "$tmpdir" "$OUTPUT_DEB"
 
 rm -rf "$tmpdir"
