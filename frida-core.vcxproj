@@ -91,8 +91,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-agent-32.lib;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-agent-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -101,8 +101,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-agent-32.lib;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-agent-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -111,8 +111,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-agent-64.lib;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-agent-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -121,8 +121,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-agent-64.lib;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-agent-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
