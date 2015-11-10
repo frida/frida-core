@@ -56,13 +56,13 @@ Package: re.frida.server
 Name: Frida
 Version: $FRIDA_VERSION
 Priority: optional
-Size: 20942682
-Installed-Size: 51000
+Size: 23166304
+Installed-Size: 60000
 Architecture: iphoneos-arm
 Description: Inject JavaScript to explore iOS apps over USB.
 Homepage: http://frida.github.io/
-Maintainer: Ole André Vadla Ravnås <ole.andre.ravnas@tillitech.com>
-Author: Frida Developers <ole.andre.ravnas@tillitech.com>
+Maintainer: Ole André Vadla Ravnås <oleavr@nowsecure.com>
+Author: Frida Developers <oleavr@nowsecure.com>
 Section: Development
 EOF
 chmod 644 "$tmpdir/DEBIAN/control"
