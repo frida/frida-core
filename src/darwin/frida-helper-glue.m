@@ -753,28 +753,46 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
 
   ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right local_tx");
-  local_tx = local_rx;
-  do
+  if (local_task != self_task)
   {
-    local_tx++;
-    ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+    local_tx = local_rx;
+    do
+    {
+      local_tx++;
+      ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+    }
+    while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
+    if (ret != 0)
+      local_tx = MACH_PORT_NULL;
+    CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right local_tx");
+    mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
   }
-  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right local_tx");
-  mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+  else
+  {
+    local_tx = tx;
+  }
   tx = MACH_PORT_NULL;
 
   ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right remote_tx");
-  remote_tx = remote_rx;
-  do
+  if (remote_task != self_task)
   {
-    remote_tx++;
-    ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+    remote_tx = remote_rx;
+    do
+    {
+      remote_tx++;
+      ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+    }
+    while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
+    if (ret != 0)
+      remote_tx = MACH_PORT_NULL;
+    CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
+    mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
   }
-  while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
-  CHECK_MACH_RESULT (ret, ==, 0, "mach_port_insert_right remote_tx");
-  mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+  else
+  {
+    remote_tx = tx;
+  }
   tx = MACH_PORT_NULL;
 
   local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
