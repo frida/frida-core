@@ -241,6 +241,7 @@ libfrida_helper_main_la_VALAFLAGS = \
 	--pkg=frida-pipe \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
+	@FRIDA_AGENT_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_glue_la_SOURCES = \

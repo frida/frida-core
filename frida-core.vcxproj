@@ -91,8 +91,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;gumjs-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -101,8 +101,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;gumjs-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -111,8 +111,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;gumjs-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -121,8 +121,8 @@
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;gumjs-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -192,7 +192,7 @@ REM. &gt; "$(IntDir)data\winjector.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\frida.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -200,7 +200,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\frida.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -208,7 +208,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\frida.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
@@ -216,7 +216,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">mkdir "$(IntDir)data" 2&gt;NUL
 mkdir "$(IntDir)src" 2&gt;NUL
-"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
+"$(ValaCompiler)" lib/interfaces/session.vala src/frida.vala src/host-session-service.vala src/system.vala src/droidy/droidy-client.vala src/droidy/droidy-host-session.vala src/fruity/fruity-client.vala src/fruity/fruity-host-session.vala src/fruity/fruity-property-list.vala src/tcp/tcp-host-session.vala src/windows/windows-host-session.vala src/windows/winjector.vala src/windows/winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-core --header=$(IntDir)frida-core.h --symbols=$(IntDir)frida-core.symbols --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)data" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=frida-gum-1.0 --pkg=frida-pipe --pkg=frida-data-agent --pkg=frida-data-winjector || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\interfaces\session.vala;$(ProjectDir)src\frida.vala;$(ProjectDir)src\host-session-service.vala;$(ProjectDir)src\system.vala;$(ProjectDir)src\droidy\droidy-client.vala;$(ProjectDir)src\droidy\droidy-host-session.vala;$(ProjectDir)src\fruity\fruity-client.vala;$(ProjectDir)src\fruity\fruity-host-session.vala;$(ProjectDir)src\fruity\fruity-property-list.vala;$(ProjectDir)src\tcp\tcp-host-session.vala;$(ProjectDir)src\windows\windows-host-session.vala;$(ProjectDir)src\windows\winjector.vala;$(ProjectDir)src\windows\winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
