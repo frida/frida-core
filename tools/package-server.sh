@@ -56,8 +56,8 @@ Package: re.frida.server
 Name: Frida
 Version: $FRIDA_VERSION
 Priority: optional
-Size: 23166304
-Installed-Size: 60000
+Size: 15642966
+Installed-Size: 39000
 Architecture: iphoneos-arm
 Description: Inject JavaScript to explore iOS apps over USB.
 Homepage: http://frida.github.io/
