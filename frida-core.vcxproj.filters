@@ -43,11 +43,17 @@
     <Filter Include="Source Files\lib\interfaces">
       <UniqueIdentifier>{9729c4b0-4b37-4674-8f1b-8ff9601ef6f3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\lib\agent">
+      <UniqueIdentifier>{9729c4b0-4b37-4674-8f1b-8ff9601ef6f4}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\generated\lib">
       <UniqueIdentifier>{a0a6f4ce-c998-4406-81db-1b78adc3ab04}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\generated\lib\interfaces">
       <UniqueIdentifier>{e0ca1c8c-d387-4bef-b6a6-d6c571db2eee}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\lib\agent">
+      <UniqueIdentifier>{e0ca1c8c-d387-4bef-b6a6-d6c571db2eef}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\generated">
       <UniqueIdentifier>{0ddd771d-c7e1-405b-a3e6-a4433e9094db}</UniqueIdentifier>
@@ -80,6 +86,9 @@
     </None>
     <None Include="lib\interfaces\session.vala">
       <Filter>Source Files\lib\interfaces</Filter>
+    </None>
+    <None Include="lib\agent\agent-container.vala">
+      <Filter>Source Files\lib\agent</Filter>
     </None>
     <None Include="src\tcp\tcp-host-session.vala">
       <Filter>Source Files\tcp</Filter>
@@ -121,6 +130,9 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)lib\interfaces\session.c">
       <Filter>Source Files\generated\lib\interfaces</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)lib\agent\agent-container.c">
+      <Filter>Source Files\generated\lib\agent</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-agent.c">
       <Filter>Source Files\generated\data</Filter>
