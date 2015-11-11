@@ -231,17 +231,19 @@ libfrida_helper_main_la_CFLAGS = \
 	-w
 libfrida_helper_main_la_LIBADD = \
 	libfrida-helper-types.la \
+	$(top_builddir)/lib/agent/libfrida-agent-container.la \
 	$(FRIDA_LIBS)
 libfrida_helper_main_la_VALAFLAGS = \
 	--header=frida-helper.h \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
+	--vapidir=$(abs_top_srcdir)/lib/agent \
 	--vapidir=$(abs_srcdir) \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
+	--pkg=frida-agent-container \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
-	@FRIDA_AGENT_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_glue_la_SOURCES = \
@@ -360,6 +362,7 @@ libfrida_core_1_0_la_SOURCES = \
 libfrida_core_1_0_la_LIBADD = \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
+	$(top_builddir)/lib/agent/libfrida-agent-container.la \
 	libfrida-data-agent.la \
 	$(backend_libadd) \
 	libfrida-core.la \
@@ -382,11 +385,13 @@ libfrida_core_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/vapi \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
+	--vapidir=$(abs_top_srcdir)/lib/agent \
 	--vapidir=$(abs_srcdir) \
 	--vapidir=$(abs_builddir) \
 	--pkg=config \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
+	--pkg=frida-agent-container \
 	--pkg=frida-data-agent \
 	$(backend_valaflags) \
 	@FRIDA_PACKAGES@ \
@@ -403,6 +408,7 @@ AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe \
+	-I $(top_srcdir)/lib/agent \
 	-I $(top_srcdir)/lib/selinux/include \
 	$(FRIDA_CFLAGS)
 

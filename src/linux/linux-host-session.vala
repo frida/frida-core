@@ -71,6 +71,8 @@ namespace Frida {
 	}
 
 	public class LinuxHostSession : BaseDBusHostSession {
+		private AgentContainer system_session = null;
+
 		private HelperProcess helper;
 		private Linjector injector;
 		private AgentResource agent;
@@ -119,6 +121,17 @@ namespace Frida {
 
 			yield helper.close ();
 			helper = null;
+
+			if (system_session != null) {
+				yield system_session.destroy ();
+				system_session = null;
+			}
+		}
+
+		protected override async AgentSession create_system_session () throws Error {
+			var agent_filename = agent.path_template.printf (sizeof (void *) == 8 ? 64 : 32);
+			system_session = yield AgentContainer.create (agent_filename);
+			return system_session;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {

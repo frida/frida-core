@@ -48,7 +48,7 @@ frida_tests_VALAFLAGS = \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
 	--pkg=frida-tests \
-	@FRIDA_TEST_PACKAGES@ \
+	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 if OS_MAC
 frida_tests_LDFLAGS += \
@@ -80,7 +80,7 @@ libfrida_tests_la_VALAFLAGS = \
 	--pkg=frida-core \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
-	@FRIDA_TEST_PACKAGES@ \
+	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 libfrida_tests_glue_la_SOURCES = \

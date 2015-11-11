@@ -145,6 +145,8 @@ namespace Frida {
 			entries.clear ();
 		}
 
+		protected abstract async AgentSession create_system_session () throws Error;
+
 		public abstract async HostApplicationInfo get_frontmost_application () throws Error;
 
 		public abstract async HostApplicationInfo[] enumerate_applications () throws Error;
@@ -175,7 +177,7 @@ namespace Frida {
 
 			if (pid == 0) {
 				id = Frida.AgentSessionId (0);
-				session = yield obtain_system_session ();
+				session = yield create_system_session ();
 				entry = new Entry (id, pid, null, null, session);
 			} else {
 				Object transport;
@@ -224,10 +226,6 @@ namespace Frida {
 					return entry.agent_session;
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-		}
-
-		protected virtual async AgentSession obtain_system_session () throws Error {
-			throw new Error.NOT_SUPPORTED ("This backend does not yet support attaching to the system");
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {

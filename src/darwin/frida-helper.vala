@@ -17,14 +17,13 @@ namespace Frida {
 			construct;
 		}
 
-		private SystemSession system_session = new SystemSession ();
-
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
 		private uint system_session_registration_id = 0;
+		private AgentContainer system_session;
 		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
 		private uint last_pipe_proxy_id = 1;
 
@@ -64,8 +63,13 @@ namespace Frida {
 					connection.unregister_object (registration_id);
 				pipe_proxies.clear ();
 
-				if (system_session_registration_id != 0)
+				if (system_session != null) {
+					assert (system_session_registration_id != 0);
 					connection.unregister_object (system_session_registration_id);
+					yield system_session.destroy ();
+					system_session = null;
+				}
+
 				if (helper_registration_id != 0)
 					connection.unregister_object (helper_registration_id);
 
@@ -88,9 +92,6 @@ namespace Frida {
 				Helper helper = this;
 				helper_registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 
-				AgentSession ss = system_session;
-				system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION, ss);
-
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
 				printerr ("Unable to start: %s\n", e.message);
@@ -104,6 +105,16 @@ namespace Frida {
 				shutdown.begin ();
 				return false;
 			});
+		}
+
+		public async string create_system_session (string agent_filename) throws GLib.Error {
+			assert (system_session == null);
+
+			system_session = yield AgentContainer.create (agent_filename);
+			AgentSession system_agent_session = system_session;
+			system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION, system_agent_session);
+
+			return Frida.ObjectPath.SYSTEM_SESSION;
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -215,81 +226,6 @@ namespace Frida {
 		public extern void _free_inject_instance (void * instance);
 
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid, out bool need_proxy) throws Error;
-	}
-
-	private class SystemSession : Object, AgentSession {
-		private Gum.ScriptBackend script_backend = Gum.ScriptBackend.obtain ();
-
-		private Gee.HashMap<uint, Gum.Script> script_by_id = new Gee.HashMap<uint, Gum.Script> ();
-		private uint last_script_id = 0;
-
-		public async void close () throws Error {
-		}
-
-		public async void ping () throws Error {
-		}
-
-		public async AgentScriptId create_script (string name, string source) throws Error {
-			var sid = AgentScriptId (++last_script_id);
-
-			string script_name;
-			if (name != "")
-				script_name = name;
-			else
-				script_name = "script%u".printf (sid.handle);
-
-			Gum.Script script;
-			try {
-				script = yield script_backend.create (script_name, source);
-			} catch (IOError create_error) {
-				throw new Error.INVALID_ARGUMENT (create_error.message);
-			}
-			script.set_message_handler ((script, message, data) => {
-				var data_param = (data != null) ? data.get_data () : new uint8[] {};
-				this.message_from_script (sid, message, data_param);
-			});
-
-			script_by_id[sid.handle] = script;
-
-			return sid;
-		}
-
-		public async void destroy_script (AgentScriptId sid) throws Error {
-			Gum.Script script;
-			if (!script_by_id.unset (sid.handle, out script))
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			yield script.unload ();
-		}
-
-		public async void load_script (AgentScriptId sid) throws Error {
-			var script = script_by_id[sid.handle];
-			if (script == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			yield script.load ();
-		}
-
-		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
-			var script = script_by_id[sid.handle];
-			if (script == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			script.post_message (message);
-		}
-
-		public async void enable_debugger () throws Error {
-			script_backend.set_debug_message_handler (on_debug_message);
-		}
-
-		public async void disable_debugger () throws Error {
-			script_backend.set_debug_message_handler (null);
-		}
-
-		public async void post_message_to_debugger (string message) throws Error {
-			script_backend.post_debug_message (message);
-		}
-
-		private void on_debug_message (string message) {
-			message_from_debugger (message);
-		}
 	}
 
 	private class PipeProxy : Object, TunneledStream {

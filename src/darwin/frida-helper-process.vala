@@ -27,7 +27,6 @@ namespace Frida {
 		private Subprocess process;
 		private DBusConnection connection;
 		private Helper proxy;
-		private AgentSession system_session;
 		private Gee.Promise<Helper> obtain_request;
 
 		public HelperProcess () {
@@ -35,8 +34,6 @@ namespace Frida {
 		}
 
 		public async void close () {
-			system_session = null;
-
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
@@ -60,6 +57,16 @@ namespace Frida {
 
 		public async void preload () throws Error {
 			yield obtain ();
+		}
+
+		public async AgentSession create_system_session (string agent_filename) throws Error {
+			var helper = yield obtain ();
+			try {
+				var system_session_path = yield helper.create_system_session (agent_filename);
+				return yield connection.get_proxy (null, system_session_path);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -119,12 +126,6 @@ namespace Frida {
 			}
 		}
 
-		public async AgentSession obtain_system_session () throws Error {
-			yield obtain ();
-
-			return system_session;
-		}
-
 		private async Helper obtain () throws Error {
 			if (obtain_request != null) {
 				try {
@@ -138,7 +139,6 @@ namespace Frida {
 			Subprocess pending_process = null;
 			DBusConnection pending_connection = null;
 			Helper pending_proxy = null;
-			AgentSession pending_system_session = null;
 			Error pending_error = null;
 
 			DBusServer server = null;
@@ -170,10 +170,8 @@ namespace Frida {
 				timeout_source.destroy ();
 				timeout_source = null;
 
-				if (pending_error == null) {
+				if (pending_error == null)
 					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
-					pending_system_session = yield pending_connection.get_proxy (null, ObjectPath.SYSTEM_SESSION);
-				}
 			} catch (GLib.Error e) {
 				if (timeout_source != null)
 					timeout_source.destroy ();
@@ -188,7 +186,6 @@ namespace Frida {
 				connection.closed.connect (on_connection_closed);
 				proxy = pending_proxy;
 				proxy.uninjected.connect (on_uninjected);
-				system_session = pending_system_session;
 
 				obtain_request.set_value (proxy);
 				return proxy;

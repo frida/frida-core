@@ -11,7 +11,7 @@ namespace Frida {
 			}
 		}
 
-		private ResourceStore resource_store {
+		public ResourceStore resource_store {
 			get {
 				if (_resource_store == null) {
 					try {
@@ -125,7 +125,7 @@ namespace Frida {
 		public extern void _free_instance (void * instance);
 		public extern uint _do_inject (uint pid, string so_path, string data_string, string temp_path) throws Error;
 
-		private class ResourceStore {
+		public class ResourceStore {
 			public TemporaryDirectory tempdir {
 				get;
 				private set;

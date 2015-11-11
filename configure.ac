@@ -130,8 +130,8 @@ fi
 AC_SUBST(FRIDA_VALAFLAGS)
 
 GLIB_VERSION=2.46.0
-pkg_modules="glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, frida-gum-1.0"
-FRIDA_PACKAGES="--pkg glib-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg posix --pkg gee-0.8 --pkg frida-gum-1.0"
+pkg_modules="glib-2.0 >= $GLIB_VERSION, gmodule-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gio-unix-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, frida-gum-1.0"
+FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.0 --pkg posix --pkg gee-0.8 --pkg frida-gum-1.0"
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
   FRIDA_PACKAGES="$FRIDA_PACKAGES --pkg frida-gum-linux-1.0"
 fi
@@ -139,7 +139,6 @@ if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
   pkg_modules="$pkg_modules, json-glib-1.0"
   FRIDA_PACKAGES="$FRIDA_PACKAGES --pkg json-glib-1.0"
 fi
-FRIDA_TEST_PACKAGES="$FRIDA_PACKAGES --pkg gmodule-2.0"
 PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
 PKG_CHECK_MODULES(FRIDA_TEST, [gmodule-2.0 >= $GLIB_VERSION])
 
@@ -160,7 +159,6 @@ AC_SUBST(FRIDA_LDFLAGS)
 AC_SUBST(FRIDA_LIBS)
 AC_SUBST(FRIDA_BACKEND_LIBS)
 AC_SUBST(FRIDA_PACKAGES)
-AC_SUBST(FRIDA_TEST_PACKAGES)
 
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
   PKG_CHECK_MODULES(FRIDA_LOADER, [frida-gum-1.0])

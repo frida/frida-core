@@ -115,6 +115,10 @@ namespace Frida {
 			helper = null;
 		}
 
+		protected override async AgentSession create_system_session () throws Error {
+			return yield helper.create_system_session (agent.file.path);
+		}
+
 		public override async HostApplicationInfo get_frontmost_application () throws Error {
 			return System.get_frontmost_application ();
 		}
@@ -189,10 +193,6 @@ namespace Frida {
 			yield injector.inject (pid, agent, remote_address);
 
 			return stream;
-		}
-
-		protected override async AgentSession obtain_system_session () throws Error {
-			return yield helper.obtain_system_session ();
 		}
 
 		private FruitLauncher get_fruit_launcher () {

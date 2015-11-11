@@ -1,26 +1,47 @@
 #if WINDOWS
 namespace Frida {
 	public class Winjector : Object {
-		private ResourceStore normal_resource_store;
+		public ResourceStore normal_resource_store {
+			get {
+				if (_normal_resource_store == null) {
+					try {
+						_normal_resource_store = new ResourceStore ();
+					} catch (Error e) {
+						assert_not_reached ();
+					}
+					normal_helper_factory.resource_store = _normal_resource_store;
+				}
+				return _normal_resource_store;
+			}
+		}
+		private ResourceStore _normal_resource_store;
 		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
 
-		private ResourceStore elevated_resource_store;
+		public ResourceStore elevated_resource_store {
+			get {
+				if (_elevated_resource_store == null) {
+					try {
+						_elevated_resource_store = new ResourceStore ();
+					} catch (Error e) {
+						assert_not_reached ();
+					}
+					elevated_helper_factory.resource_store = _elevated_resource_store;
+				}
+				return _elevated_resource_store;
+			}
+		}
+		private ResourceStore _elevated_resource_store;
 		private HelperFactory elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
 		public async void close () {
 			yield normal_helper_factory.close ();
 			yield elevated_helper_factory.close ();
 
-			normal_resource_store = null;
-			elevated_resource_store = null;
+			_normal_resource_store = null;
+			_elevated_resource_store = null;
 		}
 
 		public async void inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
-			if (normal_resource_store == null) {
-				normal_resource_store = new ResourceStore ();
-				normal_helper_factory.resource_store = normal_resource_store;
-			}
-
 			var filename = normal_resource_store.ensure_copy_of (desc);
 
 			bool injected = false;
@@ -35,11 +56,6 @@ namespace Frida {
 			}
 
 			if (!injected) {
-				if (elevated_resource_store == null) {
-					elevated_resource_store = new ResourceStore ();
-					elevated_helper_factory.resource_store = elevated_resource_store;
-				}
-
 				filename = elevated_resource_store.ensure_copy_of (desc);
 
 				HelperInstance elevated_helper;
@@ -249,7 +265,7 @@ namespace Frida {
 			private static extern void * spawn (string path, string parameters, PrivilegeLevel level) throws Error;
 		}
 
-		private class ResourceStore {
+		public class ResourceStore {
 			private TemporaryDirectory tempdir;
 
 			public TemporaryFile helper32 {

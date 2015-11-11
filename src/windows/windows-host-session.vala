@@ -81,6 +81,8 @@ namespace Frida {
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
+		private AgentContainer system_session = null;
+
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
 		private Winjector winjector = new Winjector ();
@@ -120,6 +122,18 @@ namespace Frida {
 
 			yield winjector.close ();
 			winjector = null;
+
+			if (system_session != null) {
+				yield system_session.destroy ();
+				system_session = null;
+			}
+		}
+
+		protected override async AgentSession create_system_session () throws Error {
+			var path_template = winjector.normal_resource_store.ensure_copy_of (agent_desc);
+			var agent_filename = path_template.printf (sizeof (void *) == 8 ? 64 : 32);
+			system_session = yield AgentContainer.create (agent_filename);
+			return system_session;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {
