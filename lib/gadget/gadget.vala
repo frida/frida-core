@@ -1,15 +1,114 @@
 namespace Frida.Gadget {
+	private bool loaded = false;
+	private Server server;
+	private Gum.Interceptor interceptor;
+	private AutoIgnorer ignorer;
+	private Mutex mutex;
+	private Cond cond;
+
+	public void load () {
+		if (loaded)
+			return;
+		loaded = true;
+
+		Environment.init ();
+
+		var source = new IdleSource ();
+		source.set_callback (() => {
+			create_server.begin ();
+			return false;
+		});
+		source.attach (Environment.get_main_context ());
+
+		mutex.lock ();
+		while (server == null)
+			cond.wait (mutex);
+		mutex.unlock ();
+	}
+
+	public void unload () {
+		if (!loaded)
+			return;
+		loaded = false;
+
+		var ign = ignorer;
+
+		{
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				destroy_server.begin ();
+				return false;
+			});
+			source.attach (Environment.get_main_context ());
+		}
+
+		mutex.lock ();
+		while (server != null)
+			cond.wait (mutex);
+		mutex.unlock ();
+
+		Environment.deinit ((owned) ign);
+	}
+
+	private async void create_server () {
+		Gum.init ();
+
+#if IOS
+		var script_backend = Gum.ScriptBackend.obtain_jsc ();
+#else
+		var script_backend = Gum.ScriptBackend.obtain_v8 ();
+#endif
+		var gadget_range = memory_range ();
+
+		interceptor = Gum.Interceptor.obtain ();
+
+		ignorer = new AutoIgnorer (script_backend, interceptor, gadget_range);
+		ignorer.enable ();
+		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
+
+		var s = new Server (script_backend, gadget_range);
+		try {
+			yield s.start ();
+		} catch (Error e) {
+			log_error ("Failed to start: " + e.message);
+		}
+
+		mutex.lock ();
+		server = s;
+		cond.signal ();
+		mutex.unlock ();
+
+		log_info ("Listening on TCP port 27042");
+	}
+
+	private async void destroy_server () {
+		yield server.stop ();
+
+		ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
+		ignorer.disable ();
+		ignorer = null;
+		interceptor = null;
+
+		Environment.shutdown ();
+		Gum.deinit ();
+
+		mutex.lock ();
+		server = null;
+		cond.signal ();
+		mutex.unlock ();
+	}
+
 	private class Server : Object {
 		private const string LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
 
 		private Gum.ScriptBackend script_backend;
-		private Gum.MemoryRange agent_range;
+		private Gum.MemoryRange gadget_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Session> sessions = new Gee.HashMap<DBusConnection, Session> ();
 
-		public Server (Gum.ScriptBackend script_backend, Gum.MemoryRange agent_range) {
+		public Server (Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
 			this.script_backend = script_backend;
-			this.agent_range = agent_range;
+			this.gadget_range = gadget_range;
 		}
 
 		public async void start () throws Error {
@@ -23,7 +122,7 @@ namespace Frida.Gadget {
 				if (server == null)
 					return false;
 
-				sessions[connection] = new Session (connection, script_backend, agent_range);
+				sessions[connection] = new Session (connection, script_backend, gadget_range);
 				connection.closed.connect (on_connection_closed);
 
 				return true;
@@ -54,11 +153,12 @@ namespace Frida.Gadget {
 			private DBusConnection connection;
 			private uint host_registration_id;
 			private uint agent_registration_id;
+			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
-			private Frida.Agent.ScriptEngine script_engine;
+			private ScriptEngine script_engine;
 			private bool close_requested = false;
 
-			public Session (DBusConnection c, Gum.ScriptBackend script_backend, Gum.MemoryRange agent_range) {
+			public Session (DBusConnection c, Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
 				connection = c;
 
 				try {
@@ -68,9 +168,10 @@ namespace Frida.Gadget {
 					assert_not_reached ();
 				}
 
+				this_app = get_application_info ();
 				this_process = get_process_info ();
 
-				script_engine = new Frida.Agent.ScriptEngine (script_backend, agent_range);
+				script_engine = new ScriptEngine (script_backend, gadget_range);
 				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 			}
 
@@ -94,12 +195,32 @@ namespace Frida.Gadget {
 				}
 			}
 
+			public async HostApplicationInfo get_frontmost_application () throws Error {
+				return this_app;
+			}
+
+			public async HostApplicationInfo[] enumerate_applications () throws Error {
+				return new HostApplicationInfo[] { this_app };
+			}
+
 			public async HostProcessInfo[] enumerate_processes () throws Error {
 				return new HostProcessInfo[] { this_process };
 			}
 
+			public async void enable_spawn_gating () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+			}
+
+			public async void disable_spawn_gating () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+			}
+
+			public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+			}
+
 			public async uint spawn (string path, string[] argv, string[] envp) throws Error {
-				throw new Error.NOT_SUPPORTED ("Unable to spawn processes when embedded");
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
 			}
 
 			public async void resume (uint pid) throws Error {
@@ -117,7 +238,7 @@ namespace Frida.Gadget {
 
 			private void validate_pid (uint pid) throws Error {
 				if (pid != this_process.pid)
-					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
+					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded in app");
 			}
 
 			public async void close () throws Error {
@@ -130,7 +251,10 @@ namespace Frida.Gadget {
 					connection.close.begin ();
 					return false;
 				});
-				source.attach (Frida.get_main_context ());
+				source.attach (Environment.get_main_context ());
+			}
+
+			public async void ping () throws Error {
 			}
 
 			public async AgentScriptId create_script (string name, string source) throws Error {
@@ -164,108 +288,48 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private bool loaded = false;
-	private Server server;
-	private Gum.Interceptor interceptor;
-	private Frida.Agent.AutoIgnorer ignorer;
-	private Mutex mutex;
-	private Cond cond;
+	public class AutoIgnorer : Object {
+		protected weak Gum.ScriptBackend script_backend;
+		protected Gum.Interceptor interceptor;
+		protected Gum.MemoryRange gadget_range;
+		protected SList tls_contexts;
+		protected Mutex mutex;
 
-	public void load () {
-		if (loaded)
-			return;
-		loaded = true;
-
-		Environment.set_variable ("G_DEBUG", "fatal-warnings:fatal-criticals", true);
-		Frida.init ();
-
-		var source = new IdleSource ();
-		source.set_callback (() => {
-			create_server.begin ();
-			return false;
-		});
-		source.attach (Frida.get_main_context ());
-
-		mutex.lock ();
-		while (server == null)
-			cond.wait (mutex);
-		mutex.unlock ();
-	}
-
-	public void unload () {
-		if (!loaded)
-			return;
-		loaded = false;
-
-		{
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				destroy_server.begin ();
-				return false;
-			});
-			source.attach (Frida.get_main_context ());
+		public AutoIgnorer (Gum.ScriptBackend script_backend, Gum.Interceptor interceptor, Gum.MemoryRange gadget_range) {
+			this.script_backend = script_backend;
+			this.interceptor = interceptor;
+			this.gadget_range = gadget_range;
 		}
 
-		mutex.lock ();
-		while (server != null)
-			cond.wait (mutex);
-		mutex.unlock ();
-
-		Frida.deinit ();
-	}
-
-	private async void create_server () {
-		Gum.init ();
-
-#if IOS
-		var script_backend = Gum.ScriptBackend.obtain_jsc ();
-#else
-		var script_backend = Gum.ScriptBackend.obtain_v8 ();
-#endif
-		var agent_range = memory_range ();
-
-		interceptor = Gum.Interceptor.obtain ();
-
-		ignorer = new Frida.Agent.AutoIgnorer (script_backend, interceptor, agent_range);
-		ignorer.enable ();
-		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
-
-		var s = new Server (script_backend, agent_range);
-		try {
-			yield s.start ();
-		} catch (Error e) {
-			log_error ("Failed to start: " + e.message);
+		public void enable () {
+			replace_apis ();
 		}
 
-		mutex.lock ();
-		server = s;
-		cond.signal ();
-		mutex.unlock ();
+		public void disable () {
+			revert_apis ();
+		}
 
-		log_info ("Listening on TCP port 27042");
-	}
+		public void ignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
+			if (parent_thread_id != 0)
+				script_backend.ignore (parent_thread_id);
+			script_backend.ignore (agent_thread_id);
+		}
 
-	private async void destroy_server () {
-		yield server.stop ();
+		public void unignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
+			script_backend.unignore (agent_thread_id);
+			if (parent_thread_id != 0)
+				script_backend.unignore (parent_thread_id);
+		}
 
-		ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
-		ignorer.disable ();
-		ignorer = null;
-		interceptor = null;
-
-		Gum.deinit ();
-
-		mutex.lock ();
-		server = null;
-		cond.signal ();
-		mutex.unlock ();
+		private extern void replace_apis ();
+		private extern void revert_apis ();
 	}
 
 	internal Gum.MemoryRange memory_range () {
 		Gum.MemoryRange? result = null;
 
 		Gum.Process.enumerate_modules ((details) => {
-			if (details.name.index_of ("frida-gadget") != -1) {
+			if (details.name.index_of ("FridaGadget") != -1) {
 				result = details.range;
 				return false;
 			}
@@ -276,7 +340,16 @@ namespace Frida.Gadget {
 		return result;
 	}
 
+	namespace Environment {
+		public extern void init ();
+		public extern void shutdown ();
+		public extern void deinit (owned AutoIgnorer ignorer);
+		public extern unowned MainContext get_main_context ();
+	}
+
+	private extern HostApplicationInfo get_application_info ();
 	private extern HostProcessInfo get_process_info ();
+
 	private extern void log_info (string message);
 	private extern void log_error (string message);
 }

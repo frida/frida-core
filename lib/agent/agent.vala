@@ -175,7 +175,7 @@ namespace Frida.Agent {
 		}
 	}
 
-	public class AutoIgnorer : Object {
+	internal class AutoIgnorer : Object {
 		protected weak Gum.ScriptBackend script_backend;
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange agent_range;

@@ -46,6 +46,7 @@
 /lib/gadget/frida-gadget.h
 /lib/gadget/frida-gadget.vapi
 /lib/gadget/gadget.c
+/lib/gadget/script-engine.c
 /lib/interfaces/Makefile
 /lib/interfaces/Makefile.in
 /lib/interfaces/frida-interfaces.h

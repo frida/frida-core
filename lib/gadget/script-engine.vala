@@ -1,7 +1,7 @@
 using Gee;
 
-namespace Frida.Agent {
-	internal class ScriptEngine : Object {
+namespace Frida.Gadget {
+	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
 		public signal void message_from_debugger (string message);
 
