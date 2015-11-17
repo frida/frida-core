@@ -53,7 +53,7 @@ namespace Frida.Gadget {
 	private async void create_server () {
 		Gum.init ();
 
-#if IOS
+#if DARWIN
 		var script_backend = Gum.ScriptBackend.obtain_jsc ();
 #else
 		var script_backend = Gum.ScriptBackend.obtain_v8 ();
