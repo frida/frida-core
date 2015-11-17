@@ -23,7 +23,6 @@ libfrida_gadget_1_0_la_CFLAGS = \
 	-w
 libfrida_gadget_1_0_la_LIBADD = \
 	$(builddir)/libfrida-gadget-glue.la \
-	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(extra_libs) \
 	$(FRIDA_AGENT_LIBS)
 libfrida_gadget_1_0_la_LDFLAGS = \
@@ -35,10 +34,7 @@ libfrida_gadget_1_0_la_VALAFLAGS = \
 	--header=frida-gadget.h \
 	--vapidir=$(abs_top_srcdir)/vapi \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
-	--vapidir=$(abs_top_srcdir)/src \
-	--pkg=config \
 	--pkg=frida-interfaces \
-	--pkg=frida-core \
 	@FRIDA_AGENT_PACKAGES@
 
 libfrida_gadget_glue_la_SOURCES = \
@@ -47,7 +43,5 @@ libfrida_gadget_glue_la_SOURCES = \
 AM_CPPFLAGS = \
 	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
-	-I $(top_srcdir)/lib/interfaces \
-	-I $(top_srcdir)/lib/agent \
-	-I $(top_srcdir)/src \
-	$(FRIDA_AGENT_CFLAGS)
+	$(FRIDA_AGENT_CFLAGS) \
+	-I $(top_srcdir)/lib/interfaces
