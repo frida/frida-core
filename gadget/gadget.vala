@@ -217,7 +217,11 @@ namespace Frida.Gadget {
 	private async void create_server () {
 		Gum.init ();
 
-		var script_backend = Gum.ScriptBackend.obtain ();
+#if IOS
+		var script_backend = Gum.ScriptBackend.obtain_jsc ();
+#else
+		var script_backend = Gum.ScriptBackend.obtain_v8 ();
+#endif
 		var agent_range = memory_range ();
 
 		interceptor = Gum.Interceptor.obtain ();
