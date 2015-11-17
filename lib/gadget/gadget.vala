@@ -288,7 +288,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	public class AutoIgnorer : Object {
+	protected class AutoIgnorer : Object {
 		protected weak Gum.ScriptBackend script_backend;
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange gadget_range;
@@ -325,7 +325,7 @@ namespace Frida.Gadget {
 		private extern void revert_apis ();
 	}
 
-	internal Gum.MemoryRange memory_range () {
+	private Gum.MemoryRange memory_range () {
 		Gum.MemoryRange? result = null;
 
 		Gum.Process.enumerate_modules ((details) => {
@@ -341,10 +341,10 @@ namespace Frida.Gadget {
 	}
 
 	namespace Environment {
-		public extern void init ();
-		public extern void shutdown ();
-		public extern void deinit (owned AutoIgnorer ignorer);
-		public extern unowned MainContext get_main_context ();
+		private extern void init ();
+		private extern void shutdown ();
+		private extern void deinit (owned AutoIgnorer ignorer);
+		private extern unowned MainContext get_main_context ();
 	}
 
 	private extern HostApplicationInfo get_application_info ();

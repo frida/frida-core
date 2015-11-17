@@ -44,7 +44,7 @@ namespace Frida.Agent {
 			Environment.deinit ((owned) ignorer);
 	}
 
-	public class AgentServer : Object, AgentSession {
+	private class AgentServer : Object, AgentSession {
 		public string pipe_address {
 			get;
 			construct;
@@ -175,7 +175,7 @@ namespace Frida.Agent {
 		}
 	}
 
-	internal class AutoIgnorer : Object {
+	protected class AutoIgnorer : Object {
 		protected weak Gum.ScriptBackend script_backend;
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange agent_range;
@@ -212,7 +212,7 @@ namespace Frida.Agent {
 		private extern void revert_apis ();
 	}
 
-	internal string? find_agent_module_name () {
+	private string? find_agent_module_name () {
 		string result = null;
 
 		Gum.Process.enumerate_modules ((details) => {
@@ -226,7 +226,7 @@ namespace Frida.Agent {
 		return result;
 	}
 
-	internal Gum.MemoryRange memory_range (Gum.MemoryRange? mapped_range) {
+	private Gum.MemoryRange memory_range (Gum.MemoryRange? mapped_range) {
 		Gum.MemoryRange? result = mapped_range;
 
 		if (result == null) {
@@ -244,9 +244,9 @@ namespace Frida.Agent {
 	}
 
 	namespace Environment {
-		public extern void init ();
-		public extern void deinit (owned AutoIgnorer ignorer);
-		public extern void prevent_unload (string module_name);
+		private extern void init ();
+		private extern void deinit (owned AutoIgnorer ignorer);
+		private extern void prevent_unload (string module_name);
 	}
 
 }
