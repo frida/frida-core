@@ -41,7 +41,8 @@ libfrida_gadget_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/vapi \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--pkg=frida-interfaces \
-	@FRIDA_AGENT_PACKAGES@
+	@FRIDA_AGENT_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
 
 libfrida_gadget_glue_la_SOURCES = \
 	gadget-glue.c

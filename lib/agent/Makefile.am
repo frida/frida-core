@@ -44,7 +44,8 @@ libfrida_agent_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
-	@FRIDA_AGENT_PACKAGES@
+	@FRIDA_AGENT_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
 
 libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
