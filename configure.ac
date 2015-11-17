@@ -186,9 +186,9 @@ AC_CONFIG_FILES([
   lib/pipe/Makefile
   lib/agent/Makefile
   lib/loader/Makefile
+  lib/gadget/Makefile
   src/Makefile
   server/Makefile
-  gadget/Makefile
   tests/Makefile
   tests/pipe/Makefile
 ])

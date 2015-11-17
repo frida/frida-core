@@ -30,11 +30,6 @@
 /data/frida-data-agent.h
 /data/frida-data-agent.vapi
 /ext/gum/
-/gadget/Makefile
-/gadget/Makefile.in
-/gadget/frida-gadget.h
-/gadget/frida-gadget.vapi
-/gadget/gadget.c
 /lib/Makefile
 /lib/Makefile.in
 /lib/agent/Makefile
@@ -46,6 +41,11 @@
 /lib/agent/frida-agent.h
 /lib/agent/frida-agent.vapi
 /lib/agent/script-engine.c
+/lib/gadget/Makefile
+/lib/gadget/Makefile.in
+/lib/gadget/frida-gadget.h
+/lib/gadget/frida-gadget.vapi
+/lib/gadget/gadget.c
 /lib/interfaces/Makefile
 /lib/interfaces/Makefile.in
 /lib/interfaces/frida-interfaces.h

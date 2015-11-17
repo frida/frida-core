@@ -3,4 +3,6 @@ SUBDIRS = \
 	interfaces \
 	pipe \
 	agent \
-	loader
+	loader \
+	gadget \
+	$(NULL)
