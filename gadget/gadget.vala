@@ -63,7 +63,7 @@ namespace Frida.Gadget {
 
 				try {
 					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
-					agent_registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, this as AgentSession);
+					agent_registration_id = connection.register_object (Frida.ObjectPath.from_agent_session_id (AgentSessionId (1)), this as AgentSession);
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -112,7 +112,7 @@ namespace Frida.Gadget {
 
 			public async AgentSessionId attach_to (uint pid) throws Error {
 				validate_pid (pid);
-				return AgentSessionId (27042);
+				return AgentSessionId (1);
 			}
 
 			private void validate_pid (uint pid) throws Error {
