@@ -4,7 +4,6 @@
 
 #ifdef HAVE_ANDROID
 # include <android/log.h>
-# include <jni.h>
 # include <unistd.h>
 #else
 # include <stdio.h>
@@ -87,23 +86,17 @@ static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
 
-#ifdef HAVE_ANDROID
-
-JNIEXPORT jint
-JNI_OnLoad (JavaVM * vm, void * reserved)
+__attribute__ ((constructor)) static void
+on_load (void)
 {
   frida_gadget_load ();
-
-  return JNI_VERSION_1_6;
 }
 
-JNIEXPORT void
-JNI_OnUnload (JavaVM * vm, void * reserved)
+__attribute__ ((destructor)) static void
+on_unload (void)
 {
   frida_gadget_unload ();
 }
-
-#endif
 
 void
 frida_gadget_environment_init (void)
@@ -123,6 +116,9 @@ frida_gadget_environment_init (void)
   g_assertion_set_handler (frida_gadget_on_assert_failure, NULL);
   g_log_set_default_handler (frida_gadget_on_log_message, NULL);
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
+#if GLIB_CHECK_VERSION (2, 46, 1)
+  gobject_init ();
+#endif
   gio_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
@@ -206,51 +202,6 @@ void
 frida_gadget_log_error (const gchar * message)
 {
   g_error ("%s", message);
-}
-
-void
-frida_gadget_get_application_info (FridaHostApplicationInfo * result)
-{
-  const gchar * identifier, * name;
-  guint pid;
-  FridaImageData no_icon;
-
-  /* TODO: implement */
-  identifier = "re.frida.Gadget";
-  name = "Gadget";
-  pid = getpid ();
-  frida_image_data_init (&no_icon, 0, 0, 0, "");
-
-  frida_host_application_info_init (result, identifier, name, pid, &no_icon, &no_icon);
-
-  frida_image_data_destroy (&no_icon);
-}
-
-void
-frida_gadget_get_process_info (FridaHostProcessInfo * result)
-{
-  guint pid;
-  gchar * name;
-  FridaImageData no_icon;
-
-  pid = getpid ();
-#ifdef HAVE_LINUX
-  {
-    gchar * cmdline;
-    g_file_get_contents ("/proc/self/cmdline", &cmdline, NULL, NULL);
-    name = g_path_get_basename (cmdline);
-    g_free (cmdline);
-  }
-#else
-  /* TODO: implement for other platforms */
-  name = g_strdup ("Gadget");
-#endif
-  frida_image_data_init (&no_icon, 0, 0, 0, "");
-
-  frida_host_process_info_init (result, pid, name, &no_icon, &no_icon);
-
-  frida_image_data_destroy (&no_icon);
-  g_free (name);
 }
 
 static void

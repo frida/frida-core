@@ -1,5 +1,6 @@
 namespace Frida.Gadget {
 	private bool loaded = false;
+	private bool ready = false;
 	private Server server;
 	private Gum.Interceptor interceptor;
 	private AutoIgnorer ignorer;
@@ -21,7 +22,7 @@ namespace Frida.Gadget {
 		source.attach (Environment.get_main_context ());
 
 		mutex.lock ();
-		while (server == null)
+		while (!ready)
 			cond.wait (mutex);
 		mutex.unlock ();
 	}
@@ -50,6 +51,13 @@ namespace Frida.Gadget {
 		Environment.deinit ((owned) ign);
 	}
 
+	public void resume () {
+		mutex.lock ();
+		ready = true;
+		cond.signal ();
+		mutex.unlock ();
+	}
+
 	private async void create_server () {
 		Gum.init ();
 
@@ -75,7 +83,6 @@ namespace Frida.Gadget {
 
 		mutex.lock ();
 		server = s;
-		cond.signal ();
 		mutex.unlock ();
 
 		log_info ("Listening on TCP port 27042");
@@ -156,6 +163,7 @@ namespace Frida.Gadget {
 			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
 			private ScriptEngine script_engine;
+			private bool resume_on_attach = true;
 			private bool close_requested = false;
 
 			public Session (DBusConnection c, Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
@@ -168,8 +176,12 @@ namespace Frida.Gadget {
 					assert_not_reached ();
 				}
 
-				this_app = get_application_info ();
-				this_process = get_process_info ();
+				var pid = Posix.getpid ();
+				var identifier = "re.frida.Gadget";
+				var name = "Gadget";
+				var no_icon = ImageData (0, 0, 0, "");
+				this_app = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+				this_process = HostProcessInfo (pid, name, no_icon, no_icon);
 
 				script_engine = new ScriptEngine (script_backend, gadget_range);
 				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
@@ -208,37 +220,60 @@ namespace Frida.Gadget {
 			}
 
 			public async void enable_spawn_gating () throws Error {
-				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
 			public async void disable_spawn_gating () throws Error {
-				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
 			public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
 			public async uint spawn (string path, string[] argv, string[] envp) throws Error {
-				throw new Error.NOT_SUPPORTED ("Not possible when embedded in app");
+				if (argv.length < 1 || argv[0] != this_app.identifier)
+					throw new Error.NOT_SUPPORTED ("Unable to spawn other apps when embedded");
+
+				resume_on_attach = false;
+
+				return this_process.pid;
 			}
 
 			public async void resume (uint pid) throws Error {
 				validate_pid (pid);
+
+				Frida.Gadget.resume ();
 			}
 
 			public async void kill (uint pid) throws Error {
 				validate_pid (pid);
+
+				yield script_engine.shutdown ();
+				suicide.begin ();
+			}
+
+			private async void suicide () {
+				try {
+					yield connection.flush ();
+				} catch (GLib.Error e) {
+				}
+
+				Posix.kill ((Posix.pid_t) this_process.pid, Posix.SIGKILL);
 			}
 
 			public async AgentSessionId attach_to (uint pid) throws Error {
 				validate_pid (pid);
+
+				if (resume_on_attach)
+					Frida.Gadget.resume ();
+
 				return AgentSessionId (1);
 			}
 
 			private void validate_pid (uint pid) throws Error {
 				if (pid != this_process.pid)
-					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded in app");
+					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
 			}
 
 			public async void close () throws Error {
@@ -346,9 +381,6 @@ namespace Frida.Gadget {
 		private extern void deinit (owned AutoIgnorer ignorer);
 		private extern unowned MainContext get_main_context ();
 	}
-
-	private extern HostApplicationInfo get_application_info ();
-	private extern HostProcessInfo get_process_info ();
 
 	private extern void log_info (string message);
 	private extern void log_error (string message);

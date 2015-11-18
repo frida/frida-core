@@ -1,8 +1,4 @@
 LIBFRIDA_GADGET_1.0 {
-  global:
-    JNI_OnLoad;
-    JNI_OnUnload;
-
   local:
     *;
 };

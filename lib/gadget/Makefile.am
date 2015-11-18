@@ -5,13 +5,13 @@ if OS_ANDROID
 extra_libs += -llog
 endif
 
-if OS_DARWIN
-extra_ldflags += -export-symbols-regex "^(frida_gadget_load|frida_gadget_unload)$$"
-else
 if OS_LINUX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-gadget.version
 else
-extra_ldflags += -export-symbols-regex "^(JNI_OnLoad|JNI_OnUnload)$$"
+if OS_QNX
+extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-gadget.version
+else
+extra_ldflags += -export-symbols-regex "^frida_gadget_no_exports$$"
 endif
 endif
 
@@ -41,6 +41,7 @@ libfrida_gadget_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/vapi \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--pkg=frida-interfaces \
+	--pkg=posix \
 	@FRIDA_AGENT_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
