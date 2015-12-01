@@ -16,6 +16,9 @@ namespace Frida.Test {
 #endif
 
 		Frida.AgentTest.add_tests ();
+#if !WINDOWS
+		Frida.GadgetTest.add_tests ();
+#endif
 		Frida.HostSessionTest.add_tests ();
 
 		GLib.Test.run ();

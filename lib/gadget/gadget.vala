@@ -1,6 +1,13 @@
 namespace Frida.Gadget {
+	private enum State {
+		CREATED,
+		STARTED,
+		RUNNING,
+		STOPPED
+	}
 	private bool loaded = false;
-	private bool ready = false;
+	private State state = State.CREATED;
+	private ScriptRunner script_runner;
 	private Server server;
 	private Gum.Interceptor interceptor;
 	private AutoIgnorer ignorer;
@@ -16,13 +23,13 @@ namespace Frida.Gadget {
 
 		var source = new IdleSource ();
 		source.set_callback (() => {
-			create_server.begin ();
+			start.begin ();
 			return false;
 		});
 		source.attach (Environment.get_main_context ());
 
 		mutex.lock ();
-		while (!ready)
+		while (state != State.RUNNING)
 			cond.wait (mutex);
 		mutex.unlock ();
 	}
@@ -37,14 +44,14 @@ namespace Frida.Gadget {
 		{
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				destroy_server.begin ();
+				stop.begin ();
 				return false;
 			});
 			source.attach (Environment.get_main_context ());
 		}
 
 		mutex.lock ();
-		while (server != null)
+		while (state != State.STOPPED)
 			cond.wait (mutex);
 		mutex.unlock ();
 
@@ -53,19 +60,15 @@ namespace Frida.Gadget {
 
 	public void resume () {
 		mutex.lock ();
-		ready = true;
+		state = State.RUNNING;
 		cond.signal ();
 		mutex.unlock ();
 	}
 
-	private async void create_server () {
+	private async void start () {
 		Gum.init ();
 
-#if DARWIN
-		var script_backend = Gum.ScriptBackend.obtain_jsc ();
-#else
-		var script_backend = Gum.ScriptBackend.obtain_v8 ();
-#endif
+		var script_backend = obtain_script_backend ();
 		var gadget_range = memory_range ();
 
 		interceptor = Gum.Interceptor.obtain ();
@@ -74,22 +77,35 @@ namespace Frida.Gadget {
 		ignorer.enable ();
 		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
 
-		var s = new Server (script_backend, gadget_range);
-		try {
-			yield s.start ();
-		} catch (Error e) {
-			log_error ("Failed to start: " + e.message);
+		var script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
+		if (script_file != null) {
+			var r = new ScriptRunner (script_file, script_backend, gadget_range);
+			try {
+				yield r.start ();
+				script_runner = r;
+			} catch (Error e) {
+				log_error ("Failed to load script: " + e.message);
+			}
+		} else {
+			var s = new Server (script_backend, gadget_range);
+			try {
+				yield s.start ();
+				server = s;
+				log_info ("Listening on TCP port 27042");
+			} catch (Error e) {
+				log_error ("Failed to start: " + e.message);
+			}
 		}
-
-		mutex.lock ();
-		server = s;
-		mutex.unlock ();
-
-		log_info ("Listening on TCP port 27042");
 	}
 
-	private async void destroy_server () {
-		yield server.stop ();
+	private async void stop () {
+		if (script_runner != null) {
+			yield script_runner.stop ();
+			script_runner = null;
+		} else {
+			yield server.stop ();
+			server = null;
+		}
 
 		ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
 		ignorer.disable ();
@@ -100,9 +116,45 @@ namespace Frida.Gadget {
 		Gum.deinit ();
 
 		mutex.lock ();
-		server = null;
+		state = State.STOPPED;
 		cond.signal ();
 		mutex.unlock ();
+	}
+
+	private class ScriptRunner : Object {
+		private AgentScriptId script;
+		private string script_file;
+		private ScriptEngine script_engine;
+
+		public ScriptRunner (string script_file, Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
+			this.script_file = script_file;
+
+			script_engine = new ScriptEngine (script_backend, gadget_range);
+			script_engine.message_from_script.connect (on_message);
+		}
+
+		public async void start () throws Error {
+			var name = Path.get_basename (script_file).split (".", 2)[0];
+
+			string source;
+			try {
+				FileUtils.get_contents (script_file, out source);
+			} catch (FileError e) {
+				throw new Error.INVALID_ARGUMENT (e.message);
+			}
+
+			var instance = yield script_engine.create_script (name, source);
+			script = instance.sid;
+			yield script_engine.load_script (script);
+		}
+
+		public async void stop () {
+			yield script_engine.shutdown ();
+		}
+
+		private void on_message (AgentScriptId sid, string message, uint8[] data) {
+			// TODO: implement basic RPC so we know when the script has finished initializing
+		}
 	}
 
 	private class Server : Object {
@@ -364,7 +416,8 @@ namespace Frida.Gadget {
 		Gum.MemoryRange? result = null;
 
 		Gum.Process.enumerate_modules ((details) => {
-			if (details.name.index_of ("FridaGadget") != -1) {
+			var name = details.name;
+			if (name.index_of ("FridaGadget") != -1 || name.index_of ("frida-gadget") != -1) {
 				result = details.range;
 				return false;
 			}
@@ -381,6 +434,9 @@ namespace Frida.Gadget {
 		private extern void deinit (owned AutoIgnorer ignorer);
 		private extern unowned MainContext get_main_context ();
 	}
+
+	// TODO: use Vala's preprocessor when the build system has been fixed
+	private extern unowned Gum.ScriptBackend obtain_script_backend ();
 
 	private extern void log_info (string message);
 	private extern void log_error (string message);

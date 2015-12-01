@@ -117,6 +117,7 @@
 /tests/runner.c
 /tests/test-agent.c
 /tests/test-fruitjector.c
+/tests/test-gadget.c
 /tests/test-host-session.c
 /tests/test-linjector.c
 /tests/test-qinjector.c

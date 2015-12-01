@@ -59,6 +59,7 @@ libfrida_tests_la_SOURCES = \
 	test-system.vala \
 	$(platform_tests) \
 	test-agent.vala \
+	test-gadget.vala \
 	test-host-session.vala \
 	runner.vala \
 	async-harness.vala \
@@ -92,6 +93,7 @@ data/.stamp:
 	mkdir -p $(@D)
 	cp $(srcdir)/labrats/unixvictim-* $(@D)
 	cp $(srcdir)/labrats/unixattacker-* $(@D)
+	cp $(srcdir)/*.js $(@D)
 	touch $@
 
 AM_CPPFLAGS = \
