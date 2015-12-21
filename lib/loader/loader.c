@@ -45,6 +45,8 @@ typedef FridaCFIndex (* FridaCFStringGetLengthFunc) (FridaCFRef str);
 typedef FridaCFIndex (* FridaCFStringGetMaximumSizeForEncodingFunc) (FridaCFIndex length, FridaCFStringEncoding encoding);
 typedef FridaCFBoolean (* FridaCFStringGetCString) (FridaCFRef str, char * buffer, FridaCFIndex buffer_size, FridaCFStringEncoding encoding);
 
+static void detect_data_dir (void);
+
 #define FRIDA_AGENT_FILENAME "frida-agent.dylib"
 
 __attribute__ ((constructor)) static void
@@ -52,6 +54,8 @@ frida_loader_on_load (void)
 {
   char * identifier = NULL, * details;
   FridaCFBundleGetMainBundleFunc cf_bundle_get_main_bundle;
+
+  detect_data_dir ();
 
   cf_bundle_get_main_bundle = dlsym (RTLD_DEFAULT, "CFBundleGetMainBundle");
   if (cf_bundle_get_main_bundle != NULL)
@@ -99,6 +103,21 @@ frida_loader_on_load (void)
   free (details);
   if (identifier != NULL)
     free (identifier);
+}
+
+static void
+detect_data_dir (void)
+{
+  Dl_info info;
+  int res;
+
+  res = dladdr (frida_loader_on_load, &info);
+  assert (res != 0);
+
+  res = readlink (info.dli_fname, frida_data_dir, sizeof (frida_data_dir));
+  assert (res != -1);
+  frida_data_dir[res] = '\0';
+  *strrchr (frida_data_dir, '/') = '\0';
 }
 
 #else

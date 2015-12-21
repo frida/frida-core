@@ -191,7 +191,6 @@ backend_sources += \
 glue_sources += \
 	darwin/system-darwin.m \
 	darwin/darwin-host-session-glue.m \
-	darwin/fruitjector-glue.c \
 	darwin/icon-helpers.h \
 	darwin/icon-helpers.m \
 	$(springboard_sources)

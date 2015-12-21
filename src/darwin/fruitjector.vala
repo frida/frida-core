@@ -74,7 +74,7 @@ namespace Frida {
 			get {
 				if (_file == null) {
 					try {
-						_file = new TemporaryFile.from_stream (name, _clone_dylib (dylib), tempdir);
+						_file = new TemporaryFile.from_stream (name, dylib, tempdir);
 					} catch (Error e) {
 						assert_not_reached ();
 					}
@@ -102,8 +102,6 @@ namespace Frida {
 				assert_not_reached ();
 			}
 		}
-
-		public static extern InputStream _clone_dylib (InputStream dylib);
 	}
 }
 #endif

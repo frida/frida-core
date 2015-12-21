@@ -210,8 +210,6 @@ namespace Frida {
 	private class FruitLauncher {
 		public signal void spawned (HostSpawnInfo info);
 
-		private const string LOADER_DATA_DIR_MAGIC = "3zPLi3BupiesaB9diyimME74fJw4jvj6";
-
 		private HelperProcess helper;
 		private AgentResource agent;
 		private UnixSocketAddress service_address;
@@ -351,8 +349,11 @@ namespace Frida {
 			try {
 				FileUtils.set_data (plist_path, generate_loader_plist ());
 				FileUtils.chmod (plist_path, 0644);
-				FileUtils.set_data (dylib_path, generate_loader_dylib (dylib_blob, agent.tempdir.path));
-				FileUtils.chmod (dylib_path, 0755);
+				var real_dylib_path = Path.build_filename (agent.tempdir.path, dylib_blob.name);
+				FileUtils.set_data (real_dylib_path, dylib_blob.data);
+				FileUtils.chmod (real_dylib_path, 0755);
+				FileUtils.unlink (dylib_path);
+				FileUtils.symlink (real_dylib_path, dylib_path);
 			} catch (GLib.FileError e) {
 				throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
 			}
@@ -374,23 +375,6 @@ namespace Frida {
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x31
 			};
-		}
-
-		private uint8[] generate_loader_dylib (Frida.Data.Loader.Blob blob, string callback_path) {
-			var result = blob.data[0:blob.data.length];
-			uint8 first_byte = LOADER_DATA_DIR_MAGIC[0];
-			for (var i = 0; i != result.length; i++) {
-				if (result[i] == first_byte) {
-					uint8 * p = &result[i];
-					if (Memory.cmp (p, LOADER_DATA_DIR_MAGIC, LOADER_DATA_DIR_MAGIC.length) == 0) {
-						Memory.copy (p, callback_path, callback_path.length + 1);
-						i += callback_path.length;
-						// We need to keep going due to universal binaries.
-						// Note that we omit the `+ 1` as the for-loop does it for us.
-					}
-				}
-			}
-			return result;
 		}
 
 		private static extern void check_identifier (string identifier) throws Error;
