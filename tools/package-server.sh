@@ -41,10 +41,16 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	<array>
 		<string>/usr/sbin/frida-server</string>
 	</array>
-	<key>RunAtLoad</key>
-	<true/>
 	<key>UserName</key>
 	<string>root</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<key>ExecuteAllowed</key>
+	<true/>
 </dict>
 </plist>
 EOF
