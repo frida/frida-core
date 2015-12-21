@@ -8,7 +8,7 @@
 #endif
 
 #include <windows.h>
-#include <aclapi.h>
+#include <sddl.h>
 
 #define PIPE_BUFSIZE (1024 * 1024)
 
@@ -325,40 +325,27 @@ frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
 {
   HANDLE result = INVALID_HANDLE_VALUE;
   BOOL success;
-  DWORD res;
   const gchar * failed_operation;
   WCHAR * path;
-  SID_IDENTIFIER_AUTHORITY world_auth = SECURITY_WORLD_SID_AUTHORITY;
-  PSID everyone_sid = NULL;
-  EXPLICIT_ACCESSW ea;
-  PACL acl = NULL;
   PSECURITY_DESCRIPTOR sd = NULL;
   SECURITY_ATTRIBUTES sa;
 
   path = frida_pipe_path_from_name (name);
 
-  success = AllocateAndInitializeSid (&world_auth, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &everyone_sid);
-  CHECK_WINAPI_RESULT (success, !=, FALSE, "AllocateAndInitializeSid");
+  //
+  // Named pipe security descriptor
+  //
+  // DACL
+  // No automatic inheritance
+  // ACE #1 - Allow GENERIC_READ | GENERIC_WRITE for ALL APPLICATION PACKAGES
+  // ACE #2 - Allow GENERIC_READ | GENERIC_WRITE for Everyone
+  //
+  // SACL
+  // ACE #1 - Mandatory Label, Low Integrity w/ no read and write up from lower levels
+  //
 
-  ZeroMemory (&ea, sizeof (ea));
-  ea.grfAccessPermissions = GENERIC_READ | GENERIC_WRITE;
-  ea.grfAccessMode = SET_ACCESS;
-  ea.grfInheritance = NO_INHERITANCE;
-  ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-  ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
-  ea.Trustee.ptstrName  = (LPWSTR) everyone_sid;
-
-  res = SetEntriesInAclW (1, &ea, NULL, &acl);
-  CHECK_WINAPI_RESULT (res, ==, ERROR_SUCCESS, "SetEntriesInAcl");
-
-  sd = LocalAlloc (LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
-  CHECK_WINAPI_RESULT (sd, !=, NULL, "LocalAlloc");
-
-  success = InitializeSecurityDescriptor (sd, SECURITY_DESCRIPTOR_REVISION);
-  CHECK_WINAPI_RESULT (success, !=, FALSE, "InitializeSecurityDescriptor");
-
-  success = SetSecurityDescriptorDacl (sd, TRUE, acl, FALSE);
-  CHECK_WINAPI_RESULT (success, !=, FALSE, "SetSecurityDescriptorDacl");
+  success = ConvertStringSecurityDescriptorToSecurityDescriptor (L"D:PAI(A;;GRGW;;;AC)(A;;GRGW;;;WD)S:(ML;;NWNR;;;LW)", SDDL_REVISION_1, &sd, NULL);
+  CHECK_WINAPI_RESULT (success, != , FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
 
   sa.nLength = sizeof (sa);
   sa.lpSecurityDescriptor = sd;
@@ -408,10 +395,6 @@ beach:
   {
     if (sd != NULL)
       LocalFree (sd);
-    if (acl != NULL)
-      LocalFree (acl);
-    if (everyone_sid != NULL)
-      FreeSid (everyone_sid);
 
     g_free (path);
 
