@@ -31,12 +31,22 @@ void CFLog (CFLogLevel level, CFStringRef format, ...);
 # include <stdio.h>
 #endif
 
+#ifdef HAVE_IOS
+# define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT 6
+
+int memorystatus_control (uint32_t command, int32_t pid, uint32_t flags, void * buffer, size_t buffer_size);
+#endif
+
 static void frida_server_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
 static void frida_server_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
 void
 frida_server_environment_init (void)
 {
+#ifdef HAVE_IOS
+  memorystatus_control (MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT, getpid (), 256, NULL, 0);
+#endif
+
   g_assertion_set_handler (frida_server_on_assert_failure, NULL);
   g_log_set_default_handler (frida_server_on_log_message, NULL);
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
