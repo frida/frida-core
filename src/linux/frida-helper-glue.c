@@ -25,6 +25,9 @@
 #include <stdio.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#ifdef HAVE_ARM
+# include <asm/ptrace.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -701,12 +704,12 @@ frida_inject_instance_commit_arm_code (GumThumbWriter * cw, FridaCodeChunk * cod
 static void
 frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
-#ifdef HAVE_ANDROID
   GumThumbWriter cw;
-  const guint worker_offset = 64;
+  const guint worker_offset = 128;
 
   gum_thumb_writer_init (&cw, code->cur);
 
+#ifdef HAVE_ANDROID
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "pthread_create"),
       4,
@@ -714,6 +717,37 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, remote_address + worker_offset + 1,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+#else
+  gum_thumb_writer_put_push_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_so)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "__libc_dlsym"),
+      2,
+      GUM_ARG_REGISTER, ARM_REG_R6,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_create)));
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
+
+  gum_thumb_writer_put_call_reg_with_arguments (&cw,
+      ARM_REG_R5,
+      4,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_ADDRESS, remote_address + worker_offset + 1,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "__libc_dlclose"),
+      1,
+      GUM_ARG_REGISTER, ARM_REG_R6);
+
+#endif
 
   gum_thumb_writer_put_breakpoint (&cw);
   gum_thumb_writer_flush (&cw);
@@ -741,6 +775,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (1));
 
+#ifdef HAVE_ANDROID
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_linker_function (params->pid, dlopen),
       2,
@@ -754,6 +789,21 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_REGISTER, ARM_REG_R6,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
+#else
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
+
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "__libc_dlsym"),
+      2,
+      GUM_ARG_REGISTER, ARM_REG_R6,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
+#endif
 
   gum_thumb_writer_put_call_reg_with_arguments (&cw,
       ARM_REG_R5,
@@ -762,10 +812,17 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
+#ifdef HAVE_ANDROID
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_linker_function (params->pid, dlclose),
       1,
       GUM_ARG_REGISTER, ARM_REG_R6);
+#else
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "__libc_dlclose"),
+      1,
+      GUM_ARG_REGISTER, ARM_REG_R6);
+#endif
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "close"),
@@ -776,9 +833,6 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   frida_inject_instance_commit_arm_code (&cw, code);
   gum_thumb_writer_free (&cw);
-#else
-# error Not yet ported to Linux/ARM
-#endif
 }
 
 #elif defined (HAVE_ARM64)
@@ -1542,7 +1596,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
       {
         p++;
 
-        if (g_str_has_prefix (p, library_name) && g_str_has_suffix (p, ".so"))
+        if (g_str_has_prefix (p, library_name) && strstr (p, ".so"))
         {
           gchar next_char = p[strlen (library_name)];
           if (next_char == '-' || next_char == '.')
