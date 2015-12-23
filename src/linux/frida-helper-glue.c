@@ -1596,7 +1596,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
       {
         p++;
 
-        if (g_str_has_prefix (p, library_name) && g_str_has_suffix (p, ".so"))
+        if (g_str_has_prefix (p, library_name) && strstr (p, ".so"))
         {
           gchar next_char = p[strlen (library_name)];
           if (next_char == '-' || next_char == '.')
