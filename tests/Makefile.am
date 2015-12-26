@@ -89,7 +89,7 @@ libfrida_tests_glue_la_SOURCES = \
 	process-unix.c \
 	runner-glue.c
 
-data/.stamp:
+data/.stamp: test-gadget-standalone.js
 	mkdir -p $(@D)
 	cp $(srcdir)/labrats/unixvictim-* $(@D)
 	cp $(srcdir)/labrats/unixattacker-* $(@D)

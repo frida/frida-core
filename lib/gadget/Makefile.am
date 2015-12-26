@@ -30,7 +30,7 @@ libfrida_gadget_la_LIBADD = \
 	$(builddir)/libfrida-gadget-glue.la \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(extra_libs) \
-	$(FRIDA_AGENT_LIBS)
+	$(FRIDA_GADGET_LIBS)
 libfrida_gadget_la_LDFLAGS = \
 	-no-undefined \
 	-avoid-version \
@@ -42,7 +42,7 @@ libfrida_gadget_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--pkg=frida-interfaces \
 	--pkg=posix \
-	@FRIDA_AGENT_PACKAGES@ \
+	@FRIDA_GADGET_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
 libfrida_gadget_glue_la_SOURCES = \
@@ -51,5 +51,5 @@ libfrida_gadget_glue_la_SOURCES = \
 AM_CPPFLAGS = \
 	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
-	$(FRIDA_AGENT_CFLAGS) \
+	$(FRIDA_GADGET_CFLAGS) \
 	-I $(top_srcdir)/lib/interfaces

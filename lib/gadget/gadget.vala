@@ -86,6 +86,7 @@ namespace Frida.Gadget {
 			} catch (Error e) {
 				log_error ("Failed to load script: " + e.message);
 			}
+			resume ();
 		} else {
 			var s = new Server (script_backend, gadget_range);
 			try {
@@ -126,6 +127,9 @@ namespace Frida.Gadget {
 		private string script_file;
 		private ScriptEngine script_engine;
 
+		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
+		private int64 next_request_id = 1;
+
 		public ScriptRunner (string script_file, Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
 			this.script_file = script_file;
 
@@ -146,14 +150,149 @@ namespace Frida.Gadget {
 			var instance = yield script_engine.create_script (name, source);
 			script = instance.sid;
 			yield script_engine.load_script (script);
+
+			try {
+				yield call ("init", new Json.Node[] {});
+			} catch (Error e) {
+			}
 		}
 
 		public async void stop () {
 			yield script_engine.shutdown ();
 		}
 
-		private void on_message (AgentScriptId sid, string message, uint8[] data) {
-			// TODO: implement basic RPC so we know when the script has finished initializing
+		private async Json.Node call (string method, Json.Node[] args) throws Error {
+			var request_id = next_request_id++;
+
+			var builder = new Json.Builder ();
+			builder
+			.begin_array ()
+			.add_string_value ("frida:rpc")
+			.add_int_value (request_id)
+			.add_string_value ("call")
+			.add_string_value (method)
+			.begin_array ();
+			foreach (var arg in args)
+				builder.add_value (arg);
+			builder
+			.end_array ()
+			.end_array ();
+
+			var generator = new Json.Generator ();
+			generator.set_root (builder.get_root ());
+			size_t length;
+			var request = generator.to_data (out length);
+
+			var response = new PendingResponse (() => call.callback ());
+			pending[request_id.to_string ()] = response;
+
+			post_call_request.begin (request, response);
+
+			yield;
+
+			if (response.error != null)
+				throw response.error;
+
+			return response.result;
+		}
+
+		private async void post_call_request (string request, PendingResponse response) {
+			try {
+				script_engine.post_message_to_script (script, request);
+			} catch (GLib.Error e) {
+				response.complete_with_error (Marshal.from_dbus (e));
+			}
+		}
+
+		private void on_message (AgentScriptId sid, string raw_message, uint8[] data) {
+			var parser = new Json.Parser ();
+			try {
+				parser.load_from_data (raw_message);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			var message = parser.get_root ().get_object ();
+
+			bool handled = false;
+			var type = message.get_string_member ("type");
+			if (type == "send")
+				handled = try_handle_rpc_message (message);
+			else if (type == "log")
+				handled = try_handle_log_message (message);
+
+			if (!handled) {
+				stdout.puts (raw_message);
+				stdout.putc ('\n');
+			}
+		}
+
+		private bool try_handle_rpc_message (Json.Object message) {
+			var payload = message.get_member ("payload");
+			if (payload == null || payload.get_node_type () != Json.NodeType.ARRAY)
+				return false;
+			var rpc_message = payload.get_array ();
+			if (rpc_message.get_length () < 4)
+				return false;
+			else if (rpc_message.get_element (0).get_string () != "frida:rpc")
+				return false;
+
+			var request_id = rpc_message.get_int_element (1);
+			PendingResponse response;
+			pending.unset (request_id.to_string (), out response);
+			var status = rpc_message.get_string_element (2);
+			if (status == "ok")
+				response.complete_with_result (rpc_message.get_element (3));
+			else
+				response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
+			return true;
+		}
+
+		private bool try_handle_log_message (Json.Object message) {
+			var level = message.get_string_member ("level");
+			var payload = message.get_string_member ("payload");
+			switch (level) {
+				case "info":
+					stdout.printf ("%s\n", payload);
+					break;
+
+				case "warning":
+					stderr.printf ("\033[0;33m%s\033[0m\n", payload);
+					break;
+
+				case "error":
+					stderr.printf ("\033[0;31m%s\033[0m\n", payload);
+					break;
+			}
+			return true;
+		}
+
+		private class PendingResponse {
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
+
+			public Json.Node? result {
+				get;
+				private set;
+			}
+
+			public Error? error {
+				get;
+				private set;
+			}
+
+			public PendingResponse (owned CompletionHandler handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete_with_result (Json.Node r) {
+				result = r;
+				handler ();
+			}
+
+			public void complete_with_error (Error e) {
+				error = e;
+				handler ();
+			}
 		}
 	}
 

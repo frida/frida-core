@@ -36,7 +36,7 @@ namespace Frida.GadgetTest {
 
 			try {
 				var process = Frida.Test.Process.start (rat_file, argv, envp, Frida.Test.Arch.CURRENT);
-				process.join (1000);
+				process.join (5000);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
