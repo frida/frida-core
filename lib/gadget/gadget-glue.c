@@ -120,18 +120,12 @@ frida_gadget_environment_init (void)
   gobject_init ();
 #endif
   gio_init ();
+  gum_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
   main_context = g_main_context_ref (g_main_context_default ());
   main_loop = g_main_loop_new (main_context, FALSE);
   main_thread = g_thread_new ("gadget-main-loop", run_main_loop, NULL);
-}
-
-void
-frida_gadget_environment_shutdown (void)
-{
-  gio_shutdown ();
-  glib_shutdown ();
 }
 
 void
@@ -159,6 +153,7 @@ frida_gadget_environment_deinit (FridaGadgetAutoIgnorer * ignorer)
   glib_shutdown ();
   frida_gadget_auto_ignorer_shutdown (ignorer);
   g_object_unref (ignorer);
+  gum_deinit ();
   gio_deinit ();
   glib_deinit ();
   gum_memory_deinit ();

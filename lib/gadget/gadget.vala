@@ -9,7 +9,6 @@ namespace Frida.Gadget {
 	private State state = State.CREATED;
 	private ScriptRunner script_runner;
 	private Server server;
-	private Gum.Interceptor interceptor;
 	private AutoIgnorer ignorer;
 	private Mutex mutex;
 	private Cond cond;
@@ -66,12 +65,10 @@ namespace Frida.Gadget {
 	}
 
 	private async void start () {
-		Gum.init ();
-
 		var script_backend = obtain_script_backend ();
 		var gadget_range = memory_range ();
 
-		interceptor = Gum.Interceptor.obtain ();
+		var interceptor = Gum.Interceptor.obtain ();
 
 		ignorer = new AutoIgnorer (script_backend, interceptor, gadget_range);
 		ignorer.enable ();
@@ -111,10 +108,6 @@ namespace Frida.Gadget {
 		ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
 		ignorer.disable ();
 		ignorer = null;
-		interceptor = null;
-
-		Environment.shutdown ();
-		Gum.deinit ();
 
 		mutex.lock ();
 		state = State.STOPPED;
@@ -569,7 +562,6 @@ namespace Frida.Gadget {
 
 	namespace Environment {
 		private extern void init ();
-		private extern void shutdown ();
 		private extern void deinit (owned AutoIgnorer ignorer);
 		private extern unowned MainContext get_main_context ();
 	}

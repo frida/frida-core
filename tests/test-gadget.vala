@@ -23,20 +23,19 @@ namespace Frida.GadgetTest {
 			var data_dir = Path.build_filename (tests_dir, "data");
 			var rat_file = Path.build_filename (data_dir, "unixvictim" + os_suffix ());
 			var script_file = File.new_for_path (Path.build_filename (data_dir, "test-gadget-standalone.js"));
-			var log_file = File.new_for_path (Path.build_filename (tests_dir, "test-gadget-standalone.log"));
 
 			var argv = new string[] {
 				rat_file
 			};
 			var envp = new string[] {
 				"DYLD_INSERT_LIBRARIES=" + gadget_filename,
-				"FRIDA_GADGET_SCRIPT=" + script_file.get_path (),
-				"FRIDA_GADGET_TEST_LOGFILE=" + log_file.get_path ()
+				"FRIDA_GADGET_SCRIPT=" + script_file.get_path ()
 			};
 
 			try {
 				var process = Frida.Test.Process.start (rat_file, argv, envp, Frida.Test.Arch.CURRENT);
-				process.join (5000);
+				var exitcode = process.join (5000);
+				assert (exitcode == 123);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
