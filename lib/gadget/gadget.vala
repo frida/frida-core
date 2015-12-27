@@ -245,15 +245,15 @@ namespace Frida.Gadget {
 			var payload = message.get_string_member ("payload");
 			switch (level) {
 				case "info":
-					stdout.printf ("%s\n", payload);
+					print ("%s\n", payload);
 					break;
 
 				case "warning":
-					stderr.printf ("\033[0;33m%s\033[0m\n", payload);
+					printerr ("\033[0;33m%s\033[0m\n", payload);
 					break;
 
 				case "error":
-					stderr.printf ("\033[0;31m%s\033[0m\n", payload);
+					printerr ("\033[0;31m%s\033[0m\n", payload);
 					break;
 			}
 			return true;
