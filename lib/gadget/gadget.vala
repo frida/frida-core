@@ -5,8 +5,13 @@ namespace Frida.Gadget {
 		RUNNING,
 		STOPPED
 	}
+	private enum Env {
+		PRODUCTION,
+		DEVELOPMENT
+	}
 	private bool loaded = false;
 	private State state = State.CREATED;
+	private Env env = Env.PRODUCTION;
 	private ScriptRunner script_runner;
 	private Server server;
 	private AutoIgnorer ignorer;
@@ -74,6 +79,10 @@ namespace Frida.Gadget {
 		ignorer.enable ();
 		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
 
+		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {
+			env = Env.DEVELOPMENT;
+		}
+
 		var script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
 		if (script_file != null) {
 			var r = new ScriptRunner (script_file, script_backend, gadget_range);
@@ -118,7 +127,10 @@ namespace Frida.Gadget {
 	private class ScriptRunner : Object {
 		private AgentScriptId script;
 		private string script_file;
+		private FileMonitor script_monitor;
+		private Source script_unchanged_timeout;
 		private ScriptEngine script_engine;
+		private bool load_in_progress = false;
 
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
@@ -131,27 +143,71 @@ namespace Frida.Gadget {
 		}
 
 		public async void start () throws Error {
-			var name = Path.get_basename (script_file).split (".", 2)[0];
+			yield load ();
 
-			string source;
-			try {
-				FileUtils.get_contents (script_file, out source);
-			} catch (FileError e) {
-				throw new Error.INVALID_ARGUMENT (e.message);
-			}
-
-			var instance = yield script_engine.create_script (name, source);
-			script = instance.sid;
-			yield script_engine.load_script (script);
-
-			try {
-				yield call ("init", new Json.Node[] {});
-			} catch (Error e) {
+			if (env == Env.DEVELOPMENT) {
+				try {
+					script_monitor = File.new_for_path (script_file).monitor_file (FileMonitorFlags.NONE);
+					script_monitor.changed.connect (on_script_file_changed);
+				} catch (GLib.Error e) {
+					printerr (e.message);
+				}
 			}
 		}
 
 		public async void stop () {
+			if (script_monitor != null) {
+				script_monitor.changed.disconnect (on_script_file_changed);
+				script_monitor.cancel ();
+				script_monitor = null;
+			}
+
 			yield script_engine.shutdown ();
+		}
+
+		private async void try_reload () {
+			try {
+				yield load ();
+			} catch (Error e) {
+				printerr ("Failed to reload script: %s\n", e.message);
+			}
+		}
+
+		private async void load () throws Error {
+			load_in_progress = true;
+
+			try {
+				var name = Path.get_basename (script_file).split (".", 2)[0];
+
+				string source;
+				try {
+					FileUtils.get_contents (script_file, out source);
+				} catch (FileError e) {
+					throw new Error.INVALID_ARGUMENT (e.message);
+				}
+
+				var instance = yield script_engine.create_script (name, source);
+
+				if (script.handle != 0) {
+					try {
+						yield call ("dispose", new Json.Node[] {});
+					} catch (Error e) {
+					}
+
+					yield script_engine.destroy_script (script);
+					script = AgentScriptId (0);
+				}
+				script = instance.sid;
+
+				yield script_engine.load_script (script);
+
+				try {
+					yield call ("init", new Json.Node[] {});
+				} catch (Error e) {
+				}
+			} finally {
+				load_in_progress = false;
+			}
 		}
 
 		private async Json.Node call (string method, Json.Node[] args) throws Error {
@@ -195,6 +251,24 @@ namespace Frida.Gadget {
 			} catch (GLib.Error e) {
 				response.complete_with_error (Marshal.from_dbus (e));
 			}
+		}
+
+		private void on_script_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
+			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
+				return;
+
+			var source = new TimeoutSource (50);
+			source.set_callback (() => {
+				if (load_in_progress)
+					return true;
+				try_reload.begin ();
+				return false;
+			});
+			source.attach (Environment.get_main_context ());
+
+			if (script_unchanged_timeout != null)
+				script_unchanged_timeout.destroy ();
+			script_unchanged_timeout = source;
 		}
 
 		private void on_message (AgentScriptId sid, string raw_message, uint8[] data) {
