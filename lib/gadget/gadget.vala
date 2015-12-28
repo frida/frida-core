@@ -155,7 +155,18 @@ namespace Frida.Gadget {
 			}
 		}
 
+		public async void flush () {
+			if (script.handle != 0) {
+				try {
+					yield call ("dispose", new Json.Node[] {});
+				} catch (Error e) {
+				}
+			}
+		}
+
 		public async void stop () {
+			yield flush ();
+
 			if (script_monitor != null) {
 				script_monitor.changed.disconnect (on_script_file_changed);
 				script_monitor.cancel ();
