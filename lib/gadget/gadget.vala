@@ -59,7 +59,8 @@ namespace Frida.Gadget {
 			cond.wait (mutex);
 		mutex.unlock ();
 
-		Environment.deinit ((owned) ign);
+		if (env == Env.DEVELOPMENT)
+			Environment.deinit ((owned) ign);
 	}
 
 	public void resume () {
@@ -106,17 +107,22 @@ namespace Frida.Gadget {
 	}
 
 	private async void stop () {
-		if (script_runner != null) {
-			yield script_runner.stop ();
-			script_runner = null;
+		if (env == Env.PRODUCTION) {
+			if (script_runner != null)
+				yield script_runner.flush ();
 		} else {
-			yield server.stop ();
-			server = null;
-		}
+			if (script_runner != null) {
+				yield script_runner.stop ();
+				script_runner = null;
+			} else {
+				yield server.stop ();
+				server = null;
+			}
 
-		ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
-		ignorer.disable ();
-		ignorer = null;
+			ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
+			ignorer.disable ();
+			ignorer = null;
+		}
 
 		mutex.lock ();
 		state = State.STOPPED;
