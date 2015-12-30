@@ -9,6 +9,6 @@ _frida_fruity_host_session_provider_extract_details_for_device (gint product_id,
 
   no_icon._pixels = "";
 
-  *name = "iOS Device";
+  *name = g_strdup ("iOS Device");
   *icon = frida_image_data_dup (&no_icon);
 }
