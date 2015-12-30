@@ -8,6 +8,7 @@
 #endif
 
 #include <windows.h>
+#include <aclapi.h>
 #include <sddl.h>
 
 #define PIPE_BUFSIZE (1024 * 1024)
