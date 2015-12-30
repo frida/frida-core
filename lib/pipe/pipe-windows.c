@@ -327,6 +327,8 @@ frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
   BOOL success;
   const gchar * failed_operation;
   WCHAR * path;
+  PSID everyone_sid = NULL;
+  PACL acl = NULL;
   PSECURITY_DESCRIPTOR sd = NULL;
   SECURITY_ATTRIBUTES sa;
 
@@ -345,7 +347,37 @@ frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
   //
 
   success = ConvertStringSecurityDescriptorToSecurityDescriptor (L"D:PAI(A;;GRGW;;;AC)(A;;GRGW;;;WD)S:(ML;;NWNR;;;LW)", SDDL_REVISION_1, &sd, NULL);
-  CHECK_WINAPI_RESULT (success, != , FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
+  if (!success)
+  {
+    DWORD res;
+    SID_IDENTIFIER_AUTHORITY world_auth = SECURITY_WORLD_SID_AUTHORITY;
+    EXPLICIT_ACCESSW ea;
+
+    // FIXME: This is a quick and dirty fallback for earlier Windows OSes.
+
+    success = AllocateAndInitializeSid (&world_auth, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &everyone_sid);
+    CHECK_WINAPI_RESULT (success, !=, FALSE, "AllocateAndInitializeSid");
+
+    ZeroMemory (&ea, sizeof (ea));
+    ea.grfAccessPermissions = GENERIC_READ | GENERIC_WRITE;
+    ea.grfAccessMode = SET_ACCESS;
+    ea.grfInheritance = NO_INHERITANCE;
+    ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+    ea.Trustee.ptstrName = (LPWSTR) everyone_sid;
+
+    res = SetEntriesInAclW (1, &ea, NULL, &acl);
+    CHECK_WINAPI_RESULT (res, ==, ERROR_SUCCESS, "SetEntriesInAcl");
+
+    sd = LocalAlloc (LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
+    CHECK_WINAPI_RESULT (sd, !=, NULL, "LocalAlloc");
+
+    success = InitializeSecurityDescriptor (sd, SECURITY_DESCRIPTOR_REVISION);
+    CHECK_WINAPI_RESULT (success, !=, FALSE, "InitializeSecurityDescriptor");
+
+    success = SetSecurityDescriptorDacl (sd, TRUE, acl, FALSE);
+    CHECK_WINAPI_RESULT (success, !=, FALSE, "SetSecurityDescriptorDacl");
+  }
 
   sa.nLength = sizeof (sa);
   sa.lpSecurityDescriptor = sd;
@@ -395,6 +427,10 @@ beach:
   {
     if (sd != NULL)
       LocalFree (sd);
+    if (acl != NULL)
+      LocalFree (acl);
+    if (everyone_sid != NULL)
+      FreeSid (everyone_sid);
 
     g_free (path);
 
