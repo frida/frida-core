@@ -9,9 +9,7 @@ namespace Frida {
 
 		public HostSessionService.with_default_backends () {
 			add_local_backends ();
-#if !LINUX && !QNX
 			add_backend (new FruityHostSessionBackend ());
-#endif
 			add_backend (new DroidyHostSessionBackend ());
 			add_backend (new TcpHostSessionBackend ());
 		}

@@ -293,13 +293,6 @@ backend_cleanfiles += \
 	frida-data-helper-process.c \
 	frida-data-helper-process-blob.S
 
-backend_sources += \
-	fruity/fruity-client.vala \
-	fruity/fruity-host-session.vala \
-	fruity/fruity-property-list.vala
-glue_sources += \
-	fruity/fruity-host-session-darwin.m
-
 backend_libraries += \
 	libfrida-data-loader.la
 libfrida_data_loader_la_SOURCES = \
@@ -324,6 +317,16 @@ glue_sources += \
 	qnx/system-qnx.c \
 	qnx/qnx-host-session-glue.c \
 	qnx/qinjector-glue.c
+endif
+
+backend_sources += \
+	fruity/fruity-client.vala \
+	fruity/fruity-host-session.vala \
+	fruity/fruity-property-list.vala
+if OS_DARWIN
+glue_sources += fruity/fruity-host-session-darwin.m
+else
+glue_sources += fruity/fruity-host-session-unix.c
 endif
 
 backend_sources += \

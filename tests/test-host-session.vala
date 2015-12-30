@@ -20,7 +20,6 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-#if !LINUX && !QNX
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
 		});
@@ -38,14 +37,11 @@ namespace Frida.HostSessionTest {
 			var h = new Harness ((h) => Fruity.large_messages.begin (h as Harness));
 			h.run ();
 		});
-#endif
 
-#if !QNX
 		GLib.Test.add_func ("/HostSession/Droidy/backend", () => {
 			var h = new Harness ((h) => Droidy.backend.begin (h as Harness));
 			h.run ();
 		});
-#endif
 
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
@@ -802,7 +798,6 @@ namespace Frida.HostSessionTest {
 	}
 #endif
 
-#if !LINUX && !QNX
 	namespace Fruity {
 
 		private static async void backend (Harness h) {
@@ -1007,9 +1002,7 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
-#endif
 
-#if !QNX
 	namespace Droidy {
 
 		private static async void backend (Harness h) {
@@ -1055,7 +1048,6 @@ namespace Frida.HostSessionTest {
 		}
 
 	}
-#endif
 
 	public class Harness : Frida.Test.AsyncHarness {
 		public HostSessionService service {
