@@ -232,6 +232,7 @@ namespace Frida {
 			this.provider = provider;
 			this.main_context = manager.main_context;
 
+			provider.host_session_closed.connect (on_host_session_closed);
 			provider.agent_session_closed.connect (on_agent_session_closed);
 		}
 
@@ -539,6 +540,7 @@ namespace Frida {
 				}
 			}
 
+			provider.host_session_closed.disconnect (on_host_session_closed);
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
 
 			foreach (var session in session_by_pid.values.to_array ()) {
@@ -602,6 +604,16 @@ namespace Frida {
 
 		private void on_spawned (HostSpawnInfo info) {
 			spawned (spawn_from_info (info));
+		}
+
+		private void on_host_session_closed (HostSession session) {
+			if (session != host_session)
+				return;
+
+			host_session.spawned.disconnect (on_spawned);
+			host_session = null;
+
+			ensure_request = null;
 		}
 
 		private void on_agent_session_closed (AgentSessionId id) {

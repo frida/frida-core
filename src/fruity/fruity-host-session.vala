@@ -300,8 +300,10 @@ namespace Frida {
 		}
 
 		private async void destroy_entry (Entry entry) {
+			entry.connection.closed.disconnect (on_connection_closed);
 			yield entry.destroy ();
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session_closed (entry.host_session);
 		}
 
 		private class Entry : Object {

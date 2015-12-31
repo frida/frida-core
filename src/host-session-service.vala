@@ -111,6 +111,7 @@ namespace Frida {
 
 		public abstract async HostSession create (string? location = null) throws Error;
 		public abstract async void destroy (HostSession session) throws Error;
+		public signal void host_session_closed (HostSession session);
 
 		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error;
 		public signal void agent_session_closed (AgentSessionId id);
