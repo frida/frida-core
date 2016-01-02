@@ -101,8 +101,9 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
   ZeroMemory (&startup_info, sizeof (startup_info));
   startup_info.cb = sizeof (startup_info);
 
-  if (!CreateProcessW (application_name, command_line, NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, environment, NULL, &startup_info, &instance->process_info))
+  if (!CreateProcessW (application_name, command_line, NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS, environment, NULL, &startup_info, &instance->process_info))
     goto handle_create_error;
+  DebugActiveProcessStop (instance->process_info.dwProcessId);
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_pid), GUINT_TO_POINTER (instance->process_info.dwProcessId), instance);
 
