@@ -20,10 +20,17 @@ noinst_LTLIBRARIES = \
 	libfrida-agent-glue.la \
 	libfrida-agent-container.la
 
+if ENABLE_DIET
+libfrida_agent_la_LIBTOOLFLAGS = \
+	--tag=CC
+else
+libfrida_agent_la_LIBTOOLFLAGS = \
+	--tag=CXX
+endif
+
 libfrida_agent_la_SOURCES = \
 	agent.vala \
-	script-engine.vala \
-	dummy.cpp
+	script-engine.vala
 libfrida_agent_la_CFLAGS = \
 	-w
 libfrida_agent_la_LIBADD = \
