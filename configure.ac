@@ -181,6 +181,15 @@ PKG_CHECK_MODULES(FRIDA_GADGET, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB
 FRIDA_GADGET_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg json-glib-1.0 --pkg frida-gum-1.0 --pkg frida-gumjs-1.0"
 AC_SUBST(FRIDA_GADGET_PACKAGES)
 
+AC_ARG_ENABLE(diet,
+  [AS_HELP_STRING([--enable-diet],
+                  [enable diet mode [default=no]])],,
+  [enable_diet=no])
+if [[ "x$enable_diet" = "xyes" ]]; then
+  AC_DEFINE(HAVE_DIET, 1, [Define to 1 if diet mode is enabled.])
+fi
+AM_CONDITIONAL(ENABLE_DIET, [test "x$enable_diet" = "xyes"])
+
 FRIDA_TEST_LIBS=""
 if [[ "x$HAVE_MAC" = "xyes" ]]; then
   FRIDA_TEST_LIBS="$FRIDA_TEST_LIBS -Wl,-framework -Wl,AppKit"
