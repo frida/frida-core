@@ -33,7 +33,7 @@ case $host_cpu in
     HAVE_I386=yes
     HAVE_64BIT=yes
   ;;
-  arm|armv7)
+  arm|armv7|armhf)
     HAVE_ARM=yes
   ;;
   aarch64)
