@@ -36,7 +36,7 @@ unixattacker-linux-arm.so: unixattacker.c
 	arm-linux-gnueabi-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabi-strip --strip-all $@.tmp
 	mv $@.tmp $@
-	j
+
 unixattacker-linux-armhf.so: unixattacker.c
 	arm-linux-gnueabihf-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabihf-strip --strip-all $@.tmp

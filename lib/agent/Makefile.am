@@ -20,18 +20,6 @@ noinst_LTLIBRARIES = \
 	libfrida-agent-glue.la \
 	libfrida-agent-container.la
 
-if ENABLE_DIET
-libfrida_agent_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
-	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(LD) \
-	$(AM_CFLAGS) $(CFLAGS) $(libfrida_agent_la_LDFLAGS) \
-	$(LDFLAGS) -o $@
-else
-libfrida_agent_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX \
-	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CXX) \
-	$(AM_CXXFLAGS) $(CXXFLAGS) $(libfrida_agent_la_LDFLAGS) \
-	$(LDFLAGS) -o $@
-endif 
-
 libfrida_agent_la_SOURCES = \
 	agent.vala \
 	script-engine.vala
@@ -57,6 +45,18 @@ libfrida_agent_la_VALAFLAGS = \
 	--pkg=frida-pipe \
 	@FRIDA_AGENT_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
+
+if ENABLE_DIET
+libfrida_agent_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(LD) \
+	$(AM_CFLAGS) $(CFLAGS) $(libfrida_agent_la_LDFLAGS) \
+	$(LDFLAGS) -o $@
+else
+libfrida_agent_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CXX) \
+	$(AM_CXXFLAGS) $(CXXFLAGS) $(libfrida_agent_la_LDFLAGS) \
+	$(LDFLAGS) -o $@
+endif 
 
 libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
