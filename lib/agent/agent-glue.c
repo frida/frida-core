@@ -502,7 +502,7 @@ frida_get_address_of_thread_create_func (void)
 #ifdef G_OS_WIN32
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
 #else
-  return GUM_FUNCPTR_TO_POINTER (pthread_create);
+  return dlsym (-1, "pthread_create");
 #endif
 }
 
