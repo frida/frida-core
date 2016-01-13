@@ -2,6 +2,9 @@
 
 #include "frida-interfaces.h"
 
+#ifndef G_OS_WIN32
+# include <dlfcn.h>
+#endif
 #ifdef HAVE_ANDROID
 # include <android/log.h>
 # include <unistd.h>
