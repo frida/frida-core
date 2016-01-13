@@ -71,7 +71,7 @@ namespace Frida.Gadget {
 	}
 
 	private async void start () {
-		var script_backend = ScriptBackend.obtain ();
+		var script_backend = Gum.ScriptBackend.obtain ();
 		var gadget_range = memory_range ();
 
 		var interceptor = Gum.Interceptor.obtain ();
