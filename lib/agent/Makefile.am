@@ -84,4 +84,3 @@ AM_CPPFLAGS = \
 	$(FRIDA_AGENT_CFLAGS) \
 	-I $(top_srcdir)/lib/interfaces \
 	-I $(top_srcdir)/lib/pipe
-
