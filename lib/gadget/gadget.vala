@@ -71,7 +71,7 @@ namespace Frida.Gadget {
 	}
 
 	private async void start () {
-		var script_backend = obtain_script_backend ();
+		var script_backend = ScriptBackend.obtain ();
 		var gadget_range = memory_range ();
 
 		var interceptor = Gum.Interceptor.obtain ();
@@ -656,9 +656,6 @@ namespace Frida.Gadget {
 		private extern void deinit (owned AutoIgnorer ignorer);
 		private extern unowned MainContext get_main_context ();
 	}
-
-	// TODO: use Vala's preprocessor when the build system has been fixed
-	private extern unowned Gum.ScriptBackend obtain_script_backend ();
 
 	private extern void log_info (string message);
 	private extern void log_error (string message);

@@ -187,16 +187,6 @@ stop_main_loop (gpointer data)
   return FALSE;
 }
 
-GumScriptBackend *
-frida_gadget_obtain_script_backend (void)
-{
-#ifdef HAVE_IOS
-  return gum_script_backend_obtain_jsc ();
-#else
-  return gum_script_backend_obtain_v8 ();
-#endif
-}
-
 void
 frida_gadget_log_info (const gchar * message)
 {
