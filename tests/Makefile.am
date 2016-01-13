@@ -30,7 +30,6 @@ platform_tests += test-qinjector.vala
 endif
 
 frida_tests_SOURCES = \
-	dummy.cpp \
 	main.vala
 frida_tests_LDADD = \
 	$(builddir)/libfrida-tests.la \

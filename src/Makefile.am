@@ -206,7 +206,7 @@ backend_valaflags += \
 backend_programs += \
 	frida-helper
 frida_helper_SOURCES = \
-	dummy.cpp
+	$(NULL)
 frida_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_helper_LDADD = \

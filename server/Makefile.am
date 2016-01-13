@@ -9,7 +9,6 @@ endif
 bin_PROGRAMS = frida-server
 
 frida_server_SOURCES = \
-	dummy.cpp \
 	server.vala \
 	server-glue.c
 frida_server_CFLAGS = \
