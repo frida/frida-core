@@ -539,10 +539,12 @@ frida_gadget_auto_ignorer_revert_apis (FridaGadgetAutoIgnorer * self)
 static gpointer
 frida_get_address_of_thread_create_func (void)
 {
-#ifdef G_OS_WIN32
+#if defined (G_OS_WIN32)
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
-#else
+#elif defined (HAVE_DARWIN)
   return GUM_FUNCPTR_TO_POINTER (pthread_create);
+#else
+  return dlsym (RTLD_NEXT, "pthread_create");
 #endif
 }
 
