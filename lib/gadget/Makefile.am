@@ -22,8 +22,7 @@ noinst_LTLIBRARIES = \
 
 libfrida_gadget_la_SOURCES = \
 	gadget.vala \
-	script-engine.vala \
-	dummy.cpp
+	script-engine.vala
 libfrida_gadget_la_CFLAGS = \
 	-w
 libfrida_gadget_la_LIBADD = \
@@ -44,6 +43,18 @@ libfrida_gadget_la_VALAFLAGS = \
 	--pkg=posix \
 	@FRIDA_GADGET_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
+
+if ENABLE_DIET
+libfrida_gadget_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link "$(LD)" \
+	$(AM_CFLAGS) $(CFLAGS) $(libfrida_gadget_la_LDFLAGS) \
+	$(LDFLAGS) -o $@
+else
+libfrida_gadget_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link "$(CXX)" \
+	$(AM_CXXFLAGS) $(CXXFLAGS) $(libfrida_gadget_la_LDFLAGS) \
+	$(LDFLAGS) -o $@
+endif
 
 libfrida_gadget_glue_la_SOURCES = \
 	gadget-glue.c
