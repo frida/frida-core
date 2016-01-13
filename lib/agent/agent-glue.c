@@ -499,8 +499,10 @@ frida_agent_auto_ignorer_revert_apis (FridaAgentAutoIgnorer * self)
 static gpointer
 frida_get_address_of_thread_create_func (void)
 {
-#ifdef G_OS_WIN32
+#if defined (G_OS_WIN32)
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
+#elif defined (HAVE_DARWIN)
+  return GUM_FUNCPTR_TO_POINTER (pthread_create);
 #else
   return dlsym (RTLD_NEXT, "pthread_create");
 #endif
