@@ -48,15 +48,15 @@ libfrida_agent_la_VALAFLAGS = \
 
 if ENABLE_DIET
 libfrida_agent_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
-	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(LD) \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link "$(LD)" \
 	$(AM_CFLAGS) $(CFLAGS) $(libfrida_agent_la_LDFLAGS) \
 	$(LDFLAGS) -o $@
 else
 libfrida_agent_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX \
-	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CXX) \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link "$(CXX)" \
 	$(AM_CXXFLAGS) $(CXXFLAGS) $(libfrida_agent_la_LDFLAGS) \
 	$(LDFLAGS) -o $@
-endif 
+endif
 
 libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
