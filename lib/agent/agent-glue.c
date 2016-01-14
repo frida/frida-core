@@ -107,20 +107,6 @@ frida_agent_environment_deinit (FridaAgentAutoIgnorer * ignorer)
   gum_memory_deinit ();
 }
 
-void
-frida_agent_environment_prevent_unload (const gchar * module_name)
-{
-#ifdef G_OS_WIN32
-  /* XXX: Implement this when we need it on Windows */
-  (void) module_name;
-#else
-  void * leaked_library_reference_to_prevent_unload;
-
-  leaked_library_reference_to_prevent_unload = dlopen (module_name, RTLD_LAZY | RTLD_GLOBAL);
-  g_assert (leaked_library_reference_to_prevent_unload != NULL);
-#endif
-}
-
 static void
 frida_agent_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data)
 {
