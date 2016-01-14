@@ -124,6 +124,7 @@ frida_gadget_environment_init (void)
 #endif
   gio_init ();
   gum_init ();
+  gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
   main_context = g_main_context_ref (g_main_context_default ());
@@ -166,6 +167,23 @@ GMainContext *
 frida_gadget_environment_get_main_context (void)
 {
   return main_context;
+}
+
+GumScriptBackend *
+frida_gadget_environment_obtain_script_backend (gboolean jit_enabled)
+{
+  GumScriptBackend * backend = NULL;
+
+#ifdef HAVE_DIET
+  backend = gum_script_backend_obtain_duk ();
+#else
+  if (jit_enabled)
+    backend = gum_script_backend_obtain_v8 ();
+  if (backend == NULL)
+    backend = gum_script_backend_obtain_duk ();
+#endif
+
+  return backend;
 }
 
 static gpointer
@@ -556,19 +574,18 @@ frida_thread_create_proxy (void * data)
 {
   GumThreadId current_thread_id;
   FridaThreadCreateContext * ctx = data;
-  GumScriptBackend * script_backend = ctx->ignorer->script_backend;
   NativeThreadFuncReturnType result;
 
   current_thread_id = gum_process_get_current_thread_id ();
 
-  gum_script_backend_ignore (script_backend, current_thread_id);
+  gum_script_backend_ignore (current_thread_id);
 
   result = ctx->thread_func (ctx->thread_data);
 
   g_object_unref (ctx->ignorer);
   g_slice_free (FridaThreadCreateContext, ctx);
 
-  gum_script_backend_unignore_later (script_backend, current_thread_id);
+  gum_script_backend_unignore_later (current_thread_id);
 
   return result;
 }

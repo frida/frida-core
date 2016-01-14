@@ -71,12 +71,11 @@ namespace Frida.Gadget {
 	}
 
 	private async void start () {
-		var script_backend = Gum.ScriptBackend.obtain ();
 		var gadget_range = memory_range ();
 
 		var interceptor = Gum.Interceptor.obtain ();
 
-		ignorer = new AutoIgnorer (script_backend, interceptor, gadget_range);
+		ignorer = new AutoIgnorer (interceptor, gadget_range);
 		ignorer.enable ();
 		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
 
@@ -85,8 +84,9 @@ namespace Frida.Gadget {
 		}
 
 		var script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
+		bool jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_DISABLE_JIT") == null;
 		if (script_file != null) {
-			var r = new ScriptRunner (script_file, script_backend, gadget_range);
+			var r = new ScriptRunner (script_file, jit_enabled, gadget_range);
 			try {
 				yield r.start ();
 				script_runner = r;
@@ -95,7 +95,7 @@ namespace Frida.Gadget {
 			}
 			resume ();
 		} else {
-			var s = new Server (script_backend, gadget_range);
+			var s = new Server (jit_enabled, gadget_range);
 			try {
 				yield s.start ();
 				server = s;
@@ -141,10 +141,10 @@ namespace Frida.Gadget {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (string script_file, Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
+		public ScriptRunner (string script_file, bool jit_enabled, Gum.MemoryRange gadget_range) {
 			this.script_file = script_file;
 
-			script_engine = new ScriptEngine (script_backend, gadget_range);
+			script_engine = new ScriptEngine (Environment.obtain_script_backend (jit_enabled), gadget_range);
 			script_engine.message_from_script.connect (on_message);
 		}
 
@@ -383,13 +383,14 @@ namespace Frida.Gadget {
 	private class Server : Object {
 		private const string LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
 
-		private Gum.ScriptBackend script_backend;
+		private unowned Gum.ScriptBackend script_backend = null;
+		private bool jit_enabled;
 		private Gum.MemoryRange gadget_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Session> sessions = new Gee.HashMap<DBusConnection, Session> ();
 
-		public Server (Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
-			this.script_backend = script_backend;
+		public Server (bool jit_enabled, Gum.MemoryRange gadget_range) {
+			this.jit_enabled = jit_enabled;
 			this.gadget_range = gadget_range;
 		}
 
@@ -404,7 +405,7 @@ namespace Frida.Gadget {
 				if (server == null)
 					return false;
 
-				sessions[connection] = new Session (connection, script_backend, gadget_range);
+				sessions[connection] = new Session (this, connection, gadget_range);
 				connection.closed.connect (on_connection_closed);
 
 				return true;
@@ -425,6 +426,18 @@ namespace Frida.Gadget {
 			server = null;
 		}
 
+		public unowned Gum.ScriptBackend obtain_script_backend () {
+			if (script_backend == null)
+				script_backend = Environment.obtain_script_backend (jit_enabled);
+			return script_backend;
+		}
+
+		public void disable_jit () throws Error {
+			if (script_backend != null)
+				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
+			jit_enabled = false;
+		}
+
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			Session session;
 			if (sessions.unset (connection, out session))
@@ -432,7 +445,9 @@ namespace Frida.Gadget {
 		}
 
 		private class Session : Object, HostSession, AgentSession {
+			private unowned Server server;
 			private DBusConnection connection;
+			Gum.MemoryRange gadget_range;
 			private uint host_registration_id;
 			private uint agent_registration_id;
 			private HostApplicationInfo this_app;
@@ -441,8 +456,10 @@ namespace Frida.Gadget {
 			private bool resume_on_attach = true;
 			private bool close_requested = false;
 
-			public Session (DBusConnection c, Gum.ScriptBackend script_backend, Gum.MemoryRange gadget_range) {
+			public Session (Server s, DBusConnection c, Gum.MemoryRange r) {
+				server = s;
 				connection = c;
+				gadget_range = r;
 
 				try {
 					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
@@ -457,9 +474,6 @@ namespace Frida.Gadget {
 				var no_icon = ImageData (0, 0, 0, "");
 				this_app = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 				this_process = HostProcessInfo (pid, name, no_icon, no_icon);
-
-				script_engine = new ScriptEngine (script_backend, gadget_range);
-				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 			}
 
 			~Session () {
@@ -568,45 +582,59 @@ namespace Frida.Gadget {
 			}
 
 			public async AgentScriptId create_script (string name, string source) throws Error {
-				var instance = yield script_engine.create_script (name, source);
+				var engine = get_script_engine ();
+				var instance = yield engine.create_script (name, source);
 				return instance.sid;
 			}
 
 			public async void destroy_script (AgentScriptId sid) throws Error {
-				yield script_engine.destroy_script (sid);
+				var engine = get_script_engine ();
+				yield engine.destroy_script (sid);
 			}
 
 			public async void load_script (AgentScriptId sid) throws Error {
-				yield script_engine.load_script (sid);
+				var engine = get_script_engine ();
+				yield engine.load_script (sid);
 			}
 
 			public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
-				script_engine.post_message_to_script (sid, message);
+				get_script_engine ().post_message_to_script (sid, message);
 			}
 
 			public async void enable_debugger () throws Error {
-				script_engine.enable_debugger ();
+				get_script_engine ().enable_debugger ();
 			}
 
 			public async void disable_debugger () throws Error {
-				script_engine.disable_debugger ();
+				get_script_engine ().disable_debugger ();
 			}
 
 			public async void post_message_to_debugger (string message) throws Error {
-				script_engine.post_message_to_debugger (message);
+				get_script_engine ().post_message_to_debugger (message);
+			}
+
+			public async void disable_jit () throws GLib.Error {
+				server.disable_jit ();
+			}
+
+			private ScriptEngine get_script_engine () throws Error {
+				if (script_engine == null) {
+					script_engine = new ScriptEngine (server.obtain_script_backend (), gadget_range);
+					script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+				}
+
+				return script_engine;
 			}
 		}
 	}
 
 	protected class AutoIgnorer : Object {
-		protected weak Gum.ScriptBackend script_backend;
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange gadget_range;
 		protected SList tls_contexts;
 		protected Mutex mutex;
 
-		public AutoIgnorer (Gum.ScriptBackend script_backend, Gum.Interceptor interceptor, Gum.MemoryRange gadget_range) {
-			this.script_backend = script_backend;
+		public AutoIgnorer (Gum.Interceptor interceptor, Gum.MemoryRange gadget_range) {
 			this.interceptor = interceptor;
 			this.gadget_range = gadget_range;
 		}
@@ -621,14 +649,14 @@ namespace Frida.Gadget {
 
 		public void ignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
 			if (parent_thread_id != 0)
-				script_backend.ignore (parent_thread_id);
-			script_backend.ignore (agent_thread_id);
+				Gum.ScriptBackend.ignore (parent_thread_id);
+			Gum.ScriptBackend.ignore (agent_thread_id);
 		}
 
 		public void unignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
-			script_backend.unignore (agent_thread_id);
+			Gum.ScriptBackend.unignore (agent_thread_id);
 			if (parent_thread_id != 0)
-				script_backend.unignore (parent_thread_id);
+				Gum.ScriptBackend.unignore (parent_thread_id);
 		}
 
 		private extern void replace_apis ();
@@ -655,6 +683,7 @@ namespace Frida.Gadget {
 		private extern void init ();
 		private extern void deinit (owned AutoIgnorer ignorer);
 		private extern unowned MainContext get_main_context ();
+		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
 	}
 
 	private extern void log_info (string message);

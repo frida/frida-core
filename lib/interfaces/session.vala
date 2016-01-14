@@ -33,6 +33,8 @@ namespace Frida {
 		public abstract async void disable_debugger () throws GLib.Error;
 		public abstract async void post_message_to_debugger (string message) throws GLib.Error;
 		public signal void message_from_debugger (string message);
+
+		public abstract async void disable_jit () throws GLib.Error;
 	}
 
 	[DBus (name = "re.frida.Error")]

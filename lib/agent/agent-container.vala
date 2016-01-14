@@ -110,6 +110,10 @@ namespace Frida {
 			yield session.post_message_to_debugger (message);
 		}
 
+		public async void disable_jit () throws GLib.Error {
+			yield session.disable_jit ();
+		}
+
 		private void on_message_from_script (AgentScriptId sid, string message, uint8[] data) {
 			message_from_script (sid, message, data);
 		}

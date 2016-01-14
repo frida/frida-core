@@ -1,25 +1,18 @@
 namespace Frida.Agent {
-	private static AutoIgnorer active_ignorer = null;
-
 	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
-		if (active_ignorer == null)
-			Environment.init ();
+		Environment.init ();
 
 		AutoIgnorer ignorer;
 		{
-			var script_backend = Gum.ScriptBackend.obtain ();
 			var agent_range = memory_range (mapped_range);
 			var agent_thread_id = Gum.Process.get_current_thread_id ();
 
-			if (active_ignorer == null) {
-				var interceptor = Gum.Interceptor.obtain ();
-				active_ignorer = new AutoIgnorer (script_backend, interceptor, agent_range);
-				active_ignorer.enable ();
-			}
-			ignorer = active_ignorer;
+			var interceptor = Gum.Interceptor.obtain ();
+			ignorer = new AutoIgnorer (interceptor, agent_range);
+			ignorer.enable ();
 			ignorer.ignore (agent_thread_id, parent_thread_id);
 
-			var server = new AgentServer (pipe_address, script_backend, agent_range);
+			var server = new AgentServer (pipe_address, agent_range);
 
 			try {
 				server.run ();
@@ -29,7 +22,6 @@ namespace Frida.Agent {
 
 			ignorer.unignore (agent_thread_id, parent_thread_id);
 			ignorer.disable ();
-			active_ignorer = null;
 		}
 
 		Environment.deinit ((owned) ignorer);
@@ -45,13 +37,14 @@ namespace Frida.Agent {
 		private DBusConnection connection;
 		private bool closing = false;
 		private uint registration_id = 0;
-		private ScriptEngine script_engine;
+		private ScriptEngine script_engine = null;
+		private bool jit_enabled = true;
+		protected Gum.MemoryRange agent_range;
 
-		public AgentServer (string pipe_address, Gum.ScriptBackend script_backend, Gum.MemoryRange agent_range) {
+		public AgentServer (string pipe_address, Gum.MemoryRange agent_range) {
 			Object (pipe_address: pipe_address);
-			script_engine = new ScriptEngine (script_backend, agent_range);
-			script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
-			script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
+
+			this.agent_range = agent_range;
 		}
 
 		public async void close () throws Error {
@@ -62,8 +55,10 @@ namespace Frida.Agent {
 		}
 
 		private async void perform_close () {
-			yield script_engine.shutdown ();
-			script_engine = null;
+			if (script_engine != null) {
+				yield script_engine.shutdown ();
+				script_engine = null;
+			}
 
 			yield teardown_connection ();
 
@@ -77,36 +72,54 @@ namespace Frida.Agent {
 		}
 
 		public async AgentScriptId create_script (string name, string source) throws Error {
-			check_open ();
-			var instance = yield script_engine.create_script ((name != "") ? name : null, source);
+			var engine = get_script_engine ();
+			var instance = yield engine.create_script ((name != "") ? name : null, source);
 			return instance.sid;
 		}
 
 		public async void destroy_script (AgentScriptId sid) throws Error {
-			check_open ();
-			yield script_engine.destroy_script (sid);
+			var engine = get_script_engine ();
+			yield engine.destroy_script (sid);
 		}
 
 		public async void load_script (AgentScriptId sid) throws Error {
-			check_open ();
-			yield script_engine.load_script (sid);
+			var engine = get_script_engine ();
+			yield engine.load_script (sid);
 		}
 
 		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
-			check_open ();
-			script_engine.post_message_to_script (sid, message);
+			var engine = get_script_engine ();
+			engine.post_message_to_script (sid, message);
 		}
 
 		public async void enable_debugger () throws Error {
-			script_engine.enable_debugger ();
+			get_script_engine ().enable_debugger ();
 		}
 
 		public async void disable_debugger () throws Error {
-			script_engine.disable_debugger ();
+			get_script_engine ().disable_debugger ();
 		}
 
 		public async void post_message_to_debugger (string message) throws Error {
-			script_engine.post_message_to_debugger (message);
+			get_script_engine ().post_message_to_debugger (message);
+		}
+
+		public async void disable_jit () throws GLib.Error {
+			if (script_engine != null)
+				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
+			jit_enabled = false;
+		}
+
+		private ScriptEngine get_script_engine () throws Error {
+			check_open ();
+
+			if (script_engine == null) {
+				script_engine = new ScriptEngine (Environment.obtain_script_backend (jit_enabled), agent_range);
+				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+				script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
+			}
+
+			return script_engine;
 		}
 
 		private void check_open () throws Error {
@@ -167,14 +180,12 @@ namespace Frida.Agent {
 	}
 
 	protected class AutoIgnorer : Object {
-		protected weak Gum.ScriptBackend script_backend;
 		protected Gum.Interceptor interceptor;
 		protected Gum.MemoryRange agent_range;
 		protected SList tls_contexts;
 		protected Mutex mutex;
 
-		public AutoIgnorer (Gum.ScriptBackend script_backend, Gum.Interceptor interceptor, Gum.MemoryRange agent_range) {
-			this.script_backend = script_backend;
+		public AutoIgnorer (Gum.Interceptor interceptor, Gum.MemoryRange agent_range) {
 			this.interceptor = interceptor;
 			this.agent_range = agent_range;
 		}
@@ -189,14 +200,14 @@ namespace Frida.Agent {
 
 		public void ignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
 			if (parent_thread_id != 0)
-				script_backend.ignore (parent_thread_id);
-			script_backend.ignore (agent_thread_id);
+				Gum.ScriptBackend.ignore (parent_thread_id);
+			Gum.ScriptBackend.ignore (agent_thread_id);
 		}
 
 		public void unignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
-			script_backend.unignore (agent_thread_id);
+			Gum.ScriptBackend.unignore (agent_thread_id);
 			if (parent_thread_id != 0)
-				script_backend.unignore (parent_thread_id);
+				Gum.ScriptBackend.unignore (parent_thread_id);
 		}
 
 		private extern void replace_apis ();
@@ -223,6 +234,6 @@ namespace Frida.Agent {
 	namespace Environment {
 		private extern void init ();
 		private extern void deinit (owned AutoIgnorer ignorer);
+		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
 	}
-
 }

@@ -938,6 +938,26 @@ namespace Frida {
 			}
 		}
 
+		public async void disable_jit () throws Error {
+			check_open ();
+
+			try {
+				yield session.disable_jit ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void disable_jit_sync () throws Error {
+			(create<DisableJitTask> () as DisableJitTask).start_and_wait_for_completion ();
+		}
+
+		private class DisableJitTask : ProcessTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.disable_jit ();
+			}
+		}
+
 		private void on_message_from_script (AgentScriptId sid, string message, uint8[] data) {
 			var script = script_by_id[sid.handle];
 			if (script != null)

@@ -1,9 +1,11 @@
 #define DEBUG_HEAP_LEAKS 0
 
 #include "frida-agent.h"
+#include "frida-interfaces.h"
 
 #include <gio/gio.h>
 #include <gum/gum.h>
+#include <gumjs/gumscriptbackend.h>
 
 #ifdef G_OS_WIN32
 # include <crtdbg.h>
@@ -92,6 +94,8 @@ frida_agent_environment_init (void)
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
   gum_init ();
+  gum_script_backend_get_type (); /* Warm up */
+  frida_error_quark (); /* Initialize early so GDBus will pick it up */
 }
 
 void
@@ -105,6 +109,23 @@ frida_agent_environment_deinit (FridaAgentAutoIgnorer * ignorer)
   gio_deinit ();
   glib_deinit ();
   gum_memory_deinit ();
+}
+
+GumScriptBackend *
+frida_agent_environment_obtain_script_backend (gboolean jit_enabled)
+{
+  GumScriptBackend * backend = NULL;
+
+#ifdef HAVE_DIET
+  backend = gum_script_backend_obtain_duk ();
+#else
+  if (jit_enabled)
+    backend = gum_script_backend_obtain_v8 ();
+  if (backend == NULL)
+    backend = gum_script_backend_obtain_duk ();
+#endif
+
+  return backend;
 }
 
 static void
@@ -499,19 +520,18 @@ frida_thread_create_proxy (void * data)
 {
   GumThreadId current_thread_id;
   FridaThreadCreateContext * ctx = data;
-  GumScriptBackend * script_backend = ctx->ignorer->script_backend;
   NativeThreadFuncReturnType result;
 
   current_thread_id = gum_process_get_current_thread_id ();
 
-  gum_script_backend_ignore (script_backend, current_thread_id);
+  gum_script_backend_ignore (current_thread_id);
 
   result = ctx->thread_func (ctx->thread_data);
 
   g_object_unref (ctx->ignorer);
   g_slice_free (FridaThreadCreateContext, ctx);
 
-  gum_script_backend_unignore_later (script_backend, current_thread_id);
+  gum_script_backend_unignore_later (current_thread_id);
 
   return result;
 }
