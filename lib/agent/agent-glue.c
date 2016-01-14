@@ -1,8 +1,10 @@
 #define DEBUG_HEAP_LEAKS 0
 
 #include "frida-agent.h"
-#include "frida-interfaces.h"
 
+#ifndef G_OS_WIN32
+# include <frida-interfaces.h>
+#endif
 #include <gio/gio.h>
 #include <gum/gum.h>
 #include <gumjs/gumscriptbackend.h>
