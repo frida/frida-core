@@ -510,7 +510,7 @@ frida_get_address_of_thread_create_func (void)
 {
 #if defined (G_OS_WIN32)
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
-#elif defined (HAVE_DARWIN)
+#elif defined (HAVE_DARWIN) || defined (HAVE_ANDROID)
   return GUM_FUNCPTR_TO_POINTER (pthread_create);
 #else
   return dlsym (RTLD_NEXT, "pthread_create");
