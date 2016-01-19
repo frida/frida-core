@@ -1,10 +1,21 @@
 #include "frida-core.h"
 
+#include "access-helpers.h"
+
 #define VC_EXTRALEAN
-#include <windows.h>
+#include <aclapi.h>
 #include <objbase.h>
+#include <sddl.h>
 #include <shellapi.h>
 #include <strsafe.h>
+#include <windows.h>
+
+#define CHECK_WINAPI_RESULT(n1, cmp, n2, op) \
+  if (!(n1 cmp n2)) \
+  { \
+    failed_operation = op; \
+    goto handle_winapi_error; \
+  }
 
 gboolean
 frida_winjector_helper_instance_is_process_still_running (void * handle)
@@ -73,4 +84,54 @@ frida_winjector_helper_factory_spawn (const gchar * path, const gchar * paramete
   CoUninitialize ();
 
   return process_handle;
+}
+
+void
+frida_winjector_resource_store_set_acls_as_needed (const gchar * path, GError ** error)
+{
+  const gchar * failed_operation;
+  LPWSTR path_utf16;
+  LPWSTR sddl;
+  SECURITY_DESCRIPTOR * sd;
+  BOOL dacl_present;
+  BOOL dacl_defaulted;
+  PACL dacl;
+
+  path_utf16 = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
+  sddl = frida_access_get_sddl_string_for_temp_directory ();
+
+  if (sddl != NULL)
+  {
+    DWORD success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
+    CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
+
+    dacl_present = FALSE;
+    dacl_defaulted = FALSE;
+    success = GetSecurityDescriptorDacl (sd, &dacl_present, &dacl, &dacl_defaulted);
+    CHECK_WINAPI_RESULT (success, !=, FALSE, "GetSecurityDescriptorDacl");
+
+    success = SetNamedSecurityInfo (path_utf16, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, dacl, NULL);
+    CHECK_WINAPI_RESULT (success, ==, ERROR_SUCCESS, "SetNamedSecurityInfo");
+  }
+
+  goto beach;
+
+handle_winapi_error:
+  {
+    DWORD last_error = GetLastError ();
+    g_set_error (error,
+        G_IO_ERROR,
+        g_io_error_from_win32_error (last_error),
+        "Error setting ACLs (%s returned 0x%08lx)",
+        failed_operation, last_error);
+    goto beach;
+  }
+
+beach:
+  {
+    if (sd != NULL)
+      LocalFree (sd);
+
+    g_free (path_utf16);
+  }
 }

@@ -267,6 +267,7 @@ namespace Frida {
 
 		public class ResourceStore {
 			private TemporaryDirectory tempdir;
+			private static extern void set_acls_as_needed (string path) throws Error;
 
 			public TemporaryFile helper32 {
 				get;
@@ -283,6 +284,7 @@ namespace Frida {
 
 			public ResourceStore () throws Error {
 				tempdir = new TemporaryDirectory ();
+				set_acls_as_needed (tempdir.path);
 
 				var blob32 = Frida.Data.Winjector.get_winjector_helper_32_exe_blob ();
 				helper32 = new TemporaryFile.from_stream ("frida-winjector-helper-32.exe",
