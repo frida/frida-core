@@ -173,6 +173,9 @@
     <ClCompile Include="src\frida-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\windows\access-helpers.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="src\windows\winjector.resources">
@@ -190,6 +193,9 @@
       <Filter>Header Files\generated</Filter>
     </ClInclude>
     <ClInclude Include="src\windows\icon-helpers.h">
+      <Filter>Source Files\windows</Filter>
+    </ClInclude>
+    <ClInclude Include="src\windows\access-helpers.h">
       <Filter>Source Files\windows</Filter>
     </ClInclude>
   </ItemGroup>

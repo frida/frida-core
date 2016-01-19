@@ -87,7 +87,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
@@ -97,7 +97,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
@@ -107,7 +107,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
@@ -117,7 +117,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib>
@@ -394,6 +394,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)src\fruity\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)src\fruity\</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="src\windows\access-helpers.c" />
     <ClCompile Include="src\windows\system-windows.c" />
     <ClCompile Include="src\windows\icon-helpers.c">
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)src\</ObjectFileName>
@@ -450,6 +451,7 @@ echo &gt; "$(IntDir)valacode.stamp"
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-core.h" />
+    <ClInclude Include="src\windows\access-helpers.h" />
     <ClInclude Include="src\windows\icon-helpers.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
