@@ -230,12 +230,6 @@ _frida_helper_service_create_context (FridaHelperService * self)
   ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", NULL);
 
   self->context = ctx;
-
-  while (!gum_process_is_debugger_attached ())
-  {
-    g_printerr ("[frida-helper pid %d] waiting for debugger...\n", (gint) getpid ());
-    g_usleep (G_USEC_PER_SEC);
-  }
 }
 
 void
