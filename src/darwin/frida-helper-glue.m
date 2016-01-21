@@ -13,6 +13,7 @@
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
 #else
+# include <gum/arch-arm/gumarmwriter.h>
 # include <gum/arch-arm/gumthumbwriter.h>
 # include <gum/arch-arm64/gumarm64writer.h>
 #endif
@@ -21,34 +22,7 @@
 #include <mach/mach.h>
 
 #define FRIDA_AGENT_ENTRYPOINT_NAME      "frida_agent_main"
-
 #define FRIDA_SYSTEM_LIBC                "/usr/lib/libSystem.B.dylib"
-
-/* TODO: check page size dynamically */
-#ifdef HAVE_ARM64
-# define FRIDA_PAGE_SIZE                 (16384)
-#else
-# define FRIDA_PAGE_SIZE                 (4096)
-#endif
-#define FRIDA_STACK_GUARD_SIZE           FRIDA_PAGE_SIZE
-#define FRIDA_STACK_SIZE                 (32 * 1024)
-#define FRIDA_PTHREAD_DATA_SIZE          (16384)
-
-#define FRIDA_SPAWN_CODE_OFFSET          (0 * FRIDA_PAGE_SIZE)
-#define FRIDA_SPAWN_DATA_OFFSET          (1 * FRIDA_PAGE_SIZE)
-#define FRIDA_SPAWN_PAYLOAD_SIZE         (2 * FRIDA_PAGE_SIZE)
-
-#define FRIDA_INJECT_CODE_OFFSET         (0)
-#define FRIDA_INJECT_MACH_CODE_OFFSET    (0)
-#define FRIDA_INJECT_PTHREAD_CODE_OFFSET (512)
-#define FRIDA_INJECT_DATA_OFFSET         FRIDA_PAGE_SIZE
-#define FRIDA_INJECT_STACK_GUARD_OFFSET  (FRIDA_INJECT_DATA_OFFSET + FRIDA_PAGE_SIZE)
-#define FRIDA_INJECT_STACK_BOTTOM_OFFSET (FRIDA_INJECT_STACK_GUARD_OFFSET + FRIDA_STACK_GUARD_SIZE)
-#define FRIDA_INJECT_STACK_TOP_OFFSET    (FRIDA_INJECT_STACK_BOTTOM_OFFSET + FRIDA_STACK_SIZE)
-#define FRIDA_INJECT_THREAD_SELF_OFFSET  (FRIDA_INJECT_STACK_TOP_OFFSET)
-
-#define FRIDA_INJECT_BASE_PAYLOAD_SIZE   (FRIDA_INJECT_THREAD_SELF_OFFSET + FRIDA_PTHREAD_DATA_SIZE)
-
 #define FRIDA_PSR_THUMB                  (0x20)
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
@@ -60,11 +34,13 @@
 
 typedef struct _FridaHelperContext FridaHelperContext;
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
+typedef struct _FridaSpawnPayloadLayout FridaSpawnPayloadLayout;
 typedef struct _FridaSpawnMessageTx FridaSpawnMessageTx;
 typedef struct _FridaSpawnMessageRx FridaSpawnMessageRx;
 typedef struct _FridaSpawnApi FridaSpawnApi;
 typedef struct _FridaSpawnFillContext FridaSpawnFillContext;
 typedef struct _FridaInjectInstance FridaInjectInstance;
+typedef struct _FridaInjectPayloadLayout FridaInjectPayloadLayout;
 typedef struct _FridaAgentDetails FridaAgentDetails;
 typedef struct _FridaAgentContext FridaAgentContext;
 typedef struct _FridaAgentEmitContext FridaAgentEmitContext;
@@ -84,6 +60,7 @@ struct _FridaSpawnInstance
   dispatch_source_t task_monitor_source;
 
   GumAddress entrypoint;
+  GumAddress entrypoint_address;
   mach_vm_address_t payload_address;
   guint8 * overwritten_code;
   guint overwritten_code_size;
@@ -91,6 +68,13 @@ struct _FridaSpawnInstance
   mach_port_name_t server_port;
   mach_port_name_t reply_port;
   dispatch_source_t server_recv_source;
+};
+
+struct _FridaSpawnPayloadLayout
+{
+  guint code_offset;
+  guint data_offset;
+  guint size;
 };
 
 struct _FridaSpawnMessageTx
@@ -128,6 +112,22 @@ struct _FridaInjectInstance
   mach_vm_size_t payload_size;
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
+};
+
+struct _FridaInjectPayloadLayout
+{
+  guint stack_guard_size;
+  guint stack_size;
+  guint pthread_data_size;
+
+  guint code_offset;
+  guint mach_code_offset;
+  guint pthread_code_offset;
+  guint data_offset;
+  guint stack_guard_offset;
+  guint stack_bottom_offset;
+  guint stack_top_offset;
+  guint thread_self_offset;
 };
 
 struct _FridaAgentDetails
@@ -202,15 +202,17 @@ static void frida_spawn_instance_on_server_recv (void * context);
 static gboolean frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaSpawnApi * api, GError ** error);
 static gboolean frida_spawn_fill_context_process_export (const GumExportDetails * details, gpointer user_data);
 
-static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error);
-static gboolean frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error);
+static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error);
+static gboolean frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 
 static void frida_inject_instance_on_event (void * context);
 
-static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details,
+static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
     mach_vm_address_t payload_base, mach_vm_size_t payload_size, GError ** error);
 static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details,
     GError ** error);
@@ -228,6 +230,12 @@ _frida_helper_service_create_context (FridaHelperService * self)
   ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", NULL);
 
   self->context = ctx;
+
+  while (!gum_process_is_debugger_attached ())
+  {
+    g_printerr ("[frida-helper pid %d] waiting for debugger...\n", (gint) getpid ());
+    g_usleep (G_USEC_PER_SEC);
+  }
 }
 
 void
@@ -253,6 +261,8 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   kern_return_t ret;
   mach_port_name_t task;
   FridaSpawnApi api;
+  FridaSpawnPayloadLayout layout;
+  guint page_size;
   mach_vm_address_t payload_address = 0;
   guint8 redirect_code[512];
   guint redirect_code_size;
@@ -293,30 +303,41 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   if (instance->entrypoint == 0)
     goto handle_entrypoint_error;
 
+  if (instance->cpu_type == GUM_CPU_ARM)
+    instance->entrypoint_address = instance->entrypoint & ~((GumAddress) 1);
+  else
+    instance->entrypoint_address = instance->entrypoint;
+
   if (!frida_spawn_instance_find_remote_api (instance, &api, error))
     goto error_epilogue;
 
   ret = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_allocate server");
 
-  ret = mach_vm_allocate (task, &payload_address, FRIDA_SPAWN_PAYLOAD_SIZE, TRUE);
+  if (!gum_darwin_query_page_size (instance->task, &page_size))
+    goto handle_page_size_error;
+  layout.code_offset = 0 * page_size;
+  layout.data_offset = 1 * page_size;
+  layout.size = 2 * page_size;
+
+  ret = mach_vm_allocate (task, &payload_address, layout.size, TRUE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_allocate");
   instance->payload_address = payload_address;
 
-  if (!frida_spawn_instance_emit_redirect_code (instance, redirect_code, &redirect_code_size, error))
+  if (!frida_spawn_instance_emit_redirect_code (instance, &layout, redirect_code, &redirect_code_size, error))
     goto error_epilogue;
-  instance->overwritten_code = gum_darwin_read (task, instance->entrypoint, redirect_code_size, NULL);
+  instance->overwritten_code = gum_darwin_read (task, instance->entrypoint_address, redirect_code_size, NULL);
   instance->overwritten_code_size = redirect_code_size;
-  ret = mach_vm_protect (task, instance->entrypoint, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  ret = mach_vm_protect (task, instance->entrypoint_address, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
-  ret = mach_vm_write (task, instance->entrypoint, (vm_offset_t) redirect_code, redirect_code_size);
+  ret = mach_vm_write (task, instance->entrypoint_address, (vm_offset_t) redirect_code, redirect_code_size);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(redirect_code)");
-  ret = mach_vm_protect (task, instance->entrypoint, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  ret = mach_vm_protect (task, instance->entrypoint_address, redirect_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
-  if (!frida_spawn_instance_emit_sync_code (instance, &api, sync_code, &sync_code_size, error))
+  if (!frida_spawn_instance_emit_sync_code (instance, &api, &layout, sync_code, &sync_code_size, error))
     goto error_epilogue;
-  ret = mach_vm_write (task, payload_address + FRIDA_SPAWN_CODE_OFFSET, (vm_offset_t) sync_code, sync_code_size);
+  ret = mach_vm_write (task, payload_address + layout.code_offset, (vm_offset_t) sync_code, sync_code_size);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(sync_code)");
 
   msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, MACH_MSG_TYPE_MAKE_SEND_ONCE);
@@ -333,13 +354,13 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   msg.header.msgh_local_port = MACH_PORT_NULL; /* filled in by the sync code */
   msg.header.msgh_reserved = 0;
   msg.header.msgh_id = 1337;
-  ret = mach_vm_write (task, payload_address + FRIDA_SPAWN_DATA_OFFSET, (vm_offset_t) &msg, sizeof (msg));
+  ret = mach_vm_write (task, payload_address + layout.data_offset, (vm_offset_t) &msg, sizeof (msg));
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(data)");
 
-  ret = mach_vm_protect (task, payload_address + FRIDA_SPAWN_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  ret = mach_vm_protect (task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
-  ret = mach_vm_protect (task, payload_address + FRIDA_SPAWN_DATA_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  ret = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
@@ -404,6 +425,15 @@ handle_entrypoint_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing entrypoint of child process '%s'",
+        path);
+    goto error_epilogue;
+  }
+handle_page_size_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing page size of child process '%s'",
         path);
     goto error_epilogue;
   }
@@ -513,6 +543,9 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   const gchar * failed_operation;
   kern_return_t ret;
   GumDarwinMapper * mapper = NULL;
+  guint page_size;
+  FridaInjectPayloadLayout layout;
+  guint base_payload_size;
   mach_vm_address_t payload_address = 0;
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
@@ -545,7 +578,24 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   mapper = gum_darwin_mapper_new (dylib_path, details.task, details.cpu_type);
 #endif
 
-  instance->payload_size = FRIDA_INJECT_BASE_PAYLOAD_SIZE;
+  if (!gum_darwin_query_page_size (instance->task, &page_size))
+    goto handle_page_size_error;
+  layout.stack_guard_size = page_size;
+  layout.stack_size = 32 * 1024;
+  layout.pthread_data_size = 16384;
+
+  layout.code_offset = 0;
+  layout.mach_code_offset = 0;
+  layout.pthread_code_offset = 512;
+  layout.data_offset = page_size;
+  layout.stack_guard_offset = layout.data_offset + page_size;
+  layout.stack_bottom_offset = layout.stack_guard_offset + layout.stack_guard_size;
+  layout.stack_top_offset = layout.stack_bottom_offset + layout.stack_size;
+  layout.thread_self_offset = layout.stack_top_offset;
+
+  base_payload_size = layout.thread_self_offset + layout.pthread_data_size;
+
+  instance->payload_size = base_payload_size;
   if (mapper != NULL)
     instance->payload_size += gum_darwin_mapper_size (mapper);
 
@@ -554,31 +604,31 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance->payload_address = payload_address;
 
   if (mapper != NULL)
-    gum_darwin_mapper_map (mapper, payload_address + FRIDA_INJECT_BASE_PAYLOAD_SIZE);
+    gum_darwin_mapper_map (mapper, payload_address + base_payload_size);
 
-  ret = mach_vm_protect (details.task, payload_address + FRIDA_INJECT_STACK_GUARD_OFFSET, FRIDA_STACK_GUARD_SIZE, FALSE, VM_PROT_NONE);
+  ret = mach_vm_protect (details.task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
-  if (!frida_agent_context_init (&agent_ctx, &details, payload_address, instance->payload_size, error))
+  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, error))
     goto error_epilogue;
 
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type, mapper);
-  ret = mach_vm_write (details.task, payload_address + FRIDA_INJECT_MACH_CODE_OFFSET,
+  ret = mach_vm_write (details.task, payload_address + layout.mach_code_offset,
       (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write (mach_stub_code)");
 
   frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, details.cpu_type, mapper);
-  ret = mach_vm_write (details.task, payload_address + FRIDA_INJECT_PTHREAD_CODE_OFFSET,
+  ret = mach_vm_write (details.task, payload_address + layout.pthread_code_offset,
       (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(pthread_stub_code)");
 
-  ret = mach_vm_write (details.task, payload_address + FRIDA_INJECT_DATA_OFFSET, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
+  ret = mach_vm_write (details.task, payload_address + layout.data_offset, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_write(data)");
 
-  ret = mach_vm_protect (details.task, payload_address + FRIDA_INJECT_CODE_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  ret = mach_vm_protect (details.task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
-  ret = mach_vm_protect (details.task, payload_address + FRIDA_INJECT_DATA_OFFSET, FRIDA_PAGE_SIZE, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  ret = mach_vm_protect (details.task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_vm_protect");
 
 #ifdef HAVE_I386
@@ -593,10 +643,10 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts = &state.uts.ts64;
 
-    ts->__rbp = payload_address + FRIDA_INJECT_DATA_OFFSET;
+    ts->__rbp = payload_address + layout.data_offset;
 
-    ts->__rsp = payload_address + FRIDA_INJECT_STACK_TOP_OFFSET;
-    ts->__rip = payload_address + FRIDA_INJECT_MACH_CODE_OFFSET;
+    ts->__rsp = payload_address + layout.stack_top_offset;
+    ts->__rip = payload_address + layout.mach_code_offset;
   }
   else
   {
@@ -607,10 +657,10 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts = &state.uts.ts32;
 
-    ts->__ebp = payload_address + FRIDA_INJECT_DATA_OFFSET;
+    ts->__ebp = payload_address + layout.data_offset;
 
-    ts->__esp = payload_address + FRIDA_INJECT_STACK_TOP_OFFSET;
-    ts->__eip = payload_address + FRIDA_INJECT_MACH_CODE_OFFSET;
+    ts->__esp = payload_address + layout.stack_top_offset;
+    ts->__eip = payload_address + layout.mach_code_offset;
   }
 
   state_data = (thread_state_t) &state;
@@ -628,11 +678,11 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts = &state64.ts_64;
 
-    ts->__x[20] = payload_address + FRIDA_INJECT_DATA_OFFSET;
+    ts->__x[20] = payload_address + layout.data_offset;
 
-    ts->__sp = payload_address + FRIDA_INJECT_STACK_TOP_OFFSET;
+    ts->__sp = payload_address + layout.stack_top_offset;
     ts->__lr = 0xcafebabe;
-    ts->__pc = payload_address + FRIDA_INJECT_MACH_CODE_OFFSET;
+    ts->__pc = payload_address + layout.mach_code_offset;
 
     state_data = (thread_state_t) &state64;
     state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
@@ -642,11 +692,11 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   {
     bzero (&state32, sizeof (state32));
 
-    state32.__r[7] = payload_address + FRIDA_INJECT_DATA_OFFSET;
+    state32.__r[7] = payload_address + layout.data_offset;
 
-    state32.__sp = payload_address + FRIDA_INJECT_STACK_TOP_OFFSET;
+    state32.__sp = payload_address + layout.stack_top_offset;
     state32.__lr = 0xcafebabe;
-    state32.__pc = payload_address + FRIDA_INJECT_MACH_CODE_OFFSET;
+    state32.__pc = payload_address + layout.mach_code_offset;
     state32.__cpsr = FRIDA_PSR_THUMB;
 
     state_data = (thread_state_t) &state32;
@@ -676,6 +726,15 @@ handle_cpu_type_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing CPU type of process with pid %u",
+        pid);
+    goto error_epilogue;
+  }
+handle_page_size_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing page size of process with pid %u",
         pid);
     goto error_epilogue;
   }
@@ -936,9 +995,9 @@ frida_spawn_instance_on_server_recv (void * context)
   g_assert_cmpint (msg.header.msgh_id, ==, 1337);
   self->reply_port = msg.header.msgh_remote_port;
 
-  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  mach_vm_write (self->task, self->entrypoint, (vm_offset_t) self->overwritten_code, self->overwritten_code_size);
-  mach_vm_protect (self->task, self->entrypoint, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  mach_vm_protect (self->task, self->entrypoint_address, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  mach_vm_write (self->task, self->entrypoint_address, (vm_offset_t) self->overwritten_code, self->overwritten_code_size);
+  mach_vm_protect (self->task, self->entrypoint_address, self->overwritten_code_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
 
   _frida_helper_service_on_spawn_instance_ready (self->service, self->pid);
 }
@@ -989,32 +1048,11 @@ frida_spawn_fill_context_process_export (const GumExportDetails * details, gpoin
   return TRUE;
 }
 
-#if defined (HAVE_ARM) || defined (HAVE_ARM64)
+#if defined (HAVE_I386)
 
 static gboolean
-frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
-{
-  g_set_error (error,
-      FRIDA_ERROR,
-      FRIDA_ERROR_NOT_SUPPORTED,
-      "Not yet implemented for ARM");
-  return FALSE;
-}
-
-static gboolean
-frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
-{
-  g_set_error (error,
-      FRIDA_ERROR,
-      FRIDA_ERROR_NOT_SUPPORTED,
-      "Not yet implemented for ARM");
-  return FALSE;
-}
-
-#else
-
-static gboolean
-frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * code, guint * code_size, GError ** error)
+frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
 {
   GumX86Writer cw;
 
@@ -1032,7 +1070,7 @@ frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * cod
     gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XSP, 16 * sizeof (guint64), GUM_REG_XAX);
 
   /* transfer to the sync code */
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, self->payload_address + FRIDA_SPAWN_CODE_OFFSET);
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, self->payload_address + layout->code_offset);
   gum_x86_writer_put_jmp_reg (&cw, GUM_REG_XAX);
 
   gum_x86_writer_flush (&cw);
@@ -1043,7 +1081,8 @@ frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, guint8 * cod
 }
 
 static gboolean
-frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, guint8 * code, guint * code_size, GError ** error)
+frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
 {
   GumX86Writer cw;
   gconstpointer panic_label = "frida_spawn_instance_panic";
@@ -1067,7 +1106,7 @@ frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawn
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XAX); /* release space */
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, api->mach_msg_impl);
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, self->payload_address + FRIDA_SPAWN_DATA_OFFSET);
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, self->payload_address + layout->data_offset);
 
   /* xbx->header.msgh_local_port = *xbp; */
   gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBX, G_STRUCT_OFFSET (FridaSpawnMessageTx, header.msgh_local_port), GUM_REG_EBP);
@@ -1102,6 +1141,275 @@ frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawn
   gum_x86_writer_flush (&cw);
   *code_size = gum_x86_writer_offset (&cw);
   gum_x86_writer_free (&cw);
+
+  return TRUE;
+}
+
+#else
+
+static gboolean frida_spawn_instance_emit_arm_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error);
+static gboolean frida_spawn_instance_emit_arm_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error);
+
+static gboolean frida_spawn_instance_emit_arm64_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error);
+static gboolean frida_spawn_instance_emit_arm64_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error);
+
+static gboolean
+frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
+{
+  if (self->cpu_type == GUM_CPU_ARM)
+    return frida_spawn_instance_emit_arm_redirect_code (self, layout, code, code_size, error);
+  else
+    return frida_spawn_instance_emit_arm64_redirect_code (self, layout, code, code_size, error);
+}
+
+static gboolean
+frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
+{
+  if (self->cpu_type == GUM_CPU_ARM)
+    return frida_spawn_instance_emit_arm_sync_code (self, api, layout, code, code_size, error);
+  else
+    return frida_spawn_instance_emit_arm64_sync_code (self, api, layout, code, code_size, error);
+}
+
+static gboolean
+frida_spawn_instance_emit_arm_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
+{
+  GumAddress sync_impl;
+  gboolean entrypoint_is_thumb;
+
+  sync_impl = self->payload_address + layout->code_offset + 1;
+
+  entrypoint_is_thumb = (self->entrypoint & 1) != 0;
+  if (entrypoint_is_thumb)
+  {
+    GumThumbWriter tw;
+
+    gum_thumb_writer_init (&tw, code);
+
+    gum_thumb_writer_put_push_regs (&tw, 8 + 1,
+        ARM_REG_R0, ARM_REG_R1, ARM_REG_R2, ARM_REG_R3,
+        ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7,
+        ARM_REG_LR);
+    gum_thumb_writer_put_ldr_reg_address (&tw, ARM_REG_R0, sync_impl);
+    gum_thumb_writer_put_bx_reg (&tw, ARM_REG_R0);
+
+    gum_thumb_writer_flush (&tw);
+    *code_size = gum_thumb_writer_offset (&tw);
+    gum_thumb_writer_free (&tw);
+  }
+  else
+  {
+    GumArmWriter aw;
+
+    gum_arm_writer_init (&aw, code);
+
+    gum_arm_writer_put_ldr_reg_address (&aw, ARM_REG_PC, sync_impl);
+
+    gum_arm_writer_flush (&aw);
+    *code_size = gum_arm_writer_offset (&aw);
+    gum_arm_writer_free (&aw);
+  }
+
+  return TRUE;
+}
+
+static gboolean
+frida_spawn_instance_emit_arm_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
+{
+  GumThumbWriter tw;
+  gboolean entrypoint_is_thumb;
+  gconstpointer panic_label = "frida_spawn_instance_panic";
+
+  gum_thumb_writer_init (&tw, code);
+
+  entrypoint_is_thumb = (self->entrypoint & 1) != 0;
+
+  if (!entrypoint_is_thumb)
+  {
+    gum_thumb_writer_put_push_regs (&tw, 8 + 1,
+        ARM_REG_R0, ARM_REG_R1, ARM_REG_R2, ARM_REG_R3,
+        ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7,
+        ARM_REG_LR);
+  }
+
+  gum_thumb_writer_put_mov_reg_reg (&tw, ARM_REG_R7, ARM_REG_SP);
+
+  /* r4 = mach_task_self (); */
+  gum_thumb_writer_put_call_address_with_arguments (&tw, api->mach_task_self_impl, 0);
+  gum_thumb_writer_put_mov_reg_reg (&tw, ARM_REG_R4, ARM_REG_R0);
+
+  /* reserve space for port variable */
+  gum_thumb_writer_put_sub_reg_reg_imm (&tw, ARM_REG_SP, ARM_REG_SP, sizeof (mach_port_t));
+  /* r5 = &port; */
+  gum_thumb_writer_put_mov_reg_reg (&tw, ARM_REG_R5, ARM_REG_SP);
+  /* mach_port_allocate (r4, MACH_PORT_RIGHT_RECEIVE, r5); */
+  gum_thumb_writer_put_call_address_with_arguments (&tw, api->mach_port_allocate_impl, 3,
+      GUM_ARG_REGISTER, ARM_REG_R4,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_PORT_RIGHT_RECEIVE),
+      GUM_ARG_REGISTER, ARM_REG_R5);
+  /* r5 = port; */
+  gum_thumb_writer_put_ldr_reg_reg (&tw, ARM_REG_R5, ARM_REG_R5);
+
+  /* mach_msg(...); */
+
+  /* r6 = self->payload_address + self->data_offset; */
+  gum_thumb_writer_put_ldr_reg_address (&tw, ARM_REG_R6, self->payload_address + layout->data_offset);
+
+  /* r6->header.msgh_local_port = r5; */
+  gum_thumb_writer_put_str_reg_reg_offset (&tw, ARM_REG_R5, ARM_REG_R6, G_STRUCT_OFFSET (FridaSpawnMessageTx, header.msgh_local_port));
+
+  gum_thumb_writer_put_call_address_with_arguments (&tw, api->mach_msg_impl, 7,
+      GUM_ARG_REGISTER, ARM_REG_R6,                                /* header           */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_SEND_MSG | MACH_RCV_MSG), /* flags            */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (sizeof (FridaSpawnMessageTx)), /* send size        */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (sizeof (FridaSpawnMessageRx)), /* max receive size */
+      GUM_ARG_REGISTER, ARM_REG_R5,                                /* receive port     */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_MSG_TIMEOUT_NONE),        /* timeout          */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_PORT_NULL)                /* notification     */
+  );
+  gum_thumb_writer_put_cbnz_reg_label (&tw, ARM_REG_R0, panic_label);
+
+  /* mach_port_deallocate (r4, r5); */
+  gum_thumb_writer_put_call_address_with_arguments (&tw, api->mach_port_deallocate_impl, 2,
+      GUM_ARG_REGISTER, ARM_REG_R4,
+      GUM_ARG_REGISTER, ARM_REG_R5);
+
+  gum_thumb_writer_put_mov_reg_reg (&tw, ARM_REG_SP, ARM_REG_R7);
+
+  /* restore LR */
+  gum_thumb_writer_put_ldr_reg_reg_offset (&tw, ARM_REG_R0, ARM_REG_SP, 8 * 4);
+  gum_thumb_writer_put_mov_reg_reg (&tw, ARM_REG_LR, ARM_REG_R0);
+
+  /* replace LR with the entrypoint so we can pop it straight into PC */
+  gum_thumb_writer_put_ldr_reg_address (&tw, ARM_REG_R0, self->entrypoint);
+  gum_thumb_writer_put_str_reg_reg_offset (&tw, ARM_REG_R0, ARM_REG_SP, 8 * 4);
+
+  /* restore r[0-8] and jump straight to the entrypoint */
+  gum_thumb_writer_put_pop_regs (&tw, 9,
+      ARM_REG_R0, ARM_REG_R1, ARM_REG_R2, ARM_REG_R3,
+      ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7,
+      ARM_REG_PC);
+
+  gum_thumb_writer_put_label (&tw, panic_label);
+  gum_thumb_writer_put_call_address_with_arguments (&tw, api->abort_impl, 0);
+
+  gum_thumb_writer_flush (&tw);
+  *code_size = gum_thumb_writer_offset (&tw);
+  gum_thumb_writer_free (&tw);
+
+  return TRUE;
+}
+
+static gboolean
+frida_spawn_instance_emit_arm64_redirect_code (FridaSpawnInstance * self, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
+{
+  GumArm64Writer aw;
+
+  gum_arm64_writer_init (&aw, code);
+
+  gum_arm64_writer_put_ldr_reg_address (&aw, ARM64_REG_X16, self->payload_address + layout->code_offset);
+  gum_arm64_writer_put_br_reg (&aw, ARM64_REG_X16);
+
+  gum_arm64_writer_flush (&aw);
+  *code_size = gum_arm64_writer_offset (&aw);
+  gum_arm64_writer_free (&aw);
+
+  return TRUE;
+}
+
+static gboolean
+frida_spawn_instance_emit_arm64_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
+    guint8 * code, guint * code_size, GError ** error)
+{
+  GumArm64Writer aw;
+  gconstpointer panic_label = "frida_spawn_instance_panic";
+
+  gum_arm64_writer_init (&aw, code);
+
+  /* we make use of x19 and x20, and also save the clobberable registers so we're transparent */
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_FP, ARM64_REG_LR);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X19, ARM64_REG_X20);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X14, ARM64_REG_X15);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X12, ARM64_REG_X13);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X10, ARM64_REG_X11);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X8, ARM64_REG_X9);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X6, ARM64_REG_X7);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X4, ARM64_REG_X5);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X2, ARM64_REG_X3);
+  gum_arm64_writer_put_push_reg_reg (&aw, ARM64_REG_X0, ARM64_REG_X1);
+  gum_arm64_writer_put_mov_reg_reg (&aw, ARM64_REG_FP, ARM64_REG_SP);
+
+  /* x19 = mach_task_self (); */
+  gum_arm64_writer_put_call_address_with_arguments (&aw, api->mach_task_self_impl, 0);
+  gum_arm64_writer_put_mov_reg_reg (&aw, ARM64_REG_X19, ARM64_REG_X0);
+
+  /* reserve space for port variable */
+  gum_arm64_writer_put_sub_reg_reg_imm (&aw, ARM64_REG_SP, ARM64_REG_SP, 16);
+  /* x20 = &port; */
+  gum_arm64_writer_put_mov_reg_reg (&aw, ARM64_REG_X20, ARM64_REG_SP);
+  /* mach_port_allocate (x19, MACH_PORT_RIGHT_RECEIVE, x20); */
+  gum_arm64_writer_put_call_address_with_arguments (&aw, api->mach_port_allocate_impl, 3,
+      GUM_ARG_REGISTER, ARM64_REG_X19,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_PORT_RIGHT_RECEIVE),
+      GUM_ARG_REGISTER, ARM64_REG_X20);
+  /* x20 = port; */
+  gum_arm64_writer_put_ldr_reg_reg_offset (&aw, ARM64_REG_X20, ARM64_REG_X20, 0);
+
+  /* mach_msg(...); */
+
+  /* x0 = self->payload_address + self->data_offset; */
+  gum_arm64_writer_put_ldr_reg_address (&aw, ARM64_REG_X0, self->payload_address + layout->data_offset);
+
+  /* x0->header.msgh_local_port = (mach_port_t) x20; */
+  gum_arm64_writer_put_str_reg_reg_offset (&aw, ARM64_REG_W20, ARM64_REG_X0, G_STRUCT_OFFSET (FridaSpawnMessageTx, header.msgh_local_port));
+
+  gum_arm64_writer_put_call_address_with_arguments (&aw, api->mach_msg_impl, 7,
+      GUM_ARG_REGISTER, ARM64_REG_X0,                              /* header           */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_SEND_MSG | MACH_RCV_MSG), /* flags            */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (sizeof (FridaSpawnMessageTx)), /* send size        */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (sizeof (FridaSpawnMessageRx)), /* max receive size */
+      GUM_ARG_REGISTER, ARM64_REG_X20,                             /* receive port     */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_MSG_TIMEOUT_NONE),        /* timeout          */
+      GUM_ARG_ADDRESS, GUM_ADDRESS (MACH_PORT_NULL)                /* notification     */
+  );
+  gum_arm64_writer_put_cbnz_reg_label (&aw, ARM64_REG_X0, panic_label);
+
+  /* mach_port_deallocate (x19, x20); */
+  gum_arm64_writer_put_call_address_with_arguments (&aw, api->mach_port_deallocate_impl, 2,
+      GUM_ARG_REGISTER, ARM64_REG_X19,
+      GUM_ARG_REGISTER, ARM64_REG_X20);
+
+  gum_arm64_writer_put_mov_reg_reg (&aw, ARM64_REG_SP, ARM64_REG_FP);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X0, ARM64_REG_X1);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X2, ARM64_REG_X3);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X4, ARM64_REG_X5);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X6, ARM64_REG_X7);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X8, ARM64_REG_X9);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X10, ARM64_REG_X11);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X12, ARM64_REG_X13);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X14, ARM64_REG_X15);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_X19, ARM64_REG_X20);
+  gum_arm64_writer_put_pop_reg_reg (&aw, ARM64_REG_FP, ARM64_REG_LR);
+
+  /* we can now jump back to the actual entrypoint (which has just been restored) */
+  gum_arm64_writer_put_ldr_reg_address (&aw, ARM64_REG_X16, self->entrypoint);
+  gum_arm64_writer_put_br_reg (&aw, ARM64_REG_X16);
+
+  gum_arm64_writer_put_label (&aw, panic_label);
+  gum_arm64_writer_put_call_address_with_arguments (&aw, api->abort_impl, 0);
+
+  gum_arm64_writer_flush (&aw);
+  *code_size = gum_arm64_writer_offset (&aw);
+  gum_arm64_writer_free (&aw);
 
   return TRUE;
 }
@@ -1150,7 +1458,7 @@ frida_inject_instance_on_event (void * context)
 }
 
 static gboolean
-frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details,
+frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
     mach_vm_address_t payload_base, mach_vm_size_t payload_size, GError ** error)
 {
   memset (self, 0, sizeof (FridaAgentContext));
@@ -1158,27 +1466,27 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   if (!frida_agent_context_init_functions (self, details, error))
     return FALSE;
 
-  self->thread_self_data = payload_base + FRIDA_INJECT_THREAD_SELF_OFFSET;
+  self->thread_self_data = payload_base + layout->thread_self_offset;
 
   if (details->cpu_type == GUM_CPU_ARM)
-    self->pthread_create_start_routine = payload_base + FRIDA_INJECT_PTHREAD_CODE_OFFSET + 1;
+    self->pthread_create_start_routine = payload_base + layout->pthread_code_offset + 1;
   else
-    self->pthread_create_start_routine = payload_base + FRIDA_INJECT_PTHREAD_CODE_OFFSET;
-  self->pthread_create_arg = payload_base + FRIDA_INJECT_DATA_OFFSET;
+    self->pthread_create_start_routine = payload_base + layout->pthread_code_offset;
+  self->pthread_create_arg = payload_base + layout->data_offset;
 
-  self->dylib_path = payload_base + FRIDA_INJECT_DATA_OFFSET +
+  self->dylib_path = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, dylib_path_data);
   strcpy (self->dylib_path_data, details->dylib_path);
   self->dlopen_mode = RTLD_LAZY;
 
-  self->entrypoint_name = payload_base + FRIDA_INJECT_DATA_OFFSET +
+  self->entrypoint_name = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, entrypoint_name_data);
   strcpy (self->entrypoint_name_data, FRIDA_AGENT_ENTRYPOINT_NAME);
-  self->data_string = payload_base + FRIDA_INJECT_DATA_OFFSET +
+  self->data_string = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, data_string_data);
   g_assert_cmpint (strlen (details->data_string), <, sizeof (self->data_string_data));
   strcpy (self->data_string_data, details->data_string);
-  self->mapped_range = payload_base + FRIDA_INJECT_DATA_OFFSET +
+  self->mapped_range = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, mapped_range_data);
   self->mapped_range_data.base_address = payload_base;
   self->mapped_range_data.size = payload_size;

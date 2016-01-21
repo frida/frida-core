@@ -66,8 +66,13 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Darwin/spawn", () => {
-			var h = new Harness ((h) => Darwin.spawn.begin (h as Harness));
+		GLib.Test.add_func ("/HostSession/Darwin/spawn-native", () => {
+			var h = new Harness ((h) => Darwin.spawn_native.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/spawn-other", () => {
+			var h = new Harness ((h) => Darwin.spawn_other.begin (h as Harness));
 			h.run ();
 		});
 
@@ -547,13 +552,17 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void spawn (Harness h) {
-			if (!GLib.Test.slow ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				h.done ();
-				return;
-			}
+		private static async void spawn_native (Harness h) {
+			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "unixvictim-mac" : "unixvictim-ios";
+			yield run_spawn_scenario (h, victim_name);
+		}
 
+		private static async void spawn_other (Harness h) {
+			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "unixvictim-mac32" : "unixvictim-ios32";
+			yield run_spawn_scenario (h, victim_name);
+		}
+
+		private static async void run_spawn_scenario (Harness h, string victim_name) {
 			var backend = new DarwinHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
@@ -565,26 +574,33 @@ namespace Frida.HostSessionTest {
 				var host_session = yield prov.create ();
 
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim-mac");
+				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
 				string[] argv = { victim_path };
 				string[] envp = {};
 				var pid = yield host_session.spawn (victim_path, argv, envp);
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
 				string received_message = null;
+				bool waiting = false;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
-					spawn.callback ();
+					if (waiting)
+						run_spawn_scenario.callback ();
 				});
 				var script_id = yield session.create_script ("spawn",
-					"Interceptor.attach (Module.findExportByName('libSystem.B.dylib', 'sleep'), {" +
+					"var sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';" +
+					"Interceptor.attach(Module.findExportByName('libSystem.B.dylib', sleepFuncName), {" +
 					"  onEnter: function (args) {" +
 					"    send({ seconds: args[0].toInt32() });" +
 					"  }" +
 					"});");
 				yield session.load_script (script_id);
 				yield host_session.resume (pid);
-				yield;
+				if (received_message == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
 				session.disconnect (message_handler);
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				yield host_session.kill (pid);
