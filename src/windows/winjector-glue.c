@@ -91,8 +91,8 @@ frida_winjector_resource_store_set_acls_as_needed (const gchar * path, GError **
 {
   const gchar * failed_operation;
   LPWSTR path_utf16;
-  LPWSTR sddl;
-  SECURITY_DESCRIPTOR * sd;
+  LPCWSTR sddl;
+  SECURITY_DESCRIPTOR * sd = NULL;
   BOOL dacl_present;
   BOOL dacl_defaulted;
   PACL dacl;
