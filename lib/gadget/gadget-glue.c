@@ -538,6 +538,8 @@ frida_replacement_tls_key_create (
 void
 frida_gadget_auto_ignorer_replace_apis (FridaGadgetAutoIgnorer * self)
 {
+  gum_interceptor_begin_transaction (self->interceptor);
+
   gum_interceptor_replace_function (self->interceptor,
       frida_get_address_of_thread_create_func (),
       GUM_FUNCPTR_TO_POINTER (frida_replacement_thread_create),
@@ -549,6 +551,8 @@ frida_gadget_auto_ignorer_replace_apis (FridaGadgetAutoIgnorer * self)
       GUM_FUNCPTR_TO_POINTER (frida_replacement_tls_key_create),
       self);
 #endif
+
+  gum_interceptor_end_transaction (self->interceptor);
 }
 
 void
