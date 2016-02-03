@@ -70,6 +70,8 @@ namespace Frida.Inject {
 			return 1;
 		}
 
+        application = null;
+
 		return 0;
 	}
 
@@ -78,6 +80,7 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
+        DeviceManager device_manager;
 		private int pid;
 		private string script_file;
 		private bool disable_jit;
@@ -107,7 +110,6 @@ namespace Frida.Inject {
 		
 		public async void start () throws Error 
 		{
-			DeviceManager device_manager;
 			DeviceList device_list;
 			Device device = null;
 			Session session;
@@ -153,6 +155,8 @@ namespace Frida.Inject {
 				yield script_runner.stop ();
 				script_runner = null;
 			}
+
+            yield device_manager.close ();
 
 			Idle.add (() => {
 				loop.quit ();
