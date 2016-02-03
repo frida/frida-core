@@ -5,6 +5,7 @@ SUBDIRS = \
 	lib \
 	src \
 	server \
+	inject \
 	tests
 
 pcfiles = \
