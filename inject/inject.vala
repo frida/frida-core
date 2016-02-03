@@ -4,8 +4,8 @@ namespace Frida.Inject {
 	private static bool output_version;
 	private static bool disable_jit;
 	private static bool enable_development;
-    private static int pid;
-    private static string script_file;
+	private static int pid;
+	private static string script_file;
 
 	static const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
@@ -23,8 +23,8 @@ namespace Frida.Inject {
 
 		Environment.init ();
 
-        pid = -1;
-        script_file = "";
+		pid = -1;
+		script_file = "";
 
 		try {
 			var ctx = new OptionContext ();
@@ -42,15 +42,15 @@ namespace Frida.Inject {
 			return 1;
 		}
 
-        if (pid == -1) {
-            stdout.printf ("pid must be specified\n");
-            return 1;
-        }
+		if (pid == -1) {
+			stdout.printf ("pid must be specified\n");
+			return 1;
+		}
 
-        if (script_file == "") {
-            stdout.printf ("javascript filename must be specified\n");
-            return 1;
-        }
+		if (script_file == "") {
+			stdout.printf ("javascript filename must be specified\n");
+			return 1;
+		}
 
 		application = new Application ();
 
@@ -78,11 +78,11 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
-        private int pid;
-        private string script_file;
-        private bool disable_jit;
-        private bool enable_development;
-        private ScriptRunner script_runner;
+		private int pid;
+		private string script_file;
+		private bool disable_jit;
+		private bool enable_development;
+		private ScriptRunner script_runner;
 
 		private MainLoop loop;
 		private bool stopping;
@@ -91,76 +91,73 @@ namespace Frida.Inject {
 		}
 
 		public void run (int pid, string script_file, bool disable_jit, bool enable_development) throws Error {
-            this.pid = pid;
-            this.script_file = script_file;
-            this.disable_jit = disable_jit;
-            this.enable_development = enable_development;
+			this.pid = pid;
+			this.script_file = script_file;
+			this.disable_jit = disable_jit;
+			this.enable_development = enable_development;
 
-            Idle.add (() => {
-                start.begin ();
-                return false;
-            });
+			Idle.add (() => {
+				start.begin ();
+				return false;
+			});
 
 			loop = new MainLoop ();
 			loop.run ();
 		}
-        
-        public async void start () throws Error 
-        {
-            DeviceManager device_manager;
-            DeviceList device_list;
-            Device device = null;
-            Session session;
+		
+		public async void start () throws Error 
+		{
+			DeviceManager device_manager;
+			DeviceList device_list;
+			Device device = null;
+			Session session;
 
-            stdout.printf ("here\n");
-            device_manager = new DeviceManager ();
-            stdout.printf ("here\n");
-            device_list = yield device_manager.enumerate_devices ();
-            stdout.printf ("here\n");
+			device_manager = new DeviceManager ();
+			device_list = yield device_manager.enumerate_devices ();
 
-            for (int i = 0; i < device_list.size (); i++) {
-                Device current_device = device_list.get (i);
-                if (current_device.dtype == DeviceType.LOCAL) {
-                    device = current_device;
-                    break;
-                }
-            }
+			for (int i = 0; i < device_list.size (); i++) {
+				Device current_device = device_list.get (i);
+				if (current_device.dtype == DeviceType.LOCAL) {
+					device = current_device;
+					break;
+				}
+			}
 
-            if (device == null)
-                throw new Error.INVALID_OPERATION ("Couldn't find the local backend\n");
+			if (device == null)
+				throw new Error.INVALID_OPERATION ("Couldn't find the local backend\n");
 
-            session = yield device.attach (pid);
+			session = yield device.attach (pid);
 
-            var r = new ScriptRunner (session, script_file, disable_jit, enable_development);
+			var r = new ScriptRunner (session, script_file, disable_jit, enable_development);
 			try {
 				yield r.start ();
 				script_runner = r;
 			} catch (Error e) {
 				stdout.printf ("Failed to load script: " + e.message);
 			}
-        }
+		}
 
 		public void shutdown () {
-            Idle.add (() => {
-                stop.begin ();
-                return false;
-            });
+			Idle.add (() => {
+				stop.begin ();
+				return false;
+			});
 		}
 
 		public async void stop () {
 			if (stopping)
 				return;
 			stopping = true;
-    
-            if (script_runner != null) {
-                yield script_runner.stop ();
-                script_runner = null;
-            }
+	
+			if (script_runner != null) {
+				yield script_runner.stop ();
+				script_runner = null;
+			}
 
-            Idle.add (() => {
-                loop.quit ();
-                return false;
-            });
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
 		}
 	}
 
@@ -171,18 +168,18 @@ namespace Frida.Inject {
 		private Source script_unchanged_timeout;
 		private Session session;
 		private bool load_in_progress = false;
-        private bool enable_development = false;
+		private bool enable_development = false;
 
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
 		public ScriptRunner (Session session, string script_file, bool disable_jit, bool enable_development) {
-            this.session = session;
+			this.session = session;
 			this.script_file = script_file;
-            this.enable_development = enable_development;
+			this.enable_development = enable_development;
 
 			if (disable_jit)
-                session.disable_jit.begin ();
+				session.disable_jit.begin ();
 		}
 
 		public async void start () throws Error {
@@ -253,7 +250,7 @@ namespace Frida.Inject {
 				}
 				script = s;
 
-                script.message.connect (on_message);
+				script.message.connect (on_message);
 				yield script.load ();
 
 				try {
