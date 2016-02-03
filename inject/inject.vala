@@ -80,7 +80,7 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
-		DeviceManager device_manager;
+		private DeviceManager device_manager;
 		private int pid;
 		private string script_file;
 		private bool disable_jit;
@@ -89,9 +89,6 @@ namespace Frida.Inject {
 
 		private MainLoop loop;
 		private bool stopping;
-
-		construct {
-		}
 
 		public void run (int pid, string script_file, bool disable_jit, bool enable_development) throws Error {
 			this.pid = pid;
@@ -108,16 +105,12 @@ namespace Frida.Inject {
 			loop.run ();
 		}
 		
-		public async void start () throws Error 
-		{
-			DeviceList device_list;
-			Device device = null;
-			Session session;
-
+		private async void start () throws Error {
 			device_manager = new DeviceManager ();
-			device_list = yield device_manager.enumerate_devices ();
+			var device_list = yield device_manager.enumerate_devices ();
 
-			for (int i = 0; i < device_list.size (); i++) {
+			Device device = null;
+			for (int i = 0; i != device_list.size (); i++) {
 				Device current_device = device_list.get (i);
 				if (current_device.dtype == DeviceType.LOCAL) {
 					device = current_device;
@@ -128,7 +121,7 @@ namespace Frida.Inject {
 			if (device == null)
 				throw new Error.INVALID_OPERATION ("Couldn't find the local backend\n");
 
-			session = yield device.attach (pid);
+			var session = yield device.attach (pid);
 
 			var r = new ScriptRunner (session, script_file, disable_jit, enable_development);
 			try {
@@ -146,7 +139,7 @@ namespace Frida.Inject {
 			});
 		}
 
-		public async void stop () {
+		private async void stop () {
 			if (stopping)
 				return;
 			stopping = true;
@@ -157,6 +150,7 @@ namespace Frida.Inject {
 			}
 
 			yield device_manager.close ();
+			device_manager = null;
 
 			Idle.add (() => {
 				loop.quit ();
