@@ -2,8 +2,7 @@ extra_libs =
 
 if OS_ANDROID
 extra_libs += \
-	$(top_builddir)/lib/selinux/libfrida-selinux.la \
-	-llog
+	$(top_builddir)/lib/selinux/libfrida-selinux.la
 endif
 
 bin_PROGRAMS = frida-inject

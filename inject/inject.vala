@@ -33,7 +33,7 @@ namespace Frida.Inject {
 			ctx.parse (ref args);
 
 			if (output_version) {
-				stdout.printf ("%s\n", version_string ());
+				print ("%s\n", version_string ());
 				return 0;
 			}
 		} catch (OptionError e) {
@@ -43,12 +43,12 @@ namespace Frida.Inject {
 		}
 
 		if (pid == -1) {
-			stdout.printf ("pid must be specified\n");
+			printerr ("pid must be specified\n");
 			return 1;
 		}
 
 		if (script_file == "") {
-			stdout.printf ("javascript filename must be specified\n");
+			printerr ("javascript filename must be specified\n");
 			return 1;
 		}
 
@@ -72,11 +72,13 @@ namespace Frida.Inject {
 
 		application = null;
 
+        Environment.deinit ();
 		return 0;
 	}
 
 	namespace Environment {
 		public extern void init ();
+		public extern void deinit ();
 	}
 
 	public class Application : Object {
@@ -128,7 +130,7 @@ namespace Frida.Inject {
 				yield r.start ();
 				script_runner = r;
 			} catch (Error e) {
-				stdout.printf ("Failed to load script: " + e.message);
+				printerr ("Failed to load script: " + e.message);
 			}
 		}
 
