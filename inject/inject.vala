@@ -37,18 +37,18 @@ namespace Frida.Inject {
 				return 0;
 			}
 		} catch (OptionError e) {
-			stdout.printf ("%s\n", e.message);
-			stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
+			printerr ("%s\n", e.message);
+			printerr ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
 			return 1;
 		}
 
 		if (pid == -1) {
-			printerr ("pid must be specified\n");
+			printerr ("PID must be specified\n");
 			return 1;
 		}
 
 		if (script_file == "") {
-			printerr ("javascript filename must be specified\n");
+			printerr ("Path to JavaScript file must be specified\n");
 			return 1;
 		}
 
@@ -66,7 +66,7 @@ namespace Frida.Inject {
 		try {
 			application.run (pid, script_file, disable_jit, enable_development);
 		} catch (Error e) {
-			printerr ("Unable to start inject: %s\n", e.message);
+			printerr ("Unable to start: %s\n", e.message);
 			return 1;
 		}
 
@@ -106,7 +106,7 @@ namespace Frida.Inject {
 			loop = new MainLoop ();
 			loop.run ();
 		}
-		
+
 		private async void start () throws Error {
 			device_manager = new DeviceManager ();
 			var device_list = yield device_manager.enumerate_devices ();
@@ -130,7 +130,7 @@ namespace Frida.Inject {
 				yield r.start ();
 				script_runner = r;
 			} catch (Error e) {
-				printerr ("Failed to load script: " + e.message);
+				printerr ("Failed to load script: " + e.message + "\n");
 			}
 		}
 
@@ -145,7 +145,7 @@ namespace Frida.Inject {
 			if (stopping)
 				return;
 			stopping = true;
-	
+
 			if (script_runner != null) {
 				yield script_runner.stop ();
 				script_runner = null;
@@ -190,7 +190,7 @@ namespace Frida.Inject {
 					script_monitor = File.new_for_path (script_file).monitor_file (FileMonitorFlags.NONE);
 					script_monitor.changed.connect (on_script_file_changed);
 				} catch (GLib.Error e) {
-					printerr (e.message);
+					printerr (e.message + "\n");
 				}
 			}
 		}

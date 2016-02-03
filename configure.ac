@@ -181,7 +181,7 @@ AC_SUBST(FRIDA_AGENT_PACKAGES)
 PKG_CHECK_MODULES(FRIDA_GADGET, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, json-glib-1.0, frida-gum-1.0, frida-gumjs-1.0])
 FRIDA_GADGET_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg json-glib-1.0 --pkg frida-gum-1.0 --pkg frida-gumjs-1.0"
 AC_SUBST(FRIDA_GADGET_PACKAGES)
- 
+
 PKG_CHECK_MODULES(FRIDA_INJECT, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, json-glib-1.0, frida-gum-1.0])
 FRIDA_INJECT_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg json-glib-1.0 --pkg frida-gum-1.0"
 AC_SUBST(FRIDA_INJECT_PACKAGES)
