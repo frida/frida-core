@@ -78,14 +78,6 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
-        private enum State {
-            CREATED,
-            STARTED,
-            RUNNING,
-            STOPPED
-        }
-
-        private State state = State.CREATED;
         private int pid;
         private string script_file;
         private bool disable_jit;
@@ -94,8 +86,6 @@ namespace Frida.Inject {
 
 		private MainLoop loop;
 		private bool stopping;
-        private Mutex mutex;
-        private Cond cond;
 
 		construct {
 		}
@@ -110,11 +100,6 @@ namespace Frida.Inject {
                 start.begin ();
                 return false;
             });
-
-            mutex.lock ();
-            while (state != State.RUNNING)
-                cond.wait (mutex);
-            mutex.unlock ();
 
 			loop = new MainLoop ();
 			loop.run ();
@@ -153,11 +138,6 @@ namespace Frida.Inject {
 			} catch (Error e) {
 				stdout.printf ("Failed to load script: " + e.message);
 			}
-            
-            mutex.lock ();
-            state = State.RUNNING;
-            cond.signal ();
-            mutex.unlock ();
         }
 
 		public void shutdown () {
@@ -165,11 +145,6 @@ namespace Frida.Inject {
                 stop.begin ();
                 return false;
             });
-
-            mutex.lock ();
-            while (state != State.STOPPED)
-                cond.wait (mutex);
-            mutex.unlock ();
 		}
 
 		public async void stop () {
@@ -186,11 +161,6 @@ namespace Frida.Inject {
                 loop.quit ();
                 return false;
             });
-
-            mutex.lock ();
-            state = State.STOPPED;
-            cond.signal ();
-            mutex.unlock ();
 		}
 	}
 
