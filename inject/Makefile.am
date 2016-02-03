@@ -14,7 +14,7 @@ frida_inject_SOURCES = \
 frida_inject_CFLAGS = \
 	-w
 frida_inject_LDFLAGS = \
-	$(FRIDA_LDFLAGS)
+	$(FRIDA_INJECT_LDFLAGS)
 frida_inject_LDADD = \
 	$(top_builddir)/src/libfrida-core-1.0.la \
 	$(extra_libs) \
