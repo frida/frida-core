@@ -106,14 +106,10 @@ namespace Frida.Inject {
             this.disable_jit = disable_jit;
             this.enable_development = enable_development;
 
-            Frida.init ();
-
-            var source = new IdleSource ();
-            source.set_callback (() => {
+            Idle.add (() => {
                 start.begin ();
                 return false;
             });
-            source.attach (Frida.get_main_context ());
 
             mutex.lock ();
             while (state != State.RUNNING)
@@ -131,8 +127,11 @@ namespace Frida.Inject {
             Device device = null;
             Session session;
 
+            stdout.printf ("here\n");
             device_manager = new DeviceManager ();
+            stdout.printf ("here\n");
             device_list = yield device_manager.enumerate_devices ();
+            stdout.printf ("here\n");
 
             for (int i = 0; i < device_list.size (); i++) {
                 Device current_device = device_list.get (i);
@@ -162,12 +161,10 @@ namespace Frida.Inject {
         }
 
 		public void shutdown () {
-            var source = new IdleSource ();
-            source.set_callback (() => {
+            Idle.add (() => {
                 stop.begin ();
                 return false;
             });
-            source.attach (Frida.get_main_context ());
 
             mutex.lock ();
             while (state != State.STOPPED)
@@ -185,14 +182,15 @@ namespace Frida.Inject {
                 script_runner = null;
             }
 
-            loop.quit ();
+            Idle.add (() => {
+                loop.quit ();
+                return false;
+            });
 
             mutex.lock ();
             state = State.STOPPED;
             cond.signal ();
             mutex.unlock ();
-
-            Frida.shutdown ();
 		}
 	}
 
