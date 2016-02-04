@@ -55,6 +55,10 @@ static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags
 
 static void frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self);
 
+#ifdef HAVE_LINUX
+static void frida_libdl_prevent_unload ();
+#endif
+
 void
 frida_agent_environment_init (void)
 {
@@ -98,7 +102,18 @@ frida_agent_environment_init (void)
   gum_init ();
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
+#ifdef HAVE_LINUX
+  frida_libdl_prevent_unload ();
+#endif
 }
+
+#ifdef HAVE_LINUX
+void
+frida_libdl_prevent_unload ()
+{
+  __libc_dlopen_mode ("libdl.so.2", RTLD_LAZY | 0x80000000);
+}
+#endif
 
 void
 frida_agent_environment_deinit (FridaAgentAutoIgnorer * ignorer)
