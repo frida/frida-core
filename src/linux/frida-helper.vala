@@ -139,7 +139,10 @@ namespace Frida {
 		}
 
 		private async void _monitor_inject_instance (uint id) {
-			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
+			var instance = inject_instance_by_id[id];
+			if (instance == null)
+				return;
+			var fifo = _get_fifo_for_inject_instance (instance);
 			while (true) {
 				var buf = new uint8[1];
 				try {
