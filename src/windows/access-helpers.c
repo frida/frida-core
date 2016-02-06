@@ -8,11 +8,11 @@ LPCWSTR
 frida_access_get_sddl_string_for_temp_directory (void)
 {
   #define DACL_START_INHERIT L"D:AI"
-  #define DACL_ACE_APPCONTAINER_RW_WITH_CHILD_INHERIT L"(A;OICI;GRGW;;;AC)"
+  #define DACL_ACE_APPCONTAINER_RWX_WITH_CHILD_INHERIT L"(A;OICI;GRGWGX;;;AC)"
 
   if (frida_access_is_windows_8_or_greater ())
   {
-    return DACL_START_INHERIT DACL_ACE_APPCONTAINER_RW_WITH_CHILD_INHERIT;
+    return DACL_START_INHERIT DACL_ACE_APPCONTAINER_RWX_WITH_CHILD_INHERIT;
   }
   else
   {
