@@ -30,6 +30,7 @@
 /data/frida-data-agent.h
 /data/frida-data-agent.vapi
 /ext/gum/
+/inject/Makefile.in
 /lib/Makefile
 /lib/Makefile.in
 /lib/agent/Makefile
