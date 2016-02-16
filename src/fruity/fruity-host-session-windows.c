@@ -299,6 +299,8 @@ frida_foreach_usb_device (const GUID * guid, FridaEnumerateDeviceFunc func, gpoi
     device_info.friendly_name = frida_read_device_registry_string_property (info_set, &info_data, SPDRP_FRIENDLYNAME);
 
     device_info.location = frida_read_device_registry_string_property (info_set, &info_data, SPDRP_LOCATION_INFORMATION);
+    if (device_info.location == NULL)
+      goto skip_device;
 
     device_info.device_info_set = info_set;
     device_info.device_info_data = &info_data;
