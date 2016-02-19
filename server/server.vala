@@ -1,14 +1,14 @@
 namespace Frida.Server {
 	private static Application application;
 
-	private const string DEFAULT_LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
+	private const uint16 DEFAULT_LISTEN_PORT = 27042;
 	private static bool output_version;
-	[CCode (array_length = false, array_null_terminated = true)]
-	private static string[] listen_addresses;
+	private static string listen_address;
 
 	static const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
-		{ "", 0, 0, OptionArg.STRING_ARRAY, ref listen_addresses, null, "[LISTEN_ADDRESS]" },
+		{ "listen", 'l', 0, OptionArg.STRING, ref listen_address, "Listen on ADDRESS", "ADDRESS" },
 		{ null }
 	};
 
@@ -29,14 +29,28 @@ namespace Frida.Server {
 				return 0;
 			}
 		} catch (OptionError e) {
-			stdout.printf ("%s\n", e.message);
-			stdout.printf ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
+			printerr ("%s\n", e.message);
+			printerr ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
 			return 1;
 		}
 
-		var listen_address = DEFAULT_LISTEN_ADDRESS;
-		if (listen_addresses.length > 0)
-			listen_address = listen_addresses[0];
+		string listen_uri;
+		try {
+			var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
+			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
+			if (socket_address is InetSocketAddress) {
+				var inet_socket_address = socket_address as InetSocketAddress;
+				var inet_address = inet_socket_address.get_address ();
+				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
+				listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (), inet_socket_address.get_port ());
+			} else {
+				printerr ("Invalid listen address\n");
+				return 1;
+			}
+		} catch (GLib.Error e) {
+			printerr ("%s\n", e.message);
+			return 1;
+		}
 
 		application = new Application ();
 
@@ -50,7 +64,7 @@ namespace Frida.Server {
 #endif
 
 		try {
-			application.run (listen_address);
+			application.run (listen_uri);
 		} catch (Error e) {
 			printerr ("Unable to start server: %s\n", e.message);
 			return 1;
@@ -91,9 +105,9 @@ namespace Frida.Server {
 			host_session.agent_session_closed.connect (on_agent_session_closed);
 		}
 
-		public void run (string address) throws Error {
+		public void run (string listen_uri) throws Error {
 			try {
-				server = new DBusServer.sync (address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			} catch (GLib.Error listen_error) {
 				throw new Error.ADDRESS_IN_USE (listen_error.message);
 			}
