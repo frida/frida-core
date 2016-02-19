@@ -63,6 +63,84 @@ namespace Frida {
 			}
 		}
 
+		public async Device add_remote_device (string host) throws Error {
+			check_open ();
+
+			yield ensure_service ();
+
+			var id = "tcp@" + host;
+
+			foreach (var device in devices) {
+				if (device.id == id)
+					throw new Error.INVALID_ARGUMENT ("Device already exists");
+			}
+
+			HostSessionProvider tcp_provider = null;
+			foreach (var device in devices) {
+				var p = device.provider;
+				if (p is TcpHostSessionProvider) {
+					tcp_provider = p;
+					break;
+				}
+			}
+			if (tcp_provider == null)
+				throw new Error.NOT_SUPPORTED ("TCP backend not available");
+
+			var device = new Device (this, id, host, HostSessionProviderKind.REMOTE_SYSTEM, tcp_provider, host);
+			devices.add (device);
+			added (device);
+			changed ();
+
+			return device;
+		}
+
+		public Device add_remote_device_sync (string host) throws Error {
+			var task = create<AddRemoteDeviceTask> () as AddRemoteDeviceTask;
+			task.host = host;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class AddRemoteDeviceTask : ManagerTask<Device> {
+			public string host;
+
+			protected override async Device perform_operation () throws Error {
+				return yield parent.add_remote_device (host);
+			}
+		}
+
+		public async void remove_remote_device (string host) throws Error {
+			check_open ();
+
+			yield ensure_service ();
+
+			var id = "tcp@" + host;
+
+			foreach (var device in devices) {
+				if (device.id == id) {
+					yield device._do_close (true);
+					removed (device);
+					changed ();
+					return;
+				}
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Device not found");
+		}
+
+		public void remove_remote_device_sync (string host) throws Error {
+			var task = create<RemoveRemoteDeviceTask> () as RemoveRemoteDeviceTask;
+			task.host = host;
+			task.start_and_wait_for_completion ();
+		}
+
+		private class RemoveRemoteDeviceTask : ManagerTask<void> {
+			public string host;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.remove_remote_device (host);
+			}
+		}
+
 		public void _release_device (Device device) {
 			var device_did_exist = devices.remove (device);
 			assert (device_did_exist);
@@ -206,6 +284,7 @@ namespace Frida {
 		}
 
 		private weak DeviceManager manager;
+		private string? location;
 		private Gee.Promise<bool> ensure_request;
 		private Gee.Promise<bool> close_request;
 
@@ -213,7 +292,7 @@ namespace Frida {
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 
-		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider) {
+		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;
@@ -230,6 +309,7 @@ namespace Frida {
 					break;
 			}
 			this.provider = provider;
+			this.location = location;
 			this.main_context = manager.main_context;
 
 			provider.host_session_closed.connect (on_host_session_closed);
@@ -551,6 +631,12 @@ namespace Frida {
 
 			if (host_session != null) {
 				host_session.spawned.disconnect (on_spawned);
+				if (may_block) {
+					try {
+						yield provider.destroy (host_session);
+					} catch (Error e) {
+					}
+				}
 				host_session = null;
 			}
 
@@ -592,7 +678,7 @@ namespace Frida {
 			ensure_request = new Gee.Promise<bool> ();
 
 			try {
-				host_session = yield provider.create ();
+				host_session = yield provider.create (location);
 				host_session.spawned.connect (on_spawned);
 				ensure_request.set_value (true);
 			} catch (Error e) {

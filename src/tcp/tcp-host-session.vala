@@ -33,7 +33,8 @@ namespace Frida {
 			get { return HostSessionProviderKind.REMOTE_SYSTEM; }
 		}
 
-		private const string DEFAULT_SERVER_ADDRESS = "tcp:host=127.0.0.1,port=27042";
+		private const string DEFAULT_SERVER_ADDRESS = "127.0.0.1";
+		private const uint16 DEFAULT_SERVER_PORT = 27042;
 
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 
@@ -44,10 +45,26 @@ namespace Frida {
 		}
 
 		public async HostSession create (string? location = null) throws Error {
-			var address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
+			string address;
+			try {
+				var raw_address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
+				var enumerator = NetworkAddress.parse (raw_address, DEFAULT_SERVER_PORT).enumerate ();
+				var socket_address = yield enumerator.next_async ();
+				if (socket_address is InetSocketAddress) {
+					var inet_socket_address = socket_address as InetSocketAddress;
+					var inet_address = inet_socket_address.get_address ();
+					var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
+					address = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (), inet_socket_address.get_port ());
+				} else {
+					throw new Error.INVALID_ARGUMENT ("Invalid server address");
+				}
+			} catch (GLib.Error e) {
+				throw new Error.INVALID_ARGUMENT (e.message);
+			}
+
 			foreach (var entry in entries) {
 				if (entry.address == address)
-					throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+					throw new Error.INVALID_ARGUMENT ("Invalid server address: already created");
 			}
 
 			DBusConnection connection;
