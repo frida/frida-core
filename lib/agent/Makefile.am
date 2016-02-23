@@ -10,6 +10,7 @@ extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-agent.version
 else
 if OS_QNX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-agent.version
+extra_libs += -lm
 else
 extra_ldflags += -export-symbols-regex "^frida_agent_main$$"
 endif
