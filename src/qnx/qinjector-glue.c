@@ -20,6 +20,35 @@
 #endif
 #include <sys/wait.h>
 
+enum {
+  GUM_QNX_ARM_REG_PC = ARM_REG_PC,
+  GUM_QNX_ARM_REG_LR = ARM_REG_LR,
+  GUM_QNX_ARM_REG_SP = ARM_REG_SP,
+  GUM_QNX_ARM_REG_R0 = ARM_REG_R0
+};
+#undef ARM_REG_R0
+#undef ARM_REG_R1
+#undef ARM_REG_R2
+#undef ARM_REG_R3
+#undef ARM_REG_R4
+#undef ARM_REG_R5
+#undef ARM_REG_R6
+#undef ARM_REG_R7
+#undef ARM_REG_R8
+#undef ARM_REG_R9
+#undef ARM_REG_R10
+#undef ARM_REG_R11
+#undef ARM_REG_R12
+#undef ARM_REG_R13
+#undef ARM_REG_R14
+#undef ARM_REG_R15
+#undef ARM_REG_SPSR
+#undef ARM_REG_FP
+#undef ARM_REG_IP
+#undef ARM_REG_SP
+#undef ARM_REG_LR
+#undef ARM_REG_PC
+
 #define PSR_T_BIT (1 << 5)
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
@@ -545,12 +574,12 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
    */
   if ((func & 1) != 0)
   {
-    modified_registers.arm.gpr[ARM_REG_PC] = (func & ~1);
+    modified_registers.arm.gpr[GUM_QNX_ARM_REG_PC] = (func & ~1);
     modified_registers.arm.spsr |= PSR_T_BIT;
   }
   else
   {
-    modified_registers.arm.gpr[ARM_REG_PC] = func;
+    modified_registers.arm.gpr[GUM_QNX_ARM_REG_PC] = func;
     modified_registers.arm.spsr &= ~PSR_T_BIT;
   }
 
@@ -561,9 +590,9 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   for (i = args_length - 1; i >= 4; i--)
   {
-    modified_registers.arm.gpr[ARM_REG_SP] -= 4;
+    modified_registers.arm.gpr[GUM_QNX_ARM_REG_SP] -= 4;
 
-    if (!frida_remote_write_fd (fd, modified_registers.arm.gpr[ARM_REG_SP], &args[i],
+    if (!frida_remote_write_fd (fd, modified_registers.arm.gpr[GUM_QNX_ARM_REG_SP], &args[i],
         4, error))
       goto beach;
   }
@@ -571,12 +600,12 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   /*
    * Set the LR to be a dummy address which will trigger a pagefault.
    */
-  modified_registers.arm.gpr[ARM_REG_LR] = 0xfffffff0;
+  modified_registers.arm.gpr[GUM_QNX_ARM_REG_LR] = 0xfffffff0;
 
   ret = devctl (fd, DCMD_PROC_SETGREG, &modified_registers, sizeof (modified_registers), 0);
   CHECK_OS_RESULT (ret, ==, 0, "DCMD_PROC_SETGREG");
 
-  while (modified_registers.arm.gpr[ARM_REG_PC] != 0xfffffff0)
+  while (modified_registers.arm.gpr[GUM_QNX_ARM_REG_PC] != 0xfffffff0)
   {
     /*
      * Continue the process, watching for FLTPAGE which should trigger when
@@ -604,7 +633,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   }
 
   if (retval != NULL)
-    *retval = modified_registers.arm.gpr[ARM_REG_R0];
+    *retval = modified_registers.arm.gpr[GUM_QNX_ARM_REG_R0];
 
   /*
    * Restore the registers and continue the process:
