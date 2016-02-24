@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession6")]
+	[DBus (name = "re.frida.HostSession7")]
 	public interface HostSession : Object {
 		public abstract async HostApplicationInfo get_frontmost_application () throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
@@ -17,7 +17,7 @@ namespace Frida {
 		public signal void agent_session_destroyed (AgentSessionId id);
 	}
 
-	[DBus (name = "re.frida.AgentSession6")]
+	[DBus (name = "re.frida.AgentSession7")]
 	public interface AgentSession : Object {
 		public abstract async void close () throws GLib.Error;
 
