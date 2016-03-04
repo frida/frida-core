@@ -462,33 +462,30 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
 {
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
-  NSDictionary * params, * options;
+  NSString * bundleIDStr = nil;
+  NSURL * urlToOpen = nil;
   UInt32 res;
 
   pool = [[NSAutoreleasePool alloc] init];
 
   api = _frida_get_springboard_api ();
 
-  params = [NSDictionary dictionary];
-
-  options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
+  bundleIDStr = [NSString stringWithUTF8String:identifier];
 
   if (url != NULL)
   {
-    res = api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions (
-        [NSString stringWithUTF8String:identifier],
-        [NSURL URLWithString:[NSString stringWithUTF8String:url]],
-        params,
-        options,
-        NO);
+    urlToOpen = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
   }
-  else
-  {
-    res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
-        [NSString stringWithUTF8String:identifier],
-        options,
-        NO);
-  }
+
+  res = api->SBSLaunchApplicationForDebugging (
+      bundleIDStr,
+      urlToOpen,
+      nil,
+      nil,
+      nil,
+      nil,
+      0x4 // Unlock Device
+    );
 
   if (res != 0)
   {

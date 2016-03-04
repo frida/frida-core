@@ -20,6 +20,13 @@ struct _FridaSpringboardApi
   NSString * (* SBSApplicationLaunchingErrorString) (UInt32 error);
 
   NSString * SBSApplicationLaunchOptionUnlockDeviceKey;
+
+  /*
+     flags:
+        SBSApplicationLaunchWaitForDebugger = 0x2
+        SBSApplicationLaunchUnlockDevice = 0x4
+  */
+  int (* SBSLaunchApplicationForDebugging) (NSString * bundleID, NSURL * openURL, NSArray * argv, NSDictionary * env, NSString * stdout, NSString * stderr, int flags);
 };
 
 G_GNUC_INTERNAL FridaSpringboardApi * _frida_get_springboard_api (void);

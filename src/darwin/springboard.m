@@ -45,6 +45,9 @@ _frida_get_springboard_api (void)
     g_assert (str != NULL);
     api->SBSApplicationLaunchOptionUnlockDeviceKey = *str;
 
+    api->SBSLaunchApplicationForDebugging = dlsym (api->module, "SBSLaunchApplicationForDebugging");
+    g_assert (api->SBSLaunchApplicationForDebugging != NULL);
+
     frida_springboard_api = api;
   }
 
