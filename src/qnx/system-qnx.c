@@ -57,8 +57,9 @@ frida_system_enumerate_processes (int * result_length)
     g_free (tmp);
     g_assert (fd != -1);
 
-    g_assert (devctl (fd, DCMD_PROC_MAPDEBUG_BASE, &procfs_name,
-      sizeof (procfs_name), 0) == EOK);
+    if (devctl (fd, DCMD_PROC_MAPDEBUG_BASE, &procfs_name,
+      sizeof (procfs_name), 0) != EOK)
+	  continue;
 
     name = g_path_get_basename (procfs_name.info.path);
 
