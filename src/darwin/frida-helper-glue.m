@@ -9,6 +9,7 @@
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <errno.h>
+#import <Foundation/Foundation.h>
 #include <spawn.h>
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
@@ -220,6 +221,25 @@ static gboolean frida_agent_fill_context_process_export (const GumExportDetails 
 
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
+
+static volatile BOOL _frida_run_loop_running = NO;
+
+void
+_frida_start_run_loop (void)
+{
+  NSRunLoop * loop = [NSRunLoop mainRunLoop];
+
+  _frida_run_loop_running = YES;
+  while (_frida_run_loop_running && [loop runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]])
+    ;
+}
+
+void
+_frida_stop_run_loop (void)
+{
+  _frida_run_loop_running = NO;
+  CFRunLoopStop ([[NSRunLoop mainRunLoop] getCFRunLoop]);
+}
 
 void
 _frida_helper_service_create_context (FridaHelperService * self)

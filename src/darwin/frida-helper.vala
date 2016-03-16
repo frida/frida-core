@@ -6,9 +6,22 @@ namespace Frida {
 		Gum.init ();
 
 		var parent_address = args[1];
-		var service = new HelperService (parent_address);
-		return service.run ();
+		var worker = new Thread<int> ("frida-helper-main-loop", () => {
+			var service = new HelperService (parent_address);
+
+			var exit_code = service.run ();
+			_stop_run_loop ();
+
+			return exit_code;
+		});
+		_start_run_loop ();
+		var exit_code = worker.join ();
+
+		return exit_code;
 	}
+
+	public extern void _start_run_loop ();
+	public extern void _stop_run_loop ();
 
 	public class HelperService : Object, Helper {
 		public signal void child_dead (uint pid);
