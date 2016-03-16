@@ -271,14 +271,17 @@ frida_gadget_on_log_message (const gchar * log_domain, GLogLevelFlags log_level,
 
   if (g_once_init_enter (&api_value))
   {
+    const gchar * cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
     void * cf;
 
     /*
      * CoreFoundation must be loaded by the main thread, so we should avoid loading it.
      */
-    cf = dlopen ("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY | RTLD_GLOBAL | RTLD_NOLOAD);
-    if (cf != NULL)
+    if (gum_module_find_base_address (cf_path) != 0)
     {
+      cf = dlopen (cf_path, RTLD_LAZY | RTLD_GLOBAL);
+      g_assert (cf != NULL);
+
       api = g_slice_new (FridaCFApi);
 
       api->CFStringCreateWithCString = dlsym (cf, "CFStringCreateWithCString");
