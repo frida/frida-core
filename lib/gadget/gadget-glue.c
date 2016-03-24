@@ -31,10 +31,27 @@ enum _CFLogLevel
 
 struct _FridaCFApi
 {
-  CFStringRef (* CFStringCreateWithCString) (CFAllocatorRef alloc, const char * c_str, CFStringEncoding encoding);
+  const CFAllocatorRef * kCFAllocatorDefault;
+  const CFStringRef * kCFRunLoopCommonModes;
+
   void (* CFRelease) (CFTypeRef cf);
+
+  CFStringRef (* CFStringCreateWithCString) (CFAllocatorRef alloc, const char * c_str, CFStringEncoding encoding);
+
+  CFRunLoopRef (* CFRunLoopGetMain) (void);
+  void (* CFRunLoopRun) (void);
+  void (* CFRunLoopStop) (CFRunLoopRef loop);
+  CFRunLoopTimerRef (* CFRunLoopTimerCreate) (CFAllocatorRef allocator, CFAbsoluteTime fire_date, CFTimeInterval interval, CFOptionFlags flags, CFIndex order, CFRunLoopTimerCallBack callout, CFRunLoopTimerContext * context);
+  void (* CFRunLoopAddTimer) (CFRunLoopRef loop, CFRunLoopTimerRef timer, CFStringRef mode);
+  void (* CFRunLoopTimerInvalidate) (CFRunLoopTimerRef timer);
+
   void (* CFLog) (CFLogLevel level, CFStringRef format, ...);
 };
+
+static void * frida_gadget_wait_for_permission_to_resume_then_stop_loop (void * user_data);
+static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
+
+static FridaCFApi * frida_cf_api_try_get (void);
 
 # endif
 #endif
@@ -93,6 +110,35 @@ __attribute__ ((constructor)) static void
 on_load (void)
 {
   frida_gadget_load ();
+
+#ifdef HAVE_DARWIN
+  FridaCFApi * api = frida_cf_api_try_get ();
+  if (api != NULL)
+  {
+    CFRunLoopRef loop;
+    CFAbsoluteTime distant_future;
+    CFRunLoopTimerRef timer;
+    pthread_t thread;
+
+    loop = api->CFRunLoopGetMain ();
+
+    distant_future = DBL_MAX;
+    timer = api->CFRunLoopTimerCreate (*(api->kCFAllocatorDefault), distant_future, 0, 0, 0, on_keep_alive_timer_fire, NULL);
+    api->CFRunLoopAddTimer (loop, timer, *(api->kCFRunLoopCommonModes));
+
+    pthread_create (&thread, NULL, frida_gadget_wait_for_permission_to_resume_then_stop_loop, loop);
+    pthread_detach (thread);
+
+    api->CFRunLoopRun ();
+
+    api->CFRunLoopTimerInvalidate (timer);
+    api->CFRelease (timer);
+  }
+  else
+#endif
+  {
+    frida_gadget_wait_for_permission_to_resume ();
+  }
 }
 
 __attribute__ ((destructor)) static void
@@ -100,6 +146,27 @@ on_unload (void)
 {
   frida_gadget_unload ();
 }
+
+#ifdef HAVE_DARWIN
+
+static void *
+frida_gadget_wait_for_permission_to_resume_then_stop_loop (void * user_data)
+{
+  CFRunLoopRef loop = user_data;
+
+  frida_gadget_wait_for_permission_to_resume ();
+
+  frida_cf_api_try_get ()->CFRunLoopStop (loop);
+
+  return NULL;
+}
+
+static void
+on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info)
+{
+}
+
+#endif
 
 void
 frida_gadget_environment_init (void)
@@ -266,44 +333,7 @@ frida_gadget_on_log_message (const gchar * log_domain, GLogLevelFlags log_level,
   __android_log_write (priority, log_domain, message);
 #else
 # ifdef HAVE_DARWIN
-  static gsize api_value = 0;
-  FridaCFApi * api;
-
-  if (g_once_init_enter (&api_value))
-  {
-    const gchar * cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-    void * cf;
-
-    /*
-     * CoreFoundation must be loaded by the main thread, so we should avoid loading it.
-     */
-    if (gum_module_find_base_address (cf_path) != 0)
-    {
-      cf = dlopen (cf_path, RTLD_LAZY | RTLD_GLOBAL);
-      g_assert (cf != NULL);
-
-      api = g_slice_new (FridaCFApi);
-
-      api->CFStringCreateWithCString = dlsym (cf, "CFStringCreateWithCString");
-      g_assert (api->CFStringCreateWithCString != NULL);
-
-      api->CFRelease = dlsym (cf, "CFRelease");
-      g_assert (api->CFRelease != NULL);
-
-      api->CFLog = dlsym (cf, "CFLog");
-      g_assert (api->CFLog != NULL);
-
-      dlclose (cf);
-    }
-    else
-    {
-      api = NULL;
-    }
-
-    g_once_init_leave (&api_value, 1 + GPOINTER_TO_SIZE (api));
-  }
-
-  api = GSIZE_TO_POINTER (api_value - 1);
+  FridaCFApi * api = frida_cf_api_try_get ();
   if (api != NULL)
   {
     CFLogLevel cf_log_level;
@@ -596,3 +626,65 @@ frida_thread_create_proxy (void * data)
 
   return result;
 }
+
+#ifdef HAVE_DARWIN
+
+static FridaCFApi *
+frida_cf_api_try_get (void)
+{
+  static gsize api_value = 0;
+  FridaCFApi * api;
+
+  if (g_once_init_enter (&api_value))
+  {
+    const gchar * cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+    void * cf;
+
+    /*
+     * CoreFoundation must be loaded by the main thread, so we should avoid loading it.
+     */
+    if (gum_module_find_base_address (cf_path) != 0)
+    {
+      cf = dlopen (cf_path, RTLD_LAZY | RTLD_GLOBAL);
+      g_assert (cf != NULL);
+
+      api = g_slice_new (FridaCFApi);
+
+#define FRIDA_ASSIGN_CF_SYMBOL(n) \
+    api->n = dlsym (cf, G_STRINGIFY (n)); \
+    g_assert (api->n != NULL)
+
+      FRIDA_ASSIGN_CF_SYMBOL (kCFAllocatorDefault);
+      FRIDA_ASSIGN_CF_SYMBOL (kCFRunLoopCommonModes);
+
+      FRIDA_ASSIGN_CF_SYMBOL (CFRelease);
+
+      FRIDA_ASSIGN_CF_SYMBOL (CFStringCreateWithCString);
+
+      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopGetMain);
+      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopRun);
+      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopStop);
+      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerCreate);
+      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopAddTimer);
+      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerInvalidate);
+
+      FRIDA_ASSIGN_CF_SYMBOL (CFLog);
+
+#undef FRIDA_ASSIGN_CF_SYMBOL
+
+      dlclose (cf);
+    }
+    else
+    {
+      api = NULL;
+    }
+
+    g_once_init_leave (&api_value, 1 + GPOINTER_TO_SIZE (api));
+  }
+
+  api = GSIZE_TO_POINTER (api_value - 1);
+
+  return api;
+}
+
+#endif

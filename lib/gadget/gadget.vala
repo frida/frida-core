@@ -31,7 +31,9 @@ namespace Frida.Gadget {
 			return false;
 		});
 		source.attach (Environment.get_main_context ());
+	}
 
+	public void wait_for_permission_to_resume () {
 		mutex.lock ();
 		while (state != State.RUNNING)
 			cond.wait (mutex);
