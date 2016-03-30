@@ -231,7 +231,7 @@ if __name__ == '__main__':
     with open(os.path.join(output_dir, 'frida-core.h'), 'wt') as output_header_file:
         output_header_file.write("#ifndef __FRIDA_CORE_H__\n#define __FRIDA_CORE_H__\n\n")
 
-        output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n")
+        output_header_file.write("#include <glib.h>\n#include <glib-object.h>\n#include <gio/gio.h>\n#include <json-glib/json-glib.h>\n")
 
         output_header_file.write("\nG_BEGIN_DECLS\n")
 
