@@ -14,6 +14,7 @@ namespace Frida {
 		public abstract async AgentSessionId attach_to (uint pid) throws GLib.Error;
 
 		public signal void spawned (HostSpawnInfo info);
+		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void agent_session_destroyed (AgentSessionId id);
 	}
 

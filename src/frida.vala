@@ -251,6 +251,7 @@ namespace Frida {
 
 	public class Device : Object {
 		public signal void spawned (Spawn spawn);
+		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void lost ();
 
 		public string id {
@@ -631,6 +632,7 @@ namespace Frida {
 
 			if (host_session != null) {
 				host_session.spawned.disconnect (on_spawned);
+				host_session.output.disconnect (on_output);
 				if (may_block) {
 					try {
 						yield provider.destroy (host_session);
@@ -680,6 +682,7 @@ namespace Frida {
 			try {
 				host_session = yield provider.create (location);
 				host_session.spawned.connect (on_spawned);
+				host_session.output.connect (on_output);
 				ensure_request.set_value (true);
 			} catch (Error e) {
 				ensure_request.set_exception (e);
@@ -692,11 +695,16 @@ namespace Frida {
 			spawned (spawn_from_info (info));
 		}
 
+		private void on_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
+		}
+
 		private void on_host_session_closed (HostSession session) {
 			if (session != host_session)
 				return;
 
 			host_session.spawned.disconnect (on_spawned);
+			host_session.output.disconnect (on_output);
 			host_session = null;
 
 			ensure_request = null;
