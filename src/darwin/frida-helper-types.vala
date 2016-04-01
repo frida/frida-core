@@ -10,6 +10,8 @@ namespace Frida {
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async uint inject (uint pid, string filename, string data_string) throws GLib.Error;
 		public abstract async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error;
+
+		public signal void output (uint pid, int fd, uint8[] data);
 	}
 
 	[DBus (name = "re.frida.Helper")]

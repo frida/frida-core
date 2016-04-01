@@ -193,6 +193,8 @@ struct _FridaAgentFillContext
   guint remaining;
 };
 
+static void frida_make_pipe (int fds[2]);
+
 static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * service);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
@@ -263,12 +265,14 @@ _frida_helper_service_destroy_context (FridaHelperService * self)
 }
 
 guint
-_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
+_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
 {
   FridaHelperContext * ctx = self->context;
   FridaSpawnInstance * instance = NULL;
+  int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
   pid_t pid;
-  posix_spawnattr_t attr;
+  posix_spawn_file_actions_t file_actions;
+  posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
   int spawn_errno, result;
   const gchar * failed_operation;
@@ -286,20 +290,45 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   mach_port_name_t name;
   dispatch_source_t source;
 
+  *pipes = NULL;
+
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     goto handle_path_error;
 
   instance = frida_spawn_instance_new (self);
 
-  posix_spawnattr_init (&attr);
-  sigemptyset (&signal_mask_set);
-  posix_spawnattr_setsigmask (&attr, &signal_mask_set);
-  posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED);
+  frida_make_pipe (stdin_pipe);
+  frida_make_pipe (stdout_pipe);
+  frida_make_pipe (stderr_pipe);
 
-  result = posix_spawn (&pid, path, NULL, &attr, argv, envp);
+  *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+
+  posix_spawn_file_actions_init (&file_actions);
+
+  posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
+  posix_spawn_file_actions_addclose (&file_actions, stdin_pipe[0]);
+
+  posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
+  posix_spawn_file_actions_addclose (&file_actions, stdout_pipe[1]);
+
+  posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
+  posix_spawn_file_actions_addclose (&file_actions, stderr_pipe[1]);
+
+  posix_spawnattr_init (&attributes);
+  sigemptyset (&signal_mask_set);
+  posix_spawnattr_setsigmask (&attributes, &signal_mask_set);
+  posix_spawnattr_setflags (&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED);
+
+  result = posix_spawn (&pid, path, &file_actions, &attributes, argv, envp);
   spawn_errno = errno;
 
-  posix_spawnattr_destroy (&attr);
+  posix_spawnattr_destroy (&attributes);
+
+  posix_spawn_file_actions_destroy (&file_actions);
+
+  close (stdin_pipe[0]);
+  close (stdout_pipe[1]);
+  close (stderr_pipe[1]);
 
   if (result != 0)
     goto handle_spawn_error;
@@ -471,6 +500,21 @@ error_epilogue:
 
     return 0;
   }
+}
+
+static void
+frida_make_pipe (int fds[2])
+{
+  int res;
+
+  res = pipe (fds);
+  g_assert_cmpint (res, ==, 0);
+
+  res = fcntl (fds[0], F_SETNOSIGPIPE, TRUE);
+  g_assert_cmpint (res, ==, 0);
+
+  res = fcntl (fds[1], F_SETNOSIGPIPE, TRUE);
+  g_assert_cmpint (res, ==, 0);
 }
 
 #ifdef HAVE_IOS

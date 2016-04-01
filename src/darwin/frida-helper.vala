@@ -135,7 +135,8 @@ namespace Frida {
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			string error = null;
 
-			uint child_pid = _do_spawn (path, argv, envp);
+			StdioPipes pipes;
+			uint child_pid = _do_spawn (path, argv, envp, out pipes);
 			var death_handler = child_dead.connect ((pid) => {
 				if (pid == child_pid) {
 					error = "Unexpected error while spawning child process '%s' (child process crashed)".printf (path);
@@ -151,10 +152,26 @@ namespace Frida {
 			disconnect (death_handler);
 			disconnect (ready_handler);
 
+			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
+			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+
 			if (error != null)
 				throw new Error.NOT_SUPPORTED (error);
 
 			return child_pid;
+		}
+
+		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
+			try {
+				var buf = new uint8[4096];
+				var n = yield stream.read_async (buf);
+				var data = buf[0:n];
+				output (pid, fd, data);
+				if (n > 0)
+					process_next_output_from.begin (stream, pid, fd, resource);
+			} catch (GLib.Error e) {
+				output (pid, fd, new uint8[0] {});
+			}
 		}
 
 		public async void launch (string identifier, string url) throws Error {
@@ -232,7 +249,7 @@ namespace Frida {
 		public extern void _create_context ();
 		public extern void _destroy_context ();
 
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
+		public extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
 		public extern void _do_launch (string identifier, string? url) throws Error;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
@@ -241,6 +258,43 @@ namespace Frida {
 		public extern void _free_inject_instance (void * instance);
 
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid, out bool need_proxy) throws Error;
+	}
+
+	public class StdioPipes : Object {
+		public int input {
+			get;
+			construct;
+		}
+
+		public int output {
+			get;
+			construct;
+		}
+
+		public int error {
+			get;
+			construct;
+		}
+
+		public StdioPipes (int input, int output, int error) {
+			Object (input: input, output: output, error: error);
+		}
+
+		construct {
+			try {
+				Unix.set_fd_nonblocking (input, true);
+				Unix.set_fd_nonblocking (output, true);
+				Unix.set_fd_nonblocking (error, true);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		~StdioPipes () {
+			Posix.close (input);
+			Posix.close (output);
+			Posix.close (error);
+		}
 	}
 
 	private class PipeProxy : Object, TunneledStream {

@@ -88,6 +88,7 @@ namespace Frida {
 
 		construct {
 			helper = new HelperProcess ();
+			helper.output.connect (on_output);
 			injector = new Fruitjector.with_helper (helper);
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
@@ -112,6 +113,7 @@ namespace Frida {
 			agent = null;
 
 			yield helper.close ();
+			helper.output.disconnect (on_output);
 			helper = null;
 		}
 
@@ -201,6 +203,10 @@ namespace Frida {
 				fruit_launcher.spawned.connect ((info) => { spawned (info); });
 			}
 			return fruit_launcher;
+		}
+
+		private void on_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
 		}
 
 		// TODO: use Vala's preprocessor when the build system has been fixed
