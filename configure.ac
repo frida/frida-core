@@ -179,7 +179,7 @@ FRIDA_GADGET_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg json-glib-1.0 --pkg fri
 AC_SUBST(FRIDA_GADGET_PACKAGES)
 
 PKG_CHECK_MODULES(FRIDA_INJECT, [json-glib-1.0])
-FRIDA_INJECT_PACKAGES="--pkg json-glib-1.0"
+FRIDA_INJECT_PACKAGES="--pkg gee-0.8 --pkg json-glib-1.0"
 AC_SUBST(FRIDA_INJECT_PACKAGES)
 
 AC_ARG_ENABLE(diet,
