@@ -400,17 +400,44 @@ namespace Frida.HostSessionTest {
 
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim" + Frida.Test.arch_suffix ());
+
+				uint pid = 0;
+				bool waiting = false;
+
+				string received_output = null;
+				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
+					assert (source_pid == pid);
+					assert (fd == 1);
+
+					var buf = new uint8[data.length + 1];
+					Memory.copy (buf, data, data.length);
+					buf[data.length] = '\0';
+					char * chars = buf;
+					received_output = (string) chars;
+
+					if (waiting)
+						spawn.callback ();
+				});
+
 				string[] argv = { victim_path };
 				string[] envp = {};
-				var pid = yield host_session.spawn (victim_path, argv, envp);
+				pid = yield host_session.spawn (victim_path, argv, envp);
+
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
+
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
-					spawn.callback ();
+					if (waiting)
+						spawn.callback ();
 				});
+
 				var script_id = yield session.create_script ("spawn",
+					"'use strict';" +
+					"var write = new NativeFunction(Module.findExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);" +
+					"var message = Memory.allocUtf8String('Hello stdout');" +
+					"write(1, message, 12);" +
 					"Process.enumerateModules({" +
 					"  onMatch: function (m) {" +
 					"    if (m.name.indexOf('libc') === 0) {" +
@@ -424,10 +451,25 @@ namespace Frida.HostSessionTest {
 					"  onComplete: function () {}" +
 					"});");
 				yield session.load_script (script_id);
+
+				if (received_output == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (received_output == "Hello stdout");
+				host_session.disconnect (output_handler);
+
 				yield host_session.resume (pid);
-				yield;
-				session.disconnect (message_handler);
+
+				if (received_message == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
+				session.disconnect (message_handler);
+
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
@@ -576,9 +618,8 @@ namespace Frida.HostSessionTest {
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
 
-				bool waiting = false;
-
 				uint pid = 0;
+				bool waiting = false;
 
 				string received_output = null;
 				var output_handler = host_session.output.connect ((source_pid, fd, data) => {

@@ -1,6 +1,7 @@
 #include "frida-helper.h"
 
 #include <gio/gunixinputstream.h>
+#include <glib-unix.h>
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
 #endif
@@ -150,6 +151,8 @@ static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * servi
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
+static void frida_make_pipe (int fds[2]);
+
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_attach (FridaInjectInstance * instance, FridaRegs * saved_regs, GError ** error);
@@ -181,9 +184,10 @@ static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name
 static gboolean frida_is_regset_supported = TRUE;
 
 guint
-_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
+_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
 {
   FridaSpawnInstance * instance;
+  int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
   int status;
   long ret;
   gboolean success;
@@ -191,9 +195,21 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
 
   instance = frida_spawn_instance_new (self);
 
+  frida_make_pipe (stdin_pipe);
+  frida_make_pipe (stdout_pipe);
+  frida_make_pipe (stderr_pipe);
+
+  *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+
   instance->pid = fork ();
   if (instance->pid == 0)
   {
+    setsid ();
+
+    dup2 (stdin_pipe[0], 0);
+    dup2 (stdout_pipe[1], 1);
+    dup2 (stderr_pipe[1], 2);
+
     ptrace (PTRACE_TRACEME, 0, NULL, NULL);
     kill (getpid (), SIGSTOP);
     if (execve (path, argv, envp) == -1)
@@ -203,6 +219,10 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
       abort ();
     }
   }
+
+  close (stdin_pipe[0]);
+  close (stdout_pipe[1]);
+  close (stderr_pipe[1]);
 
   waitpid (instance->pid, &status, 0);
 
@@ -327,6 +347,15 @@ static void
 frida_spawn_instance_resume (FridaSpawnInstance * self)
 {
   ptrace (PTRACE_DETACH, self->pid, NULL, NULL);
+}
+
+static void
+frida_make_pipe (int fds[2])
+{
+  gboolean pipe_opened;
+
+  pipe_opened = g_unix_open_pipe (fds, FD_CLOEXEC, NULL);
+  g_assert (pipe_opened);
 }
 
 static FridaInjectInstance *

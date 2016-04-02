@@ -84,6 +84,7 @@ namespace Frida {
 
 		construct {
 			helper = new HelperProcess ();
+			helper.output.connect (on_output);
 			injector = new Linjector.with_helper (helper);
 
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
@@ -120,6 +121,7 @@ namespace Frida {
 			injector = null;
 
 			yield helper.close ();
+			helper.output.disconnect (on_output);
 			helper = null;
 
 			if (system_session != null) {
@@ -194,7 +196,7 @@ namespace Frida {
 		}
 
 		public override async void input (uint pid, uint8[] data) throws Error {
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			yield helper.input (pid, data);
 		}
 
 		public override async void resume (uint pid) throws Error {
@@ -246,6 +248,10 @@ namespace Frida {
 			return robo_launcher;
 		}
 #endif
+
+		private void on_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
+		}
 	}
 
 #if ANDROID

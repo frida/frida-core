@@ -1,6 +1,7 @@
 #if LINUX
 namespace Frida {
 	internal class HelperProcess {
+		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
 		public TemporaryDirectory tempdir {
@@ -53,6 +54,17 @@ namespace Frida {
 			var helper = yield obtain_for_path (path);
 			try {
 				return yield helper.spawn (path, argv_copy, envp_copy);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void input (uint pid, uint8[] data) throws Error {
+			/* FIXME: workaround for Vala compiler bug */
+			var data_copy = data;
+			var helper = yield obtain_for_pid (pid);
+			try {
+				yield helper.input (pid, data_copy);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -121,6 +133,7 @@ namespace Frida {
 							throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
 						factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
 						factory32.lost.connect (on_factory_lost);
+						factory32.output.connect (on_factory_output);
 						factory32.uninjected.connect (on_factory_uninjected);
 					}
 					factory = factory32;
@@ -133,6 +146,7 @@ namespace Frida {
 							throw new Error.NOT_SUPPORTED ("Unable to handle 64-bit processes due to build configuration");
 						factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
 						factory64.lost.connect (on_factory_lost);
+						factory64.output.connect (on_factory_output);
 						factory64.uninjected.connect (on_factory_uninjected);
 					}
 					factory = factory64;
@@ -172,12 +186,17 @@ namespace Frida {
 
 		private void on_factory_lost (HelperFactory factory) {
 			factory.lost.disconnect (on_factory_lost);
+			factory.output.disconnect (on_factory_output);
 			factory.uninjected.disconnect (on_factory_uninjected);
 			if (factory == factory32) {
 				factory32 = null;
 			} else if (factory == factory64) {
 				factory64 = null;
 			}
+		}
+
+		private void on_factory_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
 		}
 
 		private void on_factory_uninjected (uint id) {
@@ -187,6 +206,7 @@ namespace Frida {
 
 	private class HelperFactory {
 		public signal void lost (HelperFactory factory);
+		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
 		private TemporaryFile helper_file;
@@ -209,6 +229,7 @@ namespace Frida {
 					yield proxy.stop ();
 				} catch (GLib.Error proxy_error) {
 				}
+				proxy.output.disconnect (on_output);
 				proxy.uninjected.disconnect (on_uninjected);
 				proxy = null;
 			}
@@ -291,6 +312,7 @@ namespace Frida {
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
 				proxy = pending_proxy;
+				proxy.output.connect (on_output);
 				proxy.uninjected.connect (on_uninjected);
 
 				obtain_request.set_value (proxy);
@@ -305,9 +327,14 @@ namespace Frida {
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
+			proxy.output.disconnect (on_output);
 			proxy.uninjected.disconnect (on_uninjected);
 			connection.closed.disconnect (on_connection_closed);
 			lost (this);
+		}
+
+		private void on_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
 		}
 
 		private void on_uninjected (uint id) {

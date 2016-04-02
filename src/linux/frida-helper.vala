@@ -21,6 +21,7 @@ namespace Frida {
 
 		private DBusConnection connection;
 		private uint registration_id = 0;
+		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 
 		/* these should be private, but must be accessible to glue code */
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
@@ -86,7 +87,47 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			return _do_spawn (path, argv, envp);
+			StdioPipes pipes;
+			var child_pid = _do_spawn (path, argv, envp, out pipes);
+
+			ChildWatch.add ((Pid) child_pid, on_child_dead);
+
+			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
+			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
+			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+
+			return child_pid;
+		}
+
+		private void on_child_dead (Pid pid, int status) {
+			stdin_streams.unset ((uint) pid);
+
+			void * instance;
+			if (spawn_instance_by_pid.unset (pid, out instance))
+				_free_spawn_instance (instance);
+		}
+
+		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
+			try {
+				var buf = new uint8[4096];
+				var n = yield stream.read_async (buf);
+
+				var data = buf[0:n];
+				output (pid, fd, data);
+
+				if (n > 0)
+					process_next_output_from.begin (stream, pid, fd, resource);
+			} catch (GLib.Error e) {
+				output (pid, fd, new uint8[0] {});
+			}
+		}
+
+		public async void input (uint pid, uint8[] data) throws GLib.Error {
+			var stream = stdin_streams[pid];
+			if (stream == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid pid");
+			var data_copy = data; /* FIXME: workaround for Vala compiler bug */
+			yield stream.write_all_async (data_copy, Priority.DEFAULT, null, null);
 		}
 
 		public async void resume (uint pid) throws Error {
@@ -99,10 +140,6 @@ namespace Frida {
 		}
 
 		public async void kill (uint pid) throws Error {
-			void * instance;
-			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
-			if (instance_found)
-				_free_spawn_instance (instance);
 			Posix.kill ((Posix.pid_t) pid, Posix.SIGKILL);
 		}
 
@@ -177,13 +214,50 @@ namespace Frida {
 			shutdown.begin ();
 		}
 
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
+		public extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
 		public extern uint _do_inject (uint pid, string dylib_path, string data_string, string temp_path) throws Error;
 		public extern InputStream _get_fifo_for_inject_instance (void * instance);
 		public extern void _free_inject_instance (void * instance);
+	}
+
+	public class StdioPipes : Object {
+		public int input {
+			get;
+			construct;
+		}
+
+		public int output {
+			get;
+			construct;
+		}
+
+		public int error {
+			get;
+			construct;
+		}
+
+		public StdioPipes (int input, int output, int error) {
+			Object (input: input, output: output, error: error);
+		}
+
+		construct {
+			try {
+				Unix.set_fd_nonblocking (input, true);
+				Unix.set_fd_nonblocking (output, true);
+				Unix.set_fd_nonblocking (error, true);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		~StdioPipes () {
+			Posix.close (input);
+			Posix.close (output);
+			Posix.close (error);
+		}
 	}
 }
 #endif
