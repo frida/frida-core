@@ -82,6 +82,17 @@ namespace Frida {
 			}
 		}
 
+		public async void input (uint pid, uint8[] data) throws Error {
+			/* FIXME: workaround for Vala compiler bug */
+			var data_copy = data;
+			var helper = yield obtain ();
+			try {
+				yield helper.input (pid, data_copy);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async void launch (string identifier, string? url) throws Error {
 			var helper = yield obtain ();
 			try {

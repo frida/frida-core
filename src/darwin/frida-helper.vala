@@ -39,6 +39,7 @@ namespace Frida {
 		private uint helper_registration_id = 0;
 		private uint system_session_registration_id = 0;
 		private AgentContainer system_session;
+		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
 		private uint last_pipe_proxy_id = 1;
 
@@ -152,11 +153,15 @@ namespace Frida {
 			disconnect (death_handler);
 			disconnect (ready_handler);
 
-			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
-			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
-
 			if (error != null)
 				throw new Error.NOT_SUPPORTED (error);
+
+			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
+			pipes.weak_ref (() => {
+				stdin_streams.unset (child_pid);
+			});
+			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
+			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
 
 			return child_pid;
 		}
@@ -176,6 +181,14 @@ namespace Frida {
 
 		public async void launch (string identifier, string url) throws Error {
 			_do_launch (identifier, (url.length > 0) ? url : null);
+		}
+
+		public async void input (uint pid, uint8[] data) throws GLib.Error {
+			var stream = stdin_streams[pid];
+			if (stream == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid pid");
+			var data_copy = data; /* FIXME: workaround for Vala compiler bug */
+			yield stream.write_all_async (data_copy, Priority.DEFAULT, null, null);
 		}
 
 		public async void resume (uint pid) throws Error {

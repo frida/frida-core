@@ -169,6 +169,10 @@ namespace Frida {
 			}
 		}
 
+		public override async void input (uint pid, uint8[] data) throws Error {
+			yield helper.input (pid, data);
+		}
+
 		public override async void resume (uint pid) throws Error {
 			if (fruit_launcher != null) {
 				if (yield fruit_launcher.try_resume (pid))
