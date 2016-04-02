@@ -466,13 +466,12 @@ handle_os_error:
 static gboolean
 frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error)
 {
-  FridaCodeChunk code;
+  FridaCodeChunk code = { 0, };
   guint padding = 0;
   GumAddress address_mask = 0;
   FridaTrampolineData * data;
 
   code.cur = code.bytes;
-  code.size = 0;
 
 #if defined (HAVE_ARM)
   {
