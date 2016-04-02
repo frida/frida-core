@@ -1439,6 +1439,7 @@ static void
 frida_make_pipe (int fds[2])
 {
   gboolean pipe_opened;
+  int res;
 
   pipe_opened = g_unix_open_pipe (fds, FD_CLOEXEC, NULL);
   g_assert (pipe_opened);
