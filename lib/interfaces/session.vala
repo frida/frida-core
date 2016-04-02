@@ -9,6 +9,7 @@ namespace Frida {
 		public abstract async void disable_spawn_gating () throws GLib.Error;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws GLib.Error;
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
+		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async void kill (uint pid) throws GLib.Error;
 		public abstract async AgentSessionId attach_to (uint pid) throws GLib.Error;

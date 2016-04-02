@@ -160,6 +160,8 @@ namespace Frida {
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 
+		public abstract async void input (uint pid, uint8[] data) throws Error;
+
 		public abstract async void resume (uint pid) throws Error;
 
 		public abstract async void kill (uint pid) throws Error;

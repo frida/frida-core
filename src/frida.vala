@@ -515,6 +515,34 @@ namespace Frida {
 			}
 		}
 
+		public async void input (uint pid, uint8[] data) throws Error {
+			check_open ();
+
+			try {
+				var data_copy = data; /* FIXME: workaround for Vala compiler bug */
+				yield ensure_host_session ();
+				yield host_session.input (pid, data_copy);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void input_sync (uint pid, uint8[] data) throws Error {
+			var task = create<InputTask> () as InputTask;
+			task.pid = pid;
+			task.data = data;
+			task.start_and_wait_for_completion ();
+		}
+
+		private class InputTask : DeviceTask<void> {
+			public uint pid;
+			public uint8[] data;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.input (pid, data);
+			}
+		}
+
 		public async void resume (uint pid) throws Error {
 			check_open ();
 
