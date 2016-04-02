@@ -164,6 +164,10 @@ namespace Frida {
 			return _do_spawn (path, argv, envp);
 		}
 
+		public override async void input (uint pid, uint8[] data) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
 		public override async void resume (uint pid) throws Error {
 			void * instance;
 			bool instance_found = instance_by_pid.unset (pid, out instance);

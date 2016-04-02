@@ -193,6 +193,10 @@ namespace Frida {
 #endif
 		}
 
+		public override async void input (uint pid, uint8[] data) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
 		public override async void resume (uint pid) throws Error {
 #if ANDROID
 			if (robo_launcher != null) {
