@@ -531,6 +531,10 @@ namespace Frida.Gadget {
 				return this_process.pid;
 			}
 
+			public async void input (uint pid, uint8[] data) throws Error {
+				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
+			}
+
 			public async void resume (uint pid) throws Error {
 				validate_pid (pid);
 
