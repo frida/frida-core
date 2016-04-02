@@ -134,10 +134,16 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			string error = null;
-
 			StdioPipes pipes;
-			uint child_pid = _do_spawn (path, argv, envp, out pipes);
+			var child_pid = _do_spawn (path, argv, envp, out pipes);
+
+			ChildWatch.add ((Pid) child_pid, on_child_dead);
+
+			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
+			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
+			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+
+			string error = null;
 			var death_handler = child_dead.connect ((pid) => {
 				if (pid == child_pid) {
 					error = "Unexpected error while spawning child process '%s' (child process crashed)".printf (path);
@@ -156,22 +162,29 @@ namespace Frida {
 			if (error != null)
 				throw new Error.NOT_SUPPORTED (error);
 
-			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
-			pipes.weak_ref (() => {
-				stdin_streams.unset (child_pid);
-			});
-			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
-			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
-
 			return child_pid;
+		}
+
+		private void on_child_dead (Pid pid, int status) {
+			var child_pid = (uint) pid;
+
+			stdin_streams.unset (child_pid);
+
+			void * instance;
+			if (spawn_instance_by_pid.unset (pid, out instance))
+				_free_spawn_instance (instance);
+
+			child_dead (pid);
 		}
 
 		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
 			try {
 				var buf = new uint8[4096];
 				var n = yield stream.read_async (buf);
+
 				var data = buf[0:n];
 				output (pid, fd, data);
+
 				if (n > 0)
 					process_next_output_from.begin (stream, pid, fd, resource);
 			} catch (GLib.Error e) {
@@ -228,17 +241,6 @@ namespace Frida {
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			shutdown.begin ();
-		}
-
-		public void _on_spawn_instance_dead (uint pid) {
-			Idle.add (() => {
-				void * instance;
-				bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
-				assert (instance_found);
-				_free_spawn_instance (instance);
-				child_dead (pid);
-				return false;
-			});
 		}
 
 		public void _on_spawn_instance_ready (uint pid) {

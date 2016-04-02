@@ -10,6 +10,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #import <Foundation/Foundation.h>
+#include <glib-unix.h>
 #include <spawn.h>
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
@@ -58,7 +59,6 @@ struct _FridaSpawnInstance
   guint pid;
   GumCpuType cpu_type;
   mach_port_t task;
-  dispatch_source_t task_monitor_source;
 
   GumAddress entrypoint;
   GumAddress entrypoint_address;
@@ -193,13 +193,10 @@ struct _FridaAgentFillContext
   guint remaining;
 };
 
-static void frida_make_pipe (int fds[2]);
-
 static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * service);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
-static void frida_spawn_instance_on_task_dead (void * context);
 static void frida_spawn_instance_on_server_recv (void * context);
 
 static gboolean frida_spawn_instance_find_remote_api (FridaSpawnInstance * self, FridaSpawnApi * api, GError ** error);
@@ -209,6 +206,8 @@ static gboolean frida_spawn_instance_emit_redirect_code (FridaSpawnInstance * se
     guint8 * code, guint * code_size, GError ** error);
 static gboolean frida_spawn_instance_emit_sync_code (FridaSpawnInstance * self, const FridaSpawnApi * api, const FridaSpawnPayloadLayout * layout,
     guint8 * code, guint * code_size, GError ** error);
+
+static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
@@ -304,15 +303,9 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
 
   posix_spawn_file_actions_init (&file_actions);
-
   posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
-  posix_spawn_file_actions_addclose (&file_actions, stdin_pipe[0]);
-
   posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
-  posix_spawn_file_actions_addclose (&file_actions, stdout_pipe[1]);
-
   posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
-  posix_spawn_file_actions_addclose (&file_actions, stderr_pipe[1]);
 
   posix_spawnattr_init (&attributes);
   sigemptyset (&signal_mask_set);
@@ -408,12 +401,6 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
 
-  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, task, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
-  instance->task_monitor_source = source;
-  dispatch_set_context (source, instance);
-  dispatch_source_set_event_handler_f (source, frida_spawn_instance_on_task_dead);
-  dispatch_resume (source);
-
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, instance->server_port, 0, ctx->dispatch_queue);
   instance->server_recv_source = source;
   dispatch_set_context (source, instance);
@@ -500,21 +487,6 @@ error_epilogue:
 
     return 0;
   }
-}
-
-static void
-frida_make_pipe (int fds[2])
-{
-  int res;
-
-  res = pipe (fds);
-  g_assert_cmpint (res, ==, 0);
-
-  res = fcntl (fds[0], F_SETNOSIGPIPE, TRUE);
-  g_assert_cmpint (res, ==, 0);
-
-  res = fcntl (fds[1], F_SETNOSIGPIPE, TRUE);
-  g_assert_cmpint (res, ==, 0);
 }
 
 #ifdef HAVE_IOS
@@ -980,7 +952,6 @@ frida_spawn_instance_new (FridaHelperService * service)
   instance = g_slice_new0 (FridaSpawnInstance);
   instance->service = g_object_ref (service);
   instance->task = MACH_PORT_NULL;
-  instance->task_monitor_source = NULL;
 
   instance->overwritten_code = NULL;
 
@@ -1005,8 +976,6 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   g_free (instance->overwritten_code);
 
-  if (instance->task_monitor_source != NULL)
-    dispatch_release (instance->task_monitor_source);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
   g_object_unref (instance->service);
@@ -1028,14 +997,6 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
   mach_msg_send (&msg.header);
 
   self->reply_port = MACH_PORT_NULL;
-}
-
-static void
-frida_spawn_instance_on_task_dead (void * context)
-{
-  FridaSpawnInstance * self = context;
-
-  _frida_helper_service_on_spawn_instance_dead (self->service, self->pid);
 }
 
 static void
@@ -1473,6 +1434,21 @@ frida_spawn_instance_emit_arm64_sync_code (FridaSpawnInstance * self, const Frid
 }
 
 #endif
+
+static void
+frida_make_pipe (int fds[2])
+{
+  gboolean pipe_opened;
+
+  pipe_opened = g_unix_open_pipe (fds, FD_CLOEXEC, NULL);
+  g_assert (pipe_opened);
+
+  res = fcntl (fds[0], F_SETNOSIGPIPE, TRUE);
+  g_assert_cmpint (res, ==, 0);
+
+  res = fcntl (fds[1], F_SETNOSIGPIPE, TRUE);
+  g_assert_cmpint (res, ==, 0);
+}
 
 static FridaInjectInstance *
 frida_inject_instance_new (FridaHelperService * service, guint id)
