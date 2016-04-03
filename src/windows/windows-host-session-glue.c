@@ -121,7 +121,6 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
       TRUE,
       CREATE_SUSPENDED |
       CREATE_UNICODE_ENVIRONMENT |
-      CREATE_NEW_CONSOLE |
       CREATE_NEW_PROCESS_GROUP |
       DEBUG_PROCESS |
       DEBUG_ONLY_THIS_PROCESS,
