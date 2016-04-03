@@ -4,6 +4,8 @@
 
 #include "icon-helpers.h"
 
+#include <gio/gwin32inputstream.h>
+#include <gio/gwin32outputstream.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -12,22 +14,15 @@
 
 #define PARSE_STRING_MAX_LENGTH   (40 + 1)
 
-typedef struct _FridaSpawnInstance FridaSpawnInstance;
-
-struct _FridaSpawnInstance
-{
-  FridaWindowsHostSession * host_session;
-  PROCESS_INFORMATION process_info;
-};
-
-static FridaSpawnInstance * frida_spawn_instance_new (FridaWindowsHostSession * host_session);
-static void frida_spawn_instance_free (FridaSpawnInstance * instance);
-static void frida_spawn_instance_resume (FridaSpawnInstance * self);
+static void frida_child_process_on_death (GPid pid, gint status, gpointer user_data);
 
 static WCHAR * command_line_from_argv (const gchar ** argv, gint argv_length);
 static WCHAR * environment_block_from_envp (const gchar ** envp, gint envp_length);
 
 static void append_n_backslashes (GString * str, guint n);
+
+static void frida_make_pipe (HANDLE * read, HANDLE * write);
+static void frida_ensure_not_inherited (HANDLE handle);
 
 FridaImageData *
 _frida_windows_host_session_provider_extract_icon (GError ** error)
@@ -82,36 +77,95 @@ beach:
   return result;
 }
 
-guint
+FridaChildProcess *
 _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
 {
-  FridaSpawnInstance * instance = NULL;
   WCHAR * application_name, * command_line, * environment;
+  HANDLE stdin_read, stdin_write;
+  HANDLE stdout_read, stdout_write;
+  HANDLE stderr_read, stderr_write;
   STARTUPINFO startup_info;
+  PROCESS_INFORMATION process_info;
+  FridaStdioPipes * pipes;
+  FridaChildProcess * process;
+  guint watch_id;
+  GSource * watch;
 
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     goto handle_path_error;
-
-  instance = frida_spawn_instance_new (self);
 
   application_name = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
   command_line = command_line_from_argv (argv, argv_length);
   environment = environment_block_from_envp (envp, envp_length);
 
+  frida_make_pipe (&stdin_read, &stdin_write);
+  frida_make_pipe (&stdout_read, &stdout_write);
+  frida_make_pipe (&stderr_read, &stderr_write);
+
+  frida_ensure_not_inherited (stdin_write);
+  frida_ensure_not_inherited (stdout_read);
+  frida_ensure_not_inherited (stderr_read);
+
   ZeroMemory (&startup_info, sizeof (startup_info));
   startup_info.cb = sizeof (startup_info);
+  startup_info.hStdInput = stdin_read;
+  startup_info.hStdOutput = stdout_write;
+  startup_info.hStdError = stderr_write;
+  startup_info.dwFlags = STARTF_USESTDHANDLES;
 
-  if (!CreateProcessW (application_name, command_line, NULL, NULL, FALSE, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS, environment, NULL, &startup_info, &instance->process_info))
+  if (!CreateProcessW (
+      application_name,
+      command_line,
+      NULL,
+      NULL,
+      TRUE,
+      CREATE_SUSPENDED |
+      CREATE_UNICODE_ENVIRONMENT |
+      CREATE_NEW_CONSOLE |
+      CREATE_NEW_PROCESS_GROUP |
+      DEBUG_PROCESS |
+      DEBUG_ONLY_THIS_PROCESS,
+      environment,
+      NULL,
+      &startup_info,
+      &process_info))
+  {
     goto handle_create_error;
-  DebugActiveProcessStop (instance->process_info.dwProcessId);
+  }
 
-  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->instance_by_pid), GUINT_TO_POINTER (instance->process_info.dwProcessId), instance);
+  CloseHandle (stdin_read);
+  CloseHandle (stdout_write);
+  CloseHandle (stderr_write);
+
+  DebugActiveProcessStop (process_info.dwProcessId);
 
   g_free (environment);
   g_free (command_line);
   g_free (application_name);
 
-  return instance->process_info.dwProcessId;
+  pipes = frida_stdio_pipes_new (
+      g_win32_output_stream_new (stdin_write, TRUE),
+      g_win32_input_stream_new (stdout_read, TRUE),
+      g_win32_input_stream_new (stderr_read, TRUE));
+
+  process = frida_child_process_new (
+      G_OBJECT (self),
+      process_info.dwProcessId,
+      process_info.hProcess,
+      process_info.hThread,
+      pipes);
+
+  watch_id = g_child_watch_add_full (
+      G_PRIORITY_DEFAULT,
+      process_info.hProcess,
+      frida_child_process_on_death,
+      g_object_ref (process),
+      g_object_unref);
+  watch = g_main_context_find_source_by_id (g_main_context_get_thread_default (), watch_id);
+  g_assert (watch != NULL);
+  frida_child_process_set_watch (process, watch);
+
+  return process;
 
 handle_path_error:
   {
@@ -120,7 +174,7 @@ handle_path_error:
         FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
         "Unable to find executable at '%s'",
         path);
-    goto error_epilogue;
+    return NULL;
   }
 handle_create_error:
   {
@@ -141,62 +195,73 @@ handle_create_error:
           "Unable to spawn executable at '%s': 0x%08lx",
           path, GetLastError ());
     }
-    goto error_epilogue;
-  }
-error_epilogue:
-  {
-    if (instance != NULL)
-      frida_spawn_instance_free (instance);
-    return 0;
+
+    CloseHandle (stdin_read);
+    CloseHandle (stdin_write);
+
+    CloseHandle (stdout_read);
+    CloseHandle (stdout_write);
+
+    CloseHandle (stderr_read);
+    CloseHandle (stderr_write);
+
+    g_free (environment);
+    g_free (command_line);
+    g_free (application_name);
+
+    return NULL;
   }
 }
 
 void
-_frida_windows_host_session_resume_instance (FridaWindowsHostSession * self, void * instance)
+frida_child_process_close (FridaChildProcess * self)
 {
-  (void) self;
+  GSource * watch;
 
-  frida_spawn_instance_resume (instance);
+  if (self->closed)
+    return;
+
+  watch = frida_child_process_get_watch (self);
+  if (watch != NULL)
+    g_source_destroy (watch);
+
+  CloseHandle (frida_child_process_get_handle (self));
+  CloseHandle (frida_child_process_get_main_thread (self));
+
+  self->closed = TRUE;
 }
 
 void
-_frida_windows_host_session_free_instance (FridaWindowsHostSession * self, void * instance)
+frida_child_process_resume (FridaChildProcess * self, GError ** error)
 {
-  (void) self;
+  if (self->resumed)
+    goto already_resumed;
 
-  frida_spawn_instance_free (instance);
-}
+  ResumeThread (frida_child_process_get_main_thread (self));
 
-static FridaSpawnInstance *
-frida_spawn_instance_new (FridaWindowsHostSession * host_session)
-{
-  FridaSpawnInstance * instance;
+  self->resumed = TRUE;
+  return;
 
-  instance = g_slice_new0 (FridaSpawnInstance);
-  instance->host_session = g_object_ref (host_session);
-
-  return instance;
-}
-
-static void
-frida_spawn_instance_free (FridaSpawnInstance * instance)
-{
-  PROCESS_INFORMATION * info = &instance->process_info;
-  if (info->hProcess != NULL)
+already_resumed:
   {
-    CloseHandle (info->hProcess);
-    CloseHandle (info->hThread);
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_OPERATION,
+        "Already resumed");
   }
-
-  g_object_unref (instance->host_session);
-
-  g_slice_free (FridaSpawnInstance, instance);
 }
 
 static void
-frida_spawn_instance_resume (FridaSpawnInstance * self)
+frida_child_process_on_death (GPid pid, gint status, gpointer user_data)
 {
-  ResumeThread (self->process_info.hThread);
+  FridaChildProcess * self = user_data;
+
+  (void) pid;
+
+  _frida_windows_host_session_on_child_dead (
+      FRIDA_WINDOWS_HOST_SESSION (frida_child_process_get_parent (self)),
+      self,
+      status);
 }
 
 static WCHAR *
@@ -307,4 +372,28 @@ append_n_backslashes (GString * str, guint n)
 
   for (i = 0; i != n; i++)
     g_string_append_c (str, '\\');
+}
+
+static void
+frida_make_pipe (HANDLE * read, HANDLE * write)
+{
+  SECURITY_ATTRIBUTES attributes;
+  DWORD default_buffer_size = 0;
+  BOOL pipe_created;
+
+  attributes.nLength = sizeof (attributes);
+  attributes.bInheritHandle = TRUE;
+  attributes.lpSecurityDescriptor = NULL;
+
+  pipe_created = CreatePipe (read, write, &attributes, default_buffer_size);
+  g_assert (pipe_created);
+}
+
+static void
+frida_ensure_not_inherited (HANDLE handle)
+{
+  BOOL inherit_flag_updated;
+
+  inherit_flag_updated = SetHandleInformation (handle, HANDLE_FLAG_INHERIT, 0);
+  g_assert (inherit_flag_updated);
 }

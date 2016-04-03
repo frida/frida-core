@@ -83,7 +83,7 @@ namespace Frida {
 	public class WindowsHostSession : BaseDBusHostSession {
 		private AgentContainer system_session = null;
 
-		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, ChildProcess> processes = new Gee.HashMap<uint, ChildProcess> ();
 
 		private Winjector winjector = new Winjector ();
 		private AgentDescriptor agent_desc;
@@ -127,6 +127,10 @@ namespace Frida {
 				yield system_session.destroy ();
 				system_session = null;
 			}
+
+			foreach (var process in processes.values)
+				process.close ();
+			processes.clear ();
 		}
 
 		protected override async AgentSession create_system_session () throws Error {
@@ -161,27 +165,57 @@ namespace Frida {
 		}
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			return _do_spawn (path, argv, envp);
+			var process = _do_spawn (path, argv, envp);
+
+			var pid = process.pid;
+			processes[pid] = process;
+
+			var pipes = process.pipes;
+			process_next_output_from.begin (pipes.output, pid, 1, pipes);
+			process_next_output_from.begin (pipes.error, pid, 2, pipes);
+
+			return pid;
+		}
+
+		public void _on_child_dead (ChildProcess process, int status) {
+			processes.unset (process.pid);
+		}
+
+		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
+			try {
+				var buf = new uint8[4096];
+				var n = yield stream.read_async (buf);
+
+				var data = buf[0:n];
+				output (pid, fd, data);
+
+				if (n > 0)
+					process_next_output_from.begin (stream, pid, fd, resource);
+			} catch (GLib.Error e) {
+				output (pid, fd, new uint8[0] {});
+			}
 		}
 
 		public override async void input (uint pid, uint8[] data) throws Error {
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			var process = processes[pid];
+			if (process == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid pid");
+			var data_copy = data; /* FIXME: workaround for Vala compiler bug */
+			try {
+				yield process.pipes.input.write_all_async (data_copy, Priority.DEFAULT, null, null);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT (e.message);
+			}
 		}
 
 		public override async void resume (uint pid) throws Error {
-			void * instance;
-			bool instance_found = instance_by_pid.unset (pid, out instance);
-			if (!instance_found)
+			var process = processes[pid];
+			if (process == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid pid");
-			_resume_instance (instance);
-			_free_instance (instance);
+			process.resume ();
 		}
 
 		public override async void kill (uint pid) throws Error {
-			void * instance;
-			bool instance_found = instance_by_pid.unset (pid, out instance);
-			if (instance_found)
-				_free_instance (instance);
 			System.kill (pid);
 		}
 
@@ -199,9 +233,75 @@ namespace Frida {
 			return stream;
 		}
 
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
-		public extern void _resume_instance (void * instance);
-		public extern void _free_instance (void * instance);
+		public extern ChildProcess _do_spawn (string path, string[] argv, string[] envp) throws Error;
+	}
+
+	public class ChildProcess : Object {
+		public unowned Object parent {
+			get;
+			construct;
+		}
+
+		public uint pid {
+			get;
+			construct;
+		}
+
+		public void * handle {
+			get;
+			construct;
+		}
+
+		public void * main_thread {
+			get;
+			construct;
+		}
+
+		public StdioPipes pipes {
+			get;
+			construct;
+		}
+
+		public Source? watch {
+			get;
+			set;
+		}
+
+		protected bool closed = false;
+		protected bool resumed = false;
+
+		public ChildProcess (Object parent, uint pid, void * handle, void * main_thread, StdioPipes pipes) {
+			Object (parent: parent, pid: pid, handle: handle, main_thread: main_thread, pipes: pipes);
+		}
+
+		~ChildProcess () {
+			close ();
+		}
+
+		public extern void close ();
+
+		public extern void resume () throws Error;
+	}
+
+	public class StdioPipes : Object {
+		public OutputStream input {
+			get;
+			construct;
+		}
+
+		public InputStream output {
+			get;
+			construct;
+		}
+
+		public InputStream error {
+			get;
+			construct;
+		}
+
+		public StdioPipes (OutputStream input, InputStream output, InputStream error) {
+			Object (input: input, output: output, error: error);
+		}
 	}
 }
 #endif

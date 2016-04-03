@@ -398,9 +398,6 @@ namespace Frida.HostSessionTest {
 			try {
 				var host_session = yield prov.create ();
 
-				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim" + Frida.Test.arch_suffix ());
-
 				uint pid = 0;
 				bool waiting = false;
 
@@ -419,6 +416,8 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
+				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim" + Frida.Test.arch_suffix ());
 				string[] argv = { victim_path };
 				string[] envp = {};
 				pid = yield host_session.spawn (victim_path, argv, envp);
@@ -615,9 +614,6 @@ namespace Frida.HostSessionTest {
 			try {
 				var host_session = yield prov.create ();
 
-				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
-
 				uint pid = 0;
 				bool waiting = false;
 
@@ -636,6 +632,8 @@ namespace Frida.HostSessionTest {
 						run_spawn_scenario.callback ();
 				});
 
+				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
 				string[] argv = { victim_path };
 				string[] envp = {};
 				pid = yield host_session.spawn (victim_path, argv, envp);
@@ -853,31 +851,76 @@ namespace Frida.HostSessionTest {
 			try {
 				var host_session = yield prov.create ();
 
+				uint pid = 0;
+				bool waiting = false;
+
+				string received_output = null;
+				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
+					assert (source_pid == pid);
+					assert (fd == 1);
+
+					var buf = new uint8[data.length + 1];
+					Memory.copy (buf, data, data.length);
+					buf[data.length] = '\0';
+					char * chars = buf;
+					received_output = (string) chars;
+
+					if (waiting)
+						spawn.callback ();
+				});
+
 				var self_filename = Frida.Test.Process.current.filename;
 				var rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename))))),
 					"frida-core", "tests", "labrats");
 				var victim_path = Path.build_filename (rat_directory, "winvictim-sleepy%d.exe".printf (sizeof (void *) == 4 ? 32 : 64));
 				string[] argv = { victim_path };
 				string[] envp = {};
-				var pid = yield host_session.spawn (victim_path, argv, envp);
+				pid = yield host_session.spawn (victim_path, argv, envp);
+
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
+
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
-					spawn.callback ();
+					if (waiting)
+						spawn.callback ();
 				});
+
 				var script_id = yield session.create_script ("spawn",
+					"'use strict';" +
+					"var STD_OUTPUT_HANDLE = -11;" +
+					"var winAbi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';" +
+					"var GetStdHandle = new NativeFunction(Module.findExportByName('kernel32.dll', 'GetStdHandle'), 'pointer', ['int'], winAbi);" +
+					"var WriteFile = new NativeFunction(Module.findExportByName('kernel32.dll', 'WriteFile'), 'int', ['pointer', 'pointer', 'uint', 'pointer', 'pointer'], winAbi);" +
+					"var stdout = GetStdHandle(STD_OUTPUT_HANDLE);" +
+					"var message = Memory.allocUtf8String('Hello stdout');" +
+					"var success = WriteFile(stdout, message, 12, NULL, NULL);" +
 					"Interceptor.attach (Module.findExportByName('user32.dll', 'GetMessageW'), {" +
 					"  onEnter: function (args) {" +
 					"    send('GetMessage');" +
 					"  }" +
 					"});");
 				yield session.load_script (script_id);
+
+				if (received_output == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (received_output == "Hello stdout");
+				host_session.disconnect (output_handler);
+
 				yield host_session.resume (pid);
-				yield;
-				session.disconnect (message_handler);
+
+				if (received_message == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
 				assert (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
+				session.disconnect (message_handler);
+
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
 				stderr.printf ("Unexpected error: %s\n", e.message);
