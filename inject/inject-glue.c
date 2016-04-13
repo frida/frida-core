@@ -5,6 +5,7 @@
 #endif
 
 #include <gio/gio.h>
+#include <gum/gum.h>
 
 void
 frida_inject_environment_init (void)
@@ -25,5 +26,4 @@ frida_inject_environment_deinit (void)
 
   gio_deinit ();
 }
-
 
