@@ -322,7 +322,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   posix_spawnattr_setsigmask (&attributes, &signal_mask_set);
   posix_spawnattr_setflags (&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED);
 
-  result = posix_spawn (&pid, path, &file_actions, &attributes, argv, NULL);
+  result = posix_spawn (&pid, path, &file_actions, &attributes, argv, envp);
   spawn_errno = errno;
 
   posix_spawnattr_destroy (&attributes);
