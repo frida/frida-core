@@ -135,10 +135,21 @@ namespace Frida {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
 		public signal void agent_session_closed (AgentSessionId id, AgentSession session);
 
-		private uint last_session_id = 0;
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
+		private Gee.HashMap<uint, Gee.Promise<uint>> pending_attach_requests = new Gee.HashMap<uint, Gee.Promise<uint>> ();
+		private uint last_session_id = 0;
 
 		public virtual async void close () {
+			while (!pending_attach_requests.is_empty) {
+				var iterator = pending_attach_requests.values.iterator ();
+				iterator.next ();
+				var attach_request = iterator.get ();
+				try {
+					yield attach_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+				}
+			}
+
 			foreach (var entry in entries.slice (0, entries.size))
 				yield entry.close ();
 			entries.clear ();
@@ -172,49 +183,71 @@ namespace Frida {
 					return e.id;
 			}
 
-			AgentSessionId id;
-			AgentSession session;
-			Entry entry;
-
-			if (pid == 0) {
-				id = Frida.AgentSessionId (0);
-				session = yield create_system_session ();
-				entry = new Entry (id, pid, null, null, session);
-			} else {
-				Object transport;
-				var stream = yield perform_attach_to (pid, out transport);
-
-				var cancellable = new Cancellable ();
-				var timeout_source = new TimeoutSource.seconds (10);
-				timeout_source.set_callback (() => {
-					cancellable.cancel ();
-					return false;
-				});
-				timeout_source.attach (MainContext.get_thread_default ());
-
-				DBusConnection connection;
+			var attach_request = pending_attach_requests[pid];
+			if (attach_request != null) {
+				var future = attach_request.future;
 				try {
-					connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
-					session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
-				} catch (GLib.Error establish_error) {
-					if (establish_error is IOError.CANCELLED)
-						throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
-					else
-						throw new Error.PROCESS_NOT_RESPONDING (establish_error.message);
+					var handle = yield future.wait_async ();
+					return AgentSessionId (handle);
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
 				}
-				if (cancellable.is_cancelled ())
-					throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
-
-				timeout_source.destroy ();
-
-				id = AgentSessionId (++last_session_id);
-
-				entry = new Entry (id, pid, transport, connection, session);
-				connection.closed.connect (on_connection_closed);
 			}
-			entries.add (entry);
+			attach_request = new Gee.Promise<uint> ();
+			pending_attach_requests[pid] = attach_request;
 
-			agent_session_opened (id, session);
+			AgentSessionId id;
+			try {
+				AgentSession session;
+				Entry entry;
+
+				if (pid == 0) {
+					id = Frida.AgentSessionId (0);
+					session = yield create_system_session ();
+					entry = new Entry (id, pid, null, null, session);
+				} else {
+					Object transport;
+					var stream = yield perform_attach_to (pid, out transport);
+
+					var cancellable = new Cancellable ();
+					var timeout_source = new TimeoutSource.seconds (10);
+					timeout_source.set_callback (() => {
+						cancellable.cancel ();
+						return false;
+					});
+					timeout_source.attach (MainContext.get_thread_default ());
+
+					DBusConnection connection;
+					try {
+						connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+						session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE, cancellable);
+					} catch (GLib.Error establish_error) {
+						if (establish_error is IOError.CANCELLED)
+							throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
+						else
+							throw new Error.PROCESS_NOT_RESPONDING (establish_error.message);
+					}
+					if (cancellable.is_cancelled ())
+						throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
+
+					timeout_source.destroy ();
+
+					id = AgentSessionId (++last_session_id);
+
+					entry = new Entry (id, pid, transport, connection, session);
+					connection.closed.connect (on_connection_closed);
+				}
+				entries.add (entry);
+
+				agent_session_opened (id, session);
+
+				attach_request.set_value (id.handle);
+				pending_attach_requests.unset (pid);
+			} catch (Error e) {
+				attach_request.set_exception (e);
+				pending_attach_requests.unset (pid);
+				throw e;
+			}
 
 			return id;
 		}
