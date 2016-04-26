@@ -420,7 +420,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   ret = thread_swap_exception_ports (child_thread,
       EXC_MASK_BREAKPOINT,
       instance->server_port,
-      EXCEPTION_STATE_IDENTITY,
+      EXCEPTION_DEFAULT,
       state_flavor,
       previous_ports->masks,
       &previous_ports->count,
