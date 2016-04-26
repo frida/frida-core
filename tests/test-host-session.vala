@@ -724,22 +724,32 @@ namespace Frida.HostSessionTest {
 				uint pid = 0;
 				bool waiting = false;
 
-				int outputs_remaining = 2;
+				string received_stdout = null;
+				string received_stderr = null;
 				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
 					assert (source_pid == pid);
 
-					var buf = new uint8[data.length + 1];
-					Memory.copy (buf, data, data.length);
-					buf[data.length] = '\0';
-					char * chars = buf;
-					var received_output = (string) chars;
+					if (data.length > 0) {
+						var buf = new uint8[data.length + 1];
+						Memory.copy (buf, data, data.length);
+						buf[data.length] = '\0';
+						char * chars = buf;
+						var received_output = (string) chars;
 
-					if (fd == 1)
-						assert (received_output == "Hello stdout");
-					else if (fd == 2)
-						assert (received_output == "Hello stderr");
-					else
-						assert_not_reached ();
+						if (fd == 1)
+							received_stdout = received_output;
+						else if (fd == 2)
+							received_stderr = received_output;
+						else
+							assert_not_reached ();
+					} else {
+						if (fd == 1)
+							assert (received_stdout != null);
+						else if (fd == 2)
+							assert (received_stderr != null);
+						else
+							assert_not_reached ();
+					}
 
 					if (waiting)
 						run_spawn_scenario_with_stdio.callback ();
@@ -753,11 +763,13 @@ namespace Frida.HostSessionTest {
 
 				yield host_session.resume (pid);
 
-				while (outputs_remaining > 0) {
+				while (received_stdout == null && received_stderr == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
+				assert (received_stdout == "Hello stdout");
+				assert (received_stderr == "Hello stderr");
 				host_session.disconnect (output_handler);
 
 				yield host_session.kill (pid);
