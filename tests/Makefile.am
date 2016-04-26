@@ -92,6 +92,7 @@ data/.stamp: test-gadget-standalone.js
 	mkdir -p $(@D)
 	cp $(srcdir)/labrats/unixvictim-* $(@D)
 	cp $(srcdir)/labrats/unixattacker-* $(@D)
+	cp $(srcdir)/labrats/write-to-stdio-* $(@D)
 	cp $(srcdir)/*.js $(@D)
 	touch $@
 

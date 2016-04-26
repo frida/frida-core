@@ -76,6 +76,16 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/spawn-without-attach-native", () => {
+			var h = new Harness ((h) => Darwin.spawn_without_attach_native.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/spawn-without-attach-other", () => {
+			var h = new Harness ((h) => Darwin.spawn_without_attach_other.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Darwin/Manual/cross-arch", () => {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch.begin (h as Harness));
 			h.run ();
@@ -678,6 +688,77 @@ namespace Frida.HostSessionTest {
 				}
 				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				session.disconnect (message_handler);
+
+				yield host_session.kill (pid);
+			} catch (GLib.Error e) {
+				stderr.printf ("Unexpected error: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.service.stop ();
+			h.service.remove_backend (backend);
+			h.done ();
+		}
+
+		private static async void spawn_without_attach_native (Harness h) {
+			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "write-to-stdio-mac" : "write-to-stdio-ios";
+			yield run_spawn_scenario_with_stdio (h, victim_name);
+		}
+
+		private static async void spawn_without_attach_other (Harness h) {
+			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "write-to-stdio-mac32" : "write-to-stdio-ios32";
+			yield run_spawn_scenario_with_stdio (h, victim_name);
+		}
+
+		private static async void run_spawn_scenario_with_stdio (Harness h, string victim_name) {
+			var backend = new DarwinHostSessionBackend ();
+			h.service.add_backend (backend);
+			yield h.service.start ();
+			yield h.process_events ();
+			h.assert_n_providers_available (1);
+			var prov = h.first_provider ();
+
+			try {
+				var host_session = yield prov.create ();
+
+				uint pid = 0;
+				bool waiting = false;
+
+				int outputs_remaining = 2;
+				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
+					assert (source_pid == pid);
+
+					var buf = new uint8[data.length + 1];
+					Memory.copy (buf, data, data.length);
+					buf[data.length] = '\0';
+					char * chars = buf;
+					var received_output = (string) chars;
+
+					if (fd == 1)
+						assert (received_output == "Hello stdout");
+					else if (fd == 2)
+						assert (received_output == "Hello stderr");
+					else
+						assert_not_reached ();
+
+					if (waiting)
+						run_spawn_scenario_with_stdio.callback ();
+				});
+
+				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
+				string[] argv = { victim_path };
+				string[] envp = {};
+				pid = yield host_session.spawn (victim_path, argv, envp);
+
+				yield host_session.resume (pid);
+
+				while (outputs_remaining > 0) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				host_session.disconnect (output_handler);
 
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
