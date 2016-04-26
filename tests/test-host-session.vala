@@ -763,7 +763,7 @@ namespace Frida.HostSessionTest {
 
 				yield host_session.resume (pid);
 
-				while (received_stdout == null && received_stderr == null) {
+				while (received_stdout == null || received_stderr == null) {
 					waiting = true;
 					yield;
 					waiting = false;
