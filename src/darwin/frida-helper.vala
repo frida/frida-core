@@ -34,6 +34,7 @@ namespace Frida {
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
+		private Gee.Promise<bool> shutdown_request;
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
@@ -74,6 +75,16 @@ namespace Frida {
 		}
 
 		private async void shutdown () {
+			if (shutdown_request != null) {
+				try {
+					yield shutdown_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+				return;
+			}
+			shutdown_request = new Gee.Promise<bool> ();
+
 			if (connection != null) {
 				foreach (var registration_id in pipe_proxies.values)
 					connection.unregister_object (registration_id);
@@ -98,6 +109,8 @@ namespace Frida {
 			}
 
 			loop.quit ();
+
+			shutdown_request.set_value (true);
 		}
 
 		private async void start () {
