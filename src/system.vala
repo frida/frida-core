@@ -136,13 +136,30 @@ namespace Frida {
 			}
 		}
 
+		private static string? fixed_name = null;
+
 		public TemporaryDirectory () throws Error {
-			this.file = File.new_for_path (Path.build_filename (get_system_tmp (), make_name ()));
+			var name = (fixed_name != null) ? fixed_name : make_name ();
+			this.file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
 			this.remove_on_dispose = true;
+
+			if (fixed_name != null) {
+				try {
+					var path = this.file.get_path ();
+					var dir = Dir.open (path);
+					string? child;
+					while ((child = dir.read_name ()) != null) {
+						FileUtils.unlink (Path.build_filename (path, child));
+					}
+				} catch (FileError e) {
+				}
+			}
+
 			try {
 				this.file.make_directory ();
 			} catch (GLib.Error e) {
-				throw new Error.PERMISSION_DENIED (e.message);
+				if (fixed_name == null)
+					throw new Error.PERMISSION_DENIED (e.message);
 			}
 		}
 
@@ -153,6 +170,10 @@ namespace Frida {
 
 		~TemporaryDirectory () {
 			destroy ();
+		}
+
+		public static void always_use (string name) {
+			fixed_name = name;
 		}
 
 		public void destroy () {

@@ -89,6 +89,8 @@ namespace Frida.Server {
 		private bool stopping;
 
 		construct {
+			TemporaryDirectory.always_use ("re.frida.server");
+
 #if WINDOWS
 			host_session = new WindowsHostSession ();
 #endif
