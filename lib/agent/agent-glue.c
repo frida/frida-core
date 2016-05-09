@@ -397,11 +397,11 @@ frida_replacement_thread_create (
     void * data)
 #endif
 {
-  GumInvocationContext * ctx;
+  GumInvocationContext * ic;
   FridaAgentAutoIgnorer * self;
 
-  ctx = gum_interceptor_get_current_invocation ();
-  self = FRIDA_AGENT_AUTO_IGNORER (gum_invocation_context_get_replacement_function_data (ctx));
+  ic = gum_interceptor_get_current_invocation ();
+  self = FRIDA_AGENT_AUTO_IGNORER (gum_invocation_context_get_replacement_function_data (ic));
 
   if (GUM_MEMORY_RANGE_INCLUDES (&self->agent_range, GUM_ADDRESS (GUM_FUNCPTR_TO_POINTER (func))))
   {
