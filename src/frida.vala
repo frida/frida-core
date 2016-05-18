@@ -998,6 +998,10 @@ namespace Frida {
 		}
 
 		public async void detach () {
+			// There's no point in detaching from the system session
+			if (pid == 0)
+				return;
+
 			yield _do_close (true);
 		}
 
