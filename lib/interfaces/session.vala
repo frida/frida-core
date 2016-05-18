@@ -59,10 +59,14 @@ namespace Frida {
 	namespace Marshal {
 		public static Frida.Error from_dbus (GLib.Error e) {
 			DBusError.strip_remote_error (e);
-			if (e is Frida.Error)
+			if (e is Frida.Error) {
 				return (Frida.Error) e;
-			else
+			} else if (e is DBusError.UNKNOWN_METHOD) {
+				return new Frida.Error.PROTOCOL ("Unable to communicate with remote frida-server; " +
+					"please ensure that major versions match and that the remote Frida has the feature you are trying to use");
+			} else {
 				return new Frida.Error.TRANSPORT (e.message);
+			}
 		}
 	}
 
