@@ -54,7 +54,6 @@ namespace Frida {
 			try {
 				yield session.close ();
 			} catch (GLib.Error session_error) {
-				assert_not_reached ();
 			}
 			session = null;
 
