@@ -589,8 +589,20 @@ namespace Frida.Gadget {
 
 			public async AgentScriptId create_script (string name, string source) throws Error {
 				var engine = get_script_engine ();
-				var instance = yield engine.create_script (name, source);
+				var instance = yield engine.create_script ((name != "") ? name : null, source, null);
 				return instance.sid;
+			}
+
+			public async AgentScriptId create_script_from_bytes (string name, uint8[] bytes) throws Error {
+				var engine = get_script_engine ();
+				var instance = yield engine.create_script ((name != "") ? name : null, null, new Bytes (bytes));
+				return instance.sid;
+			}
+
+			public async uint8[] compile_script (string source) throws Error {
+				var engine = get_script_engine ();
+				var bytes = yield engine.compile_script (source);
+				return bytes.get_data ();
 			}
 
 			public async void destroy_script (AgentScriptId sid) throws Error {

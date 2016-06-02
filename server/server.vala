@@ -370,7 +370,7 @@ namespace Frida.Server {
 							return false;
 						});
 					}
-				} else if (member == "CreateScript" && type == DBusMessageType.METHOD_RETURN) {
+				} else if (member.has_prefix ("CreateScript") && type == DBusMessageType.METHOD_RETURN) {
 					uint32 script_id;
 					message.get_body ().get ("((u))", out script_id);
 					Idle.add (() => {

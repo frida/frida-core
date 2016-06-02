@@ -85,6 +85,14 @@ namespace Frida {
 			return yield session.create_script (name, source);
 		}
 
+		public async AgentScriptId create_script_from_bytes (string name, uint8[] bytes) throws GLib.Error {
+			return yield session.create_script_from_bytes (name, bytes);
+		}
+
+		public async uint8[] compile_script (string source) throws GLib.Error {
+			return yield session.compile_script (source);
+		}
+
 		public async void destroy_script (AgentScriptId sid) throws GLib.Error {
 			yield session.destroy_script (sid);
 		}

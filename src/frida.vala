@@ -1053,6 +1053,67 @@ namespace Frida {
 			}
 		}
 
+		public async Script create_script_from_bytes (string? name, Bytes bytes) throws Error {
+			check_open ();
+
+			AgentScriptId sid;
+			try {
+				sid = yield session.create_script_from_bytes ((name == null) ? "" : name, bytes.get_data ());
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			check_open ();
+
+			var script = new Script (this, sid);
+			script_by_id[sid.handle] = script;
+
+			return script;
+		}
+
+		public Script create_script_from_bytes_sync (string? name, Bytes bytes) throws Error {
+			var task = create<CreateScriptFromBytesTask> () as CreateScriptFromBytesTask;
+			task.name = name;
+			task.bytes = bytes;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class CreateScriptFromBytesTask : ProcessTask<Script> {
+			public string? name;
+			public Bytes bytes;
+
+			protected override async Script perform_operation () throws Error {
+				return yield parent.create_script_from_bytes (name, bytes);
+			}
+		}
+
+		public async Bytes compile_script (string source) throws Error {
+			check_open ();
+
+			uint8[] data;
+			try {
+				data = yield session.compile_script (source);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			return new Bytes (data);
+		}
+
+		public Bytes compile_script_sync (string source) throws Error {
+			var task = create<CompileScriptTask> () as CompileScriptTask;
+			task.source = source;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class CompileScriptTask : ProcessTask<Bytes> {
+			public string source;
+
+			protected override async Bytes perform_operation () throws Error {
+				return yield parent.compile_script (source);
+			}
+		}
+
 		public async void enable_debugger (uint16 port = 0) throws Error {
 			check_open ();
 

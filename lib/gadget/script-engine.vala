@@ -22,7 +22,7 @@ namespace Frida.Gadget {
 			instance_by_id.clear ();
 		}
 
-		public async ScriptInstance create_script (string? name, string source) throws Error {
+		public async ScriptInstance create_script (string? name, string? source, Bytes? bytes) throws Error {
 			var sid = AgentScriptId (++last_script_id);
 
 			string script_name;
@@ -33,9 +33,12 @@ namespace Frida.Gadget {
 
 			Gum.Script script;
 			try {
-				script = yield backend.create (script_name, source);
-			} catch (IOError create_error) {
-				throw new Error.INVALID_ARGUMENT (create_error.message);
+				if (source != null)
+					script = yield backend.create (script_name, source);
+				else
+					script = yield backend.create_from_bytes (script_name, bytes);
+			} catch (IOError e) {
+				throw new Error.INVALID_ARGUMENT (e.message);
 			}
 			script.get_stalker ().exclude (agent_range);
 			script.set_message_handler ((script, message, data) => {
@@ -47,6 +50,14 @@ namespace Frida.Gadget {
 			instance_by_id[sid.handle] = instance;
 
 			return instance;
+		}
+
+		public async Bytes compile_script (string source) throws Error {
+			try {
+				return yield backend.compile (source);
+			} catch (IOError e) {
+				throw new Error.INVALID_ARGUMENT (e.message);
+			}
 		}
 
 		public async void destroy_script (AgentScriptId sid) throws Error {
