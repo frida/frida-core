@@ -205,7 +205,7 @@ namespace Frida.Gadget {
 					throw new Error.INVALID_ARGUMENT (e.message);
 				}
 
-				var instance = yield script_engine.create_script (name, source);
+				var instance = yield script_engine.create_script (name, source, null);
 
 				if (script.handle != 0) {
 					try {
