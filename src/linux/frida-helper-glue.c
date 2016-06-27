@@ -1259,11 +1259,12 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
     src++;
   }
 
-  dst = remote_address + (size / sizeof (gsize));
+  dst = remote_address + ((size / sizeof (gsize)) * sizeof (gsize));
+  src = data + ((size / sizeof (gsize)) * sizeof (gsize));
   remainder = size % sizeof (gsize);
   if (remainder != 0)
   {
-    gsize word;
+    gsize word = 0;
 
     memcpy (&word, src, remainder);
 
