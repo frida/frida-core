@@ -55,7 +55,7 @@ static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags
 
 static void frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self);
 
-#if defined (HAVE_LINUX) && !defined (HAVE_ANDROID)
+#if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
 #define __RTLD_DLOPEN	0x80000000
 extern void * __libc_dlopen_mode (char *name, int flags);
 static void frida_libdl_prevent_unload (void);
@@ -104,12 +104,12 @@ frida_agent_environment_init (void)
   gum_init ();
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
-#if defined (HAVE_LINUX) && !defined (HAVE_ANDROID)
+#if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
   frida_libdl_prevent_unload ();
 #endif
 }
 
-#if defined (HAVE_LINUX) && !defined (HAVE_ANDROID)
+#if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
 void
 frida_libdl_prevent_unload (void)
 {
