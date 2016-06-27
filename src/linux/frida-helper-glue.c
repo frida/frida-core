@@ -12,6 +12,9 @@
 #ifdef HAVE_ARM64
 # include <gum/arch-arm64/gumarm64writer.h>
 #endif
+#ifdef HAVE_MIPS
+# include <gum/arch-mips/gummipswriter.h>
+#endif
 #include <gum/gum.h>
 #include <gum/gumlinux.h>
 #include <dlfcn.h>
@@ -72,6 +75,54 @@
 # define FridaRegs struct pt_regs
 #elif defined (HAVE_ARM64)
 # define FridaRegs struct user_pt_regs
+#elif defined (HAVE_MIPS)
+typedef struct _FridaRegs FridaRegs;
+
+struct _FridaRegs
+{
+  guint64 zero;
+  guint64 at;
+  guint64 v0;
+  guint64 v1;
+  guint64 a0;
+  guint64 a1;
+  guint64 a2;
+  guint64 a3;
+  guint64 t0;
+  guint64 t1;
+  guint64 t2;
+  guint64 t3;
+  guint64 t4;
+  guint64 t5;
+  guint64 t6;
+  guint64 t7;
+  guint64 s0;
+  guint64 s1;
+  guint64 s2;
+  guint64 s3;
+  guint64 s4;
+  guint64 s5;
+  guint64 s6;
+  guint64 s7;
+  guint64 t8;
+  guint64 t9;
+  guint64 k0;
+  guint64 k1;
+  guint64 gp;
+  guint64 sp;
+  guint64 fp;
+  guint64 ra;
+
+  guint64 lo;
+  guint64 hi;
+
+  guint64 pc;
+  guint64 badvaddr;
+  guint64 status;
+  guint64 cause;
+
+  guint64 __padding[8];
+};
 #else
 # error Unsupported architecture
 #endif
@@ -175,7 +226,7 @@ static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress 
 static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, gboolean * exited, GError ** error);
 
 static GumAddress frida_resolve_libc_function (pid_t pid, const gchar * function_name);
-#ifdef HAVE_ANDROID
+#if defined (HAVE_ANDROID) || defined (HAVE_UCLIBC)
 static GumAddress frida_resolve_linker_function (pid_t pid, gpointer func);
 #endif
 static GumAddress frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name);
@@ -959,6 +1010,123 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 #endif
 }
 
+#elif defined (HAVE_MIPS)
+
+static void
+frida_inject_instance_commit_mips_code (GumMipsWriter * cw, FridaCodeChunk * code)
+{
+  gum_mips_writer_flush (cw);
+  code->cur = gum_mips_writer_cur (cw);
+  code->size += gum_mips_writer_offset (cw);
+}
+
+static void
+frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
+{
+  GumMipsWriter cw;
+  const guint worker_offset = 192;
+
+  static guint32 global_times = 0;
+  global_times ++;
+
+  gum_mips_writer_init (&cw, code->cur);
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlopen),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_so)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_NOW));
+  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S0, MIPS_REG_V0);
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlsym),
+      2,
+      GUM_ARG_REGISTER, MIPS_REG_S0,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_create)));
+  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
+
+  gum_mips_writer_put_call_reg_with_arguments (&cw,
+      MIPS_REG_T9,
+      4,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_ADDRESS, remote_address + worker_offset,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlclose),
+      1,
+      GUM_ARG_REGISTER, MIPS_REG_S0);
+
+  gum_mips_writer_put_break (&cw);
+  gum_mips_writer_flush (&cw);
+  g_assert_cmpuint (gum_mips_writer_offset (&cw), <=, worker_offset);
+  while (gum_mips_writer_offset (&cw) != worker_offset - code->size)
+    gum_mips_writer_put_nop (&cw);
+  frida_inject_instance_commit_mips_code (&cw, code);
+  gum_mips_writer_free (&cw);
+
+  gum_mips_writer_init (&cw, code->cur);
+
+  gum_mips_writer_put_push_reg (&cw, MIPS_REG_RA);
+  gum_mips_writer_put_push_reg (&cw, MIPS_REG_S0);
+  gum_mips_writer_put_push_reg (&cw, MIPS_REG_S1);
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "open"),
+      3,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S0, MIPS_REG_V0);
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "write"),
+      3,
+      GUM_ARG_REGISTER, MIPS_REG_S0,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlopen),
+      2,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S1, MIPS_REG_V0);
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlsym),
+      2,
+      GUM_ARG_REGISTER, MIPS_REG_S1,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
+
+  gum_mips_writer_put_call_reg_with_arguments (&cw,
+      MIPS_REG_T9,
+      3,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_linker_function (params->pid, dlclose),
+      1,
+      GUM_ARG_REGISTER, MIPS_REG_S1);
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "close"),
+      1,
+      GUM_ARG_REGISTER, MIPS_REG_S0);
+
+  gum_mips_writer_put_pop_reg (&cw, MIPS_REG_S1);
+  gum_mips_writer_put_pop_reg (&cw, MIPS_REG_S0);
+  gum_mips_writer_put_pop_reg (&cw, MIPS_REG_RA);
+  gum_mips_writer_put_ret (&cw);
+
+  frida_inject_instance_commit_mips_code (&cw, code);
+  gum_mips_writer_free (&cw);
+}
+
 #endif
 
 static gboolean
@@ -980,7 +1148,11 @@ frida_wait_for_attach_signal (pid_t pid)
         return FALSE;
       /* fall through */
     case SIGSTOP:
+#if defined (HAVE_UCLIBC)
+      if (frida_find_library_base (pid, "libuClibc", NULL) == 0)
+#else
       if (frida_find_library_base (pid, "libc", NULL) == 0)
+#endif
       {
         if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
           return FALSE;
@@ -988,7 +1160,11 @@ frida_wait_for_attach_signal (pid_t pid)
         kill (pid, SIGSTOP);
         if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
           return FALSE;
+#if defined (HAVE_UCLIBC)
+        return frida_find_library_base (pid, "libuClibc", NULL) != 0;
+#else
         return frida_find_library_base (pid, "libc", NULL) != 0;
+#endif
       }
       return TRUE;
     default:
@@ -1118,9 +1294,14 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
     /* ARM64 */
     patched_entry_code = 0xd4200000;
   }
-#else
+#elif defined (HAVE_X86)
   /* x86 */
   patched_entry_code = 0xcc;
+#elif defined (HAVE_MIPS)
+  /* mips */
+  patched_entry_code = 0x0000000d;
+#else
+# error Unsupported architecture
 #endif
 
   ptrace (PTRACE_POKEDATA, pid, entry_point_address, GSIZE_TO_POINTER (patched_entry_code));
@@ -1144,6 +1325,10 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   regs.ARM_pc = GPOINTER_TO_SIZE (entry_point_address);
 #elif defined (HAVE_ARM64)
   regs.pc = GPOINTER_TO_SIZE (entry_point_address);
+#elif defined (HAVE_MIPS)
+  regs.pc = GPOINTER_TO_SIZE (entry_point_address);
+#else
+# error Unsupported architecture
 #endif
 
   ret = frida_set_regs (pid, &regs);
@@ -1399,6 +1584,70 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     regs.regs[i] = args[i];
 
   regs.regs[30] = FRIDA_DUMMY_RETURN_ADDRESS;
+#elif defined (HAVE_MIPS)
+  guint32 insn = 0;
+  insn = ptrace (PTRACE_PEEKDATA, pid, GSIZE_TO_POINTER (regs.pc - 4), NULL);
+  CHECK_OS_RESULT (ret, ==, 0, "PTRACE_PEEKDATA");
+
+  /* if insn is a syscall, trying to hijack the thread won't work well because
+   * a3 will be overwritten by the syscall on CONT. So we just set a bad PC and
+   * then run until we SIGSEGV. We can then replace a3 correctly.*/
+  if ((insn & 0xfc00003f) == 0x0000000c)
+  {
+    /* cause a SIGSEGV with a bad PC */
+    regs.pc = 0x12345678;
+
+    ret = frida_set_regs (pid, &regs);
+    CHECK_OS_RESULT (ret, ==, 0, "frida_set_regs");
+
+    ret = ptrace (PTRACE_CONT, pid, NULL, NULL);
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_CONT");
+
+    ret = frida_wait_for_child_signal (pid, SIGSEGV, exited);
+    CHECK_OS_RESULT (ret, !=, FALSE, "PTRACE_CONT wait");
+
+    ret = frida_get_regs (pid, &regs);
+    CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
+  }
+
+  /* we need to set t9 as well as pc, so that PIC functions work as expected */
+  regs.t9 = func;
+  regs.pc = func;
+
+  for (i = 0; i < args_length && i < 4; i++)
+  {
+    switch (i)
+    {
+      case 0:
+        regs.a0 = args[i];
+        break;
+      case 1:
+        regs.a1 = args[i];
+        break;
+      case 2:
+        regs.a2 = args[i];
+        break;
+      case 3:
+        regs.a3 = args[i];
+        break;
+    }
+  }
+
+  for (i = args_length - 1; i >= 4; i--)
+  {
+    regs.sp -= 4;
+
+    ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.sp), GSIZE_TO_POINTER (args[i]));
+    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
+  }
+
+  /* we need to reserve 16 bytes for 'incoming arguments', as per
+   * http://math-atlas.sourceforge.net/devel/assembly/mipsabi32.pdf section 3-15 */
+  regs.sp -= 16;
+
+  regs.ra = FRIDA_DUMMY_RETURN_ADDRESS;
+#else
+# error Unsupported architecture
 #endif
 
   ret = frida_set_regs (pid, &regs);
@@ -1421,6 +1670,10 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   *retval = regs.ARM_r0;
 #elif defined (HAVE_ARM64)
   *retval = regs.regs[0];
+#elif defined (HAVE_MIPS)
+  *retval = regs.v0;
+#else
+# error Unsupported architecture
 #endif
 
   return TRUE;
@@ -1472,6 +1725,11 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 #elif defined (HAVE_ARM64)
   regs.pc = remote_address;
   regs.sp = remote_stack;
+#elif defined (HAVE_MIPS)
+  regs.pc = remote_address;
+  regs.sp = remote_stack;
+#else
+# error Unsupported architecture
 #endif
 
   ret = frida_set_regs (pid, &regs);
@@ -1496,6 +1754,10 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
     *result = regs.ARM_r0;
 #elif defined (HAVE_ARM64)
     *result = regs.regs[0];
+#elif defined (HAVE_MIPS)
+    *result = regs.v0;
+#else
+# error Unsupported architecture
 #endif
   }
 
@@ -1515,7 +1777,11 @@ handle_os_error:
 static GumAddress
 frida_resolve_libc_function (pid_t pid, const gchar * function_name)
 {
+#if defined (HAVE_UCLIBC)
+  return frida_resolve_library_function (pid, "libuClibc", function_name);
+#else
   return frida_resolve_library_function (pid, "libc", function_name);
+#endif
 }
 
 #ifdef HAVE_ANDROID
@@ -1534,6 +1800,83 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
   g_assert (local_base != 0);
 
   remote_base = frida_find_library_base (pid, linker_path, NULL);
+  g_assert (remote_base != 0);
+
+  remote_address = remote_base + (GUM_ADDRESS (func) - local_base);
+
+  return remote_address;
+}
+
+#elif defined (HAVE_UCLIBC)
+
+extern void * (*_dl_load_shared_library)(int secure, void ** rpnt, void *tpnt, char *full_libname, int trace_loaded_objects);
+static GumAddress
+frida_resolve_linker_function (pid_t pid, gpointer func)
+{
+  const gchar * linker_path = "/lib/libdl-0.9.32.so";
+  GumAddress local_base, remote_base, remote_address;
+
+  local_base = frida_find_library_base (getpid (), linker_path, NULL);
+  g_assert (local_base != 0);
+
+  remote_base = frida_find_library_base (pid, linker_path, NULL);
+  if (remote_base == 0)
+  {
+    gpointer rpnt, rpnt_next, tpnt;
+    gint32 ret;
+    GumAddress remote_dl_symbol_tables, remote_address;
+    const gchar * ldso_path = "/lib/ld-uClibc-0.9.32.so";
+    GumAddress args[] = {
+      0,
+      GUM_ADDRESS (&rpnt),
+      GUM_ADDRESS (NULL),
+      GUM_ADDRESS (linker_path),
+      GUM_ADDRESS (NULL),
+    };
+    GumAddress retval = 0;
+
+    /* retrieve the rpnt */
+    remote_dl_symbol_tables = frida_resolve_library_function (pid, ldso_path, "_dl_symbol_tables");
+    rpnt = (gpointer) ptrace (PTRACE_PEEKDATA, pid, remote_dl_symbol_tables, NULL);
+    while (TRUE)
+    {
+      rpnt_next = (gpointer) ptrace (PTRACE_PEEKDATA, pid, rpnt + 0x10, NULL);
+      if (rpnt_next == 0)
+        break;
+      rpnt = rpnt_next;
+    }
+
+    /* allocate space */
+    remote_address = frida_remote_alloc (pid, gum_query_page_size (), PROT_READ | PROT_WRITE, NULL);
+    g_assert (remote_address != GUM_ADDRESS (NULL));
+
+    /* copy data across */
+    ret = frida_remote_write (pid, remote_address, &rpnt, 4, NULL);
+    g_assert (ret == TRUE);
+    ret = frida_remote_write (pid, GUM_ADDRESS (remote_address + 4), linker_path, strlen(linker_path) + 1, NULL);
+    g_assert (ret == TRUE);
+
+    /* fixup args and call _dl_load_shared_library */
+    args[1] = remote_address;
+    args[3] = remote_address + 4;
+    ret = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_load_shared_library"), args, G_N_ELEMENTS (args), &retval, NULL, NULL);
+    g_assert (ret == TRUE);
+    tpnt = (gpointer) retval;
+    g_assert (retval != 0);
+
+    GumAddress args_perform_mips_global_got_relocations[] = {
+      GUM_ADDRESS (tpnt),
+      0
+    };
+    ret = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_perform_mips_global_got_relocations"), args_perform_mips_global_got_relocations, G_N_ELEMENTS (args_perform_mips_global_got_relocations), &retval, NULL, NULL);
+    g_assert (ret == TRUE);
+
+
+    ret = frida_remote_dealloc (pid, remote_address, gum_query_page_size (), NULL);
+    g_assert (ret == 0);
+
+    remote_base = frida_find_library_base (pid, linker_path, NULL);
+  }
   g_assert (remote_base != 0);
 
   remote_address = remote_base + (GUM_ADDRESS (func) - local_base);
