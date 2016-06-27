@@ -40,6 +40,9 @@ case $host_cpu in
     HAVE_ARM64=yes
     HAVE_64BIT=yes
   ;;
+  mips|mipsel)
+    HAVE_MIPS=yes
+  ;;
 esac
 if [[ "$HAVE_I386" = "yes" ]]; then
   AC_DEFINE(HAVE_I386, 1, [Define to 1 if target is x86 based.])
@@ -50,9 +53,13 @@ fi
 if [[ "$HAVE_ARM64" = "yes" ]]; then
   AC_DEFINE(HAVE_ARM64, 1, [Define to 1 if target is AArch64 based.])
 fi
+if [[ "$HAVE_MIPS" = "yes" ]]; then
+  AC_DEFINE(HAVE_MIPS, 1, [Define to 1 if target is MIPS based.])
+fi
 AM_CONDITIONAL(ARCH_I386, [test "$HAVE_I386" = "yes"])
 AM_CONDITIONAL(ARCH_ARM, [test "$HAVE_ARM" = "yes"])
 AM_CONDITIONAL(ARCH_ARM64, test "$HAVE_ARM64" = "yes")
+AM_CONDITIONAL(ARCH_MIPS, test "$HAVE_MIPS" = "yes")
 AM_CONDITIONAL(ARCH_64BIT, test "$HAVE_64BIT" = "yes")
 
 case $host_os in
@@ -100,6 +107,44 @@ case $host_os in
   *-android*)
     HAVE_ANDROID=yes
     ;;
+  linux-*)
+    AC_MSG_CHECKING([Libc is glibc])
+    AC_PREPROC_IFELSE(
+      [AC_LANG_PROGRAM([[#include <features.h>]],
+                       [[
+#if defined (__GLIBC__) && !defined (__UCLIBC__)
+#else
+# error Not glibc
+#endif
+      ]])],
+      [
+        HAVE_GLIBC=yes
+        AC_MSG_RESULT([yes])
+      ],
+      [
+        HAVE_GLIBC=no
+        AC_MSG_RESULT([no])
+      ]
+    )
+    AC_MSG_CHECKING([Libc is uClibc])
+    AC_PREPROC_IFELSE(
+      [AC_LANG_PROGRAM([[#include <features.h>]],
+                       [[
+#if defined (__UCLIBC__)
+#else
+# error Not uClibc
+#endif
+      ]])],
+      [
+        HAVE_UCLIBC=yes
+        AC_MSG_RESULT([yes])
+      ],
+      [
+        HAVE_UCLIBC=no
+        AC_MSG_RESULT([no])
+      ]
+    )
+    ;;
   *)
     ;;
 esac
@@ -117,6 +162,13 @@ if [[ "x$HAVE_IOS" = "xyes" ]]; then
 fi
 
 AM_CONDITIONAL(OS_IOS, [test "x$HAVE_IOS" = "xyes"])
+
+if [[ "x$HAVE_GLIBC" = "xyes" ]]; then
+  AC_DEFINE(HAVE_GLIBC, 1, [Define to 1 if libc is glibc.])
+fi
+if [[ "x$HAVE_UCLIBC" = "xyes" ]]; then
+  AC_DEFINE(HAVE_UCLIBC, 1, [Define to 1 if libc is uClibc.])
+fi
 
 FRIDA_VALAFLAGS=
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
