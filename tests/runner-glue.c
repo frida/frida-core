@@ -106,5 +106,23 @@ frida_test_cpu (void)
   return FRIDA_TEST_CPU_ARM_32;
 #elif defined (HAVE_ARM64)
   return FRIDA_TEST_CPU_ARM_64;
+#elif defined (HAVE_MIPS)
+# if _G_BYTE_ORDER == _G_LITTLE_ENDIAN
+  return FRIDA_TEST_CPU_MIPSEL;
+# else
+  return FRIDA_TEST_CPU_MIPS;
+# endif
+#endif
+}
+
+FridaTestLibc
+frida_test_libc (void)
+{
+#if defined (HAVE_GLIBC)
+  return FRIDA_TEST_LIBC_GLIBC;
+#elif defined (HAVE_UCLIBC)
+  return FRIDA_TEST_LIBC_UCLIBC;
+#elif defined (HAVE_ANDROID)
+  return FRIDA_TEST_LIBC_BIONIC;
 #endif
 }
