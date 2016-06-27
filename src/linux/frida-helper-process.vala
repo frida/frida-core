@@ -95,6 +95,7 @@ namespace Frida {
 			switch (cpu_type) {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
+				case Gum.CpuType.MIPS:
 					filename = filename_template.printf (32);
 					break;
 
@@ -128,6 +129,7 @@ namespace Frida {
 			switch (cpu_type) {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
+				case Gum.CpuType.MIPS:
 					if (factory32 == null) {
 						if (resource_store.helper32 == null)
 							throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
