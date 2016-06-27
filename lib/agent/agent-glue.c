@@ -536,6 +536,9 @@ frida_get_address_of_thread_create_func (void)
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
 #elif defined (HAVE_DARWIN) || defined (HAVE_ANDROID)
   return GUM_FUNCPTR_TO_POINTER (pthread_create);
+#elif defined (HAVE_UCLIBC)
+  void * handle = dlopen ("libpthread.so.0", RTLD_GLOBAL | RTLD_LAZY);
+  return dlsym (handle, "pthread_create");
 #else
   return dlsym (RTLD_NEXT, "pthread_create");
 #endif
