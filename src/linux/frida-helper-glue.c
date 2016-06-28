@@ -226,6 +226,7 @@ static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress 
 static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, gboolean * exited, GError ** error);
 
 static GumAddress frida_resolve_libc_function (pid_t pid, const gchar * function_name);
+static GumAddress frida_find_libc_base (pid_t pid);
 #if defined (HAVE_ANDROID) || defined (HAVE_UCLIBC)
 static GumAddress frida_resolve_linker_function (pid_t pid, gpointer func);
 #endif
@@ -1148,11 +1149,7 @@ frida_wait_for_attach_signal (pid_t pid)
         return FALSE;
       /* fall through */
     case SIGSTOP:
-#if defined (HAVE_UCLIBC)
-      if (frida_find_library_base (pid, "libuClibc", NULL) == 0)
-#else
-      if (frida_find_library_base (pid, "libc", NULL) == 0)
-#endif
+      if (frida_find_libc_base (pid) == 0)
       {
         if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
           return FALSE;
@@ -1160,11 +1157,7 @@ frida_wait_for_attach_signal (pid_t pid)
         kill (pid, SIGSTOP);
         if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
           return FALSE;
-#if defined (HAVE_UCLIBC)
-        return frida_find_library_base (pid, "libuClibc", NULL) != 0;
-#else
-        return frida_find_library_base (pid, "libc", NULL) != 0;
-#endif
+        return frida_find_libc_base (pid) != 0;
       }
       return TRUE;
     default:
@@ -1781,6 +1774,16 @@ frida_resolve_libc_function (pid_t pid, const gchar * function_name)
   return frida_resolve_library_function (pid, "libuClibc", function_name);
 #else
   return frida_resolve_library_function (pid, "libc", function_name);
+#endif
+}
+
+static GumAddress
+frida_find_libc_base (pid_t pid)
+{
+#if defined (HAVE_UCLIBC)
+  return frida_find_library_base (pid, "libuClibc", NULL);
+#else
+  return frida_find_library_base (pid, "libc", NULL);
 #endif
 }
 
