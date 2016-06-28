@@ -1817,19 +1817,21 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
 static GumAddress
 frida_resolve_linker_function (pid_t pid, gpointer func)
 {
-  const gchar * linker_path = "/lib/libdl-0.9.32.so";
+  const gchar * linker_file_name = "libdl";
+  gchar * linker_path;
   GumAddress local_base, remote_base, remote_address;
 
-  local_base = frida_find_library_base (getpid (), linker_path, NULL);
+  local_base = frida_find_library_base (getpid (), linker_file_name, &linker_path);
   g_assert (local_base != 0);
 
-  remote_base = frida_find_library_base (pid, linker_path, NULL);
+  remote_base = frida_find_library_base (pid, linker_file_name, NULL);
   if (remote_base == 0)
   {
     gpointer rpnt, rpnt_next, tpnt;
     gint32 ret;
     GumAddress remote_dl_symbol_tables, remote_address;
-    const gchar * ldso_path = "/lib/ld-uClibc-0.9.32.so";
+    const gchar * ldso_file_name = "ld-uClibc";
+    gchar * ldso_path;
     GumAddress args[] = {
       0,
       GUM_ADDRESS (&rpnt),
@@ -1838,6 +1840,8 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
       GUM_ADDRESS (NULL),
     };
     GumAddress retval = 0;
+
+    frida_find_library_base (pid, ldso_file_name, &ldso_path);
 
     /* retrieve the rpnt */
     remote_dl_symbol_tables = frida_resolve_library_function (pid, ldso_path, "_dl_symbol_tables");
@@ -1879,11 +1883,14 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
     g_assert (ret == 0);
 
     remote_base = frida_find_library_base (pid, linker_path, NULL);
+
+    g_free (ldso_path);
   }
   g_assert (remote_base != 0);
 
   remote_address = remote_base + (GUM_ADDRESS (func) - local_base);
 
+  g_free (linker_path);
   return remote_address;
 }
 
