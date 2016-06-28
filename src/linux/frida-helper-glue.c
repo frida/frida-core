@@ -1861,7 +1861,7 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
     args[3] = remote_address + 4;
     ret = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_load_shared_library"), args, G_N_ELEMENTS (args), &retval, NULL, NULL);
     g_assert (ret == TRUE);
-    tpnt = (gpointer) retval;
+    tpnt = GSIZE_TO_POINTER (retval);
     g_assert (retval != 0);
 
     GumAddress args_perform_mips_global_got_relocations[] = {
