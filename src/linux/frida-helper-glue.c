@@ -1576,7 +1576,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   regs.regs[30] = FRIDA_DUMMY_RETURN_ADDRESS;
 #elif defined (HAVE_MIPS)
-  guint32 insn = 0;
+  guint32 insn;
   insn = ptrace (PTRACE_PEEKDATA, pid, GSIZE_TO_POINTER (regs.pc - 4), NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_PEEKDATA");
 
