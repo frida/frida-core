@@ -1027,9 +1027,6 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   GumMipsWriter cw;
   const guint worker_offset = 192;
 
-  static guint32 global_times = 0;
-  global_times ++;
-
   gum_mips_writer_init (&cw, code->cur);
 
   gum_mips_writer_put_call_address_with_arguments (&cw,
