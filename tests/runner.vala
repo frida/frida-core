@@ -35,7 +35,7 @@ namespace Frida.Test {
 
 	public extern CPU cpu ();
 
-    public extern Libc libc ();
+	public extern Libc libc ();
 
 	public string arch_suffix () {
 		string os_name;
@@ -94,8 +94,8 @@ namespace Frida.Test {
 		X86_64,
 		ARM_32,
 		ARM_64,
-        MIPS,
-        MIPSEL
+		MIPS,
+		MIPSEL
 	}
 
 	public enum Arch {
@@ -103,9 +103,9 @@ namespace Frida.Test {
 		OTHER
 	}
 
-    public enum Libc {
-        GLIBC,
-        UCLIBC,
-        BIONIC
-    }
+	public enum Libc {
+		GLIBC,
+		UCLIBC,
+		BIONIC
+	}
 }
