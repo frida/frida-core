@@ -107,7 +107,7 @@ frida_test_cpu (void)
 #elif defined (HAVE_ARM64)
   return FRIDA_TEST_CPU_ARM_64;
 #elif defined (HAVE_MIPS)
-# if _G_BYTE_ORDER == _G_LITTLE_ENDIAN
+# if G_BYTE_ORDER == G_LITTLE_ENDIAN
   return FRIDA_TEST_CPU_MIPSEL;
 # else
   return FRIDA_TEST_CPU_MIPS;
