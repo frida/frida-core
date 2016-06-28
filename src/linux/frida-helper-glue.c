@@ -1580,9 +1580,11 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   insn = ptrace (PTRACE_PEEKDATA, pid, GSIZE_TO_POINTER (regs.pc - 4), NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_PEEKDATA");
 
-  /* if insn is a syscall, trying to hijack the thread won't work well because
+  /*
+   * if insn is a syscall, trying to hijack the thread won't work well because
    * a3 will be overwritten by the syscall on CONT. So we just set a bad PC and
-   * then run until we SIGSEGV. We can then replace a3 correctly.*/
+   * then run until we SIGSEGV. We can then replace a3 correctly.
+   */
   if ((insn & 0xfc00003f) == 0x0000000c)
   {
     /* cause a SIGSEGV with a bad PC */
@@ -1632,8 +1634,10 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
   }
 
-  /* we need to reserve 16 bytes for 'incoming arguments', as per
-   * http://math-atlas.sourceforge.net/devel/assembly/mipsabi32.pdf section 3-15 */
+  /*
+   * we need to reserve 16 bytes for 'incoming arguments', as per
+   * http://math-atlas.sourceforge.net/devel/assembly/mipsabi32.pdf section 3-15
+   */
   regs.sp -= 16;
 
   regs.ra = FRIDA_DUMMY_RETURN_ADDRESS;
