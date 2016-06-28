@@ -1420,7 +1420,7 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
   const gsize * src;
   long ret;
   const gchar * failed_operation;
-  gsize remainder;
+  gsize remainder, remainder_offset;
 
   dst = remote_address;
   src = data;
@@ -1434,8 +1434,9 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
     src++;
   }
 
-  dst = remote_address + ((size / sizeof (gsize)) * sizeof (gsize));
-  src = data + ((size / sizeof (gsize)) * sizeof (gsize));
+  remainder_offset = ((size / sizeof (gsize)) * sizeof (gsize));
+  dst = remote_address + remainder_offset;
+  src = data + remainder_offset;
   remainder = size % sizeof (gsize);
   if (remainder != 0)
   {
