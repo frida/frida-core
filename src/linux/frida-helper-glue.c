@@ -1814,7 +1814,6 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
 
 #elif defined (HAVE_UCLIBC)
 
-extern void * (*_dl_load_shared_library)(int secure, void ** rpnt, void *tpnt, char *full_libname, int trace_loaded_objects);
 static GumAddress
 frida_resolve_linker_function (pid_t pid, gpointer func)
 {
@@ -1875,7 +1874,6 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
     };
     ret = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_perform_mips_global_got_relocations"), args_perform_mips_global_got_relocations, G_N_ELEMENTS (args_perform_mips_global_got_relocations), &retval, NULL, NULL);
     g_assert (ret == TRUE);
-
 
     ret = frida_remote_dealloc (pid, remote_address, gum_query_page_size (), NULL);
     g_assert (ret == 0);
