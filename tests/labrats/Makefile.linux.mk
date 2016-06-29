@@ -32,6 +32,16 @@ unixvictim-linux-x86_64: unixvictim.c
 	strip --strip-all $@.tmp
 	mv $@.tmp $@
 
+unixvictim-linux-mips: unixvictim.c
+	mips-linux-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
+	mips-linux-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+unixvictim-linux-mipsel: unixvictim.c
+	mipsel-linux-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
+	mipsel-linux-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
 unixattacker-linux-arm.so: unixattacker.c
 	arm-linux-gnueabi-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabi-strip --strip-all $@.tmp
@@ -50,6 +60,16 @@ unixattacker-linux-i386.so: unixattacker.c
 unixattacker-linux-x86_64.so: unixattacker.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m64 -shared $< -o $@.tmp
 	strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+unixattacker-linux-mips.so: unixattacker.c
+	mips-linux-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mips-linux-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+unixattacker-linux-mipsel.so: unixattacker.c
+	mipsel-linux-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mipsel-linux-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 .PHONY: all

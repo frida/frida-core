@@ -35,6 +35,8 @@ namespace Frida.Test {
 
 	public extern CPU cpu ();
 
+	public extern Libc libc ();
+
 	public string arch_suffix () {
 		string os_name;
 		switch (os ()) {
@@ -65,6 +67,12 @@ namespace Frida.Test {
 			case CPU.ARM_64:
 				cpu_name = "arm64";
 				break;
+			case CPU.MIPS:
+				cpu_name = "mips";
+				break;
+			case CPU.MIPSEL:
+				cpu_name = "mipsel";
+				break;
 			default:
 				assert_not_reached ();
 		}
@@ -85,11 +93,19 @@ namespace Frida.Test {
 		X86_32,
 		X86_64,
 		ARM_32,
-		ARM_64
+		ARM_64,
+		MIPS,
+		MIPSEL
 	}
 
 	public enum Arch {
 		CURRENT,
 		OTHER
+	}
+
+	public enum Libc {
+		GLIBC,
+		UCLIBC,
+		BIONIC
 	}
 }

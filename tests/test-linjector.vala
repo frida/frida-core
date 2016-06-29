@@ -27,7 +27,7 @@ namespace Frida.LinjectorTest {
 			rat.inject ("unixattacker", requested_exit_code.to_string ());
 			rat.wait_for_uninject ();
 
-			if (Frida.Test.os () == Frida.Test.OS.ANDROID) {
+			if (Frida.Test.os () == Frida.Test.OS.ANDROID || Frida.Test.libc () == Frida.Test.Libc.UCLIBC) {
 				assert (content_of (logfile) == ">m<>m");
 			} else {
 				assert (content_of (logfile) == ">m<>m<");

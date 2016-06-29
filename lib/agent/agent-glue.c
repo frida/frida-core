@@ -55,7 +55,7 @@ static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags
 
 static void frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self);
 
-#if defined (HAVE_LINUX) && !defined (HAVE_ANDROID)
+#if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
 #define __RTLD_DLOPEN	0x80000000
 extern void * __libc_dlopen_mode (char *name, int flags);
 static void frida_libdl_prevent_unload (void);
@@ -104,12 +104,12 @@ frida_agent_environment_init (void)
   gum_init ();
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
-#if defined (HAVE_LINUX) && !defined (HAVE_ANDROID)
+#if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
   frida_libdl_prevent_unload ();
 #endif
 }
 
-#if defined (HAVE_LINUX) && !defined (HAVE_ANDROID)
+#if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
 void
 frida_libdl_prevent_unload (void)
 {
@@ -536,6 +536,14 @@ frida_get_address_of_thread_create_func (void)
   return GUM_FUNCPTR_TO_POINTER (_beginthreadex);
 #elif defined (HAVE_DARWIN) || defined (HAVE_ANDROID)
   return GUM_FUNCPTR_TO_POINTER (pthread_create);
+#elif defined (HAVE_UCLIBC)
+  gpointer handle, func;
+
+  handle = dlopen ("libpthread.so.0", RTLD_GLOBAL | RTLD_LAZY);
+  func = dlsym (handle, "pthread_create");
+  dlclose (handle);
+
+  return func;
 #else
   return dlsym (RTLD_NEXT, "pthread_create");
 #endif
