@@ -1434,7 +1434,7 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
     src++;
   }
 
-  remainder_offset = ((size / sizeof (gsize)) * sizeof (gsize));
+  remainder_offset = (size / sizeof (gsize)) * sizeof (gsize);
   dst = remote_address + remainder_offset;
   src = data + remainder_offset;
   remainder = size % sizeof (gsize);
@@ -1577,17 +1577,18 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   regs.regs[30] = FRIDA_DUMMY_RETURN_ADDRESS;
 #elif defined (HAVE_MIPS)
   guint32 insn;
+
   insn = ptrace (PTRACE_PEEKDATA, pid, GSIZE_TO_POINTER (regs.pc - 4), NULL);
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_PEEKDATA");
 
   /*
-   * if insn is a syscall, trying to hijack the thread won't work well because
+   * If insn is a syscall, trying to hijack the thread won't work well because
    * a3 will be overwritten by the syscall on CONT. So we just set a bad PC and
    * then run until we SIGSEGV. We can then replace a3 correctly.
    */
   if ((insn & 0xfc00003f) == 0x0000000c)
   {
-    /* cause a SIGSEGV with a bad PC */
+    /* Cause a SIGSEGV with a bad PC */
     regs.pc = 0x12345678;
 
     ret = frida_set_regs (pid, &regs);
@@ -1603,7 +1604,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
     CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
   }
 
-  /* we need to set t9 as well as pc, so that PIC functions work as expected */
+  /* We need to set t9 as well as pc, so that PIC functions work as expected */
   regs.t9 = func;
   regs.pc = func;
 
@@ -1635,7 +1636,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   }
 
   /*
-   * we need to reserve 16 bytes for 'incoming arguments', as per
+   * We need to reserve 16 bytes for 'incoming arguments', as per
    * http://math-atlas.sourceforge.net/devel/assembly/mipsabi32.pdf section 3-15
    */
   regs.sp -= 16;
@@ -1828,6 +1829,7 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
   if (remote_base == 0)
   {
     gpointer rpnt, rpnt_next, tpnt;
+    gboolean success;
     gint32 ret;
     GumAddress remote_dl_symbol_tables, remote_address;
     const gchar * ldso_file_name = "ld-uClibc";
@@ -1843,7 +1845,6 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
 
     frida_find_library_base (pid, ldso_file_name, &ldso_path);
 
-    /* retrieve the rpnt */
     remote_dl_symbol_tables = frida_resolve_library_function (pid, ldso_path, "_dl_symbol_tables");
     rpnt = (gpointer) ptrace (PTRACE_PEEKDATA, pid, remote_dl_symbol_tables, NULL);
     while (TRUE)
@@ -1854,21 +1855,18 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
       rpnt = rpnt_next;
     }
 
-    /* allocate space */
     remote_address = frida_remote_alloc (pid, gum_query_page_size (), PROT_READ | PROT_WRITE, NULL);
     g_assert (remote_address != GUM_ADDRESS (NULL));
 
-    /* copy data across */
-    ret = frida_remote_write (pid, remote_address, &rpnt, 4, NULL);
-    g_assert (ret == TRUE);
-    ret = frida_remote_write (pid, GUM_ADDRESS (remote_address + 4), linker_path, strlen(linker_path) + 1, NULL);
-    g_assert (ret == TRUE);
+    success = frida_remote_write (pid, remote_address, &rpnt, 4, NULL);
+    g_assert (success);
+    success = frida_remote_write (pid, GUM_ADDRESS (remote_address + 4), linker_path, strlen (linker_path) + 1, NULL);
+    g_assert (success);
 
-    /* fixup args and call _dl_load_shared_library */
     args[1] = remote_address;
     args[3] = remote_address + 4;
-    ret = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_load_shared_library"), args, G_N_ELEMENTS (args), &retval, NULL, NULL);
-    g_assert (ret == TRUE);
+    success = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_load_shared_library"), args, G_N_ELEMENTS (args), &retval, NULL, NULL);
+    g_assert (success);
     tpnt = GSIZE_TO_POINTER (retval);
     g_assert (retval != 0);
 
@@ -1876,8 +1874,8 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
       GUM_ADDRESS (tpnt),
       0
     };
-    ret = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_perform_mips_global_got_relocations"), args_perform_mips_global_got_relocations, G_N_ELEMENTS (args_perform_mips_global_got_relocations), &retval, NULL, NULL);
-    g_assert (ret == TRUE);
+    success = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_perform_mips_global_got_relocations"), args_perform_mips_global_got_relocations, G_N_ELEMENTS (args_perform_mips_global_got_relocations), &retval, NULL, NULL);
+    g_assert (success);
 
     ret = frida_remote_dealloc (pid, remote_address, gum_query_page_size (), NULL);
     g_assert (ret == 0);
@@ -1891,6 +1889,7 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
   remote_address = remote_base + (GUM_ADDRESS (func) - local_base);
 
   g_free (linker_path);
+
   return remote_address;
 }
 
