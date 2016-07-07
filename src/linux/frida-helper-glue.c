@@ -1284,7 +1284,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
     /* ARM64 */
     patched_entry_code = 0xd4200000;
   }
-#elif defined (HAVE_X86)
+#elif defined (HAVE_I386)
   /* x86 */
   patched_entry_code = 0xcc;
 #elif defined (HAVE_MIPS)

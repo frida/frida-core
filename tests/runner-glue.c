@@ -118,7 +118,9 @@ frida_test_cpu (void)
 FridaTestLibc
 frida_test_libc (void)
 {
-#if defined (HAVE_GLIBC)
+#if defined (G_OS_WIN32)
+  return FRIDA_TEST_LIBC_MSVCRT;
+#elif defined (HAVE_GLIBC)
   return FRIDA_TEST_LIBC_GLIBC;
 #elif defined (HAVE_UCLIBC)
   return FRIDA_TEST_LIBC_UCLIBC;
