@@ -120,6 +120,8 @@ frida_test_libc (void)
 {
 #if defined (G_OS_WIN32)
   return FRIDA_TEST_LIBC_MSVCRT;
+#elif defined (HAVE_DARWIN)
+  return FRIDA_TEST_LIBC_APPLE;
 #elif defined (HAVE_GLIBC)
   return FRIDA_TEST_LIBC_GLIBC;
 #elif defined (HAVE_UCLIBC)

@@ -105,6 +105,7 @@ namespace Frida.Test {
 
 	public enum Libc {
 		MSVCRT,
+		APPLE,
 		GLIBC,
 		UCLIBC,
 		BIONIC
