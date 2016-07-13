@@ -26,7 +26,6 @@
 #include <mach/mach.h>
 
 #define FRIDA_AGENT_ENTRYPOINT_NAME      "frida_agent_main"
-#define FRIDA_SYSTEM_LIBC                "/usr/lib/libSystem.B.dylib"
 #define FRIDA_PSR_THUMB                  0x20
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
@@ -43,7 +42,6 @@ typedef struct _FridaInjectPayloadLayout FridaInjectPayloadLayout;
 typedef struct _FridaAgentDetails FridaAgentDetails;
 typedef struct _FridaAgentContext FridaAgentContext;
 typedef struct _FridaAgentEmitContext FridaAgentEmitContext;
-typedef struct _FridaAgentFillContext FridaAgentFillContext;
 
 typedef struct _FridaExceptionPortSet FridaExceptionPortSet;
 typedef union _FridaDebugState FridaDebugState;
@@ -171,12 +169,6 @@ struct _FridaAgentEmitContext
   GumDarwinMapper * mapper;
 };
 
-struct _FridaAgentFillContext
-{
-  FridaAgentContext * agent;
-  guint remaining;
-};
-
 static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * service);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
@@ -191,10 +183,9 @@ static void frida_inject_instance_free (FridaInjectInstance * instance);
 static void frida_inject_instance_on_event (void * context);
 
 static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
-    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GError ** error);
-static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details,
+    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinMapper * mapper, GError ** error);
+static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details, GumDarwinMapper * mapper,
     GError ** error);
-static gboolean frida_agent_fill_context_process_export (const GumExportDetails * details, gpointer user_data);
 
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
@@ -670,7 +661,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   ret = mach_vm_protect (details.task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
 
-  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, error))
+  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, mapper, error))
     goto error_epilogue;
 
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type, mapper);
@@ -1158,11 +1149,11 @@ frida_inject_instance_on_event (void * context)
 
 static gboolean
 frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
-    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GError ** error)
+    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinMapper * mapper, GError ** error)
 {
   memset (self, 0, sizeof (FridaAgentContext));
 
-  if (!frida_agent_context_init_functions (self, details, error))
+  if (!frida_agent_context_init_functions (self, details, mapper, error))
     return FALSE;
 
   self->thread_self_data = payload_base + layout->thread_self_offset;
@@ -1193,59 +1184,71 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   return TRUE;
 }
 
+#define FRIDA_AGENT_CONTEXT_RESOLVE(field) \
+  FRIDA_AGENT_CONTEXT_TRY_RESOLVE (field); \
+  if (self->field##_impl == 0) \
+    goto handle_resolve_error
+#define FRIDA_AGENT_CONTEXT_TRY_RESOLVE(field) \
+  self->field##_impl = gum_darwin_module_resolver_find_export_address (&resolver, module, G_STRINGIFY (field))
+
 static gboolean
-frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details, GError ** error)
+frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details, GumDarwinMapper * mapper, GError ** error)
 {
-  FridaAgentFillContext fill_ctx;
-  gboolean resolved_all;
-  gboolean resolved_all_except_cthread_set_self;
+  GumDarwinModuleResolver resolver;
+  GumDarwinModule * module;
 
-  fill_ctx.agent = self;
-  fill_ctx.remaining = 9;
-  gum_darwin_enumerate_exports (details->task, FRIDA_SYSTEM_LIBC, frida_agent_fill_context_process_export, &fill_ctx);
+  gum_darwin_module_resolver_open (&resolver, details->task);
 
-  resolved_all = fill_ctx.remaining == 0;
-  resolved_all_except_cthread_set_self = fill_ctx.remaining == 1 && self->cthread_set_self_impl == 0;
+  module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_pthread.dylib");
+  if (module == NULL)
+    goto handle_libc_error;
+  FRIDA_AGENT_CONTEXT_RESOLVE (_pthread_set_self);
+  FRIDA_AGENT_CONTEXT_TRY_RESOLVE (cthread_set_self);
+  FRIDA_AGENT_CONTEXT_RESOLVE (pthread_create);
+  FRIDA_AGENT_CONTEXT_RESOLVE (pthread_join);
 
-  if (!resolved_all && !resolved_all_except_cthread_set_self)
+  module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_kernel.dylib");
+  if (module == NULL)
+    goto handle_libc_error;
+  FRIDA_AGENT_CONTEXT_RESOLVE (thread_terminate);
+  FRIDA_AGENT_CONTEXT_RESOLVE (mach_thread_self);
+
+  if (mapper == NULL)
+  {
+    module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libdyld.dylib");
+    if (module == NULL)
+      goto handle_libc_error;
+    FRIDA_AGENT_CONTEXT_RESOLVE (dlopen);
+    FRIDA_AGENT_CONTEXT_RESOLVE (dlsym);
+    FRIDA_AGENT_CONTEXT_RESOLVE (dlclose);
+  }
+
+  gum_darwin_module_resolver_close (&resolver);
+
+  return TRUE;
+
+handle_libc_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to attach to processes without Apple's libc (for now)");
+    goto error_epilogue;
+  }
+handle_resolve_error:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while resolving functions");
+    goto error_epilogue;
+  }
+error_epilogue:
+  {
+    gum_darwin_module_resolver_close (&resolver);
+
     return FALSE;
   }
-
-  return TRUE;
-}
-
-#define FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING(field) \
-  if (strcmp (details->name, G_STRINGIFY (field)) == 0) \
-  { \
-    ctx->agent->field##_impl = details->address; \
-    ctx->remaining--; \
-    return ctx->remaining != 0; \
-  }
-
-static gboolean
-frida_agent_fill_context_process_export (const GumExportDetails * details, gpointer user_data)
-{
-  FridaAgentFillContext * ctx = user_data;
-
-  if (details->type != GUM_EXPORT_FUNCTION)
-    return TRUE;
-
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (_pthread_set_self);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (cthread_set_self);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (pthread_create);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (pthread_join);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (thread_terminate);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (mach_thread_self);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlopen);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlsym);
-  FRIDA_AGENT_CTX_ASSIGN_AND_RETURN_IF_MATCHING (dlclose);
-
-  return TRUE;
 }
 
 #ifdef HAVE_I386
