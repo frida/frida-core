@@ -182,7 +182,7 @@ namespace Frida {
 		}
 
 		public override async void kill (uint pid) throws Error {
-			System.kill (pid);
+			yield helper.kill_process (pid);
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
@@ -292,8 +292,6 @@ namespace Frida {
 		}
 
 		public async uint spawn (string identifier, string? url) throws Error {
-			check_identifier (identifier);
-
 			yield ensure_loader_deployed ();
 
 			var waiting = false;
@@ -305,7 +303,7 @@ namespace Frida {
 			spawn_request_by_identifier[identifier] = request;
 
 			try {
-				kill (identifier);
+				yield helper.kill_application (identifier);
 				yield helper.launch (identifier, url);
 			} catch (Error e) {
 				spawn_request_by_identifier.unset (identifier);
@@ -386,9 +384,6 @@ namespace Frida {
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x31
 			};
 		}
-
-		private static extern void check_identifier (string identifier) throws Error;
-		private static extern void kill (string identifier);
 
 		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
 			perform_handshake.begin (new Loader (connection));

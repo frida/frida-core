@@ -515,6 +515,8 @@ error_epilogue:
 
 #import "springboard.h"
 
+static void frida_kill_application (NSString * identifier);
+
 void
 _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, const gchar * url, GError ** error)
 {
@@ -560,6 +562,62 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
   [pool release];
 }
 
+void
+_frida_helper_service_do_kill_process (FridaHelperService * self, guint pid)
+{
+  NSAutoreleasePool * pool;
+  NSString * identifier;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  identifier = _frida_get_springboard_api ()->SBSCopyDisplayIdentifierForProcessID (pid);
+  if (identifier != nil)
+  {
+    frida_kill_application (identifier);
+
+    [identifier release];
+  }
+  else
+  {
+    kill (pid, SIGKILL);
+  }
+
+  [pool release];
+}
+
+void
+_frida_helper_service_do_kill_application (FridaHelperService * self, const gchar * identifier)
+{
+  NSAutoreleasePool * pool;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  frida_kill_application ([NSString stringWithUTF8String:identifier]);
+
+  [pool release];
+}
+
+static void
+frida_kill_application (NSString * identifier)
+{
+  FridaSpringboardApi * api;
+  FBSSystemService * service;
+  guint num_checks;
+
+  api = _frida_get_springboard_api ();
+  service = [api->FBSSystemService sharedService];
+
+  [service terminateApplication:identifier
+                      forReason:FBProcessKillReasonUser
+                      andReport:NO
+                withDescription:@"killed from Frida"];
+
+  for (num_checks = 0; [service pidForApplication:identifier] != 0 && num_checks < 300; num_checks++)
+  {
+    g_usleep (10000);
+  }
+}
+
 #else
 
 void
@@ -569,6 +627,17 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
       FRIDA_ERROR,
       FRIDA_ERROR_NOT_SUPPORTED,
       "Not yet able to launch apps on Mac");
+}
+
+void
+_frida_helper_service_do_kill_process (FridaHelperService * self, guint pid)
+{
+  kill (pid, SIGKILL);
+}
+
+void
+_frida_helper_service_do_kill_application (FridaHelperService * self, const gchar * identifier)
+{
 }
 
 #endif

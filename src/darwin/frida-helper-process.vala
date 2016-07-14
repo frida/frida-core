@@ -111,6 +111,24 @@ namespace Frida {
 			}
 		}
 
+		public async void kill_process (uint pid) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.kill_process (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void kill_application (string identifier) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.kill_application (identifier);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async uint inject (uint pid, string filename, string data_string) throws Error {
 			var helper = yield obtain ();
 			try {

@@ -226,6 +226,14 @@ namespace Frida {
 			_free_spawn_instance (instance);
 		}
 
+		public async void kill_process (uint pid) throws Error {
+			_do_kill_process (pid);
+		}
+
+		public async void kill_application (string identifier) throws Error {
+			_do_kill_application (identifier);
+		}
+
 		public async uint inject (uint pid, string filename, string data_string) throws Error {
 			return _do_inject (pid, filename, data_string);
 		}
@@ -279,6 +287,8 @@ namespace Frida {
 
 		public extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
 		public extern void _do_launch (string identifier, string? url) throws Error;
+		public extern void _do_kill_process (uint pid);
+		public extern void _do_kill_application (string identifier);
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
