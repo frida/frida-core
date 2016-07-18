@@ -602,7 +602,7 @@ frida_kill_application (NSString * identifier)
 {
   FridaSpringboardApi * api;
   FBSSystemService * service;
-  guint num_checks;
+  GTimer * timer;
 
   api = _frida_get_springboard_api ();
   service = [api->FBSSystemService sharedService];
@@ -612,10 +612,14 @@ frida_kill_application (NSString * identifier)
                       andReport:NO
                 withDescription:@"killed from Frida"];
 
-  for (num_checks = 0; [service pidForApplication:identifier] != 0 && num_checks < 300; num_checks++)
+  timer = g_timer_new ();
+
+  while ([service pidForApplication:identifier] > 0 && g_timer_elapsed (timer, NULL) < 3.0)
   {
     g_usleep (10000);
   }
+
+  g_timer_destroy (timer);
 }
 
 #else
