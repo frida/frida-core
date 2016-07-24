@@ -85,6 +85,7 @@ namespace Frida {
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
+		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		construct {
 			helper = new HelperProcess ();
@@ -93,6 +94,8 @@ namespace Frida {
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
 			agent = new AgentResource (blob.name, new MemoryInputStream.from_data (blob.data, null), helper.tempdir);
+
+			injector.uninjected.connect (on_uninjected);
 		}
 
 		public override async void close () {
@@ -107,6 +110,7 @@ namespace Frida {
 			while (injector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close ();
 			injector = null;
 
@@ -196,7 +200,13 @@ namespace Frida {
 					return stream;
 			}
 
-			yield injector.inject (pid, agent, remote_address);
+			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
+			while (injectee_by_pid.has_key (pid))
+				yield;
+			injector.disconnect (uninjected_handler);
+
+			var id = yield injector.inject (pid, agent, remote_address);
+			injectee_by_pid[pid] = id;
 
 			return stream;
 		}
@@ -211,6 +221,15 @@ namespace Frida {
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_uninjected (uint id) {
+			foreach (var entry in injectee_by_pid.entries) {
+				if (entry.value == id) {
+					injectee_by_pid.unset (entry.key);
+					return;
+				}
+			}
 		}
 
 		// TODO: use Vala's preprocessor when the build system has been fixed
