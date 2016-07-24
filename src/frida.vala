@@ -293,6 +293,7 @@ namespace Frida {
 		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Gee.Promise<Session>> pending_attach_requests = new Gee.HashMap<uint, Gee.Promise<Session>> ();
+		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
 
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			this.manager = manager;
@@ -669,6 +670,16 @@ namespace Frida {
 			}
 			close_request = new Gee.Promise<bool> ();
 
+			while (!pending_detach_requests.is_empty) {
+				var iterator = pending_detach_requests.entries.iterator ();
+				iterator.next ();
+				var entry = iterator.get ();
+				var handle = entry.key;
+				var detach_request = entry.value;
+				detach_request.set_value (true);
+				pending_detach_requests.unset (handle);
+			}
+
 			while (!pending_attach_requests.is_empty) {
 				var iterator = pending_attach_requests.values.iterator ();
 				iterator.next ();
@@ -715,8 +726,10 @@ namespace Frida {
 			close_request.set_value (true);
 		}
 
-		public void _release_session (Session session) {
-			var session_did_exist = session_by_pid.unset (session.pid);
+		public async void _release_session (Session session, bool may_block) {
+			var pid = session.pid;
+
+			var session_did_exist = session_by_pid.unset (pid);
 			assert (session_did_exist);
 
 			bool session_exists = false;
@@ -730,6 +743,18 @@ namespace Frida {
 			}
 			assert (session_exists);
 			session_by_handle.unset (handle);
+
+			if (may_block) {
+				var detach_request = new Gee.Promise<bool> ();
+
+				pending_detach_requests[handle] = detach_request;
+
+				try {
+					yield detach_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+			}
 		}
 
 		private async void ensure_host_session () throws Error {
@@ -776,9 +801,15 @@ namespace Frida {
 		}
 
 		private void on_agent_session_closed (AgentSessionId id) {
-			var session = session_by_handle[id.handle];
+			var handle = id.handle;
+
+			var session = session_by_handle[handle];
 			if (session != null)
 				session._do_close.begin (false);
+
+			Gee.Promise<bool> detach_request;
+			if (pending_detach_requests.unset (handle, out detach_request))
+				detach_request.set_value (true);
 		}
 
 		private Object create<T> () {
@@ -1220,16 +1251,12 @@ namespace Frida {
 			foreach (var script in script_by_id.values.to_array ())
 				yield script._do_close (may_block);
 
-			if (may_block) {
-				try {
-					yield session.close ();
-				} catch (GLib.Error ignored_error) {
-				}
-			}
+			if (may_block)
+				session.close.begin ();
 			session.message_from_script.disconnect (on_message_from_script);
 			session = null;
 
-			device._release_session (this);
+			yield device._release_session (this, may_block);
 			device = null;
 
 			detached ();
