@@ -20,6 +20,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Manual/torture", () => {
+			var h = new Harness.without_timeout ((h) => Service.Manual.torture.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
 			Fruity.PropertyList.can_construct_from_xml_document ();
 		});
@@ -344,6 +349,62 @@ namespace Frida.HostSessionTest {
 					}
 
 					yield device_manager.close ();
+
+					h.done ();
+				} catch (Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+					assert_not_reached ();
+				}
+			}
+
+			private static async void torture (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with target application running> ");
+					h.done ();
+					return;
+				}
+
+				try {
+					var device_manager = new DeviceManager ();
+
+					var devices = yield device_manager.enumerate_devices ();
+					Device device = null;
+					var num_devices = devices.size ();
+					for (var i = 0; i != num_devices && device == null; i++) {
+						var d = devices.get (i);
+						if (d.dtype == DeviceType.LOCAL)
+							device = d;
+					}
+					assert (device != null);
+
+					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
+
+					var processes = yield device.enumerate_processes ();
+					Process process = null;
+					var num_processes = processes.size ();
+					for (var i = 0; i != num_processes && process == null; i++) {
+						var p = processes.get (i);
+						if (p.name == "SpringBoard")
+							process = p;
+					}
+
+					uint pid;
+					if (process != null) {
+						pid = process.pid;
+					} else {
+						stdout.printf ("Enter PID: ");
+						stdout.flush ();
+						pid = (uint) int.parse (stdin.read_line ());
+					}
+
+					stdout.printf ("\n");
+					var num_iterations = 100;
+					for (var i = 0; i != num_iterations; i++) {
+						stdout.printf ("%u of %u\n", i + 1, num_iterations);
+						stdout.flush ();
+						var session = yield device.attach (pid);
+						yield session.detach ();
+					}
 
 					h.done ();
 				} catch (Error e) {
