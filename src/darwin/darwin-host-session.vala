@@ -89,6 +89,7 @@ namespace Frida {
 
 		construct {
 			helper = new HelperProcess ();
+			helper.stopped.connect (on_helper_stopped);
 			helper.output.connect (on_output);
 			injector = new Fruitjector.with_helper (helper);
 
@@ -118,6 +119,7 @@ namespace Frida {
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);
+			helper.stopped.disconnect (on_helper_stopped);
 			helper = null;
 		}
 
@@ -217,6 +219,10 @@ namespace Frida {
 				fruit_launcher.spawned.connect ((info) => { spawned (info); });
 			}
 			return fruit_launcher;
+		}
+
+		private void on_helper_stopped () {
+			release_system_session ();
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {

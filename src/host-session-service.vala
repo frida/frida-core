@@ -157,6 +157,15 @@ namespace Frida {
 
 		protected abstract async AgentSession create_system_session () throws Error;
 
+		protected void release_system_session () {
+			foreach (var entry in entries) {
+				if (entry.pid == 0) {
+					destroy (entry);
+					return;
+				}
+			}
+		}
+
 		public abstract async HostApplicationInfo get_frontmost_application () throws Error;
 
 		public abstract async HostApplicationInfo[] enumerate_applications () throws Error;
@@ -274,13 +283,20 @@ namespace Frida {
 					break;
 				}
 			}
-
 			assert (entry_to_remove != null);
-			entries.remove (entry_to_remove);
-			entry_to_remove.close.begin ();
-			agent_session_closed (entry_to_remove.id, entry_to_remove.agent_session);
 
-			agent_session_destroyed (entry_to_remove.id);
+			destroy (entry_to_remove);
+		}
+
+		private void destroy (Entry entry) {
+			var id = entry.id;
+
+			entries.remove (entry);
+
+			entry.close.begin ();
+			agent_session_closed (id, entry.agent_session);
+
+			agent_session_destroyed (id);
 		}
 
 		private class Entry : Object {

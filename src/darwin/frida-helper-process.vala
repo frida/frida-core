@@ -1,6 +1,7 @@
 #if DARWIN
 namespace Frida {
 	internal class HelperProcess {
+		public signal void stopped ();
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
@@ -40,17 +41,13 @@ namespace Frida {
 					yield proxy.stop ();
 				} catch (GLib.Error proxy_error) {
 				}
-				proxy.uninjected.disconnect (on_uninjected);
-				proxy = null;
 			}
 
 			if (connection != null) {
-				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
 				} catch (GLib.Error connection_error) {
 				}
-				connection = null;
 			}
 
 			_resource_store = null;
@@ -212,8 +209,10 @@ namespace Frida {
 
 			if (pending_error == null) {
 				process = pending_process;
+
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
+
 				proxy = pending_proxy;
 				proxy.output.connect (on_output);
 				proxy.uninjected.connect (on_uninjected);
@@ -230,9 +229,18 @@ namespace Frida {
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
+			obtain_request = null;
+
 			proxy.output.disconnect (on_output);
 			proxy.uninjected.disconnect (on_uninjected);
+			proxy = null;
+
 			connection.closed.disconnect (on_connection_closed);
+			connection = null;
+
+			process = null;
+
+			stopped ();
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
