@@ -61,6 +61,8 @@ extern void * __libc_dlopen_mode (char * name, int flags);
 static void frida_libdl_prevent_unload (void);
 #endif
 
+static void * frida_linker_stub_warmup_thread (void * data);
+
 void
 frida_agent_environment_init (void)
 {
@@ -107,6 +109,8 @@ frida_agent_environment_init (void)
 #if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
   frida_libdl_prevent_unload ();
 #endif
+
+  (void) frida_linker_stub_warmup_thread;
 }
 
 #if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
@@ -545,7 +549,19 @@ frida_get_address_of_thread_create_func (void)
 
   return func;
 #else
-  return dlsym (RTLD_NEXT, "pthread_create");
+  static gsize gonce_value = 0;
+
+  if (g_once_init_enter (&gonce_value))
+  {
+    pthread_t linker_stub_warmup_thread;
+
+    pthread_create (&linker_stub_warmup_thread, NULL, frida_linker_stub_warmup_thread, NULL);
+    pthread_detach (linker_stub_warmup_thread);
+
+    g_once_init_leave (&gonce_value, TRUE);
+  }
+
+  return GUM_FUNCPTR_TO_POINTER (pthread_create);
 #endif
 }
 
@@ -568,4 +584,12 @@ frida_thread_create_proxy (void * data)
   gum_script_backend_unignore_later (current_thread_id);
 
   return result;
+}
+
+static void *
+frida_linker_stub_warmup_thread (void * data)
+{
+  (void) data;
+
+  return NULL;
 }

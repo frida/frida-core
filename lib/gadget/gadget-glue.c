@@ -102,6 +102,8 @@ static void frida_gadget_auto_ignorer_shutdown (FridaGadgetAutoIgnorer * self);
 static gpointer frida_get_address_of_thread_create_func (void);
 static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API frida_thread_create_proxy (void * data);
 
+static void * frida_linker_stub_warmup_thread (void * data);
+
 static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
@@ -139,6 +141,8 @@ on_load (void)
   {
     frida_gadget_wait_for_permission_to_resume ();
   }
+
+  (void) frida_linker_stub_warmup_thread;
 }
 
 __attribute__ ((destructor)) static void
@@ -602,7 +606,19 @@ frida_get_address_of_thread_create_func (void)
 #elif defined (HAVE_DARWIN)
   return GUM_FUNCPTR_TO_POINTER (pthread_create);
 #else
-  return dlsym (RTLD_NEXT, "pthread_create");
+  static gsize gonce_value = 0;
+
+  if (g_once_init_enter (&gonce_value))
+  {
+    pthread_t linker_stub_warmup_thread;
+
+    pthread_create (&linker_stub_warmup_thread, NULL, frida_linker_stub_warmup_thread, NULL);
+    pthread_detach (linker_stub_warmup_thread);
+
+    g_once_init_leave (&gonce_value, TRUE);
+  }
+
+  return GUM_FUNCPTR_TO_POINTER (pthread_create);
 #endif
 }
 
@@ -625,6 +641,14 @@ frida_thread_create_proxy (void * data)
   gum_script_backend_unignore_later (current_thread_id);
 
   return result;
+}
+
+static void *
+frida_linker_stub_warmup_thread (void * data)
+{
+  (void) data;
+
+  return NULL;
 }
 
 #ifdef HAVE_DARWIN
