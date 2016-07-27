@@ -24,6 +24,7 @@
 #include <mach-o/loader.h>
 #include <mach/exc.h>
 #include <mach/mach.h>
+#include <sys/sysctl.h>
 
 #define FRIDA_AGENT_ENTRYPOINT_NAME      "frida_agent_main"
 #define FRIDA_PSR_THUMB                  0x20
@@ -601,25 +602,80 @@ static void
 frida_kill_application (NSString * identifier)
 {
   FridaSpringboardApi * api;
-  FBSSystemService * service;
   GTimer * timer;
 
   api = _frida_get_springboard_api ();
-  service = [api->FBSSystemService sharedService];
 
-  [service terminateApplication:identifier
-                      forReason:FBProcessKillReasonUser
-                      andReport:NO
-                withDescription:@"killed from Frida"];
-
-  timer = g_timer_new ();
-
-  while ([service pidForApplication:identifier] > 0 && g_timer_elapsed (timer, NULL) < 3.0)
+  if (api->FBSSystemService != nil)
   {
-    g_usleep (10000);
-  }
+    FBSSystemService * service;
 
-  g_timer_destroy (timer);
+    service = [api->FBSSystemService sharedService];
+
+    [service terminateApplication:identifier
+                        forReason:FBProcessKillReasonUser
+                        andReport:NO
+                  withDescription:@"killed from Frida"];
+
+    timer = g_timer_new ();
+
+    while ([service pidForApplication:identifier] > 0 && g_timer_elapsed (timer, NULL) < 3.0)
+    {
+      g_usleep (10000);
+    }
+
+    g_timer_destroy (timer);
+  }
+  else
+  {
+    int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+    struct kinfo_proc * entries;
+    size_t length;
+    gint err;
+    gboolean found;
+    guint count, i;
+
+    err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
+    g_assert_cmpint (err, !=, -1);
+
+    entries = g_malloc0 (length);
+
+    err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
+    g_assert_cmpint (err, !=, -1);
+    count = length / sizeof (struct kinfo_proc);
+
+    for (i = 0, found = FALSE; i != count && !found; i++)
+    {
+      struct kinfo_proc * e = &entries[i];
+      UInt32 pid = e->kp_proc.p_pid;
+      NSString * cur;
+
+      cur = api->SBSCopyDisplayIdentifierForProcessID (pid);
+      if ([cur isEqualToString:identifier])
+      {
+        kill (pid, SIGKILL);
+
+        timer = g_timer_new ();
+
+        while (g_timer_elapsed (timer, NULL) < 3.0)
+        {
+          NSString * identifier_of_dying_process = api->SBSCopyDisplayIdentifierForProcessID (pid);
+          if (identifier_of_dying_process == nil)
+            break;
+          [identifier_of_dying_process release];
+          g_usleep (10000);
+        }
+
+        g_timer_destroy (timer);
+
+        found = TRUE;
+
+        [cur release];
+      }
+    }
+
+    g_free (entries);
+  }
 }
 
 #else

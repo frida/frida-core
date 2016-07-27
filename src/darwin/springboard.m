@@ -19,7 +19,6 @@ _frida_get_springboard_api (void)
     g_assert (api->sbs != NULL);
 
     api->fbs = dlopen ("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY | RTLD_GLOBAL);
-    g_assert (api->fbs != NULL);
 
     api->SBSCopyFrontmostApplicationDisplayIdentifier = dlsym (api->sbs, "SBSCopyFrontmostApplicationDisplayIdentifier");
     g_assert (api->SBSCopyFrontmostApplicationDisplayIdentifier != NULL);
@@ -49,11 +48,18 @@ _frida_get_springboard_api (void)
     g_assert (str != NULL);
     api->SBSApplicationLaunchOptionUnlockDeviceKey = *str;
 
-    objc_get_class_impl = dlsym (RTLD_DEFAULT, "objc_getClass");
-    g_assert (objc_get_class_impl != NULL);
+    if (api->fbs != NULL)
+    {
+      objc_get_class_impl = dlsym (RTLD_DEFAULT, "objc_getClass");
+      g_assert (objc_get_class_impl != NULL);
 
-    api->FBSSystemService = objc_get_class_impl ("FBSSystemService");
-    g_assert (api->FBSSystemService != nil);
+      api->FBSSystemService = objc_get_class_impl ("FBSSystemService");
+      g_assert (api->FBSSystemService != nil);
+    }
+    else
+    {
+      api->FBSSystemService = nil;
+    }
 
     frida_springboard_api = api;
   }
