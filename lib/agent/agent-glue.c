@@ -56,8 +56,8 @@ static void frida_agent_on_log_message (const gchar * log_domain, GLogLevelFlags
 static void frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self);
 
 #if defined (HAVE_LINUX) && defined (HAVE_GLIBC)
-#define __RTLD_DLOPEN	0x80000000
-extern void * __libc_dlopen_mode (char *name, int flags);
+#define __RTLD_DLOPEN 0x80000000
+extern void * __libc_dlopen_mode (char * name, int flags);
 static void frida_libdl_prevent_unload (void);
 #endif
 
