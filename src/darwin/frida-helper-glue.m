@@ -603,6 +603,7 @@ frida_kill_application (NSString * identifier)
 {
   FridaSpringboardApi * api;
   GTimer * timer;
+  const double kill_timeout = 3.0;
 
   api = _frida_get_springboard_api ();
 
@@ -619,7 +620,7 @@ frida_kill_application (NSString * identifier)
 
     timer = g_timer_new ();
 
-    while ([service pidForApplication:identifier] > 0 && g_timer_elapsed (timer, NULL) < 3.0)
+    while ([service pidForApplication:identifier] > 0 && g_timer_elapsed (timer, NULL) < kill_timeout)
     {
       g_usleep (10000);
     }
@@ -657,7 +658,7 @@ frida_kill_application (NSString * identifier)
 
         timer = g_timer_new ();
 
-        while (g_timer_elapsed (timer, NULL) < 3.0)
+        while (g_timer_elapsed (timer, NULL) < kill_timeout)
         {
           NSString * identifier_of_dying_process = api->SBSCopyDisplayIdentifierForProcessID (pid);
           if (identifier_of_dying_process == nil)
