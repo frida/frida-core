@@ -831,10 +831,8 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     gum_code_segment_map (segment, 0, page_size, scratch_page);
 
     code_address = payload_address + layout.code_offset;
-    /* FIXME: window for race-conditions between these next two calls */
-    mach_vm_deallocate (details.task, code_address, page_size);
-    ret = mach_vm_remap (details.task, &code_address, page_size, 0, FALSE, self_task, (mach_vm_address_t) scratch_page, FALSE,
-        &cur_protection, &max_protection, VM_INHERIT_COPY);
+    ret = mach_vm_remap (details.task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
+        FALSE, &cur_protection, &max_protection, VM_INHERIT_COPY);
 
     gum_code_segment_free (segment);
 
