@@ -253,6 +253,7 @@ namespace Frida {
 		private string plugin_directory;
 		private string plist_path;
 		private string dylib_path;
+		private string real_dylib_path;
 
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, SpawnRequest> spawn_request_by_identifier = new Gee.HashMap<string, SpawnRequest> ();
@@ -262,8 +263,10 @@ namespace Frida {
 			this.helper = helper;
 			this.agent = agent;
 
+			var tempdir_path = agent.tempdir.path;
+
 			this.service = new SocketService ();
-			var address = new UnixSocketAddress (Path.build_filename (agent.tempdir.path, "callback"));
+			var address = new UnixSocketAddress (Path.build_filename (tempdir_path, "callback"));
 			SocketAddress effective_address;
 			try {
 				this.service.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null, out effective_address);
@@ -279,6 +282,7 @@ namespace Frida {
 			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 			this.plist_path = Path.build_filename (this.plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
 			this.dylib_path = Path.build_filename (this.plugin_directory, dylib_blob.name);
+			this.real_dylib_path = Path.build_filename (tempdir_path, dylib_blob.name);
 
 			this.service.start ();
 		}
@@ -289,6 +293,7 @@ namespace Frida {
 
 			FileUtils.unlink (plist_path);
 			FileUtils.unlink (dylib_path);
+			FileUtils.unlink (real_dylib_path);
 			FileUtils.unlink (service_address.path);
 
 			agent = null;
@@ -382,7 +387,6 @@ namespace Frida {
 			try {
 				FileUtils.set_data (plist_path, generate_loader_plist ());
 				FileUtils.chmod (plist_path, 0644);
-				var real_dylib_path = Path.build_filename (agent.tempdir.path, dylib_blob.name);
 				FileUtils.set_data (real_dylib_path, dylib_blob.data);
 				FileUtils.chmod (real_dylib_path, 0755);
 				FileUtils.unlink (dylib_path);
