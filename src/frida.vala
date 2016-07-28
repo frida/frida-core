@@ -697,14 +697,14 @@ namespace Frida {
 				}
 			}
 
-			provider.host_session_closed.disconnect (on_host_session_closed);
-			provider.agent_session_closed.disconnect (on_agent_session_closed);
-
 			foreach (var session in session_by_pid.values.to_array ()) {
 				yield session._do_close (may_block);
 			}
 			session_by_pid.clear ();
 			session_by_handle.clear ();
+
+			provider.host_session_closed.disconnect (on_host_session_closed);
+			provider.agent_session_closed.disconnect (on_agent_session_closed);
 
 			if (host_session != null) {
 				host_session.spawned.disconnect (on_spawned);
@@ -744,7 +744,8 @@ namespace Frida {
 			assert (session_exists);
 			session_by_handle.unset (handle);
 
-			if (may_block) {
+			var is_system_session = (handle == 0);
+			if (!is_system_session && may_block) {
 				var detach_request = new Gee.Promise<bool> ();
 
 				pending_detach_requests[handle] = detach_request;
