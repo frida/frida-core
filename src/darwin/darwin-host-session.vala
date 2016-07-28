@@ -259,6 +259,8 @@ namespace Frida {
 		private Gee.HashMap<string, SpawnRequest> spawn_request_by_identifier = new Gee.HashMap<string, SpawnRequest> ();
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
+		private Gee.Promise<bool> ensure_request;
+
 		internal FruitLauncher (HelperProcess helper, AgentResource agent) {
 			this.helper = helper;
 			this.agent = agent;
@@ -377,22 +379,42 @@ namespace Frida {
 		}
 
 		private async void ensure_loader_deployed () throws Error {
-			if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
-				throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+			if (ensure_request != null) {
+				var future = ensure_request.future;
+				try {
+					yield future.wait_async ();
+					return;
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
+				}
+			}
+			ensure_request = new Gee.Promise<bool> ();
 
-			yield helper.preload ();
-			agent.ensure_written_to_disk ();
-
-			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 			try {
-				FileUtils.set_data (plist_path, generate_loader_plist ());
-				FileUtils.chmod (plist_path, 0644);
-				FileUtils.set_data (real_dylib_path, dylib_blob.data);
-				FileUtils.chmod (real_dylib_path, 0755);
-				FileUtils.unlink (dylib_path);
-				FileUtils.symlink (real_dylib_path, dylib_path);
-			} catch (GLib.FileError e) {
-				throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
+				if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
+					throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+
+				yield helper.preload ();
+				agent.ensure_written_to_disk ();
+
+				var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
+				try {
+					FileUtils.set_data (plist_path, generate_loader_plist ());
+					FileUtils.chmod (plist_path, 0644);
+					FileUtils.set_data (real_dylib_path, dylib_blob.data);
+					FileUtils.chmod (real_dylib_path, 0755);
+					FileUtils.unlink (dylib_path);
+					FileUtils.symlink (real_dylib_path, dylib_path);
+				} catch (GLib.FileError e) {
+					throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
+				}
+
+				ensure_request.set_value (true);
+			} catch (Error ensure_error) {
+				ensure_request.set_exception (ensure_error);
+				ensure_request = null;
+
+				throw ensure_error;
 			}
 		}
 
