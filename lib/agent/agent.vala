@@ -37,7 +37,7 @@ namespace Frida.Agent {
 		private DBusConnection connection;
 		private bool closing = false;
 		private uint registration_id = 0;
-		private int pending_calls = 0;
+		private uint pending_calls = 0;
 		private Gee.Promise<bool> pending_close = null;
 
 		private ScriptEngine script_engine = null;
@@ -209,6 +209,15 @@ namespace Frida.Agent {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (!closed_by_us)
 				close.begin ();
+
+			Gee.Promise<bool> operation = null;
+			lock (pending_calls) {
+				pending_calls = 0;
+				operation = pending_close;
+				pending_close = null;
+			}
+			if (operation != null)
+				operation.set_value (true);
 		}
 
 		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
