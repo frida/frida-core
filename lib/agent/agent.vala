@@ -58,14 +58,21 @@ namespace Frida.Agent {
 		}
 
 		private async void perform_close () {
-			if (AtomicInt.get (ref pending_calls) > 0) {
-				pending_close = new Gee.Promise<bool> ();
+			Gee.Promise<bool> operation = null;
+
+			lock (pending_calls) {
+				if (pending_calls > 0) {
+					pending_close = new Gee.Promise<bool> ();
+					operation = pending_close;
+				}
+			}
+
+			if (operation != null) {
 				try {
-					yield pending_close.future.wait_async ();
+					yield operation.future.wait_async ();
 				} catch (Gee.FutureError e) {
 					assert_not_reached ();
 				}
-				pending_close = null;
 			}
 
 			if (script_engine != null) {
@@ -207,17 +214,26 @@ namespace Frida.Agent {
 		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
 			switch (message.get_message_type ()) {
 				case DBusMessageType.METHOD_CALL:
-					if (incoming)
-						AtomicInt.inc (ref pending_calls);
+					if (incoming) {
+						lock (pending_calls) {
+							pending_calls++;
+						}
+					}
 					break;
 				case DBusMessageType.METHOD_RETURN:
 				case DBusMessageType.ERROR:
-					if (!incoming && AtomicInt.dec_and_test (ref pending_calls) && pending_close != null) {
-						Idle.add (() => {
-							if (pending_close != null)
-								pending_close.set_value (true);
-							return false;
-						});
+					if (!incoming) {
+						lock (pending_calls) {
+							pending_calls--;
+							var operation = pending_close;
+							if (pending_calls == 0 && operation != null) {
+								pending_close = null;
+								Idle.add (() => {
+									operation.set_value (true);
+									return false;
+								});
+							}
+						}
 					}
 					break;
 				default:
