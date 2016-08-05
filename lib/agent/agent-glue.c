@@ -98,7 +98,7 @@ frida_agent_environment_init (void)
   g_mem_set_vtable (&mem_vtable);
 #else
   g_setenv ("G_SLICE", "always-malloc", TRUE);
-#else
+#endif
   glib_init ();
   g_assertion_set_handler (frida_agent_on_assert_failure, NULL);
   g_log_set_default_handler (frida_agent_on_log_message, NULL);
