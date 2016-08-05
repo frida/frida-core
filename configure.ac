@@ -170,6 +170,25 @@ if [[ "x$HAVE_UCLIBC" = "xyes" ]]; then
   AC_DEFINE(HAVE_UCLIBC, 1, [Define to 1 if libc is uClibc.])
 fi
 
+AC_COMPILE_IFELSE(
+  [AC_LANG_PROGRAM([[
+#ifndef __SANITIZE_ADDRESS__
+# ifdef __clang__
+#  if __has_feature(address_sanitizer)
+#   define __SANITIZE_ADDRESS__
+#  endif
+# endif
+#endif
+]], [[
+#ifndef __SANITIZE_ADDRESS__
+# error ASAN disabled
+#endif
+]])],
+  [
+    AC_DEFINE(HAVE_ASAN, 1, [Define to 1 if AddressSanitizer is enabled.])
+  ]
+)
+
 FRIDA_VALAFLAGS=
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D LINUX"

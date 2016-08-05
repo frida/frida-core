@@ -66,6 +66,7 @@ static void * frida_linker_stub_warmup_thread (void * data);
 void
 frida_agent_environment_init (void)
 {
+#if !DEBUG_HEAP_LEAKS && !defined (HAVE_ASAN)
   GMemVTable mem_vtable = {
     gum_malloc,
     gum_realloc,
@@ -74,11 +75,10 @@ frida_agent_environment_init (void)
     gum_malloc,
     gum_realloc
   };
+#endif
 #if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   int tmp_flag;
-#endif
 
-#if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
   /*_CrtSetBreakAlloc (1337);*/
 
   _CrtSetReportMode (_CRT_ERROR, _CRTDBG_MODE_FILE);
@@ -94,10 +94,11 @@ frida_agent_environment_init (void)
 #endif
 
   gum_memory_init ();
+#if !DEBUG_HEAP_LEAKS && !defined (HAVE_ASAN)
   g_mem_set_vtable (&mem_vtable);
-#if DEBUG_HEAP_LEAKS
+#else
   g_setenv ("G_SLICE", "always-malloc", TRUE);
-#endif
+#else
   glib_init ();
   g_assertion_set_handler (frida_agent_on_assert_failure, NULL);
   g_log_set_default_handler (frida_agent_on_log_message, NULL);
