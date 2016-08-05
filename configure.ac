@@ -243,6 +243,21 @@ if [[ "x$enable_diet" = "xyes" ]]; then
 fi
 AM_CONDITIONAL(ENABLE_DIET, [test "x$enable_diet" = "xyes"])
 
+AC_ARG_ENABLE(mapper,
+  [AS_HELP_STRING([--enable-mapper],
+                  [enable mapper when available [default=auto]])],,
+  [enable_mapper=auto])
+if [[ "x$enable_mapper" = "xauto" ]]; then
+  if [[ "x$HAVE_MAC" = "xyes" ]]; then
+    enable_mapper=yes
+  else
+    enable_mapper=no
+  fi
+fi
+if [[ "x$enable_mapper" = "xyes" ]]; then
+  AC_DEFINE(HAVE_MAPPER, 1, [Define to 1 if mapper is enabled.])
+fi
+
 FRIDA_TEST_LIBS=""
 if [[ "x$HAVE_MAC" = "xyes" ]]; then
   FRIDA_TEST_LIBS="$FRIDA_TEST_LIBS -Wl,-framework -Wl,AppKit"

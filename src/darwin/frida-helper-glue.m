@@ -1,9 +1,3 @@
-#ifdef HAVE_MAC
-# define ENABLE_MAPPER 1
-#else
-# define ENABLE_MAPPER 0
-#endif
-
 #include "frida-helper.h"
 
 #include <dispatch/dispatch.h>
@@ -759,7 +753,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_for_pid");
   instance->task = details.task;
 
-#if ENABLE_MAPPER
+#ifdef HAVE_MAPPER
   mapper = gum_darwin_mapper_new (dylib_path, details.task, details.cpu_type);
 #endif
 
