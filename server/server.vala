@@ -307,6 +307,15 @@ namespace Frida.Server {
 					yield session.close ();
 				} catch (GLib.Error e) {
 				}
+			} else {
+				var notification = new DBusMessage.@signal ("/re/frida/HostSession", "re.frida.HostSession7", "AgentSessionDestroyed");
+				notification.set_body (new Variant ("((u))", session_id));
+
+				try {
+					uint32 serial;
+					connection.send_message (notification, DBusSendMessageFlags.NONE, out serial);
+				} catch (GLib.Error e) {
+				}
 			}
 		}
 
