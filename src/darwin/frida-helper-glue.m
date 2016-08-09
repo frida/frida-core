@@ -214,7 +214,7 @@ _frida_helper_service_create_context (FridaHelperService * self)
   FridaHelperContext * ctx;
 
   ctx = g_slice_new (FridaHelperContext);
-  ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", NULL);
+  ctx->dispatch_queue = dispatch_queue_create ("re.frida.helper.queue", DISPATCH_QUEUE_SERIAL);
 
   self->context = ctx;
 }
