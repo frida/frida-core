@@ -1,16 +1,15 @@
 #if defined (HAVE_IOS) || defined (HAVE_ANDROID)
 
+#include "channel.h"
+
 #include <assert.h>
 #include <dlfcn.h>
-#include <errno.h>
 #include <pthread.h>
-#include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #ifdef HAVE_ANDROID
@@ -23,10 +22,6 @@ typedef void (* FridaAgentMainFunc) (const char * data_string, void * mapped_ran
 
 static void frida_loader_connect (const char * details);
 static void * frida_loader_run (void * user_data);
-static bool frida_loader_send_string (int s, const char * v);
-static bool frida_loader_send_bytes (int s, const void * bytes, size_t size);
-static char * frida_loader_recv_string (int s);
-static bool frida_loader_recv_bytes (int s, void * bytes, size_t size);
 
 static char frida_data_dir[256] = FRIDA_LOADER_DATA_DIR_MAGIC;
 
@@ -68,7 +63,7 @@ typedef void (* FridaCFReleaseFunc) (FridaCFRef cf);
 
 struct _FridaWaitForPermissionToResumeContext
 {
-  int fd;
+  FridaChannel * channel;
   FridaCFRef loop;
 
   FridaCFRunLoopStopFunc cf_run_loop_stop;
@@ -143,7 +138,7 @@ frida_loader_wait_for_permission_to_resume (void * user_data)
 
   ctx = *original_ctx;
 
-  permission_to_resume = frida_loader_recv_string (ctx.fd);
+  permission_to_resume = frida_channel_recv_string (ctx.channel);
   free (permission_to_resume);
 
   ctx.cf_run_loop_stop (ctx.loop);
@@ -536,34 +531,18 @@ frida_zygote_monitor_init (FridaZygoteMonitor * self)
 static void
 frida_loader_connect (const char * identifier)
 {
-  char * callback_path;
-  int s;
-  struct sockaddr_un callback;
-  socklen_t callback_len;
+  FridaChannel * channel;
   char * pipe_address, * permission_to_resume;
   pthread_t thread;
 
-  asprintf (&callback_path, "%s/callback", frida_data_dir);
-
-  s = socket (AF_UNIX, SOCK_STREAM, 0);
-  if (s == -1)
+  channel = frida_channel_open (frida_data_dir);
+  if (channel == NULL)
     goto beach;
 
-#ifdef HAVE_IOS
-  callback.sun_len = sizeof (callback.sun_len) + sizeof (callback.sun_family) + strlen (callback_path);
-  callback_len = callback.sun_len;
-#else
-  callback_len = sizeof (callback);
-#endif
-  callback.sun_family = AF_UNIX;
-  strcpy (callback.sun_path, callback_path);
-  if (connect (s, (struct sockaddr *) &callback, callback_len) == -1)
+  if (!frida_channel_send_string (channel, identifier))
     goto beach;
 
-  if (!frida_loader_send_string (s, identifier))
-    goto beach;
-
-  pipe_address = frida_loader_recv_string (s);
+  pipe_address = frida_channel_recv_string (channel);
   if (pipe_address == NULL)
     goto beach;
 
@@ -608,7 +587,7 @@ frida_loader_connect (const char * identifier)
       cf_release = dlsym (RTLD_DEFAULT, "CFRelease");
       assert (cf_release != NULL);
 
-      ctx.fd = s;
+      ctx.channel = channel;
       ctx.loop = cf_run_loop_get_main ();
       distant_future = DBL_MAX;
       timer = cf_run_loop_timer_create (NULL, distant_future, 0, 0, 0, on_keep_alive_timer_fire, NULL);
@@ -624,20 +603,18 @@ frida_loader_connect (const char * identifier)
     }
     else
     {
-      permission_to_resume = frida_loader_recv_string (s);
+      permission_to_resume = frida_channel_recv_string (channel);
       free (permission_to_resume);
     }
   }
 #else
-  permission_to_resume = frida_loader_recv_string (s);
+  permission_to_resume = frida_channel_recv_string (channel);
   free (permission_to_resume);
 #endif
 
 beach:
-  if (s != -1)
-    close (s);
-
-  free (callback_path);
+  if (channel != NULL)
+    frida_channel_close (channel);
 }
 
 static void *
@@ -667,76 +644,6 @@ beach:
   free (pipe_address);
 
   return NULL;
-}
-
-static bool
-frida_loader_send_string (int s, const char * v)
-{
-  uint8_t size = strlen (v);
-  if (!frida_loader_send_bytes (s, &size, sizeof (size)))
-    return false;
-
-  return frida_loader_send_bytes (s, v, size);
-}
-
-static bool
-frida_loader_send_bytes (int s, const void * bytes, size_t size)
-{
-  size_t offset = 0;
-
-  while (offset != size)
-  {
-    ssize_t n;
-
-    n = send (s, bytes + offset, size - offset, 0);
-    if (n != -1)
-      offset += n;
-    else if (errno != EINTR)
-      return false;
-  }
-
-  return true;
-}
-
-static char *
-frida_loader_recv_string (int s)
-{
-  uint8_t size;
-  char * buf;
-
-  if (!frida_loader_recv_bytes (s, &size, sizeof (size)))
-    return NULL;
-
-  buf = malloc (size + 1);
-  buf[size] = '\0';
-  if (!frida_loader_recv_bytes (s, buf, size))
-  {
-    free (buf);
-    return NULL;
-  }
-
-  return buf;
-}
-
-static bool
-frida_loader_recv_bytes (int s, void * bytes, size_t size)
-{
-  size_t offset = 0;
-
-  while (offset != size)
-  {
-    ssize_t n;
-
-    n = recv (s, bytes + offset, size - offset, 0);
-    if (n > 0)
-      offset += n;
-    else if (n == 0)
-      return false;
-    else if (n == -1 && errno != EINTR)
-      return false;
-  }
-
-  return true;
 }
 
 #endif

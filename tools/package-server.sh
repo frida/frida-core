@@ -41,8 +41,18 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	<array>
 		<string>/usr/sbin/frida-server</string>
 	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>_MSSafeMode</key>
+		<string>1</string>
+	</dict>
 	<key>UserName</key>
 	<string>root</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.apple.uikit.viewservice.frida</key>
+		<true/>
+	</dict>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>

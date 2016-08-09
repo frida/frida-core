@@ -15,11 +15,19 @@ extra_ldflags += -export-symbols-regex "^frida_loader_main$$"
 endif
 endif
 
+if OS_IOS
+channel_impl = channel-xpc.c
+else
+channel_impl = channel-unix.c
+endif
+
 noinst_LTLIBRARIES = \
 	libfrida-loader.la
 
 libfrida_loader_la_SOURCES = \
-	loader.c
+	loader.c \
+	channel.h \
+	$(channel_impl)
 libfrida_loader_la_LIBADD = \
 	$(extra_libs) \
 	$(FRIDA_LOADER_LIBS)
