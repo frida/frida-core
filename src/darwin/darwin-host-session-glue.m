@@ -159,11 +159,7 @@ frida_fruit_launcher_handle_xpc_client (FridaFruitLauncher * self, xpc_connectio
     }
     else
     {
-      const char * payload;
-
-      payload = xpc_dictionary_get_string (event, "payload");
-
-      frida_fruit_launcher_loader_on_message (loader, payload);
+      frida_fruit_launcher_loader_on_message (loader, xpc_dictionary_get_string (event, "payload"));
     }
   });
   xpc_connection_resume (connection);
