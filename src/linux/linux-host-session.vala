@@ -268,8 +268,10 @@ namespace Frida {
 		private UnixSocketAddress service_address;
 		private SocketService service;
 
+		private MainContext main_context;
+
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<string, SpawnRequest> spawn_request_by_package_name = new Gee.HashMap<string, SpawnRequest> ();
+		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_package_name = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
 		internal RoboLauncher (RoboAgent robo_agent, HelperProcess helper, Linjector injector, AgentResource agent) {
@@ -299,11 +301,21 @@ namespace Frida {
 			FileUtils.chmod (this.service_address.path, 0777);
 			this.service.incoming.connect (this.on_incoming_connection);
 			this.service.start ();
+
+			this.main_context = MainContext.ref_thread_default ();
 		}
 
 		public async void close () {
 			service.stop ();
 			service = null;
+
+			foreach (var loader in loader_by_pid.values)
+				loader.close ();
+			loader_by_pid.clear ();
+
+			foreach (var request in spawn_request_by_package_name.values)
+				request.set_exception (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
+			spawn_request_by_package_name.clear ();
 
 			FileUtils.unlink (service_address.path);
 
@@ -335,12 +347,10 @@ namespace Frida {
 		public async uint spawn (string package_name) throws Error {
 			yield ensure_loader_injected ();
 
-			var waiting = false;
-			var timed_out = false;
-			var request = new SpawnRequest (package_name, () => {
-				if (waiting)
-					spawn.callback ();
-			});
+			if (spawn_request_by_package_name.has_key (package_name))
+				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
+
+			var request = new Gee.Promise<uint> ();
 			spawn_request_by_package_name[package_name] = request;
 
 			try {
@@ -351,24 +361,24 @@ namespace Frida {
 				throw e;
 			}
 
-			if (request.result == null) {
-				var timeout = Timeout.add_seconds (10, () => {
-					timed_out = true;
-					spawn.callback ();
-					return false;
-				});
-				waiting = true;
-				yield;
-				waiting = false;
-				if (timed_out) {
-					spawn_request_by_package_name.unset (package_name);
-					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch");
-				} else {
-					Source.remove (timeout);
-				}
-			}
+			var timeout = new TimeoutSource.seconds (10);
+			timeout.set_callback (() => {
+				spawn_request_by_package_name.unset (package_name);
+				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
+				return false;
+			});
+			timeout.attach (main_context);
 
-			return request.result.pid;
+			try {
+				var future = request.future;
+				try {
+					return yield future.wait_async ();
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
+				}
+			} finally {
+				timeout.destroy ();
+			}
 		}
 
 		public async bool try_establish (uint pid, string remote_address) throws Error {
@@ -422,18 +432,21 @@ namespace Frida {
 					}
 				}
 
-				var timeout = Timeout.add_seconds (10, () => {
+				var timeout = new TimeoutSource.seconds (10);
+				timeout.set_callback (() => {
 					timed_out = true;
 					ensure_loader_injected.callback ();
 					return false;
 				});
+				timeout.attach (main_context);
+
 				while (!pending.is_empty) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				if (!timed_out)
-					Source.remove (timeout);
+
+				timeout.destroy ();
 			} finally {
 				injector.disconnect (on_uninjected);
 			}
@@ -460,9 +473,9 @@ namespace Frida {
 
 					loader_by_pid[pid] = loader;
 
-					SpawnRequest request;
+					Gee.Promise<uint> request;
 					if (spawn_request_by_package_name.unset (loader.package_name, out request)) {
-						request.complete (loader);
+						request.set_value (pid);
 						return;
 					}
 
@@ -478,33 +491,6 @@ namespace Frida {
 
 				loader.close ();
 			} catch (Error e) {
-			}
-		}
-
-		private class SpawnRequest : Object {
-			public delegate void CompletionHandler ();
-
-			public string package_name {
-				get;
-				construct;
-			}
-
-			private CompletionHandler handler;
-
-			public Loader? result {
-				get;
-				private set;
-			}
-
-			public SpawnRequest (string package_name, owned CompletionHandler handler) {
-				Object (package_name: package_name);
-
-				this.handler = (owned) handler;
-			}
-
-			public void complete (Loader r) {
-				result = r;
-				handler ();
 			}
 		}
 
