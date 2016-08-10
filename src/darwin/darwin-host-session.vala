@@ -570,12 +570,6 @@ namespace Frida {
 			public Loader (void * connection, MainContext main_context) {
 				this.connection = connection;
 				this.main_context = main_context;
-
-				message ("Loader(%p)", this);
-			}
-
-			~Loader () {
-				message ("~Loader %p", this);
 			}
 
 			public override void dispose () {
