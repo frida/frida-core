@@ -50,6 +50,7 @@ struct _FridaChannel
   pthread_mutex_t mutex;
   pthread_cond_t cond;
   volatile bool closed;
+  volatile bool interrupted;
   volatile xpc_object_t pending_message;
 };
 
@@ -65,6 +66,7 @@ frida_channel_open (const char * frida_data_dir)
   pthread_mutex_init (&channel->mutex, NULL);
   pthread_cond_init (&channel->cond, NULL);
   channel->closed = false;
+  channel->interrupted = false;
   channel->pending_message = NULL;
 
   channel->connection = xpc_connection_create_mach_service ("com.apple.uikit.viewservice.frida", NULL, 0);
@@ -123,7 +125,7 @@ frida_channel_recv_string (FridaChannel * self)
 
   pthread_mutex_lock (&self->mutex);
 
-  while (self->pending_message == NULL && !self->closed)
+  while (self->pending_message == NULL && !self->closed && !self->interrupted)
     pthread_cond_wait (&self->cond, &self->mutex);
 
   message = self->pending_message;
@@ -145,10 +147,11 @@ frida_channel_on_event (FridaChannel * self, xpc_object_t event)
 {
   pthread_mutex_lock (&self->mutex);
 
-  if (event == XPC_ERROR_CONNECTION_INVALID || event == XPC_ERROR_CONNECTION_INTERRUPTED)
+  if (event == XPC_ERROR_CONNECTION_INVALID)
     self->closed = true;
-
-  if (xpc_get_type (event) != XPC_TYPE_ERROR && self->pending_message == NULL)
+  else if (event == XPC_ERROR_CONNECTION_INTERRUPTED)
+    self->interrupted = true;
+  else if (xpc_get_type (event) != XPC_TYPE_ERROR && self->pending_message == NULL)
     self->pending_message = xpc_retain (event);
 
   pthread_cond_signal (&self->cond);
