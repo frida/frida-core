@@ -314,7 +314,7 @@ namespace Frida {
 			loader_by_pid.clear ();
 
 			foreach (var request in spawn_request_by_identifier.values)
-				request.set_exception (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
+				request.set_exception (new Error.INVALID_OPERATION ("XPC server is closed; is frida-server running outside launchd?"));
 			spawn_request_by_identifier.clear ();
 
 			FileUtils.unlink (plist_path);
