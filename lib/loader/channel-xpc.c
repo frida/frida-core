@@ -20,6 +20,9 @@ XPC_DECL (xpc_connection);
 #define XPC_TYPE_ERROR (&_xpc_type_error)
 XPC_EXPORT XPC_TYPE (_xpc_type_error);
 
+#define XPC_ERROR_CONNECTION_INTERRUPTED XPC_GLOBAL_OBJECT (_xpc_error_connection_interrupted)
+XPC_EXPORT const struct _xpc_dictionary_s _xpc_error_connection_interrupted;
+
 #define XPC_ERROR_CONNECTION_INVALID XPC_GLOBAL_OBJECT (_xpc_error_connection_invalid)
 XPC_EXPORT const struct _xpc_dictionary_s _xpc_error_connection_invalid;
 
@@ -142,7 +145,7 @@ frida_channel_on_event (FridaChannel * self, xpc_object_t event)
 {
   pthread_mutex_lock (&self->mutex);
 
-  if (event == XPC_ERROR_CONNECTION_INVALID)
+  if (event == XPC_ERROR_CONNECTION_INVALID || event == XPC_ERROR_CONNECTION_INTERRUPTED)
     self->closed = true;
 
   if (xpc_get_type (event) != XPC_TYPE_ERROR && self->pending_message == NULL)
