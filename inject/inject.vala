@@ -7,7 +7,7 @@ namespace Frida.Inject {
 	private static int pid;
 	private static string script_file;
 
-	static const OptionEntry[] options = {
+	const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ "disable-jit", 0, 0, OptionArg.NONE, ref disable_jit, "Disable the JIT runtime", null },
 		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },

@@ -6,7 +6,7 @@ namespace Frida.Server {
 	private static bool output_version;
 	private static string listen_address;
 
-	static const OptionEntry[] options = {
+	const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ "listen", 'l', 0, OptionArg.STRING, ref listen_address, "Listen on ADDRESS", "ADDRESS" },
 		{ null }
