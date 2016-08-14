@@ -365,6 +365,9 @@ static void frida_tls_key_context_free (FridaTlsKeyContext * ctx);
 
 static gpointer frida_get_address_of_thread_create_func (void);
 static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API frida_thread_create_proxy (void * data);
+static void frida_thread_create_context_free (FridaThreadCreateContext * ctx);
+
+static GPrivate frida_thread_create_context_key = G_PRIVATE_INIT ((GDestroyNotify) frida_thread_create_context_free);
 
 static void
 frida_agent_auto_ignorer_shutdown (FridaAgentAutoIgnorer * self)
@@ -569,22 +572,23 @@ frida_get_address_of_thread_create_func (void)
 static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API
 frida_thread_create_proxy (void * data)
 {
-  GumThreadId current_thread_id;
   FridaThreadCreateContext * ctx = data;
-  NativeThreadFuncReturnType result;
 
-  current_thread_id = gum_process_get_current_thread_id ();
+  gum_script_backend_ignore (gum_process_get_current_thread_id ());
 
-  gum_script_backend_ignore (current_thread_id);
+  /* This allows us to free the data no matter how the thread exits */
+  g_private_set (&frida_thread_create_context_key, ctx);
 
-  result = ctx->thread_func (ctx->thread_data);
+  return ctx->thread_func (ctx->thread_data);
+}
 
+static void
+frida_thread_create_context_free (FridaThreadCreateContext * ctx)
+{
   g_object_unref (ctx->ignorer);
   g_slice_free (FridaThreadCreateContext, ctx);
 
-  gum_script_backend_unignore_later (current_thread_id);
-
-  return result;
+  gum_script_backend_unignore_later (gum_process_get_current_thread_id ());
 }
 
 static void *
