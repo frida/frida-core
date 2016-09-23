@@ -2,6 +2,8 @@
 
 #include "frida-agent.h"
 
+#include "valgrind.h"
+
 #ifndef G_OS_WIN32
 # include <frida-interfaces.h>
 #endif
@@ -95,7 +97,14 @@ frida_agent_environment_init (void)
 
   gum_memory_init ();
 #if !DEBUG_HEAP_LEAKS && !defined (HAVE_ASAN)
-  g_mem_set_vtable (&mem_vtable);
+  if (RUNNING_ON_VALGRIND)
+  {
+    g_setenv ("G_SLICE", "always-malloc", TRUE);
+  }
+  else
+  {
+    g_mem_set_vtable (&mem_vtable);
+  }
 #else
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
