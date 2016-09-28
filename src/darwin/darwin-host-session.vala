@@ -123,7 +123,7 @@ namespace Frida {
 			helper = null;
 		}
 
-		protected override async AgentSession create_system_session () throws Error {
+		protected override async AgentSessionProvider create_system_session () throws Error {
 			return yield helper.create_system_session (agent.file.path);
 		}
 

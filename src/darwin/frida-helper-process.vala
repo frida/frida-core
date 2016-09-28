@@ -57,7 +57,7 @@ namespace Frida {
 			yield obtain ();
 		}
 
-		public async AgentSession create_system_session (string agent_filename) throws Error {
+		public async AgentSessionProvider create_system_session (string agent_filename) throws Error {
 			var helper = yield obtain ();
 			try {
 				var system_session_path = yield helper.create_system_session (agent_filename);
