@@ -60,7 +60,7 @@ namespace Frida {
 			var helper = yield obtain ();
 			try {
 				var provider_path = yield helper.create_system_session_provider (agent_filename);
-				var provider = yield connection.get_proxy (null, provider_path);
+				AgentSessionProvider provider = yield connection.get_proxy (null, provider_path);
 				conn = connection;
 				return provider;
 			} catch (GLib.Error e) {
