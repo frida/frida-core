@@ -64,6 +64,8 @@ namespace Frida.Agent {
 			} catch (IOError io_error) {
 				assert_not_reached ();
 			}
+
+			opened (id);
 		}
 
 		private void on_client_closed (AgentClient client) {

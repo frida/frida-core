@@ -4,7 +4,7 @@ namespace Frida {
 	public interface Helper : Object {
 		public signal void uninjected (uint id);
 		public abstract async void stop () throws GLib.Error;
-		public abstract async string create_system_session (string agent_filename) throws GLib.Error;
+		public abstract async string create_system_session_provider (string agent_filename) throws GLib.Error;
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
 		public abstract async void launch (string identifier, string url) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;

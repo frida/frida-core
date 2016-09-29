@@ -1,12 +1,16 @@
 namespace Frida {
 	public class AgentContainer : Object, AgentSessionProvider {
+		public DBusConnection connection {
+			get;
+			private set;
+		}
+
 		private Module module;
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data_string, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id);
 		private AgentMainFunc main_impl;
 		private PipeTransport transport;
 		private Thread<bool> thread;
-		private DBusConnection connection;
 		private AgentSessionProvider provider;
 
 		public static async AgentContainer create (string agent_filename) throws Error {
@@ -35,6 +39,7 @@ namespace Frida {
 			try {
 				connection = yield DBusConnection.new (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
+				provider.opened.connect (container.on_session_opened);
 				provider.closed.connect (container.on_session_closed);
 			} catch (GLib.Error dbus_error) {
 				assert_not_reached ();
@@ -47,6 +52,7 @@ namespace Frida {
 		}
 
 		public async void destroy () {
+			provider.opened.disconnect (on_session_opened);
 			provider.closed.disconnect (on_session_closed);
 			provider = null;
 
@@ -70,6 +76,10 @@ namespace Frida {
 
 		public async void open (AgentSessionId id) throws GLib.Error {
 			yield provider.open (id);
+		}
+
+		private void on_session_opened (AgentSessionId id) {
+			opened (id);
 		}
 
 		private void on_session_closed (AgentSessionId id) {

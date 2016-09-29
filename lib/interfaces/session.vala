@@ -23,6 +23,7 @@ namespace Frida {
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id) throws GLib.Error;
 
+		public signal void opened (AgentSessionId id);
 		public signal void closed (AgentSessionId id);
 	}
 

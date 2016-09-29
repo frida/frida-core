@@ -153,19 +153,7 @@ namespace Frida {
 			}
 		}
 
-		protected abstract async AgentSessionProvider create_system_session () throws Error;
-
-		protected void release_system_session () {
-			var promise = entries[0];
-			if (promise == null)
-				return;
-
-			var future = promise.future;
-			if (!future.ready)
-				return;
-
-			destroy (future.value);
-		}
+		protected abstract async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error;
 
 		public abstract async HostApplicationInfo get_frontmost_application () throws Error;
 
@@ -252,11 +240,12 @@ namespace Frida {
 
 			Entry entry;
 			try {
+				DBusConnection connection;
 				AgentSessionProvider provider;
 
 				if (pid == 0) {
-					provider = yield create_system_session ();
-					entry = new Entry (pid, null, null, provider);
+					provider = yield create_system_session_provider (out connection);
+					entry = new Entry (pid, null, connection, provider);
 				} else {
 					Object transport;
 					var stream = yield perform_attach_to (pid, out transport);
@@ -269,7 +258,6 @@ namespace Frida {
 					});
 					timeout_source.attach (MainContext.get_thread_default ());
 
-					DBusConnection connection;
 					try {
 						connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
@@ -285,9 +273,10 @@ namespace Frida {
 					timeout_source.destroy ();
 
 					entry = new Entry (pid, transport, connection, provider);
-					connection.closed.connect (on_connection_closed);
-					provider.closed.connect (on_session_closed);
 				}
+
+				connection.closed.connect (on_connection_closed);
+				provider.closed.connect (on_session_closed);
 
 				promise.set_value (entry);
 			} catch (Error e) {
