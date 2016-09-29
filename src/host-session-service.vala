@@ -196,7 +196,34 @@ namespace Frida {
 
 			try {
 				yield entry.provider.open (id);
+			} catch (GLib.Error e) {
+				/*
+				 * We might be attempting to open a new session on an agent that is about to unload,
+				 * so if we fail here wait 2 milliseconds and consider re-establishing. We typically
+				 * get on_connection_closed within 300-500 microseconds.
+				 */
+				var timeout_source = new TimeoutSource (2);
+				timeout_source.set_callback (() => {
+					attach_to.callback ();
+					return false;
+				});
+				timeout_source.attach (MainContext.get_thread_default ());
 
+				yield;
+
+				if (entries.has_key (pid))
+					throw new Error.PROTOCOL (e.message);
+
+				entry = yield establish (pid);
+
+				try {
+					yield entry.provider.open (id);
+				} catch (GLib.Error e) {
+					throw new Error.PROTOCOL (e.message);
+				}
+			}
+
+			try {
 				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id), DBusProxyFlags.NONE, null);
 			} catch (GLib.Error e) {
 				throw new Error.PROTOCOL (e.message);
