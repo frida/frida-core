@@ -27,7 +27,7 @@ namespace Frida.Agent {
 		Environment.deinit ((owned) ignorer);
 	}
 
-	private class AgentServer : Object, AgentSession {
+	private class AgentServer : Object, AgentSessionProvider {
 		public string pipe_address {
 			get;
 			construct;
@@ -39,8 +39,9 @@ namespace Frida.Agent {
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
 		private Gee.Promise<bool> pending_close = null;
+		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 
-		private ScriptEngine script_engine = null;
+		private Gum.ScriptBackend script_backend = null;
 		private bool jit_enabled = true;
 		protected Gum.MemoryRange agent_range;
 
@@ -48,6 +49,36 @@ namespace Frida.Agent {
 			Object (pipe_address: pipe_address);
 
 			this.agent_range = agent_range;
+		}
+
+		public async void open (AgentSessionId id) throws Error {
+			check_open ();
+
+			var client = new AgentClient (this, id);
+			clients.add (client);
+			client.closed.connect (on_client_closed);
+
+			try {
+				AgentSession session = client;
+				client.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+		}
+
+		private void on_client_closed (AgentClient client) {
+			closed (client.id);
+
+			connection.unregister_object (client.registration_id);
+
+			client.closed.disconnect (on_client_closed);
+			clients.remove (client);
+
+			Idle.add (() => {
+				if (clients.is_empty)
+					close.begin ();
+				return false;
+			});
 		}
 
 		public async void close () throws Error {
@@ -75,10 +106,14 @@ namespace Frida.Agent {
 				}
 			}
 
-			if (script_engine != null) {
-				yield script_engine.shutdown ();
-				script_engine = null;
+			foreach (var client in clients.to_array ()) {
+				try {
+					yield client.close ();
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
 			}
+			assert (clients.is_empty);
 
 			yield teardown_connection ();
 
@@ -88,75 +123,22 @@ namespace Frida.Agent {
 			});
 		}
 
-		public async void ping () throws Error {
-		}
-
-		public async AgentScriptId create_script (string name, string source) throws Error {
-			var engine = get_script_engine ();
-			var instance = yield engine.create_script ((name != "") ? name : null, source, null);
-			return instance.sid;
-		}
-
-		public async AgentScriptId create_script_from_bytes (string name, uint8[] bytes) throws Error {
-			var engine = get_script_engine ();
-			var instance = yield engine.create_script ((name != "") ? name : null, null, new Bytes (bytes));
-			return instance.sid;
-		}
-
-		public async uint8[] compile_script (string source) throws Error {
-			var engine = get_script_engine ();
-			var bytes = yield engine.compile_script (source);
-			return bytes.get_data ();
-		}
-
-		public async void destroy_script (AgentScriptId sid) throws Error {
-			var engine = get_script_engine ();
-			yield engine.destroy_script (sid);
-		}
-
-		public async void load_script (AgentScriptId sid) throws Error {
-			var engine = get_script_engine ();
-			yield engine.load_script (sid);
-		}
-
-		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
-			var engine = get_script_engine ();
-			engine.post_message_to_script (sid, message);
-		}
-
-		public async void enable_debugger () throws Error {
-			get_script_engine ().enable_debugger ();
-		}
-
-		public async void disable_debugger () throws Error {
-			get_script_engine ().disable_debugger ();
-		}
-
-		public async void post_message_to_debugger (string message) throws Error {
-			get_script_engine ().post_message_to_debugger (message);
-		}
-
-		public async void disable_jit () throws GLib.Error {
-			if (script_engine != null)
-				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
-			jit_enabled = false;
-		}
-
-		private ScriptEngine get_script_engine () throws Error {
-			check_open ();
-
-			if (script_engine == null) {
-				script_engine = new ScriptEngine (Environment.obtain_script_backend (jit_enabled), agent_range);
-				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
-				script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
-			}
-
-			return script_engine;
-		}
-
 		private void check_open () throws Error {
 			if (closing)
 				throw new Error.INVALID_OPERATION ("Agent is closing");
+		}
+
+		public ScriptEngine create_script_engine () {
+			if (script_backend == null)
+				script_backend = Environment.obtain_script_backend (jit_enabled);
+
+			return new ScriptEngine (script_backend, agent_range);
+		}
+
+		public void disable_jit () throws Error {
+			if (script_backend != null)
+				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
+			jit_enabled = false;
 		}
 
 		public void run () throws Error {
@@ -175,8 +157,8 @@ namespace Frida.Agent {
 			connection.closed.connect (on_connection_closed);
 			connection.add_filter (on_connection_message);
 			try {
-				Frida.AgentSession session = this;
-				registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, session);
+				AgentSessionProvider provider = this;
+				registration_id = connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider);
 				connection.start_message_processing ();
 			} catch (IOError io_error) {
 				assert_not_reached ();
@@ -250,6 +232,120 @@ namespace Frida.Agent {
 			}
 
 			return message;
+		}
+	}
+
+	private class AgentClient : Object, AgentSession {
+		public signal void closed (AgentClient client);
+
+		public weak AgentServer server {
+			get;
+			construct;
+		}
+
+		public AgentSessionId id {
+			get;
+			construct;
+		}
+
+		public uint registration_id {
+			get;
+			set;
+		}
+
+		private Gee.Promise<bool> close_request;
+
+		private ScriptEngine script_engine;
+
+		public AgentClient (AgentServer server, AgentSessionId id) {
+			Object (server: server, id: id);
+		}
+
+		public async void close () throws Error {
+			if (close_request != null) {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+				return;
+			}
+			close_request = new Gee.Promise<bool> ();
+
+			if (script_engine != null) {
+				yield script_engine.shutdown ();
+				script_engine = null;
+			}
+
+			closed (this);
+
+			close_request.set_value (true);
+		}
+
+		public async AgentScriptId create_script (string name, string source) throws Error {
+			var engine = get_script_engine ();
+			var instance = yield engine.create_script ((name != "") ? name : null, source, null);
+			return instance.sid;
+		}
+
+		public async AgentScriptId create_script_from_bytes (string name, uint8[] bytes) throws Error {
+			var engine = get_script_engine ();
+			var instance = yield engine.create_script ((name != "") ? name : null, null, new Bytes (bytes));
+			return instance.sid;
+		}
+
+		public async uint8[] compile_script (string source) throws Error {
+			var engine = get_script_engine ();
+			var bytes = yield engine.compile_script (source);
+			return bytes.get_data ();
+		}
+
+		public async void destroy_script (AgentScriptId sid) throws Error {
+			var engine = get_script_engine ();
+			yield engine.destroy_script (sid);
+		}
+
+		public async void load_script (AgentScriptId sid) throws Error {
+			var engine = get_script_engine ();
+			yield engine.load_script (sid);
+		}
+
+		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
+			var engine = get_script_engine ();
+			engine.post_message_to_script (sid, message);
+		}
+
+		public async void enable_debugger () throws Error {
+			get_script_engine ().enable_debugger ();
+		}
+
+		public async void disable_debugger () throws Error {
+			get_script_engine ().disable_debugger ();
+		}
+
+		public async void post_message_to_debugger (string message) throws Error {
+			get_script_engine ().post_message_to_debugger (message);
+		}
+
+		public async void disable_jit () throws GLib.Error {
+			server.disable_jit ();
+		}
+
+		private ScriptEngine get_script_engine () throws Error {
+			check_open ();
+
+			if (script_engine == null) {
+				script_engine = server.create_script_engine ();
+				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+				script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
+			}
+
+			return script_engine;
+		}
+
+		private void check_open () throws Error {
+			if (close_request != null)
+				throw new Error.INVALID_OPERATION ("Session is closing");
 		}
 	}
 

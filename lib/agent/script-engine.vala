@@ -9,6 +9,7 @@ namespace Frida.Agent {
 		private Gum.MemoryRange agent_range;
 		private uint last_script_id = 0;
 		private HashMap<uint, ScriptInstance> instance_by_id = new HashMap<uint, ScriptInstance> ();
+		private bool debugger_enabled = false;
 
 		public ScriptEngine (Gum.ScriptBackend backend, Gum.MemoryRange agent_range) {
 			this.backend = backend;
@@ -20,6 +21,11 @@ namespace Frida.Agent {
 				yield instance.destroy ();
 			}
 			instance_by_id.clear ();
+
+			if (debugger_enabled) {
+				backend.set_debug_message_handler (null);
+				debugger_enabled = false;
+			}
 		}
 
 		public async ScriptInstance create_script (string? name, string? source, Bytes? bytes) throws Error {
@@ -83,10 +89,12 @@ namespace Frida.Agent {
 
 		public void enable_debugger () throws Error {
 			backend.set_debug_message_handler (on_debug_message);
+			debugger_enabled = true;
 		}
 
 		public void disable_debugger () throws Error {
 			backend.set_debug_message_handler (null);
+			debugger_enabled = false;
 		}
 
 		public void post_message_to_debugger (string message) {
