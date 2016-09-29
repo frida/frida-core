@@ -43,7 +43,7 @@ namespace Frida {
 
 	namespace ObjectPath {
 		public const string HELPER = "/re/frida/Helper";
-		public const string SYSTEM_SESSION = "/re/frida/SystemSession";
+		public const string SYSTEM_SESSION_PROVIDER = "/re/frida/SystemSessionProvider";
 		public const string TUNNELED_STREAM = "/re/frida/TunneledStream";
 
 		public static string from_tunneled_stream_id (uint id) {

@@ -140,10 +140,10 @@ namespace Frida {
 			assert (system_session == null);
 
 			system_session = yield AgentContainer.create (agent_filename);
-			AgentSession system_agent_session = system_session;
-			system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION, system_agent_session);
+			AgentSessionProvider system_session_provider = system_session;
+			system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION_PROVIDER, system_session_provider);
 
-			return Frida.ObjectPath.SYSTEM_SESSION;
+			return Frida.ObjectPath.SYSTEM_SESSION_PROVIDER;
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
