@@ -35,7 +35,7 @@ namespace Frida.Agent {
 
 		private MainLoop main_loop = new MainLoop ();
 		private DBusConnection connection;
-		private bool closing = false;
+		private bool unloading = false;
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
 		private Gee.Promise<bool> pending_close = null;
@@ -52,7 +52,8 @@ namespace Frida.Agent {
 		}
 
 		public async void open (AgentSessionId id) throws Error {
-			check_open ();
+			if (unloading)
+				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
 			var client = new AgentClient (this, id);
 			clients.add (client);
@@ -75,22 +76,16 @@ namespace Frida.Agent {
 
 			client.closed.disconnect (on_client_closed);
 			clients.remove (client);
-
-			Idle.add (() => {
-				if (clients.is_empty)
-					close.begin ();
-				return false;
-			});
 		}
 
-		public async void close () throws Error {
-			if (closing)
-				throw new Error.INVALID_OPERATION ("Agent is already closing");
-			closing = true;
-			perform_close.begin ();
+		public async void unload () throws Error {
+			if (unloading)
+				throw new Error.INVALID_OPERATION ("Agent is already unloading");
+			unloading = true;
+			perform_unload.begin ();
 		}
 
-		private async void perform_close () {
+		private async void perform_unload () {
 			Gee.Promise<bool> operation = null;
 
 			lock (pending_calls) {
@@ -123,11 +118,6 @@ namespace Frida.Agent {
 				main_loop.quit ();
 				return false;
 			});
-		}
-
-		private void check_open () throws Error {
-			if (closing)
-				throw new Error.INVALID_OPERATION ("Agent is closing");
 		}
 
 		public ScriptEngine create_script_engine () {
@@ -192,7 +182,7 @@ namespace Frida.Agent {
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (!closed_by_us)
-				close.begin ();
+				unload.begin ();
 
 			Gee.Promise<bool> operation = null;
 			lock (pending_calls) {

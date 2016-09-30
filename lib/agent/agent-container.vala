@@ -78,6 +78,10 @@ namespace Frida {
 			yield provider.open (id);
 		}
 
+		public async void unload () throws GLib.Error {
+			yield provider.unload ();
+		}
+
 		private void on_session_opened (AgentSessionId id) {
 			opened (id);
 		}

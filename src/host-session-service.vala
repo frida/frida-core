@@ -337,7 +337,14 @@ namespace Frida {
 					continue;
 
 				var entry = future.value;
-				entry.sessions.remove (raw_id);
+
+				var sessions = entry.sessions;
+				sessions.remove (raw_id);
+				if (sessions.is_empty) {
+					var is_system_session = entry.pid == 0;
+					if (!is_system_session)
+						entry.provider.unload.begin ();
+				}
 			}
 		}
 
