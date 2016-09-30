@@ -27,7 +27,7 @@ namespace Frida.Agent {
 		Environment.deinit ((owned) ignorer);
 	}
 
-	private class AgentServer : Object, AgentSession {
+	private class AgentServer : Object, AgentSessionProvider {
 		public string pipe_address {
 			get;
 			construct;
@@ -35,12 +35,13 @@ namespace Frida.Agent {
 
 		private MainLoop main_loop = new MainLoop ();
 		private DBusConnection connection;
-		private bool closing = false;
+		private bool unloading = false;
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
 		private Gee.Promise<bool> pending_close = null;
+		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 
-		private ScriptEngine script_engine = null;
+		private Gum.ScriptBackend script_backend = null;
 		private bool jit_enabled = true;
 		protected Gum.MemoryRange agent_range;
 
@@ -50,14 +51,41 @@ namespace Frida.Agent {
 			this.agent_range = agent_range;
 		}
 
-		public async void close () throws Error {
-			if (closing)
-				throw new Error.INVALID_OPERATION ("Agent is already closing");
-			closing = true;
-			perform_close.begin ();
+		public async void open (AgentSessionId id) throws Error {
+			if (unloading)
+				throw new Error.INVALID_OPERATION ("Agent is unloading");
+
+			var client = new AgentClient (this, id);
+			clients.add (client);
+			client.closed.connect (on_client_closed);
+
+			try {
+				AgentSession session = client;
+				client.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+
+			opened (id);
 		}
 
-		private async void perform_close () {
+		private void on_client_closed (AgentClient client) {
+			closed (client.id);
+
+			connection.unregister_object (client.registration_id);
+
+			client.closed.disconnect (on_client_closed);
+			clients.remove (client);
+		}
+
+		public async void unload () throws Error {
+			if (unloading)
+				throw new Error.INVALID_OPERATION ("Agent is already unloading");
+			unloading = true;
+			perform_unload.begin ();
+		}
+
+		private async void perform_unload () {
 			Gee.Promise<bool> operation = null;
 
 			lock (pending_calls) {
@@ -75,10 +103,14 @@ namespace Frida.Agent {
 				}
 			}
 
-			if (script_engine != null) {
-				yield script_engine.shutdown ();
-				script_engine = null;
+			foreach (var client in clients.to_array ()) {
+				try {
+					yield client.close ();
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
 			}
+			assert (clients.is_empty);
 
 			yield teardown_connection ();
 
@@ -88,7 +120,158 @@ namespace Frida.Agent {
 			});
 		}
 
-		public async void ping () throws Error {
+		public ScriptEngine create_script_engine () {
+			if (script_backend == null)
+				script_backend = Environment.obtain_script_backend (jit_enabled);
+
+			return new ScriptEngine (script_backend, agent_range);
+		}
+
+		public void disable_jit () throws Error {
+			if (script_backend != null)
+				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
+			jit_enabled = false;
+		}
+
+		public void run () throws Error {
+			setup_connection.begin ();
+			main_loop = new MainLoop ();
+			main_loop.run ();
+		}
+
+		private async void setup_connection () {
+			try {
+				connection = yield DBusConnection.new (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+			} catch (GLib.Error connection_error) {
+				printerr ("Unable to create connection: %s\n", connection_error.message);
+				return;
+			}
+			connection.closed.connect (on_connection_closed);
+			connection.add_filter (on_connection_message);
+			try {
+				AgentSessionProvider provider = this;
+				registration_id = connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider);
+				connection.start_message_processing ();
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+		}
+
+		private async void teardown_connection () {
+			if (connection != null) {
+				connection.closed.disconnect (on_connection_closed);
+
+				try {
+					yield connection.flush ();
+				} catch (GLib.Error e) {
+				}
+
+				if (registration_id != 0) {
+					connection.unregister_object (registration_id);
+				}
+
+				try {
+					yield connection.close ();
+				} catch (GLib.Error e) {
+				}
+
+				connection = null;
+			}
+		}
+
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			bool closed_by_us = (!remote_peer_vanished && error == null);
+			if (!closed_by_us)
+				unload.begin ();
+
+			Gee.Promise<bool> operation = null;
+			lock (pending_calls) {
+				pending_calls = 0;
+				operation = pending_close;
+				pending_close = null;
+			}
+			if (operation != null)
+				operation.set_value (true);
+		}
+
+		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
+			switch (message.get_message_type ()) {
+				case DBusMessageType.METHOD_CALL:
+					if (incoming) {
+						lock (pending_calls) {
+							pending_calls++;
+						}
+					}
+					break;
+				case DBusMessageType.METHOD_RETURN:
+				case DBusMessageType.ERROR:
+					if (!incoming) {
+						lock (pending_calls) {
+							pending_calls--;
+							var operation = pending_close;
+							if (pending_calls == 0 && operation != null) {
+								pending_close = null;
+								Idle.add (() => {
+									operation.set_value (true);
+									return false;
+								});
+							}
+						}
+					}
+					break;
+				default:
+					break;
+			}
+
+			return message;
+		}
+	}
+
+	private class AgentClient : Object, AgentSession {
+		public signal void closed (AgentClient client);
+
+		public weak AgentServer server {
+			get;
+			construct;
+		}
+
+		public AgentSessionId id {
+			get;
+			construct;
+		}
+
+		public uint registration_id {
+			get;
+			set;
+		}
+
+		private Gee.Promise<bool> close_request;
+
+		private ScriptEngine script_engine;
+
+		public AgentClient (AgentServer server, AgentSessionId id) {
+			Object (server: server, id: id);
+		}
+
+		public async void close () throws Error {
+			if (close_request != null) {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+				return;
+			}
+			close_request = new Gee.Promise<bool> ();
+
+			if (script_engine != null) {
+				yield script_engine.shutdown ();
+				script_engine = null;
+			}
+
+			closed (this);
+
+			close_request.set_value (true);
 		}
 
 		public async AgentScriptId create_script (string name, string source) throws Error {
@@ -137,16 +320,14 @@ namespace Frida.Agent {
 		}
 
 		public async void disable_jit () throws GLib.Error {
-			if (script_engine != null)
-				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
-			jit_enabled = false;
+			server.disable_jit ();
 		}
 
 		private ScriptEngine get_script_engine () throws Error {
 			check_open ();
 
 			if (script_engine == null) {
-				script_engine = new ScriptEngine (Environment.obtain_script_backend (jit_enabled), agent_range);
+				script_engine = server.create_script_engine ();
 				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
 				script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 			}
@@ -155,101 +336,8 @@ namespace Frida.Agent {
 		}
 
 		private void check_open () throws Error {
-			if (closing)
-				throw new Error.INVALID_OPERATION ("Agent is closing");
-		}
-
-		public void run () throws Error {
-			setup_connection.begin ();
-			main_loop = new MainLoop ();
-			main_loop.run ();
-		}
-
-		private async void setup_connection () {
-			try {
-				connection = yield DBusConnection.new (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
-			} catch (GLib.Error connection_error) {
-				printerr ("Unable to create connection: %s\n", connection_error.message);
-				return;
-			}
-			connection.closed.connect (on_connection_closed);
-			connection.add_filter (on_connection_message);
-			try {
-				Frida.AgentSession session = this;
-				registration_id = connection.register_object (Frida.ObjectPath.AGENT_SESSION, session);
-				connection.start_message_processing ();
-			} catch (IOError io_error) {
-				assert_not_reached ();
-			}
-		}
-
-		private async void teardown_connection () {
-			if (connection != null) {
-				connection.closed.disconnect (on_connection_closed);
-
-				try {
-					yield connection.flush ();
-				} catch (GLib.Error e) {
-				}
-
-				if (registration_id != 0) {
-					connection.unregister_object (registration_id);
-				}
-
-				try {
-					yield connection.close ();
-				} catch (GLib.Error e) {
-				}
-
-				connection = null;
-			}
-		}
-
-		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			bool closed_by_us = (!remote_peer_vanished && error == null);
-			if (!closed_by_us)
-				close.begin ();
-
-			Gee.Promise<bool> operation = null;
-			lock (pending_calls) {
-				pending_calls = 0;
-				operation = pending_close;
-				pending_close = null;
-			}
-			if (operation != null)
-				operation.set_value (true);
-		}
-
-		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
-			switch (message.get_message_type ()) {
-				case DBusMessageType.METHOD_CALL:
-					if (incoming) {
-						lock (pending_calls) {
-							pending_calls++;
-						}
-					}
-					break;
-				case DBusMessageType.METHOD_RETURN:
-				case DBusMessageType.ERROR:
-					if (!incoming) {
-						lock (pending_calls) {
-							pending_calls--;
-							var operation = pending_close;
-							if (pending_calls == 0 && operation != null) {
-								pending_close = null;
-								Idle.add (() => {
-									operation.set_value (true);
-									return false;
-								});
-							}
-						}
-					}
-					break;
-				default:
-					break;
-			}
-
-			return message;
+			if (close_request != null)
+				throw new Error.INVALID_OPERATION ("Session is closing");
 		}
 	}
 

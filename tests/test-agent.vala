@@ -102,6 +102,7 @@ namespace Frida.AgentTest {
 		private PipeTransport transport;
 		private Thread<bool> main_thread;
 		private DBusConnection connection;
+		private AgentSessionProvider provider;
 		private AgentSession session;
 
 		private Gee.LinkedList<ScriptMessage> message_queue = new Gee.LinkedList<ScriptMessage> ();
@@ -150,7 +151,12 @@ namespace Frida.AgentTest {
 
 			try {
 				connection = yield DBusConnection.new (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
-				session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION);
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
+
+				var session_id = AgentSessionId (1);
+				yield provider.open (session_id);
+
+				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id));
 			} catch (GLib.Error dbus_error) {
 				assert_not_reached ();
 			}
@@ -167,6 +173,7 @@ namespace Frida.AgentTest {
 				assert_not_reached ();
 			}
 			session = null;
+			provider = null;
 
 			try {
 				yield connection.close ();

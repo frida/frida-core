@@ -82,7 +82,6 @@ namespace Frida.Server {
 		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
-		private Gee.HashMap<uint, SessionResources> session_resources = new Gee.HashMap<uint, SessionResources> ();
 		private Gee.HashMap<uint32, DBusMessage> method_calls = new Gee.HashMap<uint32, DBusMessage> ();
 
 		private MainLoop loop;
@@ -133,8 +132,6 @@ namespace Frida.Server {
 			stopping = true;
 
 			server.new_connection.disconnect (on_connection_opened);
-
-			session_resources.clear ();
 
 			while (clients.size != 0) {
 				foreach (var entry in clients.entries) {
@@ -192,7 +189,6 @@ namespace Frida.Server {
 
 			var raw_id = id.handle;
 			agent_sessions.unset (raw_id);
-			session_resources.unset (raw_id);
 		}
 
 		private bool on_connection_opened (DBusConnection connection) {
@@ -217,106 +213,28 @@ namespace Frida.Server {
 			clients.unset (connection, out client);
 			client.close ();
 
-			prune_sessions.begin (connection);
+			foreach (var raw_session_id in client.sessions)
+				close_session.begin (AgentSessionId (raw_session_id));
+		}
+
+		private async void close_session (AgentSessionId id) {
+			try {
+				var session = yield host_session.obtain_agent_session (id);
+				yield session.close ();
+			} catch (GLib.Error e) {
+			}
 		}
 
 		private void on_session_opened (uint session_id, DBusConnection connection) {
-			var resources = session_resources[session_id];
-			if (resources == null) {
-				resources = new SessionResources (session_id);
-				session_resources[session_id] = resources;
-			}
-			resources.connections.add (connection);
+			var client = clients[connection];
+			if (client != null)
+				client.sessions.add (session_id);
 		}
 
 		private void on_session_closed (uint session_id, DBusConnection connection) {
-			var resources = session_resources[session_id];
-			if (resources != null)
-				prune_session.begin (resources, connection);
-		}
-
-		private void on_script_created (uint script_id, uint session_id, DBusConnection connection) {
-			var resources = session_resources[session_id];
-			if (resources != null)
-				resources.scripts[script_id] = connection;
-		}
-
-		private void on_script_destroyed (uint script_id, uint session_id, DBusConnection connection) {
-			var resources = session_resources[session_id];
-			if (resources != null)
-				resources.scripts.unset (script_id);
-		}
-
-		private void on_debugger_enabled (uint session_id, DBusConnection connection) {
-			var resources = session_resources[session_id];
-			if (resources != null)
-				resources.debugger = connection;
-		}
-
-		private void on_debugger_disabled (uint session_id, DBusConnection connection) {
-			var resources = session_resources[session_id];
-			if (resources != null)
-				resources.debugger = null;
-		}
-
-		private async void prune_sessions (DBusConnection connection) {
-			foreach (var resources in session_resources.values.to_array ())
-				yield prune_session (resources, connection);
-		}
-
-		private async void prune_session (SessionResources resources, DBusConnection connection) {
-			var session_id = resources.session_id;
-			var session = agent_sessions[session_id];
-			if (session == null) {
-				session_resources.unset (session_id);
-				return;
-			}
-
-			resources.connections.remove (connection);
-
-			var scripts_to_destroy = new Gee.ArrayList<uint> ();
-			var scripts = resources.scripts;
-			foreach (var entry in scripts.entries) {
-				if (entry.value == connection) {
-					scripts_to_destroy.add (entry.key);
-				}
-			}
-			foreach (var id in scripts_to_destroy)
-				scripts.unset (id);
-
-			foreach (var id in scripts_to_destroy) {
-				try {
-					yield session.destroy_script (AgentScriptId (id));
-				} catch (GLib.Error e) {
-				}
-			}
-
-			if (resources.debugger == connection) {
-				resources.debugger = null;
-
-				try {
-					yield session.disable_debugger ();
-				} catch (GLib.Error e) {
-				}
-			}
-
-			if (resources.connections.is_empty) {
-				session_resources.unset (session_id);
-
-				try {
-					yield session.close ();
-				} catch (GLib.Error e) {
-				}
-			} else {
-				var notification = new DBusMessage.@signal ("/re/frida/HostSession", "re.frida.HostSession7", "AgentSessionDestroyed");
-				notification.set_body (new Variant ("((u))", session_id));
-
-				try {
-					uint32 serial;
-					connection.send_message (notification, DBusSendMessageFlags.NONE, out serial);
-				} catch (GLib.Error e) {
-				}
-			}
+			var client = clients[connection];
+			if (client != null)
+				client.sessions.remove (session_id);
 		}
 
 		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
@@ -353,7 +271,7 @@ namespace Frida.Server {
 				iface = call.get_interface ();
 				member = call.get_member ();
 			}
-			if (iface == "re.frida.HostSession7") {
+			if (iface == "re.frida.HostSession8") {
 				if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
 					uint32 session_id;
 					message.get_body ().get ("((u))", out session_id);
@@ -362,47 +280,16 @@ namespace Frida.Server {
 						return false;
 					});
 				}
-			} else if (iface == "re.frida.AgentSession7") {
+			} else if (iface == "re.frida.AgentSession8") {
 				uint session_id;
 				path.scanf ("/re/frida/AgentSession/%u", out session_id);
 				if (member == "Close") {
-					if (type == DBusMessageType.METHOD_CALL) {
-						try {
-							result = message.copy ();
-						} catch (GLib.Error e) {
-							assert_not_reached ();
-						}
-						result.set_member ("Ping");
-					} else {
+					if (type != DBusMessageType.METHOD_CALL) {
 						Idle.add (() => {
 							on_session_closed (session_id, connection);
 							return false;
 						});
 					}
-				} else if (member.has_prefix ("CreateScript") && type == DBusMessageType.METHOD_RETURN) {
-					uint32 script_id;
-					message.get_body ().get ("((u))", out script_id);
-					Idle.add (() => {
-						on_script_created (script_id, session_id, connection);
-						return false;
-					});
-				} else if (member == "DestroyScript" && type == DBusMessageType.METHOD_RETURN) {
-					uint32 script_id;
-					call.get_body ().get ("((u))", out script_id);
-					Idle.add (() => {
-						on_script_destroyed (script_id, session_id, connection);
-						return false;
-					});
-				} else if (member == "EnableDebugger" && type == DBusMessageType.METHOD_RETURN) {
-					Idle.add (() => {
-						on_debugger_enabled (session_id, connection);
-						return false;
-					});
-				} else if (member == "DisableDebugger" && type == DBusMessageType.METHOD_RETURN) {
-					Idle.add (() => {
-						on_debugger_disabled (session_id, connection);
-						return false;
-					});
 				}
 			}
 
@@ -415,11 +302,16 @@ namespace Frida.Server {
 				construct;
 			}
 
+			public Gee.HashSet<uint> sessions {
+				get;
+				construct;
+			}
+
 			private Gee.HashSet<uint> registrations = new Gee.HashSet<uint> ();
 			private Gee.HashMap<uint, uint> agent_registration_by_id = new Gee.HashMap<uint, uint> ();
 
 			public Client (DBusConnection connection) {
-				Object (connection: connection);
+				Object (connection: connection, sessions: new Gee.HashSet<uint> ());
 			}
 
 			public void close () {
@@ -453,36 +345,6 @@ namespace Frida.Server {
 				agent_registration_by_id.unset (id.handle, out registration_id);
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
-			}
-		}
-
-		private class SessionResources : Object {
-			public uint session_id {
-				get;
-				construct;
-			}
-
-			public Gee.HashSet<DBusConnection> connections {
-				get;
-				construct;
-			}
-
-			public Gee.HashMap<uint, DBusConnection> scripts {
-				get;
-				construct;
-			}
-
-			public DBusConnection? debugger {
-				get;
-				set;
-			}
-
-			public SessionResources (uint session_id) {
-				Object (
-					session_id: session_id,
-					connections: new Gee.HashSet<DBusConnection> (),
-					scripts: new Gee.HashMap<uint, DBusConnection> ()
-				);
 			}
 		}
 	}

@@ -39,7 +39,8 @@ namespace Frida {
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
 		private uint system_session_registration_id = 0;
-		private AgentContainer system_session;
+		private AgentContainer system_session_container;
+		private Gee.HashMap<uint, uint> system_sessions = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
 		private uint last_pipe_proxy_id = 1;
@@ -86,15 +87,23 @@ namespace Frida {
 			shutdown_request = new Gee.Promise<bool> ();
 
 			if (connection != null) {
+				foreach (var registration_id in system_sessions.values)
+					connection.unregister_object (registration_id);
+				system_sessions.clear ();
+
 				foreach (var registration_id in pipe_proxies.values)
 					connection.unregister_object (registration_id);
 				pipe_proxies.clear ();
 
-				if (system_session != null) {
+				if (system_session_container != null) {
+					system_session_container.opened.disconnect (on_system_session_opened);
+					system_session_container.closed.disconnect (on_system_session_closed);
+
 					assert (system_session_registration_id != 0);
 					connection.unregister_object (system_session_registration_id);
-					yield system_session.destroy ();
-					system_session = null;
+
+					yield system_session_container.destroy ();
+					system_session_container = null;
 				}
 
 				if (helper_registration_id != 0)
@@ -136,14 +145,34 @@ namespace Frida {
 			});
 		}
 
-		public async string create_system_session (string agent_filename) throws GLib.Error {
-			assert (system_session == null);
+		public async string create_system_session_provider (string agent_filename) throws GLib.Error {
+			assert (system_session_container == null);
 
-			system_session = yield AgentContainer.create (agent_filename);
-			AgentSession system_agent_session = system_session;
-			system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION, system_agent_session);
+			system_session_container = yield AgentContainer.create (agent_filename);
+			AgentSessionProvider provider = system_session_container;
+			system_session_registration_id = connection.register_object (Frida.ObjectPath.SYSTEM_SESSION_PROVIDER, provider);
 
-			return Frida.ObjectPath.SYSTEM_SESSION;
+			provider.opened.connect (on_system_session_opened);
+			provider.closed.connect (on_system_session_closed);
+
+			return Frida.ObjectPath.SYSTEM_SESSION_PROVIDER;
+		}
+
+		private void on_system_session_opened (AgentSessionId id) {
+			try {
+				var session_path = ObjectPath.from_agent_session_id (id);
+				AgentSession session = system_session_container.connection.get_proxy_sync (null, session_path);
+				var session_registration = connection.register_object (session_path, session);
+				system_sessions[id.handle] = session_registration;
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private void on_system_session_closed (AgentSessionId id) {
+			uint session_registration;
+			var found = system_sessions.unset (id.handle, out session_registration);
+			assert (found);
+			connection.unregister_object (session_registration);
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {

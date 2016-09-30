@@ -290,9 +290,8 @@ namespace Frida {
 		private Gee.Promise<bool> close_request;
 
 		protected HostSession host_session;
-		private Gee.HashMap<uint, Session> session_by_pid = new Gee.HashMap<uint, Session> ();
 		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
-		private Gee.HashMap<uint, Gee.Promise<Session>> pending_attach_requests = new Gee.HashMap<uint, Gee.Promise<Session>> ();
+		private Gee.HashSet<Gee.Promise<Session>> pending_attach_requests = new Gee.HashSet<Gee.Promise<Session>> ();
 		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
 
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
@@ -601,38 +600,25 @@ namespace Frida {
 		public async Session attach (uint pid) throws Error {
 			check_open ();
 
-			var session = session_by_pid[pid];
-			if (session != null)
-				return session;
+			var attach_request = new Gee.Promise<Session> ();
+			pending_attach_requests.add (attach_request);
 
-			var attach_request = pending_attach_requests[pid];
-			if (attach_request != null) {
-				var future = attach_request.future;
-				try {
-					return yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
-				}
-			}
-			attach_request = new Gee.Promise<Session> ();
-			pending_attach_requests[pid] = attach_request;
-
+			Session session;
 			try {
 				yield ensure_host_session ();
 
 				var agent_session_id = yield host_session.attach_to (pid);
 				var agent_session = yield provider.obtain_agent_session (host_session, agent_session_id);
 				session = new Session (this, pid, agent_session);
-				session_by_pid[pid] = session;
 				session_by_handle[agent_session_id.handle] = session;
 
 				attach_request.set_value (session);
-				pending_attach_requests.unset (pid);
+				pending_attach_requests.remove (attach_request);
 			} catch (GLib.Error raw_attach_error) {
 				var attach_error = Marshal.from_dbus (raw_attach_error);
 
 				attach_request.set_exception (attach_error);
-				pending_attach_requests.unset (pid);
+				pending_attach_requests.remove (attach_request);
 
 				throw attach_error;
 			}
@@ -681,7 +667,7 @@ namespace Frida {
 			}
 
 			while (!pending_attach_requests.is_empty) {
-				var iterator = pending_attach_requests.values.iterator ();
+				var iterator = pending_attach_requests.iterator ();
 				iterator.next ();
 				var attach_request = iterator.get ();
 				try {
@@ -697,10 +683,9 @@ namespace Frida {
 				}
 			}
 
-			foreach (var session in session_by_pid.values.to_array ()) {
+			foreach (var session in session_by_handle.values.to_array ()) {
 				yield session._do_close (may_block);
 			}
-			session_by_pid.clear ();
 			session_by_handle.clear ();
 
 			provider.host_session_closed.disconnect (on_host_session_closed);
@@ -727,11 +712,6 @@ namespace Frida {
 		}
 
 		public async void _release_session (Session session, bool may_block) {
-			var pid = session.pid;
-
-			var session_did_exist = session_by_pid.unset (pid);
-			assert (session_did_exist);
-
 			bool session_exists = false;
 			uint handle = 0;
 			foreach (var entry in session_by_handle.entries) {
@@ -744,8 +724,7 @@ namespace Frida {
 			assert (session_exists);
 			session_by_handle.unset (handle);
 
-			var is_system_session = (handle == 0);
-			if (!is_system_session && may_block) {
+			if (may_block) {
 				var detach_request = new Gee.Promise<bool> ();
 
 				pending_detach_requests[handle] = detach_request;
@@ -1030,10 +1009,6 @@ namespace Frida {
 		}
 
 		public async void detach () {
-			// There's no point in detaching from the system session
-			if (pid == 0)
-				return;
-
 			yield _do_close (true);
 		}
 

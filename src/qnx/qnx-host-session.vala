@@ -71,7 +71,7 @@ namespace Frida {
 	}
 
 	public class QnxHostSession : BaseDBusHostSession {
-		private AgentContainer system_session = null;
+		private AgentContainer system_session_container;
 
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 
@@ -92,16 +92,17 @@ namespace Frida {
 			injector.disconnect (uninjected_handler);
 			injector = null;
 
-			if (system_session != null) {
-				yield system_session.destroy ();
-				system_session = null;
+			if (system_session_container != null) {
+				yield system_session_container.destroy ();
+				system_session_container = null;
 			}
 		}
 
-		protected override async AgentSession create_system_session () throws Error {
+		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
 			var agent_filename = injector.resource_store.ensure_copy_of (agent_desc);
-			system_session = yield AgentContainer.create (agent_filename);
-			return system_session;
+			system_session_container = yield AgentContainer.create (agent_filename);
+			connection = system_session_container.connection;
+			return system_session_container;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {

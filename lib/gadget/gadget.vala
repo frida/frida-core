@@ -389,7 +389,7 @@ namespace Frida.Gadget {
 		private bool jit_enabled;
 		private Gum.MemoryRange gadget_range;
 		private DBusServer server;
-		private Gee.HashMap<DBusConnection, Session> sessions = new Gee.HashMap<DBusConnection, Session> ();
+		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
 		public Server (bool jit_enabled, Gum.MemoryRange gadget_range) {
 			this.jit_enabled = jit_enabled;
@@ -407,7 +407,7 @@ namespace Frida.Gadget {
 				if (server == null)
 					return false;
 
-				sessions[connection] = new Session (this, connection, gadget_range);
+				clients[connection] = new Client (this, connection);
 				connection.closed.connect (on_connection_closed);
 
 				return true;
@@ -420,18 +420,25 @@ namespace Frida.Gadget {
 			if (server == null)
 				return;
 
-			foreach (var session in sessions.values)
-				session.shutdown ();
-			sessions.clear ();
-
 			server.stop ();
 			server = null;
+
+			while (!clients.is_empty) {
+				var iterator = clients.keys.iterator ();
+				iterator.next ();
+				var connection = iterator.get ();
+
+				Client client;
+				clients.unset (connection, out client);
+				yield client.shutdown ();
+			}
 		}
 
-		public unowned Gum.ScriptBackend obtain_script_backend () {
+		public ScriptEngine create_script_engine () {
 			if (script_backend == null)
 				script_backend = Environment.obtain_script_backend (jit_enabled);
-			return script_backend;
+
+			return new ScriptEngine (script_backend, gadget_range);
 		}
 
 		public void disable_jit () throws Error {
@@ -441,31 +448,27 @@ namespace Frida.Gadget {
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			Session session;
-			if (sessions.unset (connection, out session))
-				session.shutdown ();
+			Client client;
+			if (clients.unset (connection, out client))
+				client.shutdown.begin ();
 		}
 
-		private class Session : Object, HostSession, AgentSession {
+		private class Client : Object, HostSession {
 			private unowned Server server;
 			private DBusConnection connection;
-			Gum.MemoryRange gadget_range;
 			private uint host_registration_id;
-			private uint agent_registration_id;
 			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
-			private ScriptEngine script_engine;
+			private Gee.HashSet<ClientSession> sessions = new Gee.HashSet<ClientSession> ();
+			private uint next_session_id = 1;
 			private bool resume_on_attach = true;
-			private bool close_requested = false;
 
-			public Session (Server s, DBusConnection c, Gum.MemoryRange r) {
+			public Client (Server s, DBusConnection c) {
 				server = s;
 				connection = c;
-				gadget_range = r;
 
 				try {
 					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
-					agent_registration_id = connection.register_object (Frida.ObjectPath.from_agent_session_id (AgentSessionId (1)), this as AgentSession);
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -478,20 +481,16 @@ namespace Frida.Gadget {
 				this_process = HostProcessInfo (pid, name, no_icon, no_icon);
 			}
 
-			~Session () {
-				shutdown ();
-			}
-
-			public void shutdown () {
-				if (script_engine != null) {
-					script_engine.shutdown.begin ();
-					script_engine = null;
+			public async void shutdown () {
+				foreach (var session in sessions.to_array ()) {
+					try {
+						yield session.close ();
+					} catch (GLib.Error e) {
+						assert_not_reached ();
+					}
 				}
+				assert (sessions.is_empty);
 
-				if (agent_registration_id != 0) {
-					connection.unregister_object (agent_registration_id);
-					agent_registration_id = 0;
-				}
 				if (host_registration_id != 0) {
 					connection.unregister_object (host_registration_id);
 					host_registration_id = 0;
@@ -544,7 +543,6 @@ namespace Frida.Gadget {
 			public async void kill (uint pid) throws Error {
 				validate_pid (pid);
 
-				yield script_engine.shutdown ();
 				suicide.begin ();
 			}
 
@@ -563,28 +561,82 @@ namespace Frida.Gadget {
 				if (resume_on_attach)
 					Frida.Gadget.resume ();
 
-				return AgentSessionId (1);
+				var id = AgentSessionId (next_session_id++);
+
+				var session = new ClientSession (server, id);
+				sessions.add (session);
+				session.closed.connect (on_session_closed);
+
+				try {
+					AgentSession s = session;
+					session.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), s);
+				} catch (IOError io_error) {
+					assert_not_reached ();
+				}
+
+				return id;
+			}
+
+			private void on_session_closed (ClientSession session) {
+				connection.unregister_object (session.registration_id);
+
+				session.closed.disconnect (on_session_closed);
+				sessions.remove (session);
+
+				agent_session_destroyed (session.id);
 			}
 
 			private void validate_pid (uint pid) throws Error {
 				if (pid != this_process.pid)
 					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
 			}
+		}
 
-			public async void close () throws Error {
-				if (close_requested)
-					return;
-				close_requested = true;
+		private class ClientSession : Object, AgentSession {
+			public signal void closed (ClientSession session);
 
-				var source = new TimeoutSource (50);
-				source.set_callback (() => {
-					connection.close.begin ();
-					return false;
-				});
-				source.attach (Environment.get_main_context ());
+			public weak Server server {
+				get;
+				construct;
 			}
 
-			public async void ping () throws Error {
+			public AgentSessionId id {
+				get;
+				construct;
+			}
+
+			public uint registration_id {
+				get;
+				set;
+			}
+
+			private Gee.Promise<bool> close_request;
+
+			private ScriptEngine script_engine;
+
+			public ClientSession (Server server, AgentSessionId id) {
+				Object (server: server, id: id);
+			}
+
+			public async void close () throws Error {
+				if (close_request != null) {
+					try {
+						yield close_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+					return;
+				}
+				close_request = new Gee.Promise<bool> ();
+
+				if (script_engine != null) {
+					yield script_engine.shutdown ();
+					script_engine = null;
+				}
+
+				closed (this);
+
+				close_request.set_value (true);
 			}
 
 			public async AgentScriptId create_script (string name, string source) throws Error {
@@ -636,12 +688,20 @@ namespace Frida.Gadget {
 			}
 
 			private ScriptEngine get_script_engine () throws Error {
+				check_open ();
+
 				if (script_engine == null) {
-					script_engine = new ScriptEngine (server.obtain_script_backend (), gadget_range);
+					script_engine = server.create_script_engine ();
 					script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+					script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 				}
 
 				return script_engine;
+			}
+
+			private void check_open () throws Error {
+				if (close_request != null)
+					throw new Error.INVALID_OPERATION ("Session is closing");
 			}
 		}
 	}

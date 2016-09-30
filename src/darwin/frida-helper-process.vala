@@ -1,7 +1,6 @@
 #if DARWIN
 namespace Frida {
 	internal class HelperProcess {
-		public signal void stopped ();
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
@@ -57,11 +56,13 @@ namespace Frida {
 			yield obtain ();
 		}
 
-		public async AgentSession create_system_session (string agent_filename) throws Error {
+		public async AgentSessionProvider create_system_session_provider (string agent_filename, out DBusConnection conn) throws Error {
 			var helper = yield obtain ();
 			try {
-				var system_session_path = yield helper.create_system_session (agent_filename);
-				return yield connection.get_proxy (null, system_session_path);
+				var provider_path = yield helper.create_system_session_provider (agent_filename);
+				AgentSessionProvider provider = yield connection.get_proxy (null, provider_path);
+				conn = connection;
+				return provider;
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -239,8 +240,6 @@ namespace Frida {
 			connection = null;
 
 			process = null;
-
-			stopped ();
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
