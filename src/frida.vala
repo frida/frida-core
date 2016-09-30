@@ -251,7 +251,7 @@ namespace Frida {
 
 	public class Device : Object {
 		public signal void spawned (Spawn spawn);
-		public signal void output (uint pid, int fd, uint8[] data);
+		public signal void output (uint pid, int fd, Bytes data);
 		public signal void lost ();
 
 		public string id {
@@ -407,7 +407,7 @@ namespace Frida {
 		private Icon? icon_from_image_data (ImageData? img) {
 			if (img == null || img.width == 0)
 				return null;
-			return new Icon (img.width, img.height, img.rowstride, Base64.decode (img.pixels));
+			return new Icon (img.width, img.height, img.rowstride, new Bytes.take (Base64.decode (img.pixels)));
 		}
 
 		public async void enable_spawn_gating () throws Error {
@@ -519,19 +519,18 @@ namespace Frida {
 			}
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
+		public async void input (uint pid, Bytes data) throws Error {
 			check_open ();
 
 			try {
-				var data_copy = data; /* FIXME: workaround for Vala compiler bug */
 				yield ensure_host_session ();
-				yield host_session.input (pid, data_copy);
+				yield host_session.input (pid, data.get_data ());
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 		}
 
-		public void input_sync (uint pid, uint8[] data) throws Error {
+		public void input_sync (uint pid, Bytes data) throws Error {
 			var task = create<InputTask> () as InputTask;
 			task.pid = pid;
 			task.data = data;
@@ -540,7 +539,7 @@ namespace Frida {
 
 		private class InputTask : DeviceTask<void> {
 			public uint pid;
-			public uint8[] data;
+			public Bytes data;
 
 			protected override async void perform_operation () throws Error {
 				yield parent.input (pid, data);
@@ -766,7 +765,7 @@ namespace Frida {
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
-			output (pid, fd, data);
+			output (pid, fd, new Bytes (data));
 		}
 
 		private void on_host_session_closed (HostSession session) {
@@ -955,12 +954,12 @@ namespace Frida {
 			private set;
 		}
 
-		public uint8[] pixels {
+		public Bytes pixels {
 			get;
 			private set;
 		}
 
-		public Icon (int width, int height, int rowstride, uint8[] pixels) {
+		public Icon (int width, int height, int rowstride, Bytes pixels) {
 			this.width = width;
 			this.height = height;
 			this.rowstride = rowstride;
