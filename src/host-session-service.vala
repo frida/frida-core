@@ -146,8 +146,7 @@ namespace Frida {
 				var request = iterator.get ();
 				try {
 					var entry = yield request.future.wait_async ();
-					entries.unset (entry.pid);
-					yield entry.close ();
+					yield destroy (entry);
 				} catch (Gee.FutureError e) {
 				}
 			}
@@ -318,7 +317,7 @@ namespace Frida {
 			}
 			assert (entry_to_remove != null);
 
-			destroy (entry_to_remove);
+			destroy.begin (entry_to_remove);
 		}
 
 		private void on_session_closed (AgentSessionId id) {
@@ -348,13 +347,13 @@ namespace Frida {
 			}
 		}
 
-		private void destroy (Entry entry) {
+		private async void destroy (Entry entry) {
 			entry.provider.closed.disconnect (on_session_closed);
 			entry.connection.closed.disconnect (on_connection_closed);
 
 			entries.unset (entry.pid);
 
-			entry.close.begin ();
+			yield entry.close ();
 
 			foreach (var raw_id in entry.sessions) {
 				var id = AgentSessionId (raw_id);
