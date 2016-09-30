@@ -81,7 +81,7 @@ namespace Frida {
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
-		private AgentContainer system_session_container = null;
+		private AgentContainer system_session_container;
 
 		private Gee.HashMap<uint, ChildProcess> processes = new Gee.HashMap<uint, ChildProcess> ();
 
