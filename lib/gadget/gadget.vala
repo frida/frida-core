@@ -266,7 +266,7 @@ namespace Frida.Gadget {
 
 		private async void post_call_request (string request, PendingResponse response) {
 			try {
-				script_engine.post_message_to_script (script, request);
+				script_engine.post_to_script (script, request);
 			} catch (GLib.Error e) {
 				response.complete_with_error (Marshal.from_dbus (e));
 			}
@@ -290,7 +290,7 @@ namespace Frida.Gadget {
 			script_unchanged_timeout = source;
 		}
 
-		private void on_message (AgentScriptId sid, string raw_message, uint8[] data) {
+		private void on_message (AgentScriptId sid, string raw_message, Bytes? data) {
 			var parser = new Json.Parser ();
 			try {
 				parser.load_from_data (raw_message);
@@ -667,8 +667,8 @@ namespace Frida.Gadget {
 				yield engine.load_script (sid);
 			}
 
-			public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
-				get_script_engine ().post_message_to_script (sid, message);
+			public async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws Error {
+				get_script_engine ().post_to_script (sid, message, has_data ? new Bytes (data) : null);
 			}
 
 			public async void enable_debugger () throws Error {
@@ -692,7 +692,11 @@ namespace Frida.Gadget {
 
 				if (script_engine == null) {
 					script_engine = server.create_script_engine ();
-					script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+					script_engine.message_from_script.connect ((script_id, message, data) => {
+						var has_data = data != null;
+						var data_param = has_data ? data.get_data () : new uint8[0];
+						this.message_from_script (script_id, message, has_data, data_param);
+					});
 					script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 				}
 

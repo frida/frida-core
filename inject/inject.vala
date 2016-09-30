@@ -299,7 +299,7 @@ namespace Frida.Inject {
 
 		private async void post_call_request (string request, PendingResponse response) {
 			try {
-				yield script.post_message (request);
+				yield script.post (request);
 			} catch (GLib.Error e) {
 				response.complete_with_error (Marshal.from_dbus (e));
 			}

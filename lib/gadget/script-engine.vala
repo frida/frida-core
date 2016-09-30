@@ -2,7 +2,7 @@ using Gee;
 
 namespace Frida.Gadget {
 	public class ScriptEngine : Object {
-		public signal void message_from_script (AgentScriptId sid, string message, uint8[] data);
+		public signal void message_from_script (AgentScriptId sid, string message, Bytes? data);
 		public signal void message_from_debugger (string message);
 
 		private Gum.ScriptBackend backend;
@@ -47,10 +47,7 @@ namespace Frida.Gadget {
 				throw new Error.INVALID_ARGUMENT (e.message);
 			}
 			script.get_stalker ().exclude (agent_range);
-			script.set_message_handler ((script, message, data) => {
-				var data_param = (data != null) ? data.get_data () : new uint8[] {};
-				this.message_from_script (sid, message, data_param);
-			});
+			script.set_message_handler ((script, message, data) => this.message_from_script (sid, message, data));
 
 			var instance = new ScriptInstance (sid, script);
 			instance_by_id[sid.handle] = instance;
@@ -80,11 +77,11 @@ namespace Frida.Gadget {
 			yield instance.script.load ();
 		}
 
-		public void post_message_to_script (AgentScriptId sid, string message) throws Error {
+		public void post_to_script (AgentScriptId sid, string message, Bytes? data = null) throws Error {
 			var instance = instance_by_id[sid.handle];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			instance.script.post_message (message);
+			instance.script.post (message, data);
 		}
 
 		public void enable_debugger () throws Error {

@@ -161,7 +161,7 @@ namespace Frida.AgentTest {
 				assert_not_reached ();
 			}
 
-			session.message_from_script.connect ((sid, message, data) => message_queue.add (new ScriptMessage (sid, message)));
+			session.message_from_script.connect ((sid, message, has_data, data) => message_queue.add (new ScriptMessage (sid, message)));
 
 			return session;
 		}

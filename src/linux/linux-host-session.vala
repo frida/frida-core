@@ -721,7 +721,7 @@ namespace Frida {
 
 		private async void post_call_request (string request, PendingResponse response, AgentSession session, AgentScriptId script) {
 			try {
-				yield session.post_message_to_script (script, request);
+				yield session.post_to_script (script, request, false, new uint8[0]);
 			} catch (GLib.Error e) {
 				response.complete_with_error (Marshal.from_dbus (e));
 			}
@@ -748,7 +748,7 @@ namespace Frida {
 			script = cached_script;
 		}
 
-		private void on_message_from_script (AgentScriptId sid, string raw_message, uint8[] data) {
+		private void on_message_from_script (AgentScriptId sid, string raw_message, bool has_data, uint8[] data) {
 			if (sid != cached_script)
 				return;
 

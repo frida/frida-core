@@ -497,7 +497,7 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.obtain_agent_session (host_session, session_id);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
@@ -577,7 +577,7 @@ namespace Frida.HostSessionTest {
 					stdout.printf ("obtain_agent_session()\n");
 					var session = yield prov.obtain_agent_session (host_session, id);
 					string received_message = null;
-					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 						received_message = message;
 						spawn_android_app.callback ();
 					});
@@ -713,7 +713,7 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.obtain_agent_session (host_session, session_id);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 					received_message = message;
 					if (waiting)
 						run_spawn_scenario.callback ();
@@ -876,7 +876,7 @@ namespace Frida.HostSessionTest {
 					var session = yield prov.obtain_agent_session (host_session, id);
 					string received_message = null;
 					bool waiting = false;
-					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 						received_message = message;
 						if (waiting)
 							cross_arch.callback ();
@@ -922,7 +922,7 @@ namespace Frida.HostSessionTest {
 					var id = yield host_session.attach_to (pid);
 					var session = yield prov.obtain_agent_session (host_session, id);
 					string received_message = null;
-					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 						received_message = message;
 						spawn_ios_app.callback ();
 					});
@@ -1035,7 +1035,7 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.obtain_agent_session (host_session, session_id);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
@@ -1169,7 +1169,7 @@ namespace Frida.HostSessionTest {
 				var session_id = yield host_session.attach_to (process.pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 					received_message = message;
 					large_messages.callback ();
 				});
@@ -1192,7 +1192,7 @@ namespace Frida.HostSessionTest {
 						builder.append ("s");
 					}
 					builder.append ("\"");
-					yield session.post_message_to_script (script_id, builder.str);
+					yield session.post_to_script (script_id, builder.str, false, new uint8[0]);
 					yield;
 					stdout.printf ("received message: '%s'\n", received_message);
 				}

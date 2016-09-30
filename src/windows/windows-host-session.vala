@@ -193,7 +193,7 @@ namespace Frida {
 				if (n > 0)
 					process_next_output_from.begin (stream, pid, fd, resource);
 			} catch (GLib.Error e) {
-				output (pid, fd, new uint8[0] {});
+				output (pid, fd, new uint8[0]);
 			}
 		}
 

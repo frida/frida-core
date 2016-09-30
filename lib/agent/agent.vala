@@ -302,9 +302,8 @@ namespace Frida.Agent {
 			yield engine.load_script (sid);
 		}
 
-		public async void post_message_to_script (AgentScriptId sid, string message) throws Error {
-			var engine = get_script_engine ();
-			engine.post_message_to_script (sid, message);
+		public async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws Error {
+			get_script_engine ().post_to_script (sid, message, has_data ? new Bytes (data) : null);
 		}
 
 		public async void enable_debugger () throws Error {
@@ -328,7 +327,11 @@ namespace Frida.Agent {
 
 			if (script_engine == null) {
 				script_engine = server.create_script_engine ();
-				script_engine.message_from_script.connect ((script_id, message, data) => this.message_from_script (script_id, message, data));
+				script_engine.message_from_script.connect ((script_id, message, data) => {
+					var has_data = data != null;
+					var data_param = has_data ? data.get_data () : new uint8[0];
+					this.message_from_script (script_id, message, has_data, data_param);
+				});
 				script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
 			}
 

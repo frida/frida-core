@@ -1192,10 +1192,10 @@ namespace Frida {
 			}
 		}
 
-		private void on_message_from_script (AgentScriptId sid, string message, uint8[] data) {
+		private void on_message_from_script (AgentScriptId sid, string message, bool has_data, uint8[] data) {
 			var script = script_by_id[sid.handle];
 			if (script != null)
-				script.message (message, data);
+				script.message (message, has_data ? new Bytes (data) : null);
 		}
 
 		public void _release_script (AgentScriptId sid) {
@@ -1253,7 +1253,7 @@ namespace Frida {
 
 	public class Script : Object {
 		public signal void destroyed ();
-		public signal void message (string message, uint8[] data);
+		public signal void message (string message, Bytes? data);
 
 		public MainContext main_context {
 			get;
@@ -1309,27 +1309,32 @@ namespace Frida {
 			}
 		}
 
-		public async void post_message (string message) throws Error {
+		public async void post (string message, Bytes? data = null) throws Error {
 			check_open ();
 
+			var has_data = data != null;
+			var data_param = has_data ? data.get_data () : new uint8[0];
+
 			try {
-				yield session.session.post_message_to_script (script_id, message);
+				yield session.session.post_to_script (script_id, message, has_data, data_param);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 		}
 
-		public void post_message_sync (string message) throws Error {
-			var task = create<PostMessageTask> () as PostMessageTask;
+		public void post_sync (string message, Bytes? data = null) throws Error {
+			var task = create<PostTask> () as PostTask;
 			task.message = message;
+			task.data = data;
 			task.start_and_wait_for_completion ();
 		}
 
-		private class PostMessageTask : ScriptTask<void> {
+		private class PostTask : ScriptTask<void> {
 			public string message;
+			public Bytes? data;
 
 			protected override async void perform_operation () throws Error {
-				yield parent.post_message (message);
+				yield parent.post (message, data);
 			}
 		}
 
