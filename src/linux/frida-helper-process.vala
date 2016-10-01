@@ -134,7 +134,6 @@ namespace Frida {
 						if (resource_store.helper32 == null)
 							throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
 						factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
-						factory32.lost.connect (on_factory_lost);
 						factory32.output.connect (on_factory_output);
 						factory32.uninjected.connect (on_factory_uninjected);
 					}
@@ -147,7 +146,6 @@ namespace Frida {
 						if (resource_store.helper64 == null)
 							throw new Error.NOT_SUPPORTED ("Unable to handle 64-bit processes due to build configuration");
 						factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
-						factory64.lost.connect (on_factory_lost);
 						factory64.output.connect (on_factory_output);
 						factory64.uninjected.connect (on_factory_uninjected);
 					}
@@ -186,17 +184,6 @@ namespace Frida {
 			}
 		}
 
-		private void on_factory_lost (HelperFactory factory) {
-			factory.lost.disconnect (on_factory_lost);
-			factory.output.disconnect (on_factory_output);
-			factory.uninjected.disconnect (on_factory_uninjected);
-			if (factory == factory32) {
-				factory32 = null;
-			} else if (factory == factory64) {
-				factory64 = null;
-			}
-		}
-
 		private void on_factory_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
 		}
@@ -207,7 +194,6 @@ namespace Frida {
 	}
 
 	private class HelperFactory {
-		public signal void lost (HelperFactory factory);
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
@@ -226,23 +212,27 @@ namespace Frida {
 		}
 
 		public async void close () {
+			var proc = process as Subprocess;
+
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
-				} catch (GLib.Error proxy_error) {
+				} catch (GLib.Error e) {
 				}
-				proxy.output.disconnect (on_output);
-				proxy.uninjected.disconnect (on_uninjected);
-				proxy = null;
 			}
 
 			if (connection != null) {
-				connection.closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
-				} catch (GLib.Error connection_error) {
+				} catch (GLib.Error e) {
 				}
-				connection = null;
+			}
+
+			if (proc != null) {
+				try {
+					yield proc.wait_async ();
+				} catch (GLib.Error e) {
+				}
 			}
 		}
 
@@ -311,8 +301,10 @@ namespace Frida {
 					process = pending_superprocess;
 				else
 					process = pending_subprocess;
+
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
+
 				proxy = pending_proxy;
 				proxy.output.connect (on_output);
 				proxy.uninjected.connect (on_uninjected);
@@ -329,10 +321,16 @@ namespace Frida {
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
+			obtain_request = null;
+
 			proxy.output.disconnect (on_output);
 			proxy.uninjected.disconnect (on_uninjected);
+			proxy = null;
+
 			connection.closed.disconnect (on_connection_closed);
-			lost (this);
+			connection = null;
+
+			process = null;
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
