@@ -35,17 +35,26 @@ namespace Frida {
 		}
 
 		public async void close () {
+			var proc = process;
+
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
-				} catch (GLib.Error proxy_error) {
+				} catch (GLib.Error e) {
 				}
 			}
 
 			if (connection != null) {
 				try {
 					yield connection.close ();
-				} catch (GLib.Error connection_error) {
+				} catch (GLib.Error e) {
+				}
+			}
+
+			if (proc != null) {
+				try {
+					yield proc.wait_async ();
+				} catch (GLib.Error e) {
 				}
 			}
 
