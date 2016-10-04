@@ -348,10 +348,11 @@ namespace Frida {
 		}
 
 		private async void destroy (Entry entry) {
+			if (!entries.unset (entry.pid))
+				return;
+
 			entry.provider.closed.disconnect (on_session_closed);
 			entry.connection.closed.disconnect (on_connection_closed);
-
-			entries.unset (entry.pid);
 
 			yield entry.close ();
 
