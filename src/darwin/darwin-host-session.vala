@@ -224,19 +224,12 @@ namespace Frida {
 		}
 
 		private void on_uninjected (uint id) {
-			bool found = false;
-			uint pid = 0;
-
 			foreach (var entry in injectee_by_pid.entries) {
 				if (entry.value == id) {
-					found = true;
-					pid = entry.key;
-					break;
+					injectee_by_pid.unset (entry.key);
+					return;
 				}
 			}
-
-			if (found)
-				injectee_by_pid.unset (pid);
 		}
 
 		// TODO: use Vala's preprocessor when the build system has been fixed
