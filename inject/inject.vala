@@ -323,7 +323,7 @@ namespace Frida.Inject {
 			script_unchanged_timeout = source;
 		}
 
-		private void on_message (string raw_message, uint8[] data) {
+		private void on_message (string raw_message, Bytes? data) {
 			var parser = new Json.Parser ();
 			try {
 				parser.load_from_data (raw_message);
