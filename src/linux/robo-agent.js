@@ -1,41 +1,43 @@
 "use strict";
 
-let ApplicationInfo, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
-let context, packageManager, activityManager;
+var ApplicationInfo, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
+var context, packageManager, activityManager;
 
 rpc.exports = {
-    enumerateApplications() {
-        const result = [];
+    enumerateApplications: function () {
+        return performOnJavaVM(function () {
+            var result = [];
 
-        Java.perform(() => {
-            const appPids = {};
-            const processes = activityManager.getRunningAppProcesses();
-            const numProcesses = processes.size();
-            for (let i = 0; i !== numProcesses; i++) {
-                const process = Java.cast(processes.get(i), RunningAppProcessInfo);
-                const pid = process.pid.value;
-                const pkgList = process.pkgList.value;
-                pkgList.forEach(packageName => {
+            var i, pid;
+
+            var appPids = {};
+            var processes = activityManager.getRunningAppProcesses();
+            var numProcesses = processes.size();
+            for (i = 0; i !== numProcesses; i++) {
+                var process = Java.cast(processes.get(i), RunningAppProcessInfo);
+                pid = process.pid.value;
+                var pkgList = process.pkgList.value;
+                pkgList.forEach(function (packageName) {
                     appPids[packageName] = pid;
                 });
             }
 
-            const apps = packageManager.getInstalledApplications(GET_META_DATA);
-            const numApps = apps.size();
-            for (let i = 0; i !== numApps; i++) {
-                const app = Java.cast(apps.get(i), ApplicationInfo);
-                const packageName = app.packageName.value;
-                const name = app.loadLabel(packageManager).toString();
-                const pid = appPids[packageName] || 0;
+            var apps = packageManager.getInstalledApplications(GET_META_DATA);
+            var numApps = apps.size();
+            for (i = 0; i !== numApps; i++) {
+                var app = Java.cast(apps.get(i), ApplicationInfo);
+                var packageName = app.packageName.value;
+                var name = app.loadLabel(packageManager).toString();
+                pid = appPids[packageName] || 0;
                 result.push([packageName, name, pid]);
             }
-        });
 
-        return result;
+            return result;
+        });
     },
-    startActivity(packageName) {
-        Java.perform(() => {
-            const launchIntent = packageManager.getLaunchIntentForPackage(packageName);
+    startActivity: function (packageName) {
+        return performOnJavaVM(function () {
+            var launchIntent = packageManager.getLaunchIntentForPackage(packageName);
             if (launchIntent !== null) {
                 context.startActivity(launchIntent);
             } else {
@@ -43,24 +45,25 @@ rpc.exports = {
             }
         });
     },
-    getFrontmostApplication() {
-        let result = null;
-        Java.perform(() => {
-            const runningTaskInfos = activityManager.getRunningTasks(1);
-            if (runningTaskInfos != null && runningTaskInfos.size() > 0) {
-                const runningTaskInfo = Java.cast(runningTaskInfos.get(0), RunningTaskInfo);
-                if (typeof runningTaskInfo.topActivity !== 'undefined') {
-                    const topActivity = runningTaskInfo.topActivity.value;
-                    const app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
-                    const packageName = app.packageName.value;
-                    const name = app.loadLabel(packageManager).toString();
+    getFrontmostApplication: function () {
+        return performOnJavaVM(function () {
+            var result = null;
 
-                    const processes = activityManager.getRunningAppProcesses();
-                    const numProcesses = processes.size();
-                    let pid = 0;
-                    for (let i = 0; i !== numProcesses; i++) {
-                        const process = Java.cast(processes.get(i), RunningAppProcessInfo);
-                        const pkgList = process.pkgList.value;
+            var runningTaskInfos = activityManager.getRunningTasks(1);
+            if (runningTaskInfos !== null && runningTaskInfos.size() > 0) {
+                var runningTaskInfo = Java.cast(runningTaskInfos.get(0), RunningTaskInfo);
+                if (typeof runningTaskInfo.topActivity !== 'undefined') {
+                    var topActivity = runningTaskInfo.topActivity.value;
+                    var app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
+                    var packageName = app.packageName.value;
+                    var name = app.loadLabel(packageManager).toString();
+
+                    var processes = activityManager.getRunningAppProcesses();
+                    var numProcesses = processes.size();
+                    var pid = 0;
+                    for (var i = 0; i !== numProcesses; i++) {
+                        var process = Java.cast(processes.get(i), RunningAppProcessInfo);
+                        var pkgList = process.pkgList.value;
                         if (pkgList.indexOf(packageName) > -1) {
                             pid = process.pid.value;
                             break;
@@ -70,21 +73,35 @@ rpc.exports = {
                     result = [packageName, name, pid];
                 }
             }
-        });
 
-        return result;
+            return result;
+        });
     }
 };
 
-Java.perform(() => {
-    const ActivityManager = Java.use("android.app.ActivityManager");
-    const ActivityThread = Java.use("android.app.ActivityThread");
+function performOnJavaVM(task) {
+    return new Promise(function (resolve, reject) {
+        Java.perform(function () {
+            try {
+                var result = task();
+
+                resolve(result);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
+}
+
+Java.perform(function () {
+    var ActivityManager = Java.use("android.app.ActivityManager");
+    var ActivityThread = Java.use("android.app.ActivityThread");
     ApplicationInfo = Java.use("android.content.pm.ApplicationInfo");
-    const Context = Java.use("android.content.Context");
-    const PackageManager = Java.use("android.content.pm.PackageManager");
+    var Context = Java.use("android.content.Context");
+    var PackageManager = Java.use("android.content.pm.PackageManager");
     RunningAppProcessInfo = Java.use("android.app.ActivityManager$RunningAppProcessInfo");
     RunningTaskInfo = Java.use("android.app.ActivityManager$RunningTaskInfo");
-    const ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
+    var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
     GET_META_DATA = PackageManager.GET_META_DATA.value;
 
     context = ActivityThread.currentApplication();
