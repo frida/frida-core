@@ -173,10 +173,8 @@ detect_data_dir (void)
 #include <jni.h>
 
 #if GLIB_SIZEOF_VOID_P == 4
-# define FRIDA_LOADER_FILENAME "frida-loader-32.so"
 # define FRIDA_AGENT_FILENAME "frida-agent-32.so"
 #else
-# define FRIDA_LOADER_FILENAME "frida-loader-64.so"
 # define FRIDA_AGENT_FILENAME "frida-agent-64.so"
 #endif
 
@@ -356,7 +354,13 @@ frida_loader_on_log_message (const gchar * log_domain, GLogLevelFlags log_level,
 static void
 frida_loader_prevent_unload (void)
 {
-  module = dlopen (FRIDA_LOADER_FILENAME, RTLD_GLOBAL | RTLD_LAZY);
+  Dl_info info;
+  int res;
+
+  res = dladdr (frida_agent_main, &info);
+  assert (res != 0);
+
+  module = dlopen (info.dli_fname, RTLD_GLOBAL | RTLD_LAZY);
   assert (module != NULL);
 }
 
