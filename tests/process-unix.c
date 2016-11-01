@@ -84,7 +84,7 @@ frida_test_process_backend_filename_of (void * handle)
 #ifdef HAVE_QNX
   g_assert (handle == &frida_magic_self_handle);
 
-  struct dlopen_handle ** _handle = dlopen (NULL, RTLD_NOW);
+  struct dlopen_handle ** _handle = dlopen (NULL, RTLD_LAZY);
   struct dlopen_handle * p_u = *(_handle);
 
   return g_strdup (p_u->p_lm->l_path);

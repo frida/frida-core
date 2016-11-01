@@ -689,7 +689,7 @@ frida_resolve_remote_library_function (int remote_pid, const gchar * library_nam
 
   canonical_library_name = g_path_get_basename (local_library_path);
 
-  module = dlopen (canonical_library_name, RTLD_GLOBAL | RTLD_NOW);
+  module = dlopen (canonical_library_name, RTLD_GLOBAL | RTLD_LAZY);
   g_assert (module != NULL);
 
   local_address = dlsym (module, function_name);
