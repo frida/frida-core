@@ -360,7 +360,7 @@ frida_loader_prevent_unload (void)
   res = dladdr (frida_agent_main, &info);
   assert (res != 0);
 
-  module = dlopen (info.dli_fname, RTLD_GLOBAL | RTLD_LAZY);
+  module = dlopen (info.dli_fname, RTLD_LAZY);
   assert (module != NULL);
 }
 
@@ -631,7 +631,7 @@ frida_loader_run (void * user_data)
 
   asprintf (&agent_path, "%s/" FRIDA_AGENT_FILENAME, frida_data_dir);
 
-  agent = dlopen (agent_path, RTLD_GLOBAL | RTLD_LAZY);
+  agent = dlopen (agent_path, RTLD_LAZY);
   if (agent == NULL)
     goto beach;
 

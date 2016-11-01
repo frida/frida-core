@@ -313,7 +313,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
       frida_resolve_remote_libc_function (params->pid, "dlopen"),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,

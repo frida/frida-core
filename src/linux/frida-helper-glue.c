@@ -702,7 +702,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       2,
       GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (RTLD_GLOBAL | RTLD_LAZY));
+      GUM_ARG_POINTER, GSIZE_TO_POINTER (RTLD_LAZY));
   gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, library_offset,
       GUM_REG_XAX);
 
@@ -860,7 +860,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       frida_resolve_linker_function (params->pid, dlopen),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
@@ -874,7 +874,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
@@ -973,7 +973,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       frida_resolve_linker_function (params->pid, dlopen),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X20, ARM64_REG_X0);
 
   gum_arm64_writer_put_call_address_with_arguments (&cw,
@@ -1033,7 +1033,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       frida_resolve_linker_function (params->pid, dlopen),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_so)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_NOW));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S0, MIPS_REG_V0);
 
   gum_mips_writer_put_call_address_with_arguments (&cw,
@@ -1089,7 +1089,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       frida_resolve_linker_function (params->pid, dlopen),
       2,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (so_path)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_GLOBAL | RTLD_LAZY));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S1, MIPS_REG_V0);
 
   gum_mips_writer_put_call_address_with_arguments (&cw,
