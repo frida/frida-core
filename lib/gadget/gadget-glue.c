@@ -673,7 +673,7 @@ frida_cf_api_try_get (void)
      */
     if (gum_module_find_base_address (cf_path) != 0)
     {
-      cf = dlopen (cf_path, RTLD_LAZY | RTLD_GLOBAL);
+      cf = dlopen (cf_path, RTLD_GLOBAL | RTLD_LAZY);
       g_assert (cf != NULL);
 
       api = g_slice_new (FridaCFApi);

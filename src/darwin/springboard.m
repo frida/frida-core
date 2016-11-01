@@ -15,10 +15,10 @@ _frida_get_springboard_api (void)
 
     api = g_new (FridaSpringboardApi, 1);
 
-    api->sbs = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY | RTLD_GLOBAL);
+    api->sbs = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_GLOBAL | RTLD_LAZY);
     g_assert (api->sbs != NULL);
 
-    api->fbs = dlopen ("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY | RTLD_GLOBAL);
+    api->fbs = dlopen ("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_GLOBAL | RTLD_LAZY);
 
     api->SBSCopyFrontmostApplicationDisplayIdentifier = dlsym (api->sbs, "SBSCopyFrontmostApplicationDisplayIdentifier");
     g_assert (api->SBSCopyFrontmostApplicationDisplayIdentifier != NULL);
