@@ -178,14 +178,13 @@ detect_data_dir (void)
 # define FRIDA_AGENT_FILENAME "frida-agent-64.so"
 #endif
 
-#define FRIDA_ART_METHOD_OFFSET_JNI_CODE 32
-#define FRIDA_DVM_METHOD_OFFSET_INSNS    32
-
 #define FRIDA_TYPE_ZYGOTE_MONITOR (frida_zygote_monitor_get_type ())
 #define FRIDA_ZYGOTE_MONITOR(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_ZYGOTE_MONITOR, FridaZygoteMonitor))
 
 typedef struct _FridaZygoteMonitor FridaZygoteMonitor;
 typedef struct _FridaZygoteMonitorClass FridaZygoteMonitorClass;
+
+typedef struct _FridaRuntimeBounds FridaRuntimeBounds;
 
 typedef guint FridaZygoteMonitorState;
 
@@ -211,12 +210,19 @@ struct _FridaZygoteMonitorClass
   GObjectClass parent_class;
 };
 
+struct _FridaRuntimeBounds
+{
+  gpointer start;
+  gpointer end;
+};
+
 static void frida_loader_init (void);
 static void frida_loader_deinit (void);
 static void frida_loader_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
 static void frida_loader_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 static void frida_loader_prevent_unload (void);
 static void frida_loader_allow_unload (void);
+static gboolean frida_store_runtime_bounds (const GumModuleDetails * details, FridaRuntimeBounds * bounds);
 
 static void frida_zygote_monitor_iface_init (gpointer g_iface, gpointer iface_data);
 
@@ -383,6 +389,8 @@ frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
   JNIEnv * env;
   jclass process;
   jmethodID set_argv0;
+  FridaRuntimeBounds runtime_bounds;
+  guint offset;
   GumAttachReturn attach_ret;
 
   if (self->state != FRIDA_ZYGOTE_MONITOR_PARENT_AWAITING_FORK)
@@ -429,14 +437,42 @@ frida_zygote_monitor_on_fork_enter (FridaZygoteMonitor * self)
   set_argv0 = (*env)->GetStaticMethodID (env, process, "setArgV0", "(Ljava/lang/String;)V");
   g_assert (set_argv0 != NULL);
 
-  set_argv0_impl = *((gpointer *) (GPOINTER_TO_SIZE (set_argv0) +
-      (is_art ? FRIDA_ART_METHOD_OFFSET_JNI_CODE : FRIDA_DVM_METHOD_OFFSET_INSNS)));
+  runtime_bounds.start = NULL;
+  runtime_bounds.end = NULL;
+  gum_process_enumerate_modules ((GumFoundModuleFunc) frida_store_runtime_bounds, &runtime_bounds);
+  g_assert (runtime_bounds.end != runtime_bounds.start);
+
+  for (offset = 0; offset != 64; offset += 4)
+  {
+    gpointer address = *((gpointer *) (GPOINTER_TO_SIZE (set_argv0) + offset));
+
+    if (address >= runtime_bounds.start && address < runtime_bounds.end)
+    {
+      set_argv0_impl = address;
+      break;
+    }
+  }
+
   attach_ret = gum_interceptor_attach_listener (interceptor, set_argv0_impl, GUM_INVOCATION_LISTENER (self), set_argv0_impl);
   g_assert_cmpint (attach_ret, ==, GUM_ATTACH_OK);
 
   self->state = FRIDA_ZYGOTE_MONITOR_PARENT_READY;
 
   dlclose (runtime);
+}
+
+static gboolean
+frida_store_runtime_bounds (const GumModuleDetails * details, FridaRuntimeBounds * bounds)
+{
+  const GumMemoryRange * range = details->range;
+
+  if (strcmp (details->name, "libandroid_runtime.so") != 0)
+    return TRUE;
+
+  bounds->start = GSIZE_TO_POINTER (range->base_address);
+  bounds->end = GSIZE_TO_POINTER (range->base_address + range->size);
+
+  return FALSE;
 }
 
 static void
