@@ -15,6 +15,7 @@ namespace Frida.Gadget {
 	private ScriptRunner script_runner;
 	private Server server;
 	private AutoIgnorer ignorer;
+	private Gum.Exceptor exceptor;
 	private Mutex mutex;
 	private Cond cond;
 
@@ -76,10 +77,15 @@ namespace Frida.Gadget {
 		var gadget_range = memory_range ();
 
 		var interceptor = Gum.Interceptor.obtain ();
+		interceptor.begin_transaction ();
 
 		ignorer = new AutoIgnorer (interceptor, gadget_range);
 		ignorer.enable ();
 		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
+
+		exceptor = Gum.Exceptor.obtain ();
+
+		interceptor.end_transaction ();
 
 		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {
 			env = Env.DEVELOPMENT;
@@ -121,9 +127,16 @@ namespace Frida.Gadget {
 				server = null;
 			}
 
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.begin_transaction ();
+
+			exceptor = null;
+
 			ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
 			ignorer.disable ();
 			ignorer = null;
+
+			interceptor.end_transaction ();
 		}
 
 		mutex.lock ();
