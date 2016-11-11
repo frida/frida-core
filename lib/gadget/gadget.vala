@@ -77,15 +77,12 @@ namespace Frida.Gadget {
 		var gadget_range = memory_range ();
 
 		var interceptor = Gum.Interceptor.obtain ();
-		interceptor.begin_transaction ();
 
 		ignorer = new AutoIgnorer (interceptor, gadget_range);
 		ignorer.enable ();
 		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
 
 		exceptor = Gum.Exceptor.obtain ();
-
-		interceptor.end_transaction ();
 
 		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {
 			env = Env.DEVELOPMENT;

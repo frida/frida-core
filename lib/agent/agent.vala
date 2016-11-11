@@ -8,15 +8,12 @@ namespace Frida.Agent {
 			var agent_thread_id = Gum.Process.get_current_thread_id ();
 
 			var interceptor = Gum.Interceptor.obtain ();
-			interceptor.begin_transaction ();
 
 			ignorer = new AutoIgnorer (interceptor, agent_range);
 			ignorer.enable ();
 			ignorer.ignore (agent_thread_id, parent_thread_id);
 
 			var exceptor = Gum.Exceptor.obtain ();
-
-			interceptor.end_transaction ();
 
 			var server = new AgentServer (pipe_address, agent_range);
 
