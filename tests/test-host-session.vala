@@ -232,7 +232,7 @@ namespace Frida.HostSessionTest {
 					var num_processes = processes.size ();
 					for (var i = 0; i != num_processes && process == null; i++) {
 						var p = processes.get (i);
-						if (p.name == "re.frida.helloworld")
+						if (p.name == "Twitter")
 							process = p;
 					}
 
@@ -248,6 +248,23 @@ namespace Frida.HostSessionTest {
 					stdout.printf ("Attaching to pid %u...\n", pid);
 					var session = yield device.attach (pid);
 					stdout.printf ("Attached!\n");
+
+					/*
+					stdout.printf ("Disabling JIT...\n");
+					yield session.disable_jit ();
+					stdout.printf ("JIT disabled!\n");
+					*/
+
+					var script = yield session.create_script ("hello",
+						"'use strict';" +
+						"var i = 1;" +
+						"setInterval(function () {" +
+						"  console.log('hello' + i++);" +
+						"}, 1000);");
+					script.message.connect ((message, data) => {
+						stdout.printf ("Got message: %s\n", message);
+					});
+					yield script.load ();
 
 					stdout.printf ("Enabling debugger...\n");
 					yield session.enable_debugger (5858);
