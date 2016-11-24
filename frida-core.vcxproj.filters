@@ -161,6 +161,9 @@
     <ClCompile Include="$(IntDir)src\frida.c">
       <Filter>Source Files\generated\core</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\debugger.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)src\windows\winjector-types.c">
       <Filter>Source Files\generated\windows</Filter>
     </ClCompile>
@@ -182,6 +185,9 @@
       <Filter>Resource Files\windows</Filter>
     </CustomBuild>
     <CustomBuild Include="src\frida.vala">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="src\debugger.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
     <CustomBuild Include="src\agent.resources">

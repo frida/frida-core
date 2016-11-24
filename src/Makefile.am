@@ -374,6 +374,7 @@ libfrida_core_1_0_la_LIBTOOLFLAGS = \
 
 libfrida_core_la_SOURCES = \
 	frida.vala \
+	debugger.vala \
 	host-session-service.vala \
 	$(backend_sources) \
 	tcp/tcp-host-session.vala \

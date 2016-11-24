@@ -79,6 +79,7 @@
 /src/darwin/frida-helper-types.c
 /src/darwin/frida-helper.c
 /src/darwin/fruitjector.c
+/src/debugger.c
 /src/droidy/droidy-client.c
 /src/droidy/droidy-host-session.c
 /src/frida-core.h
