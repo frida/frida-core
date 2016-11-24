@@ -247,28 +247,24 @@ namespace Frida.HostSessionTest {
 					print ("Attaching to pid %u...\n", pid);
 					var session = yield device.attach (pid);
 
-					print ("Disabling JIT...\n");
-					yield session.disable_jit ();
-					print ("JIT disabled!\n");
-
 					var scripts = new Gee.ArrayList<Script> ();
-
 					var done = false;
 
 					new Thread<bool> ("input-worker", () => {
 						while (true) {
 							print (
 								"1. Add script\n" +
-								"2. Remove first script\n" +
-								"3. Remove last script\n" +
+								"2. Load script\n" +
+								"3. Remove script\n" +
 								"4. Enable debugger\n" +
-								"5. Disable debugger\n"
+								"5. Disable debugger\n" +
+								"6. Disable JIT\n"
 							);
 
-							var raw_choice = prompt (">");
-							if (raw_choice == null)
+							var command = prompt (">");
+							if (command == null)
 								break;
-							var choice = int.parse (raw_choice);
+							var choice = int.parse (command);
 
 							switch (choice) {
 								case 1:
@@ -278,17 +274,28 @@ namespace Frida.HostSessionTest {
 									});
 									break;
 								case 2:
+								case 3: {
+									var tokens = command.split(" ");
+									if (tokens.length < 2) {
+										printerr ("Missing argument\n");
+										continue;
+									}
+
+									int64 script_index;
+									if (!int64.try_parse (tokens[1], out script_index)) {
+										printerr ("Invalid script index\n");
+										continue;
+									}
+
 									Idle.add (() => {
-										remove_script.begin (0, scripts);
+										if (choice == 2)
+											load_script.begin ((int) script_index, scripts);
+										else
+											remove_script.begin ((int) script_index, scripts);
 										return false;
 									});
 									break;
-								case 3:
-									Idle.add (() => {
-										remove_script.begin (scripts.size - 1, scripts);
-										return false;
-									});
-									break;
+								}
 								case 4:
 									Idle.add (() => {
 										enable_debugger.begin (session);
@@ -298,6 +305,12 @@ namespace Frida.HostSessionTest {
 								case 5:
 									Idle.add (() => {
 										disable_debugger.begin (session);
+										return false;
+									});
+									break;
+								case 6:
+									Idle.add (() => {
+										disable_jit.begin (session);
 										return false;
 									});
 									break;
@@ -345,8 +358,6 @@ namespace Frida.HostSessionTest {
 					script.message.connect ((message, data) => {
 						print ("Got message: %s\n", message);
 					});
-
-					yield script.load ();
 				} catch (Error e) {
 					printerr ("Unable to add script: %s\n", e.message);
 					return null;
@@ -357,9 +368,26 @@ namespace Frida.HostSessionTest {
 				return script;
 			}
 
-			private static async void remove_script (int index, Gee.ArrayList<Script> container) {
-				if (container.is_empty)
+			private static async void load_script (int index, Gee.ArrayList<Script> container) {
+				if (index < 0 || index >= container.size) {
+					printerr ("Invalid script index\n");
 					return;
+				}
+
+				var script = container[index];
+
+				try {
+					yield script.load ();
+				} catch (Error e) {
+					printerr ("Unable to remove script: %s\n", e.message);
+				}
+			}
+
+			private static async void remove_script (int index, Gee.ArrayList<Script> container) {
+				if (index < 0 || index >= container.size) {
+					printerr ("Invalid script index\n");
+					return;
+				}
 
 				var script = container.remove_at (index);
 
@@ -383,6 +411,14 @@ namespace Frida.HostSessionTest {
 					yield session.disable_debugger ();
 				} catch (Error e) {
 					printerr ("Unable to disable debugger: %s\n", e.message);
+				}
+			}
+
+			private static async void disable_jit (Session session) {
+				try {
+					yield session.disable_jit ();
+				} catch (Error e) {
+					printerr ("Unable to disable JIT: %s\n", e.message);
 				}
 			}
 
