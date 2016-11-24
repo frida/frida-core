@@ -225,7 +225,7 @@ namespace Frida.HostSessionTest {
 					}
 					assert (device != null);
 
-					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
+					print ("\n\nUsing \"%s\"\n", device.name);
 
 					var processes = yield device.enumerate_processes ();
 					Process process = null;
@@ -240,42 +240,156 @@ namespace Frida.HostSessionTest {
 					if (process != null) {
 						pid = process.pid;
 					} else {
-						stdout.printf ("Enter PID: ");
-						stdout.flush ();
-						pid = (uint) int.parse (stdin.read_line ());
+						var raw_pid = prompt ("Enter PID:");
+						pid = (uint) int.parse (raw_pid);
 					}
 
-					stdout.printf ("Attaching to pid %u...\n", pid);
+					print ("Attaching to pid %u...\n", pid);
 					var session = yield device.attach (pid);
-					stdout.printf ("Attached!\n");
 
-					/*
-					stdout.printf ("Disabling JIT...\n");
+					print ("Disabling JIT...\n");
 					yield session.disable_jit ();
-					stdout.printf ("JIT disabled!\n");
-					*/
+					print ("JIT disabled!\n");
 
-					var script = yield session.create_script ("hello",
-						"'use strict';" +
-						"var i = 1;" +
-						"setInterval(function () {" +
-						"  console.log('hello' + i++);" +
-						"}, 1000);");
-					script.message.connect ((message, data) => {
-						stdout.printf ("Got message: %s\n", message);
+					var scripts = new Gee.ArrayList<Script> ();
+
+					var done = false;
+
+					new Thread<bool> ("input-worker", () => {
+						while (true) {
+							print (
+								"1. Add script\n" +
+								"2. Remove first script\n" +
+								"3. Remove last script\n" +
+								"4. Enable debugger\n" +
+								"5. Disable debugger\n"
+							);
+
+							var raw_choice = prompt (">");
+							if (raw_choice == null)
+								break;
+							var choice = int.parse (raw_choice);
+
+							switch (choice) {
+								case 1:
+									Idle.add (() => {
+										add_script.begin (scripts, session);
+										return false;
+									});
+									break;
+								case 2:
+									Idle.add (() => {
+										remove_script.begin (0, scripts);
+										return false;
+									});
+									break;
+								case 3:
+									Idle.add (() => {
+										remove_script.begin (scripts.size - 1, scripts);
+										return false;
+									});
+									break;
+								case 4:
+									Idle.add (() => {
+										enable_debugger.begin (session);
+										return false;
+									});
+									break;
+								case 5:
+									Idle.add (() => {
+										disable_debugger.begin (session);
+										return false;
+									});
+									break;
+								default:
+									break;
+							}
+						}
+
+						print ("\n\n");
+
+						Idle.add (() => {
+							done = true;
+							return false;
+						});
+
+						return true;
 					});
-					yield script.load ();
 
-					stdout.printf ("Enabling debugger...\n");
-					yield session.enable_debugger (5858);
-					stdout.printf ("Debugger listening on port 5858\n");
-
-					while (true)
+					while (!done)
 						yield h.process_events ();
+
+					h.done ();
 				} catch (Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
+			}
+
+			private static uint next_script_id = 1;
+
+			private static async Script? add_script (Gee.ArrayList<Script> container, Session session) {
+				Script script;
+
+				try {
+					var name = "hello%u".printf (next_script_id++);
+
+					script = yield session.create_script (name,
+						"'use strict';" +
+						"var puts = new NativeFunction(Module.findExportByName(null, 'puts'), 'int', ['pointer']);" +
+						"var i = 1;" +
+						"setInterval(function () {" +
+						"  puts(Memory.allocUtf8String('hello' + i++));" +
+						"}, 1000);");
+
+					script.message.connect ((message, data) => {
+						print ("Got message: %s\n", message);
+					});
+
+					yield script.load ();
+				} catch (Error e) {
+					printerr ("Unable to add script: %s\n", e.message);
+					return null;
+				}
+
+				container.add (script);
+
+				return script;
+			}
+
+			private static async void remove_script (int index, Gee.ArrayList<Script> container) {
+				if (container.is_empty)
+					return;
+
+				var script = container.remove_at (index);
+
+				try {
+					yield script.unload ();
+				} catch (Error e) {
+					printerr ("Unable to remove script: %s\n", e.message);
+				}
+			}
+
+			private static async void enable_debugger (Session session) {
+				try {
+					yield session.enable_debugger (5858);
+				} catch (Error e) {
+					printerr ("Unable to enable debugger: %s\n", e.message);
+				}
+			}
+
+			private static async void disable_debugger (Session session) {
+				try {
+					yield session.disable_debugger ();
+				} catch (Error e) {
+					printerr ("Unable to disable debugger: %s\n", e.message);
+				}
+			}
+
+			private static string prompt (string message) {
+				stdout.printf ("%s ", message);
+				stdout.flush ();
+				return stdin.read_line ();
 			}
 
 			private static async void error_feedback (Harness h) {
