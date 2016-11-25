@@ -45,7 +45,7 @@ namespace Frida {
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
 			// We can optimize this later when our mapper is always used instead of dyld
 			var name = "blob%u.dylib".printf (next_blob_id++);
-			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob));
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_helper ().tempdir);
 
 			var id = yield inject_library_file (pid, file.path, entrypoint, data);
 

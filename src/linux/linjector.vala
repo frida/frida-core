@@ -45,7 +45,7 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
 			var name = "blob%u.so".printf (next_blob_id++);
-			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob));
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_helper ().tempdir);
 			var path = file.path;
 			FileUtils.chmod (path, 0755);
 #if ANDROID
