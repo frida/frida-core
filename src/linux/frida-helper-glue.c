@@ -322,7 +322,7 @@ _frida_helper_service_free_spawn_instance (FridaHelperService * self, void * ins
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const char * data, const gchar * temp_path, GError ** error)
+_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, GError ** error)
 {
   FridaInjectInstance * instance;
   FridaInjectParams params = { pid, path, entrypoint, data };

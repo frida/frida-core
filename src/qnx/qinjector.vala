@@ -2,9 +2,7 @@
 using Gee;
 
 namespace Frida {
-	public class Qinjector : Object {
-		public signal void uninjected (uint id);
-
+	public class Qinjector : Object, Injector {
 		public string temp_directory {
 			owned get {
 				return resource_store.tempdir.path;
@@ -27,8 +25,12 @@ namespace Frida {
 
 		/* these should be private, but must be accessible to glue code */
 		private MainContext main_context;
+
 		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
 		public uint last_id = 1;
+
+		private HashMap<uint, TemporaryFile> blob_file_by_id = new HashMap<uint, TemporaryFile> ();
+		private uint next_blob_id = 1;
 
 		construct {
 			main_context = MainContext.get_thread_default ();
@@ -39,10 +41,8 @@ namespace Frida {
 				_free_instance (instance);
 		}
 
-		public async uint inject (uint pid, AgentDescriptor desc, string data_string) throws Error {
-			var filename = resource_store.ensure_copy_of (desc);
-
-			var id = _do_inject (pid, filename, data_string, resource_store.tempdir.path);
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			var id = _do_inject (pid, path, entrypoint, data, resource_store.tempdir.path);
 
 			var fifo = _get_fifo_for_instance (instance_by_id[id]);
 			var buf = new uint8[1];
@@ -79,6 +79,24 @@ namespace Frida {
 			return id;
 		}
 
+		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
+			var name = "blob%u.so".printf (next_blob_id++);
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), resource_store.tempdir);
+			var path = file.path;
+			FileUtils.chmod (path, 0755);
+
+			var id = yield inject_library_file (pid, path, entrypoint, data);
+
+			blob_file_by_id[id] = file;
+
+			return id;
+		}
+
+		public async uint inject_library_resource (uint pid, AgentDescriptor descriptor, string entrypoint, string data) throws Error {
+			var path = resource_store.ensure_copy_of (descriptor);
+			return yield inject_library_file (pid, path, entrypoint, data);
+		}
+
 		private async void _monitor_instance (uint id) {
 			var fifo = _get_fifo_for_instance (instance_by_id[id]);
 			while (true) {
@@ -110,6 +128,9 @@ namespace Frida {
 			bool found = instance_by_id.unset (id, out instance);
 			assert (found);
 			_free_instance (instance);
+
+			blob_file_by_id.unset (id);
+
 			uninjected (id);
 		}
 
@@ -123,7 +144,7 @@ namespace Frida {
 
 		public extern InputStream _get_fifo_for_instance (void * instance);
 		public extern void _free_instance (void * instance);
-		public extern uint _do_inject (uint pid, string so_path, string data_string, string temp_path) throws Error;
+		public extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
 
 		public class ResourceStore {
 			public TemporaryDirectory tempdir {

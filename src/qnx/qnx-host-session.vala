@@ -74,11 +74,14 @@ namespace Frida {
 		private AgentContainer system_session_container;
 
 		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
-		private Qinjector injector = new Qinjector ();
 		private AgentDescriptor agent_desc;
 
 		construct {
+			injector = new Qinjector ();
+			injector.uninjected.connect (on_uninjected);
+
 			var blob = Frida.Data.Agent.get_frida_agent_so_blob ();
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
@@ -87,9 +90,11 @@ namespace Frida {
 			yield base.close ();
 
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (injector.any_still_injected ())
+			var qinjector = injector as Qinjector;
+			while (qinjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+			injector.uninjected.disconnect (on_uninjected);
 			injector = null;
 
 			if (system_session_container != null) {
@@ -99,7 +104,8 @@ namespace Frida {
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
-			var agent_filename = injector.resource_store.ensure_copy_of (agent_desc);
+			var qinjector = injector as Qinjector;
+			var agent_filename = qinjector.resource_store.ensure_copy_of (agent_desc);
 			system_session_container = yield AgentContainer.create (agent_filename);
 			connection = system_session_container.connection;
 			return system_session_container;
@@ -155,7 +161,9 @@ namespace Frida {
 		}
 
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
-			PipeTransport.set_temp_directory (injector.temp_directory);
+			var qinjector = injector as Qinjector;
+
+			PipeTransport.set_temp_directory (qinjector.temp_directory);
 			PipeTransport t;
 			Pipe stream;
 			try {
@@ -164,9 +172,29 @@ namespace Frida {
 			} catch (IOError stream_error) {
 				throw new Error.NOT_SUPPORTED (stream_error.message);
 			}
-			yield injector.inject (pid, agent_desc, t.remote_address);
+
+			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
+			while (injectee_by_pid.has_key (pid))
+				yield;
+			injector.disconnect (uninjected_handler);
+
+			var id = yield qinjector.inject_library_resource (pid, agent_desc, "frida_agent_main", t.remote_address);
+			injectee_by_pid[pid] = id;
+
 			transport = t;
+
 			return stream;
+		}
+
+		private void on_uninjected (uint id) {
+			foreach (var entry in injectee_by_pid.entries) {
+				if (entry.value == id) {
+					injectee_by_pid.unset (entry.key);
+					return;
+				}
+			}
+
+			uninjected (InjectorPayloadId (id));
 		}
 
 		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;

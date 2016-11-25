@@ -89,12 +89,12 @@ namespace Frida {
 		construct {
 			helper = new HelperProcess ();
 			helper.output.connect (on_output);
+
 			injector = new Fruitjector.with_helper (helper);
+			injector.uninjected.connect (on_uninjected);
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
 			agent = new AgentResource (blob.name, new MemoryInputStream.from_data (blob.data, null), helper.tempdir);
-
-			injector.uninjected.connect (on_uninjected);
 		}
 
 		public override async void close () {

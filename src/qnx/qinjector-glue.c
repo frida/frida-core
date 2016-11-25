@@ -86,10 +86,11 @@ struct _FridaInjectionInstance
 struct _FridaInjectionParams
 {
   pid_t pid;
-  const char * so_path;
-  const char * data_string;
+  const gchar * so_path;
+  const gchar * entrypoint_name;
+  const gchar * entrypoint_data;
 
-  const char * fifo_path;
+  const gchar * fifo_path;
   GumAddress remote_address;
 };
 
@@ -106,8 +107,8 @@ struct _FridaTrampolineData
   gchar pthread_create[32];
   gchar fifo_path[256];
   gchar so_path[256];
-  gchar entrypoint_name[32];
-  gchar data_string[256];
+  gchar entrypoint_name[256];
+  gchar entrypoint_data[256];
 
   pthread_attr_t create_thread_attr;
   pthread_t worker_thread;
@@ -191,11 +192,11 @@ _frida_qinjector_free_instance (FridaQinjector * self, void * instance)
 }
 
 guint
-_frida_qinjector_do_inject (FridaQinjector * self, guint pid, const char * so_path, const char * data_string,
-    const char * temp_path, GError ** error)
+_frida_qinjector_do_inject (FridaQinjector * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data,
+    const gchar * temp_path, GError ** error)
 {
   FridaInjectionInstance * instance;
-  FridaInjectionParams params = { pid, so_path, data_string };
+  FridaInjectionParams params = { pid, path, entrypoint, data };
 
   instance = frida_injection_instance_new (self, self->last_id++, pid, temp_path);
 
@@ -236,8 +237,8 @@ frida_emit_and_remote_execute (FridaEmitFunc func, const FridaInjectionParams * 
   strcpy (data->pthread_create, "pthread_create");
   strcpy (data->fifo_path, params->fifo_path);
   strcpy (data->so_path, params->so_path);
-  strcpy (data->entrypoint_name, "frida_agent_main");
-  strcpy (data->data_string, params->data_string);
+  strcpy (data->entrypoint_name, params->entrypoint_name);
+  strcpy (data->entrypoint_data, params->entrypoint_data);
 
   pthread_attr_init (&data->create_thread_attr);
   pthread_attr_setstacksize (&data->create_thread_attr, 2 * 1024 * 1024);
@@ -326,7 +327,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   gum_thumb_writer_put_call_reg_with_arguments (&cw,
       ARM_REG_R5,
       3,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
