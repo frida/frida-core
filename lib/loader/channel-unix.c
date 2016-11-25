@@ -21,12 +21,14 @@ FridaChannel *
 frida_channel_open (const char * frida_data_dir)
 {
   char * callback_path;
-  int fd;
+  int res, fd = -1;
   struct sockaddr_un callback;
   socklen_t callback_len;
   FridaChannel * channel;
 
-  asprintf (&callback_path, "%s/callback", frida_data_dir);
+  res = asprintf (&callback_path, "%s/callback", frida_data_dir);
+  if (res == -1)
+    goto handle_error;
 
   fd = socket (AF_UNIX, SOCK_STREAM, 0);
   if (fd == -1)

@@ -8,7 +8,7 @@ namespace Frida {
 		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async void kill (uint pid) throws GLib.Error;
-		public abstract async uint inject (uint pid, string filename, string data_string, string temp_path) throws GLib.Error;
+		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws GLib.Error;
 
 		public signal void output (uint pid, int fd, uint8[] data);
 	}

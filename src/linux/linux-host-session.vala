@@ -74,7 +74,6 @@ namespace Frida {
 		private AgentContainer system_session_container;
 
 		private HelperProcess helper;
-		private Linjector injector;
 		private AgentResource agent;
 
 #if ANDROID
@@ -114,10 +113,11 @@ namespace Frida {
 #endif
 
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (injector.any_still_injected ())
+			var linjector = injector as Linjector;
+			while (linjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
-			yield injector.close ();
+			yield linjector.close ();
 			injector = null;
 
 			yield helper.close ();
@@ -235,8 +235,11 @@ namespace Frida {
 			}
 #endif
 
-			yield injector.inject (pid, agent, t.remote_address);
+			var linjector = injector as Linjector;
+			yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address);
+
 			transport = t;
+
 			return pipe;
 		}
 

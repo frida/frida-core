@@ -18,12 +18,12 @@ on_unload (void)
 }
 
 void
-frida_agent_main (const char * data_string)
+frida_agent_main (const char * data)
 {
   append_to_log ('m');
 
-  if (strlen (data_string) > 0)
-    exit (atoi (data_string));
+  if (strlen (data) > 0)
+    exit (atoi (data));
 }
 
 static void

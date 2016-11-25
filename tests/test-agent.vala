@@ -97,7 +97,7 @@ namespace Frida.AgentTest {
 	private class Harness : Frida.Test.AsyncHarness {
 		private GLib.Module module;
 		[CCode (has_target = false)]
-		private delegate void AgentMainFunc (string data_string, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id);
+		private delegate void AgentMainFunc (string data, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id);
 		private AgentMainFunc main_impl;
 		private PipeTransport transport;
 		private Thread<bool> main_thread;

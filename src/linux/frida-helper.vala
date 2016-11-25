@@ -143,8 +143,8 @@ namespace Frida {
 			Posix.kill ((Posix.pid_t) pid, Posix.SIGKILL);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string, string temp_path) throws Error {
-			var id = _do_inject (pid, filename, data_string, temp_path);
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
+			var id = _do_inject (pid, path, entrypoint, data, temp_path);
 
 			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
 			var buf = new uint8[1];
@@ -218,7 +218,7 @@ namespace Frida {
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string dylib_path, string data_string, string temp_path) throws Error;
+		public extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
 		public extern InputStream _get_fifo_for_inject_instance (void * instance);
 		public extern void _free_inject_instance (void * instance);
 	}

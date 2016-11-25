@@ -18,7 +18,7 @@
 
 #define FRIDA_LOADER_DATA_DIR_MAGIC "3zPLi3BupiesaB9diyimME74fJw4jvj6"
 
-typedef void (* FridaAgentMainFunc) (const char * data_string, void * mapped_range, size_t parent_thread_id);
+typedef void (* FridaAgentMainFunc) (const char * data, void * mapped_range, size_t parent_thread_id);
 
 static void frida_loader_connect (const char * details);
 static void * frida_loader_run (void * user_data);
