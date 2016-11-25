@@ -116,11 +116,13 @@ namespace Frida {
 			robo_agent = null;
 #endif
 
-			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			var linjector = injector as Linjector;
+
+			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			while (linjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+
 			injector.uninjected.disconnect (on_uninjected);
 			yield linjector.close ();
 			injector = null;

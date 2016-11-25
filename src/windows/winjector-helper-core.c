@@ -30,7 +30,8 @@ struct _InjectionDetails
 {
   HANDLE process_handle;
   const WCHAR * dll_path;
-  const gchar * data_string;
+  const gchar * entrypoint_name;
+  const gchar * entrypoint_data;
 };
 
 struct _RemoteWorkerContext
@@ -41,8 +42,8 @@ struct _RemoteWorkerContext
   gpointer virtual_free_impl;
 
   WCHAR dll_path[MAX_PATH + 1];
-  gchar frida_agent_main_string[16 + 1];
-  gchar data_string[MAX_PATH + 1];
+  gchar entrypoint_name[256];
+  gchar entrypoint_data[MAX_PATH + 1];
 
   gpointer entrypoint;
   gpointer argument;
@@ -96,7 +97,7 @@ typedef NTSTATUS (WINAPI * RtlCreateUserThreadFunc) (HANDLE process, SECURITY_DE
 
 static gboolean enable_debug_privilege (void);
 
-static HANDLE try_to_grab_a_thread_in (DWORD process_id, GError ** error);
+static HANDLE try_to_grab_a_thread_in (DWORD pid, GError ** error);
 static void trick_thread_into_spawning_worker_thread (HANDLE process_handle, HANDLE thread_handle, RemoteWorkerContext * rwc, GError ** error);
 
 static gboolean initialize_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details, GError ** error);
@@ -128,7 +129,7 @@ winjector_system_is_x64 (void)
 }
 
 gboolean
-winjector_process_is_x64 (guint32 process_id)
+winjector_process_is_x64 (guint32 pid)
 {
   HANDLE process_handle;
   BOOL is_wow64, success;
@@ -136,7 +137,7 @@ winjector_process_is_x64 (guint32 process_id)
   if (!winjector_system_is_x64 ())
     return FALSE;
 
-  process_handle = OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, process_id);
+  process_handle = OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, pid);
   if (process_handle == NULL)
     goto error;
   success = IsWow64Process (process_handle, &is_wow64);
@@ -151,8 +152,8 @@ error:
 }
 
 void *
-winjector_process_inject (guint32 process_id, const char * dll_path,
-    const gchar * data_string, GError ** error)
+winjector_process_inject_library_file (guint32 pid, const gchar * path,
+    const gchar * entrypoint, const gchar * data, GError ** error)
 {
   gboolean success = FALSE;
   const gchar * failed_operation;
@@ -165,8 +166,9 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   gboolean rwc_initialized = FALSE;
   RemoteWorkerContext rwc;
 
-  details.dll_path = (WCHAR *) g_utf8_to_utf16 (dll_path, -1, NULL, NULL, NULL);
-  details.data_string = data_string;
+  details.dll_path = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
+  details.entrypoint_name = entrypoint;
+  details.entrypoint_data = data;
   details.process_handle = NULL;
 
   if (!file_exists_and_is_readable (details.dll_path))
@@ -174,7 +176,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
 
   enable_debug_privilege ();
 
-  desired_access = 
+  desired_access =
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
       PROCESS_VM_OPERATION  | /* for VirtualProtectEx and mem access  */
       PROCESS_VM_READ       | /*   ReadProcessMemory                  */
@@ -182,7 +184,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
   if (!enable_stealth_mode)
     desired_access |= PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION;
 
-  details.process_handle = OpenProcess (desired_access, FALSE, process_id);
+  details.process_handle = OpenProcess (desired_access, FALSE, pid);
   CHECK_OS_RESULT (details.process_handle, !=, NULL, "OpenProcess");
 
   if (!initialize_remote_worker_context (&rwc, &details, error))
@@ -191,7 +193,7 @@ winjector_process_inject (guint32 process_id, const char * dll_path,
 
   if (enable_stealth_mode)
   {
-    thread_handle = try_to_grab_a_thread_in (process_id, error);
+    thread_handle = try_to_grab_a_thread_in (pid, error);
     if (*error != NULL)
       goto beach;
     else if (thread_handle == NULL)
@@ -230,7 +232,7 @@ handle_path_error:
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to find DLL at '%s'",
-        dll_path);
+        path);
     goto beach;
   }
 no_suitable_thread_found:
@@ -239,7 +241,7 @@ no_suitable_thread_found:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to locate a suitable thread in process with pid %u",
-        process_id);
+        pid);
     goto beach;
   }
 handle_os_error:
@@ -254,7 +256,7 @@ handle_os_error:
           FRIDA_ERROR,
           FRIDA_ERROR_PROCESS_NOT_FOUND,
           "Unable to find process with pid %u",
-          process_id);
+          pid);
     }
     else
     {
@@ -262,7 +264,7 @@ handle_os_error:
           FRIDA_ERROR,
           (os_error == ERROR_ACCESS_DENIED) ? FRIDA_ERROR_PERMISSION_DENIED : FRIDA_ERROR_NOT_SUPPORTED,
           "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
-          process_id, failed_operation, os_error);
+          pid, failed_operation, os_error);
     }
 
     goto beach;
@@ -280,7 +282,7 @@ handle_nt_error:
         FRIDA_ERROR,
         code,
         "Unexpected error while attaching to process with pid %u (%s returned 0x%08lx)",
-        process_id, failed_operation, nt_status);
+        pid, failed_operation, nt_status);
     goto beach;
   }
 
@@ -338,13 +340,13 @@ beach:
 }
 
 static HANDLE
-try_to_grab_a_thread_in (DWORD process_id, GError ** error)
+try_to_grab_a_thread_in (DWORD pid, GError ** error)
 {
   HANDLE snapshot_handle;
   THREADENTRY32 entry = { 0, };
   HANDLE thread_handle = NULL;
 
-  snapshot_handle = CreateToolhelp32Snapshot (TH32CS_SNAPTHREAD, process_id);
+  snapshot_handle = CreateToolhelp32Snapshot (TH32CS_SNAPTHREAD, pid);
   if (snapshot_handle == INVALID_HANDLE_VALUE)
   {
     set_grab_thread_error_from_os_error ("CreateToolhelp32Snapshot", error);
@@ -363,7 +365,7 @@ try_to_grab_a_thread_in (DWORD process_id, GError ** error)
   {
     DWORD prev_suspend_count;
 
-    if (entry.th32OwnerProcessID != process_id)
+    if (entry.th32OwnerProcessID != pid)
       continue;
 
     thread_handle = OpenThread (
@@ -615,16 +617,16 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_jcc_near_label (&cw, GUM_X86_JZ, loadlibrary_failed_label, GUM_UNLIKELY);
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
 
-  /* xax = GetProcAddress (xsi, xbx->frida_agent_main_string) */
+  /* xax = GetProcAddress (xsi, xbx->entrypoint_name) */
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, frida_agent_main_string));
+      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, entrypoint_name));
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_proc_address_impl),
       2,
       GUM_ARG_REGISTER, GUM_REG_XSI,
       GUM_ARG_REGISTER, GUM_REG_XDX);
 
-  /* xax (xbx->data_string, NULL, 0) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, data_string));
+  /* xax (xbx->entrypoint_data, NULL, 0) */
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, entrypoint_data));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       3,
       GUM_ARG_REGISTER, GUM_REG_XCX,
@@ -687,10 +689,9 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   if (!remote_worker_context_has_resolved_all_kernel32_functions (rwc))
     goto failed_to_resolve_kernel32_functions;
 
-  StringCbCopyA (rwc->frida_agent_main_string, sizeof (rwc->frida_agent_main_string), "frida_agent_main");
-
   StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
-  StringCbCopyA (rwc->data_string, sizeof (rwc->data_string), details->data_string);
+  StringCbCopyA (rwc->entrypoint_name, sizeof (rwc->entrypoint_name), details->entrypoint_name);
+  StringCbCopyA (rwc->entrypoint_data, sizeof (rwc->entrypoint_data), details->entrypoint_data);
 
   rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL,
       code_size + data_alignment + sizeof (RemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);

@@ -89,11 +89,13 @@ namespace Frida {
 		public override async void close () {
 			yield base.close ();
 
-			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			var qinjector = injector as Qinjector;
+
+			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			while (qinjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+
 			injector.uninjected.disconnect (on_uninjected);
 			injector = null;
 

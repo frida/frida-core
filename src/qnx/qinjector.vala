@@ -27,7 +27,7 @@ namespace Frida {
 		private MainContext main_context;
 
 		public Gee.HashMap<uint, void *> instance_by_id = new Gee.HashMap<uint, void *> ();
-		public uint last_id = 1;
+		public uint next_instance_id = 1;
 
 		private HashMap<uint, TemporaryFile> blob_file_by_id = new HashMap<uint, TemporaryFile> ();
 		private uint next_blob_id = 1;

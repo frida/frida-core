@@ -198,7 +198,7 @@ _frida_qinjector_do_inject (FridaQinjector * self, guint pid, const gchar * path
   FridaInjectionInstance * instance;
   FridaInjectionParams params = { pid, path, entrypoint, data };
 
-  instance = frida_injection_instance_new (self, self->last_id++, pid, temp_path);
+  instance = frida_injection_instance_new (self, self->next_instance_id++, pid, temp_path);
 
   params.fifo_path = instance->fifo_path;
   params.remote_address = frida_remote_alloc (pid, FRIDA_REMOTE_PAYLOAD_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, error);

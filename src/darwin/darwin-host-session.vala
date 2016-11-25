@@ -84,6 +84,7 @@ namespace Frida {
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
+
 		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		construct {
@@ -105,16 +106,18 @@ namespace Frida {
 				fruit_launcher = null;
 			}
 
-			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			var fruitjector = injector as Fruitjector;
+
+			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
 			while (fruitjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+
+			agent = null;
+
 			injector.uninjected.disconnect (on_uninjected);
 			yield fruitjector.close ();
 			injector = null;
-
-			agent = null;
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);

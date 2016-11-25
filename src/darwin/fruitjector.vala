@@ -69,6 +69,7 @@ namespace Frida {
 		private void on_uninjected (uint id) {
 			pid_by_id.unset (id);
 			blob_file_by_id.unset (id);
+
 			uninjected (id);
 		}
 	}
