@@ -20,7 +20,6 @@
 #include <mach/mach.h>
 #include <sys/sysctl.h>
 
-#define FRIDA_AGENT_ENTRYPOINT_NAME      "frida_agent_main"
 #define FRIDA_PSR_THUMB                  0x20
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
@@ -112,6 +111,7 @@ struct _FridaAgentDetails
 {
   guint pid;
   const char * dylib_path;
+  const char * entrypoint_name;
   const char * data_string;
   GumCpuType cpu_type;
   mach_port_name_t task;
@@ -146,7 +146,7 @@ struct _FridaAgentContext
 
   GumAddress dylib_path;
 
-  gchar entrypoint_name_data[32];
+  gchar entrypoint_name_data[256];
   gchar data_string_data[256];
   GumMemoryRange mapped_range_data;
   gchar dylib_path_data[256];
@@ -710,7 +710,7 @@ _frida_helper_service_free_spawn_instance (FridaHelperService * self, void * ins
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * dylib_path, const char * data_string, GError ** error)
+_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const char * data, GError ** error)
 {
   guint result = 0;
   FridaHelperContext * ctx = self->context;
@@ -743,8 +743,9 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance = frida_inject_instance_new (self, self->last_id++);
 
   details.pid = pid;
-  details.dylib_path = dylib_path;
-  details.data_string = data_string;
+  details.dylib_path = path;
+  details.entrypoint_name = entrypoint;
+  details.data_string = data;
 
   if (!gum_darwin_cpu_type_from_pid (pid, &details.cpu_type))
     goto handle_cpu_type_error;
@@ -754,7 +755,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance->task = details.task;
 
 #ifdef HAVE_MAPPER
-  mapper = gum_darwin_mapper_new (dylib_path, details.task, details.cpu_type);
+  mapper = gum_darwin_mapper_new (path, details.task, details.cpu_type);
 #endif
 
   if (!gum_darwin_query_page_size (instance->task, &page_size))
@@ -1327,7 +1328,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 
   self->entrypoint_name = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, entrypoint_name_data);
-  strcpy (self->entrypoint_name_data, FRIDA_AGENT_ENTRYPOINT_NAME);
+  strcpy (self->entrypoint_name_data, details->entrypoint_name);
   self->data_string = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, data_string_data);
   g_assert_cmpint (strlen (details->data_string), <, sizeof (self->data_string_data));
@@ -1489,7 +1490,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_data));
     FRIDA_EMIT_LOAD (XCX, data_string);
     FRIDA_EMIT_LOAD (XSI, mapped_range);
     FRIDA_EMIT_LOAD (XDX, thread_id);
@@ -1700,7 +1701,7 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
     EMIT_ARM_LOAD (R2, thread_id);
     EMIT_ARM_LOAD (R1, mapped_range);
     EMIT_ARM_LOAD (R0, data_string);
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_data));
     EMIT_ARM_CALL (R5);
 
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_destructor (ctx->mapper));
@@ -1881,7 +1882,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_LOAD (X2, thread_id);
     EMIT_ARM64_LOAD (X1, mapped_range);
     EMIT_ARM64_LOAD (X0, data_string);
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_data));
     EMIT_ARM64_CALL (X8);
 
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_destructor (ctx->mapper));

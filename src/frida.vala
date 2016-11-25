@@ -639,6 +639,74 @@ namespace Frida {
 			}
 		}
 
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			check_open ();
+
+			try {
+				yield ensure_host_session ();
+
+				var id = yield host_session.inject_library_file (pid, path, entrypoint, data);
+
+				return id.handle;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public uint inject_library_file_sync (uint pid, string path, string entrypoint, string data) throws Error {
+			var task = create<InjectLibraryFileTask> () as InjectLibraryFileTask;
+			task.pid = pid;
+			task.path = path;
+			task.entrypoint = entrypoint;
+			task.data = data;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class InjectLibraryFileTask : DeviceTask<uint> {
+			public uint pid;
+			public string path;
+			public string entrypoint;
+			public string data;
+
+			protected override async uint perform_operation () throws Error {
+				return yield parent.inject_library_file (pid, path, entrypoint, data);
+			}
+		}
+
+		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
+			check_open ();
+
+			try {
+				yield ensure_host_session ();
+
+				var id = yield host_session.inject_library_blob (pid, blob.get_data (), entrypoint, data);
+
+				return id.handle;
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public uint inject_library_blob_sync (uint pid, Bytes blob, string entrypoint, string data) throws Error {
+			var task = create<InjectLibraryBlobTask> () as InjectLibraryBlobTask;
+			task.pid = pid;
+			task.blob = blob;
+			task.entrypoint = entrypoint;
+			task.data = data;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class InjectLibraryBlobTask : DeviceTask<uint> {
+			public uint pid;
+			public Bytes blob;
+			public string entrypoint;
+			public string data;
+
+			protected override async uint perform_operation () throws Error {
+				return yield parent.inject_library_blob (pid, blob, entrypoint, data);
+			}
+		}
+
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Device is gone");
@@ -1369,6 +1437,80 @@ namespace Frida {
 
 		private abstract class ScriptTask<T> : AsyncTask<T> {
 			public weak Script parent {
+				get;
+				construct;
+			}
+		}
+	}
+
+	public interface Injector : Object {
+		public signal void uninjected (uint id);
+
+		public static Injector new () {
+#if WINDOWS
+			return new Winjector ();
+#endif
+#if DARWIN
+			return new Fruitjector ();
+#endif
+#if LINUX
+			return new Linjector ();
+#endif
+#if QNX
+			return new Qinjector ();
+#endif
+		}
+
+		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error;
+
+		public uint inject_library_file_sync (uint pid, string path, string entrypoint, string data) throws Error {
+			var task = create<InjectLibraryFileTask> () as InjectLibraryFileTask;
+			task.pid = pid;
+			task.path = path;
+			task.entrypoint = entrypoint;
+			task.data = data;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class InjectLibraryFileTask : InjectorTask<uint> {
+			public uint pid;
+			public string path;
+			public string entrypoint;
+			public string data;
+
+			protected override async uint perform_operation () throws Error {
+				return yield parent.inject_library_file (pid, path, entrypoint, data);
+			}
+		}
+
+		public abstract async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error;
+
+		public uint inject_library_blob_sync (uint pid, Bytes blob, string entrypoint, string data) throws Error {
+			var task = create<InjectLibraryBlobTask> () as InjectLibraryBlobTask;
+			task.pid = pid;
+			task.blob = blob;
+			task.entrypoint = entrypoint;
+			task.data = data;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class InjectLibraryBlobTask : InjectorTask<uint> {
+			public uint pid;
+			public Bytes blob;
+			public string entrypoint;
+			public string data;
+
+			protected override async uint perform_operation () throws Error {
+				return yield parent.inject_library_blob (pid, blob, entrypoint, data);
+			}
+		}
+
+		private Object create<T> () {
+			return Object.new (typeof (T), main_context: get_main_context (), parent: this);
+		}
+
+		private abstract class InjectorTask<T> : AsyncTask<T> {
+			public weak Injector parent {
 				get;
 				construct;
 			}

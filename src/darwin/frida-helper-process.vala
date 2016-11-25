@@ -136,10 +136,10 @@ namespace Frida {
 			}
 		}
 
-		public async uint inject (uint pid, string filename, string data_string) throws Error {
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
 			var helper = yield obtain ();
 			try {
-				return yield helper.inject (pid, filename, data_string);
+				return yield helper.inject_library_file (pid, path, entrypoint, data);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

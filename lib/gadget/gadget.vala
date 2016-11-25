@@ -587,6 +587,14 @@ namespace Frida.Gadget {
 				return id;
 			}
 
+			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");
+			}
+
+			public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
+				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");
+			}
+
 			private void on_session_closed (ClientSession session) {
 				connection.unregister_object (session.registration_id);
 

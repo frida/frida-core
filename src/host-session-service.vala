@@ -139,6 +139,8 @@ namespace Frida {
 		private Gee.HashMap<uint, AgentSession> sessions = new Gee.HashMap<uint, AgentSession> ();
 		private uint next_session_id = 1;
 
+		protected Injector injector;
+
 		public virtual async void close () {
 			while (!entries.is_empty) {
 				var iterator = entries.values.iterator ();
@@ -426,6 +428,17 @@ namespace Frida {
 
 				close_request.set_value (true);
 			}
+		}
+
+		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			var raw_id = yield injector.inject_library_file (pid, path, entrypoint, data);
+			return InjectorPayloadId (raw_id);
+		}
+
+		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
+			var blob_bytes = new Bytes (blob);
+			var raw_id = yield injector.inject_library_blob (pid, blob_bytes, entrypoint, data);
+			return InjectorPayloadId (raw_id);
 		}
 	}
 }

@@ -2,35 +2,60 @@
 using Gee;
 
 namespace Frida {
-	public class Fruitjector : Object {
-		public signal void uninjected (uint id);
-
+	public class Fruitjector : Object, Injector {
 		private HelperProcess helper;
 		private bool close_helper;
 		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
+		private HashMap<uint, TemporaryFile> blob_file_by_id = new HashMap<uint, TemporaryFile> ();
+		private uint next_blob_id = 1;
 
 		public Fruitjector () {
-			helper = new HelperProcess ();
 			close_helper = true;
-			helper.uninjected.connect (on_uninjected);
 		}
 
 		internal Fruitjector.with_helper (HelperProcess helper) {
-			this.helper = helper;
 			close_helper = false;
+
+			this.helper = helper;
 			this.helper.uninjected.connect (on_uninjected);
 		}
 
-		public async void close () {
-			helper.uninjected.disconnect (on_uninjected);
-			if (close_helper)
-				yield helper.close ();
+		private HelperProcess get_helper () {
+			if (helper == null) {
+				helper = new HelperProcess ();
+				helper.uninjected.connect (on_uninjected);
+			}
+			return helper;
 		}
 
-		public async uint inject (uint pid, AgentResource resource, string data_string) throws Error {
-			var id = yield helper.inject (pid, resource.file.path, data_string);
+		public async void close () {
+			if (helper != null) {
+				helper.uninjected.disconnect (on_uninjected);
+				if (close_helper)
+					yield helper.close ();
+			}
+		}
+
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			var id = yield get_helper ().inject_library_file (pid, path, entrypoint, data);
 			pid_by_id[id] = pid;
 			return id;
+		}
+
+		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
+			// We can optimize this later when our mapper is always used instead of dyld
+			var name = "blob%u.dylib".printf (next_blob_id++);
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob));
+
+			var id = yield inject_library_file (pid, file.path, entrypoint, data);
+
+			blob_file_by_id[id] = file;
+
+			return id;
+		}
+
+		public async uint inject_library_resource (uint pid, AgentResource resource, string entrypoint, string data) throws Error {
+			return yield inject_library_file (pid, resource.file.path, entrypoint, data);
 		}
 
 		public bool any_still_injected () {
@@ -43,6 +68,7 @@ namespace Frida {
 
 		private void on_uninjected (uint id) {
 			pid_by_id.unset (id);
+			blob_file_by_id.unset (id);
 			uninjected (id);
 		}
 	}

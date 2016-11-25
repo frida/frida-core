@@ -79,7 +79,6 @@ namespace Frida {
 
 	public class DarwinHostSession : BaseDBusHostSession {
 		private HelperProcess helper;
-		private Fruitjector injector;
 		private AgentResource agent;
 		private FruitLauncher fruit_launcher;
 
@@ -107,11 +106,12 @@ namespace Frida {
 			}
 
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (injector.any_still_injected ())
+			var fruitjector = injector as Fruitjector;
+			while (fruitjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
 			injector.uninjected.disconnect (on_uninjected);
-			yield injector.close ();
+			yield fruitjector.close ();
 			injector = null;
 
 			agent = null;
@@ -205,7 +205,8 @@ namespace Frida {
 				yield;
 			injector.disconnect (uninjected_handler);
 
-			var id = yield injector.inject (pid, agent, remote_address);
+			var fruitjector = injector as Fruitjector;
+			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address);
 			injectee_by_pid[pid] = id;
 
 			return stream;
@@ -230,6 +231,8 @@ namespace Frida {
 					return;
 				}
 			}
+
+			uninjected (InjectorPayloadId (id));
 		}
 
 		// TODO: use Vala's preprocessor when the build system has been fixed
