@@ -56,10 +56,10 @@ namespace Frida.WinjectorTest {
 			process = Frida.Test.Process.start (rat_file, argv, envp, Frida.Test.Arch.CURRENT);
 		}
 
-		public void inject (string name, string data_string) {
+		public void inject (string name, string data) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_injection.begin (name, data_string, loop);
+				do_injection.begin (name, data, loop);
 				return false;
 			});
 			loop.run ();
@@ -90,7 +90,7 @@ namespace Frida.WinjectorTest {
 			loop.run ();
 		}
 
-		private async void do_injection (string name, string data_string, MainLoop loop) {
+		private async void do_injection (string name, string data, MainLoop loop) {
 			if (injector == null)
 				injector = new Winjector ();
 
@@ -107,7 +107,7 @@ namespace Frida.WinjectorTest {
 			}
 
 			try {
-				yield injector.inject ((uint32) process.id, desc, data_string);
+				yield injector.inject_library_resource ((uint32) process.id, desc, "frida_agent_main", data);
 			} catch (Error e) {
 				inject_error = e.message;
 			}

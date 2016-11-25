@@ -88,20 +88,20 @@ namespace Frida {
 			}
 		}
 
-		public async uint inject (uint pid, string filename_template, string data_string) throws Error {
+		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data) throws Error {
 			var cpu_type = cpu_type_from_pid (pid);
 
-			string filename;
+			string path;
 			switch (cpu_type) {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
 				case Gum.CpuType.MIPS:
-					filename = filename_template.printf (32);
+					path = path_template.printf (32);
 					break;
 
 				case Gum.CpuType.AMD64:
 				case Gum.CpuType.ARM64:
-					filename = filename_template.printf (64);
+					path = path_template.printf (64);
 					break;
 
 				default:
@@ -110,7 +110,7 @@ namespace Frida {
 
 			var helper = yield obtain_for_cpu_type (cpu_type);
 			try {
-				return yield helper.inject (pid, filename, data_string, resource_store.tempdir.path);
+				return yield helper.inject_library_file (pid, path, entrypoint, data, resource_store.tempdir.path);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

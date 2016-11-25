@@ -111,7 +111,7 @@ if __name__ == '__main__':
                 enum.c_definition = beautify_cenum(m.group(0))
                 break
 
-    api_classes = [ApiClass(m.group(1)) for m in re.finditer(r"^\t+public\s+class\s+(\w+)\s+", api_vala, re.MULTILINE)]
+    api_classes = [ApiClass(m.group(2)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", api_vala, re.MULTILINE)]
     class_by_name = {}
     for klass in api_classes:
         class_by_name[klass.name] = klass

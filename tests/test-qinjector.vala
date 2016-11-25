@@ -82,16 +82,16 @@ namespace Frida.QinjectorTest {
 			}
 		}
 
-		public void inject (string name, string data_string) {
+		public void inject (string name, string data) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_injection.begin (name, data_string, loop);
+				do_injection.begin (name, data, loop);
 				return false;
 			});
 			loop.run ();
 		}
 
-		private async void do_injection (string name, string data_string, MainLoop loop) {
+		private async void do_injection (string name, string data, MainLoop loop) {
 			if (injector == null)
 				injector = new Qinjector ();
 
@@ -108,7 +108,7 @@ namespace Frida.QinjectorTest {
 					assert_not_reached ();
 				}
 
-				yield injector.inject (process.id, desc, data_string);
+				yield injector.inject_library_resource (process.id, desc, "frida_agent_main", data);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();

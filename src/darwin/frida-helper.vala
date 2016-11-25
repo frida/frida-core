@@ -263,8 +263,8 @@ namespace Frida {
 			_do_kill_application (identifier);
 		}
 
-		public async uint inject (uint pid, string filename, string data_string) throws Error {
-			return _do_inject (pid, filename, data_string);
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			return _do_inject (pid, path, entrypoint, data);
 		}
 
 		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error {
@@ -321,7 +321,7 @@ namespace Frida {
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string dylib_path, string data_string) throws Error;
+		public extern uint _do_inject (uint pid, string path, string entrypoint, string data) throws Error;
 		public extern void _free_inject_instance (void * instance);
 
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid, out bool need_proxy) throws Error;

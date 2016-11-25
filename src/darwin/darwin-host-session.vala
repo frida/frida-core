@@ -79,23 +79,23 @@ namespace Frida {
 
 	public class DarwinHostSession : BaseDBusHostSession {
 		private HelperProcess helper;
-		private Fruitjector injector;
 		private AgentResource agent;
 		private FruitLauncher fruit_launcher;
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
+
 		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		construct {
 			helper = new HelperProcess ();
 			helper.output.connect (on_output);
+
 			injector = new Fruitjector.with_helper (helper);
+			injector.uninjected.connect (on_uninjected);
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
 			agent = new AgentResource (blob.name, new MemoryInputStream.from_data (blob.data, null), helper.tempdir);
-
-			injector.uninjected.connect (on_uninjected);
 		}
 
 		public override async void close () {
@@ -106,15 +106,18 @@ namespace Frida {
 				fruit_launcher = null;
 			}
 
+			var fruitjector = injector as Fruitjector;
+
 			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (injector.any_still_injected ())
+			while (fruitjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
-			injector.uninjected.disconnect (on_uninjected);
-			yield injector.close ();
-			injector = null;
 
 			agent = null;
+
+			injector.uninjected.disconnect (on_uninjected);
+			yield fruitjector.close ();
+			injector = null;
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);
@@ -205,7 +208,8 @@ namespace Frida {
 				yield;
 			injector.disconnect (uninjected_handler);
 
-			var id = yield injector.inject (pid, agent, remote_address);
+			var fruitjector = injector as Fruitjector;
+			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address);
 			injectee_by_pid[pid] = id;
 
 			return stream;
@@ -230,6 +234,8 @@ namespace Frida {
 					return;
 				}
 			}
+
+			uninjected (InjectorPayloadId (id));
 		}
 
 		// TODO: use Vala's preprocessor when the build system has been fixed

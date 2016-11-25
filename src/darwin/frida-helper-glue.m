@@ -20,7 +20,6 @@
 #include <mach/mach.h>
 #include <sys/sysctl.h>
 
-#define FRIDA_AGENT_ENTRYPOINT_NAME      "frida_agent_main"
 #define FRIDA_PSR_THUMB                  0x20
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
@@ -111,8 +110,9 @@ struct _FridaInjectPayloadLayout
 struct _FridaAgentDetails
 {
   guint pid;
-  const char * dylib_path;
-  const char * data_string;
+  const gchar * dylib_path;
+  const gchar * entrypoint_name;
+  const gchar * entrypoint_data;
   GumCpuType cpu_type;
   mach_port_name_t task;
 };
@@ -138,7 +138,7 @@ struct _FridaAgentContext
 
   GumAddress dlsym_impl;
   GumAddress entrypoint_name;
-  GumAddress data_string;
+  GumAddress entrypoint_data;
   GumAddress mapped_range;
   GumThreadId thread_id;
 
@@ -146,10 +146,10 @@ struct _FridaAgentContext
 
   GumAddress dylib_path;
 
-  gchar entrypoint_name_data[32];
-  gchar data_string_data[256];
-  GumMemoryRange mapped_range_data;
-  gchar dylib_path_data[256];
+  gchar entrypoint_name_storage[256];
+  gchar entrypoint_data_storage[256];
+  GumMemoryRange mapped_range_storage;
+  gchar dylib_path_storage[256];
 };
 
 struct _FridaAgentEmitContext
@@ -710,7 +710,7 @@ _frida_helper_service_free_spawn_instance (FridaHelperService * self, void * ins
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * dylib_path, const char * data_string, GError ** error)
+_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, GError ** error)
 {
   guint result = 0;
   FridaHelperContext * ctx = self->context;
@@ -743,8 +743,9 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance = frida_inject_instance_new (self, self->last_id++);
 
   details.pid = pid;
-  details.dylib_path = dylib_path;
-  details.data_string = data_string;
+  details.dylib_path = path;
+  details.entrypoint_name = entrypoint;
+  details.entrypoint_data = data;
 
   if (!gum_darwin_cpu_type_from_pid (pid, &details.cpu_type))
     goto handle_cpu_type_error;
@@ -754,7 +755,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance->task = details.task;
 
 #ifdef HAVE_MAPPER
-  mapper = gum_darwin_mapper_new (dylib_path, details.task, details.cpu_type);
+  mapper = gum_darwin_mapper_new (path, details.task, details.cpu_type);
 #endif
 
   if (!gum_darwin_query_page_size (instance->task, &page_size))
@@ -1321,21 +1322,21 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   self->pthread_create_arg = payload_base + layout->data_offset;
 
   self->dylib_path = payload_base + layout->data_offset +
-      G_STRUCT_OFFSET (FridaAgentContext, dylib_path_data);
-  strcpy (self->dylib_path_data, details->dylib_path);
+      G_STRUCT_OFFSET (FridaAgentContext, dylib_path_storage);
+  strcpy (self->dylib_path_storage, details->dylib_path);
   self->dlopen_mode = RTLD_LAZY;
 
   self->entrypoint_name = payload_base + layout->data_offset +
-      G_STRUCT_OFFSET (FridaAgentContext, entrypoint_name_data);
-  strcpy (self->entrypoint_name_data, FRIDA_AGENT_ENTRYPOINT_NAME);
-  self->data_string = payload_base + layout->data_offset +
-      G_STRUCT_OFFSET (FridaAgentContext, data_string_data);
-  g_assert_cmpint (strlen (details->data_string), <, sizeof (self->data_string_data));
-  strcpy (self->data_string_data, details->data_string);
+      G_STRUCT_OFFSET (FridaAgentContext, entrypoint_name_storage);
+  strcpy (self->entrypoint_name_storage, details->entrypoint_name);
+  self->entrypoint_data = payload_base + layout->data_offset +
+      G_STRUCT_OFFSET (FridaAgentContext, entrypoint_data_storage);
+  g_assert_cmpint (strlen (details->entrypoint_data), <, sizeof (self->entrypoint_data_storage));
+  strcpy (self->entrypoint_data_storage, details->entrypoint_data);
   self->mapped_range = payload_base + layout->data_offset +
-      G_STRUCT_OFFSET (FridaAgentContext, mapped_range_data);
-  self->mapped_range_data.base_address = payload_base;
-  self->mapped_range_data.size = payload_size;
+      G_STRUCT_OFFSET (FridaAgentContext, mapped_range_storage);
+  self->mapped_range_storage.base_address = payload_base;
+  self->mapped_range_storage.size = payload_size;
 
   return TRUE;
 }
@@ -1489,8 +1490,8 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
-    FRIDA_EMIT_LOAD (XCX, data_string);
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    FRIDA_EMIT_LOAD (XCX, entrypoint_data);
     FRIDA_EMIT_LOAD (XSI, mapped_range);
     FRIDA_EMIT_LOAD (XDX, thread_id);
     gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
@@ -1525,7 +1526,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
-    FRIDA_EMIT_LOAD (XCX, data_string);
+    FRIDA_EMIT_LOAD (XCX, entrypoint_data);
     FRIDA_EMIT_LOAD (XDX, thread_id);
     gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
         GUM_CALL_CAPI, GUM_REG_XAX, 3,
@@ -1699,8 +1700,8 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
     EMIT_ARM_LOAD (R2, thread_id);
     EMIT_ARM_LOAD (R1, mapped_range);
-    EMIT_ARM_LOAD (R0, data_string);
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
+    EMIT_ARM_LOAD (R0, entrypoint_data);
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM_CALL (R5);
 
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_destructor (ctx->mapper));
@@ -1722,7 +1723,7 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
     EMIT_ARM_LOAD (R2, thread_id);
     EMIT_ARM_LOAD_U32 (R1, 0);
-    EMIT_ARM_LOAD (R0, data_string);
+    EMIT_ARM_LOAD (R0, entrypoint_data);
     EMIT_ARM_CALL (R5);
 
     EMIT_ARM_MOVE (R0, R4);
@@ -1880,8 +1881,8 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 
     EMIT_ARM64_LOAD (X2, thread_id);
     EMIT_ARM64_LOAD (X1, mapped_range);
-    EMIT_ARM64_LOAD (X0, data_string);
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, FRIDA_AGENT_ENTRYPOINT_NAME));
+    EMIT_ARM64_LOAD (X0, entrypoint_data);
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM64_CALL (X8);
 
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_destructor (ctx->mapper));
@@ -1903,7 +1904,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 
     EMIT_ARM64_LOAD (X2, thread_id);
     EMIT_ARM64_LOAD_U64 (X1, 0);
-    EMIT_ARM64_LOAD (X0, data_string);
+    EMIT_ARM64_LOAD (X0, entrypoint_data);
     EMIT_ARM64_CALL (X8);
 
     EMIT_ARM64_MOVE (X0, X19);

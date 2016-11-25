@@ -164,10 +164,11 @@ struct _FridaInjectInstance
 struct _FridaInjectParams
 {
   pid_t pid;
-  const char * so_path;
-  const char * data_string;
+  const gchar * so_path;
+  const gchar * entrypoint_name;
+  const gchar * entrypoint_data;
 
-  const char * fifo_path;
+  const gchar * fifo_path;
   GumAddress remote_address;
 };
 
@@ -184,8 +185,8 @@ struct _FridaTrampolineData
   gchar pthread_create[32];
   gchar fifo_path[256];
   gchar so_path[256];
-  gchar entrypoint_name[32];
-  gchar data_string[256];
+  gchar entrypoint_name[256];
+  gchar entrypoint_data[256];
 
   pthread_t worker_thread;
 };
@@ -321,20 +322,20 @@ _frida_helper_service_free_spawn_instance (FridaHelperService * self, void * ins
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * so_path, const char * data_string, const gchar * temp_path, GError ** error)
+_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, GError ** error)
 {
   FridaInjectInstance * instance;
-  FridaInjectParams params = { pid, so_path, data_string };
+  FridaInjectParams params = { pid, path, entrypoint, data };
   FridaRegs saved_regs;
   gboolean exited;
 
-  if (self->last_id == 0 || self->last_id >= G_MAXINT)
+  if (self->next_id == 0 || self->next_id >= G_MAXINT)
   {
     /* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
-    self->last_id = (GLIB_SIZEOF_VOID_P == 4) ? 1 : 2;
+    self->next_id = (GLIB_SIZEOF_VOID_P == 4) ? 1 : 2;
   }
-  instance = frida_inject_instance_new (self, self->last_id, pid, temp_path);
-  self->last_id += 2;
+  instance = frida_inject_instance_new (self, self->next_id, pid, temp_path);
+  self->next_id += 2;
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
     goto beach;
@@ -577,8 +578,8 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   strcpy (data->pthread_create, "pthread_create");
   strcpy (data->fifo_path, params->fifo_path);
   strcpy (data->so_path, params->so_path);
-  strcpy (data->entrypoint_name, "frida_agent_main");
-  strcpy (data->data_string, params->data_string);
+  strcpy (data->entrypoint_name, params->entrypoint_name);
+  strcpy (data->entrypoint_data, params->entrypoint_data);
 
   if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
     return FALSE;
@@ -735,7 +736,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       3,
-      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (data_string),
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (entrypoint_data),
       GUM_ARG_POINTER, GSIZE_TO_POINTER (0),
       GUM_ARG_POINTER, GSIZE_TO_POINTER (0));
 
@@ -888,7 +889,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_put_call_reg_with_arguments (&cw,
       ARM_REG_R5,
       3,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
@@ -986,7 +987,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_arm64_writer_put_call_reg_with_arguments (&cw,
       ARM64_REG_X5,
       3,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
@@ -1102,7 +1103,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_mips_writer_put_call_reg_with_arguments (&cw,
       MIPS_REG_T9,
       3,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (data_string)),
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 

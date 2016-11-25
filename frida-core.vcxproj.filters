@@ -105,6 +105,9 @@
     <None Include="src\host-session-service.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="src\debugger.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\host-session-service.c">
@@ -185,9 +188,6 @@
       <Filter>Resource Files\windows</Filter>
     </CustomBuild>
     <CustomBuild Include="src\frida.vala">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
-    <CustomBuild Include="src\debugger.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
     <CustomBuild Include="src\agent.resources">

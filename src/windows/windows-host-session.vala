@@ -83,15 +83,18 @@ namespace Frida {
 	public class WindowsHostSession : BaseDBusHostSession {
 		private AgentContainer system_session_container;
 
-		private Gee.HashMap<uint, ChildProcess> processes = new Gee.HashMap<uint, ChildProcess> ();
-
-		private Winjector winjector = new Winjector ();
 		private AgentDescriptor agent_desc;
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
+		private Gee.HashMap<uint, ChildProcess> process_by_pid = new Gee.HashMap<uint, ChildProcess> ();
+		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
+
 		construct {
+			injector = new Winjector ();
+			injector.uninjected.connect (on_uninjected);
+
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_dll_blob ();
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_dll_blob ();
 			var dbghelp32 = Frida.Data.Agent.get_dbghelp_32_dll_blob ();
@@ -109,35 +112,38 @@ namespace Frida {
 		public override async void close () {
 			yield base.close ();
 
-			/* HACK: give processes 100 ms to unload DLLs */
-			var source = new TimeoutSource (100);
-			source.set_callback (() => {
-				close.callback ();
-				return false;
-			});
-			source.attach (MainContext.get_thread_default ());
-			yield;
+			var winjector = injector as Winjector;
+
+			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
+			while (winjector.any_still_injected ())
+				yield;
+			injector.disconnect (uninjected_handler);
 
 			agent_desc = null;
 
+			injector.uninjected.disconnect (on_uninjected);
 			yield winjector.close ();
-			winjector = null;
+			injector = null;
 
 			if (system_session_container != null) {
 				yield system_session_container.destroy ();
 				system_session_container = null;
 			}
 
-			foreach (var process in processes.values)
+			foreach (var process in process_by_pid.values)
 				process.close ();
-			processes.clear ();
+			process_by_pid.clear ();
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
+			var winjector = injector as Winjector;
 			var path_template = winjector.normal_resource_store.ensure_copy_of (agent_desc);
-			var agent_filename = path_template.printf (sizeof (void *) == 8 ? 64 : 32);
-			system_session_container = yield AgentContainer.create (agent_filename);
+			var agent_path = path_template.printf (sizeof (void *) == 8 ? 64 : 32);
+
+			system_session_container = yield AgentContainer.create (agent_path);
+
 			connection = system_session_container.connection;
+
 			return system_session_container;
 		}
 
@@ -169,7 +175,7 @@ namespace Frida {
 			var process = _do_spawn (path, argv, envp);
 
 			var pid = process.pid;
-			processes[pid] = process;
+			process_by_pid[pid] = process;
 
 			var pipes = process.pipes;
 			process_next_output_from.begin (pipes.output, pid, 1, pipes);
@@ -179,7 +185,7 @@ namespace Frida {
 		}
 
 		public void _on_child_dead (ChildProcess process, int status) {
-			processes.unset (process.pid);
+			process_by_pid.unset (process.pid);
 		}
 
 		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
@@ -198,7 +204,7 @@ namespace Frida {
 		}
 
 		public override async void input (uint pid, uint8[] data) throws Error {
-			var process = processes[pid];
+			var process = process_by_pid[pid];
 			if (process == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid pid");
 			var data_copy = data; /* FIXME: workaround for Vala compiler bug */
@@ -210,7 +216,7 @@ namespace Frida {
 		}
 
 		public override async void resume (uint pid) throws Error {
-			var process = processes[pid];
+			var process = process_by_pid[pid];
 			if (process == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid pid");
 			process.resume ();
@@ -229,9 +235,30 @@ namespace Frida {
 			} catch (IOError stream_error) {
 				throw new Error.NOT_SUPPORTED (stream_error.message);
 			}
-			yield winjector.inject (pid, agent_desc, t.remote_address);
+
+			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
+			while (injectee_by_pid.has_key (pid))
+				yield;
+			injector.disconnect (uninjected_handler);
+
+			var winjector = injector as Winjector;
+			var id = yield winjector.inject_library_resource (pid, agent_desc, "frida_agent_main", t.remote_address);
+			injectee_by_pid[pid] = id;
+
 			transport = t;
+
 			return stream;
+		}
+
+		private void on_uninjected (uint id) {
+			foreach (var entry in injectee_by_pid.entries) {
+				if (entry.value == id) {
+					injectee_by_pid.unset (entry.key);
+					return;
+				}
+			}
+
+			uninjected (InjectorPayloadId (id));
 		}
 
 		public extern ChildProcess _do_spawn (string path, string[] argv, string[] envp) throws Error;
