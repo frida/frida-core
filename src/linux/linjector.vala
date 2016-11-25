@@ -5,6 +5,7 @@ namespace Frida {
 	public class Linjector : Object, Injector {
 		private HelperProcess helper;
 		private bool close_helper;
+
 		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
 		private HashMap<uint, TemporaryFile> blob_file_by_id = new HashMap<uint, TemporaryFile> ();
 		private uint next_blob_id = 1;
@@ -73,6 +74,7 @@ namespace Frida {
 		private void on_uninjected (uint id) {
 			pid_by_id.unset (id);
 			blob_file_by_id.unset (id);
+
 			uninjected (id);
 		}
 	}

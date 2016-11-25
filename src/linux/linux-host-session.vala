@@ -81,10 +81,14 @@ namespace Frida {
 		private RoboAgent robo_agent;
 #endif
 
+		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
+
 		construct {
 			helper = new HelperProcess ();
 			helper.output.connect (on_output);
+
 			injector = new Linjector.with_helper (helper);
+			injector.uninjected.connect (on_uninjected);
 
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
@@ -117,6 +121,7 @@ namespace Frida {
 			while (linjector.any_still_injected ())
 				yield;
 			injector.disconnect (uninjected_handler);
+			injector.uninjected.disconnect (on_uninjected);
 			yield linjector.close ();
 			injector = null;
 
@@ -235,8 +240,14 @@ namespace Frida {
 			}
 #endif
 
+			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
+			while (injectee_by_pid.has_key (pid))
+				yield;
+			injector.disconnect (uninjected_handler);
+
 			var linjector = injector as Linjector;
-			yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address);
+			var id = yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address);
+			injectee_by_pid[pid] = id;
 
 			transport = t;
 
@@ -255,6 +266,17 @@ namespace Frida {
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_uninjected (uint id) {
+			foreach (var entry in injectee_by_pid.entries) {
+				if (entry.value == id) {
+					injectee_by_pid.unset (entry.key);
+					return;
+				}
+			}
+
+			uninjected (InjectorPayloadId (id));
 		}
 	}
 
