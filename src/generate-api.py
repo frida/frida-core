@@ -15,11 +15,12 @@ class ApiEnum:
         self.vapi_declaration = None
         self.vapi_members = []
 
-class ApiClass:
-    def __init__(self, name):
+class ApiObjectType:
+    def __init__(self, name, kind):
         self.name = name
         self.name_lc = camel_identifier_to_lc(self.name)
         self.name_uc = camel_identifier_to_uc(self.name)
+        self.kind = kind
         self.property_names = []
         self.method_names = []
         self.c_name = 'Frida' + name
@@ -111,35 +112,35 @@ if __name__ == '__main__':
                 enum.c_definition = beautify_cenum(m.group(0))
                 break
 
-    api_classes = [ApiClass(m.group(2)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", api_vala, re.MULTILINE)]
-    class_by_name = {}
-    for klass in api_classes:
-        class_by_name[klass.name] = klass
+    api_object_types = [ApiObjectType(m.group(2), m.group(1)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", api_vala, re.MULTILINE)]
+    object_type_by_name = {}
+    for klass in api_object_types:
+        object_type_by_name[klass.name] = klass
     seen_cfunctions = {}
-    for klass in sorted(api_classes, key=lambda klass: len(klass.c_name_lc), reverse=True):
-        for m in re.finditer(r"^.*?\s+" + klass.c_name_lc + r"_(\w+)\s+.*;", core_header, re.MULTILINE):
+    for object_type in sorted(api_object_types, key=lambda klass: len(klass.c_name_lc), reverse=True):
+        for m in re.finditer(r"^.*?\s+" + object_type.c_name_lc + r"_(\w+)\s+.*;", core_header, re.MULTILINE):
             method_cprototype = beautify_cprototype(m.group(0))
             method_name = m.group(1)
-            method_cname_lc = klass.c_name_lc + '_' + method_name
+            method_cname_lc = object_type.c_name_lc + '_' + method_name
             if method_cname_lc not in seen_cfunctions:
                 seen_cfunctions[method_cname_lc] = True
                 if method_name not in ('construct', 'get_main_context', 'get_provider', 'get_session'):
-                    if (klass.c_name + '*') in m.group(0):
+                    if (object_type.c_name + '*') in m.group(0):
                         if method_name == 'new':
-                            if not klass.name.endswith("List") and method_cprototype.endswith("(void);"):
-                                klass.c_constructor = method_cprototype
+                            if not object_type.name.endswith("List") and method_cprototype.endswith("(void);"):
+                                object_type.c_constructor = method_cprototype
                         elif method_name.startswith('get_'):
-                            klass.property_names.append(method_name[4:])
-                            klass.c_getter_prototypes.append(method_cprototype)
+                            object_type.property_names.append(method_name[4:])
+                            object_type.c_getter_prototypes.append(method_cprototype)
                         else:
-                            klass.method_names.append(method_name)
-                            klass.c_method_prototypes.append(method_cprototype)
+                            object_type.method_names.append(method_name)
+                            object_type.c_method_prototypes.append(method_cprototype)
                     elif method_name == 'get_type':
-                        klass.c_get_type = method_cprototype
+                        object_type.c_get_type = method_cprototype
 
     with open(core_vapi_filename) as core_vapi_file:
         current_enum = None
-        current_class = None
+        current_object_type = None
         ignoring = False
         for line in core_vapi_file:
             stripped_line = line.strip()
@@ -156,7 +157,7 @@ if __name__ == '__main__':
                     if stripped_line == "}":
                         ignoring = False
                 else:
-                    if stripped_line.startswith("public interface") or stripped_line.startswith("public abstract"):
+                    if stripped_line.startswith("public abstract"):
                         ignoring = True
                     elif stripped_line.startswith("public enum"):
                         name = re.match(r"^public enum (\w+) ", stripped_line).group(1)
@@ -165,34 +166,34 @@ if __name__ == '__main__':
                         else:
                             current_enum = enum_by_name[name]
                             current_enum.vapi_declaration = stripped_line
-                    elif stripped_line.startswith("public class"):
-                        name = re.match(r"^public class (\w+) ", stripped_line).group(1)
-                        if name not in class_by_name:
+                    elif stripped_line.startswith("public class") or stripped_line.startswith("public interface"):
+                        name = re.match(r"^public (class|interface) (\w+) ", stripped_line).group(2)
+                        if name not in object_type_by_name:
                             ignoring = True
                         else:
-                            current_class = class_by_name[name]
-                            current_class.vapi_declaration = stripped_line
+                            current_object_type = object_type_by_name[name]
+                            current_object_type.vapi_declaration = stripped_line
                     elif stripped_line == "}":
                         current_enum = None
-                        current_class = None
+                        current_object_type = None
             elif current_enum is not None:
                 current_enum.vapi_members.append(stripped_line)
-            elif current_class is not None and stripped_line.startswith("public"):
-                if stripped_line.startswith("public " + current_class.name + " ("):
-                    if current_class.c_constructor is not None:
-                        current_class.vapi_constructor = stripped_line
+            elif current_object_type is not None and stripped_line.startswith("public"):
+                if stripped_line.startswith("public " + current_object_type.name + " (") or stripped_line.startswith("public static Frida." + current_object_type.name + " @new ("):
+                    if current_object_type.c_constructor is not None:
+                        current_object_type.vapi_constructor = stripped_line
                 elif stripped_line.startswith("public signal"):
-                    current_class.vapi_signals.append(stripped_line)
+                    current_object_type.vapi_signals.append(stripped_line)
                 elif "{ get" in stripped_line:
                     name = re.match(r".+?(\w+)\s+{", stripped_line).group(1)
                     if name not in ('main_context', 'provider', 'session'):
-                        current_class.vapi_properties.append(stripped_line)
+                        current_object_type.vapi_properties.append(stripped_line)
                 else:
                     name = re.match(r".+?(\w+)\s+\(", stripped_line).group(1)
                     if not name.startswith("_") and name != 'dispose':
-                        current_class.vapi_methods.append(stripped_line)
-        for klass in api_classes:
-            klass.sort_members()
+                        current_object_type.vapi_methods.append(stripped_line)
+        for object_type in api_object_types:
+            object_type.sort_members()
 
     with open(os.path.join(output_dir, 'frida-core-1.0.deps'), 'wt') as output_deps_file:
         output_deps_file.write("glib-2.0\n")
@@ -212,17 +213,17 @@ if __name__ == '__main__':
             output_vapi_file.write("\n\t\t".join(enum.vapi_members))
             output_vapi_file.write("\n\t}")
 
-        for klass in api_classes:
-            output_vapi_file.write("\n\n\t%s" % klass.vapi_declaration)
+        for object_type in api_object_types:
+            output_vapi_file.write("\n\n\t%s" % object_type.vapi_declaration)
             sections = []
-            if len(klass.vapi_properties) > 0:
-                sections.append("\n\t\t" + "\n\t\t".join(klass.vapi_properties))
-            if klass.vapi_constructor is not None:
-                sections.append("\n\t\t" + klass.vapi_constructor)
-            if len(klass.vapi_methods) > 0:
-                sections.append("\n\t\t" + "\n\t\t".join(klass.vapi_methods))
-            if len(klass.vapi_signals) > 0:
-                sections.append("\n\t\t" + "\n\t\t".join(klass.vapi_signals))
+            if len(object_type.vapi_properties) > 0:
+                sections.append("\n\t\t" + "\n\t\t".join(object_type.vapi_properties))
+            if object_type.vapi_constructor is not None:
+                sections.append("\n\t\t" + object_type.vapi_constructor)
+            if len(object_type.vapi_methods) > 0:
+                sections.append("\n\t\t" + "\n\t\t".join(object_type.vapi_methods))
+            if len(object_type.vapi_signals) > 0:
+                sections.append("\n\t\t" + "\n\t\t".join(object_type.vapi_signals))
             output_vapi_file.write("\n".join(sections))
             output_vapi_file.write("\n\t}")
 
@@ -235,8 +236,8 @@ if __name__ == '__main__':
 
         output_header_file.write("\nG_BEGIN_DECLS\n")
 
-        for klass in api_classes:
-            output_header_file.write("\ntypedef struct _%s %s;" % (klass.c_name, klass.c_name))
+        for object_type in api_object_types:
+            output_header_file.write("\ntypedef struct _%s %s;" % (object_type.c_name, object_type.c_name))
 
         for enum in api_enums:
             output_header_file.write("\n\n" + enum.c_definition)
@@ -254,15 +255,15 @@ if __name__ == '__main__':
         output_header_file.write("\nvoid frida_version (guint * major, guint * minor, guint * micro, guint * nano);")
         output_header_file.write("\nconst gchar * frida_version_string (void);")
 
-        for klass in api_classes:
-            output_header_file.write("\n\n/* %s */" % klass.name)
+        for object_type in api_object_types:
+            output_header_file.write("\n\n/* %s */" % object_type.name)
             sections = []
-            if klass.c_constructor is not None:
-                sections.append("\n" + klass.c_constructor)
-            if len(klass.c_getter_prototypes) > 0:
-                sections.append("\n" + "\n".join(klass.c_getter_prototypes))
-            if len(klass.c_method_prototypes) > 0:
-                sections.append("\n" + "\n".join(klass.c_method_prototypes))
+            if object_type.c_constructor is not None:
+                sections.append("\n" + object_type.c_constructor)
+            if len(object_type.c_getter_prototypes) > 0:
+                sections.append("\n" + "\n".join(object_type.c_getter_prototypes))
+            if len(object_type.c_method_prototypes) > 0:
+                sections.append("\n" + "\n".join(object_type.c_method_prototypes))
             output_header_file.write("\n".join(sections))
 
         if len(errors) > 0:
@@ -275,23 +276,21 @@ if __name__ == '__main__':
         output_header_file.write("\n\n/* GTypes */")
         for enum in api_enums:
             output_header_file.write("\nGType %s_get_type (void) G_GNUC_CONST;" % enum.c_name_lc)
-        for klass in api_classes:
-            if klass.c_get_type is not None:
-                output_header_file.write("\n" + klass.c_get_type)
+        for object_type in api_object_types:
+            if object_type.c_get_type is not None:
+                output_header_file.write("\n" + object_type.c_get_type)
 
         output_header_file.write("\n\n/* Macros */")
         macros = []
         for enum in api_enums:
             macros.append("#define FRIDA_TYPE_%(name_uc)s (frida_%(name_lc)s_get_type ())" \
                 % { 'name_lc': enum.name_lc, 'name_uc': enum.name_uc })
-        for klass in api_classes:
+        for object_type in api_object_types:
             macros.append("""#define FRIDA_TYPE_%(name_uc)s (frida_%(name_lc)s_get_type ())
 #define FRIDA_%(name_uc)s(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_%(name_uc)s, Frida%(name)s))
-#define FRIDA_%(name_uc)s_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST ((klass), FRIDA_TYPE_%(name_uc)s, Frida%(name)sClass))
-#define FRIDA_IS_%(name_uc)s(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_%(name_uc)s))
-#define FRIDA_IS_%(name_uc)s_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), FRIDA_TYPE_%(name_uc)s))
-#define FRIDA_%(name_uc)s_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj), FRIDA_TYPE_%(name_uc)s, Frida%(name)sClass))""" \
-                % { 'name': klass.name, 'name_lc': klass.name_lc, 'name_uc': klass.name_uc })
+#define FRIDA_IS_%(name_uc)s(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_%(name_uc)s))""" \
+                % { 'name': object_type.name, 'name_lc': object_type.name_lc, 'name_uc': object_type.name_uc })
+
         for enum in errors:
             macros.append("#define FRIDA_%(name_uc)s (frida_%(name_lc)s_quark ())" \
                 % { 'name_lc': enum.name_lc, 'name_uc': enum.name_uc })
