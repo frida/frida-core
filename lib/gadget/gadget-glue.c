@@ -2,32 +2,11 @@
 
 #include "frida-interfaces.h"
 
-#ifndef G_OS_WIN32
+#ifdef HAVE_DARWIN
+# include <CoreFoundation/CoreFoundation.h>
 # include <dlfcn.h>
-#endif
-#ifdef HAVE_ANDROID
-# include <android/log.h>
-# include <unistd.h>
-#else
-# include <stdio.h>
-# ifdef HAVE_DARWIN
-#  include <CoreFoundation/CoreFoundation.h>
-#  include <dlfcn.h>
 
 typedef struct _FridaCFApi FridaCFApi;
-typedef gint32 CFLogLevel;
-
-enum _CFLogLevel
-{
-  kCFLogLevelEmergency = 0,
-  kCFLogLevelAlert     = 1,
-  kCFLogLevelCritical  = 2,
-  kCFLogLevelError     = 3,
-  kCFLogLevelWarning   = 4,
-  kCFLogLevelNotice    = 5,
-  kCFLogLevelInfo      = 6,
-  kCFLogLevelDebug     = 7
-};
 
 struct _FridaCFApi
 {
@@ -36,16 +15,12 @@ struct _FridaCFApi
 
   void (* CFRelease) (CFTypeRef cf);
 
-  CFStringRef (* CFStringCreateWithCString) (CFAllocatorRef alloc, const char * c_str, CFStringEncoding encoding);
-
   CFRunLoopRef (* CFRunLoopGetMain) (void);
   void (* CFRunLoopRun) (void);
   void (* CFRunLoopStop) (CFRunLoopRef loop);
   CFRunLoopTimerRef (* CFRunLoopTimerCreate) (CFAllocatorRef allocator, CFAbsoluteTime fire_date, CFTimeInterval interval, CFOptionFlags flags, CFIndex order, CFRunLoopTimerCallBack callout, CFRunLoopTimerContext * context);
   void (* CFRunLoopAddTimer) (CFRunLoopRef loop, CFRunLoopTimerRef timer, CFStringRef mode);
   void (* CFRunLoopTimerInvalidate) (CFRunLoopTimerRef timer);
-
-  void (* CFLog) (CFLogLevel level, CFStringRef format, ...);
 };
 
 static void * frida_gadget_wait_for_permission_to_resume_then_stop_loop (void * user_data);
@@ -53,7 +28,6 @@ static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 
 static FridaCFApi * frida_cf_api_try_get (void);
 
-# endif
 #endif
 
 typedef struct _FridaThreadCreateContext FridaThreadCreateContext;
@@ -93,9 +67,6 @@ static void frida_tls_key_context_free (FridaTlsKeyContext * ctx);
 
 static gpointer run_main_loop (gpointer data);
 static gboolean stop_main_loop (gpointer data);
-
-static void frida_gadget_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
-static void frida_gadget_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
 static void frida_gadget_auto_ignorer_shutdown (FridaGadgetAutoIgnorer * self);
 
@@ -178,26 +149,8 @@ on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info)
 void
 frida_gadget_environment_init (void)
 {
-  GMemVTable mem_vtable = {
-    gum_malloc,
-    gum_realloc,
-    gum_free,
-    gum_calloc,
-    gum_malloc,
-    gum_realloc
-  };
+  gum_init_embedded ();
 
-  gum_memory_init ();
-  g_mem_set_vtable (&mem_vtable);
-  glib_init ();
-  g_assertion_set_handler (frida_gadget_on_assert_failure, NULL);
-  g_log_set_default_handler (frida_gadget_on_log_message, NULL);
-  g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
-#if GLIB_CHECK_VERSION (2, 46, 1)
-  gobject_init ();
-#endif
-  gio_init ();
-  gum_init ();
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
@@ -229,12 +182,11 @@ frida_gadget_environment_deinit (FridaGadgetAutoIgnorer * ignorer)
 
   gio_shutdown ();
   glib_shutdown ();
+
   frida_gadget_auto_ignorer_shutdown (ignorer);
   g_object_unref (ignorer);
-  gum_deinit ();
-  gio_deinit ();
-  glib_deinit ();
-  gum_memory_deinit ();
+
+  gum_deinit_embedded ();
 }
 
 GMainContext *
@@ -292,145 +244,6 @@ void
 frida_gadget_log_error (const gchar * message)
 {
   g_error ("%s", message);
-}
-
-static void
-frida_gadget_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data)
-{
-  gchar * full_message;
-
-  while (g_str_has_prefix (file, ".." G_DIR_SEPARATOR_S))
-    file += 3;
-  if (message == NULL)
-    message = "code should not be reached";
-
-  full_message = g_strdup_printf ("%s:%d:%s%s %s", file, line, func, (func[0] != '\0') ? ":" : "", message);
-  frida_gadget_on_log_message (log_domain, G_LOG_LEVEL_ERROR, full_message, user_data);
-  g_free (full_message);
-
-  abort ();
-}
-
-static void
-frida_gadget_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data)
-{
-#ifdef HAVE_ANDROID
-  int priority;
-
-  (void) user_data;
-
-  switch (log_level & G_LOG_LEVEL_MASK)
-  {
-    case G_LOG_LEVEL_ERROR:
-    case G_LOG_LEVEL_CRITICAL:
-    case G_LOG_LEVEL_WARNING:
-      priority = ANDROID_LOG_FATAL;
-      break;
-    case G_LOG_LEVEL_MESSAGE:
-    case G_LOG_LEVEL_INFO:
-      priority = ANDROID_LOG_INFO;
-      break;
-    case G_LOG_LEVEL_DEBUG:
-      priority = ANDROID_LOG_DEBUG;
-      break;
-    default:
-      g_assert_not_reached ();
-  }
-
-  __android_log_write (priority, log_domain, message);
-#else
-# ifdef HAVE_DARWIN
-  FridaCFApi * api = frida_cf_api_try_get ();
-  if (api != NULL)
-  {
-    CFLogLevel cf_log_level;
-    CFStringRef message_str, template_str;
-
-    switch (log_level & G_LOG_LEVEL_MASK)
-    {
-      case G_LOG_LEVEL_ERROR:
-        cf_log_level = kCFLogLevelError;
-        break;
-      case G_LOG_LEVEL_CRITICAL:
-        cf_log_level = kCFLogLevelCritical;
-        break;
-      case G_LOG_LEVEL_WARNING:
-        cf_log_level = kCFLogLevelWarning;
-        break;
-      case G_LOG_LEVEL_MESSAGE:
-        cf_log_level = kCFLogLevelNotice;
-        break;
-      case G_LOG_LEVEL_INFO:
-        cf_log_level = kCFLogLevelInfo;
-        break;
-      case G_LOG_LEVEL_DEBUG:
-        cf_log_level = kCFLogLevelDebug;
-        break;
-      default:
-        g_assert_not_reached ();
-    }
-
-    message_str = api->CFStringCreateWithCString (NULL, message, kCFStringEncodingUTF8);
-    if (log_domain != NULL)
-    {
-      CFStringRef log_domain_str;
-
-      template_str = api->CFStringCreateWithCString (NULL, "%@: %@", kCFStringEncodingUTF8);
-      log_domain_str = api->CFStringCreateWithCString (NULL, log_domain, kCFStringEncodingUTF8);
-      api->CFLog (cf_log_level, template_str, log_domain_str, message_str);
-      api->CFRelease (log_domain_str);
-    }
-    else
-    {
-      template_str = api->CFStringCreateWithCString (NULL, "%@", kCFStringEncodingUTF8);
-      api->CFLog (cf_log_level, template_str, message_str);
-    }
-    api->CFRelease (template_str);
-    api->CFRelease (message_str);
-
-    return;
-  }
-  /* else: fall through to stdout/stderr logging */
-# endif
-
-  FILE * file = NULL;
-  const gchar * severity = NULL;
-
-  (void) user_data;
-
-  switch (log_level & G_LOG_LEVEL_MASK)
-  {
-    case G_LOG_LEVEL_ERROR:
-      file = stderr;
-      severity = "ERROR";
-      break;
-    case G_LOG_LEVEL_CRITICAL:
-      file = stderr;
-      severity = "CRITICAL";
-      break;
-    case G_LOG_LEVEL_WARNING:
-      file = stderr;
-      severity = "WARNING";
-      break;
-    case G_LOG_LEVEL_MESSAGE:
-      file = stderr;
-      severity = "MESSAGE";
-      break;
-    case G_LOG_LEVEL_INFO:
-      file = stdout;
-      severity = "INFO";
-      break;
-    case G_LOG_LEVEL_DEBUG:
-      file = stdout;
-      severity = "DEBUG";
-      break;
-    default:
-      g_assert_not_reached ();
-  }
-
-  fprintf (file, "[%s %s] %s\n", log_domain, severity, message);
-  fflush (file);
-#endif
 }
 
 static void
@@ -687,16 +500,12 @@ frida_cf_api_try_get (void)
 
       FRIDA_ASSIGN_CF_SYMBOL (CFRelease);
 
-      FRIDA_ASSIGN_CF_SYMBOL (CFStringCreateWithCString);
-
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopGetMain);
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopRun);
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopStop);
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerCreate);
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopAddTimer);
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerInvalidate);
-
-      FRIDA_ASSIGN_CF_SYMBOL (CFLog);
 
 #undef FRIDA_ASSIGN_CF_SYMBOL
 
