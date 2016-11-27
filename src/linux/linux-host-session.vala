@@ -259,7 +259,7 @@ namespace Frida {
 #if ANDROID
 		private RoboLauncher get_robo_launcher () {
 			if (robo_launcher == null) {
-				robo_launcher = new RoboLauncher (robo_agent, helper, injector, agent);
+				robo_launcher = new RoboLauncher (robo_agent, helper, injector as Linjector, agent);
 				robo_launcher.spawned.connect ((info) => { spawned (info); });
 			}
 			return robo_launcher;
@@ -446,14 +446,14 @@ namespace Frida {
 
 			try {
 				if (should_inject_32bit_loader) {
-					loader32 = yield injector.inject (LocalProcesses.get_pid ("zygote"), loader, data_dir);
+					loader32 = yield injector.inject_library_resource (LocalProcesses.get_pid ("zygote"), loader, "frida_agent_main", data_dir);
 					pending.add (loader32);
 				}
 
 				if (should_inject_64bit_loader) {
 					var zygote64_pid = LocalProcesses.find_pid ("zygote64");
 					if (zygote64_pid != 0) {
-						loader64 = yield injector.inject (zygote64_pid, loader, data_dir);
+						loader64 = yield injector.inject_library_resource (zygote64_pid, loader, "frida_agent_main", data_dir);
 						pending.add (loader64);
 					} else {
 						loader64 = 1;
