@@ -1,10 +1,6 @@
 extra_libs =
 extra_ldflags =
 
-if OS_ANDROID
-extra_libs += -llog
-endif
-
 if OS_LINUX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-agent.version
 else
