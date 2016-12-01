@@ -107,9 +107,14 @@ namespace Frida {
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
 			var qinjector = injector as Qinjector;
+
+			PipeTransport.set_temp_directory (qinjector.temp_directory);
+
 			var agent_filename = qinjector.resource_store.ensure_copy_of (agent_desc);
 			system_session_container = yield AgentContainer.create (agent_filename);
+
 			connection = system_session_container.connection;
+
 			return system_session_container;
 		}
 
@@ -166,6 +171,7 @@ namespace Frida {
 			var qinjector = injector as Qinjector;
 
 			PipeTransport.set_temp_directory (qinjector.temp_directory);
+
 			PipeTransport t;
 			Pipe stream;
 			try {
