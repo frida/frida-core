@@ -124,6 +124,7 @@ struct _FridaAgentContext
   GumAddress thread_self_data;
 
   GumAddress pthread_create_impl;
+  GumAddress pthread_create_from_mach_thread_impl;
   GumAddress pthread_create_start_routine;
   GumAddress pthread_create_arg;
 
@@ -1342,9 +1343,13 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 }
 
 #define FRIDA_AGENT_CONTEXT_RESOLVE(field) \
-  FRIDA_AGENT_CONTEXT_TRY_RESOLVE (field); \
-  if (self->field##_impl == 0) \
-    goto handle_resolve_error
+  G_STMT_START \
+  { \
+    FRIDA_AGENT_CONTEXT_TRY_RESOLVE (field); \
+    if (self->field##_impl == 0) \
+      goto handle_resolve_error; \
+  } \
+  G_STMT_END
 #define FRIDA_AGENT_CONTEXT_TRY_RESOLVE(field) \
   self->field##_impl = gum_darwin_module_resolver_find_export_address (&resolver, module, G_STRINGIFY (field))
 
@@ -1361,7 +1366,11 @@ frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDe
     goto handle_libc_error;
   FRIDA_AGENT_CONTEXT_RESOLVE (_pthread_set_self);
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (cthread_set_self);
-  FRIDA_AGENT_CONTEXT_RESOLVE (pthread_create);
+  FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
+  if (self->pthread_create_from_mach_thread_impl != 0)
+    self->pthread_create_impl = self->pthread_create_from_mach_thread_impl;
+  else
+    FRIDA_AGENT_CONTEXT_RESOLVE (pthread_create);
   FRIDA_AGENT_CONTEXT_RESOLVE (pthread_join);
 
   module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_kernel.dylib");
