@@ -1363,6 +1363,8 @@ frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDe
 
   module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
+    module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/introspection/libsystem_pthread.dylib");
+  if (module == NULL)
     goto handle_libc_error;
   FRIDA_AGENT_CONTEXT_RESOLVE (_pthread_set_self);
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (cthread_set_self);
