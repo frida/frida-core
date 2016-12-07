@@ -26,8 +26,8 @@ typedef struct _FridaPipeMessage FridaPipeMessage;
 struct _FridaPipeBackend
 {
   dispatch_queue_t dispatch_queue;
-  mach_port_name_t rx_port;
-  mach_port_name_t tx_port;
+  mach_port_t rx_port;
+  mach_port_t tx_port;
   gpointer rx_buffer;
   guint8 * rx_buffer_cur;
   guint rx_buffer_length;
@@ -56,10 +56,10 @@ void *
 _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   mach_port_t self_task;
-  mach_port_name_t local_rx = MACH_PORT_NULL;
-  mach_port_name_t local_tx = MACH_PORT_NULL;
-  mach_port_name_t remote_rx = MACH_PORT_NULL;
-  mach_port_name_t remote_tx = MACH_PORT_NULL;
+  mach_port_t local_rx = MACH_PORT_NULL;
+  mach_port_t local_tx = MACH_PORT_NULL;
+  mach_port_t remote_rx = MACH_PORT_NULL;
+  mach_port_t remote_tx = MACH_PORT_NULL;
   kern_return_t ret;
   const gchar * failed_operation;
   mach_msg_type_name_t acquired_type;

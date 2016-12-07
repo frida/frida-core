@@ -73,7 +73,7 @@ struct _FridaSpawnInstance
   mach_port_t thread;
   FridaDebugState previous_debug_state;
 
-  mach_port_name_t server_port;
+  mach_port_t server_port;
   dispatch_source_t server_recv_source;
   FridaExceptionPortSet previous_ports;
 
@@ -114,7 +114,7 @@ struct _FridaAgentDetails
   const gchar * entrypoint_name;
   const gchar * entrypoint_data;
   GumCpuType cpu_type;
-  mach_port_name_t task;
+  mach_port_t task;
 };
 
 struct _FridaAgentContext
@@ -186,8 +186,8 @@ static gboolean frida_agent_context_init_functions (FridaAgentContext * self, co
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 
-static kern_return_t frida_get_debug_state (mach_port_name_t thread, gpointer state, GumCpuType cpu_type);
-static kern_return_t frida_set_debug_state (mach_port_name_t thread, gconstpointer state, GumCpuType cpu_type);
+static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type);
+static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
 static void frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType cpu_type);
 
 static volatile BOOL _frida_run_loop_running = NO;
@@ -243,7 +243,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
   int spawn_errno, result;
   const gchar * failed_operation;
   kern_return_t ret;
-  mach_port_name_t self_task, child_task, child_thread;
+  mach_port_t self_task, child_task, child_thread;
   guint page_size;
   thread_act_array_t threads;
   guint thread_index;
@@ -984,11 +984,11 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   mach_port_t self_task;
   mach_port_t local_task = MACH_PORT_NULL;
   mach_port_t remote_task = MACH_PORT_NULL;
-  mach_port_name_t local_rx = MACH_PORT_NULL;
-  mach_port_name_t local_tx = MACH_PORT_NULL;
-  mach_port_name_t remote_rx = MACH_PORT_NULL;
-  mach_port_name_t remote_tx = MACH_PORT_NULL;
-  mach_port_name_t tx = MACH_PORT_NULL;
+  mach_port_t local_rx = MACH_PORT_NULL;
+  mach_port_t local_tx = MACH_PORT_NULL;
+  mach_port_t remote_rx = MACH_PORT_NULL;
+  mach_port_t remote_tx = MACH_PORT_NULL;
+  mach_port_t tx = MACH_PORT_NULL;
   kern_return_t ret;
   const gchar * failed_operation;
   mach_msg_type_name_t acquired_type;
@@ -1986,7 +1986,7 @@ frida_agent_context_emit_arm64_thread_terminate (FridaAgentContext * self, Frida
 #endif
 
 static kern_return_t
-frida_get_debug_state (mach_port_name_t thread, gpointer state, GumCpuType cpu_type)
+frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type)
 {
   mach_msg_type_number_t state_count;
   kern_return_t ret;
@@ -2011,7 +2011,7 @@ frida_get_debug_state (mach_port_name_t thread, gpointer state, GumCpuType cpu_t
 }
 
 static kern_return_t
-frida_set_debug_state (mach_port_name_t thread, gconstpointer state, GumCpuType cpu_type)
+frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type)
 {
   mach_msg_type_number_t state_count;
   kern_return_t ret;
