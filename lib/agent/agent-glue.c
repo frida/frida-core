@@ -1,5 +1,3 @@
-#define DEBUG_HEAP_LEAKS 0
-
 #include "frida-agent.h"
 
 #ifndef G_OS_WIN32
