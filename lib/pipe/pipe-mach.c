@@ -8,7 +8,6 @@
 #endif
 
 #include <stdio.h>
-#include <dispatch/dispatch.h>
 #include <mach/mach.h>
 
 #define FRIDA_PIPE_MAX_WRITE_SIZE (10 * 1024 * 1024)
@@ -25,13 +24,18 @@ typedef struct _FridaPipeMessage FridaPipeMessage;
 
 struct _FridaPipeBackend
 {
-  dispatch_queue_t dispatch_queue;
+  gboolean eof;
+
+  mach_port_t rx_set;
+
   mach_port_t rx_port;
-  mach_port_t tx_port;
   gpointer rx_buffer;
   guint8 * rx_buffer_cur;
   guint rx_buffer_length;
-  dispatch_source_t monitor_source;
+
+  mach_port_t tx_port;
+
+  mach_port_t notify_port;
 };
 
 struct _FridaPipeMessage
@@ -40,9 +44,6 @@ struct _FridaPipeMessage
   guint size;
   guint8 payload[0];
 };
-
-static void frida_pipe_backend_demonitor (FridaPipeBackend * backend);
-static void frida_pipe_backend_on_tx_port_dead (void * context);
 
 static void frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
 
@@ -113,25 +114,34 @@ _frida_pipe_transport_destroy_backend (void * backend)
 void *
 _frida_pipe_create_backend (const gchar * address, GError ** error)
 {
-  FridaPipeBackend * backend;
   int rx, tx, assigned;
-  dispatch_source_t source;
+  FridaPipeBackend * backend;
+  mach_port_t self_task, prev_notify_port;
 
-  backend = g_slice_new (FridaPipeBackend);
-  backend->dispatch_queue = dispatch_queue_create ("re.frida.pipe.queue", DISPATCH_QUEUE_SERIAL);
   assigned = sscanf (address, "pipe:rx=%d,tx=%d", &rx, &tx);
   g_assert_cmpint (assigned, ==, 2);
+
+  backend = g_slice_new (FridaPipeBackend);
+
+  backend->eof = FALSE;
+
+  self_task = mach_task_self ();
+
+  mach_port_allocate (self_task, MACH_PORT_RIGHT_PORT_SET, &backend->rx_set);
+
   backend->rx_port = rx;
-  backend->tx_port = tx;
+  mach_port_move_member (self_task, backend->rx_port, backend->rx_set);
   backend->rx_buffer = NULL;
   backend->rx_buffer_cur = NULL;
   backend->rx_buffer_length = 0;
 
-  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, backend->tx_port, DISPATCH_MACH_SEND_DEAD, backend->dispatch_queue);
-  backend->monitor_source = source;
-  dispatch_set_context (source, backend);
-  dispatch_source_set_event_handler_f (source, frida_pipe_backend_on_tx_port_dead);
-  dispatch_resume (source);
+  backend->tx_port = tx;
+
+  mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &backend->notify_port);
+  mach_port_insert_right (self_task, backend->notify_port, backend->notify_port, MACH_MSG_TYPE_MAKE_SEND);
+  mach_port_request_notification (self_task, backend->tx_port, MACH_NOTIFY_DEAD_NAME, TRUE,
+      backend->notify_port, MACH_MSG_TYPE_MAKE_SEND_ONCE, &prev_notify_port);
+  mach_port_move_member (self_task, backend->notify_port, backend->rx_set);
 
   return backend;
 }
@@ -141,50 +151,41 @@ _frida_pipe_destroy_backend (void * b)
 {
   FridaPipeBackend * backend = (FridaPipeBackend *) b;
 
-  frida_pipe_backend_demonitor (backend);
-
   g_free (backend->rx_buffer);
-  dispatch_release (backend->dispatch_queue);
 
   g_slice_free (FridaPipeBackend, backend);
-}
-
-static void
-frida_pipe_backend_demonitor (FridaPipeBackend * self)
-{
-  if (self->monitor_source != NULL)
-  {
-    dispatch_release (self->monitor_source);
-    self->monitor_source = NULL;
-  }
 }
 
 static gboolean
 frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
 {
-  kern_return_t ret_tx = 0, ret_rx = 0, ret;
+  mach_port_t self_task;
+
+  self_task = mach_task_self ();
+
+  if (self->notify_port != MACH_PORT_NULL)
+  {
+    mach_port_mod_refs (self_task, self->notify_port, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_mod_refs (self_task, self->notify_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    self->notify_port = MACH_PORT_NULL;
+  }
 
   if (self->tx_port != MACH_PORT_NULL)
   {
-    ret_tx = mach_port_mod_refs (mach_task_self (), self->tx_port, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_deallocate (self_task, self->tx_port);
     self->tx_port = MACH_PORT_NULL;
   }
 
   if (self->rx_port != MACH_PORT_NULL)
   {
-    ret_rx = mach_port_mod_refs (mach_task_self (), self->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    mach_port_mod_refs (self_task, self->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
     self->rx_port = MACH_PORT_NULL;
   }
 
-  ret = ret_tx != 0 ? ret_tx : ret_rx;
-  if (ret != 0)
+  if (self->rx_set != MACH_PORT_NULL)
   {
-    g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_FAILED,
-        "Error closing mach ports: %s",
-        mach_error_string (ret));
-    return FALSE;
+    mach_port_mod_refs (self_task, self->rx_set, MACH_PORT_RIGHT_RECEIVE, -1);
+    self->rx_set = MACH_PORT_NULL;
   }
 
   return TRUE;
@@ -195,20 +196,7 @@ _frida_pipe_close (FridaPipe * self, GError ** error)
 {
   FridaPipeBackend * backend = self->_backend;
 
-  frida_pipe_backend_demonitor (backend);
-
   return frida_pipe_backend_close_ports (backend, error);
-}
-
-static void
-frida_pipe_backend_on_tx_port_dead (void * context)
-{
-  FridaPipeBackend * self = context;
-
-  mach_port_mod_refs (mach_task_self (), self->tx_port, MACH_PORT_RIGHT_DEAD_NAME, -1);
-  self->tx_port = MACH_PORT_NULL;
-
-  frida_pipe_backend_close_ports (self, NULL);
 }
 
 static gssize
@@ -219,6 +207,9 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
   FridaPipeMessage * msg = NULL;
   kern_return_t ret;
   gssize n;
+
+  if (backend->eof)
+    goto handle_eof;
 
   if (backend->rx_buffer == NULL)
   {
@@ -234,7 +225,7 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
     msg = g_realloc (NULL, msg_size);
     do
     {
-      ret = mach_msg (&msg->header, MACH_RCV_MSG | MACH_RCV_LARGE, 0, msg_size, backend->rx_port, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+      ret = mach_msg (&msg->header, MACH_RCV_MSG | MACH_RCV_LARGE, 0, msg_size, backend->rx_set, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
       if (ret == MACH_RCV_TOO_LARGE)
       {
         msg_size = msg->header.msgh_size + sizeof (mach_msg_trailer_t);
@@ -251,19 +242,35 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
     if (ret != 0)
       goto handle_error;
 
-    if (msg->header.msgh_id == 1)
+    if (msg->header.msgh_local_port == backend->rx_port)
     {
-      backend->rx_buffer = msg;
-      backend->rx_buffer_cur = msg->payload;
-      backend->rx_buffer_length = msg->size;
+      if (msg->header.msgh_id == 1)
+      {
+        backend->rx_buffer = msg;
+        backend->rx_buffer_cur = msg->payload;
+        backend->rx_buffer_length = msg->size;
+      }
+      else
+      {
+        g_free (msg);
+      }
     }
     else
     {
-      g_free (msg);
+      g_assert_cmpuint (msg->header.msgh_local_port, ==, backend->notify_port);
+      g_assert_cmpuint (msg->header.msgh_id, ==, MACH_NOTIFY_DEAD_NAME);
+
+      backend->eof = TRUE;
+
+      mach_port_mod_refs (mach_task_self (), backend->tx_port, MACH_PORT_RIGHT_DEAD_NAME, -1);
+      backend->tx_port = MACH_PORT_NULL;
     }
 
     if (cancellable != NULL && g_cancellable_set_error_if_cancelled (cancellable, error))
       goto handle_cancel;
+
+    if (backend->eof)
+      goto handle_eof;
   }
 
   n = MIN (buffer_length, backend->rx_buffer_length);
@@ -289,6 +296,11 @@ handle_error:
         "Error reading from mach port: %s",
         mach_error_string (ret));
     return -1;
+  }
+
+handle_eof:
+  {
+    return 0;
   }
 
 handle_cancel:
