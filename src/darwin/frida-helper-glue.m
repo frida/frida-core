@@ -1030,7 +1030,7 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
       local_tx++;
       ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
     }
-    while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
+    while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && local_tx < 0xffffffff);
     if (ret != 0)
       local_tx = MACH_PORT_NULL;
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right local_tx");
