@@ -992,6 +992,7 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   kern_return_t ret;
   const gchar * failed_operation;
   mach_msg_type_name_t acquired_type;
+  guint offset;
   gchar * local_address, * remote_address;
 
   remote_pid_exists = kill (remote_pid, 0) == 0 || errno == EPERM;
@@ -1024,14 +1025,15 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right local_tx");
   if (local_task != self_task)
   {
-    local_tx = local_rx;
+    offset = 1;
     do
     {
-      local_tx++;
+      local_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (local_rx) + offset, MACH_PORT_GEN (local_rx));
       ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+      offset++;
     }
-    while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && local_tx < 0xffffffff);
-    if (ret != 0)
+    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
+    if (ret != KERN_SUCCESS)
       local_tx = MACH_PORT_NULL;
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right local_tx");
     mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
@@ -1046,14 +1048,15 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right remote_tx");
   if (remote_task != self_task)
   {
-    remote_tx = remote_rx;
+    offset = 1;
     do
     {
-      remote_tx++;
+      remote_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (remote_rx) + offset, MACH_PORT_GEN (remote_rx));
       ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+      offset++;
     }
-    while ((ret == KERN_NAME_EXISTS || ret == KERN_FAILURE) && remote_tx < 0xffffffff);
-    if (ret != 0)
+    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
+    if (ret != KERN_SUCCESS)
       remote_tx = MACH_PORT_NULL;
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right remote_tx");
     mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
