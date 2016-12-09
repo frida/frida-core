@@ -410,6 +410,8 @@ namespace Frida {
 			private set;
 		}
 
+		public delegate bool ProcessPredicate (Process process);
+
 		private weak DeviceManager manager;
 		private string? location;
 		private Gee.Promise<bool> ensure_request;
@@ -499,6 +501,143 @@ namespace Frida {
 		private class EnumerateApplicationsTask : DeviceTask<ApplicationList> {
 			protected override async ApplicationList perform_operation () throws Error {
 				return yield parent.enumerate_applications ();
+			}
+		}
+
+		public async Process get_process_by_pid (uint pid) throws Error {
+			return check_process (yield find_process_by_pid (pid));
+		}
+
+		public Process get_process_by_pid_sync (uint pid) throws Error {
+			return check_process (find_process_by_pid_sync (pid));
+		}
+
+		public async Process get_process_by_name (string name, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return check_process (yield find_process_by_name (name, timeout, cancellable));
+		}
+
+		public Process get_process_by_name_sync (string name, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return check_process (find_process_by_name_sync (name, timeout, cancellable));
+		}
+
+		public async Process get_process (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return check_process (yield find_process (predicate, timeout, cancellable));
+		}
+
+		public Process get_process_sync (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return check_process (find_process_sync (predicate, timeout, cancellable));
+		}
+
+		private Process check_process (Process? process) throws Error {
+			if (process == null)
+				throw new Error.INVALID_ARGUMENT ("Process not found");
+			return process;
+		}
+
+		public async Process? find_process_by_pid (uint pid) throws Error {
+			return yield find_process ((process) => { return process.pid == pid; });
+		}
+
+		public Process? find_process_by_pid_sync (uint pid) throws Error {
+			return find_process_sync ((process) => { return process.pid == pid; });
+		}
+
+		public async Process? find_process_by_name (string name, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var folded_name = name.casefold ();
+			return yield find_process ((process) => { return process.name.casefold () == folded_name; }, timeout, cancellable);
+		}
+
+		public Process? find_process_by_name_sync (string name, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var folded_name = name.casefold ();
+			return find_process_sync ((process) => { return process.name.casefold () == folded_name; }, timeout, cancellable);
+		}
+
+		public async Process? find_process (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			Process process = null;
+			bool done = false;
+			bool waiting = false;
+
+			Source timeout_source = null;
+			if (timeout > 0) {
+				timeout_source = new TimeoutSource (timeout);
+				timeout_source.set_callback (() => {
+					done = true;
+					if (waiting)
+						find_process.callback ();
+					return false;
+				});
+				timeout_source.attach (MainContext.get_thread_default ());
+			}
+
+			CancellableSource cancellable_source = null;
+			if (cancellable != null) {
+				cancellable_source = cancellable.source_new ();
+				cancellable_source.set_callback (() => {
+					done = true;
+					if (waiting)
+						find_process.callback ();
+					return false;
+				});
+				cancellable_source.attach (MainContext.get_thread_default ());
+			}
+
+			while (!done) {
+				var processes = yield enumerate_processes ();
+
+				var num_processes = processes.size ();
+				for (var i = 0; i != num_processes; i++) {
+					var p = processes.get (i);
+					if (predicate (p)) {
+						process = p;
+						break;
+					}
+				}
+
+				if (process != null || done || timeout == 0)
+					break;
+
+				var poll_again_source = new TimeoutSource (500);
+				poll_again_source.set_callback (() => {
+					find_process.callback ();
+					return false;
+				});
+				poll_again_source.attach (MainContext.get_thread_default ());
+
+				waiting = true;
+				yield;
+				waiting = false;
+
+				poll_again_source.destroy ();
+			}
+
+			if (cancellable_source != null)
+				cancellable_source.destroy ();
+
+			if (timeout_source != null)
+				timeout_source.destroy ();
+
+			Marshal.throw_if_cancelled (cancellable);
+
+			return process;
+		}
+
+		public Process? find_process_sync (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var task = create<FindProcessTask> () as FindProcessTask;
+			task.predicate = (process) => {
+				return predicate (process);
+			};
+			task.timeout = timeout;
+			task.cancellable = cancellable;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class FindProcessTask : DeviceTask<Process?> {
+			public ProcessPredicate predicate;
+			public int timeout;
+			public Cancellable? cancellable;
+
+			protected override async Process? perform_operation () throws Error {
+				return yield parent.find_process (predicate, timeout, cancellable);
 			}
 		}
 
