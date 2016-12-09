@@ -219,14 +219,7 @@ namespace Frida.HostSessionTest {
 
 					print ("\n\nUsing \"%s\"\n", device.name);
 
-					var processes = yield device.enumerate_processes ();
-					Process process = null;
-					var num_processes = processes.size ();
-					for (var i = 0; i != num_processes && process == null; i++) {
-						var p = processes.get (i);
-						if (p.name == "Twitter")
-							process = p;
-					}
+					var process = yield device.find_process_by_name ("Twitter");
 
 					uint pid;
 					if (process != null) {
@@ -522,14 +515,7 @@ namespace Frida.HostSessionTest {
 
 					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
 
-					var processes = yield device.enumerate_processes ();
-					Process process = null;
-					var num_processes = processes.size ();
-					for (var i = 0; i != num_processes && process == null; i++) {
-						var p = processes.get (i);
-						if (p.name == "SpringBoard")
-							process = p;
-					}
+					var process = yield device.find_process_by_name ("SpringBoard");
 
 					uint pid;
 					if (process != null) {
