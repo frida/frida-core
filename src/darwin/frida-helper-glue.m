@@ -1036,7 +1036,7 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
     if (ret != KERN_SUCCESS)
       local_tx = MACH_PORT_NULL;
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right local_tx");
-    mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_deallocate (self_task, tx);
   }
   else
   {
@@ -1059,7 +1059,7 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
     if (ret != KERN_SUCCESS)
       remote_tx = MACH_PORT_NULL;
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right remote_tx");
-    mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_deallocate (self_task, tx);
   }
   else
   {
@@ -1104,11 +1104,11 @@ handle_mach_error:
     }
 
     if (tx != MACH_PORT_NULL)
-      mach_port_mod_refs (self_task, tx, MACH_PORT_RIGHT_SEND, -1);
+      mach_port_deallocate (self_task, tx);
     if (remote_tx != MACH_PORT_NULL)
-      mach_port_mod_refs (remote_task, remote_tx, MACH_PORT_RIGHT_SEND, -1);
+      mach_port_deallocate (remote_task, remote_tx);
     if (local_tx != MACH_PORT_NULL)
-      mach_port_mod_refs (local_task, local_tx, MACH_PORT_RIGHT_SEND, -1);
+      mach_port_deallocate (local_task, local_tx);
     if (remote_rx != MACH_PORT_NULL)
       mach_port_mod_refs (remote_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
     if (local_rx != MACH_PORT_NULL)
@@ -1158,18 +1158,18 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   port = instance->pending_request.Head.msgh_remote_port;
   if (port != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, port, MACH_PORT_RIGHT_SEND_ONCE, -1);
+    mach_port_deallocate (self_task, port);
   port = instance->pending_request.thread.name;
   if (port != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, port, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_deallocate (self_task, port);
   port = instance->pending_request.task.name;
   if (port != MACH_PORT_NULL)
-    mach_port_mod_refs (self_task, port, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_deallocate (self_task, port);
 
   previous_ports = &instance->previous_ports;
   for (port_index = 0; port_index != previous_ports->count; port_index++)
   {
-    mach_port_mod_refs (self_task, previous_ports->ports[port_index], MACH_PORT_RIGHT_SEND, -1);
+    mach_port_deallocate (self_task, previous_ports->ports[port_index]);
   }
   if (instance->server_recv_source != NULL)
     dispatch_release (instance->server_recv_source);
@@ -1241,7 +1241,7 @@ frida_spawn_instance_on_server_recv (void * context)
         previous_ports->flavors[port_index]);
     if (ret != KERN_SUCCESS)
     {
-      mach_port_mod_refs (self_task, previous_ports->ports[port_index], MACH_PORT_RIGHT_SEND, -1);
+      mach_port_deallocate (self_task, previous_ports->ports[port_index]);
     }
   }
   previous_ports->count = 0;

@@ -93,9 +93,9 @@ handle_mach_error:
         failed_operation, mach_error_string (ret));
 
     if (remote_tx != MACH_PORT_NULL)
-      mach_port_mod_refs (self_task, remote_tx, MACH_PORT_RIGHT_SEND, -1);
+      mach_port_deallocate (self_task, remote_tx);
     if (local_tx != MACH_PORT_NULL)
-      mach_port_mod_refs (self_task, local_tx, MACH_PORT_RIGHT_SEND, -1);
+      mach_port_deallocate (self_task, local_tx);
     if (remote_rx != MACH_PORT_NULL)
       mach_port_mod_refs (self_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
     if (local_rx != MACH_PORT_NULL)
@@ -261,9 +261,6 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
       g_assert_cmpuint (msg->header.msgh_id, ==, MACH_NOTIFY_DEAD_NAME);
 
       backend->eof = TRUE;
-
-      mach_port_mod_refs (mach_task_self (), backend->tx_port, MACH_PORT_RIGHT_DEAD_NAME, -1);
-      backend->tx_port = MACH_PORT_NULL;
     }
 
     if (cancellable != NULL && g_cancellable_set_error_if_cancelled (cancellable, error))
