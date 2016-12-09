@@ -184,7 +184,7 @@ frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
 
   if (self->rx_set != MACH_PORT_NULL)
   {
-    mach_port_mod_refs (self_task, self->rx_set, MACH_PORT_RIGHT_RECEIVE, -1);
+    mach_port_mod_refs (self_task, self->rx_set, MACH_PORT_RIGHT_PORT_SET, -1);
     self->rx_set = MACH_PORT_NULL;
   }
 
