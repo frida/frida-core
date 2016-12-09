@@ -109,19 +109,8 @@ namespace Frida.Inject {
 
 		private async void start () throws Error {
 			device_manager = new DeviceManager ();
-			var device_list = yield device_manager.enumerate_devices ();
 
-			Device device = null;
-			for (int i = 0; i != device_list.size (); i++) {
-				Device current_device = device_list.get (i);
-				if (current_device.dtype == DeviceType.LOCAL) {
-					device = current_device;
-					break;
-				}
-			}
-
-			if (device == null)
-				throw new Error.INVALID_OPERATION ("Couldn't find the local backend\n");
+			var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 			var session = yield device.attach (pid);
 

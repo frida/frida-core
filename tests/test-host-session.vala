@@ -215,15 +215,7 @@ namespace Frida.HostSessionTest {
 				try {
 					var device_manager = new DeviceManager ();
 
-					var devices = yield device_manager.enumerate_devices ();
-					Device device = null;
-					var num_devices = devices.size ();
-					for (var i = 0; i != num_devices && device == null; i++) {
-						var d = devices.get (i);
-						if (d.dtype == DeviceType.LOCAL)
-							device = d;
-					}
-					assert (device != null);
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 					print ("\n\nUsing \"%s\"\n", device.name);
 
@@ -438,15 +430,7 @@ namespace Frida.HostSessionTest {
 				try {
 					var device_manager = new DeviceManager ();
 
-					var devices = yield device_manager.enumerate_devices ();
-					Device device = null;
-					var num_devices = devices.size ();
-					for (var i = 0; i != num_devices && device == null; i++) {
-						var d = devices.get (i);
-						if (d.dtype == DeviceType.LOCAL)
-							device = d;
-					}
-					assert (device != null);
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 					stdout.printf ("\n\nEnter an absolute path that does not exist: ");
 					stdout.flush ();
@@ -534,15 +518,7 @@ namespace Frida.HostSessionTest {
 				try {
 					var device_manager = new DeviceManager ();
 
-					var devices = yield device_manager.enumerate_devices ();
-					Device device = null;
-					var num_devices = devices.size ();
-					for (var i = 0; i != num_devices && device == null; i++) {
-						var d = devices.get (i);
-						if (d.dtype == DeviceType.LOCAL)
-							device = d;
-					}
-					assert (device != null);
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 					stdout.printf ("\n\nUsing \"%s\"\n", device.name);
 
