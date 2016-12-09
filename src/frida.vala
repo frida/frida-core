@@ -14,6 +14,8 @@ namespace Frida {
 		public signal void removed (Device device);
 		public signal void changed ();
 
+		public delegate bool Predicate (Device device);
+
 		public MainContext main_context {
 			get;
 			private set;
@@ -44,6 +46,134 @@ namespace Frida {
 		private class CloseTask : ManagerTask<void> {
 			protected override async void perform_operation () throws Error {
 				yield parent.close ();
+			}
+		}
+
+		public async Device get_device_by_id (string id, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return yield get_device ((device) => { return device.id == id; }, timeout, cancellable);
+		}
+
+		public Device get_device_by_id_sync (string id, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var task = create<GetDeviceByIdTask> () as GetDeviceByIdTask;
+			task.id = id;
+			task.timeout = timeout;
+			task.cancellable = cancellable;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class GetDeviceByIdTask : ManagerTask<Device> {
+			public string id;
+			public int timeout;
+			public Cancellable? cancellable;
+
+			protected override async Device perform_operation () throws Error {
+				return yield parent.get_device_by_id (id, timeout, cancellable);
+			}
+		}
+
+		public async Device get_device_by_type (DeviceType type, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return yield get_device ((device) => { return device.dtype == type; }, timeout, cancellable);
+		}
+
+		public Device get_device_by_type_sync (DeviceType type, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var task = create<GetDeviceByTypeTask> () as GetDeviceByTypeTask;
+			task.type = type;
+			task.timeout = timeout;
+			task.cancellable = cancellable;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class GetDeviceByTypeTask : ManagerTask<Device> {
+			public DeviceType type;
+			public int timeout;
+			public Cancellable? cancellable;
+
+			protected override async Device perform_operation () throws Error {
+				return yield parent.get_device_by_type (type, timeout, cancellable);
+			}
+		}
+
+		public async Device get_device (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			check_open ();
+			yield ensure_service ();
+
+			foreach (var device in devices) {
+				if (predicate (device))
+					return device;
+			}
+
+			if (timeout == 0)
+				throw new Error.INVALID_ARGUMENT ("Device not found");
+
+			Device added_device = null;
+			var added_handler = added.connect ((device) => {
+				if (predicate (device)) {
+					added_device = device;
+					get_device.callback ();
+				}
+			});
+
+			Source timeout_source = null;
+			if (timeout > 0) {
+				timeout_source = new TimeoutSource (timeout);
+				timeout_source.set_callback (() => {
+					get_device.callback ();
+					return false;
+				});
+				timeout_source.attach (MainContext.get_thread_default ());
+			}
+
+			CancellableSource cancellable_source = null;
+			if (cancellable != null) {
+				cancellable_source = cancellable.source_new ();
+				cancellable_source.set_callback (() => {
+					get_device.callback ();
+					return false;
+				});
+				cancellable_source.attach (MainContext.get_thread_default ());
+			}
+
+			yield;
+
+			if (cancellable_source != null)
+				cancellable_source.destroy ();
+
+			if (timeout_source != null)
+				timeout_source.destroy ();
+
+			disconnect (added_handler);
+
+			if (cancellable != null) {
+				try {
+					cancellable.set_error_if_cancelled ();
+				} catch (IOError e) {
+					throw new Error.INVALID_OPERATION ("Cancelled");
+				}
+			}
+
+			if (added_device == null)
+				throw new Error.TIMED_OUT ("Timed out while waiting for device to appear");
+
+			return added_device;
+		}
+
+		public Device get_device_sync (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var task = create<GetDeviceTask> () as GetDeviceTask;
+			task.predicate = (device) => {
+				return predicate (device);
+			};
+			task.timeout = timeout;
+			task.cancellable = cancellable;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class GetDeviceTask : ManagerTask<Device> {
+			public Predicate predicate;
+			public int timeout;
+			public Cancellable? cancellable;
+
+			protected override async Device perform_operation () throws Error {
+				return yield parent.get_device (predicate, timeout, cancellable);
 			}
 		}
 
