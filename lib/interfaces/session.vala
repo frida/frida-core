@@ -80,6 +80,17 @@ namespace Frida {
 				return new Frida.Error.TRANSPORT (e.message);
 			}
 		}
+
+		public static void throw_if_cancelled (Cancellable? cancellable) throws Error {
+			if (cancellable == null)
+				return;
+
+			try {
+				cancellable.set_error_if_cancelled ();
+			} catch (IOError e) {
+				throw new Error.INVALID_OPERATION (e.message);
+			}
+		}
 	}
 
 	public struct HostApplicationInfo {

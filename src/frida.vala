@@ -14,12 +14,12 @@ namespace Frida {
 		public signal void removed (Device device);
 		public signal void changed ();
 
-		public delegate bool Predicate (Device device);
-
 		public MainContext main_context {
 			get;
 			private set;
 		}
+
+		public delegate bool Predicate (Device device);
 
 		private Gee.Promise<bool> ensure_request;
 		private Gee.Promise<bool> close_request;
@@ -50,52 +50,56 @@ namespace Frida {
 		}
 
 		public async Device get_device_by_id (string id, int timeout = 0, Cancellable? cancellable = null) throws Error {
-			return yield get_device ((device) => { return device.id == id; }, timeout, cancellable);
+			return check_device (yield find_device_by_id (id, timeout, cancellable));
 		}
 
 		public Device get_device_by_id_sync (string id, int timeout = 0, Cancellable? cancellable = null) throws Error {
-			var task = create<GetDeviceByIdTask> () as GetDeviceByIdTask;
-			task.id = id;
-			task.timeout = timeout;
-			task.cancellable = cancellable;
-			return task.start_and_wait_for_completion ();
-		}
-
-		private class GetDeviceByIdTask : ManagerTask<Device> {
-			public string id;
-			public int timeout;
-			public Cancellable? cancellable;
-
-			protected override async Device perform_operation () throws Error {
-				return yield parent.get_device_by_id (id, timeout, cancellable);
-			}
+			return check_device (find_device_by_id_sync (id, timeout, cancellable));
 		}
 
 		public async Device get_device_by_type (DeviceType type, int timeout = 0, Cancellable? cancellable = null) throws Error {
-			return yield get_device ((device) => { return device.dtype == type; }, timeout, cancellable);
+			return check_device (yield find_device_by_type (type, timeout, cancellable));
 		}
 
 		public Device get_device_by_type_sync (DeviceType type, int timeout = 0, Cancellable? cancellable = null) throws Error {
-			var task = create<GetDeviceByTypeTask> () as GetDeviceByTypeTask;
-			task.type = type;
-			task.timeout = timeout;
-			task.cancellable = cancellable;
-			return task.start_and_wait_for_completion ();
-		}
-
-		private class GetDeviceByTypeTask : ManagerTask<Device> {
-			public DeviceType type;
-			public int timeout;
-			public Cancellable? cancellable;
-
-			protected override async Device perform_operation () throws Error {
-				return yield parent.get_device_by_type (type, timeout, cancellable);
-			}
+			return check_device (find_device_by_type_sync (type, timeout, cancellable));
 		}
 
 		public async Device get_device (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return check_device (yield find_device (predicate, timeout, cancellable));
+		}
+
+		public Device get_device_sync (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return check_device (find_device_sync (predicate, timeout, cancellable));
+		}
+
+		private Device check_device (Device? device) throws Error {
+			if (device == null)
+				throw new Error.INVALID_ARGUMENT ("Device not found");
+			return device;
+		}
+
+		public async Device? find_device_by_id (string id, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return yield find_device ((device) => { return device.id == id; }, timeout, cancellable);
+		}
+
+		public Device? find_device_by_id_sync (string id, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return find_device_sync ((device) => { return device.id == id; }, timeout, cancellable);
+		}
+
+		public async Device? find_device_by_type (DeviceType type, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return yield find_device ((device) => { return device.dtype == type; }, timeout, cancellable);
+		}
+
+		public Device? find_device_by_type_sync (DeviceType type, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			return find_device_sync ((device) => { return device.dtype == type; }, timeout, cancellable);
+		}
+
+		public async Device? find_device (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
 			check_open ();
 			yield ensure_service ();
+
+			Marshal.throw_if_cancelled (cancellable);
 
 			foreach (var device in devices) {
 				if (predicate (device))
@@ -103,13 +107,13 @@ namespace Frida {
 			}
 
 			if (timeout == 0)
-				throw new Error.INVALID_ARGUMENT ("Device not found");
+				return null;
 
 			Device added_device = null;
 			var added_handler = added.connect ((device) => {
 				if (predicate (device)) {
 					added_device = device;
-					get_device.callback ();
+					find_device.callback ();
 				}
 			});
 
@@ -117,7 +121,7 @@ namespace Frida {
 			if (timeout > 0) {
 				timeout_source = new TimeoutSource (timeout);
 				timeout_source.set_callback (() => {
-					get_device.callback ();
+					find_device.callback ();
 					return false;
 				});
 				timeout_source.attach (MainContext.get_thread_default ());
@@ -127,7 +131,7 @@ namespace Frida {
 			if (cancellable != null) {
 				cancellable_source = cancellable.source_new ();
 				cancellable_source.set_callback (() => {
-					get_device.callback ();
+					find_device.callback ();
 					return false;
 				});
 				cancellable_source.attach (MainContext.get_thread_default ());
@@ -143,22 +147,13 @@ namespace Frida {
 
 			disconnect (added_handler);
 
-			if (cancellable != null) {
-				try {
-					cancellable.set_error_if_cancelled ();
-				} catch (IOError e) {
-					throw new Error.INVALID_OPERATION ("Cancelled");
-				}
-			}
-
-			if (added_device == null)
-				throw new Error.TIMED_OUT ("Timed out while waiting for device to appear");
+			Marshal.throw_if_cancelled (cancellable);
 
 			return added_device;
 		}
 
-		public Device get_device_sync (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
-			var task = create<GetDeviceTask> () as GetDeviceTask;
+		public Device? find_device_sync (Predicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
+			var task = create<FindDeviceTask> () as FindDeviceTask;
 			task.predicate = (device) => {
 				return predicate (device);
 			};
@@ -167,13 +162,13 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class GetDeviceTask : ManagerTask<Device> {
+		private class FindDeviceTask : ManagerTask<Device?> {
 			public Predicate predicate;
 			public int timeout;
 			public Cancellable? cancellable;
 
-			protected override async Device perform_operation () throws Error {
-				return yield parent.get_device (predicate, timeout, cancellable);
+			protected override async Device? perform_operation () throws Error {
+				return yield parent.find_device (predicate, timeout, cancellable);
 			}
 		}
 
