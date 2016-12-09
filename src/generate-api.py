@@ -129,7 +129,7 @@ if __name__ == '__main__':
                         if method_name == 'new':
                             if not object_type.name.endswith("List") and method_cprototype.endswith("(void);"):
                                 object_type.c_constructor = method_cprototype
-                        elif method_name.startswith('get_'):
+                        elif method_name.startswith('get_') and ', ' not in method_cprototype:
                             object_type.property_names.append(method_name[4:])
                             object_type.c_getter_prototypes.append(method_cprototype)
                         else:
