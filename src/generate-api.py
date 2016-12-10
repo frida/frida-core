@@ -29,6 +29,7 @@ class ApiObjectType:
         self.c_constructor = None
         self.c_getter_prototypes = []
         self.c_method_prototypes = []
+        self.c_delegate_typedefs = []
         self.vapi_declaration = None
         self.vapi_signals = []
         self.vapi_properties = []
@@ -64,6 +65,9 @@ def beautify_cenum(cenum):
 
 def beautify_cprototype(cprototype):
     result = re.sub(r"([a-z0-9])\*", r"\1 *", cprototype)
+    result = re.sub(r"\(\*", r"(* ", result)
+    result = re.sub(r"(, )void \* (.+?)_target\b", r"\1gpointer \2_data", result)
+    result = result.replace("void * user_data", "gpointer user_data")
     result = result.replace("_length1", "_length")
     result = result.replace(" _callback_,", " callback,")
     result = result.replace(" _user_data_", " user_data")
@@ -116,14 +120,15 @@ if __name__ == '__main__':
     object_type_by_name = {}
     for klass in api_object_types:
         object_type_by_name[klass.name] = klass
-    seen_cfunctions = {}
+    seen_cfunctions = set()
+    seen_cdelegates = set()
     for object_type in sorted(api_object_types, key=lambda klass: len(klass.c_name_lc), reverse=True):
         for m in re.finditer(r"^.*?\s+" + object_type.c_name_lc + r"_(\w+)\s+.*;", core_header, re.MULTILINE):
             method_cprototype = beautify_cprototype(m.group(0))
             method_name = m.group(1)
             method_cname_lc = object_type.c_name_lc + '_' + method_name
             if method_cname_lc not in seen_cfunctions:
-                seen_cfunctions[method_cname_lc] = True
+                seen_cfunctions.add(method_cname_lc)
                 if method_name not in ('construct', 'get_main_context', 'get_provider', 'get_session'):
                     if (object_type.c_name + '*') in m.group(0):
                         if method_name == 'new':
@@ -137,6 +142,11 @@ if __name__ == '__main__':
                             object_type.c_method_prototypes.append(method_cprototype)
                     elif method_name == 'get_type':
                         object_type.c_get_type = method_cprototype
+        for d in re.finditer(r"^typedef.+?\(\*(" + object_type.c_name + r".+?)\) \(.+\);$", core_header, re.MULTILINE):
+            delegate_cname = d.group(1)
+            if delegate_cname not in seen_cdelegates:
+                seen_cdelegates.add(delegate_cname)
+                object_type.c_delegate_typedefs.append(beautify_cprototype(d.group(0)))
 
     with open(core_vapi_filename) as core_vapi_file:
         current_enum = None
@@ -258,6 +268,8 @@ if __name__ == '__main__':
         for object_type in api_object_types:
             output_header_file.write("\n\n/* %s */" % object_type.name)
             sections = []
+            if len(object_type.c_delegate_typedefs) > 0:
+                sections.append("\n" + "\n".join(object_type.c_delegate_typedefs))
             if object_type.c_constructor is not None:
                 sections.append("\n" + object_type.c_constructor)
             if len(object_type.c_getter_prototypes) > 0:
