@@ -891,12 +891,12 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn_without_attach_native (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "write-to-stdio-macos" : "write-to-stdio-ios";
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "stdio-writer-macos" : "stdio-writer-ios";
 			yield run_spawn_scenario_with_stdio (h, target_name);
 		}
 
 		private static async void spawn_without_attach_other (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "write-to-stdio-macos32" : "write-to-stdio-ios32";
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "stdio-writer-macos32" : "stdio-writer-ios32";
 			yield run_spawn_scenario_with_stdio (h, target_name);
 		}
 
