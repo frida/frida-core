@@ -368,6 +368,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="process-windows.c" />
+    <ClCompile Include="process-resource-usage.c" />
     <ClCompile Include="runner-glue.c" />
     <ClCompile Include="test-agent-glue.c" />
   </ItemGroup>

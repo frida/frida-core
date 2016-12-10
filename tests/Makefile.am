@@ -73,6 +73,7 @@ libfrida_tests_la_VALAFLAGS = \
 libfrida_tests_glue_la_SOURCES = \
 	test-agent-glue.c \
 	process-unix.c \
+	process-resource-usage.c \
 	runner-glue.c
 
 data/.stamp: test-gadget-standalone.js

@@ -50,6 +50,9 @@
     <ClCompile Include="process-windows.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="process-resource-usage.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)process.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
