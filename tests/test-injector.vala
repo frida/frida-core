@@ -7,12 +7,14 @@ namespace Frida.InjectorTest {
 		GLib.Test.add_func ("/Injector/inject-other-arch", () => {
 			test_injection (Frida.Test.Arch.OTHER);
 		});
+
+		GLib.Test.add_func ("/Injector/resource-leaks", test_resource_leaks);
 	}
 
 	private static void test_injection (Frida.Test.Arch arch) {
 		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 
-		var logfile = File.new_for_path (Path.build_filename (tests_dir, "simple-agent.log"));
+		var logfile = File.new_for_path (Path.build_filename (tests_dir, "test-injection.log"));
 		try {
 			logfile.delete ();
 		} catch (GLib.Error delete_error) {
@@ -71,6 +73,37 @@ namespace Frida.InjectorTest {
 		rat.close ();
 	}
 
+	private static void test_resource_leaks () {
+		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+
+		var logfile = File.new_for_path (Path.build_filename (tests_dir, "test-leaks.log"));
+		var envp = new string[] {
+			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
+		};
+
+		var rat = new Labrat ("sleeper", envp);
+
+		if (Frida.Test.os () == Frida.Test.OS.LINUX || Frida.Test.os () == Frida.Test.OS.QNX) {
+			/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+			Thread.usleep (50000);
+		}
+
+		var before = rat.process.snapshot_resource_usage ();
+
+		rat.inject ("simple-agent", "");
+		rat.wait_for_uninject ();
+
+		var after = rat.process.snapshot_resource_usage ();
+
+		after.assert_equals (before);
+
+		rat.inject ("simple-agent", "0");
+		rat.wait_for_uninject ();
+		rat.wait_for_process_to_exit ();
+
+		rat.close ();
+	}
+
 	private static string content_of (File file) {
 		try {
 			uint8[] contents;
@@ -91,7 +124,7 @@ namespace Frida.InjectorTest {
 
 		private Injector injector;
 
-		public Labrat (string name, string[] envp, Frida.Test.Arch arch) {
+		public Labrat (string name, string[] envp, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
 			try {
 				process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable (name), null, envp, arch);
 			} catch (Error e) {
@@ -119,7 +152,7 @@ namespace Frida.InjectorTest {
 			});
 		}
 
-		public void inject (string name, string data, Frida.Test.Arch arch) {
+		public void inject (string name, string data, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
 				perform_injection.begin (name, data, arch, loop);
