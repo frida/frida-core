@@ -15,20 +15,6 @@ noinst_LTLIBRARIES = \
 	libfrida-tests.la \
 	libfrida-tests-glue.la
 
-platform_tests = $(NULL)
-
-if OS_LINUX
-platform_tests += test-linjector.vala
-endif
-
-if OS_DARWIN
-platform_tests += test-fruitjector.vala
-endif
-
-if OS_QNX
-platform_tests += test-qinjector.vala
-endif
-
 frida_tests_SOURCES = \
 	main.vala
 frida_tests_LDADD = \
@@ -56,11 +42,12 @@ endif
 
 libfrida_tests_la_SOURCES = \
 	test-system.vala \
-	$(platform_tests) \
+	test-injector.vala \
 	test-agent.vala \
 	test-gadget.vala \
 	test-host-session.vala \
 	runner.vala \
+	labrats.vala \
 	async-harness.vala \
 	process.vala
 libfrida_tests_la_CFLAGS = \
@@ -90,9 +77,9 @@ libfrida_tests_glue_la_SOURCES = \
 
 data/.stamp: test-gadget-standalone.js
 	mkdir -p $(@D)
-	cp $(srcdir)/labrats/unixvictim-* $(@D)
-	cp $(srcdir)/labrats/unixattacker-* $(@D)
-	cp $(srcdir)/labrats/write-to-stdio-* $(@D)
+	cp $(srcdir)/labrats/sleeper-* $(@D)
+	cp $(srcdir)/labrats/simple-agent-* $(@D)
+	cp $(srcdir)/labrats/stdio-writer-* $(@D)
 	cp $(srcdir)/*.js $(@D)
 	touch $@
 

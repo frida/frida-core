@@ -617,10 +617,10 @@ namespace Frida.HostSessionTest {
 				});
 
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "data", "unixvictim" + Frida.Test.arch_suffix ());
-				string[] argv = { victim_path };
+				var target_path = Path.build_filename (tests_dir, "data", "sleeper" + Frida.Test.arch_suffix ());
+				string[] argv = { target_path };
 				string[] envp = {};
-				pid = yield host_session.spawn (victim_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, envp);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -763,7 +763,7 @@ namespace Frida.HostSessionTest {
 
 			assert (prov.name == "Local System");
 
-			if (Frida.Test.os () == Frida.Test.OS.MAC) {
+			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
 				var icon = prov.icon;
 				assert (icon != null);
 				assert (icon.width == 16 && icon.height == 16);
@@ -794,16 +794,16 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn_native (Harness h) {
-			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "unixvictim-mac" : "unixvictim-ios";
-			yield run_spawn_scenario (h, victim_name);
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "sleeper-macos" : "sleeper-ios";
+			yield run_spawn_scenario (h, target_name);
 		}
 
 		private static async void spawn_other (Harness h) {
-			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "unixvictim-mac32" : "unixvictim-ios32";
-			yield run_spawn_scenario (h, victim_name);
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "sleeper-macos32" : "sleeper-ios32";
+			yield run_spawn_scenario (h, target_name);
 		}
 
-		private static async void run_spawn_scenario (Harness h, string victim_name) {
+		private static async void run_spawn_scenario (Harness h, string target_name) {
 			var backend = new DarwinHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
@@ -833,10 +833,10 @@ namespace Frida.HostSessionTest {
 				});
 
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
-				string[] argv = { victim_path };
+				var target_path = Path.build_filename (tests_dir, "data", target_name);
+				string[] argv = { target_path };
 				string[] envp = {};
-				pid = yield host_session.spawn (victim_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, envp);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -891,16 +891,16 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn_without_attach_native (Harness h) {
-			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "write-to-stdio-mac" : "write-to-stdio-ios";
-			yield run_spawn_scenario_with_stdio (h, victim_name);
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "write-to-stdio-macos" : "write-to-stdio-ios";
+			yield run_spawn_scenario_with_stdio (h, target_name);
 		}
 
 		private static async void spawn_without_attach_other (Harness h) {
-			var victim_name = (Frida.Test.os () == Frida.Test.OS.MAC) ? "write-to-stdio-mac32" : "write-to-stdio-ios32";
-			yield run_spawn_scenario_with_stdio (h, victim_name);
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "write-to-stdio-macos32" : "write-to-stdio-ios32";
+			yield run_spawn_scenario_with_stdio (h, target_name);
 		}
 
-		private static async void run_spawn_scenario_with_stdio (Harness h, string victim_name) {
+		private static async void run_spawn_scenario_with_stdio (Harness h, string target_name) {
 			var backend = new DarwinHostSessionBackend ();
 			h.service.add_backend (backend);
 			yield h.service.start ();
@@ -946,10 +946,10 @@ namespace Frida.HostSessionTest {
 				});
 
 				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var victim_path = Path.build_filename (tests_dir, "data", victim_name);
-				string[] argv = { victim_path };
+				var target_path = Path.build_filename (tests_dir, "data", target_name);
+				string[] argv = { target_path };
 				string[] envp = {};
-				pid = yield host_session.spawn (victim_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, envp);
 
 				yield host_session.resume (pid);
 
@@ -1155,10 +1155,10 @@ namespace Frida.HostSessionTest {
 				var self_filename = Frida.Test.Process.current.filename;
 				var rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename))))),
 					"frida-core", "tests", "labrats");
-				var victim_path = Path.build_filename (rat_directory, "winvictim-sleepy%d.exe".printf (sizeof (void *) == 4 ? 32 : 64));
-				string[] argv = { victim_path };
+				var target_path = Path.build_filename (rat_directory, "sleeper%d.exe".printf (sizeof (void *) == 4 ? 32 : 64));
+				string[] argv = { target_path };
 				string[] envp = {};
-				pid = yield host_session.spawn (victim_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, envp);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);

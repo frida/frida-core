@@ -21,7 +21,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="test-winjector.vala">
+    <None Include="test-injector.vala">
       <Filter>Tests</Filter>
     </None>
     <None Include="test-host-session.vala">
@@ -33,6 +33,9 @@
     <None Include="runner.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="labrats.vala">
+      <Filter>Source Files</Filter>
+    </None>
     <None Include="async-harness.vala">
       <Filter>Source Files</Filter>
     </None>
@@ -41,7 +44,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)test-winjector.c">
+    <ClCompile Include="$(IntDir)test-injector.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="process-windows.c">
@@ -66,6 +69,9 @@
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)runner.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)labrats.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
     <ClCompile Include="runner-glue.c">

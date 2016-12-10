@@ -83,7 +83,7 @@ frida_test_os (void)
 #if defined (G_OS_WIN32)
   return FRIDA_TEST_OS_WINDOWS;
 #elif defined (HAVE_MAC)
-  return FRIDA_TEST_OS_MAC;
+  return FRIDA_TEST_OS_MACOS;
 #elif defined (HAVE_IOS)
   return FRIDA_TEST_OS_IOS;
 #elif defined (HAVE_ANDROID)

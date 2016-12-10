@@ -113,7 +113,7 @@
 /tests/frida-tests.log
 /tests/frida-tests.trs
 /tests/frida-tests.vapi
-/tests/inject-victim
+/tests/labrats.c
 /tests/main.c
 /tests/pipe/Makefile
 /tests/pipe/Makefile.in
@@ -121,11 +121,9 @@
 /tests/process.c
 /tests/runner.c
 /tests/test-agent.c
-/tests/test-fruitjector.c
 /tests/test-gadget.c
 /tests/test-host-session.c
-/tests/test-linjector.c
-/tests/test-qinjector.c
+/tests/test-injector.c
 /tests/test-suite.log
 /tests/test-system.c
 /tools/Makefile

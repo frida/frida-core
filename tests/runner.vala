@@ -5,15 +5,7 @@ namespace Frida.Test {
 
 		Frida.SystemTest.add_tests ();
 
-#if WINDOWS
-		Frida.WinjectorTest.add_tests ();
-#elif LINUX
-		Frida.LinjectorTest.add_tests ();
-#elif QNX
-		Frida.QinjectorTest.add_tests ();
-#elif DARWIN
-		Frida.FruitjectorTest.add_tests ();
-#endif
+		Frida.InjectorTest.add_tests ();
 
 		Frida.AgentTest.add_tests ();
 #if !WINDOWS
@@ -37,9 +29,19 @@ namespace Frida.Test {
 
 	public extern Libc libc ();
 
-	public string arch_suffix () {
+	public string os_arch_suffix (Arch arch = Arch.CURRENT) {
+		switch (os ()) {
+			case OS.MACOS:
+				return "-macos";
+			case OS.IOS:
+				return "-ios";
+		}
+
 		string os_name;
 		switch (os ()) {
+			case OS.WINDOWS:
+				os_name = "windows";
+				break;
 			case OS.LINUX:
 				os_name = "linux";
 				break;
@@ -80,9 +82,40 @@ namespace Frida.Test {
 		return "-" + os_name + "-" + cpu_name;
 	}
 
+	public string os_executable_suffix () {
+		switch (os ()) {
+			case OS.WINDOWS:
+				return ".exe";
+			case OS.MACOS:
+			case OS.LINUX:
+			case OS.IOS:
+			case OS.ANDROID:
+			case OS.QNX:
+				return "";
+			default:
+				assert_not_reached ();
+		}
+	}
+
+	public string os_library_suffix () {
+		switch (os ()) {
+			case OS.WINDOWS:
+				return ".dll";
+			case OS.MACOS:
+			case OS.IOS:
+				return ".dylib";
+			case OS.LINUX:
+			case OS.ANDROID:
+			case OS.QNX:
+				return ".so";
+			default:
+				assert_not_reached ();
+		}
+	}
+
 	public enum OS {
 		WINDOWS,
-		MAC,
+		MACOS,
 		LINUX,
 		IOS,
 		ANDROID,

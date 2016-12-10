@@ -3,71 +3,71 @@ CFLAGS := -Wall -pipe -Os -fPIC -fdata-sections -ffunction-sections
 LDFLAGS := -Wl,--gc-sections
 
 all: \
-	unixvictim-linux-arm \
-	unixvictim-linux-armhf \
-	unixvictim-linux-i386 \
-	unixvictim-linux-x86_64 \
-	unixattacker-linux-arm.so \
-	unixattacker-linux-armhf.so \
-	unixattacker-linux-i386.so \
-	unixattacker-linux-x86_64.so
+	sleeper-linux-arm \
+	sleeper-linux-armhf \
+	sleeper-linux-i386 \
+	sleeper-linux-x86_64 \
+	simple-agent-linux-arm.so \
+	simple-agent-linux-armhf.so \
+	simple-agent-linux-i386.so \
+	simple-agent-linux-x86_64.so
 
-unixvictim-linux-arm: unixvictim.c
+sleeper-linux-arm: sleeper-unix.c
 	arm-linux-gnueabi-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
 	arm-linux-gnueabi-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixvictim-linux-armhf: unixvictim.c
+sleeper-linux-armhf: sleeper-unix.c
 	arm-linux-gnueabihf-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
 	arm-linux-gnueabihf-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixvictim-linux-i386: unixvictim.c
+sleeper-linux-i386: sleeper-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m32 $< -o $@.tmp
 	strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixvictim-linux-x86_64: unixvictim.c
+sleeper-linux-x86_64: sleeper-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m64 $< -o $@.tmp
 	strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixvictim-linux-mips: unixvictim.c
+sleeper-linux-mips: sleeper-unix.c
 	mips-linux-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
 	mips-linux-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixvictim-linux-mipsel: unixvictim.c
+sleeper-linux-mipsel: sleeper-unix.c
 	mipsel-linux-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
 	mipsel-linux-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-linux-arm.so: unixattacker.c
+simple-agent-linux-arm.so: simple-agent-unix.c
 	arm-linux-gnueabi-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabi-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-linux-armhf.so: unixattacker.c
+simple-agent-linux-armhf.so: simple-agent-unix.c
 	arm-linux-gnueabihf-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabihf-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-linux-i386.so: unixattacker.c
+simple-agent-linux-i386.so: simple-agent-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m32 -shared $< -o $@.tmp
 	strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-linux-x86_64.so: unixattacker.c
+simple-agent-linux-x86_64.so: simple-agent-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m64 -shared $< -o $@.tmp
 	strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-linux-mips.so: unixattacker.c
+simple-agent-linux-mips.so: simple-agent-unix.c
 	mips-linux-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	mips-linux-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-linux-mipsel.so: unixattacker.c
+simple-agent-linux-mipsel.so: simple-agent-unix.c
 	mipsel-linux-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	mipsel-linux-strip --strip-all $@.tmp
 	mv $@.tmp $@

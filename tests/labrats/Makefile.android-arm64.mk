@@ -21,26 +21,26 @@ LDFLAGS := \
 	-Wl,--gc-sections
 
 all: \
-	unixvictim-android-arm64 \
-	unixattacker-android-arm64.so
+	sleeper-android-arm64 \
+	simple-agent-android-arm64.so
 
-unixvictim-android-arm64: unixvictim.c
+sleeper-android-arm64: sleeper-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -fPIE $< -o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-android-arm64.so: unixattacker.c unixattacker-android-arm64.version
+simple-agent-android-arm64.so: simple-agent-unix.c simple-agent-android-arm64.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
-		-Wl,-soname,unixattacker-android-arm64.so \
-		-Wl,--version-script=unixattacker-android-arm64.version \
+		-Wl,-soname,simple-agent-android-arm64.so \
+		-Wl,--version-script=simple-agent-android-arm64.version \
 		$< \
 		-o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-android-arm64.version:
-	echo "UNIXATTACKER_ANDROID_ARM64_1.0 {" > $@.tmp
+simple-agent-android-arm64.version:
+	echo "SIMPLE_AGENT_ANDROID_ARM64_1.0 {" > $@.tmp
 	echo "  global:"             >> $@.tmp
 	echo "    frida_agent_main;" >> $@.tmp
 	echo ""                      >> $@.tmp

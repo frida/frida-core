@@ -1,16 +1,10 @@
-#if DARWIN
-namespace Frida.FruitjectorTest {
+namespace Frida.InjectorTest {
 	public static void add_tests () {
-		GLib.Test.add_func ("/Fruitjector/inject-current-arch", () => {
+		GLib.Test.add_func ("/Injector/inject-current-arch", () => {
 			test_injection (Frida.Test.Arch.CURRENT);
 		});
 
-		GLib.Test.add_func ("/Fruitjector/inject-other-arch", () => {
-			if (sizeof (void *) != 8) {
-				stdout.printf ("<64-bit only> ");
-				return;
-			}
-
+		GLib.Test.add_func ("/Injector/inject-other-arch", () => {
 			test_injection (Frida.Test.Arch.OTHER);
 		});
 	}
@@ -18,7 +12,7 @@ namespace Frida.FruitjectorTest {
 	private static void test_injection (Frida.Test.Arch arch) {
 		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
 
-		var logfile = File.new_for_path (Path.build_filename (tests_dir, "unixattacker.log"));
+		var logfile = File.new_for_path (Path.build_filename (tests_dir, "simple-agent.log"));
 		try {
 			logfile.delete ();
 		} catch (GLib.Error delete_error) {
@@ -27,21 +21,43 @@ namespace Frida.FruitjectorTest {
 			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
 		};
 
-		var rat = new LabRat (tests_dir, "unixvictim", envp, arch);
+		var rat = new Labrat ("sleeper", envp, arch);
 
-		rat.inject ("unixattacker", "");
+		if (Frida.Test.os () == Frida.Test.OS.LINUX || Frida.Test.os () == Frida.Test.OS.QNX) {
+			/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+			Thread.usleep (50000);
+		}
+
+		rat.inject ("simple-agent", "", arch);
 		rat.wait_for_uninject ();
 
-		assert (content_of (logfile) == ">m<");
+		if (Frida.Test.os () != Frida.Test.OS.WINDOWS) {
+			/* TODO: improve simple-agent-windows.c */
+			assert (content_of (logfile) == ">m<");
+		}
 
 		var requested_exit_code = 43;
-		rat.inject ("unixattacker", requested_exit_code.to_string ());
+		rat.inject ("simple-agent", requested_exit_code.to_string (), arch);
 		rat.wait_for_uninject ();
 
-		if (Frida.Test.os () == Frida.Test.OS.MAC) /* using Mapper */
-			assert (content_of (logfile) == ">m<>m");
-		else /* not using Mapper */
-			assert (content_of (logfile) == ">m<>m<");
+		switch (Frida.Test.os ()) {
+			case Frida.Test.OS.WINDOWS:
+				break;
+			case Frida.Test.OS.MACOS: /* using Mapper */
+			case Frida.Test.OS.ANDROID:
+				assert (content_of (logfile) == ">m<>m");
+				break;
+			case Frida.Test.OS.LINUX:
+				if (Frida.Test.libc () == Frida.Test.Libc.UCLIBC) {
+					assert (content_of (logfile) == ">m<>m");
+				} else {
+					assert (content_of (logfile) == ">m<>m<");
+				}
+				break;
+			default:
+				assert (content_of (logfile) == ">m<>m<");
+				break;
+		}
 
 		var exit_code = rat.wait_for_process_to_exit ();
 		assert (exit_code == requested_exit_code);
@@ -67,39 +83,20 @@ namespace Frida.FruitjectorTest {
 		}
 	}
 
-	private class LabRat {
+	private class Labrat {
 		public Frida.Test.Process process {
 			get;
 			private set;
 		}
 
-		private string data_directory;
-		private Fruitjector injector;
+		private Injector injector;
 
-		public LabRat (string dir, string name, string[] envp, Frida.Test.Arch arch) {
-			data_directory = Path.build_filename (dir, "data");
-			var rat_file = Path.build_filename (data_directory, name + os_suffix ());
-
-			var argv = new string[] {
-				rat_file
-			};
-
+		public Labrat (string name, string[] envp, Frida.Test.Arch arch) {
 			try {
-				process = Frida.Test.Process.start (rat_file, argv, envp, arch);
+				process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable (name), null, envp, arch);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
-			}
-		}
-
-		private static string os_suffix () {
-			switch (Frida.Test.os ()) {
-				case Frida.Test.OS.MAC:
-					return "-mac";
-				case Frida.Test.OS.IOS:
-					return "-ios";
-				default:
-					assert_not_reached ();
 			}
 		}
 
@@ -113,10 +110,7 @@ namespace Frida.FruitjectorTest {
 		}
 
 		private async void do_close (MainLoop loop) {
-			if (injector != null) {
-				yield injector.close ();
-				injector = null;
-			}
+			injector = null;
 
 			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
 			Idle.add (() => {
@@ -125,32 +119,24 @@ namespace Frida.FruitjectorTest {
 			});
 		}
 
-		public void inject (string name, string data) {
+		public void inject (string name, string data, Frida.Test.Arch arch) {
 			var loop = new MainLoop ();
 			Idle.add (() => {
-				do_injection.begin (name, data, loop);
+				perform_injection.begin (name, data, arch, loop);
 				return false;
 			});
 			loop.run ();
 		}
 
-		private async void do_injection (string name, string data, MainLoop loop) {
+		private async void perform_injection (string name, string data, Frida.Test.Arch arch, MainLoop loop) {
 			if (injector == null)
-				injector = new Fruitjector ();
+				injector = Injector.new ();
 
 			try {
-				var dylib = Path.build_filename (data_directory, name + os_suffix () + ".dylib");
-				assert (FileUtils.test (dylib, FileTest.EXISTS));
+				var path = Frida.Test.Labrats.path_to_library (name, arch);
+				assert (FileUtils.test (path, FileTest.EXISTS));
 
-				AgentResource agent;
-
-				try {
-					agent = new AgentResource (name, File.new_for_path (dylib).read (null));
-				} catch (GLib.Error file_error) {
-					assert_not_reached ();
-				}
-
-				yield injector.inject_library_resource (process.id, agent, "frida_agent_main", data);
+				yield injector.inject_library_file (process.id, path, "frida_agent_main", data);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
@@ -194,4 +180,3 @@ namespace Frida.FruitjectorTest {
 		}
 	}
 }
-#endif

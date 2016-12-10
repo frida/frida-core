@@ -6,11 +6,11 @@
     <IntDir>$(SolutionDir)build\tmp-windows\$(ProjectName)-$(PlatformName)\</IntDir>
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">
-    <TargetName>$(ProjectName)32</TargetName>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|Win32'">
+    <TargetName>$(ProjectName)-i386</TargetName>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">
-    <TargetName>$(ProjectName)64</TargetName>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|x64'">
+    <TargetName>$(ProjectName)-x86_64</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -38,13 +38,13 @@
       <ImportLibrary>$(IntDir)$(ProjectName).lib</ImportLibrary>
     </Link>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|Win32'">
     <Link>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='LabRat|x64'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|x64'">
     <Link>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>

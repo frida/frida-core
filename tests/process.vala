@@ -31,10 +31,20 @@ namespace Frida.Test {
 			Object (handle: handle, id: id);
 		}
 
-		public static Process start (string path, string[] argv, string[] envp, Arch arch) throws Error {
+		public static Process start (string path, string[]? args = null, string[]? env = null, Arch arch = Arch.CURRENT) throws Error {
+			var argv = new string[1 + ((args != null) ? args.length : 0)];
+			argv[0] = path;
+			if (args != null) {
+				for (var i = 0; i != args.length; i++)
+					argv[1 + i] = args[i];
+			}
+
+			string[] envp = (env != null) ? env : Environ.get ();
+
 			void * handle;
 			uint id;
 			ProcessBackend.do_start (path, argv, envp, arch, out handle, out id);
+
 			return new Process (handle, id);
 		}
 

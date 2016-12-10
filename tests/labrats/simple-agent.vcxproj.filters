@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="winattacker.c">
+    <ClCompile Include="simple-agent-windows.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

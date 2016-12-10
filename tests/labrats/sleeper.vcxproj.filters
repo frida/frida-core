@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="winvictim-busy.c">
+    <ClCompile Include="sleeper-windows.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

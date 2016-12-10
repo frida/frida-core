@@ -21,26 +21,26 @@ LDFLAGS := \
 	-Wl,--gc-sections
 
 all: \
-	unixvictim-qnx-arm \
-	unixattacker-qnx-arm.so
+	sleeper-qnx-arm \
+	simple-agent-qnx-arm.so
 
-unixvictim-qnx-arm: unixvictim.c
+sleeper-qnx-arm: sleeper-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-qnx-arm.so: unixattacker.c unixattacker-qnx-arm.version
+simple-agent-qnx-arm.so: simple-agent-unix.c simple-agent-qnx-arm.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
-		-Wl,-soname,unixattacker-qnx-arm.so \
-		-Wl,--version-script=unixattacker-qnx-arm.version \
+		-Wl,-soname,simple-agent-qnx-arm.so \
+		-Wl,--version-script=simple-agent-qnx-arm.version \
 		$< \
 		-o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-unixattacker-qnx-arm.version:
-	echo "UNIXATTACKER_QNX_ARM_1.0 {"     > $@.tmp
+simple-agent-qnx-arm.version:
+	echo "SIMPLE_AGENT_QNX_ARM_1.0 {"     > $@.tmp
 	echo "  global:"             >> $@.tmp
 	echo "    frida_agent_main;" >> $@.tmp
 	echo ""                      >> $@.tmp

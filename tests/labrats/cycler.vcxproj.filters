@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="winvictim-sleepy.c">
+    <ClCompile Include="cycler-windows.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
