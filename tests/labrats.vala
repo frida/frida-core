@@ -12,14 +12,4 @@ namespace Frida.Test.Labrats {
 		var data_dir = Path.build_filename (tests_dir, "data");
 		return Path.build_filename (data_dir, name);
 	}
-
-	public static Process start (string name, string[]? envp = null, Arch arch = Arch.CURRENT) throws Error {
-		var rat_file = path_to_executable (name);
-
-		var argv = new string[] {
-			rat_file
-		};
-
-		return Process.start (rat_file, argv, envp, arch);
-	}
 }
