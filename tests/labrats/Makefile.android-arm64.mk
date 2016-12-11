@@ -29,7 +29,7 @@ sleeper-android-arm64: sleeper-unix.c
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-simple-agent-android-arm64.so: simple-agent-unix.c simple-agent-android-arm64.version
+simple-agent-android-arm64.so: simple-agent.c simple-agent-android-arm64.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
 		-Wl,-soname,simple-agent-android-arm64.so \

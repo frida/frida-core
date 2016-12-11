@@ -30,7 +30,7 @@ sleeper-android-i386: sleeper-unix.c
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-simple-agent-android-i386.so: simple-agent-unix.c simple-agent-android-i386.version
+simple-agent-android-i386.so: simple-agent.c simple-agent-android-i386.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
 		-Wl,-soname,simple-agent-android-i386.so \

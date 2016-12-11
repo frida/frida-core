@@ -34,14 +34,14 @@ sleeper-ios: sleeper-unix.c sleeper.xcent
 	codesign -s "$$IOS_CERTID" --entitlements sleeper.xcent $@.unsigned
 	mv $@.unsigned $@
 
-simple-agent-macos.dylib: simple-agent-unix.c
+simple-agent-macos.dylib: simple-agent.c
 	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m32 -dynamiclib $< -o $@.32
 	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m64 -dynamiclib $< -o $@.64
 	strip -Sx $@.32 $@.64
 	lipo $@.32 $@.64 -create -output $@
 	$(RM) $@.32 $@.64
 
-simple-agent-ios.dylib: simple-agent-unix.c
+simple-agent-ios.dylib: simple-agent.c
 	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch armv7 -dynamiclib $< -o $@.armv7
 	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch arm64 -dynamiclib $< -o $@.arm64
 	strip -Sx $@.armv7 $@.arm64

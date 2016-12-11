@@ -15,8 +15,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="simple-agent-windows.c">
+    <ClCompile Include="simple-agent.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
-</Project>
+</Project>

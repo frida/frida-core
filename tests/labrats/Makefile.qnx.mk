@@ -29,7 +29,7 @@ sleeper-qnx-arm: sleeper-unix.c
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-simple-agent-qnx-arm.so: simple-agent-unix.c simple-agent-qnx-arm.version
+simple-agent-qnx-arm.so: simple-agent.c simple-agent-qnx-arm.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
 		-Wl,-soname,simple-agent-qnx-arm.so \

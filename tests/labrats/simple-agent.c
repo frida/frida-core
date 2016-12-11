@@ -5,25 +5,53 @@
 
 static void append_to_log (char c);
 
+#ifdef _WIN32
+
+#include <windows.h>
+
+BOOL WINAPI
+DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
+{
+  (void) instance;
+  (void) reserved;
+
+  switch (reason)
+  {
+    case DLL_PROCESS_ATTACH:
+      append_to_log ('>');
+      break;
+    case DLL_PROCESS_DETACH:
+      append_to_log ('<');
+      break;
+    default:
+      break;
+  }
+}
+
+#else
+
 __attribute__ ((constructor)) static void
 on_load (void)
 {
   append_to_log ('>');
 }
 
-__attribute__ ((destructor)) static void
+__attribute__ ((destructor)) static void  q
 on_unload (void)
 {
   append_to_log ('<');
 }
 
+#endif
+
 void
 frida_agent_main (const char * data)
 {
-  append_to_log ('m');
-
   if (strlen (data) > 0)
-    exit (atoi (data));
+  {
+    int exit_code = atoi (data);
+    exit (exit_code);
+  }
 }
 
 static void
