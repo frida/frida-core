@@ -11,7 +11,21 @@ struct _FridaMetricCollectorEntry
 
 #ifdef HAVE_DARWIN
 
+#include <libproc.h>
 #include <mach/mach.h>
+
+static guint
+frida_collect_memory_footprint (void * handle)
+{
+  int pid = GPOINTER_TO_SIZE (handle);
+  struct rusage_info_v2 info;
+  int res;
+
+  res = proc_pid_rusage (pid, RUSAGE_INFO_V2, (rusage_info_t *) &info);
+  g_assert_cmpint (res, ==, 0);
+
+  return info.ri_phys_footprint;
+}
 
 static guint
 frida_collect_mach_ports (void * handle)
@@ -38,6 +52,7 @@ frida_collect_mach_ports (void * handle)
 static const FridaMetricCollectorEntry frida_metric_collectors[] =
 {
 #ifdef HAVE_DARWIN
+  { "memory", frida_collect_memory_footprint },
   { "ports", frida_collect_mach_ports },
 #endif
   { NULL, NULL }
