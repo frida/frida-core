@@ -30,19 +30,13 @@ namespace Frida.InjectorTest {
 
 		rat.inject ("simple-agent", "", arch);
 		rat.wait_for_uninject ();
-
-		if (Frida.Test.os () != Frida.Test.OS.WINDOWS) {
-			/* TODO: improve simple-agent-windows.c */
-			assert (content_of (logfile) == ">m<");
-		}
+		assert (content_of (logfile) == ">m<");
 
 		var requested_exit_code = 43;
 		rat.inject ("simple-agent", requested_exit_code.to_string (), arch);
 		rat.wait_for_uninject ();
 
 		switch (Frida.Test.os ()) {
-			case Frida.Test.OS.WINDOWS:
-				break;
 			case Frida.Test.OS.MACOS: /* using Mapper */
 			case Frida.Test.OS.ANDROID:
 				assert (content_of (logfile) == ">m<>m");
