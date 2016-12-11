@@ -60,11 +60,26 @@ namespace Frida.Test {
 	public class ResourceUsageSnapshot : Object {
 		protected HashTable<string, uint> metrics = new HashTable<string, uint> (str_hash, str_equal);
 
+		public void print () {
+			printerr ("TYPE\tCOUNT\n");
+			metrics.for_each ((key, current_value) => {
+				printerr ("%s\t%u\n", key, current_value);
+			});
+		}
+
+		public void print_comparison (ResourceUsageSnapshot previous_snapshot) {
+			printerr ("TYPE\tBEFORE\tAFTER\n");
+			var previous_metrics = previous_snapshot.metrics;
+			metrics.for_each ((key, current_value) => {
+				var previous_value = previous_metrics[key];
+				printerr ("%s\t%u\t%u\n", key, previous_value, current_value);
+			});
+		}
+
 		public void assert_equals (ResourceUsageSnapshot previous_snapshot) {
 			uint num_differences = 0;
 
 			var previous_metrics = previous_snapshot.metrics;
-
 			metrics.for_each ((key, current_value) => {
 				var previous_value = previous_metrics[key];
 				if (current_value != previous_value) {
