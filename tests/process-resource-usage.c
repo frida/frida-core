@@ -27,6 +27,9 @@ frida_collect_mach_ports (void * handle)
   kr = mach_port_space_basic_info (task, &info);
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
+  kr = mach_port_deallocate (mach_task_self (), task);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
   return info.iisb_table_inuse;
 }
 
