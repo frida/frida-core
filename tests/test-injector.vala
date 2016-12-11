@@ -92,14 +92,14 @@ namespace Frida.InjectorTest {
 		rat.inject ("simple-agent", "");
 		rat.wait_for_uninject ();
 
-		var before = rat.process.snapshot_resource_usage ();
+		var usage_before = rat.process.snapshot_resource_usage ();
 
 		rat.inject ("simple-agent", "");
 		rat.wait_for_uninject ();
 
-		var after = rat.process.snapshot_resource_usage ();
+		var usage_after = rat.process.snapshot_resource_usage ();
 
-		after.assert_equals (before);
+		usage_after.assert_equals (usage_before);
 
 		rat.inject ("simple-agent", "0");
 		rat.wait_for_uninject ();
