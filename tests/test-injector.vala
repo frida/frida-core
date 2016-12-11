@@ -88,6 +88,10 @@ namespace Frida.InjectorTest {
 			Thread.usleep (50000);
 		}
 
+		/* Warm up static allocations */
+		rat.inject ("simple-agent", "");
+		rat.wait_for_uninject ();
+
 		var before = rat.process.snapshot_resource_usage ();
 
 		rat.inject ("simple-agent", "");
