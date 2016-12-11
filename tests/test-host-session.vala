@@ -114,6 +114,11 @@ namespace Frida.HostSessionTest {
 		});
 #endif
 
+		GLib.Test.add_func ("/HostSession/resource-leaks", () => {
+			var h = new Harness ((h) => resource_leaks.begin (h as Harness));
+			h.run ();
+		});
+
 	}
 
 	namespace Service {
@@ -544,6 +549,28 @@ namespace Frida.HostSessionTest {
 
 		}
 
+	}
+
+	private static async void resource_leaks (Harness h) {
+		try {
+			var device_manager = new DeviceManager ();
+			var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+			var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+			var usage_before = process.snapshot_resource_usage ();
+
+			var session = yield device.attach (process.id);
+			yield session.detach ();
+
+			var usage_after = process.snapshot_resource_usage ();
+
+			usage_after.assert_equals (usage_before);
+
+			h.done ();
+		} catch (Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+			assert_not_reached ();
+		}
 	}
 
 #if LINUX
