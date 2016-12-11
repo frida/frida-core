@@ -9,7 +9,15 @@ namespace Frida.Test.Labrats {
 
 	public static string path_to_file (string name) {
 		var tests_dir = Path.get_dirname (Process.current.filename);
-		var data_dir = Path.build_filename (tests_dir, "data");
+
+		string data_dir;
+		if (os () == OS.WINDOWS) {
+			data_dir = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (tests_dir)))),
+				"frida-core", "tests", "labrats");
+		} else {
+			data_dir = Path.build_filename (tests_dir, "data");
+		}
+
 		return Path.build_filename (data_dir, name);
 	}
 }
