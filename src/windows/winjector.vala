@@ -9,13 +9,11 @@ namespace Frida {
 					} catch (Error e) {
 						assert_not_reached ();
 					}
-					normal_helper_factory.resource_store = _normal_resource_store;
 				}
 				return _normal_resource_store;
 			}
 		}
 		private ResourceStore _normal_resource_store;
-		private HelperFactory normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
 
 		public ResourceStore elevated_resource_store {
 			get {
@@ -25,29 +23,45 @@ namespace Frida {
 					} catch (Error e) {
 						assert_not_reached ();
 					}
-					elevated_helper_factory.resource_store = _elevated_resource_store;
 				}
 				return _elevated_resource_store;
 			}
 		}
 		private ResourceStore _elevated_resource_store;
-		private HelperFactory elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
+
+		private HelperFactory normal_helper_factory {
+			get {
+				if (_normal_helper_factory.resource_store == null)
+					_normal_helper_factory.resource_store = normal_resource_store;
+				return _normal_helper_factory;
+			}
+		}
+		private HelperFactory _normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
+
+		private HelperFactory elevated_helper_factory {
+			get {
+				if (_elevated_helper_factory.resource_store == null)
+					_elevated_helper_factory.resource_store = elevated_resource_store;
+				return _elevated_helper_factory;
+			}
+		}
+		private HelperFactory _elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
 		private Gee.HashMap<uint, uint> pid_by_id = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, TemporaryFile> blob_file_by_id = new Gee.HashMap<uint, TemporaryFile> ();
 		private uint next_blob_id = 1;
 
 		construct {
-			normal_helper_factory.uninjected.connect (on_uninjected);
-			elevated_helper_factory.uninjected.connect (on_uninjected);
+			_normal_helper_factory.uninjected.connect (on_uninjected);
+			_elevated_helper_factory.uninjected.connect (on_uninjected);
 		}
 
 		public async void close () {
-			normal_helper_factory.uninjected.disconnect (on_uninjected);
-			elevated_helper_factory.uninjected.disconnect (on_uninjected);
+			_normal_helper_factory.uninjected.disconnect (on_uninjected);
+			_elevated_helper_factory.uninjected.disconnect (on_uninjected);
 
-			yield normal_helper_factory.close ();
-			yield elevated_helper_factory.close ();
+			yield _normal_helper_factory.close ();
+			yield _elevated_helper_factory.close ();
 
 			_normal_resource_store = null;
 			_elevated_resource_store = null;
@@ -264,7 +278,7 @@ namespace Frida {
 			private HelperInstance helper;
 			private Gee.ArrayList<ObtainRequest> obtain_requests = new Gee.ArrayList<ObtainRequest> ();
 
-			public ResourceStore resource_store {
+			public ResourceStore? resource_store {
 				get;
 				set;
 			}
