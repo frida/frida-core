@@ -23,6 +23,11 @@ namespace Frida.Test {
 		public extern void deinit ();
 	}
 
+	public static string path_to_temporary_file (string name) {
+		var tests_dir = Path.get_dirname (Process.current.filename);
+		return Path.build_filename (tests_dir, name);
+	}
+
 	public extern OS os ();
 
 	public extern CPU cpu ();

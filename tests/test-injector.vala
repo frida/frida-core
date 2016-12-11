@@ -12,9 +12,7 @@ namespace Frida.InjectorTest {
 	}
 
 	private static void test_injection (Frida.Test.Arch arch) {
-		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-
-		var logfile = File.new_for_path (Path.build_filename (tests_dir, "test-injection.log"));
+		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-injection.log"));
 		try {
 			logfile.delete ();
 		} catch (GLib.Error delete_error) {
@@ -74,9 +72,7 @@ namespace Frida.InjectorTest {
 	}
 
 	private static void test_resource_leaks () {
-		var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-
-		var logfile = File.new_for_path (Path.build_filename (tests_dir, "test-leaks.log"));
+		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-leaks.log"));
 		var envp = new string[] {
 			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
 		};
