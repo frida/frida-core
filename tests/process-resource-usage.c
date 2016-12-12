@@ -9,6 +9,24 @@ struct _FridaMetricCollectorEntry
   FridaMetricCollector collect;
 };
 
+#ifdef HAVE_WINDOWS
+
+#include <windows.h>
+
+static guint
+frida_collect_handles (void * handle)
+{
+  DWORD count;
+  BOOL success;
+
+  success = GetProcessHandleCount (handle, &count);
+  g_assert (success);
+
+  return count;
+}
+
+#endif
+
 #ifdef HAVE_DARWIN
 
 #include <libproc.h>
@@ -51,6 +69,9 @@ frida_collect_mach_ports (void * handle)
 
 static const FridaMetricCollectorEntry frida_metric_collectors[] =
 {
+#ifdef HAVE_WINDOWS
+  { "handles", frida_collect_handles },
+#endif
 #ifdef HAVE_DARWIN
   { "memory", frida_collect_memory_footprint },
   { "ports", frida_collect_mach_ports },
