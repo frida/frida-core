@@ -80,6 +80,34 @@ frida_collect_mach_ports (void * handle)
 
 #endif
 
+#ifdef HAVE_LINUX
+
+static guint
+frida_collect_file_descriptors (void * handle)
+{
+  GSubprocess * process = G_SUBPROCESS (handle);
+  gchar * path;
+  GDir * dir;
+  guint count;
+
+  path = g_strdup_printf ("/proc/%s/fd", g_subprocess_get_identifier (process));
+
+  dir = g_dir_open (path, 0, NULL);
+  g_assert (dir != NULL);
+
+  count = 0;
+  while (g_dir_read_name (dir) != NULL)
+    count++;
+
+  g_dir_close (dir);
+
+  g_free (path);
+
+  return count;
+}
+
+#endif
+
 static const FridaMetricCollectorEntry frida_metric_collectors[] =
 {
 #ifdef HAVE_WINDOWS
@@ -89,6 +117,9 @@ static const FridaMetricCollectorEntry frida_metric_collectors[] =
 #ifdef HAVE_DARWIN
   { "memory", frida_collect_memory_footprint },
   { "ports", frida_collect_mach_ports },
+#endif
+#ifdef HAVE_LINUX
+  { "file", frida_collect_file_descriptors },
 #endif
   { NULL, NULL }
 };
