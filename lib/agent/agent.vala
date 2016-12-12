@@ -1,5 +1,5 @@
 namespace Frida.Agent {
-	public void main (string pipe_address, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id) {
+	public void main (string pipe_address, ref bool stay_resident, Gum.MemoryRange? mapped_range) {
 		Environment.init ();
 
 		AutoIgnorer ignorer;
@@ -11,7 +11,7 @@ namespace Frida.Agent {
 
 			ignorer = new AutoIgnorer (interceptor, agent_range);
 			ignorer.enable ();
-			ignorer.ignore (agent_thread_id, parent_thread_id);
+			ignorer.ignore (agent_thread_id);
 
 			var exceptor = Gum.Exceptor.obtain ();
 
@@ -27,7 +27,7 @@ namespace Frida.Agent {
 
 			exceptor = null;
 
-			ignorer.unignore (agent_thread_id, parent_thread_id);
+			ignorer.unignore (agent_thread_id);
 			ignorer.disable ();
 
 			interceptor.end_transaction ();
@@ -372,16 +372,12 @@ namespace Frida.Agent {
 			revert_apis ();
 		}
 
-		public void ignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
-			if (parent_thread_id != 0)
-				Gum.ScriptBackend.ignore (parent_thread_id);
+		public void ignore (Gum.ThreadId agent_thread_id) {
 			Gum.ScriptBackend.ignore (agent_thread_id);
 		}
 
-		public void unignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
+		public void unignore (Gum.ThreadId agent_thread_id) {
 			Gum.ScriptBackend.unignore (agent_thread_id);
-			if (parent_thread_id != 0)
-				Gum.ScriptBackend.unignore (parent_thread_id);
 		}
 
 		private extern void replace_apis ();
