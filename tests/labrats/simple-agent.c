@@ -26,6 +26,8 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
     default:
       break;
   }
+
+  return TRUE;
 }
 
 #else
