@@ -5,7 +5,9 @@
 #include <sys/wait.h>
 #ifdef HAVE_DARWIN
 # include <mach-o/dyld.h>
+# include <signal.h>
 # include <spawn.h>
+# include <sys/types.h>
 #endif
 
 #ifdef HAVE_QNX
@@ -108,7 +110,7 @@ frida_test_process_backend_self_id (void)
 }
 
 void
-frida_test_process_backend_do_start (const char * path, gchar ** argv,
+frida_test_process_backend_start (const char * path, gchar ** argv,
     int argv_length, gchar ** envp, int envp_length, FridaTestArch arch,
     void ** handle, guint * id, GError ** error)
 {
@@ -226,7 +228,7 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
 }
 
 int
-frida_test_process_backend_do_join (void * handle, guint timeout_msec,
+frida_test_process_backend_join (void * handle, guint timeout_msec,
     GError ** error)
 {
   int status = -1;
@@ -335,6 +337,16 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
 #endif
 
   return status;
+}
+
+void
+frida_test_process_backend_kill (void * handle)
+{
+#ifdef HAVE_DARWIN
+  kill (GPOINTER_TO_SIZE (handle), SIGKILL);
+#else
+  g_object_unref (handle);
+#endif
 }
 
 #ifndef HAVE_DARWIN

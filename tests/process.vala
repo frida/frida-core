@@ -2,10 +2,15 @@ namespace Frida.Test {
 	public class Process : Object {
 		public void * handle {
 			get;
-			construct;
+			set;
 		}
 
 		public uint id {
+			get;
+			construct;
+		}
+
+		public bool auto_kill {
 			get;
 			construct;
 		}
@@ -23,12 +28,17 @@ namespace Frida.Test {
 
 		public static Process current {
 			owned get {
-				return new Process (ProcessBackend.self_handle (), ProcessBackend.self_id ());
+				return new Process (ProcessBackend.self_handle (), ProcessBackend.self_id (), false);
 			}
 		}
 
-		private Process (void * handle, uint id) {
-			Object (handle: handle, id: id);
+		private Process (void * handle, uint id, bool auto_kill) {
+			Object (handle: handle, id: id, auto_kill: auto_kill);
+		}
+
+		~Process () {
+			if (handle != null && auto_kill)
+				kill ();
 		}
 
 		public static Process start (string path, string[]? args = null, string[]? env = null, Arch arch = Arch.CURRENT) throws Error {
@@ -43,13 +53,28 @@ namespace Frida.Test {
 
 			void * handle;
 			uint id;
-			ProcessBackend.do_start (path, argv, envp, arch, out handle, out id);
+			ProcessBackend.start (path, argv, envp, arch, out handle, out id);
 
-			return new Process (handle, id);
+			return new Process (handle, id, true);
 		}
 
 		public int join (uint timeout_msec = 0) throws Error {
-			return ProcessBackend.do_join (handle, timeout_msec);
+			if (handle == null)
+				throw new Error.INVALID_OPERATION ("Process already joined or killed");
+
+			var result = ProcessBackend.join (handle, timeout_msec);
+
+			handle = null;
+
+			return result;
+		}
+
+		public void kill () throws Error {
+			if (handle == null)
+				throw new Error.INVALID_OPERATION ("Process already joined or killed");
+
+			ProcessBackend.kill (handle);
+			handle = null;
 		}
 
 		public ResourceUsageSnapshot snapshot_resource_usage () {
@@ -111,8 +136,9 @@ namespace Frida.Test {
 		private extern void * self_handle ();
 		private extern uint self_id ();
 		private extern string filename_of (void * handle);
-		private extern void do_start (string path, string[] argv, string[] envp, Arch arch, out void * handle, out uint id) throws Error;
-		private extern int do_join (void * handle, uint timeout_msec) throws Error;
+		private extern void start (string path, string[] argv, string[] envp, Arch arch, out void * handle, out uint id) throws Error;
+		private extern int join (void * handle, uint timeout_msec) throws Error;
+		private extern void kill (void * handle);
 		private extern ResourceUsageSnapshot snapshot_resource_usage (void * handle);
 	}
 }

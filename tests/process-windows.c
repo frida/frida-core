@@ -30,7 +30,7 @@ frida_test_process_backend_self_id (void)
 }
 
 void
-frida_test_process_backend_do_start (const char * path, gchar ** argv,
+frida_test_process_backend_start (const char * path, gchar ** argv,
     int argv_length, gchar ** envp, int envp_length, FridaTestArch arch,
     void ** handle, guint * id, GError ** error)
 {
@@ -81,8 +81,7 @@ frida_test_process_backend_do_start (const char * path, gchar ** argv,
 }
 
 int
-frida_test_process_backend_do_join (void * handle, guint timeout_msec,
-    GError ** error)
+frida_test_process_backend_join (void * handle, guint timeout_msec, GError ** error)
 {
   DWORD exit_code;
 
@@ -100,6 +99,13 @@ frida_test_process_backend_do_join (void * handle, guint timeout_msec,
   CloseHandle (handle);
 
   return exit_code;
+}
+
+void
+frida_test_process_backend_kill (void * handle)
+{
+  TerminateProcess (handle, 1);
+  CloseHandle (handle);
 }
 
 static WCHAR *
