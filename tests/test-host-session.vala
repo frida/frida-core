@@ -557,9 +557,14 @@ namespace Frida.HostSessionTest {
 			var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 			var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
 
+			/* Warm up static allocations */
+			var session = yield device.attach (process.id);
+			yield session.detach ();
+			session = null;
+
 			var usage_before = process.snapshot_resource_usage ();
 
-			var session = yield device.attach (process.id);
+			session = yield device.attach (process.id);
 			yield session.detach ();
 
 			var usage_after = process.snapshot_resource_usage ();
