@@ -61,10 +61,27 @@ frida_agent_main (const char * data)
 static void
 append_to_log (char c)
 {
+#ifdef _WIN32
+  wchar_t * path;
+  HANDLE file;
+  BOOL written;
+
+  path = _wgetenv (L"FRIDA_LABRAT_LOGFILE");
+  assert (path != NULL);
+
+  file = CreateFileW (path, FILE_APPEND_DATA, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  assert (file != INVALID_HANDLE_VALUE);
+
+  written = WriteFile (file, &c, sizeof (c), NULL, NULL);
+  assert (written);
+
+  CloseHandle (file);
+#else
   FILE * f;
 
   f = fopen (getenv ("FRIDA_LABRAT_LOGFILE"), "ab");
   assert (f != NULL);
   fwrite (&c, 1, 1, f);
   fclose (f);
+#endif
 }
