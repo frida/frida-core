@@ -12,6 +12,19 @@ struct _FridaMetricCollectorEntry
 #ifdef HAVE_WINDOWS
 
 #include <windows.h>
+#include <psapi.h>
+
+static guint
+frida_collect_memory_footprint (void * handle)
+{
+  PROCESS_MEMORY_COUNTERS_EX counters;
+  BOOL success;
+
+  success = GetProcessMemoryInfo (handle, (PPROCESS_MEMORY_COUNTERS) &counters, sizeof (counters));
+  g_assert (success);
+
+  return counters.PrivateUsage;
+}
 
 static guint
 frida_collect_handles (void * handle)
@@ -70,6 +83,7 @@ frida_collect_mach_ports (void * handle)
 static const FridaMetricCollectorEntry frida_metric_collectors[] =
 {
 #ifdef HAVE_WINDOWS
+  { "memory", frida_collect_memory_footprint },
   { "handles", frida_collect_handles },
 #endif
 #ifdef HAVE_DARWIN
