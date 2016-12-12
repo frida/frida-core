@@ -2,7 +2,7 @@
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
-    <OutDir>$(SolutionDir)build\frida-windows\$(PlatformName)-$(Configuration)\bin\</OutDir>
+    <OutDir>$(SolutionDir)</OutDir>
     <IntDir>$(SolutionDir)build\tmp-windows\$(ProjectName)-$(PlatformName)\</IntDir>
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
