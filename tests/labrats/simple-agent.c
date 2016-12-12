@@ -38,7 +38,7 @@ on_load (void)
   append_to_log ('>');
 }
 
-__attribute__ ((destructor)) static void  q
+__attribute__ ((destructor)) static void
 on_unload (void)
 {
   append_to_log ('<');
