@@ -300,15 +300,36 @@ namespace Frida {
 			});
 		}
 
-		public void _on_inject_instance_dead (uint id) {
+		public void _on_mach_thread_dead (uint id, void * posix_thread) {
 			Idle.add (() => {
-				void * instance;
-				bool instance_id_found = inject_instance_by_id.unset (id, out instance);
-				assert (instance_id_found);
-				_free_inject_instance (instance);
-				uninjected (id);
+				var instance = inject_instance_by_id[id];
+				assert (instance != null);
+
+				if (posix_thread != null)
+					_join_inject_instance_posix_thread (instance, posix_thread);
+				else
+					destroy_inject_instance (id, false);
+
 				return false;
 			});
+		}
+
+		public void _on_posix_thread_dead (uint id, bool is_resident) {
+			Idle.add (() => {
+				destroy_inject_instance (id, is_resident);
+				return false;
+			});
+		}
+
+		private void destroy_inject_instance (uint id, bool is_resident) {
+			void * instance;
+			bool instance_id_found = inject_instance_by_id.unset (id, out instance);
+			assert (instance_id_found);
+
+			_free_inject_instance (instance);
+
+			if (!is_resident)
+				uninjected (id);
 		}
 
 		public extern void _create_context ();
@@ -322,6 +343,7 @@ namespace Frida {
 		public extern void _free_spawn_instance (void * instance);
 
 		public extern uint _do_inject (uint pid, string path, string entrypoint, string data) throws Error;
+		public extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
 		public extern void _free_inject_instance (void * instance);
 
 		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid, out bool need_proxy) throws Error;

@@ -79,7 +79,7 @@ libfrida_tests_glue_la_SOURCES = \
 data/.stamp: test-gadget-standalone.js
 	mkdir -p $(@D)
 	cp $(srcdir)/labrats/sleeper-* $(@D)
-	cp $(srcdir)/labrats/simple-agent-* $(@D)
+	cp $(srcdir)/labrats/*-agent-* $(@D)
 	cp $(srcdir)/labrats/stdio-writer-* $(@D)
 	cp $(srcdir)/*.js $(@D)
 	touch $@
