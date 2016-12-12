@@ -82,6 +82,29 @@ frida_collect_mach_ports (void * handle)
 
 #ifdef HAVE_LINUX
 
+#include <gum/gum.h>
+
+static guint
+frida_collect_memory_footprint (void * handle)
+{
+  GSubprocess * process = G_SUBPROCESS (handle);
+  gchar * path, * stats;
+  gboolean success;
+  gint num_pages;
+
+  path = g_strdup_printf ("/proc/%s/statm", g_subprocess_get_identifier (process));
+
+  success = g_file_get_contents (path, &stats, NULL, NULL);
+  g_assert (success);
+
+  num_pages = atoi (strchr (stats,  ' ') + 1); /* RSS */
+
+  g_free (stats);
+  g_free (path);
+
+  return num_pages * gum_query_page_size ();
+}
+
 static guint
 frida_collect_file_descriptors (void * handle)
 {
@@ -119,6 +142,7 @@ static const FridaMetricCollectorEntry frida_metric_collectors[] =
   { "ports", frida_collect_mach_ports },
 #endif
 #ifdef HAVE_LINUX
+  { "memory", frida_collect_memory_footprint },
   { "files", frida_collect_file_descriptors },
 #endif
   { NULL, NULL }
