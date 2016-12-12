@@ -643,8 +643,7 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
-				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var target_path = Path.build_filename (tests_dir, "data", "sleeper" + Frida.Test.arch_suffix ());
+				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
 				string[] argv = { target_path };
 				string[] envp = {};
 				pid = yield host_session.spawn (target_path, argv, envp);
@@ -859,8 +858,7 @@ namespace Frida.HostSessionTest {
 						run_spawn_scenario.callback ();
 				});
 
-				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var target_path = Path.build_filename (tests_dir, "data", target_name);
+				var target_path = Frida.Test.Labrats.path_to_file (target_name);
 				string[] argv = { target_path };
 				string[] envp = {};
 				pid = yield host_session.spawn (target_path, argv, envp);
@@ -972,8 +970,7 @@ namespace Frida.HostSessionTest {
 						run_spawn_scenario_with_stdio.callback ();
 				});
 
-				var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-				var target_path = Path.build_filename (tests_dir, "data", target_name);
+				var target_path = Frida.Test.Labrats.path_to_file (target_name);
 				string[] argv = { target_path };
 				string[] envp = {};
 				pid = yield host_session.spawn (target_path, argv, envp);
@@ -1179,10 +1176,7 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
-				var self_filename = Frida.Test.Process.current.filename;
-				var rat_directory = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (self_filename))))),
-					"frida-core", "tests", "labrats");
-				var target_path = Path.build_filename (rat_directory, "sleeper%d.exe".printf (sizeof (void *) == 4 ? 32 : 64));
+				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
 				string[] argv = { target_path };
 				string[] envp = {};
 				pid = yield host_session.spawn (target_path, argv, envp);
