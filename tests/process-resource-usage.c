@@ -119,7 +119,7 @@ static const FridaMetricCollectorEntry frida_metric_collectors[] =
   { "ports", frida_collect_mach_ports },
 #endif
 #ifdef HAVE_LINUX
-  { "file", frida_collect_file_descriptors },
+  { "files", frida_collect_file_descriptors },
 #endif
   { NULL, NULL }
 };
