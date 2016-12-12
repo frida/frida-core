@@ -114,7 +114,9 @@
 /tests/frida-tests.trs
 /tests/frida-tests.vapi
 /tests/labrats.c
-/tests/labrats/*.VC.db
+/tests/labrats/*.db
+/tests/labrats/*.opendb
+/tests/labrats/*.pdb
 /tests/labrats/build/
 /tests/main.c
 /tests/pipe/Makefile
