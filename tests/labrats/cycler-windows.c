@@ -1,18 +1,22 @@
 #include <windows.h>
 
-static BOOL running = TRUE;
-
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
+int WINAPI
+wWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
-    (void)hInstance;
-    (void)hPrevInstance;
-    (void)pCmdLine;
-    (void)nCmdShow;
+  DWORD end_time;
 
-    while (running)
-    {
-      Sleep(1);
-    }
+  (void) hInstance;
+  (void) hPrevInstance;
+  (void) pCmdLine;
+  (void) nCmdShow;
 
-    return 0;
+  end_time = GetTickCount () + 60000;
+
+  do
+  {
+    Sleep (1);
+  }
+  while (GetTickCount () < end_time);
+
+  return 0;
 }
