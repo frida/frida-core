@@ -47,6 +47,8 @@ on_unload (void)
 void
 frida_agent_main (const char * data)
 {
+  append_to_log ('m');
+
   if (strlen (data) > 0)
   {
     int exit_code = atoi (data);
