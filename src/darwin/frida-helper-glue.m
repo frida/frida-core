@@ -123,6 +123,12 @@ struct _FridaAgentDetails
 
 struct _FridaAgentContext
 {
+  /* State */
+  gboolean stay_resident;
+  mach_port_t task;
+  mach_port_t mach_thread;
+  mach_port_t posix_thread;
+
   /* Mach thread */
   GumAddress mach_task_self_impl;
   GumAddress mach_thread_self_impl;
@@ -158,12 +164,6 @@ struct _FridaAgentContext
   GumAddress mach_port_destroy_impl;
 
   GumAddress thread_terminate_impl;
-
-  /* State */
-  mach_port_t task;
-  mach_port_t mach_thread;
-  mach_port_t posix_thread;
-  gboolean stay_resident;
 
   /* Storage -- at the end to make the above field offsets smaller */
   mach_msg_empty_rcv_t message_that_never_arrives_storage;
@@ -1673,7 +1673,7 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
 static void
 frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * skip_unload = "skip_unload";
+  const gchar * skip_unload_label = "skip_unload";
 
   FRIDA_EMIT_CALL (mach_thread_self_impl, 0);
   FRIDA_EMIT_STORE (posix_thread, EAX);
@@ -1720,12 +1720,12 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
     FRIDA_EMIT_LOAD (EAX, stay_resident);
     gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
-    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload, GUM_NO_HINT);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
 
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_destructor (ctx->mapper));
     gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
 
-    gum_x86_writer_put_label (&ctx->cw, skip_unload);
+    gum_x86_writer_put_label (&ctx->cw, skip_unload_label);
   }
   else
   {
@@ -1761,13 +1761,13 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
     FRIDA_EMIT_LOAD (EAX, stay_resident);
     gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
-    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload, GUM_NO_HINT);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
 
     gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP, (ctx->cw.target_cpu == GUM_CPU_IA32) ? 12 : 0);
     FRIDA_EMIT_CALL (dlclose_impl, 1,
         GUM_ARG_REGISTER, GUM_REG_XDI);
 
-    gum_x86_writer_put_label (&ctx->cw, skip_unload);
+    gum_x86_writer_put_label (&ctx->cw, skip_unload_label);
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
@@ -1798,19 +1798,15 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
 static void frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw);
 static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw);
 
 static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 
 static void
 frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
@@ -1844,9 +1840,7 @@ frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * 
   gum_thumb_writer_init (&ctx.tw, ctx.code);
   ctx.mapper = mapper;
 
-  frida_agent_context_emit_arm_thread_id_setup (self, &ctx);
-  frida_agent_context_emit_arm_pthread_create_and_join (self, &ctx);
-  frida_agent_context_emit_arm_thread_terminate (self, &ctx);
+  frida_agent_context_emit_arm_mach_stub_body (self, &ctx);
 
   gum_thumb_writer_free (&ctx.tw);
 }
@@ -1870,6 +1864,8 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
 
 #define EMIT_ARM_LOAD(reg, field) \
     frida_agent_context_emit_arm_load_reg_with_ctx_value (ARM_REG_##reg, G_STRUCT_OFFSET (FridaAgentContext, field), &ctx->tw)
+#define EMIT_ARM_LOAD_ADDRESS_OF(reg, field) \
+    gum_thumb_writer_put_add_reg_reg_imm (&ctx->tw, ARM_REG_##reg, ARM_REG_R7, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_ARM_STORE(field, reg) \
     frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), ARM_REG_##reg, &ctx->tw)
 #define EMIT_ARM_LOAD_U32(reg, val) \
@@ -1880,78 +1876,118 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
     gum_thumb_writer_put_blx_reg (&ctx->tw, ARM_REG_##reg)
 
 static void
+frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
+{
+  const gchar * again_label = "again";
+
+  EMIT_ARM_LOAD (R4, mach_task_self_impl);
+  EMIT_ARM_CALL (R4);
+  EMIT_ARM_STORE (task, R0);
+
+  EMIT_ARM_LOAD (R4, mach_thread_self_impl);
+  EMIT_ARM_CALL (R4);
+  EMIT_ARM_STORE (mach_thread, R0);
+
+  EMIT_ARM_LOAD (R0, task);
+  EMIT_ARM_LOAD (R1, mach_port_allocate_right);
+  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
+  EMIT_ARM_MOVE (R2, SP);
+  EMIT_ARM_LOAD (R4, mach_port_allocate_impl);
+  EMIT_ARM_CALL (R4);
+  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
+  EMIT_ARM_STORE (receive_port, R0);
+  EMIT_ARM_LOAD (R1, message_that_never_arrives);
+  gum_thumb_writer_put_str_reg_reg_offset (&ctx->tw, ARM_REG_R0, ARM_REG_R1, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port));
+
+  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
+  EMIT_ARM_MOVE (R0, SP);
+  EMIT_ARM_LOAD_U32 (R1, 0);
+  EMIT_ARM_LOAD (R2, pthread_create_start_routine);
+  EMIT_ARM_LOAD (R3, pthread_create_arg);
+  EMIT_ARM_LOAD (R4, pthread_create_impl);
+  EMIT_ARM_CALL (R4);
+  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
+
+  gum_thumb_writer_put_label (&ctx->tw, again_label);
+
+  EMIT_ARM_LOAD (R0, message_that_never_arrives);
+  EMIT_ARM_LOAD (R4, mach_msg_receive_impl);
+  EMIT_ARM_CALL (R4);
+
+  gum_thumb_writer_put_b_label (&ctx->tw, again_label);
+}
+
+static void
 frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
+  const gchar * skip_unload_label = "skip_unload";
+
+  EMIT_ARM_LOAD (R4, mach_thread_self_impl);
+  EMIT_ARM_CALL (R4);
+  EMIT_ARM_STORE (posix_thread, R0);
+
+  EMIT_ARM_LOAD (R0, task);
+  EMIT_ARM_LOAD (R1, receive_port);
+  EMIT_ARM_LOAD (R4, mach_port_destroy_impl);
+  EMIT_ARM_CALL (R4);
+
+  EMIT_ARM_LOAD (R0, mach_thread);
+  EMIT_ARM_LOAD (R4, thread_terminate_impl);
+  EMIT_ARM_CALL (R4);
+
   if (ctx->mapper != NULL)
   {
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_constructor (ctx->mapper));
     EMIT_ARM_CALL (R0);
 
-    EMIT_ARM_LOAD (R2, thread_id);
-    EMIT_ARM_LOAD (R1, mapped_range);
     EMIT_ARM_LOAD (R0, entrypoint_data);
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
-    EMIT_ARM_CALL (R5);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
+    EMIT_ARM_LOAD (R2, mapped_range);
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    EMIT_ARM_CALL (R4);
 
+  }
+  else
+  {
+    EMIT_ARM_LOAD (R0, dylib_path);
+    EMIT_ARM_LOAD (R1, dlopen_mode);
+    EMIT_ARM_LOAD (R4, dlopen_impl);
+    EMIT_ARM_CALL (R4);
+    EMIT_ARM_MOVE (R5, R0);
+
+    EMIT_ARM_MOVE (R0, R5);
+    EMIT_ARM_LOAD (R1, entrypoint_name);
+    EMIT_ARM_LOAD (R4, dlsym_impl);
+    EMIT_ARM_CALL (R4);
+    EMIT_ARM_MOVE (R4, R0);
+
+    EMIT_ARM_LOAD (R0, entrypoint_data);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
+    EMIT_ARM_LOAD_U32 (R2, 0);
+    EMIT_ARM_CALL (R4);
+  }
+
+  EMIT_ARM_LOAD (R0, stay_resident);
+  gum_thumb_writer_put_cbnz_reg_label (&ctx->tw, ARM_REG_R0, skip_unload_label);
+
+  if (ctx->mapper != NULL)
+  {
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_destructor (ctx->mapper));
     EMIT_ARM_CALL (R0);
   }
   else
   {
-    EMIT_ARM_LOAD (R1, dlopen_mode);
-    EMIT_ARM_LOAD (R0, dylib_path);
-    EMIT_ARM_LOAD (R3, dlopen_impl);
-    EMIT_ARM_CALL (R3);
-    EMIT_ARM_MOVE (R4, R0);
-
-    EMIT_ARM_LOAD (R1, entrypoint_name);
-    EMIT_ARM_MOVE (R0, R4);
-    EMIT_ARM_LOAD (R3, dlsym_impl);
-    EMIT_ARM_CALL (R3);
-    EMIT_ARM_MOVE (R5, R0);
-
-    EMIT_ARM_LOAD (R2, thread_id);
-    EMIT_ARM_LOAD_U32 (R1, 0);
-    EMIT_ARM_LOAD (R0, entrypoint_data);
-    EMIT_ARM_CALL (R5);
-
-    EMIT_ARM_MOVE (R0, R4);
-    EMIT_ARM_LOAD (R3, dlclose_impl);
-    EMIT_ARM_CALL (R3);
+    EMIT_ARM_MOVE (R0, R5);
+    EMIT_ARM_LOAD (R4, dlclose_impl);
+    EMIT_ARM_CALL (R4);
   }
-}
 
-static void
-frida_agent_context_emit_arm_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_LOAD (R4, mach_thread_self_impl);
-  EMIT_ARM_CALL (R4);
-  EMIT_ARM_MOVE (R6, R0);
-  EMIT_ARM_STORE (thread_id, R6);
-}
+  gum_thumb_writer_put_label (&ctx->tw, skip_unload_label);
 
-static void
-frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_LOAD (R3, pthread_create_arg);
-  EMIT_ARM_LOAD (R2, pthread_create_start_routine);
-  EMIT_ARM_LOAD_U32 (R1, 0);
-  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
-  EMIT_ARM_MOVE (R0, SP);
-  EMIT_ARM_LOAD (R4, pthread_create_impl);
+  EMIT_ARM_LOAD (R4, pthread_self_impl);
   EMIT_ARM_CALL (R4);
 
-  EMIT_ARM_LOAD_U32 (R1, 0);
-  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
-  EMIT_ARM_LOAD (R4, pthread_join_impl);
-  EMIT_ARM_CALL (R4);
-}
-
-static void
-frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_MOVE (R0, R6);
-  EMIT_ARM_LOAD (R4, thread_terminate_impl);
+  EMIT_ARM_LOAD (R4, pthread_detach_impl);
   EMIT_ARM_CALL (R4);
 }
 
@@ -1963,7 +1999,7 @@ frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAg
 static void
 frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw)
 {
-  arm_reg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
+  arm_reg tmp_reg = (reg != ARM_REG_R0) ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
   gum_thumb_writer_put_add_reg_reg_reg (tw, reg, ARM_REG_R7, tmp_reg);
@@ -1974,7 +2010,7 @@ frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_o
 static void
 frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw)
 {
-  arm_reg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
+  arm_reg tmp_reg = (reg != ARM_REG_R0) ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
   gum_thumb_writer_put_add_reg_reg_reg (tw, tmp_reg, ARM_REG_R7, tmp_reg);
@@ -2000,9 +2036,7 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_X19, ARM64_REG_X20);
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_X21, ARM64_REG_X22);
-  frida_agent_context_emit_arm64_thread_id_setup (self, &ctx);
-  frida_agent_context_emit_arm64_pthread_create_and_join (self, &ctx);
-  frida_agent_context_emit_arm64_thread_terminate (self, &ctx);
+  frida_agent_context_emit_arm64_mach_stub_body (self, &ctx);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_X21, ARM64_REG_X22);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_X19, ARM64_REG_X20);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
@@ -2043,8 +2077,32 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
     gum_arm64_writer_put_blr_reg (&ctx->aw, ARM64_REG_##reg)
 
 static void
+frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
+{
+#if 0
+  EMIT_ARM64_LOAD (X3, pthread_create_arg);
+  EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
+  EMIT_ARM64_LOAD_U64 (X1, 0);
+  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_MOVE (X0, SP);
+  EMIT_ARM64_LOAD (X8, pthread_create_impl);
+  EMIT_ARM64_CALL (X8);
+
+  EMIT_ARM64_LOAD_U64 (X1, 0);
+  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_LOAD (X8, pthread_join_impl);
+  EMIT_ARM64_CALL (X8);
+
+  EMIT_ARM64_MOVE (X0, X21);
+  EMIT_ARM64_LOAD (X8, thread_terminate_impl);
+  EMIT_ARM64_CALL (X8);
+#endif
+}
+
+static void
 frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
+#if 0
   if (ctx->mapper != NULL)
   {
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_constructor (ctx->mapper));
@@ -2082,40 +2140,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_LOAD (X8, dlclose_impl);
     EMIT_ARM64_CALL (X8);
   }
-}
-
-static void
-frida_agent_context_emit_arm64_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
-  EMIT_ARM64_CALL (X8);
-  EMIT_ARM64_MOVE (X21, X0);
-  EMIT_ARM64_STORE (thread_id, X21);
-}
-
-static void
-frida_agent_context_emit_arm64_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_LOAD (X3, pthread_create_arg);
-  EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
-  EMIT_ARM64_LOAD_U64 (X1, 0);
-  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
-  EMIT_ARM64_MOVE (X0, SP);
-  EMIT_ARM64_LOAD (X8, pthread_create_impl);
-  EMIT_ARM64_CALL (X8);
-
-  EMIT_ARM64_LOAD_U64 (X1, 0);
-  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
-  EMIT_ARM64_LOAD (X8, pthread_join_impl);
-  EMIT_ARM64_CALL (X8);
-}
-
-static void
-frida_agent_context_emit_arm64_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_MOVE (X0, X21);
-  EMIT_ARM64_LOAD (X8, thread_terminate_impl);
-  EMIT_ARM64_CALL (X8);
+#endif
 }
 
 #undef EMIT_ARM64_LOAD
