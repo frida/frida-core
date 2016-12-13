@@ -1407,9 +1407,9 @@ frida_inject_instance_free (FridaInjectInstance * instance)
     mach_port_deallocate (self_task, instance->thread);
 
   can_deallocate_payload = !(instance->is_resident && instance->is_mapped);
-
   if (instance->payload_address != 0 && can_deallocate_payload)
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
+
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
 
