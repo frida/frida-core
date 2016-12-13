@@ -77,9 +77,7 @@ namespace Frida.Test {
 			handle = null;
 		}
 
-		public ResourceUsageSnapshot snapshot_resource_usage () {
-			return ProcessBackend.snapshot_resource_usage (handle);
-		}
+		public extern ResourceUsageSnapshot snapshot_resource_usage ();
 	}
 
 	public class ResourceUsageSnapshot : Object {
@@ -139,6 +137,5 @@ namespace Frida.Test {
 		private extern void start (string path, string[] argv, string[] envp, Arch arch, out void * handle, out uint id) throws Error;
 		private extern int join (void * handle, uint timeout_msec) throws Error;
 		private extern void kill (void * handle);
-		private extern ResourceUsageSnapshot snapshot_resource_usage (void * handle);
 	}
 }

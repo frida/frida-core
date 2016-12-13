@@ -1,7 +1,7 @@
 #include "frida-tests.h"
 
 typedef struct _FridaMetricCollectorEntry FridaMetricCollectorEntry;
-typedef guint (* FridaMetricCollector) (void * handle);
+typedef guint (* FridaMetricCollector) (FridaTestProcess * process);
 
 struct _FridaMetricCollectorEntry
 {
@@ -15,24 +15,25 @@ struct _FridaMetricCollectorEntry
 #include <psapi.h>
 
 static guint
-frida_collect_memory_footprint (void * handle)
+frida_collect_memory_footprint (FridaTestProcess * process)
 {
   PROCESS_MEMORY_COUNTERS_EX counters;
   BOOL success;
 
-  success = GetProcessMemoryInfo (handle, (PPROCESS_MEMORY_COUNTERS) &counters, sizeof (counters));
+  success = GetProcessMemoryInfo (frida_test_process_get_handle (process), (PPROCESS_MEMORY_COUNTERS) &counters,
+      sizeof (counters));
   g_assert (success);
 
   return counters.PrivateUsage;
 }
 
 static guint
-frida_collect_handles (void * handle)
+frida_collect_handles (FridaTestProcess * process)
 {
   DWORD count;
   BOOL success;
 
-  success = GetProcessHandleCount (handle, &count);
+  success = GetProcessHandleCount (frida_test_process_get_handle (process), &count);
   g_assert (success);
 
   return count;
@@ -50,27 +51,25 @@ int proc_pid_rusage (int pid, int flavor, rusage_info_t * buffer);
 #include <mach/mach.h>
 
 static guint
-frida_collect_memory_footprint (void * handle)
+frida_collect_memory_footprint (FridaTestProcess * process)
 {
-  int pid = GPOINTER_TO_SIZE (handle);
   struct rusage_info_v2 info;
   int res;
 
-  res = proc_pid_rusage (pid, RUSAGE_INFO_V2, (rusage_info_t *) &info);
+  res = proc_pid_rusage (frida_test_process_get_id (process), RUSAGE_INFO_V2, (rusage_info_t *) &info);
   g_assert_cmpint (res, ==, 0);
 
   return info.ri_phys_footprint;
 }
 
 static guint
-frida_collect_mach_ports (void * handle)
+frida_collect_mach_ports (FridaTestProcess * process)
 {
-  int pid = GPOINTER_TO_SIZE (handle);
   mach_port_t task;
   kern_return_t kr;
   ipc_info_space_basic_t info;
 
-  kr = task_for_pid (mach_task_self (), pid, &task);
+  kr = task_for_pid (mach_task_self (), frida_test_process_get_id (process), &task);
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
   kr = mach_port_space_basic_info (task, &info);
@@ -89,14 +88,13 @@ frida_collect_mach_ports (void * handle)
 #include <gum/gum.h>
 
 static guint
-frida_collect_memory_footprint (void * handle)
+frida_collect_memory_footprint (FridaTestProcess * process)
 {
-  GSubprocess * process = G_SUBPROCESS (handle);
   gchar * path, * stats;
   gboolean success;
   gint num_pages;
 
-  path = g_strdup_printf ("/proc/%s/statm", g_subprocess_get_identifier (process));
+  path = g_strdup_printf ("/proc/%u/statm", frida_test_process_get_id (process));
 
   success = g_file_get_contents (path, &stats, NULL, NULL);
   g_assert (success);
@@ -110,14 +108,13 @@ frida_collect_memory_footprint (void * handle)
 }
 
 static guint
-frida_collect_file_descriptors (void * handle)
+frida_collect_file_descriptors (FridaTestProcess * process)
 {
-  GSubprocess * process = G_SUBPROCESS (handle);
   gchar * path;
   GDir * dir;
   guint count;
 
-  path = g_strdup_printf ("/proc/%s/fd", g_subprocess_get_identifier (process));
+  path = g_strdup_printf ("/proc/%u/fd", frida_test_process_get_id (process));
 
   dir = g_dir_open (path, 0, NULL);
   g_assert (dir != NULL);
@@ -153,7 +150,7 @@ static const FridaMetricCollectorEntry frida_metric_collectors[] =
 };
 
 FridaTestResourceUsageSnapshot *
-frida_test_process_backend_snapshot_resource_usage (void * handle)
+frida_test_process_snapshot_resource_usage (FridaTestProcess * self)
 {
   FridaTestResourceUsageSnapshot * snapshot;
   const FridaMetricCollectorEntry * entry;
@@ -162,9 +159,11 @@ frida_test_process_backend_snapshot_resource_usage (void * handle)
 
   for (entry = frida_metric_collectors; entry->name != NULL; entry++)
   {
-    g_hash_table_insert (snapshot->metrics,
-        g_strdup (entry->name),
-        GSIZE_TO_POINTER (entry->collect (handle)));
+    guint value;
+
+    value = entry->collect (self);
+
+    g_hash_table_insert (snapshot->metrics, g_strdup (entry->name), GSIZE_TO_POINTER (value));
   }
 
   return snapshot;
