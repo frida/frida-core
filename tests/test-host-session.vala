@@ -605,6 +605,7 @@ namespace Frida.HostSessionTest {
 						stdout.printf ("pid=%u name='%s'\n", process.pid, process.name);
 				}
 			} catch (GLib.Error e) {
+				printerr ("ERROR: %s\n", e.message);
 				assert_not_reached ();
 			}
 
@@ -702,7 +703,7 @@ namespace Frida.HostSessionTest {
 
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
-				stderr.printf ("Unexpected error: %s\n", e.message);
+				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
@@ -766,7 +767,7 @@ namespace Frida.HostSessionTest {
 					session.disconnect (message_handler);
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"onResume\"}");
 				} catch (GLib.Error e) {
-					stderr.printf ("ERROR: %s\n", e.message);
+					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
 
@@ -911,7 +912,7 @@ namespace Frida.HostSessionTest {
 
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
-				stderr.printf ("Unexpected error: %s\n", e.message);
+				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
@@ -993,7 +994,7 @@ namespace Frida.HostSessionTest {
 
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
-				stderr.printf ("Unexpected error: %s\n", e.message);
+				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
@@ -1018,7 +1019,7 @@ namespace Frida.HostSessionTest {
 					GLib.Process.spawn_sync (null, new string[] { "/usr/bin/pgrep", "Safari" }, null, 0, null, out pgrep_output, null, null);
 					pid = (uint) int.parse (pgrep_output);
 				} catch (SpawnError spawn_error) {
-					stderr.printf ("ERROR: %s\n", spawn_error.message);
+					printerr ("ERROR: %s\n", spawn_error.message);
 					assert_not_reached ();
 				}
 
@@ -1049,7 +1050,7 @@ namespace Frida.HostSessionTest {
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"hello\"}");
 					session.disconnect (message_handler);
 				} catch (GLib.Error e) {
-					stderr.printf ("ERROR: %s\n", e.message);
+					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
 
@@ -1099,7 +1100,7 @@ namespace Frida.HostSessionTest {
 					session.disconnect (message_handler);
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
 				} catch (GLib.Error e) {
-					stderr.printf ("ERROR: %s\n", e.message);
+					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
 
@@ -1232,7 +1233,7 @@ namespace Frida.HostSessionTest {
 
 				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
-				stderr.printf ("Unexpected error: %s\n", e.message);
+				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
