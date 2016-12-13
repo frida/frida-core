@@ -978,6 +978,8 @@ static void
 frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
 #ifdef HAVE_ANDROID
+  const gchar * skip_unload_label = "skip_unload";
+
   GumArm64Writer cw;
   const guint worker_offset = 64;
 
@@ -1032,17 +1034,36 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
   gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X5, ARM64_REG_X0);
 
+  gum_arm64_writer_put_ldr_reg_u64 (&cw, ARM64_REG_X0, FALSE); /* stay_resident */
+  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_X0, ARM64_REG_X1);
+  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X1, ARM64_REG_SP);
+
   gum_arm64_writer_put_call_reg_with_arguments (&cw,
       ARM64_REG_X5,
       3,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_REGISTER, ARM64_REG_X1,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_W0, ARM64_REG_SP, 0);
+  gum_arm64_writer_put_cbnz_reg_label (&cw, ARM64_REG_W0, skip_unload_label);
 
   gum_arm64_writer_put_call_address_with_arguments (&cw,
       frida_resolve_linker_function (params->pid, dlclose),
       1,
       GUM_ARG_REGISTER, ARM64_REG_X20);
+
+  gum_arm64_writer_put_label (&cw, skip_unload_label);
+
+  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X1, ARM64_REG_SP);
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "write"),
+      3,
+      GUM_ARG_REGISTER, ARM64_REG_X19,
+      GUM_ARG_REGISTER, ARM64_REG_X1,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+
+  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_X0, ARM64_REG_X1);
 
   gum_arm64_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "close"),

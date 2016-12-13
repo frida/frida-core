@@ -29,7 +29,7 @@ all: \
 	$(NULL)
 
 sleeper-android-arm: sleeper-unix.c
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
+	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
