@@ -84,10 +84,15 @@ struct _FridaInjectInstance
 {
   FridaHelperService * service;
   guint id;
+
   mach_port_t task;
+
   mach_vm_address_t payload_address;
   mach_vm_address_t data_address;
   mach_vm_size_t payload_size;
+  gboolean is_resident;
+  gboolean is_mapped;
+
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
 };
@@ -190,6 +195,7 @@ static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
+static gboolean frida_inject_instance_is_resident (FridaInjectInstance * instance);
 
 static void frida_inject_instance_on_mach_thread_dead (void * context);
 static void frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread);
@@ -801,7 +807,11 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance->data_address = payload_address + layout.data_offset;
 
   if (mapper != NULL)
+  {
     gum_darwin_mapper_map (mapper, payload_address + base_payload_size);
+
+    instance->is_mapped = TRUE;
+  }
 
   ret = mach_vm_protect (details.task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
@@ -871,7 +881,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts->__rbx = payload_address + layout.data_offset;
 
-    ts->__rsp = payload_address + layout.stack_top_offset - 16 - 8;
+    ts->__rsp = payload_address + layout.stack_top_offset;
     ts->__rip = payload_address + layout.mach_code_offset;
   }
   else
@@ -885,7 +895,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts->__ebx = payload_address + layout.data_offset;
 
-    ts->__esp = payload_address + layout.stack_top_offset - 16 - 4;
+    ts->__esp = payload_address + layout.stack_top_offset;
     ts->__eip = payload_address + layout.mach_code_offset;
   }
 
@@ -1046,17 +1056,22 @@ frida_inject_instance_on_posix_thread_dead (void * context)
 {
   FridaInjectInstance * self = context;
   gboolean * stay_resident;
-  gboolean is_resident = FALSE;
 
   stay_resident = (gboolean *) gum_darwin_read (self->task, self->data_address + G_STRUCT_OFFSET (FridaAgentContext, stay_resident),
       sizeof (gboolean), NULL);
   if (stay_resident != NULL)
   {
-    is_resident = *stay_resident;
+    self->is_resident = *stay_resident;
     g_free (stay_resident);
   }
 
-  _frida_helper_service_on_posix_thread_dead (self->service, self->id, is_resident);
+  _frida_helper_service_on_posix_thread_dead (self->service, self->id);
+}
+
+gboolean
+_frida_helper_service_is_instance_resident (FridaHelperService * self, void * instance)
+{
+  return frida_inject_instance_is_resident (instance);
 }
 
 void
@@ -1363,9 +1378,15 @@ frida_inject_instance_new (FridaHelperService * service, guint id)
   instance = g_slice_new (FridaInjectInstance);
   instance->service = g_object_ref (service);
   instance->id = id;
+
   instance->task = MACH_PORT_NULL;
+
   instance->payload_address = 0;
   instance->data_address = 0;
+  instance->payload_size = 0;
+  instance->is_resident = FALSE;
+  instance->is_mapped = FALSE;
+
   instance->thread = MACH_PORT_NULL;
   instance->thread_monitor_source = NULL;
 
@@ -1375,18 +1396,32 @@ frida_inject_instance_new (FridaHelperService * service, guint id)
 static void
 frida_inject_instance_free (FridaInjectInstance * instance)
 {
-  task_t self_task = mach_task_self ();
+  task_t self_task;
+  gboolean can_deallocate_payload;
+
+  self_task = mach_task_self ();
 
   if (instance->thread_monitor_source != NULL)
     dispatch_release (instance->thread_monitor_source);
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
-  if (instance->payload_address != 0)
+
+  can_deallocate_payload = !(instance->is_resident && instance->is_mapped);
+
+  if (instance->payload_address != 0 && can_deallocate_payload)
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
+
   g_object_unref (instance->service);
+
   g_slice_free (FridaInjectInstance, instance);
+}
+
+static gboolean
+frida_inject_instance_is_resident (FridaInjectInstance * instance)
+{
+  return instance->is_resident;
 }
 
 static gboolean
@@ -1604,9 +1639,8 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
       GUM_ARG_REGISTER, GUM_REG_EDI,
       GUM_ARG_REGISTER, GUM_REG_ESI,
       GUM_ARG_REGISTER, GUM_REG_XDX);
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_EDI,
-      GUM_REG_XSP, 0);
-  FRIDA_EMIT_STORE (receive_port, EDI);
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_EAX, GUM_REG_XSP, 0);
+  FRIDA_EMIT_STORE (receive_port, EAX);
   FRIDA_EMIT_LOAD (XDI, message_that_never_arrives);
   gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XDI, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port), GUM_REG_EAX);
 
