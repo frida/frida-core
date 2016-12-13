@@ -51,6 +51,8 @@ void
 frida_agent_main (const char * data,
                   bool * stay_resident)
 {
+  (void) data;
+
   *stay_resident = true;
 
   append_to_log ('m');
