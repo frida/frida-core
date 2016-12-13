@@ -165,7 +165,7 @@ namespace Frida {
 			Source.remove (timeout);
 			if (size == 0) {
 				Idle.add (() => {
-					_on_uninject (id);
+					_on_uninject (id, false);
 					return false;
 				});
 			} else {
@@ -180,6 +180,7 @@ namespace Frida {
 			if (instance == null)
 				return;
 			var fifo = _get_fifo_for_inject_instance (instance);
+			var is_resident = false;
 			while (true) {
 				var buf = new uint8[1];
 				try {
@@ -190,24 +191,29 @@ namespace Frida {
 						 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
 						 */
 						Timeout.add (50, () => {
-							_on_uninject (id);
+							_on_uninject (id, is_resident);
 							return false;
 						});
 						return;
+					} else {
+						is_resident = (bool) buf[0];
 					}
 				} catch (IOError e) {
-					_on_uninject (id);
+					_on_uninject (id, false);
 					return;
 				}
 			}
 		}
 
-		private void _on_uninject (uint id) {
+		private void _on_uninject (uint id, bool is_resident) {
 			void * instance;
 			bool found = inject_instance_by_id.unset (id, out instance);
 			assert (found);
+
 			_free_inject_instance (instance);
-			uninjected (id);
+
+			if (!is_resident)
+				uninjected (id);
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
