@@ -816,6 +816,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
   GumThumbWriter cw;
   const guint worker_offset = 128;
+  const gchar * skip_unload_label = "skip_unload";
 
   gum_thumb_writer_init (&cw, code->cur);
 
@@ -856,7 +857,6 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       frida_resolve_libc_function (params->pid, "__libc_dlclose"),
       1,
       GUM_ARG_REGISTER, ARM_REG_R6);
-
 #endif
 
   gum_thumb_writer_put_breakpoint (&cw);
@@ -915,12 +915,19 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
 #endif
 
+  gum_thumb_writer_put_ldr_reg_u32 (&cw, ARM_REG_R0, FALSE); /* stay_resident */
+  gum_thumb_writer_put_push_regs (&cw, 1, ARM_REG_R0);
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R1, ARM_REG_SP);
+
   gum_thumb_writer_put_call_reg_with_arguments (&cw,
       ARM_REG_R5,
       3,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
+      GUM_ARG_REGISTER, ARM_REG_R1,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_thumb_writer_put_ldr_reg_reg (&cw, ARM_REG_R0, ARM_REG_SP);
+  gum_thumb_writer_put_cbnz_reg_label (&cw, ARM_REG_R0, skip_unload_label);
 
 #ifdef HAVE_ANDROID
   gum_thumb_writer_put_call_address_with_arguments (&cw,
@@ -933,6 +940,18 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       1,
       GUM_ARG_REGISTER, ARM_REG_R6);
 #endif
+
+  gum_thumb_writer_put_label (&cw, skip_unload_label);
+
+  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R1, ARM_REG_SP);
+  gum_thumb_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "write"),
+      3,
+      GUM_ARG_REGISTER, ARM_REG_R7,
+      GUM_ARG_REGISTER, ARM_REG_R1,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+
+  gum_thumb_writer_put_pop_regs (&cw, 1, ARM_REG_R0);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "close"),
