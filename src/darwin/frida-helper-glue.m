@@ -1866,10 +1866,10 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
     frida_agent_context_emit_arm_load_reg_with_ctx_value (ARM_REG_##reg, G_STRUCT_OFFSET (FridaAgentContext, field), &ctx->tw)
 #define EMIT_ARM_LOAD_ADDRESS_OF(reg, field) \
     gum_thumb_writer_put_add_reg_reg_imm (&ctx->tw, ARM_REG_##reg, ARM_REG_R7, G_STRUCT_OFFSET (FridaAgentContext, field))
-#define EMIT_ARM_STORE(field, reg) \
-    frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), ARM_REG_##reg, &ctx->tw)
 #define EMIT_ARM_LOAD_U32(reg, val) \
     gum_thumb_writer_put_ldr_reg_u32 (&ctx->tw, ARM_REG_##reg, val)
+#define EMIT_ARM_STORE(field, reg) \
+    frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), ARM_REG_##reg, &ctx->tw)
 #define EMIT_ARM_MOVE(dstreg, srcreg) \
     gum_thumb_writer_put_mov_reg_reg (&ctx->tw, ARM_REG_##dstreg, ARM_REG_##srcreg)
 #define EMIT_ARM_CALL(reg) \
@@ -1937,15 +1937,14 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
   if (ctx->mapper != NULL)
   {
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_constructor (ctx->mapper));
-    EMIT_ARM_CALL (R0);
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_constructor (ctx->mapper));
+    EMIT_ARM_CALL (R4);
 
     EMIT_ARM_LOAD (R0, entrypoint_data);
     EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
     EMIT_ARM_LOAD (R2, mapped_range);
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM_CALL (R4);
-
   }
   else
   {
@@ -1972,8 +1971,8 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
   if (ctx->mapper != NULL)
   {
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_destructor (ctx->mapper));
-    EMIT_ARM_CALL (R0);
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_destructor (ctx->mapper));
+    EMIT_ARM_CALL (R4);
   }
   else
   {
@@ -2067,6 +2066,8 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
 
 #define EMIT_ARM64_LOAD(reg, field) \
     gum_arm64_writer_put_ldr_reg_reg_offset (&ctx->aw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaAgentContext, field))
+#define EMIT_ARM64_LOAD_ADDRESS_OF(reg, field) \
+    gum_arm64_writer_put_add_reg_reg_imm (&ctx->aw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_ARM64_LOAD_U64(reg, val) \
     gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_##reg, val)
 #define EMIT_ARM64_STORE(field, reg) \
@@ -2079,68 +2080,116 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
 static void
 frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-#if 0
-  EMIT_ARM64_LOAD (X3, pthread_create_arg);
-  EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
-  EMIT_ARM64_LOAD_U64 (X1, 0);
+  const gchar * again_label = "again";
+
+  EMIT_ARM64_LOAD (X8, mach_task_self_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_STORE (task, W0);
+
+  EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_STORE (mach_thread, W0);
+
+  EMIT_ARM64_LOAD (W0, task);
+  EMIT_ARM64_LOAD (W1, mach_port_allocate_right);
+  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_MOVE (X2, SP);
+  EMIT_ARM64_LOAD (X8, mach_port_allocate_impl);
+  EMIT_ARM64_CALL (X8);
+  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_STORE (receive_port, W0);
+  EMIT_ARM64_LOAD (X1, message_that_never_arrives);
+  gum_arm64_writer_put_str_reg_reg_offset (&ctx->aw, ARM64_REG_W0, ARM64_REG_X1, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port));
+
   gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
   EMIT_ARM64_MOVE (X0, SP);
+  EMIT_ARM64_LOAD_U64 (X1, 0);
+  EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
+  EMIT_ARM64_LOAD (X3, pthread_create_arg);
   EMIT_ARM64_LOAD (X8, pthread_create_impl);
   EMIT_ARM64_CALL (X8);
-
-  EMIT_ARM64_LOAD_U64 (X1, 0);
   gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
-  EMIT_ARM64_LOAD (X8, pthread_join_impl);
+
+  gum_arm64_writer_put_label (&ctx->aw, again_label);
+
+  EMIT_ARM64_LOAD (X0, message_that_never_arrives);
+  EMIT_ARM64_LOAD (X8, mach_msg_receive_impl);
   EMIT_ARM64_CALL (X8);
 
-  EMIT_ARM64_MOVE (X0, X21);
-  EMIT_ARM64_LOAD (X8, thread_terminate_impl);
-  EMIT_ARM64_CALL (X8);
-#endif
+  gum_arm64_writer_put_b_label (&ctx->aw, again_label);
 }
 
 static void
 frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-#if 0
+  const gchar * skip_unload_label = "skip_unload";
+
+  EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_STORE (posix_thread, W0);
+
+  EMIT_ARM64_LOAD (W0, task);
+  EMIT_ARM64_LOAD (W1, receive_port);
+  EMIT_ARM64_LOAD (X8, mach_port_destroy_impl);
+  EMIT_ARM64_CALL (X8);
+
+  EMIT_ARM64_LOAD (W0, mach_thread);
+  EMIT_ARM64_LOAD (X8, thread_terminate_impl);
+  EMIT_ARM64_CALL (X8);
+
   if (ctx->mapper != NULL)
   {
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_constructor (ctx->mapper));
-    EMIT_ARM64_CALL (X0);
-
-    EMIT_ARM64_LOAD (X2, thread_id);
-    EMIT_ARM64_LOAD (X1, mapped_range);
-    EMIT_ARM64_LOAD (X0, entrypoint_data);
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_constructor (ctx->mapper));
     EMIT_ARM64_CALL (X8);
 
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_destructor (ctx->mapper));
-    EMIT_ARM64_CALL (X0);
+    EMIT_ARM64_LOAD (X0, entrypoint_data);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+    EMIT_ARM64_LOAD (X2, mapped_range);
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    EMIT_ARM64_CALL (X8);
   }
   else
   {
-    EMIT_ARM64_LOAD (X1, dlopen_mode);
     EMIT_ARM64_LOAD (X0, dylib_path);
+    EMIT_ARM64_LOAD (X1, dlopen_mode);
     EMIT_ARM64_LOAD (X8, dlopen_impl);
     EMIT_ARM64_CALL (X8);
     EMIT_ARM64_MOVE (X19, X0);
 
-    EMIT_ARM64_LOAD (X1, entrypoint_name);
     EMIT_ARM64_MOVE (X0, X19);
+    EMIT_ARM64_LOAD (X1, entrypoint_name);
     EMIT_ARM64_LOAD (X8, dlsym_impl);
     EMIT_ARM64_CALL (X8);
     EMIT_ARM64_MOVE (X8, X0);
 
-    EMIT_ARM64_LOAD (X2, thread_id);
-    EMIT_ARM64_LOAD_U64 (X1, 0);
     EMIT_ARM64_LOAD (X0, entrypoint_data);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+    EMIT_ARM64_LOAD_U64 (X2, 0);
     EMIT_ARM64_CALL (X8);
+  }
 
+  EMIT_ARM64_LOAD (W0, stay_resident);
+  gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_W0, skip_unload_label);
+
+  if (ctx->mapper != NULL)
+  {
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_destructor (ctx->mapper));
+    EMIT_ARM64_CALL (X8);
+  }
+  else
+  {
     EMIT_ARM64_MOVE (X0, X19);
     EMIT_ARM64_LOAD (X8, dlclose_impl);
     EMIT_ARM64_CALL (X8);
   }
-#endif
+
+  gum_arm64_writer_put_label (&ctx->aw, skip_unload_label);
+
+  EMIT_ARM64_LOAD (X8, pthread_self_impl);
+  EMIT_ARM64_CALL (X8);
+
+  EMIT_ARM64_LOAD (X8, pthread_detach_impl);
+  EMIT_ARM64_CALL (X8);
 }
 
 #undef EMIT_ARM64_LOAD
