@@ -1,11 +1,15 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual Studio 2010
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sleeper", "sleeper.vcxproj", "{DEC3A521-4AD8-4A55-BE8E-A1919C10061F}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "cycler", "cycler.vcxproj", "{EAB7D2AE-DF45-4EF2-B71A-2F7F92F75D8E}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "simple-agent", "simple-agent.vcxproj", "{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "resident-agent", "resident-agent.vcxproj", "{1A16B991-DE8D-403D-9FE6-BD1696E12045}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -25,6 +29,10 @@ Global
 		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.Labrat|Win32.Build.0 = Labrat|Win32
 		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.Labrat|x64.ActiveCfg = Labrat|x64
 		{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}.Labrat|x64.Build.0 = Labrat|x64
+		{1A16B991-DE8D-403D-9FE6-BD1696E12045}.Labrat|Win32.ActiveCfg = Labrat|Win32
+		{1A16B991-DE8D-403D-9FE6-BD1696E12045}.Labrat|Win32.Build.0 = Labrat|Win32
+		{1A16B991-DE8D-403D-9FE6-BD1696E12045}.Labrat|x64.ActiveCfg = Labrat|x64
+		{1A16B991-DE8D-403D-9FE6-BD1696E12045}.Labrat|x64.Build.0 = Labrat|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
