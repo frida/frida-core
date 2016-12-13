@@ -42,7 +42,11 @@ frida_collect_handles (void * handle)
 
 #ifdef HAVE_DARWIN
 
-#include <libproc.h>
+#ifdef HAVE_IOS
+int proc_pid_rusage (int pid, int flavor, rusage_info_t * buffer);
+#else
+# include <libproc.h>
+#endif
 #include <mach/mach.h>
 
 static guint
