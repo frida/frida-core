@@ -331,6 +331,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   /* Will clobber these */
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XSI);
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XDI); /* Alignment */
 
   /* xbx = (RemoteWorkerContext *) lpParameter */
 #if GLIB_SIZEOF_VOID_P == 4
@@ -380,6 +381,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_label (&cw, skip_unload_label);
 
   /* Restore registers */
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XDI); /* Alignment */
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XSI);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
 
