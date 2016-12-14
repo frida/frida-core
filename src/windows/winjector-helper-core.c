@@ -335,7 +335,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 
   /* xbx = (RemoteWorkerContext *) lpParameter */
 #if GLIB_SIZEOF_VOID_P == 4
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EBX, GUM_REG_ESP, (2 + 1) * sizeof (gpointer));
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EBX, GUM_REG_ESP, (3 + 1) * sizeof (gpointer));
 #else
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_RBX, GUM_REG_RCX);
 #endif
