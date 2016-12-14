@@ -1,18 +1,26 @@
 namespace Frida.InjectorTest {
 	public static void add_tests () {
-		GLib.Test.add_func ("/Injector/inject-current-arch", () => {
-			test_injection (Frida.Test.Arch.CURRENT);
+		GLib.Test.add_func ("/Injector/inject-dynamic-current-arch", () => {
+			test_dynamic_injection (Frida.Test.Arch.CURRENT);
 		});
 
-		GLib.Test.add_func ("/Injector/inject-other-arch", () => {
-			test_injection (Frida.Test.Arch.OTHER);
+		GLib.Test.add_func ("/Injector/inject-dynamic-other-arch", () => {
+			test_dynamic_injection (Frida.Test.Arch.OTHER);
+		});
+
+		GLib.Test.add_func ("/Injector/inject-resident-current-arch", () => {
+			test_resident_injection (Frida.Test.Arch.CURRENT);
+		});
+
+		GLib.Test.add_func ("/Injector/inject-resident-other-arch", () => {
+			test_resident_injection (Frida.Test.Arch.OTHER);
 		});
 
 		GLib.Test.add_func ("/Injector/resource-leaks", test_resource_leaks);
 	}
 
-	private static void test_injection (Frida.Test.Arch arch) {
-		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-injection.log"));
+	private static void test_dynamic_injection (Frida.Test.Arch arch) {
+		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-dynamic-injection.log"));
 		try {
 			logfile.delete ();
 		} catch (GLib.Error delete_error) {
@@ -65,6 +73,42 @@ namespace Frida.InjectorTest {
 		rat.close ();
 	}
 
+	private static void test_resident_injection (Frida.Test.Arch arch) {
+		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-resident-injection.log"));
+		try {
+			logfile.delete ();
+		} catch (GLib.Error delete_error) {
+		}
+		var envp = new string[] {
+			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
+		};
+
+		var rat = new Labrat ("sleeper", envp, arch);
+
+		if (Frida.Test.os () == Frida.Test.OS.LINUX || Frida.Test.os () == Frida.Test.OS.QNX) {
+			/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+			Thread.usleep (50000);
+		}
+
+		rat.inject ("resident-agent", "", arch);
+		assert (!rat.try_wait_for_uninject (500));
+		assert (content_of (logfile) == ">m");
+
+		try {
+			rat.process.kill ();
+		} catch (Error e) {
+			assert_not_reached ();
+		}
+
+		assert (!rat.try_wait_for_uninject (500));
+
+		try {
+			logfile.delete ();
+		} catch (GLib.Error delete_error) {
+			assert_not_reached ();
+		}
+	}
+
 	private static void test_resource_leaks () {
 		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-leaks.log"));
 		var envp = new string[] {
@@ -111,7 +155,7 @@ namespace Frida.InjectorTest {
 	}
 
 	private class Labrat {
-		public Frida.Test.Process process {
+		public Frida.Test.Process? process {
 			get;
 			private set;
 		}
@@ -138,6 +182,7 @@ namespace Frida.InjectorTest {
 
 		private async void do_close (MainLoop loop) {
 			injector = null;
+			process = null;
 
 			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
 			Idle.add (() => {
@@ -173,6 +218,11 @@ namespace Frida.InjectorTest {
 		}
 
 		public void wait_for_uninject () {
+			var success = try_wait_for_uninject (1000);
+			assert (success);
+		}
+
+		public bool try_wait_for_uninject (uint timeout) {
 			var loop = new MainLoop ();
 
 			var handler_id = injector.uninjected.connect ((id) => {
@@ -180,7 +230,7 @@ namespace Frida.InjectorTest {
 			});
 
 			var timed_out = false;
-			var timeout_id = Timeout.add_seconds (1, () => {
+			var timeout_id = Timeout.add (timeout, () => {
 				timed_out = true;
 				loop.quit ();
 				return false;
@@ -188,9 +238,11 @@ namespace Frida.InjectorTest {
 
 			loop.run ();
 
-			assert (!timed_out);
-			Source.remove (timeout_id);
+			if (!timed_out)
+				Source.remove (timeout_id);
 			injector.disconnect (handler_id);
+
+			return !timed_out;
 		}
 
 		public int wait_for_process_to_exit () {

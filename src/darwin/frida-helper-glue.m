@@ -84,9 +84,15 @@ struct _FridaInjectInstance
 {
   FridaHelperService * service;
   guint id;
+
   mach_port_t task;
+
   mach_vm_address_t payload_address;
+  mach_vm_address_t data_address;
   mach_vm_size_t payload_size;
+  gboolean is_resident;
+  gboolean is_mapped;
+
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
 };
@@ -95,7 +101,6 @@ struct _FridaInjectPayloadLayout
 {
   guint stack_guard_size;
   guint stack_size;
-  guint pthread_data_size;
 
   guint code_offset;
   guint mach_code_offset;
@@ -104,7 +109,6 @@ struct _FridaInjectPayloadLayout
   guint stack_guard_offset;
   guint stack_bottom_offset;
   guint stack_top_offset;
-  guint thread_self_offset;
 };
 
 struct _FridaAgentDetails
@@ -119,38 +123,54 @@ struct _FridaAgentDetails
 
 struct _FridaAgentContext
 {
-  GumAddress _pthread_set_self_impl;
-  GumAddress cthread_set_self_impl;
-  GumAddress thread_self_data;
+  /* State */
+  gboolean stay_resident;
+  mach_port_t task;
+  mach_port_t mach_thread;
+  mach_port_t posix_thread;
+
+  /* Mach thread */
+  GumAddress mach_task_self_impl;
+  GumAddress mach_thread_self_impl;
+
+  GumAddress mach_port_allocate_impl;
+  mach_port_right_t mach_port_allocate_right;
+  mach_port_t receive_port;
 
   GumAddress pthread_create_impl;
   GumAddress pthread_create_from_mach_thread_impl;
   GumAddress pthread_create_start_routine;
   GumAddress pthread_create_arg;
 
-  GumAddress pthread_join_impl;
+  GumAddress mach_msg_receive_impl;
+  GumAddress message_that_never_arrives;
 
-  GumAddress thread_terminate_impl;
-
-  GumAddress mach_thread_self_impl;
-
+  /* POSIX thread */
   GumAddress dlopen_impl;
+  GumAddress dylib_path;
   int dlopen_mode;
 
   GumAddress dlsym_impl;
   GumAddress entrypoint_name;
+
   GumAddress entrypoint_data;
   GumAddress mapped_range;
-  GumThreadId thread_id;
 
   GumAddress dlclose_impl;
 
-  GumAddress dylib_path;
+  GumAddress pthread_detach_impl;
+  GumAddress pthread_self_impl;
 
+  GumAddress mach_port_destroy_impl;
+
+  GumAddress thread_terminate_impl;
+
+  /* Storage -- at the end to make the above field offsets smaller */
+  mach_msg_empty_rcv_t message_that_never_arrives_storage;
+  gchar dylib_path_storage[256];
   gchar entrypoint_name_storage[256];
   gchar entrypoint_data_storage[256];
   GumMemoryRange mapped_range_storage;
-  gchar dylib_path_storage[256];
 };
 
 struct _FridaAgentEmitContext
@@ -175,8 +195,11 @@ static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
+static gboolean frida_inject_instance_is_resident (FridaInjectInstance * instance);
 
-static void frida_inject_instance_on_event (void * context);
+static void frida_inject_instance_on_mach_thread_dead (void * context);
+static void frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread);
+static void frida_inject_instance_on_posix_thread_dead (void * context);
 
 static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
     mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinMapper * mapper, GError ** error);
@@ -763,7 +786,6 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     goto handle_page_size_error;
   layout.stack_guard_size = page_size;
   layout.stack_size = 32 * 1024;
-  layout.pthread_data_size = 16384;
 
   layout.code_offset = 0;
   layout.mach_code_offset = 0;
@@ -772,9 +794,8 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   layout.stack_guard_offset = layout.data_offset + page_size;
   layout.stack_bottom_offset = layout.stack_guard_offset + layout.stack_guard_size;
   layout.stack_top_offset = layout.stack_bottom_offset + layout.stack_size;
-  layout.thread_self_offset = layout.stack_top_offset;
 
-  base_payload_size = layout.thread_self_offset + layout.pthread_data_size;
+  base_payload_size = layout.stack_top_offset;
 
   instance->payload_size = base_payload_size;
   if (mapper != NULL)
@@ -783,9 +804,14 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   ret = mach_vm_allocate (details.task, &payload_address, instance->payload_size, TRUE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate");
   instance->payload_address = payload_address;
+  instance->data_address = payload_address + layout.data_offset;
 
   if (mapper != NULL)
+  {
     gum_darwin_mapper_map (mapper, payload_address + base_payload_size);
+
+    instance->is_mapped = TRUE;
+  }
 
   ret = mach_vm_protect (details.task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
@@ -853,7 +879,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts = &state.uts.ts64;
 
-    ts->__rbp = payload_address + layout.data_offset;
+    ts->__rbx = payload_address + layout.data_offset;
 
     ts->__rsp = payload_address + layout.stack_top_offset;
     ts->__rip = payload_address + layout.mach_code_offset;
@@ -867,7 +893,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
     ts = &state.uts.ts32;
 
-    ts->__ebp = payload_address + layout.data_offset;
+    ts->__ebx = payload_address + layout.data_offset;
 
     ts->__esp = payload_address + layout.stack_top_offset;
     ts->__eip = payload_address + layout.mach_code_offset;
@@ -924,7 +950,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
       ctx->dispatch_queue);
   instance->thread_monitor_source = source;
   dispatch_set_context (source, instance);
-  dispatch_source_set_event_handler_f (source, frida_inject_instance_on_event);
+  dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
   dispatch_resume (source);
 
   result = instance->id;
@@ -969,6 +995,83 @@ beach:
 
     return result;
   }
+}
+
+static void
+frida_inject_instance_on_mach_thread_dead (void * context)
+{
+  FridaInjectInstance * self = context;
+  mach_port_t * posix_thread;
+  gpointer posix_thread_value = NULL;
+
+  posix_thread = (mach_port_t *) gum_darwin_read (self->task, self->data_address + G_STRUCT_OFFSET (FridaAgentContext, posix_thread),
+      sizeof (mach_port_t), NULL);
+  if (posix_thread != NULL)
+  {
+    mach_port_t posix_thread_in_this_task;
+    mach_msg_type_name_t acquired_type;
+    kern_return_t kr;
+
+    if (*posix_thread != MACH_PORT_NULL)
+    {
+      kr = mach_port_extract_right (self->task, *posix_thread, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_in_this_task, &acquired_type);
+      if (kr == KERN_SUCCESS)
+        posix_thread_value = GSIZE_TO_POINTER (posix_thread_in_this_task);
+    }
+
+    g_free (posix_thread);
+  }
+
+  _frida_helper_service_on_mach_thread_dead (self->service, self->id, posix_thread_value);
+}
+
+void
+_frida_helper_service_join_inject_instance_posix_thread (FridaHelperService * self, void * instance, void * posix_thread)
+{
+  frida_inject_instance_join_posix_thread (instance, GPOINTER_TO_SIZE (posix_thread));
+}
+
+static void
+frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread)
+{
+  FridaHelperContext * ctx = self->service->context;
+  mach_port_t self_task;
+  dispatch_source_t source;
+
+  self_task = mach_task_self ();
+
+  mach_port_deallocate (self_task, self->thread);
+  self->thread = posix_thread;
+
+  dispatch_release (self->thread_monitor_source);
+  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
+  self->thread_monitor_source = source;
+  dispatch_set_context (source, self);
+  dispatch_source_set_event_handler_f (source, frida_inject_instance_on_posix_thread_dead);
+  dispatch_resume (source);
+}
+
+static void
+frida_inject_instance_on_posix_thread_dead (void * context)
+{
+  FridaInjectInstance * self = context;
+  gboolean * stay_resident;
+
+  stay_resident = (gboolean *) gum_darwin_read (self->task, self->data_address + G_STRUCT_OFFSET (FridaAgentContext, stay_resident),
+      sizeof (gboolean), NULL);
+  if (stay_resident != NULL)
+  {
+    self->is_resident = *stay_resident;
+    g_free (stay_resident);
+  }
+
+  _frida_helper_service_on_posix_thread_dead (self->service, self->id);
+}
+
+gboolean
+_frida_helper_service_is_instance_resident (FridaHelperService * self, void * instance)
+{
+  return frida_inject_instance_is_resident (instance);
 }
 
 void
@@ -1275,8 +1378,15 @@ frida_inject_instance_new (FridaHelperService * service, guint id)
   instance = g_slice_new (FridaInjectInstance);
   instance->service = g_object_ref (service);
   instance->id = id;
+
   instance->task = MACH_PORT_NULL;
+
   instance->payload_address = 0;
+  instance->data_address = 0;
+  instance->payload_size = 0;
+  instance->is_resident = FALSE;
+  instance->is_mapped = FALSE;
+
   instance->thread = MACH_PORT_NULL;
   instance->thread_monitor_source = NULL;
 
@@ -1286,44 +1396,54 @@ frida_inject_instance_new (FridaHelperService * service, guint id)
 static void
 frida_inject_instance_free (FridaInjectInstance * instance)
 {
-  task_t self_task = mach_task_self ();
+  task_t self_task;
+  gboolean can_deallocate_payload;
+
+  self_task = mach_task_self ();
 
   if (instance->thread_monitor_source != NULL)
     dispatch_release (instance->thread_monitor_source);
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
-  if (instance->payload_address != 0)
+
+  can_deallocate_payload = !(instance->is_resident && instance->is_mapped);
+  if (instance->payload_address != 0 && can_deallocate_payload)
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
+
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
+
   g_object_unref (instance->service);
+
   g_slice_free (FridaInjectInstance, instance);
 }
 
-static void
-frida_inject_instance_on_event (void * context)
+static gboolean
+frida_inject_instance_is_resident (FridaInjectInstance * instance)
 {
-  FridaInjectInstance * instance = context;
-
-  _frida_helper_service_on_inject_instance_dead (instance->service, instance->id);
+  return instance->is_resident;
 }
 
 static gboolean
 frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
     mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinMapper * mapper, GError ** error)
 {
-  memset (self, 0, sizeof (FridaAgentContext));
+  bzero (self, sizeof (FridaAgentContext));
 
   if (!frida_agent_context_init_functions (self, details, mapper, error))
     return FALSE;
 
-  self->thread_self_data = payload_base + layout->thread_self_offset;
+  self->mach_port_allocate_right = MACH_PORT_RIGHT_RECEIVE;
 
   if (details->cpu_type == GUM_CPU_ARM)
     self->pthread_create_start_routine = payload_base + layout->pthread_code_offset + 1;
   else
     self->pthread_create_start_routine = payload_base + layout->pthread_code_offset;
   self->pthread_create_arg = payload_base + layout->data_offset;
+
+  self->message_that_never_arrives = payload_base + layout->data_offset +
+      G_STRUCT_OFFSET (FridaAgentContext, message_that_never_arrives_storage);
+  self->message_that_never_arrives_storage.header.msgh_size = sizeof (mach_msg_empty_rcv_t);
 
   self->dylib_path = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, dylib_path_storage);
@@ -1333,6 +1453,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   self->entrypoint_name = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, entrypoint_name_storage);
   strcpy (self->entrypoint_name_storage, details->entrypoint_name);
+
   self->entrypoint_data = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, entrypoint_data_storage);
   g_assert_cmpint (strlen (details->entrypoint_data), <, sizeof (self->entrypoint_data_storage));
@@ -1364,25 +1485,28 @@ frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDe
 
   gum_darwin_module_resolver_open (&resolver, details->task);
 
+  module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_kernel.dylib");
+  if (module == NULL)
+    goto handle_libc_error;
+  FRIDA_AGENT_CONTEXT_RESOLVE (mach_task_self);
+  FRIDA_AGENT_CONTEXT_RESOLVE (mach_thread_self);
+  FRIDA_AGENT_CONTEXT_RESOLVE (mach_port_allocate);
+  FRIDA_AGENT_CONTEXT_RESOLVE (mach_msg_receive);
+  FRIDA_AGENT_CONTEXT_RESOLVE (mach_port_destroy);
+  FRIDA_AGENT_CONTEXT_RESOLVE (thread_terminate);
+
   module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
     module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/introspection/libsystem_pthread.dylib");
   if (module == NULL)
     goto handle_libc_error;
-  FRIDA_AGENT_CONTEXT_RESOLVE (_pthread_set_self);
-  FRIDA_AGENT_CONTEXT_TRY_RESOLVE (cthread_set_self);
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
   if (self->pthread_create_from_mach_thread_impl != 0)
     self->pthread_create_impl = self->pthread_create_from_mach_thread_impl;
   else
     FRIDA_AGENT_CONTEXT_RESOLVE (pthread_create);
-  FRIDA_AGENT_CONTEXT_RESOLVE (pthread_join);
-
-  module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_kernel.dylib");
-  if (module == NULL)
-    goto handle_libc_error;
-  FRIDA_AGENT_CONTEXT_RESOLVE (thread_terminate);
-  FRIDA_AGENT_CONTEXT_RESOLVE (mach_thread_self);
+  FRIDA_AGENT_CONTEXT_RESOLVE (pthread_detach);
+  FRIDA_AGENT_CONTEXT_RESOLVE (pthread_self);
 
   if (mapper == NULL)
   {
@@ -1424,11 +1548,7 @@ error_epilogue:
 
 #ifdef HAVE_I386
 
-static void frida_agent_context_emit_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-
+static void frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 
 static void
@@ -1441,10 +1561,7 @@ frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code
   gum_x86_writer_set_target_cpu (&ctx.cw, cpu_type);
   ctx.mapper = mapper;
 
-  frida_agent_context_emit_thread_id_setup (self, &ctx);
-  frida_agent_context_emit_pthread_setup (self, &ctx);
-  frida_agent_context_emit_pthread_create_and_join (self, &ctx);
-  frida_agent_context_emit_thread_terminate (self, &ctx);
+  frida_agent_context_emit_mach_stub_body (self, &ctx);
   gum_x86_writer_put_breakpoint (&ctx.cw);
 
   gum_x86_writer_free (&ctx.cw);
@@ -1454,6 +1571,7 @@ static void
 frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
+  guint locals_size;
 
   ctx.code = code;
   gum_x86_writer_init (&ctx.cw, ctx.code);
@@ -1461,41 +1579,124 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
   ctx.mapper = mapper;
 
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBP);
+  gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBP, GUM_REG_XSP);
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XBX);
+  gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XDI);
   gum_x86_writer_put_push_reg (&ctx.cw, GUM_REG_XSI);
 
+  locals_size = (ctx.cw.target_cpu == GUM_CPU_IA32) ? 12 : 8;
+  gum_x86_writer_put_sub_reg_imm (&ctx.cw, GUM_REG_XSP, locals_size);
+
   if (ctx.cw.target_cpu == GUM_CPU_IA32)
-  {
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx.cw, GUM_REG_XBP,
-        GUM_REG_XSP, 16);
-  }
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx.cw, GUM_REG_XBX, GUM_REG_XBP, 8);
   else
-  {
-    gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBP, GUM_REG_XDI);
-  }
+    gum_x86_writer_put_mov_reg_reg (&ctx.cw, GUM_REG_XBX, GUM_REG_XDI);
 
   frida_agent_context_emit_pthread_stub_body (self, &ctx);
 
+  gum_x86_writer_put_add_reg_imm (&ctx.cw, GUM_REG_XSP, locals_size);
+
   gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XSI);
+  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XDI);
   gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBX);
-  gum_x86_writer_put_pop_reg (&ctx.cw, GUM_REG_XBP);
+  gum_x86_writer_put_leave (&ctx.cw);
   gum_x86_writer_put_ret (&ctx.cw);
 
   gum_x86_writer_free (&ctx.cw);
 }
 
 #define FRIDA_EMIT_LOAD(reg, field) \
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_##reg, GUM_REG_XBP, G_STRUCT_OFFSET (FridaAgentContext, field))
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_##reg, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
+#define FRIDA_EMIT_LOAD_ADDRESS_OF(reg, field) \
+    gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_REG_##reg, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define FRIDA_EMIT_STORE(field, reg) \
-    gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XBP, G_STRUCT_OFFSET (FridaAgentContext, field), GUM_REG_##reg)
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field), GUM_REG_##reg)
 #define FRIDA_EMIT_MOVE(dstreg, srcreg) \
     gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_##dstreg, GUM_REG_##srcreg)
 #define FRIDA_EMIT_CALL(fun, ...) \
-  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBP, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
+    gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
+
+static void
+frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
+{
+  const gchar * again_label = "again";
+
+  FRIDA_EMIT_CALL (mach_task_self_impl, 0);
+  FRIDA_EMIT_STORE (task, EAX);
+
+  FRIDA_EMIT_CALL (mach_thread_self_impl, 0);
+  FRIDA_EMIT_STORE (mach_thread, EAX);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
+  else
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+
+  FRIDA_EMIT_LOAD (EDI, task);
+  FRIDA_EMIT_LOAD (ESI, mach_port_allocate_right);
+  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XDX, GUM_REG_XSP);
+  FRIDA_EMIT_CALL (mach_port_allocate_impl, 3,
+      GUM_ARG_REGISTER, GUM_REG_EDI,
+      GUM_ARG_REGISTER, GUM_REG_ESI,
+      GUM_ARG_REGISTER, GUM_REG_XDX);
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_EAX, GUM_REG_XSP, 0);
+  FRIDA_EMIT_STORE (receive_port, EAX);
+  FRIDA_EMIT_LOAD (XDI, message_that_never_arrives);
+  gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XDI, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port), GUM_REG_EAX);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
+
+  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP);
+  FRIDA_EMIT_LOAD (XDX, pthread_create_start_routine);
+  FRIDA_EMIT_LOAD (XCX, pthread_create_arg);
+  FRIDA_EMIT_CALL (pthread_create_impl, 4,
+      GUM_ARG_REGISTER, GUM_REG_XDI,
+      GUM_ARG_POINTER, NULL,
+      GUM_ARG_REGISTER, GUM_REG_XDX,
+      GUM_ARG_REGISTER, GUM_REG_XCX);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
+  else
+    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+
+  gum_x86_writer_put_label (&ctx->cw, again_label);
+
+  FRIDA_EMIT_LOAD (XAX, message_that_never_arrives);
+  FRIDA_EMIT_CALL (mach_msg_receive_impl, 1,
+      GUM_ARG_REGISTER, GUM_REG_XAX);
+
+  gum_x86_writer_put_jmp_short_label (&ctx->cw, again_label);
+}
 
 static void
 frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
+  const gchar * skip_unload_label = "skip_unload";
+
+  FRIDA_EMIT_CALL (mach_thread_self_impl, 0);
+  FRIDA_EMIT_STORE (posix_thread, EAX);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
+
+  FRIDA_EMIT_LOAD (EDI, task);
+  FRIDA_EMIT_LOAD (ESI, receive_port);
+  FRIDA_EMIT_CALL (mach_port_destroy_impl, 2,
+      GUM_ARG_REGISTER, GUM_REG_EDI,
+      GUM_ARG_REGISTER, GUM_REG_ESI);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
+
+  FRIDA_EMIT_LOAD (EDI, mach_thread);
+  FRIDA_EMIT_CALL (thread_terminate_impl, 1,
+      GUM_ARG_REGISTER, GUM_REG_EDI);
+
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
+
   if (ctx->mapper != NULL)
   {
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_constructor (ctx->mapper));
@@ -1505,106 +1706,83 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
       gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
-    FRIDA_EMIT_LOAD (XCX, entrypoint_data);
-    FRIDA_EMIT_LOAD (XSI, mapped_range);
-    FRIDA_EMIT_LOAD (XDX, thread_id);
+    FRIDA_EMIT_LOAD (XDI, entrypoint_data);
+    FRIDA_EMIT_LOAD_ADDRESS_OF (XSI, stay_resident);
+    FRIDA_EMIT_LOAD (XDX, mapped_range);
     gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
         GUM_CALL_CAPI, GUM_REG_XAX, 3,
-        GUM_ARG_REGISTER, GUM_REG_XCX,
+        GUM_ARG_REGISTER, GUM_REG_XDI,
         GUM_ARG_REGISTER, GUM_REG_XSI,
         GUM_ARG_REGISTER, GUM_REG_XDX);
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
+    FRIDA_EMIT_LOAD (EAX, stay_resident);
+    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
+
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_destructor (ctx->mapper));
     gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
+
+    gum_x86_writer_put_label (&ctx->cw, skip_unload_label);
   }
   else
   {
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
 
-    FRIDA_EMIT_LOAD (XAX, dylib_path);
-    FRIDA_EMIT_LOAD (XDX, dlopen_mode);
+    FRIDA_EMIT_LOAD (XDI, dylib_path);
+    FRIDA_EMIT_LOAD (ESI, dlopen_mode);
     FRIDA_EMIT_CALL (dlopen_impl, 2,
-        GUM_ARG_REGISTER, GUM_REG_XAX,
-        GUM_ARG_REGISTER, GUM_REG_XDX);
-    FRIDA_EMIT_MOVE (XBX, XAX);
+        GUM_ARG_REGISTER, GUM_REG_XDI,
+        GUM_ARG_REGISTER, GUM_REG_ESI);
 
-    FRIDA_EMIT_LOAD (XAX, entrypoint_name);
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XSP, (ctx->cw.target_cpu == GUM_CPU_IA32) ? 8 : 0, GUM_REG_XAX);
+
+    FRIDA_EMIT_LOAD (XSI, entrypoint_name);
     FRIDA_EMIT_CALL (dlsym_impl, 2,
-        GUM_ARG_REGISTER, GUM_REG_XBX,
-        GUM_ARG_REGISTER, GUM_REG_XAX);
+        GUM_ARG_REGISTER, GUM_REG_XAX,
+        GUM_ARG_REGISTER, GUM_REG_XSI);
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
 
-    FRIDA_EMIT_LOAD (XCX, entrypoint_data);
-    FRIDA_EMIT_LOAD (XDX, thread_id);
+    FRIDA_EMIT_LOAD (XDI, entrypoint_data);
+    FRIDA_EMIT_LOAD_ADDRESS_OF (XSI, stay_resident);
     gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
         GUM_CALL_CAPI, GUM_REG_XAX, 3,
-        GUM_ARG_REGISTER, GUM_REG_XCX,
-        GUM_ARG_POINTER, NULL,
-        GUM_ARG_REGISTER, GUM_REG_XDX);
+        GUM_ARG_REGISTER, GUM_REG_XDI,
+        GUM_ARG_REGISTER, GUM_REG_XSI,
+        GUM_ARG_POINTER, NULL);
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
 
+    FRIDA_EMIT_LOAD (EAX, stay_resident);
+    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
+
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP, (ctx->cw.target_cpu == GUM_CPU_IA32) ? 12 : 0);
     FRIDA_EMIT_CALL (dlclose_impl, 1,
-        GUM_ARG_REGISTER, GUM_REG_XBX);
+        GUM_ARG_REGISTER, GUM_REG_XDI);
+
+    gum_x86_writer_put_label (&ctx->cw, skip_unload_label);
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
   }
-}
 
-static void
-frida_agent_context_emit_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  FRIDA_EMIT_CALL (mach_thread_self_impl, 0);
-  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XBX, GUM_REG_XAX);
-  FRIDA_EMIT_STORE (thread_id, XBX);
-}
+  FRIDA_EMIT_CALL (pthread_self_impl, 0);
 
-static void
-frida_agent_context_emit_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  FRIDA_EMIT_LOAD (XAX, thread_self_data);
-  FRIDA_EMIT_CALL (_pthread_set_self_impl, 1, GUM_ARG_REGISTER, GUM_REG_XAX);
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
 
-  if (self->cthread_set_self_impl != 0)
-  {
-    FRIDA_EMIT_LOAD (XAX, thread_self_data);
-    FRIDA_EMIT_CALL (cthread_set_self_impl, 1, GUM_ARG_REGISTER, GUM_REG_XAX);
-  }
-}
+  FRIDA_EMIT_CALL (pthread_detach_impl, 1,
+      GUM_ARG_REGISTER, GUM_REG_XAX);
 
-static void
-frida_agent_context_emit_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
-  gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XAX, GUM_REG_XSP);
-  FRIDA_EMIT_LOAD (XDX, pthread_create_start_routine);
-  FRIDA_EMIT_LOAD (XCX, pthread_create_arg);
-  FRIDA_EMIT_CALL (pthread_create_impl, 4,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_POINTER, NULL,
-      GUM_ARG_REGISTER, GUM_REG_XDX,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
-
-  gum_x86_writer_put_pop_reg (&ctx->cw, GUM_REG_XAX);
-  gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
-  FRIDA_EMIT_CALL (pthread_join_impl, 2,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_POINTER, NULL);
-}
-
-static void
-frida_agent_context_emit_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  FRIDA_EMIT_CALL (thread_terminate_impl, 1,
-      GUM_ARG_REGISTER, GUM_REG_XBX);
+  if (ctx->cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
 }
 
 #undef FRIDA_EMIT_LOAD
@@ -1620,21 +1798,15 @@ frida_agent_context_emit_thread_terminate (FridaAgentContext * self, FridaAgentE
 
 static void frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw);
 static void frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw);
 
 static void frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper);
+static void frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 static void frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx);
-static void frida_agent_context_emit_arm64_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx);
 
 static void
 frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper)
@@ -1668,10 +1840,7 @@ frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * 
   gum_thumb_writer_init (&ctx.tw, ctx.code);
   ctx.mapper = mapper;
 
-  frida_agent_context_emit_arm_thread_id_setup (self, &ctx);
-  frida_agent_context_emit_arm_pthread_setup (self, &ctx);
-  frida_agent_context_emit_arm_pthread_create_and_join (self, &ctx);
-  frida_agent_context_emit_arm_thread_terminate (self, &ctx);
+  frida_agent_context_emit_arm_mach_stub_body (self, &ctx);
 
   gum_thumb_writer_free (&ctx.tw);
 }
@@ -1695,105 +1864,129 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
 
 #define EMIT_ARM_LOAD(reg, field) \
     frida_agent_context_emit_arm_load_reg_with_ctx_value (ARM_REG_##reg, G_STRUCT_OFFSET (FridaAgentContext, field), &ctx->tw)
-#define EMIT_ARM_STORE(field, reg) \
-    frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), ARM_REG_##reg, &ctx->tw)
+#define EMIT_ARM_LOAD_ADDRESS_OF(reg, field) \
+    gum_thumb_writer_put_add_reg_reg_imm (&ctx->tw, ARM_REG_##reg, ARM_REG_R7, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_ARM_LOAD_U32(reg, val) \
     gum_thumb_writer_put_ldr_reg_u32 (&ctx->tw, ARM_REG_##reg, val)
+#define EMIT_ARM_STORE(field, reg) \
+    frida_agent_context_emit_arm_store_reg_in_ctx_value (G_STRUCT_OFFSET (FridaAgentContext, field), ARM_REG_##reg, &ctx->tw)
 #define EMIT_ARM_MOVE(dstreg, srcreg) \
     gum_thumb_writer_put_mov_reg_reg (&ctx->tw, ARM_REG_##dstreg, ARM_REG_##srcreg)
 #define EMIT_ARM_CALL(reg) \
     gum_thumb_writer_put_blx_reg (&ctx->tw, ARM_REG_##reg)
 
 static void
+frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
+{
+  const gchar * again_label = "again";
+
+  EMIT_ARM_LOAD (R4, mach_task_self_impl);
+  EMIT_ARM_CALL (R4);
+  EMIT_ARM_STORE (task, R0);
+
+  EMIT_ARM_LOAD (R4, mach_thread_self_impl);
+  EMIT_ARM_CALL (R4);
+  EMIT_ARM_STORE (mach_thread, R0);
+
+  EMIT_ARM_LOAD (R0, task);
+  EMIT_ARM_LOAD (R1, mach_port_allocate_right);
+  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
+  EMIT_ARM_MOVE (R2, SP);
+  EMIT_ARM_LOAD (R4, mach_port_allocate_impl);
+  EMIT_ARM_CALL (R4);
+  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
+  EMIT_ARM_STORE (receive_port, R0);
+  EMIT_ARM_LOAD (R1, message_that_never_arrives);
+  gum_thumb_writer_put_str_reg_reg_offset (&ctx->tw, ARM_REG_R0, ARM_REG_R1, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port));
+
+  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
+  EMIT_ARM_MOVE (R0, SP);
+  EMIT_ARM_LOAD_U32 (R1, 0);
+  EMIT_ARM_LOAD (R2, pthread_create_start_routine);
+  EMIT_ARM_LOAD (R3, pthread_create_arg);
+  EMIT_ARM_LOAD (R4, pthread_create_impl);
+  EMIT_ARM_CALL (R4);
+  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
+
+  gum_thumb_writer_put_label (&ctx->tw, again_label);
+
+  EMIT_ARM_LOAD (R0, message_that_never_arrives);
+  EMIT_ARM_LOAD (R4, mach_msg_receive_impl);
+  EMIT_ARM_CALL (R4);
+
+  gum_thumb_writer_put_b_label (&ctx->tw, again_label);
+}
+
+static void
 frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
+  const gchar * skip_unload_label = "skip_unload";
+
+  EMIT_ARM_LOAD (R4, mach_thread_self_impl);
+  EMIT_ARM_CALL (R4);
+  EMIT_ARM_STORE (posix_thread, R0);
+
+  EMIT_ARM_LOAD (R0, task);
+  EMIT_ARM_LOAD (R1, receive_port);
+  EMIT_ARM_LOAD (R4, mach_port_destroy_impl);
+  EMIT_ARM_CALL (R4);
+
+  EMIT_ARM_LOAD (R0, mach_thread);
+  EMIT_ARM_LOAD (R4, thread_terminate_impl);
+  EMIT_ARM_CALL (R4);
+
   if (ctx->mapper != NULL)
   {
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_constructor (ctx->mapper));
-    EMIT_ARM_CALL (R0);
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_constructor (ctx->mapper));
+    EMIT_ARM_CALL (R4);
 
-    EMIT_ARM_LOAD (R2, thread_id);
-    EMIT_ARM_LOAD (R1, mapped_range);
     EMIT_ARM_LOAD (R0, entrypoint_data);
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R5, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
-    EMIT_ARM_CALL (R5);
-
-    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R0, gum_darwin_mapper_destructor (ctx->mapper));
-    EMIT_ARM_CALL (R0);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
+    EMIT_ARM_LOAD (R2, mapped_range);
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    EMIT_ARM_CALL (R4);
   }
   else
   {
-    EMIT_ARM_LOAD (R1, dlopen_mode);
     EMIT_ARM_LOAD (R0, dylib_path);
-    EMIT_ARM_LOAD (R3, dlopen_impl);
-    EMIT_ARM_CALL (R3);
-    EMIT_ARM_MOVE (R4, R0);
-
-    EMIT_ARM_LOAD (R1, entrypoint_name);
-    EMIT_ARM_MOVE (R0, R4);
-    EMIT_ARM_LOAD (R3, dlsym_impl);
-    EMIT_ARM_CALL (R3);
+    EMIT_ARM_LOAD (R1, dlopen_mode);
+    EMIT_ARM_LOAD (R4, dlopen_impl);
+    EMIT_ARM_CALL (R4);
     EMIT_ARM_MOVE (R5, R0);
 
-    EMIT_ARM_LOAD (R2, thread_id);
-    EMIT_ARM_LOAD_U32 (R1, 0);
-    EMIT_ARM_LOAD (R0, entrypoint_data);
-    EMIT_ARM_CALL (R5);
-
-    EMIT_ARM_MOVE (R0, R4);
-    EMIT_ARM_LOAD (R3, dlclose_impl);
-    EMIT_ARM_CALL (R3);
-  }
-}
-
-static void
-frida_agent_context_emit_arm_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_LOAD (R4, mach_thread_self_impl);
-  EMIT_ARM_CALL (R4);
-  EMIT_ARM_MOVE (R6, R0);
-  EMIT_ARM_STORE (thread_id, R6);
-}
-
-static void
-frida_agent_context_emit_arm_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_LOAD (R5, thread_self_data);
-
-  EMIT_ARM_MOVE (R0, R5);
-  EMIT_ARM_LOAD (R4, _pthread_set_self_impl);
-  EMIT_ARM_CALL (R4);
-
-  if (self->cthread_set_self_impl != 0)
-  {
     EMIT_ARM_MOVE (R0, R5);
-    EMIT_ARM_LOAD (R4, cthread_set_self_impl);
+    EMIT_ARM_LOAD (R1, entrypoint_name);
+    EMIT_ARM_LOAD (R4, dlsym_impl);
+    EMIT_ARM_CALL (R4);
+    EMIT_ARM_MOVE (R4, R0);
+
+    EMIT_ARM_LOAD (R0, entrypoint_data);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
+    EMIT_ARM_LOAD_U32 (R2, 0);
     EMIT_ARM_CALL (R4);
   }
-}
 
-static void
-frida_agent_context_emit_arm_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_LOAD (R3, pthread_create_arg);
-  EMIT_ARM_LOAD (R2, pthread_create_start_routine);
-  EMIT_ARM_LOAD_U32 (R1, 0);
-  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0);
-  EMIT_ARM_MOVE (R0, SP);
-  EMIT_ARM_LOAD (R4, pthread_create_impl);
+  EMIT_ARM_LOAD (R0, stay_resident);
+  gum_thumb_writer_put_cbnz_reg_label (&ctx->tw, ARM_REG_R0, skip_unload_label);
+
+  if (ctx->mapper != NULL)
+  {
+    gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_destructor (ctx->mapper));
+    EMIT_ARM_CALL (R4);
+  }
+  else
+  {
+    EMIT_ARM_MOVE (R0, R5);
+    EMIT_ARM_LOAD (R4, dlclose_impl);
+    EMIT_ARM_CALL (R4);
+  }
+
+  gum_thumb_writer_put_label (&ctx->tw, skip_unload_label);
+
+  EMIT_ARM_LOAD (R4, pthread_self_impl);
   EMIT_ARM_CALL (R4);
 
-  EMIT_ARM_LOAD_U32 (R1, 0);
-  gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
-  EMIT_ARM_LOAD (R4, pthread_join_impl);
-  EMIT_ARM_CALL (R4);
-}
-
-static void
-frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM_MOVE (R0, R6);
-  EMIT_ARM_LOAD (R4, thread_terminate_impl);
+  EMIT_ARM_LOAD (R4, pthread_detach_impl);
   EMIT_ARM_CALL (R4);
 }
 
@@ -1805,7 +1998,7 @@ frida_agent_context_emit_arm_thread_terminate (FridaAgentContext * self, FridaAg
 static void
 frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_offset, GumThumbWriter * tw)
 {
-  arm_reg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
+  arm_reg tmp_reg = (reg != ARM_REG_R0) ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
   gum_thumb_writer_put_add_reg_reg_reg (tw, reg, ARM_REG_R7, tmp_reg);
@@ -1816,7 +2009,7 @@ frida_agent_context_emit_arm_load_reg_with_ctx_value (arm_reg reg, guint field_o
 static void
 frida_agent_context_emit_arm_store_reg_in_ctx_value (guint field_offset, arm_reg reg, GumThumbWriter * tw)
 {
-  arm_reg tmp_reg = reg != ARM_REG_R0 ? ARM_REG_R0 : ARM_REG_R1;
+  arm_reg tmp_reg = (reg != ARM_REG_R0) ? ARM_REG_R0 : ARM_REG_R1;
   gum_thumb_writer_put_push_regs (tw, 1, tmp_reg);
   gum_thumb_writer_put_ldr_reg_u32 (tw, tmp_reg, field_offset);
   gum_thumb_writer_put_add_reg_reg_reg (tw, tmp_reg, ARM_REG_R7, tmp_reg);
@@ -1842,10 +2035,7 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_X19, ARM64_REG_X20);
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_X21, ARM64_REG_X22);
-  frida_agent_context_emit_arm64_thread_id_setup (self, &ctx);
-  frida_agent_context_emit_arm64_pthread_setup (self, &ctx);
-  frida_agent_context_emit_arm64_pthread_create_and_join (self, &ctx);
-  frida_agent_context_emit_arm64_thread_terminate (self, &ctx);
+  frida_agent_context_emit_arm64_mach_stub_body (self, &ctx);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_X21, ARM64_REG_X22);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_X19, ARM64_REG_X20);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
@@ -1876,6 +2066,8 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
 
 #define EMIT_ARM64_LOAD(reg, field) \
     gum_arm64_writer_put_ldr_reg_reg_offset (&ctx->aw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaAgentContext, field))
+#define EMIT_ARM64_LOAD_ADDRESS_OF(reg, field) \
+    gum_arm64_writer_put_add_reg_reg_imm (&ctx->aw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_ARM64_LOAD_U64(reg, val) \
     gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_##reg, val)
 #define EMIT_ARM64_STORE(field, reg) \
@@ -1886,95 +2078,117 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
     gum_arm64_writer_put_blr_reg (&ctx->aw, ARM64_REG_##reg)
 
 static void
+frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
+{
+  const gchar * again_label = "again";
+
+  EMIT_ARM64_LOAD (X8, mach_task_self_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_STORE (task, W0);
+
+  EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_STORE (mach_thread, W0);
+
+  EMIT_ARM64_LOAD (W0, task);
+  EMIT_ARM64_LOAD (W1, mach_port_allocate_right);
+  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_MOVE (X2, SP);
+  EMIT_ARM64_LOAD (X8, mach_port_allocate_impl);
+  EMIT_ARM64_CALL (X8);
+  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_STORE (receive_port, W0);
+  EMIT_ARM64_LOAD (X1, message_that_never_arrives);
+  gum_arm64_writer_put_str_reg_reg_offset (&ctx->aw, ARM64_REG_W0, ARM64_REG_X1, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port));
+
+  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_ARM64_MOVE (X0, SP);
+  EMIT_ARM64_LOAD_U64 (X1, 0);
+  EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
+  EMIT_ARM64_LOAD (X3, pthread_create_arg);
+  EMIT_ARM64_LOAD (X8, pthread_create_impl);
+  EMIT_ARM64_CALL (X8);
+  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
+
+  gum_arm64_writer_put_label (&ctx->aw, again_label);
+
+  EMIT_ARM64_LOAD (X0, message_that_never_arrives);
+  EMIT_ARM64_LOAD (X8, mach_msg_receive_impl);
+  EMIT_ARM64_CALL (X8);
+
+  gum_arm64_writer_put_b_label (&ctx->aw, again_label);
+}
+
+static void
 frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
+  const gchar * skip_unload_label = "skip_unload";
+
+  EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
+  EMIT_ARM64_CALL (X8);
+  EMIT_ARM64_STORE (posix_thread, W0);
+
+  EMIT_ARM64_LOAD (W0, task);
+  EMIT_ARM64_LOAD (W1, receive_port);
+  EMIT_ARM64_LOAD (X8, mach_port_destroy_impl);
+  EMIT_ARM64_CALL (X8);
+
+  EMIT_ARM64_LOAD (W0, mach_thread);
+  EMIT_ARM64_LOAD (X8, thread_terminate_impl);
+  EMIT_ARM64_CALL (X8);
+
   if (ctx->mapper != NULL)
   {
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_constructor (ctx->mapper));
-    EMIT_ARM64_CALL (X0);
-
-    EMIT_ARM64_LOAD (X2, thread_id);
-    EMIT_ARM64_LOAD (X1, mapped_range);
-    EMIT_ARM64_LOAD (X0, entrypoint_data);
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_constructor (ctx->mapper));
     EMIT_ARM64_CALL (X8);
 
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X0, gum_darwin_mapper_destructor (ctx->mapper));
-    EMIT_ARM64_CALL (X0);
+    EMIT_ARM64_LOAD (X0, entrypoint_data);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+    EMIT_ARM64_LOAD (X2, mapped_range);
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    EMIT_ARM64_CALL (X8);
   }
   else
   {
-    EMIT_ARM64_LOAD (X1, dlopen_mode);
     EMIT_ARM64_LOAD (X0, dylib_path);
+    EMIT_ARM64_LOAD (X1, dlopen_mode);
     EMIT_ARM64_LOAD (X8, dlopen_impl);
     EMIT_ARM64_CALL (X8);
     EMIT_ARM64_MOVE (X19, X0);
 
-    EMIT_ARM64_LOAD (X1, entrypoint_name);
     EMIT_ARM64_MOVE (X0, X19);
+    EMIT_ARM64_LOAD (X1, entrypoint_name);
     EMIT_ARM64_LOAD (X8, dlsym_impl);
     EMIT_ARM64_CALL (X8);
     EMIT_ARM64_MOVE (X8, X0);
 
-    EMIT_ARM64_LOAD (X2, thread_id);
-    EMIT_ARM64_LOAD_U64 (X1, 0);
     EMIT_ARM64_LOAD (X0, entrypoint_data);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+    EMIT_ARM64_LOAD_U64 (X2, 0);
     EMIT_ARM64_CALL (X8);
+  }
 
+  EMIT_ARM64_LOAD (W0, stay_resident);
+  gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_W0, skip_unload_label);
+
+  if (ctx->mapper != NULL)
+  {
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_destructor (ctx->mapper));
+    EMIT_ARM64_CALL (X8);
+  }
+  else
+  {
     EMIT_ARM64_MOVE (X0, X19);
     EMIT_ARM64_LOAD (X8, dlclose_impl);
     EMIT_ARM64_CALL (X8);
   }
-}
 
-static void
-frida_agent_context_emit_arm64_thread_id_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
-  EMIT_ARM64_CALL (X8);
-  EMIT_ARM64_MOVE (X21, X0);
-  EMIT_ARM64_STORE (thread_id, X21);
-}
+  gum_arm64_writer_put_label (&ctx->aw, skip_unload_label);
 
-static void
-frida_agent_context_emit_arm64_pthread_setup (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_LOAD (X19, thread_self_data);
-
-  EMIT_ARM64_MOVE (X0, X19);
-  EMIT_ARM64_LOAD (X8, _pthread_set_self_impl);
+  EMIT_ARM64_LOAD (X8, pthread_self_impl);
   EMIT_ARM64_CALL (X8);
 
-  if (self->cthread_set_self_impl != 0)
-  {
-    EMIT_ARM64_MOVE (X0, X19);
-    EMIT_ARM64_LOAD (X8, cthread_set_self_impl);
-    EMIT_ARM64_CALL (X8);
-  }
-}
-
-static void
-frida_agent_context_emit_arm64_pthread_create_and_join (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_LOAD (X3, pthread_create_arg);
-  EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
-  EMIT_ARM64_LOAD_U64 (X1, 0);
-  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
-  EMIT_ARM64_MOVE (X0, SP);
-  EMIT_ARM64_LOAD (X8, pthread_create_impl);
-  EMIT_ARM64_CALL (X8);
-
-  EMIT_ARM64_LOAD_U64 (X1, 0);
-  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
-  EMIT_ARM64_LOAD (X8, pthread_join_impl);
-  EMIT_ARM64_CALL (X8);
-}
-
-static void
-frida_agent_context_emit_arm64_thread_terminate (FridaAgentContext * self, FridaAgentEmitContext * ctx)
-{
-  EMIT_ARM64_MOVE (X0, X21);
-  EMIT_ARM64_LOAD (X8, thread_terminate_impl);
+  EMIT_ARM64_LOAD (X8, pthread_detach_impl);
   EMIT_ARM64_CALL (X8);
 }
 

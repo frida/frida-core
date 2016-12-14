@@ -11,9 +11,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{CFFE07E6-1919-4A65-84EA-5E7BC68ED847}</ProjectGuid>
+    <ProjectGuid>{1A16B991-DE8D-403D-9FE6-BD1696E12045}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>simple-agent</RootNamespace>
+    <RootNamespace>resident-agent</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|Win32'" Label="Configuration">
@@ -59,7 +59,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="simple-agent.c" />
+    <ClCompile Include="resident-agent.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
