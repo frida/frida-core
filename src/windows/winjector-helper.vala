@@ -262,11 +262,17 @@ namespace Winjector {
 			var id = next_id;
 			next_id += 2;
 
-			var waitable_thread_handle = Process.inject_library_file (pid, path, entrypoint, data);
+			void * instance, waitable_thread_handle;
+			Process.inject_library_file (pid, path, entrypoint, data, out instance, out waitable_thread_handle);
 			if (waitable_thread_handle != null) {
 				var source = WaitHandleSource.create (waitable_thread_handle, true);
 				source.set_callback (() => {
-					uninjected (id);
+					bool is_resident;
+					Process.free_inject_instance (instance, out is_resident);
+
+					if (!is_resident)
+						uninjected (id);
+
 					return false;
 				});
 				source.attach (MainContext.default ());
@@ -314,7 +320,8 @@ namespace Winjector {
 
 	namespace Process {
 		public static extern bool is_x64 (uint32 pid);
-		public static extern void * inject_library_file (uint32 pid, string path, string entrypoint, string data) throws Frida.Error;
+		public static extern void inject_library_file (uint32 pid, string path, string entrypoint, string data, out void * inject_instance, out void * waitable_thread_handle) throws Frida.Error;
+		public static extern void free_inject_instance (void * inject_instance, out bool is_resident);
 	}
 
 	namespace WaitHandleSource {
