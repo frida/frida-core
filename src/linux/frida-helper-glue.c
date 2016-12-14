@@ -978,10 +978,9 @@ static void
 frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
 #ifdef HAVE_ANDROID
-  const gchar * skip_unload_label = "skip_unload";
-
   GumArm64Writer cw;
   const guint worker_offset = 64;
+  const gchar * skip_unload_label = "skip_unload";
 
   gum_arm64_writer_init (&cw, code->cur);
 
