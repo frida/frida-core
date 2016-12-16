@@ -118,7 +118,6 @@ struct _FridaAgentDetails
   const gchar * entrypoint_name;
   const gchar * entrypoint_data;
   GumCpuType cpu_type;
-  mach_port_t task;
 };
 
 struct _FridaAgentContext
@@ -202,8 +201,8 @@ static void frida_inject_instance_join_posix_thread (FridaInjectInstance * self,
 static void frida_inject_instance_on_posix_thread_dead (void * context);
 
 static gboolean frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
-    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinMapper * mapper, GError ** error);
-static gboolean frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details, GumDarwinMapper * mapper,
+    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error);
+static gboolean frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper,
     GError ** error);
 
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
@@ -398,7 +397,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
     g_free (magic);
   }
 
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", child_task, instance->cpu_type, dyld_header);
+  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", child_task, instance->cpu_type, page_size, dyld_header);
 
   /*
    * Ideally we'd only run until __ZN4dyld24initializeMainExecutableEv, but for
@@ -406,7 +405,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
    */
   dyld_init_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZNK16ImageLoaderMachO11getThreadPCEv");
 
-  gum_darwin_module_unref (dyld);
+  g_object_unref (dyld);
 
   if (dyld_init_address == 0)
     goto handle_probe_dyld_error;
@@ -741,8 +740,10 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   mach_port_t self_task;
   FridaInjectInstance * instance;
   FridaAgentDetails details = { 0, };
+  mach_port_t task;
   const gchar * failed_operation;
   kern_return_t ret;
+  GumDarwinModuleResolver * resolver = NULL;
   GumDarwinMapper * mapper = NULL;
   guint page_size;
   FridaInjectPayloadLayout layout;
@@ -771,19 +772,19 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   details.entrypoint_name = entrypoint;
   details.entrypoint_data = data;
 
-  if (!gum_darwin_cpu_type_from_pid (pid, &details.cpu_type))
-    goto handle_cpu_type_error;
-
-  ret = task_for_pid (self_task, pid, &details.task);
+  ret = task_for_pid (self_task, pid, &task);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_for_pid");
-  instance->task = details.task;
+  instance->task = task;
+
+  resolver = gum_darwin_module_resolver_new (task);
+
+  details.cpu_type = resolver->cpu_type;
+  page_size = resolver->page_size;
 
 #ifdef HAVE_MAPPER
-  mapper = gum_darwin_mapper_new (path, details.task, details.cpu_type);
+  mapper = gum_darwin_mapper_new (path, resolver);
 #endif
 
-  if (!gum_darwin_query_page_size (instance->task, &page_size))
-    goto handle_page_size_error;
   layout.stack_guard_size = page_size;
   layout.stack_size = 32 * 1024;
 
@@ -801,7 +802,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   if (mapper != NULL)
     instance->payload_size += gum_darwin_mapper_size (mapper);
 
-  ret = mach_vm_allocate (details.task, &payload_address, instance->payload_size, TRUE);
+  ret = mach_vm_allocate (task, &payload_address, instance->payload_size, TRUE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate");
   instance->payload_address = payload_address;
   instance->data_address = payload_address + layout.data_offset;
@@ -813,10 +814,10 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     instance->is_mapped = TRUE;
   }
 
-  ret = mach_vm_protect (details.task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
+  ret = mach_vm_protect (task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
 
-  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, mapper, error))
+  if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, resolver, mapper, error))
     goto error_epilogue;
 
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type, mapper);
@@ -825,15 +826,15 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
   if (gum_query_is_rwx_supported ())
   {
-    ret = mach_vm_write (details.task, payload_address + layout.mach_code_offset,
+    ret = mach_vm_write (task, payload_address + layout.mach_code_offset,
         (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write (mach_stub_code)");
 
-    ret = mach_vm_write (details.task, payload_address + layout.pthread_code_offset,
+    ret = mach_vm_write (task, payload_address + layout.pthread_code_offset,
         (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write(pthread_stub_code)");
 
-    ret = mach_vm_protect (details.task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    ret = mach_vm_protect (task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
   }
   else
@@ -853,7 +854,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     gum_code_segment_map (segment, 0, page_size, scratch_page);
 
     code_address = payload_address + layout.code_offset;
-    ret = mach_vm_remap (details.task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
+    ret = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
         FALSE, &cur_protection, &max_protection, VM_INHERIT_COPY);
 
     gum_code_segment_free (segment);
@@ -861,10 +862,10 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap");
   }
 
-  ret = mach_vm_write (details.task, payload_address + layout.data_offset, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
+  ret = mach_vm_write (task, payload_address + layout.data_offset, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write(data)");
 
-  ret = mach_vm_protect (details.task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  ret = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
 
 #ifdef HAVE_I386
@@ -941,7 +942,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   }
 #endif
 
-  ret = thread_create_running (details.task, state_flavor, state_data, state_count, &instance->thread);
+  ret = thread_create_running (task, state_flavor, state_data, state_count, &instance->thread);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_create_running");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (instance->id), instance);
@@ -956,24 +957,6 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   result = instance->id;
   goto beach;
 
-handle_cpu_type_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing CPU type of process with pid %u",
-        pid);
-    goto error_epilogue;
-  }
-handle_page_size_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing page size of process with pid %u",
-        pid);
-    goto error_epilogue;
-  }
 handle_mach_error:
   {
     g_set_error (error,
@@ -990,8 +973,8 @@ error_epilogue:
   }
 beach:
   {
-    if (mapper != NULL)
-      gum_darwin_mapper_free (mapper);
+    g_clear_object (&mapper);
+    g_clear_object (&resolver);
 
     return result;
   }
@@ -1426,11 +1409,11 @@ frida_inject_instance_is_resident (FridaInjectInstance * instance)
 
 static gboolean
 frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * details, const FridaInjectPayloadLayout * layout,
-    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinMapper * mapper, GError ** error)
+    mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
 {
   bzero (self, sizeof (FridaAgentContext));
 
-  if (!frida_agent_context_init_functions (self, details, mapper, error))
+  if (!frida_agent_context_init_functions (self, resolver, mapper, error))
     return FALSE;
 
   self->mach_port_allocate_right = MACH_PORT_RIGHT_RECEIVE;
@@ -1475,17 +1458,14 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   } \
   G_STMT_END
 #define FRIDA_AGENT_CONTEXT_TRY_RESOLVE(field) \
-  self->field##_impl = gum_darwin_module_resolver_find_export_address (&resolver, module, G_STRINGIFY (field))
+  self->field##_impl = gum_darwin_module_resolver_find_export_address (resolver, module, G_STRINGIFY (field))
 
 static gboolean
-frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDetails * details, GumDarwinMapper * mapper, GError ** error)
+frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
 {
-  GumDarwinModuleResolver resolver;
   GumDarwinModule * module;
 
-  gum_darwin_module_resolver_open (&resolver, details->task);
-
-  module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_kernel.dylib");
+  module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libsystem_kernel.dylib");
   if (module == NULL)
     goto handle_libc_error;
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_task_self);
@@ -1495,9 +1475,9 @@ frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDe
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_port_destroy);
   FRIDA_AGENT_CONTEXT_RESOLVE (thread_terminate);
 
-  module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libsystem_pthread.dylib");
+  module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
-    module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/introspection/libsystem_pthread.dylib");
+    module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/introspection/libsystem_pthread.dylib");
   if (module == NULL)
     goto handle_libc_error;
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
@@ -1510,15 +1490,13 @@ frida_agent_context_init_functions (FridaAgentContext * self, const FridaAgentDe
 
   if (mapper == NULL)
   {
-    module = gum_darwin_module_resolver_find_module (&resolver, "/usr/lib/system/libdyld.dylib");
+    module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libdyld.dylib");
     if (module == NULL)
       goto handle_libc_error;
     FRIDA_AGENT_CONTEXT_RESOLVE (dlopen);
     FRIDA_AGENT_CONTEXT_RESOLVE (dlsym);
     FRIDA_AGENT_CONTEXT_RESOLVE (dlclose);
   }
-
-  gum_darwin_module_resolver_close (&resolver);
 
   return TRUE;
 
@@ -1540,7 +1518,7 @@ handle_resolve_error:
   }
 error_epilogue:
   {
-    gum_darwin_module_resolver_close (&resolver);
+    g_object_unref (resolver);
 
     return FALSE;
   }
