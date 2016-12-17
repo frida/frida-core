@@ -42,8 +42,8 @@ namespace Frida {
 		private AgentContainer system_session_container;
 		private Gee.HashMap<uint, uint> system_sessions = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
-		private Gee.HashMap<uint, uint> local_task_port_by_pid = new Gee.HashMap<uint, uint> ();
-		private Gee.HashMap<uint, uint> remote_task_port_by_pid = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> local_task_by_pid = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> remote_task_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, uint> expiry_timer_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
 		private uint last_pipe_proxy_id = 1;
@@ -298,8 +298,8 @@ namespace Frida {
 		}
 
 		private uint borrow_task_for_local_pid (uint pid) throws Error {
-			if (local_task_port_by_pid.has_key (pid))
-				return local_task_port_by_pid[pid];
+			if (local_task_by_pid.has_key (pid))
+				return local_task_by_pid[pid];
 
 			uint task;
 			try {
@@ -307,43 +307,43 @@ namespace Frida {
 			} catch (Error e) {
 				task = 0;
 			}
-			local_task_port_by_pid[pid] = task;
+			local_task_by_pid[pid] = task;
 
 			return task;
 		}
 
 		private uint borrow_task_for_remote_pid (uint pid) throws Error {
-			uint task = remote_task_port_by_pid[pid];
+			uint task = remote_task_by_pid[pid];
 			if (task != 0) {
-				schedule_task_expiry_for_pid (pid);
+				schedule_task_expiry_for_remote_pid (pid);
 				return task;
 			}
 
 			task = _task_for_pid (pid);
-			remote_task_port_by_pid[pid] = task;
-			schedule_task_expiry_for_pid (pid);
+			remote_task_by_pid[pid] = task;
+			schedule_task_expiry_for_remote_pid (pid);
 
 			return task;
 		}
 
 		private uint steal_task_for_remote_pid (uint pid) throws Error {
 			uint task;
-			if (remote_task_port_by_pid.unset (pid, out task)) {
-				cancel_task_expiry_for_pid (pid);
+			if (remote_task_by_pid.unset (pid, out task)) {
+				cancel_task_expiry_for_remote_pid (pid);
 				return task;
 			}
 
 			return _task_for_pid (pid);
 		}
 
-		private void schedule_task_expiry_for_pid (uint pid) {
+		private void schedule_task_expiry_for_remote_pid (uint pid) {
 			uint previous_timer;
 			if (expiry_timer_by_pid.unset (pid, out previous_timer))
 				Source.remove (previous_timer);
 
 			expiry_timer_by_pid[pid] = Timeout.add (500, () => {
 				uint task;
-				var removed = remote_task_port_by_pid.unset (pid, out task);
+				var removed = remote_task_by_pid.unset (pid, out task);
 				assert (removed);
 
 				_deallocate_port (task);
@@ -352,7 +352,7 @@ namespace Frida {
 			});
 		}
 
-		private void cancel_task_expiry_for_pid (uint pid) {
+		private void cancel_task_expiry_for_remote_pid (uint pid) {
 			uint timer;
 			var found = expiry_timer_by_pid.unset (pid, out timer);
 			assert (found);
