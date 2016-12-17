@@ -42,6 +42,9 @@ namespace Frida {
 		private AgentContainer system_session_container;
 		private Gee.HashMap<uint, uint> system_sessions = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
+		private Gee.HashMap<uint, uint> local_task_port_by_pid = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> remote_task_port_by_pid = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> expiry_timer_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
 		private uint last_pipe_proxy_id = 1;
 
@@ -264,12 +267,17 @@ namespace Frida {
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			return _do_inject (pid, path, entrypoint, data);
+			var task = steal_task_for_remote_pid (pid);
+
+			return _do_inject (pid, task, path, entrypoint, data);
 		}
 
 		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error {
+			var local_task = borrow_task_for_local_pid (local_pid);
+			var remote_task = borrow_task_for_remote_pid (remote_pid);
+
 			bool need_proxy;
-			var endpoints = _do_make_pipe_endpoints (local_pid, remote_pid, out need_proxy);
+			var endpoints = _do_make_pipe_endpoints (local_task, remote_pid, remote_task, out need_proxy);
 			if (need_proxy) {
 				var pipe = new Pipe (endpoints.local_address);
 				var proxy = new PipeProxy (pipe);
@@ -287,6 +295,69 @@ namespace Frida {
 				return PipeEndpoints (proxy_object_path, endpoints.remote_address);
 			}
 			return endpoints;
+		}
+
+		private uint borrow_task_for_local_pid (uint pid) throws Error {
+			if (local_task_port_by_pid.has_key (pid))
+				return local_task_port_by_pid[pid];
+
+			uint task;
+			try {
+				task = _task_for_pid (pid);
+			} catch (Error e) {
+				task = 0;
+			}
+			local_task_port_by_pid[pid] = task;
+
+			return task;
+		}
+
+		private uint borrow_task_for_remote_pid (uint pid) throws Error {
+			uint task = remote_task_port_by_pid[pid];
+			if (task != 0) {
+				schedule_task_expiry_for_pid (pid);
+				return task;
+			}
+
+			task = _task_for_pid (pid);
+			remote_task_port_by_pid[pid] = task;
+			schedule_task_expiry_for_pid (pid);
+
+			return task;
+		}
+
+		private uint steal_task_for_remote_pid (uint pid) throws Error {
+			uint task;
+			if (remote_task_port_by_pid.unset (pid, out task)) {
+				cancel_task_expiry_for_pid (pid);
+				return task;
+			}
+
+			return _task_for_pid (pid);
+		}
+
+		private void schedule_task_expiry_for_pid (uint pid) {
+			uint previous_timer;
+			if (expiry_timer_by_pid.unset (pid, out previous_timer))
+				Source.remove (previous_timer);
+
+			expiry_timer_by_pid[pid] = Timeout.add (500, () => {
+				uint task;
+				var removed = remote_task_port_by_pid.unset (pid, out task);
+				assert (removed);
+
+				_deallocate_port (task);
+
+				return false;
+			});
+		}
+
+		private void cancel_task_expiry_for_pid (uint pid) {
+			uint timer;
+			var found = expiry_timer_by_pid.unset (pid, out timer);
+			assert (found);
+
+			Source.remove (timer);
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
@@ -344,12 +415,15 @@ namespace Frida {
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string path, string entrypoint, string data) throws Error;
+		public extern uint _do_inject (uint pid, uint task, string path, string entrypoint, string data) throws Error;
 		public extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
 		public extern bool _is_instance_resident (void * instance);
 		public extern void _free_inject_instance (void * instance);
 
-		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_pid, uint remote_pid, out bool need_proxy) throws Error;
+		public static extern PipeEndpoints _do_make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task, out bool need_proxy) throws Error;
+
+		public extern uint _task_for_pid (uint pid) throws Error;
+		public extern void _deallocate_port (uint port);
 	}
 
 	public class StdioPipes : Object {

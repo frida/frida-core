@@ -733,20 +733,18 @@ _frida_helper_service_free_spawn_instance (FridaHelperService * self, void * ins
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, GError ** error)
+_frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint task, const gchar * path, const gchar * entrypoint, const gchar * data, GError ** error)
 {
   guint result = 0;
   FridaHelperContext * ctx = self->context;
-  mach_port_t self_task;
   FridaInjectInstance * instance;
-  FridaAgentDetails details = { 0, };
-  mach_port_t task;
-  const gchar * failed_operation;
-  kern_return_t ret;
   GumDarwinModuleResolver * resolver = NULL;
   GumDarwinMapper * mapper = NULL;
+  FridaAgentDetails details = { 0, };
   guint page_size;
   FridaInjectPayloadLayout layout;
+  const gchar * failed_operation;
+  kern_return_t ret;
   guint base_payload_size;
   mach_vm_address_t payload_address = 0;
   guint8 mach_stub_code[512] = { 0, };
@@ -763,22 +761,17 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   thread_state_flavor_t state_flavor;
   dispatch_source_t source;
 
-  self_task = mach_task_self ();
-
   instance = frida_inject_instance_new (self, self->last_id++);
+  instance->task = task;
+
+  resolver = gum_darwin_module_resolver_new (task);
 
   details.pid = pid;
   details.dylib_path = path;
   details.entrypoint_name = entrypoint;
   details.entrypoint_data = data;
-
-  ret = task_for_pid (self_task, pid, &task);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_for_pid");
-  instance->task = task;
-
-  resolver = gum_darwin_module_resolver_new (task);
-
   details.cpu_type = resolver->cpu_type;
+
   page_size = resolver->page_size;
 
 #ifdef HAVE_MAPPER
@@ -854,7 +847,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     gum_code_segment_map (segment, 0, page_size, scratch_page);
 
     code_address = payload_address + layout.code_offset;
-    ret = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
+    ret = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, mach_task_self (), (mach_vm_address_t) scratch_page,
         FALSE, &cur_protection, &max_protection, VM_INHERIT_COPY);
 
     gum_code_segment_free (segment);
@@ -1064,12 +1057,9 @@ _frida_helper_service_free_inject_instance (FridaHelperService * self, void * in
 }
 
 void
-_frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid, gboolean * need_proxy, FridaPipeEndpoints * result, GError ** error)
+_frida_helper_service_do_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, gboolean * need_proxy, FridaPipeEndpoints * result, GError ** error)
 {
-  gboolean remote_pid_exists;
   mach_port_t self_task;
-  mach_port_t local_task = MACH_PORT_NULL;
-  mach_port_t remote_task = MACH_PORT_NULL;
   mach_port_t local_rx = MACH_PORT_NULL;
   mach_port_t local_tx = MACH_PORT_NULL;
   mach_port_t remote_rx = MACH_PORT_NULL;
@@ -1081,14 +1071,9 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   guint offset;
   gchar * local_address, * remote_address;
 
-  remote_pid_exists = kill (remote_pid, 0) == 0 || errno == EPERM;
-  if (!remote_pid_exists)
-    goto handle_pid_error;
-
   self_task = mach_task_self ();
 
-  ret = task_for_pid (self_task, local_pid, &local_task);
-  if (ret == 0)
+  if (local_task != MACH_PORT_NULL)
   {
     *need_proxy = FALSE;
   }
@@ -1097,9 +1082,6 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
     *need_proxy = TRUE;
     local_task = self_task;
   }
-
-  ret = task_for_pid (self_task, remote_pid, &remote_task);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_for_pid() for remote pid");
 
   ret = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
@@ -1159,35 +1141,15 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_pid, guint remote_pid,
   g_free (remote_address);
   g_free (local_address);
 
-  goto beach;
+  return;
 
-handle_pid_error:
+handle_mach_error:
   {
     g_set_error (error,
         FRIDA_ERROR,
-        FRIDA_ERROR_PROCESS_NOT_FOUND,
-        "Unable to find process with pid %u",
-        remote_pid);
-    goto beach;
-  }
-handle_mach_error:
-  {
-    if (remote_task == MACH_PORT_NULL && ret == KERN_FAILURE)
-    {
-      g_set_error (error,
-          FRIDA_ERROR,
-          FRIDA_ERROR_PERMISSION_DENIED,
-          "Unable to access process with pid %u from the current user account",
-          remote_pid);
-    }
-    else
-    {
-      g_set_error (error,
-          FRIDA_ERROR,
-          FRIDA_ERROR_NOT_SUPPORTED,
-          "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
-          remote_pid, failed_operation, mach_error_string (ret));
-    }
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
+        remote_pid, failed_operation, mach_error_string (ret));
 
     if (tx != MACH_PORT_NULL)
       mach_port_deallocate (self_task, tx);
@@ -1200,17 +1162,51 @@ handle_mach_error:
     if (local_rx != MACH_PORT_NULL)
       mach_port_mod_refs (local_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
 
-    goto beach;
-  }
-beach:
-  {
-    if (remote_task != MACH_PORT_NULL)
-      mach_port_deallocate (self_task, remote_task);
-    if (local_task != MACH_PORT_NULL && local_task != self_task)
-      mach_port_deallocate (self_task, local_task);
-
     return;
   }
+}
+
+guint
+_frida_helper_service_task_for_pid (FridaHelperService * self, guint pid, GError ** error)
+{
+  gboolean remote_pid_exists;
+  mach_port_t task;
+  kern_return_t kr;
+
+  remote_pid_exists = kill (pid, 0) == 0 || errno == EPERM;
+  if (!remote_pid_exists)
+    goto handle_pid_error;
+
+  kr = task_for_pid (mach_task_self (), pid, &task);
+  if (kr != KERN_SUCCESS)
+    goto handle_task_for_pid_error;
+
+  return task;
+
+handle_pid_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "Unable to find process with pid %u",
+        pid);
+    return 0;
+  }
+handle_task_for_pid_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to access process with pid %u from the current user account",
+        pid);
+    return 0;
+  }
+}
+
+void
+_frida_helper_service_deallocate_port (FridaHelperService * self, guint port)
+{
+  mach_port_deallocate (mach_task_self (), port);
 }
 
 static FridaSpawnInstance *
