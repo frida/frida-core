@@ -55,7 +55,15 @@ namespace Frida {
 		}
 
 		public async uint inject_library_resource (uint pid, AgentResource resource, string entrypoint, string data) throws Error {
-			return yield inject_library_file (pid, resource.file.path, entrypoint, data);
+			var helper = get_helper ();
+
+			var blob = yield helper.try_mmap (resource.blob);
+			if (blob == null)
+				return yield inject_library_file (pid, resource.file.path, entrypoint, data);
+
+			var id = yield helper.inject_library_blob (pid, resource.name, blob, entrypoint, data);
+			pid_by_id[id] = pid;
+			return id;
 		}
 
 		public bool any_still_injected () {
@@ -80,17 +88,10 @@ namespace Frida {
 			construct;
 		}
 
-		public InputStream dylib {
-			get {
-				reset_stream (_dylib);
-				return _dylib;
-			}
-
-			construct {
-				_dylib = value;
-			}
+		public Bytes blob {
+			get;
+			construct;
 		}
-		private InputStream _dylib;
 
 		public TemporaryDirectory? tempdir {
 			get;
@@ -101,7 +102,8 @@ namespace Frida {
 			get {
 				if (_file == null) {
 					try {
-						_file = new TemporaryFile.from_stream (name, dylib, tempdir);
+						var stream = new MemoryInputStream.from_bytes (blob);
+						_file = new TemporaryFile.from_stream (name, stream, tempdir);
 					} catch (Error e) {
 						assert_not_reached ();
 					}
@@ -112,22 +114,12 @@ namespace Frida {
 		}
 		private TemporaryFile _file;
 
-		public AgentResource (string name, InputStream dylib, TemporaryDirectory? tempdir = null) {
-			Object (name: name, dylib: dylib, tempdir: tempdir);
-
-			assert (dylib is Seekable);
+		public AgentResource (string name, Bytes blob, TemporaryDirectory? tempdir = null) {
+			Object (name: name, blob: blob, tempdir: tempdir);
 		}
 
 		public void ensure_written_to_disk () {
 			(void) file;
-		}
-
-		private void reset_stream (InputStream stream) {
-			try {
-				(stream as Seekable).seek (0, SeekType.SET);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
 		}
 	}
 }

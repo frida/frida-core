@@ -1,6 +1,6 @@
 #if DARWIN
 namespace Frida {
-	internal class HelperProcess {
+	public class HelperProcess {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
@@ -26,6 +26,7 @@ namespace Frida {
 
 		private MainContext main_context;
 		private Subprocess process;
+		private uint task;
 		private DBusConnection connection;
 		private Helper proxy;
 		private Gee.Promise<Helper> obtain_request;
@@ -145,6 +146,15 @@ namespace Frida {
 			}
 		}
 
+		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
+			var helper = yield obtain ();
+			try {
+				return yield helper.inject_library_blob (pid, name, blob, entrypoint, data);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async IOStream make_pipe_stream (uint remote_pid, out string remote_address) throws Error {
 			var helper = yield obtain ();
 			try {
@@ -161,6 +171,15 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
+		}
+
+		public async MappedLibraryBlob? try_mmap (Bytes blob) throws Error {
+			yield obtain ();
+
+			if (task == 0)
+				return null;
+
+			return _mmap (task, blob);
 		}
 
 		private async Helper obtain () throws Error {
@@ -219,6 +238,12 @@ namespace Frida {
 
 			if (pending_error == null) {
 				process = pending_process;
+				if (_is_mmap_available ()) {
+					try {
+						task = _task_for_pid (int.parse (process.get_identifier ()));
+					} catch (Error e) {
+					}
+				}
 
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
@@ -249,6 +274,9 @@ namespace Frida {
 			connection = null;
 
 			process = null;
+			if (task != 0)
+				_deallocate_port (task);
+			task = 0;
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
@@ -258,6 +286,11 @@ namespace Frida {
 		private void on_uninjected (uint id) {
 			uninjected (id);
 		}
+
+		protected static extern bool _is_mmap_available ();
+		protected static extern uint _task_for_pid (uint pid) throws Error;
+		protected static extern MappedLibraryBlob _mmap (uint task, Bytes blob) throws Error;
+		protected static extern void _deallocate_port (uint port);
 	}
 
 	private class ResourceStore {

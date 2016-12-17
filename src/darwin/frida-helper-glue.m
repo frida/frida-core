@@ -212,6 +212,8 @@ static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, 
 static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
 static void frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType cpu_type);
 
+static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
+
 static volatile BOOL _frida_run_loop_running = NO;
 
 void
@@ -733,7 +735,8 @@ _frida_helper_service_free_spawn_instance (FridaHelperService * self, void * ins
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint task, const gchar * path, const gchar * entrypoint, const gchar * data, GError ** error)
+_frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint task, const gchar * path_or_name, FridaMappedLibraryBlob * blob,
+    const gchar * entrypoint, const gchar * data, GError ** error)
 {
   guint result = 0;
   FridaHelperContext * ctx = self->context;
@@ -767,7 +770,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint tas
   resolver = gum_darwin_module_resolver_new (task);
 
   details.pid = pid;
-  details.dylib_path = path;
+  details.dylib_path = (blob == NULL) ? path_or_name : NULL;
   details.entrypoint_name = entrypoint;
   details.entrypoint_data = data;
   details.cpu_type = resolver->cpu_type;
@@ -775,7 +778,17 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint tas
   page_size = resolver->page_size;
 
 #ifdef HAVE_MAPPER
-  mapper = gum_darwin_mapper_new (path, resolver);
+  if (blob != NULL)
+  {
+    mapper = gum_darwin_mapper_new_take_blob (path_or_name,
+        g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->_address), blob->_size,
+            (GDestroyNotify) frida_mapper_library_blob_deallocate, frida_mapped_library_blob_dup (blob)),
+        resolver);
+  }
+  else
+  {
+    mapper = gum_darwin_mapper_new_from_file (path_or_name, resolver);
+  }
 #endif
 
   layout.stack_guard_size = page_size;
@@ -1426,7 +1439,8 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 
   self->dylib_path = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, dylib_path_storage);
-  strcpy (self->dylib_path_storage, details->dylib_path);
+  if (details->dylib_path != NULL)
+    strcpy (self->dylib_path_storage, details->dylib_path);
   self->dlopen_mode = RTLD_LAZY;
 
   self->entrypoint_name = payload_base + layout->data_offset +
@@ -2263,4 +2277,12 @@ frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType c
     s->__bcr[0] = (FRIDA_BAS_ANY << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
   }
 #endif
+}
+
+static void
+frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self)
+{
+  mach_vm_deallocate (mach_task_self (), self->_address, self->_size);
+
+  frida_mapped_library_blob_free (self);
 }

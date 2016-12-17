@@ -11,10 +11,28 @@ namespace Frida {
 		public abstract async void kill_process (uint pid) throws GLib.Error;
 		public abstract async void kill_application (string identifier) throws GLib.Error;
 		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws GLib.Error;
+		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws GLib.Error;
 		public abstract async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error;
 
 		public signal void uninjected (uint id);
 		public signal void output (uint pid, int fd, uint8[] data);
+	}
+
+	public struct MappedLibraryBlob {
+		public uint64 address {
+			get;
+			private set;
+		}
+
+		public uint size {
+			get;
+			private set;
+		}
+
+		public MappedLibraryBlob (uint64 address, uint size) {
+			this.address = address;
+			this.size = size;
+		}
 	}
 
 	[DBus (name = "re.frida.Helper")]

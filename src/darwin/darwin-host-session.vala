@@ -95,7 +95,7 @@ namespace Frida {
 			injector.uninjected.connect (on_uninjected);
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
-			agent = new AgentResource (blob.name, new MemoryInputStream.from_data (blob.data, null), helper.tempdir);
+			agent = new AgentResource (blob.name, new Bytes.static (blob.data), helper.tempdir);
 		}
 
 		public override async void close () {

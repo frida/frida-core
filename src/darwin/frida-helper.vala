@@ -269,7 +269,13 @@ namespace Frida {
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
 			var task = steal_task_for_remote_pid (pid);
 
-			return _do_inject (pid, task, path, entrypoint, data);
+			return _do_inject (pid, task, path, null, entrypoint, data);
+		}
+
+		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
+			var task = steal_task_for_remote_pid (pid);
+
+			return _do_inject (pid, task, name, blob, entrypoint, data);
 		}
 
 		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error {
@@ -415,7 +421,7 @@ namespace Frida {
 		public extern void _resume_spawn_instance (void * instance);
 		public extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, uint task, string path, string entrypoint, string data) throws Error;
+		public extern uint _do_inject (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
 		public extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
 		public extern bool _is_instance_resident (void * instance);
 		public extern void _free_inject_instance (void * instance);
