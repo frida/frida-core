@@ -348,8 +348,11 @@ namespace Frida {
 				Source.remove (previous_timer);
 
 			expiry_timer_by_pid[pid] = Timeout.add (500, () => {
+				var removed = expiry_timer_by_pid.unset (pid);
+				assert (removed);
+
 				uint task;
-				var removed = remote_task_by_pid.unset (pid, out task);
+				removed = remote_task_by_pid.unset (pid, out task);
 				assert (removed);
 
 				_deallocate_port (task);
