@@ -789,6 +789,8 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint tas
   {
     mapper = gum_darwin_mapper_new_from_file (path_or_name, resolver);
   }
+#else
+  (void) frida_mapper_library_blob_deallocate;
 #endif
 
   layout.stack_guard_size = page_size;
