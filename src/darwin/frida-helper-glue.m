@@ -1530,8 +1530,6 @@ handle_resolve_error:
   }
 error_epilogue:
   {
-    g_object_unref (resolver);
-
     return FALSE;
   }
 }
