@@ -347,7 +347,7 @@ namespace Frida {
 			if (expiry_timer_by_pid.unset (pid, out previous_timer))
 				Source.remove (previous_timer);
 
-			expiry_timer_by_pid[pid] = Timeout.add (500, () => {
+			expiry_timer_by_pid[pid] = Timeout.add (2000, () => {
 				var removed = expiry_timer_by_pid.unset (pid);
 				assert (removed);
 
