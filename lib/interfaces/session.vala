@@ -207,6 +207,23 @@ namespace Frida {
 		}
 	}
 
+	public struct MappedLibraryBlob {
+		public uint64 address {
+			get;
+			private set;
+		}
+
+		public uint size {
+			get;
+			private set;
+		}
+
+		public MappedLibraryBlob (uint64 address, uint size) {
+			this.address = address;
+			this.size = size;
+		}
+	}
+
 	public struct ImageData {
 		public int width {
 			get;

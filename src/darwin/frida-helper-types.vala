@@ -18,23 +18,6 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 	}
 
-	public struct MappedLibraryBlob {
-		public uint64 address {
-			get;
-			private set;
-		}
-
-		public uint size {
-			get;
-			private set;
-		}
-
-		public MappedLibraryBlob (uint64 address, uint size) {
-			this.address = address;
-			this.size = size;
-		}
-	}
-
 	[DBus (name = "re.frida.Helper")]
 	public interface TunneledStream : Object {
 		public abstract async void close () throws GLib.Error;
