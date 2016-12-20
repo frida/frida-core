@@ -18,6 +18,7 @@ namespace Frida {
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
+		private Gee.Promise<bool> shutdown_request;
 
 		private DBusConnection connection;
 		private uint registration_id = 0;
@@ -51,6 +52,16 @@ namespace Frida {
 		}
 
 		private async void shutdown () {
+			if (shutdown_request != null) {
+				try {
+					yield shutdown_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+				return;
+			}
+			shutdown_request = new Gee.Promise<bool> ();
+
 			if (connection != null) {
 				if (registration_id != 0)
 					connection.unregister_object (registration_id);
@@ -62,7 +73,12 @@ namespace Frida {
 				connection = null;
 			}
 
-			loop.quit ();
+			shutdown_request.set_value (true);
+
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
 		}
 
 		private async void start () {
@@ -214,10 +230,14 @@ namespace Frida {
 
 			if (!is_resident)
 				uninjected (id);
+
+			if (connection.is_closed () && inject_instance_by_id.is_empty)
+				shutdown.begin ();
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
-			shutdown.begin ();
+			if (inject_instance_by_id.is_empty)
+				shutdown.begin ();
 		}
 
 		public extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;

@@ -120,9 +120,12 @@ namespace Frida {
 				connection = null;
 			}
 
-			loop.quit ();
-
 			shutdown_request.set_value (true);
+
+			Idle.add (() => {
+				loop.quit ();
+				return false;
+			});
 		}
 
 		private async void start () {
@@ -370,7 +373,8 @@ namespace Frida {
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
-			shutdown.begin ();
+			if (inject_instance_by_id.is_empty)
+				shutdown.begin ();
 		}
 
 		public void _on_spawn_instance_ready (uint pid) {
@@ -412,6 +416,9 @@ namespace Frida {
 
 			if (!is_resident)
 				uninjected (id);
+
+			if (connection.is_closed () && inject_instance_by_id.is_empty)
+				shutdown.begin ();
 		}
 
 		public extern void _create_context ();

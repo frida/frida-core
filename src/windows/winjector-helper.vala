@@ -212,6 +212,7 @@ namespace Winjector {
 		private uint registration_id;
 
 		private uint next_id = 0;
+		private uint pending = 0;
 
 		public Service () {
 			Idle.add (() => {
@@ -227,6 +228,7 @@ namespace Winjector {
 		private async void start () {
 			try {
 				connection = yield DBusConnection.new (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection.closed.connect (on_connection_closed);
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
 				connection.start_message_processing ();
@@ -245,13 +247,14 @@ namespace Winjector {
 
 		private async void do_stop () throws Frida.Error {
 			connection.unregister_object (registration_id);
+			connection.closed.disconnect (on_connection_closed);
 			try {
 				yield connection.close ();
 			} catch (GLib.Error connection_error) {
 			}
-			connection = null;
 
-			shutdown ();
+			if (pending == 0)
+				shutdown ();
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Frida.Error {
@@ -265,6 +268,7 @@ namespace Winjector {
 			void * instance, waitable_thread_handle;
 			Process.inject_library_file (pid, path, entrypoint, data, out instance, out waitable_thread_handle);
 			if (waitable_thread_handle != null) {
+				pending++;
 				var source = WaitHandleSource.create (waitable_thread_handle, true);
 				source.set_callback (() => {
 					bool is_resident;
@@ -273,12 +277,21 @@ namespace Winjector {
 					if (!is_resident)
 						uninjected (id);
 
+					pending--;
+					if (connection.is_closed () && pending == 0)
+						shutdown ();
+
 					return false;
 				});
 				source.attach (MainContext.default ());
 			}
 
 			return id;
+		}
+
+		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
+			if (pending == 0)
+				shutdown ();
 		}
 
 		public static extern string derive_basename ();
