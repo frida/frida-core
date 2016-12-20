@@ -183,6 +183,7 @@ struct _FridaTrampolineData
 {
   gchar pthread_so[32];
   gchar pthread_create[32];
+  gchar pthread_detach[32];
   gchar fifo_path[256];
   gchar so_path[256];
   gchar entrypoint_name[256];
@@ -576,6 +577,7 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   data = (FridaTrampolineData *) (code.bytes + FRIDA_REMOTE_DATA_OFFSET);
   strcpy (data->pthread_so, "libpthread.so.0");
   strcpy (data->pthread_create, "pthread_create");
+  strcpy (data->pthread_detach, "pthread_detach");
   strcpy (data->fifo_path, params->fifo_path);
   strcpy (data->so_path, params->so_path);
   strcpy (data->entrypoint_name, params->entrypoint_name);
@@ -604,7 +606,7 @@ static void
 frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
   GumX86Writer cw;
-  const guint worker_offset = 128;
+  const guint worker_offset = 172;
   gssize fd_offset, library_offset, stay_resident_offset;
   const gchar * skip_unload_label = "skip_unload";
   GumAddress write;
@@ -651,7 +653,23 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_POINTER, NULL);
 
   if (cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 12);
+    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 8);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      frida_resolve_libc_function (params->pid, "__libc_dlsym"));
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      2,
+      GUM_ARG_REGISTER, GUM_REG_XBP,
+      GUM_ARG_POINTER, FRIDA_REMOTE_DATA_FIELD (pthread_detach));
+
+  if (cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 4);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)));
+  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XCX, GUM_REG_XCX);
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XCX);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
       frida_resolve_libc_function (params->pid, "__libc_dlclose"));
