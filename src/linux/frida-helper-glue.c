@@ -1151,6 +1151,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
   GumMipsWriter cw;
   const guint worker_offset = 192;
+  GumAddress dlsym_impl;
 
   gum_mips_writer_init (&cw, code->cur);
 
@@ -1161,20 +1162,37 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
   gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S0, MIPS_REG_V0);
 
+  dlsym_impl = frida_resolve_linker_function (params->pid, dlsym);
+
   gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_function (params->pid, dlsym),
+      dlsym_impl,
       2,
       GUM_ARG_REGISTER, MIPS_REG_S0,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_create)));
   gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
 
+  gum_mips_writer_put_la_reg_address (&cw, MIPS_REG_S1, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)));
+
   gum_mips_writer_put_call_reg_with_arguments (&cw,
       MIPS_REG_T9,
       4,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      GUM_ARG_REGISTER, MIPS_REG_S1,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, remote_address + worker_offset,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_mips_writer_put_call_address_with_arguments (&cw,
+      dlsym_impl,
+      2,
+      GUM_ARG_REGISTER, MIPS_REG_S0,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (pthread_detach)));
+  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
+
+  gum_mips_writer_put_lw_reg_reg_offset (&cw, MIPS_REG_A0, MIPS_REG_S1, 0);
+  gum_mips_writer_put_call_reg_with_arguments (&cw,
+      MIPS_REG_T9,
+      1,
+      GUM_ARG_REGISTER, MIPS_REG_A0);
 
   gum_mips_writer_put_call_address_with_arguments (&cw,
       frida_resolve_linker_function (params->pid, dlclose),
@@ -1218,7 +1236,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S1, MIPS_REG_V0);
 
   gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_function (params->pid, dlsym),
+      dlsym_impl,
       2,
       GUM_ARG_REGISTER, MIPS_REG_S1,
       GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
