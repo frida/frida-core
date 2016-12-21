@@ -1027,18 +1027,26 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
 #ifdef HAVE_ANDROID
   GumArm64Writer cw;
-  const guint worker_offset = 64;
+  const guint worker_offset = 96;
   const gchar * skip_unload_label = "skip_unload";
 
   gum_arm64_writer_init (&cw, code->cur);
 
+  gum_arm64_writer_put_ldr_reg_address (&cw, ARM64_REG_X19, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)));
+
   gum_arm64_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "pthread_create"),
       4,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      GUM_ARG_REGISTER, ARM64_REG_X19,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_ADDRESS, remote_address + worker_offset,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+
+  gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_X0, ARM64_REG_X19, 0);
+  gum_arm64_writer_put_call_address_with_arguments (&cw,
+      frida_resolve_libc_function (params->pid, "pthread_detach"),
+      1,
+      GUM_ARG_REGISTER, ARM64_REG_X0);
 
   gum_arm64_writer_put_brk_imm (&cw, 0);
   gum_arm64_writer_flush (&cw);
