@@ -623,6 +623,17 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_POINTER, NULL,
       GUM_ARG_POINTER, GSIZE_TO_POINTER (remote_address + worker_offset),
       GUM_ARG_POINTER, NULL);
+
+  if (cw.target_cpu == GUM_CPU_IA32)
+    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 12);
+
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+      frida_resolve_libc_function (params->pid, "pthread_detach"));
+  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX, GUM_ADDRESS (FRIDA_REMOTE_DATA_FIELD (worker_thread)));
+  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XCX, GUM_REG_XCX);
+  gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+      1,
+      GUM_ARG_REGISTER, GUM_REG_XCX);
 #else
   if (cw.target_cpu == GUM_CPU_IA32)
     gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 8);
