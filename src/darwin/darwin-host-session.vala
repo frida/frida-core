@@ -98,6 +98,11 @@ namespace Frida {
 			agent = new AgentResource (blob.name, new Bytes.static (blob.data), helper.tempdir);
 		}
 
+		public async void preload () throws Error {
+			yield helper.preload ();
+			agent.ensure_written_to_disk ();
+		}
+
 		public override async void close () {
 			yield base.close ();
 
