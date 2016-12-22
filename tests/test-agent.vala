@@ -67,8 +67,8 @@ namespace Frida.AgentTest {
 				assert_not_reached ();
 			}
 
-			var firstMessage = yield h.wait_for_message ();
-			assert (firstMessage.content == "{\"type\":\"send\",\"payload\":{}}");
+			var first_message = yield h.wait_for_message ();
+			assert (first_message.content == "{\"type\":\"send\",\"payload\":{}}");
 
 			var timer = new Timer ();
 			int count = 0;
