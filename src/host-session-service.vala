@@ -188,10 +188,9 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				/*
 				 * We might be attempting to open a new session on an agent that is about to unload,
-				 * so if we fail here wait 2 milliseconds and consider re-establishing. We typically
-				 * get on_connection_closed within 300-500 microseconds.
+				 * so if we fail here wait a bit and consider re-establishing.
 				 */
-				var timeout_source = new TimeoutSource (2);
+				var timeout_source = new TimeoutSource (10);
 				timeout_source.set_callback (() => {
 					attach_to.callback ();
 					return false;
