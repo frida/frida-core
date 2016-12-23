@@ -566,10 +566,13 @@ namespace Frida.HostSessionTest {
 
 			session = yield device.attach (process.id);
 			yield session.detach ();
+			session = null;
 
 			var usage_after = process.snapshot_resource_usage ();
 
 			usage_after.assert_equals (usage_before);
+
+			yield device_manager.close ();
 
 			h.done ();
 		} catch (Error e) {
