@@ -13,6 +13,14 @@ namespace Frida {
 			close_helper = true;
 		}
 
+		~Fruitjector () {
+			if (helper != null) {
+				helper.uninjected.disconnect (on_uninjected);
+				if (close_helper)
+					helper.close.begin ();
+			}
+		}
+
 		internal Fruitjector.with_helper (HelperProcess helper) {
 			close_helper = false;
 
@@ -33,6 +41,7 @@ namespace Frida {
 				helper.uninjected.disconnect (on_uninjected);
 				if (close_helper)
 					yield helper.close ();
+				helper = null;
 			}
 		}
 
