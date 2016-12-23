@@ -94,9 +94,7 @@ namespace Frida.Server {
 			host_session = new WindowsHostSession ();
 #endif
 #if DARWIN
-			var session = new DarwinHostSession ();
-			session.preload.begin ();
-			host_session = session;
+			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory ());
 #endif
 #if LINUX
 			host_session = new LinuxHostSession ();

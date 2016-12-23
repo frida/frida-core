@@ -51,7 +51,8 @@ namespace Frida {
 			assert (location == null);
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
-			host_session = new DarwinHostSession ();
+			var tempdir = new TemporaryDirectory ();
+			host_session = new DarwinHostSession (new DarwinHelperProcess (tempdir), tempdir);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
 			return host_session;
 		}
@@ -78,7 +79,16 @@ namespace Frida {
 	}
 
 	public class DarwinHostSession : BaseDBusHostSession {
-		private HelperProcess helper;
+		public DarwinHelper helper {
+			get;
+			construct;
+		}
+
+		public TemporaryDirectory tempdir {
+			get;
+			construct;
+		}
+
 		private AgentResource agent;
 		private FruitLauncher fruit_launcher;
 
@@ -87,20 +97,18 @@ namespace Frida {
 
 		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
+		public DarwinHostSession (owned DarwinHelper helper, owned TemporaryDirectory tempdir) {
+			Object (helper: helper, tempdir: tempdir);
+		}
+
 		construct {
-			helper = new HelperProcess ();
 			helper.output.connect (on_output);
 
-			injector = new Fruitjector.with_helper (helper);
+			injector = new Fruitjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
-			agent = new AgentResource (blob.name, new Bytes.static (blob.data), helper.tempdir);
-		}
-
-		public async void preload () throws Error {
-			yield helper.preload ();
-			agent.ensure_written_to_disk ();
+			agent = new AgentResource (blob.name, new Bytes.static (blob.data), tempdir);
 		}
 
 		public override async void close () {
@@ -126,7 +134,8 @@ namespace Frida {
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);
-			helper = null;
+
+			tempdir.destroy ();
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
@@ -250,7 +259,7 @@ namespace Frida {
 	protected class FruitLauncher : Object {
 		public signal void spawned (HostSpawnInfo info);
 
-		private HelperProcess helper;
+		private DarwinHelper helper;
 		private AgentResource agent;
 		protected MainContext main_context;
 
@@ -267,7 +276,7 @@ namespace Frida {
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_identifier = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
-		internal FruitLauncher (HelperProcess helper, AgentResource agent) {
+		internal FruitLauncher (DarwinHelper helper, AgentResource agent) {
 			this.helper = helper;
 			this.agent = agent;
 			this.main_context = MainContext.ref_thread_default ();

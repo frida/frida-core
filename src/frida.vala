@@ -1723,7 +1723,9 @@ namespace Frida {
 			return new Winjector ();
 #endif
 #if DARWIN
-			return new Fruitjector ();
+			var tempdir = new TemporaryDirectory ();
+			var helper = new DarwinHelperProcess (tempdir);
+			return new Fruitjector (helper, true, tempdir);
 #endif
 #if LINUX
 			return new Linjector ();

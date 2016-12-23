@@ -1,20 +1,16 @@
 #if DARWIN
 namespace Frida {
-	public class HelperProcess {
-		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void uninjected (uint id);
-
+	public class DarwinHelperProcess : Object, DarwinHelper {
 		public TemporaryDirectory tempdir {
-			get {
-				return resource_store.tempdir;
-			}
+			get;
+			construct;
 		}
 
 		private ResourceStore resource_store {
 			get {
 				if (_resource_store == null) {
 					try {
-						_resource_store = new ResourceStore ();
+						_resource_store = new ResourceStore (tempdir);
 					} catch (Error e) {
 						assert_not_reached ();
 					}
@@ -28,11 +24,15 @@ namespace Frida {
 		private Subprocess process;
 		private uint task;
 		private DBusConnection connection;
-		private Helper proxy;
-		private Gee.Promise<Helper> obtain_request;
+		private DarwinRemoteHelper proxy;
+		private Gee.Promise<DarwinRemoteHelper> obtain_request;
 
-		public HelperProcess () {
-			this.main_context = MainContext.get_thread_default ();
+		public DarwinHelperProcess (TemporaryDirectory tempdir) {
+			Object (tempdir: tempdir);
+		}
+
+		construct {
+			main_context = MainContext.get_thread_default ();
 		}
 
 		public async void close () {
@@ -182,7 +182,7 @@ namespace Frida {
 			return _mmap (task, blob);
 		}
 
-		private async Helper obtain () throws Error {
+		private async DarwinRemoteHelper obtain () throws Error {
 			if (obtain_request != null) {
 				try {
 					return yield obtain_request.future.wait_async ();
@@ -190,21 +190,21 @@ namespace Frida {
 					throw new Error.INVALID_OPERATION (future_error.message);
 				}
 			}
-			obtain_request = new Gee.Promise<Helper> ();
+			obtain_request = new Gee.Promise<DarwinRemoteHelper> ();
 
 			Subprocess pending_process = null;
 			DBusConnection pending_connection = null;
-			Helper pending_proxy = null;
+			DarwinRemoteHelper pending_proxy = null;
 			Error pending_error = null;
 
 			DBusServer server = null;
 			TimeoutSource timeout_source = null;
 
 			try {
-				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server = new DBusServer.sync ("unix:tmpdir=" + tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 				server.start ();
 				var tokens = server.client_address.split ("=", 2);
-				resource_store.pipe = new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir);
+				resource_store.pipe = new TemporaryFile (File.new_for_path (tokens[1]), tempdir);
 				var connection_handler = server.new_connection.connect ((c) => {
 					pending_connection = c;
 					obtain.callback ();
@@ -294,11 +294,6 @@ namespace Frida {
 	}
 
 	private class ResourceStore {
-		public TemporaryDirectory tempdir {
-			get;
-			private set;
-		}
-
 		public TemporaryFile helper {
 			get;
 			private set;
@@ -309,9 +304,9 @@ namespace Frida {
 			set;
 		}
 
-		public ResourceStore () throws Error {
-			tempdir = new TemporaryDirectory ();
+		public ResourceStore (TemporaryDirectory tempdir) throws Error {
 			FileUtils.chmod (tempdir.path, 0755);
+
 			var blob = Frida.Data.Helper.get_frida_helper_blob ();
 			helper = new TemporaryFile.from_stream ("frida-helper",
 				new MemoryInputStream.from_data (blob.data, null),
@@ -323,7 +318,6 @@ namespace Frida {
 			if (pipe != null)
 				pipe.destroy ();
 			helper.destroy ();
-			tempdir.destroy ();
 		}
 	}
 

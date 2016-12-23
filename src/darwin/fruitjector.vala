@@ -3,58 +3,63 @@ using Gee;
 
 namespace Frida {
 	public class Fruitjector : Object, Injector {
-		private HelperProcess helper;
-		private bool close_helper;
+		public DarwinHelper helper {
+			get;
+			construct;
+		}
+
+		public bool close_helper {
+			get;
+			construct;
+		}
+
+		public TemporaryDirectory tempdir {
+			get;
+			construct;
+		}
+
 		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
 		private HashMap<uint, TemporaryFile> blob_file_by_id = new HashMap<uint, TemporaryFile> ();
 		private uint next_blob_id = 1;
 
-		public Fruitjector () {
-			close_helper = true;
+		public Fruitjector (DarwinHelper helper, bool close_helper, TemporaryDirectory tempdir) {
+			Object (helper: helper, close_helper: close_helper, tempdir: tempdir);
+		}
+
+		construct {
+			helper.uninjected.connect (on_uninjected);
 		}
 
 		~Fruitjector () {
-			if (helper != null) {
-				helper.uninjected.disconnect (on_uninjected);
-				if (close_helper)
-					helper.close.begin ();
+			helper.uninjected.disconnect (on_uninjected);
+			if (close_helper) {
+				helper.close.begin ();
+
+				tempdir.destroy ();
 			}
-		}
-
-		internal Fruitjector.with_helper (HelperProcess helper) {
-			close_helper = false;
-
-			this.helper = helper;
-			this.helper.uninjected.connect (on_uninjected);
-		}
-
-		private HelperProcess get_helper () {
-			if (helper == null) {
-				helper = new HelperProcess ();
-				helper.uninjected.connect (on_uninjected);
-			}
-			return helper;
 		}
 
 		public async void close () {
-			if (helper != null) {
-				helper.uninjected.disconnect (on_uninjected);
-				if (close_helper)
-					yield helper.close ();
-				helper = null;
+			helper.uninjected.disconnect (on_uninjected);
+			if (close_helper) {
+				yield helper.close ();
+
+				tempdir.destroy ();
 			}
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			var id = yield get_helper ().inject_library_file (pid, path, entrypoint, data);
+			var id = yield helper.inject_library_file (pid, path, entrypoint, data);
 			pid_by_id[id] = pid;
 			return id;
 		}
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
 			// We can optimize this later when our mapper is always used instead of dyld
+			FileUtils.chmod (tempdir.path, 0755);
+
 			var name = "blob%u.dylib".printf (next_blob_id++);
-			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_helper ().tempdir);
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
 
 			var id = yield inject_library_file (pid, file.path, entrypoint, data);
 
@@ -64,8 +69,6 @@ namespace Frida {
 		}
 
 		public async uint inject_library_resource (uint pid, AgentResource resource, string entrypoint, string data) throws Error {
-			var helper = get_helper ();
-
 			var blob = yield helper.try_mmap (resource.blob);
 			if (blob == null)
 				return yield inject_library_file (pid, resource.file.path, entrypoint, data);

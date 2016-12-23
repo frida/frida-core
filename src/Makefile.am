@@ -196,10 +196,11 @@ glue_sources += \
 	darwin/icon-helpers.m \
 	$(springboard_sources)
 backend_libadd += \
-	libfrida-helper-types.la \
+	libfrida-helper-backend.la \
 	libfrida-data-helper-process.la \
 	libfrida-data-loader.la
 backend_valaflags += \
+	--pkg=frida-helper-backend \
 	--pkg=frida-helper-types \
 	--pkg=frida-data-helper-process \
 	--pkg=frida-data-loader
@@ -207,50 +208,33 @@ backend_valaflags += \
 backend_programs += \
 	frida-helper
 frida_helper_SOURCES = \
-	$(NULL)
+	darwin/frida-helper-service.vala
+frida_helper_CFLAGS = \
+	-w
 frida_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_helper_LDADD = \
-	libfrida-helper-main.la \
-	libfrida-helper-glue.la \
-	$(top_builddir)/lib/pipe/libfrida-pipe.la \
+	libfrida-helper-backend.la \
 	$(FRIDA_LIBS)
 if OS_MAC
 frida_helper_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/frida-helper.plist"
 endif
-
-backend_libraries += \
-	libfrida-helper-types.la \
-	libfrida-helper-main.la \
-	libfrida-helper-glue.la
-
-libfrida_helper_main_la_SOURCES = \
-	darwin/frida-helper.vala
-libfrida_helper_main_la_CFLAGS = \
-	-w
-libfrida_helper_main_la_LIBADD = \
-	libfrida-helper-types.la \
-	$(top_builddir)/lib/agent/libfrida-agent-container.la \
-	$(FRIDA_LIBS)
-libfrida_helper_main_la_VALAFLAGS = \
-	--header=frida-helper.h \
+frida_helper_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
-	--vapidir=$(abs_top_srcdir)/lib/agent \
 	--vapidir=$(abs_srcdir) \
+	--pkg=frida-helper-backend \
+	--pkg=frida-helper-types \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
-	--pkg=frida-agent-container \
-	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
-libfrida_helper_glue_la_SOURCES = \
-	darwin/frida-helper-glue.m \
-	$(springboard_sources)
-libfrida_helper_glue_la_LIBTOOLFLAGS = \
-	--tag=CC
+backend_libraries += \
+	libfrida-helper-types.la \
+	libfrida-helper-backend.la \
+	libfrida-helper-backend-glue.la
 
 libfrida_helper_types_la_SOURCES = \
 	darwin/frida-helper-types.vala
@@ -266,6 +250,36 @@ libfrida_helper_types_la_VALAFLAGS = \
 	--pkg=frida-interfaces \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
+
+libfrida_helper_backend_la_SOURCES = \
+	darwin/frida-helper-backend.vala
+libfrida_helper_backend_la_CFLAGS = \
+	-w
+libfrida_helper_backend_la_LIBADD = \
+	libfrida-helper-backend-glue.la \
+	libfrida-helper-types.la \
+	$(top_builddir)/lib/agent/libfrida-agent-container.la \
+	$(FRIDA_LIBS)
+libfrida_helper_backend_la_VALAFLAGS = \
+	--vapi=frida-helper-backend.vapi \
+	--library=frida-helper-backend \
+	--header=frida-helper-backend.h \
+	--vapidir=$(abs_top_srcdir)/lib/interfaces \
+	--vapidir=$(abs_top_srcdir)/lib/pipe \
+	--vapidir=$(abs_top_srcdir)/lib/agent \
+	--vapidir=$(abs_srcdir) \
+	--pkg=frida-interfaces \
+	--pkg=frida-pipe \
+	--pkg=frida-agent-container \
+	--pkg=frida-helper-types \
+	@FRIDA_PACKAGES@ \
+	@FRIDA_VALAFLAGS@
+
+libfrida_helper_backend_glue_la_SOURCES = \
+	darwin/frida-helper-backend-glue.m \
+	$(springboard_sources)
+libfrida_helper_backend_glue_la_LIBTOOLFLAGS = \
+	--tag=CC
 
 frida-helper.stamp: frida-helper
 if OS_MAC

@@ -121,8 +121,20 @@ namespace Frida {
 	}
 
 	public class TemporaryDirectory {
+		private string name;
+
 		public string path {
 			owned get {
+				if (file == null) {
+					file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
+
+					try {
+						file.make_directory ();
+					} catch (GLib.Error e) {
+						// Following operations will fail
+					}
+				}
+
 				return file.get_path ();
 			}
 		}
@@ -138,14 +150,14 @@ namespace Frida {
 
 		private static string? fixed_name = null;
 
-		public TemporaryDirectory () throws Error {
-			var name = (fixed_name != null) ? fixed_name : make_name ();
-			this.file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
+		public TemporaryDirectory () {
+			this.name = (fixed_name != null) ? fixed_name : make_name ();
 			this.remove_on_dispose = true;
 
 			if (fixed_name != null) {
 				try {
-					var path = this.file.get_path ();
+					var future_file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
+					var path = future_file.get_path ();
 					var dir = Dir.open (path);
 					string? child;
 					while ((child = dir.read_name ()) != null) {
@@ -153,13 +165,6 @@ namespace Frida {
 					}
 				} catch (FileError e) {
 				}
-			}
-
-			try {
-				this.file.make_directory ();
-			} catch (GLib.Error e) {
-				if (fixed_name == null)
-					throw new Error.PERMISSION_DENIED (e.message);
 			}
 		}
 
@@ -177,9 +182,9 @@ namespace Frida {
 		}
 
 		public void destroy () {
-			if (remove_on_dispose) {
+			if (remove_on_dispose && file != null) {
 				try {
-					this.file.delete ();
+					file.delete ();
 				} catch (GLib.Error e) {
 				}
 			}

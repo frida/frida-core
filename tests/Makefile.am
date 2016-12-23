@@ -30,7 +30,7 @@ frida_tests_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/src \
 	--vapidir=$(abs_srcdir) \
-	--pkg=frida-core \
+	@FRIDA_CORE_INTERNAL@ \
 	--pkg=frida-interfaces \
 	--pkg=frida-tests \
 	@FRIDA_PACKAGES@ \
@@ -64,7 +64,7 @@ libfrida_tests_la_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--vapidir=$(abs_top_srcdir)/src \
 	--pkg=config \
-	--pkg=frida-core \
+	@FRIDA_CORE_INTERNAL@ \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
 	@FRIDA_PACKAGES@ \

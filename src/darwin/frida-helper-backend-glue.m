@@ -1,4 +1,4 @@
-#include "frida-helper.h"
+#include "frida-helper-backend.h"
 
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -66,7 +66,7 @@ union _FridaDebugState
 
 struct _FridaSpawnInstance
 {
-  FridaHelperService * service;
+  FridaDarwinHelperBackend * backend;
   guint pid;
   GumCpuType cpu_type;
   mach_port_t task;
@@ -82,7 +82,7 @@ struct _FridaSpawnInstance
 
 struct _FridaInjectInstance
 {
-  FridaHelperService * service;
+  FridaDarwinHelperBackend * backend;
   guint id;
 
   mach_port_t task;
@@ -184,7 +184,7 @@ struct _FridaAgentEmitContext
   GumDarwinMapper * mapper;
 };
 
-static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * service);
+static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend * backend);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
@@ -192,7 +192,7 @@ static void frida_spawn_instance_on_server_recv (void * context);
 
 static void frida_make_pipe (int fds[2]);
 
-static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id);
+static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_is_resident (FridaInjectInstance * instance);
 
@@ -234,7 +234,7 @@ _frida_stop_run_loop (void)
 }
 
 void
-_frida_helper_service_create_context (FridaHelperService * self)
+_frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx;
 
@@ -245,7 +245,7 @@ _frida_helper_service_create_context (FridaHelperService * self)
 }
 
 void
-_frida_helper_service_destroy_context (FridaHelperService * self)
+_frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx = self->context;
 
@@ -255,7 +255,7 @@ _frida_helper_service_destroy_context (FridaHelperService * self)
 }
 
 guint
-_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
+_frida_darwin_helper_backend_do_spawn (FridaDarwinHelperBackend * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
 {
   FridaHelperContext * ctx = self->context;
   FridaSpawnInstance * instance = NULL;
@@ -538,7 +538,7 @@ error_epilogue:
 static void frida_kill_application (NSString * identifier);
 
 void
-_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, const gchar * url, GError ** error)
+_frida_darwin_helper_backend_do_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
 {
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
@@ -583,7 +583,7 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
 }
 
 void
-_frida_helper_service_do_kill_process (FridaHelperService * self, guint pid)
+_frida_darwin_helper_backend_do_kill_process (FridaDarwinHelperBackend * self, guint pid)
 {
   NSAutoreleasePool * pool;
   NSString * identifier;
@@ -606,7 +606,7 @@ _frida_helper_service_do_kill_process (FridaHelperService * self, guint pid)
 }
 
 void
-_frida_helper_service_do_kill_application (FridaHelperService * self, const gchar * identifier)
+_frida_darwin_helper_backend_do_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
 {
   NSAutoreleasePool * pool;
 
@@ -701,7 +701,7 @@ frida_kill_application (NSString * identifier)
 #else
 
 void
-_frida_helper_service_do_launch (FridaHelperService * self, const gchar * identifier, const gchar * url, GError ** error)
+_frida_darwin_helper_backend_do_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
 {
   g_set_error (error,
       FRIDA_ERROR,
@@ -710,32 +710,32 @@ _frida_helper_service_do_launch (FridaHelperService * self, const gchar * identi
 }
 
 void
-_frida_helper_service_do_kill_process (FridaHelperService * self, guint pid)
+_frida_darwin_helper_backend_do_kill_process (FridaDarwinHelperBackend * self, guint pid)
 {
   kill (pid, SIGKILL);
 }
 
 void
-_frida_helper_service_do_kill_application (FridaHelperService * self, const gchar * identifier)
+_frida_darwin_helper_backend_do_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
 {
 }
 
 #endif
 
 void
-_frida_helper_service_resume_spawn_instance (FridaHelperService * self, void * instance)
+_frida_darwin_helper_backend_resume_spawn_instance (FridaDarwinHelperBackend * self, void * instance)
 {
   frida_spawn_instance_resume (instance);
 }
 
 void
-_frida_helper_service_free_spawn_instance (FridaHelperService * self, void * instance)
+_frida_darwin_helper_backend_free_spawn_instance (FridaDarwinHelperBackend * self, void * instance)
 {
   frida_spawn_instance_free (instance);
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, guint task, const gchar * path_or_name, FridaMappedLibraryBlob * blob,
+_frida_darwin_helper_backend_do_inject (FridaDarwinHelperBackend * self, guint pid, guint task, const gchar * path_or_name, FridaMappedLibraryBlob * blob,
     const gchar * entrypoint, const gchar * data, GError ** error)
 {
   guint result = 0;
@@ -1013,11 +1013,11 @@ frida_inject_instance_on_mach_thread_dead (void * context)
     g_free (posix_thread);
   }
 
-  _frida_helper_service_on_mach_thread_dead (self->service, self->id, posix_thread_value);
+  _frida_darwin_helper_backend_on_mach_thread_dead (self->backend, self->id, posix_thread_value);
 }
 
 void
-_frida_helper_service_join_inject_instance_posix_thread (FridaHelperService * self, void * instance, void * posix_thread)
+_frida_darwin_helper_backend_join_inject_instance_posix_thread (FridaDarwinHelperBackend * self, void * instance, void * posix_thread)
 {
   frida_inject_instance_join_posix_thread (instance, GPOINTER_TO_SIZE (posix_thread));
 }
@@ -1025,7 +1025,7 @@ _frida_helper_service_join_inject_instance_posix_thread (FridaHelperService * se
 static void
 frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread)
 {
-  FridaHelperContext * ctx = self->service->context;
+  FridaHelperContext * ctx = self->backend->context;
   mach_port_t self_task;
   dispatch_source_t source;
 
@@ -1056,23 +1056,23 @@ frida_inject_instance_on_posix_thread_dead (void * context)
     g_free (stay_resident);
   }
 
-  _frida_helper_service_on_posix_thread_dead (self->service, self->id);
+  _frida_darwin_helper_backend_on_posix_thread_dead (self->backend, self->id);
 }
 
 gboolean
-_frida_helper_service_is_instance_resident (FridaHelperService * self, void * instance)
+_frida_darwin_helper_backend_is_instance_resident (FridaDarwinHelperBackend * self, void * instance)
 {
   return frida_inject_instance_is_resident (instance);
 }
 
 void
-_frida_helper_service_free_inject_instance (FridaHelperService * self, void * instance)
+_frida_darwin_helper_backend_free_inject_instance (FridaDarwinHelperBackend * self, void * instance)
 {
   frida_inject_instance_free (instance);
 }
 
 void
-_frida_helper_service_do_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, gboolean * need_proxy, FridaPipeEndpoints * result, GError ** error)
+frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
 {
   mach_port_t self_task;
   mach_port_t local_rx = MACH_PORT_NULL;
@@ -1088,15 +1088,8 @@ _frida_helper_service_do_make_pipe_endpoints (guint local_task, guint remote_pid
 
   self_task = mach_task_self ();
 
-  if (local_task != MACH_PORT_NULL)
-  {
-    *need_proxy = FALSE;
-  }
-  else
-  {
-    *need_proxy = TRUE;
+  if (local_task == MACH_PORT_NULL)
     local_task = self_task;
-  }
 
   ret = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
@@ -1182,7 +1175,7 @@ handle_mach_error:
 }
 
 guint
-_frida_helper_service_task_for_pid (FridaHelperService * self, guint pid, GError ** error)
+_frida_darwin_helper_backend_task_for_pid (FridaDarwinHelperBackend * self, guint pid, GError ** error)
 {
   gboolean remote_pid_exists;
   mach_port_t task;
@@ -1219,18 +1212,18 @@ handle_task_for_pid_error:
 }
 
 void
-_frida_helper_service_deallocate_port (FridaHelperService * self, guint port)
+_frida_darwin_helper_backend_deallocate_port (FridaDarwinHelperBackend * self, guint port)
 {
   mach_port_deallocate (mach_task_self (), port);
 }
 
 static FridaSpawnInstance *
-frida_spawn_instance_new (FridaHelperService * service)
+frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
 {
   FridaSpawnInstance * instance;
 
   instance = g_slice_new0 (FridaSpawnInstance);
-  instance->service = g_object_ref (service);
+  instance->backend = g_object_ref (backend);
   instance->task = MACH_PORT_NULL;
   instance->thread = MACH_PORT_NULL;
 
@@ -1280,7 +1273,7 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
     mach_port_deallocate (self_task, instance->thread);
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
-  g_object_unref (instance->service);
+  g_object_unref (instance->backend);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -1345,7 +1338,7 @@ frida_spawn_instance_on_server_recv (void * context)
 
   frida_set_debug_state (self->thread, &self->previous_debug_state, self->cpu_type);
 
-  _frida_helper_service_on_spawn_instance_ready (self->service, self->pid);
+  _frida_darwin_helper_backend_on_spawn_instance_ready (self->backend, self->pid);
 }
 
 static void
@@ -1365,12 +1358,12 @@ frida_make_pipe (int fds[2])
 }
 
 static FridaInjectInstance *
-frida_inject_instance_new (FridaHelperService * service, guint id)
+frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id)
 {
   FridaInjectInstance * instance;
 
   instance = g_slice_new (FridaInjectInstance);
-  instance->service = g_object_ref (service);
+  instance->backend = g_object_ref (backend);
   instance->id = id;
 
   instance->task = MACH_PORT_NULL;
@@ -1407,7 +1400,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
 
-  g_object_unref (instance->service);
+  g_object_unref (instance->backend);
 
   g_slice_free (FridaInjectInstance, instance);
 }

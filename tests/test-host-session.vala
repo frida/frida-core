@@ -557,6 +557,9 @@ namespace Frida.HostSessionTest {
 			var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 			var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
 
+			/* TODO: improve injectors to handle injection into a process that hasn't yet finished initializing */
+			Thread.usleep (50000);
+
 			/* Warm up static allocations */
 			var session = yield device.attach (process.id);
 			yield session.detach ();

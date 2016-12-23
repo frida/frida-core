@@ -28,7 +28,7 @@ frida_inject_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/src \
 	--pkg=config \
 	--pkg=frida-interfaces \
-	--pkg=frida-core \
+	@FRIDA_CORE_INTERNAL@ \
 	--pkg=posix \
 	@FRIDA_VALAFLAGS@ \
 	@FRIDA_INJECT_PACKAGES@

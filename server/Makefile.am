@@ -27,7 +27,7 @@ frida_server_VALAFLAGS = \
 	--vapidir=$(abs_top_srcdir)/src \
 	--pkg=config \
 	--pkg=frida-interfaces \
-	--pkg=frida-core \
+	@FRIDA_CORE_INTERNAL@ \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 

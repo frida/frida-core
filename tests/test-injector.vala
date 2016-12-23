@@ -31,11 +31,6 @@ namespace Frida.InjectorTest {
 
 		var rat = new Labrat ("sleeper", envp, arch);
 
-		if (Frida.Test.os () == Frida.Test.OS.LINUX || Frida.Test.os () == Frida.Test.OS.QNX) {
-			/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
-			Thread.usleep (50000);
-		}
-
 		rat.inject ("simple-agent", "", arch);
 		rat.wait_for_uninject ();
 		assert (content_of (logfile) == ">m<");
@@ -86,11 +81,6 @@ namespace Frida.InjectorTest {
 
 		var rat = new Labrat ("sleeper", envp, arch);
 
-		if (Frida.Test.os () == Frida.Test.OS.LINUX || Frida.Test.os () == Frida.Test.OS.QNX) {
-			/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
-			Thread.usleep (50000);
-		}
-
 		rat.inject ("resident-agent", "", arch);
 		assert (!rat.try_wait_for_uninject (500));
 		assert (content_of (logfile) == ">m");
@@ -117,11 +107,6 @@ namespace Frida.InjectorTest {
 		};
 
 		var rat = new Labrat ("sleeper", envp);
-
-		if (Frida.Test.os () == Frida.Test.OS.LINUX || Frida.Test.os () == Frida.Test.OS.QNX) {
-			/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
-			Thread.usleep (50000);
-		}
 
 		/* Warm up static allocations */
 		rat.inject ("simple-agent", "");
@@ -170,6 +155,9 @@ namespace Frida.InjectorTest {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
+
+			/* TODO: improve injectors to handle injection into a process that hasn't yet finished initializing */
+			Thread.usleep (50000);
 		}
 
 		public void close () {

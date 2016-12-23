@@ -66,7 +66,8 @@ libfrida_agent_container_la_SOURCES = \
 libfrida_agent_container_la_CFLAGS = \
 	-w
 libfrida_agent_container_la_LIBADD = \
-	$(top_builddir)/lib/interfaces/libfrida-interfaces.la
+	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
+	$(top_builddir)/lib/pipe/libfrida-pipe.la
 libfrida_agent_container_la_VALAFLAGS = \
 	--vapi=frida-agent-container.vapi \
 	--library=frida-agent-container \

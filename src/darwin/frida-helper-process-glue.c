@@ -3,13 +3,13 @@
 #include <gum/gumdarwin.h>
 
 gboolean
-_frida_helper_process_is_mmap_available (void)
+_frida_darwin_helper_process_is_mmap_available (void)
 {
   return FALSE;
 }
 
 guint
-_frida_helper_process_task_for_pid (guint pid, GError ** error)
+_frida_darwin_helper_process_task_for_pid (guint pid, GError ** error)
 {
   mach_port_t task;
   kern_return_t kr;
@@ -32,7 +32,7 @@ handle_error:
 }
 
 void
-_frida_helper_process_mmap (guint task, GBytes * blob, FridaMappedLibraryBlob * result, GError ** error)
+_frida_darwin_helper_process_mmap (guint task, GBytes * blob, FridaMappedLibraryBlob * result, GError ** error)
 {
   gconstpointer data;
   gsize size, aligned_size;
@@ -70,7 +70,7 @@ handle_error:
 }
 
 void
-_frida_helper_process_deallocate_port (guint port)
+_frida_darwin_helper_process_deallocate_port (guint port)
 {
   mach_port_deallocate (mach_task_self (), port);
 }
