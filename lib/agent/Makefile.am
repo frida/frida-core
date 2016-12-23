@@ -1,6 +1,9 @@
 extra_libs =
 extra_ldflags =
 
+if OS_DARWIN
+extra_ldflags += -export-symbols-regex "^frida_agent_main$$" -Wl,-dead_strip_dylibs
+else
 if OS_LINUX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-agent.version
 else
@@ -8,6 +11,7 @@ if OS_QNX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-agent.version
 else
 extra_ldflags += -export-symbols-regex "^frida_agent_main$$"
+endif
 endif
 endif
 

@@ -329,3 +329,36 @@ frida_linker_stub_warmup_thread (void * data)
 
   return NULL;
 }
+
+#ifdef HAVE_DARWIN
+
+/*
+ * Get rid of the -lresolv dependency until we actually need it, i.e. if/when
+ * we expose GLib's resolvers to JavaScript. This is however not needed for
+ * our current Socket.connect() API, which is neat.
+ */
+
+#include <resolv.h>
+
+int
+res_9_init (void)
+{
+  g_assert_not_reached ();
+  return 0;
+}
+
+int
+res_9_query (const char * dname, int klass, int type, u_char * answer, int anslen)
+{
+  g_assert_not_reached ();
+  return -1;
+}
+
+int
+res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp_dn, char * exp_dn, int length)
+{
+  g_assert_not_reached ();
+  return -1;
+}
+
+#endif
