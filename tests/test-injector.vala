@@ -45,8 +45,9 @@ namespace Frida.InjectorTest {
 		rat.wait_for_uninject ();
 
 		switch (Frida.Test.os ()) {
-			case Frida.Test.OS.MACOS: /* using Mapper */
-			case Frida.Test.OS.ANDROID:
+			case Frida.Test.OS.MACOS:   // Gum.Darwin.Mapper
+			case Frida.Test.OS.IOS:     // Gum.Darwin.Mapper
+			case Frida.Test.OS.ANDROID: // Bionic's behavior
 				assert (content_of (logfile) == ">m<>m");
 				break;
 			case Frida.Test.OS.LINUX:
