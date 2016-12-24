@@ -194,11 +194,24 @@ namespace Frida {
 					if (toolchain == Toolchain.MICROSOFT) {
 						obj.write (blob_identifier, file_input_stream);
 					} else {
-						asource.put_string (".align 4\n");
+						var allow_dead_strip_directive = ".subsections_via_symbols\n";
+						asource.put_string (allow_dead_strip_directive);
+
+						var align_for_generic_simd_compatibility = ".align 4\n";
+						var align_for_maximum_page_size_on_darwin = ".align 14\n";
+
+						var is_dylib = input.name.has_suffix (".dylib");
+						if (is_dylib)
+							asource.put_string (align_for_maximum_page_size_on_darwin);
+						else
+							asource.put_string (align_for_generic_simd_compatibility);
+
 						asource.put_string (".globl " + asm_identifier_prefix + blob_identifier + "\n");
 						asource.put_string (asm_identifier_prefix + blob_identifier + ":\n");
 						asource.put_string (".incbin \"" + input_file.get_path () + "\"\n");
-						asource.put_string (".byte 0\n");
+
+						if (!is_dylib)
+							asource.put_string (".byte 0\n");
 					}
 				}
 
