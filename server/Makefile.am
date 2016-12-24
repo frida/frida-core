@@ -31,6 +31,17 @@ frida_server_VALAFLAGS = \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
+frida-server.stamp: frida-server
+if OS_MAC
+	codesign -s "$$MAC_CERTID" -i "re.frida.Server" "$(builddir)/frida-server" || true
+endif
+if OS_IOS
+	codesign -s "$$IOS_CERTID" --entitlements "$(srcdir)/frida-server.xcent" "$<" || true
+endif
+	touch frida-server.stamp
+
+all-local: frida-server.stamp
+
 AM_CPPFLAGS = \
 	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
