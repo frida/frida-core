@@ -194,8 +194,10 @@ namespace Frida {
 					if (toolchain == Toolchain.MICROSOFT) {
 						obj.write (blob_identifier, file_input_stream);
 					} else {
-						var allow_dead_strip_directive = ".subsections_via_symbols\n";
-						asource.put_string (allow_dead_strip_directive);
+						if (toolchain == Toolchain.APPLE) {
+							var allow_dead_strip_directive = ".subsections_via_symbols\n";
+							asource.put_string (allow_dead_strip_directive);
+						}
 
 						var align_for_generic_simd_compatibility = ".align 4\n";
 						var align_for_maximum_page_size_on_darwin = ".align 14\n";
