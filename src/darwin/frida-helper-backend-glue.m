@@ -214,25 +214,6 @@ static void frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, 
 
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
-static volatile BOOL _frida_run_loop_running = NO;
-
-void
-_frida_start_run_loop (void)
-{
-  NSRunLoop * loop = [NSRunLoop mainRunLoop];
-
-  _frida_run_loop_running = YES;
-  while (_frida_run_loop_running && [loop runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]])
-    ;
-}
-
-void
-_frida_stop_run_loop (void)
-{
-  _frida_run_loop_running = NO;
-  CFRunLoopStop ([[NSRunLoop mainRunLoop] getCFRunLoop]);
-}
-
 void
 frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
 {

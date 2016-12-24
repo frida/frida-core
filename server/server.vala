@@ -52,6 +52,25 @@ namespace Frida.Server {
 			return 1;
 		}
 
+#if DARWIN
+		var worker = new Thread<int> ("frida-server-main-loop", () => {
+			var exit_code = run_application (listen_uri);
+
+			_stop_run_loop ();
+
+			return exit_code;
+		});
+		_start_run_loop ();
+
+		var exit_code = worker.join ();
+
+		return exit_code;
+#else
+		return run_application (listen_uri);
+#endif
+	}
+
+	private static int run_application (string listen_uri) {
 		application = new Application ();
 
 #if !WINDOWS
@@ -76,6 +95,11 @@ namespace Frida.Server {
 	namespace Environment {
 		public extern void init ();
 	}
+
+#if DARWIN
+	public extern void _start_run_loop ();
+	public extern void _stop_run_loop ();
+#endif
 
 	public class Application : Object {
 		private BaseDBusHostSession host_session;

@@ -1,4 +1,9 @@
+extra_glue =
 extra_libs =
+
+if OS_DARWIN
+extra_glue += server-darwin.m
+endif
 
 if OS_ANDROID
 extra_libs += \
@@ -10,7 +15,8 @@ bin_PROGRAMS = frida-server
 
 frida_server_SOURCES = \
 	server.vala \
-	server-glue.c
+	server-glue.c \
+	$(extra_glue)
 frida_server_CFLAGS = \
 	-w
 frida_server_LDFLAGS = \
@@ -30,6 +36,8 @@ frida_server_VALAFLAGS = \
 	@FRIDA_CORE_INTERNAL@ \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
+frida_server_LIBTOOLFLAGS = \
+	--tag=CC
 
 frida-server.stamp: frida-server
 if OS_MAC

@@ -207,7 +207,8 @@ backend_valaflags += \
 backend_programs += \
 	frida-helper
 frida_helper_SOURCES = \
-	darwin/frida-helper-service.vala
+	darwin/frida-helper-service.vala \
+	darwin/frida-helper-service-glue.m
 frida_helper_CFLAGS = \
 	-w
 frida_helper_LDFLAGS = \
@@ -220,6 +221,7 @@ frida_helper_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/frida-helper.plist"
 endif
 frida_helper_VALAFLAGS = \
+	--header=frida-helper-service.h \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
 	--vapidir=$(abs_srcdir) \

@@ -87,6 +87,7 @@
 /src/frida-core.vapi
 /src/frida-helper-backend.h
 /src/frida-helper-backend.vapi
+/src/frida-helper-service.h
 /src/frida-helper-types.h
 /src/frida-helper-types.vapi
 /src/frida-helper.h
