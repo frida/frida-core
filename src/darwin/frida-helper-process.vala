@@ -179,7 +179,7 @@ namespace Frida {
 			if (task == 0)
 				return null;
 
-			return _mmap (task, blob);
+			return DarwinHelperBackend.mmap (task, blob);
 		}
 
 		private async DarwinRemoteHelper obtain () throws Error {
@@ -238,9 +238,9 @@ namespace Frida {
 
 			if (pending_error == null) {
 				process = pending_process;
-				if (_is_mmap_available ()) {
+				if (DarwinHelperBackend.is_mmap_available ()) {
 					try {
-						task = _task_for_pid (int.parse (process.get_identifier ()));
+						task = DarwinHelperBackend.task_for_pid (int.parse (process.get_identifier ()));
 					} catch (Error e) {
 					}
 				}
@@ -275,7 +275,7 @@ namespace Frida {
 
 			process = null;
 			if (task != 0)
-				_deallocate_port (task);
+				DarwinHelperBackend.deallocate_port (task);
 			task = 0;
 		}
 
@@ -286,11 +286,6 @@ namespace Frida {
 		private void on_uninjected (uint id) {
 			uninjected (id);
 		}
-
-		protected static extern bool _is_mmap_available ();
-		protected static extern uint _task_for_pid (uint pid) throws Error;
-		protected static extern MappedLibraryBlob _mmap (uint task, Bytes blob) throws Error;
-		protected static extern void _deallocate_port (uint port);
 	}
 
 	private class ResourceStore {

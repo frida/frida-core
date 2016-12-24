@@ -175,7 +175,10 @@ namespace Frida {
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob) throws Error {
-			throw new Error.INVALID_OPERATION ("Not yet implemented");
+			if (!is_mmap_available ())
+				return null;
+
+			return mmap (0, blob);
 		}
 
 		public uint borrow_task_for_local_pid (uint pid) throws Error {
@@ -184,7 +187,7 @@ namespace Frida {
 
 			uint task;
 			try {
-				task = _task_for_pid (pid);
+				task = task_for_pid (pid);
 			} catch (Error e) {
 				task = 0;
 			}
@@ -200,7 +203,7 @@ namespace Frida {
 				return task;
 			}
 
-			task = _task_for_pid (pid);
+			task = task_for_pid (pid);
 			remote_task_by_pid[pid] = task;
 			schedule_task_expiry_for_remote_pid (pid);
 
@@ -214,7 +217,7 @@ namespace Frida {
 				return task;
 			}
 
-			return _task_for_pid (pid);
+			return task_for_pid (pid);
 		}
 
 		private void schedule_task_expiry_for_remote_pid (uint pid) {
@@ -230,7 +233,7 @@ namespace Frida {
 				removed = remote_task_by_pid.unset (pid, out task);
 				assert (removed);
 
-				_deallocate_port (task);
+				deallocate_port (task);
 
 				return false;
 			});
@@ -288,25 +291,28 @@ namespace Frida {
 				idle ();
 		}
 
-		public extern void _create_context ();
-		public extern void _destroy_context ();
-
-		public extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
-		public extern void _do_launch (string identifier, string? url) throws Error;
-		public extern void _do_kill_process (uint pid);
-		public extern void _do_kill_application (string identifier);
-		public extern void _resume_spawn_instance (void * instance);
-		public extern void _free_spawn_instance (void * instance);
-
-		public extern uint _do_inject (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
-		public extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
-		public extern bool _is_instance_resident (void * instance);
-		public extern void _free_inject_instance (void * instance);
-
 		public static extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
 
-		public extern uint _task_for_pid (uint pid) throws Error;
-		public extern void _deallocate_port (uint port);
+		public static extern uint task_for_pid (uint pid) throws Error;
+		public static extern void deallocate_port (uint port);
+
+		public static extern bool is_mmap_available ();
+		public static extern MappedLibraryBlob mmap (uint task, Bytes blob) throws Error;
+
+		protected extern void _create_context ();
+		protected extern void _destroy_context ();
+
+		protected extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
+		protected extern void _do_launch (string identifier, string? url) throws Error;
+		protected extern void _do_kill_process (uint pid);
+		protected extern void _do_kill_application (string identifier);
+		protected extern void _resume_spawn_instance (void * instance);
+		protected extern void _free_spawn_instance (void * instance);
+
+		protected extern uint _do_inject (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
+		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
+		protected extern bool _is_instance_resident (void * instance);
+		protected extern void _free_inject_instance (void * instance);
 	}
 
 	public class StdioPipes : Object {

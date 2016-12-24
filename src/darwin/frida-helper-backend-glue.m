@@ -234,6 +234,207 @@ _frida_stop_run_loop (void)
 }
 
 void
+frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
+{
+  mach_port_t self_task;
+  mach_port_t local_rx = MACH_PORT_NULL;
+  mach_port_t local_tx = MACH_PORT_NULL;
+  mach_port_t remote_rx = MACH_PORT_NULL;
+  mach_port_t remote_tx = MACH_PORT_NULL;
+  mach_port_t tx = MACH_PORT_NULL;
+  kern_return_t ret;
+  const gchar * failed_operation;
+  mach_msg_type_name_t acquired_type;
+  guint offset;
+  gchar * local_address, * remote_address;
+
+  self_task = mach_task_self ();
+
+  if (local_task == MACH_PORT_NULL)
+    local_task = self_task;
+
+  ret = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
+
+  ret = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
+
+  ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right local_tx");
+  if (local_task != self_task)
+  {
+    offset = 1;
+    do
+    {
+      local_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (local_rx) + offset, MACH_PORT_GEN (local_rx));
+      ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+      offset++;
+    }
+    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
+    if (ret != KERN_SUCCESS)
+      local_tx = MACH_PORT_NULL;
+    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right local_tx");
+    mach_port_deallocate (self_task, tx);
+  }
+  else
+  {
+    local_tx = tx;
+  }
+  tx = MACH_PORT_NULL;
+
+  ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right remote_tx");
+  if (remote_task != self_task)
+  {
+    offset = 1;
+    do
+    {
+      remote_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (remote_rx) + offset, MACH_PORT_GEN (remote_rx));
+      ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
+      offset++;
+    }
+    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
+    if (ret != KERN_SUCCESS)
+      remote_tx = MACH_PORT_NULL;
+    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right remote_tx");
+    mach_port_deallocate (self_task, tx);
+  }
+  else
+  {
+    remote_tx = tx;
+  }
+  tx = MACH_PORT_NULL;
+
+  local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
+  remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
+  frida_pipe_endpoints_init (result, local_address, remote_address);
+  g_free (remote_address);
+  g_free (local_address);
+
+  return;
+
+handle_mach_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
+        remote_pid, failed_operation, mach_error_string (ret));
+
+    if (tx != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, tx);
+    if (remote_tx != MACH_PORT_NULL)
+      mach_port_deallocate (remote_task, remote_tx);
+    if (local_tx != MACH_PORT_NULL)
+      mach_port_deallocate (local_task, local_tx);
+    if (remote_rx != MACH_PORT_NULL)
+      mach_port_mod_refs (remote_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+    if (local_rx != MACH_PORT_NULL)
+      mach_port_mod_refs (local_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+
+    return;
+  }
+}
+
+guint
+frida_darwin_helper_backend_task_for_pid (guint pid, GError ** error)
+{
+  gboolean remote_pid_exists;
+  mach_port_t task;
+  kern_return_t kr;
+
+  remote_pid_exists = kill (pid, 0) == 0 || errno == EPERM;
+  if (!remote_pid_exists)
+    goto handle_pid_error;
+
+  kr = task_for_pid (mach_task_self (), pid, &task);
+  if (kr != KERN_SUCCESS)
+    goto handle_task_for_pid_error;
+
+  return task;
+
+handle_pid_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "Unable to find process with pid %u",
+        pid);
+    return 0;
+  }
+handle_task_for_pid_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to access process with pid %u from the current user account",
+        pid);
+    return 0;
+  }
+}
+
+void
+frida_darwin_helper_backend_deallocate_port (guint port)
+{
+  mach_port_deallocate (mach_task_self (), port);
+}
+
+gboolean
+frida_darwin_helper_backend_is_mmap_available (void)
+{
+#ifdef HAVE_MAPPER
+  return TRUE;
+#else
+  return FALSE;
+#endif
+}
+
+void
+frida_darwin_helper_backend_mmap (guint task, GBytes * blob, FridaMappedLibraryBlob * result, GError ** error)
+{
+  gconstpointer data;
+  gsize size, aligned_size, page_size;
+  mach_vm_address_t mapped_address;
+  vm_prot_t cur_protection, max_protection;
+  kern_return_t kr;
+
+  if (task == MACH_PORT_NULL)
+    task = mach_task_self ();
+
+  data = g_bytes_get_data (blob, &size);
+
+  mapped_address = 0;
+  page_size = getpagesize ();
+  aligned_size = (size + page_size - 1) & ~(page_size - 1);
+
+  kr = mach_vm_remap (task, &mapped_address, aligned_size, 0, VM_FLAGS_ANYWHERE,
+      mach_task_self (), GPOINTER_TO_SIZE (data), TRUE, &cur_protection, &max_protection,
+      VM_INHERIT_COPY);
+  if (kr != KERN_SUCCESS)
+    goto handle_error;
+
+  kr = mach_vm_protect (task, mapped_address, aligned_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+  if (kr != KERN_SUCCESS)
+  {
+    mach_vm_deallocate (task, mapped_address, aligned_size);
+    goto handle_error;
+  }
+
+  frida_mapped_library_blob_init (result, mapped_address, size, aligned_size);
+
+  return;
+
+handle_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to mmap (%s)",
+        mach_error_string (kr));
+  }
+}
+
+void
 _frida_darwin_helper_backend_create_context (FridaDarwinHelperBackend * self)
 {
   FridaHelperContext * ctx;
@@ -1069,152 +1270,6 @@ void
 _frida_darwin_helper_backend_free_inject_instance (FridaDarwinHelperBackend * self, void * instance)
 {
   frida_inject_instance_free (instance);
-}
-
-void
-frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
-{
-  mach_port_t self_task;
-  mach_port_t local_rx = MACH_PORT_NULL;
-  mach_port_t local_tx = MACH_PORT_NULL;
-  mach_port_t remote_rx = MACH_PORT_NULL;
-  mach_port_t remote_tx = MACH_PORT_NULL;
-  mach_port_t tx = MACH_PORT_NULL;
-  kern_return_t ret;
-  const gchar * failed_operation;
-  mach_msg_type_name_t acquired_type;
-  guint offset;
-  gchar * local_address, * remote_address;
-
-  self_task = mach_task_self ();
-
-  if (local_task == MACH_PORT_NULL)
-    local_task = self_task;
-
-  ret = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
-
-  ret = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
-
-  ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right local_tx");
-  if (local_task != self_task)
-  {
-    offset = 1;
-    do
-    {
-      local_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (local_rx) + offset, MACH_PORT_GEN (local_rx));
-      ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
-      offset++;
-    }
-    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
-    if (ret != KERN_SUCCESS)
-      local_tx = MACH_PORT_NULL;
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right local_tx");
-    mach_port_deallocate (self_task, tx);
-  }
-  else
-  {
-    local_tx = tx;
-  }
-  tx = MACH_PORT_NULL;
-
-  ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right remote_tx");
-  if (remote_task != self_task)
-  {
-    offset = 1;
-    do
-    {
-      remote_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (remote_rx) + offset, MACH_PORT_GEN (remote_rx));
-      ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
-      offset++;
-    }
-    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
-    if (ret != KERN_SUCCESS)
-      remote_tx = MACH_PORT_NULL;
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right remote_tx");
-    mach_port_deallocate (self_task, tx);
-  }
-  else
-  {
-    remote_tx = tx;
-  }
-  tx = MACH_PORT_NULL;
-
-  local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
-  remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
-  frida_pipe_endpoints_init (result, local_address, remote_address);
-  g_free (remote_address);
-  g_free (local_address);
-
-  return;
-
-handle_mach_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
-        remote_pid, failed_operation, mach_error_string (ret));
-
-    if (tx != MACH_PORT_NULL)
-      mach_port_deallocate (self_task, tx);
-    if (remote_tx != MACH_PORT_NULL)
-      mach_port_deallocate (remote_task, remote_tx);
-    if (local_tx != MACH_PORT_NULL)
-      mach_port_deallocate (local_task, local_tx);
-    if (remote_rx != MACH_PORT_NULL)
-      mach_port_mod_refs (remote_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
-    if (local_rx != MACH_PORT_NULL)
-      mach_port_mod_refs (local_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
-
-    return;
-  }
-}
-
-guint
-_frida_darwin_helper_backend_task_for_pid (FridaDarwinHelperBackend * self, guint pid, GError ** error)
-{
-  gboolean remote_pid_exists;
-  mach_port_t task;
-  kern_return_t kr;
-
-  remote_pid_exists = kill (pid, 0) == 0 || errno == EPERM;
-  if (!remote_pid_exists)
-    goto handle_pid_error;
-
-  kr = task_for_pid (mach_task_self (), pid, &task);
-  if (kr != KERN_SUCCESS)
-    goto handle_task_for_pid_error;
-
-  return task;
-
-handle_pid_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_PROCESS_NOT_FOUND,
-        "Unable to find process with pid %u",
-        pid);
-    return 0;
-  }
-handle_task_for_pid_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_PERMISSION_DENIED,
-        "Unable to access process with pid %u from the current user account",
-        pid);
-    return 0;
-  }
-}
-
-void
-_frida_darwin_helper_backend_deallocate_port (FridaDarwinHelperBackend * self, guint port)
-{
-  mach_port_deallocate (mach_task_self (), port);
 }
 
 static FridaSpawnInstance *
@@ -2275,7 +2330,7 @@ frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType c
 static void
 frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self)
 {
-  mach_vm_deallocate (mach_task_self (), self->_address, self->_size);
+  mach_vm_deallocate (mach_task_self (), self->_address, self->_allocated_size);
 
   frida_mapped_library_blob_free (self);
 }

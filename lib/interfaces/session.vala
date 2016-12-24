@@ -218,9 +218,15 @@ namespace Frida {
 			private set;
 		}
 
-		public MappedLibraryBlob (uint64 address, uint size) {
+		public uint allocated_size {
+			get;
+			private set;
+		}
+
+		public MappedLibraryBlob (uint64 address, uint size, uint allocated_size) {
 			this.address = address;
 			this.size = size;
+			this.allocated_size = allocated_size;
 		}
 	}
 
