@@ -5,6 +5,7 @@
 #endif
 
 #include <gio/gio.h>
+#include <gum/gum.h>
 
 #if defined (HAVE_DARWIN)
 # include <CoreFoundation/CoreFoundation.h>
@@ -51,6 +52,7 @@ frida_server_environment_init (void)
   g_log_set_default_handler (frida_server_on_log_message, NULL);
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
+  gum_init ();
 
 #ifdef HAVE_ANDROID
   frida_selinux_patch_policy ();
