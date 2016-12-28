@@ -219,6 +219,7 @@ namespace Frida {
 				if (yield fruit_launcher.try_resume (pid))
 					return;
 			}
+
 			yield helper.resume (pid);
 		}
 
@@ -229,18 +230,13 @@ namespace Frida {
 		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
 			transport = null;
 
-			string remote_address;
-			var stream = yield helper.make_pipe_stream (pid, out remote_address);
-
-			if (fruit_launcher != null) {
-				if (yield fruit_launcher.try_establish (pid, remote_address))
-					return stream;
-			}
-
 			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
 			while (injectee_by_pid.has_key (pid))
 				yield;
 			injector.disconnect (uninjected_handler);
+
+			string remote_address;
+			var stream = yield helper.make_pipe_stream (pid, out remote_address);
 
 			var fruitjector = injector as Fruitjector;
 			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address);
@@ -440,17 +436,6 @@ namespace Frida {
 			}
 		}
 
-		public async bool try_establish (uint pid, string remote_address) throws Error {
-			Loader loader = loader_by_pid[pid];
-			if (loader == null)
-				return false;
-
-			check_open ();
-
-			yield loader.establish (remote_address);
-			return true;
-		}
-
 		public async bool try_resume (uint pid) throws Error {
 			Loader loader;
 			if (!loader_by_pid.unset (pid, out loader))
@@ -479,7 +464,6 @@ namespace Frida {
 					throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
 
 				yield helper.preload ();
-				agent.ensure_written_to_disk ();
 
 				var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 				try {
@@ -584,7 +568,6 @@ namespace Frida {
 			private MainContext main_context;
 			private Gee.LinkedList<string> pending_messages = new Gee.LinkedList<string> ();
 			private Gee.LinkedList<Gee.Promise<string>> pending_requests = new Gee.LinkedList<Gee.Promise<string>> ();
-			private bool established = false;
 
 			public uint pid {
 				get;
@@ -660,16 +643,8 @@ namespace Frida {
 				source.attach (main_context);
 			}
 
-			public async void establish (string remote_address) throws Error {
-				send_string (remote_address);
-				established = true;
-			}
-
 			public async void resume () throws Error {
-				if (established)
-					send_string ("go");
-				else
-					close.begin ();
+				send_string ("go");
 			}
 
 			public async string recv_string () throws Error {

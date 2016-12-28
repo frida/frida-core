@@ -17,7 +17,9 @@
 typedef void (* FridaAgentMainFunc) (const char * data, unsigned int * stay_resident, void * mapped_range);
 
 static void frida_loader_connect (const char * details);
+#ifdef HAVE_ANDROID
 static void * frida_loader_run (void * user_data);
+#endif
 
 static char frida_data_dir[256] = FRIDA_LOADER_DATA_DIR_MAGIC;
 
@@ -135,7 +137,8 @@ frida_loader_wait_for_permission_to_resume (void * user_data)
   ctx = *original_ctx;
 
   permission_to_resume = frida_channel_recv_string (ctx.channel);
-  free (permission_to_resume);
+  if (permission_to_resume != NULL)
+    free (permission_to_resume);
 
   ctx.cf_run_loop_stop (ctx.loop);
 
@@ -505,7 +508,7 @@ static void
 frida_loader_connect (const char * identifier)
 {
   FridaChannel * channel;
-  char * pipe_address, * permission_to_resume;
+  char * permission_to_resume;
   pthread_t thread;
 
   channel = frida_channel_open (frida_data_dir);
@@ -515,12 +518,18 @@ frida_loader_connect (const char * identifier)
   if (!frida_channel_send_string (channel, identifier))
     goto beach;
 
-  pipe_address = frida_channel_recv_string (channel);
-  if (pipe_address == NULL)
-    goto beach;
+#ifdef HAVE_ANDROID
+  {
+    char * pipe_address;
 
-  pthread_create (&thread, NULL, frida_loader_run, pipe_address);
-  pthread_detach (thread);
+    pipe_address = frida_channel_recv_string (channel);
+    if (pipe_address == NULL)
+      goto beach;
+
+    pthread_create (&thread, NULL, frida_loader_run, pipe_address);
+    pthread_detach (thread);
+  }
+#endif
 
 #ifdef HAVE_IOS
   {
@@ -577,18 +586,22 @@ frida_loader_connect (const char * identifier)
     else
     {
       permission_to_resume = frida_channel_recv_string (channel);
-      free (permission_to_resume);
+      if (permission_to_resume != NULL)
+        free (permission_to_resume);
     }
   }
 #else
   permission_to_resume = frida_channel_recv_string (channel);
-  free (permission_to_resume);
+  if (permission_to_resume != NULL)
+    free (permission_to_resume);
 #endif
 
 beach:
   if (channel != NULL)
     frida_channel_close (channel);
 }
+
+#ifdef HAVE_ANDROID
 
 static void *
 frida_loader_run (void * user_data)
@@ -622,5 +635,7 @@ beach:
 
   return NULL;
 }
+
+#endif
 
 #endif
