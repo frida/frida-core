@@ -282,7 +282,6 @@ namespace Frida {
 		private string plugin_directory;
 		private string plist_path;
 		private string dylib_path;
-		private string real_dylib_path;
 		protected void * service;
 		private Gee.Promise<bool> service_closed = new Gee.Promise<bool> ();
 		private Gee.Promise<bool> close_request;
@@ -297,13 +296,10 @@ namespace Frida {
 			this.agent = agent;
 			this.main_context = MainContext.ref_thread_default ();
 
-			var tempdir_path = agent.tempdir.path;
-
 			this.plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
 			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
 			this.plist_path = Path.build_filename (this.plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
 			this.dylib_path = Path.build_filename (this.plugin_directory, dylib_blob.name);
-			this.real_dylib_path = Path.build_filename (tempdir_path, dylib_blob.name);
 
 			open_xpc_service ();
 		}
@@ -349,7 +345,6 @@ namespace Frida {
 
 			FileUtils.unlink (plist_path);
 			FileUtils.unlink (dylib_path);
-			FileUtils.unlink (real_dylib_path);
 
 			agent = null;
 
@@ -469,10 +464,8 @@ namespace Frida {
 				try {
 					FileUtils.set_data (plist_path, generate_loader_plist ());
 					FileUtils.chmod (plist_path, 0644);
-					FileUtils.set_data (real_dylib_path, dylib_blob.data);
-					FileUtils.chmod (real_dylib_path, 0755);
-					FileUtils.unlink (dylib_path);
-					FileUtils.symlink (real_dylib_path, dylib_path);
+					FileUtils.set_data (dylib_path, dylib_blob.data);
+					FileUtils.chmod (dylib_path, 0755);
 				} catch (GLib.FileError e) {
 					throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
 				}

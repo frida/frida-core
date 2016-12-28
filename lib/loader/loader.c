@@ -67,8 +67,6 @@ struct _FridaWaitForPermissionToResumeContext
   FridaCFRunLoopStopFunc cf_run_loop_stop;
 };
 
-static void detect_data_dir (void);
-
 #define FRIDA_AGENT_FILENAME "frida-agent.dylib"
 
 __attribute__ ((constructor)) static void
@@ -76,8 +74,6 @@ frida_loader_on_load (void)
 {
   char * identifier = NULL, * details;
   FridaCFBundleGetMainBundleFunc cf_bundle_get_main_bundle;
-
-  detect_data_dir ();
 
   cf_bundle_get_main_bundle = dlsym (RTLD_DEFAULT, "CFBundleGetMainBundle");
   if (cf_bundle_get_main_bundle != NULL)
@@ -148,21 +144,6 @@ frida_loader_wait_for_permission_to_resume (void * user_data)
 static void
 on_keep_alive_timer_fire (FridaCFRef timer, void * info)
 {
-}
-
-static void
-detect_data_dir (void)
-{
-  Dl_info info;
-  int res;
-
-  res = dladdr (frida_loader_on_load, &info);
-  assert (res != 0);
-
-  res = readlink (info.dli_fname, frida_data_dir, sizeof (frida_data_dir));
-  assert (res != -1);
-  frida_data_dir[res] = '\0';
-  *strrchr (frida_data_dir, '/') = '\0';
 }
 
 #else
