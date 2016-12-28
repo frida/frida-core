@@ -4,11 +4,13 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
+		public abstract uint pid {
+			get;
+		}
+
 		public abstract async void close ();
 
 		public abstract async void preload () throws Error;
-
-		public abstract async AgentSessionProvider create_system_session_provider (string agent_filename, out DBusConnection conn) throws Error;
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 		public abstract async void input (uint pid, uint8[] data) throws Error;
@@ -31,8 +33,6 @@ namespace Frida {
 		public signal void uninjected (uint id);
 
 		public abstract async void stop () throws GLib.Error;
-
-		public abstract async string create_system_session_provider (string agent_filename) throws GLib.Error;
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
 		public abstract async void launch (string identifier, string url) throws GLib.Error;

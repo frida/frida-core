@@ -139,7 +139,27 @@ namespace Frida {
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
-			return yield helper.create_system_session_provider (agent.file.path, out connection);
+			var pid = helper.pid;
+
+			string remote_address;
+			var stream = yield helper.make_pipe_stream (pid, out remote_address);
+
+			var fruitjector = injector as Fruitjector;
+			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address);
+			injectee_by_pid[pid] = id;
+
+			DBusConnection conn;
+			AgentSessionProvider provider;
+			try {
+				conn = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE);
+				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			connection = conn;
+
+			return provider;
 		}
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {

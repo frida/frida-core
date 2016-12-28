@@ -5,13 +5,18 @@ namespace Frida {
 		public signal void child_dead (uint pid);
 		public signal void child_ready (uint pid);
 
+		public uint pid {
+			get {
+				return Posix.getpid ();
+			}
+		}
+
 		public bool is_idle {
 			get {
 				return inject_instance_by_id.is_empty;
 			}
 		}
 
-		private AgentContainer system_session_container;
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 		private Gee.HashMap<uint, uint> local_task_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, uint> remote_task_by_pid = new Gee.HashMap<uint, uint> ();
@@ -38,22 +43,9 @@ namespace Frida {
 		}
 
 		public async void close () {
-			if (system_session_container != null) {
-				yield system_session_container.destroy ();
-				system_session_container = null;
-			}
 		}
 
 		public async void preload () throws Error {
-		}
-
-		public async AgentSessionProvider create_system_session_provider (string agent_filename, out DBusConnection connection) throws Error {
-			assert (system_session_container == null);
-
-			system_session_container = yield AgentContainer.create (agent_filename);
-			connection = system_session_container.connection;
-
-			return system_session_container;
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {

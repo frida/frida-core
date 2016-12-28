@@ -1,6 +1,15 @@
 #if DARWIN
 namespace Frida {
 	public class DarwinHelperProcess : Object, DarwinHelper {
+		public uint pid {
+			get {
+				if (process == null)
+					return 0;
+
+				return (uint) uint64.parse (process.get_identifier ());
+			}
+		}
+
 		public TemporaryDirectory tempdir {
 			get;
 			construct;
@@ -64,18 +73,6 @@ namespace Frida {
 
 		public async void preload () throws Error {
 			yield obtain ();
-		}
-
-		public async AgentSessionProvider create_system_session_provider (string agent_filename, out DBusConnection conn) throws Error {
-			var helper = yield obtain ();
-			try {
-				var provider_path = yield helper.create_system_session_provider (agent_filename);
-				AgentSessionProvider provider = yield connection.get_proxy (null, provider_path);
-				conn = connection;
-				return provider;
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
