@@ -14,7 +14,7 @@
 
 #define FRIDA_LOADER_DATA_DIR_MAGIC "3zPLi3BupiesaB9diyimME74fJw4jvj6"
 
-typedef void (* FridaAgentMainFunc) (const char * data, void * mapped_range, size_t parent_thread_id);
+typedef void (* FridaAgentMainFunc) (const char * data, unsigned int * stay_resident, void * mapped_range);
 
 static void frida_loader_connect (const char * details);
 static void * frida_loader_run (void * user_data);
@@ -597,6 +597,7 @@ frida_loader_run (void * user_data)
   char * agent_path;
   void * agent;
   FridaAgentMainFunc agent_main;
+  unsigned int stay_resident;
 
   asprintf (&agent_path, "%s/" FRIDA_AGENT_FILENAME, frida_data_dir);
 
@@ -607,9 +608,12 @@ frida_loader_run (void * user_data)
   agent_main = (FridaAgentMainFunc) dlsym (agent, "frida_agent_main");
   assert (agent_main != NULL);
 
-  agent_main (pipe_address, NULL, 0);
+  stay_resident = false;
 
-  dlclose (agent);
+  agent_main (pipe_address, &stay_resident, NULL);
+
+  if (!stay_resident)
+    dlclose (agent);
 
 beach:
   free (agent_path);
