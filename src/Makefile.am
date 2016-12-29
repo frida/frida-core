@@ -3,6 +3,7 @@ RESOURCE_COMPILER = $(top_builddir)/tools/resource-compiler
 backend_programs = $(NULL)
 backend_libraries = $(NULL)
 backend_sources = $(NULL)
+backend_data = $(NULL)
 backend_libadd = $(NULL)
 backend_valaflags = $(NULL)
 backend_cleanfiles = $(NULL)
@@ -45,9 +46,10 @@ backend_sources += \
 glue_sources += \
 	linux/system-linux.c \
 	linux/linjector-glue.c
-backend_libadd += \
-	libfrida-helper-types.la \
+backend_data += \
 	libfrida-data-helper-process.la
+backend_libadd += \
+	libfrida-helper-types.la
 backend_valaflags += \
 	--pkg=frida-helper-types \
 	--pkg=frida-data-helper-process \
@@ -57,7 +59,7 @@ backend_valaflags += \
 if OS_ANDROID
 backend_libraries += \
 	libfrida-data-android.la
-backend_libadd += \
+backend_data += \
 	libfrida-data-android.la
 backend_valaflags += \
 	--pkg=frida-data-android
@@ -79,7 +81,7 @@ backend_cleanfiles += \
 
 backend_libraries += \
 	libfrida-data-loader.la
-backend_libadd += \
+backend_data += \
 	libfrida-data-loader.la
 backend_valaflags += \
 	--pkg=frida-data-loader
@@ -186,11 +188,12 @@ backend_sources += \
 	darwin/darwin-host-session.vala \
 	darwin/fruitjector.vala \
 	darwin/frida-helper-process.vala
-backend_libadd += \
-	libfrida-core-darwin.la \
-	libfrida-helper-backend.la \
+backend_data += \
 	libfrida-data-helper-process.la \
 	libfrida-data-loader.la
+backend_libadd += \
+	libfrida-core-darwin.la \
+	libfrida-helper-backend.la
 backend_valaflags += \
 	--pkg=frida-helper-backend \
 	--pkg=frida-helper-types \
@@ -225,7 +228,6 @@ endif
 backend_libraries += \
 	libfrida-helper-service.la \
 	libfrida-helper-service-darwin.la \
-	libfrida-helper-darwin.la \
 	libfrida-helper-types.la \
 	libfrida-helper-backend.la \
 	libfrida-helper-backend-glue.la
@@ -366,10 +368,10 @@ lib_LTLIBRARIES = \
 noinst_PROGRAMS = \
 	$(backend_programs)
 noinst_LTLIBRARIES = \
-	$(backend_libraries) \
-	libfrida-data-agent.la \
 	libfrida-core.la \
-	libfrida-core-glue.la
+	libfrida-core-glue.la \
+	$(backend_libraries) \
+	libfrida-data-agent.la
 
 fridacoreincludedir = $(includedir)/frida-1.0
 fridacoreinclude_HEADERS = \
@@ -392,9 +394,10 @@ libfrida_core_1_0_la_LIBADD = \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
 	$(top_builddir)/lib/agent/libfrida-agent-container.la \
 	libfrida-data-agent.la \
-	$(backend_libadd) \
+	$(backend_data) \
 	libfrida-core.la \
-	libfrida-core-glue.la
+	libfrida-core-glue.la \
+	$(backend_libadd)
 libfrida_core_1_0_la_LIBTOOLFLAGS = \
 	--tag=disable-shared
 
