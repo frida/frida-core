@@ -109,6 +109,8 @@ if OS_ANDROID
 frida_helper_LDADD += \
 	$(top_builddir)/lib/selinux/libfrida-selinux.la
 endif
+frida_helper_LIBTOOLFLAGS = \
+	--tag=CC
 
 backend_libraries += \
 	libfrida-helper-types.la \
