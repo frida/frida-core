@@ -109,8 +109,6 @@ if OS_ANDROID
 frida_helper_LDADD += \
 	$(top_builddir)/lib/selinux/libfrida-selinux.la
 endif
-frida_helper_LIBTOOLFLAGS = \
-	--tag=CC
 
 backend_libraries += \
 	libfrida-helper-types.la \
@@ -135,8 +133,6 @@ libfrida_helper_main_la_VALAFLAGS = \
 
 libfrida_helper_glue_la_SOURCES = \
 	linux/frida-helper-glue.c
-libfrida_helper_glue_la_LIBTOOLFLAGS = \
-	--tag=CC
 
 libfrida_helper_types_la_SOURCES = \
 	linux/frida-helper-types.vala
@@ -190,13 +186,8 @@ backend_sources += \
 	darwin/darwin-host-session.vala \
 	darwin/fruitjector.vala \
 	darwin/frida-helper-process.vala
-glue_sources += \
-	darwin/system-darwin.m \
-	darwin/darwin-host-session-glue.m \
-	darwin/icon-helpers.h \
-	darwin/icon-helpers.m \
-	$(springboard_sources)
 backend_libadd += \
+	libfrida-core-darwin.la \
 	libfrida-helper-backend.la \
 	libfrida-data-helper-process.la \
 	libfrida-data-loader.la
@@ -206,23 +197,44 @@ backend_valaflags += \
 	--pkg=frida-data-helper-process \
 	--pkg=frida-data-loader
 
+backend_libraries += \
+	libfrida-core-darwin.la
+libfrida_core_darwin_la_SOURCES = \
+	darwin/system-darwin.m \
+	darwin/darwin-host-session-glue.m \
+	darwin/icon-helpers.h \
+	darwin/icon-helpers.m \
+	$(springboard_sources)
+
 backend_programs += \
 	frida-helper
 frida_helper_SOURCES = \
-	darwin/frida-helper-service.vala \
-	darwin/frida-helper-service-glue.m
-frida_helper_CFLAGS = \
-	-w
+	$(NULL)
 frida_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_helper_LDADD = \
+	libfrida-helper-service.la \
+	libfrida-helper-service-darwin.la \
 	libfrida-helper-backend.la \
 	$(FRIDA_LIBS)
 if OS_MAC
 frida_helper_LDFLAGS += \
 	-sectcreate __TEXT __info_plist "$(srcdir)/darwin/frida-helper.plist"
 endif
-frida_helper_VALAFLAGS = \
+
+backend_libraries += \
+	libfrida-helper-service.la \
+	libfrida-helper-service-darwin.la \
+	libfrida-helper-darwin.la \
+	libfrida-helper-types.la \
+	libfrida-helper-backend.la \
+	libfrida-helper-backend-glue.la
+
+libfrida_helper_service_la_SOURCES = \
+	darwin/frida-helper-service.vala
+libfrida_helper_service_la_CFLAGS = \
+	-w
+libfrida_helper_service_la_VALAFLAGS = \
 	--header=frida-helper-service.h \
 	--vapidir=$(abs_top_srcdir)/lib/interfaces \
 	--vapidir=$(abs_top_srcdir)/lib/pipe \
@@ -234,10 +246,8 @@ frida_helper_VALAFLAGS = \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
 
-backend_libraries += \
-	libfrida-helper-types.la \
-	libfrida-helper-backend.la \
-	libfrida-helper-backend-glue.la
+libfrida_helper_service_darwin_la_SOURCES = \
+	darwin/frida-helper-service-glue.m
 
 libfrida_helper_types_la_SOURCES = \
 	darwin/frida-helper-types.vala
@@ -281,8 +291,6 @@ libfrida_helper_backend_la_VALAFLAGS = \
 libfrida_helper_backend_glue_la_SOURCES = \
 	darwin/frida-helper-backend-glue.m \
 	$(springboard_sources)
-libfrida_helper_backend_glue_la_LIBTOOLFLAGS = \
-	--tag=CC
 
 frida-helper.stamp: frida-helper
 if OS_MAC
@@ -342,7 +350,7 @@ backend_sources += \
 	fruity/fruity-host-session.vala \
 	fruity/fruity-property-list.vala
 if OS_DARWIN
-glue_sources += fruity/fruity-host-session-darwin.m
+libfrida_core_darwin_la_SOURCES += fruity/fruity-host-session-darwin.m
 else
 glue_sources += fruity/fruity-host-session-unix.c
 endif
@@ -421,8 +429,6 @@ libfrida_core_la_VALAFLAGS = \
 libfrida_core_glue_la_SOURCES = \
 	frida-glue.c \
 	$(glue_sources)
-libfrida_core_glue_la_LIBTOOLFLAGS = \
-	--tag=CC
 
 AM_CPPFLAGS = \
 	-DG_LOG_DOMAIN=\"Frida\" \
