@@ -196,9 +196,11 @@ namespace Frida {
 					assert_not_reached ();
 				}
 
-				proxy.closed.connect (() => {
+				ulong closed_handler = 0;
+				closed_handler = proxy.closed.connect (() => {
 					connection.unregister_object (registration_id);
 					pipe_proxies.unset (proxy);
+					proxy.disconnect (closed_handler);
 				});
 
 				return PipeEndpoints (proxy_object_path, endpoints.remote_address);
@@ -226,6 +228,8 @@ namespace Frida {
 		private InputStream input;
 		private OutputStream output;
 
+		private Cancellable cancellable = new Cancellable ();
+
 		public PipeProxy (Pipe pipe) {
 			Object (pipe: pipe);
 		}
@@ -235,18 +239,26 @@ namespace Frida {
 			output = pipe.output_stream;
 		}
 
+		~PipeProxy () {
+			pipe.close_async.begin ();
+		}
+
 		public async void close () throws GLib.Error {
-			try {
-				yield pipe.close_async ();
-			} catch (GLib.Error e) {
-			}
-			closed ();
+			if (cancellable.is_cancelled ())
+				return;
+
+			cancellable.cancel ();
+
+			Idle.add (() => {
+				closed ();
+				return false;
+			});
 		}
 
 		public async uint8[] read () throws GLib.Error {
 			try {
 				var buf = new uint8[4096];
-				var n = yield input.read_async (buf);
+				var n = yield input.read_async (buf, Priority.DEFAULT, cancellable);
 				return buf[0:n];
 			} catch (GLib.Error e) {
 				close.begin ();
@@ -257,7 +269,7 @@ namespace Frida {
 		public async void write (uint8[] data) throws GLib.Error {
 			try {
 				var data_copy = data; /* FIXME: workaround for Vala compiler bug */
-				yield output.write_all_async (data_copy, Priority.DEFAULT, null, null);
+				yield output.write_all_async (data_copy, Priority.DEFAULT, cancellable, null);
 			} catch (GLib.Error e) {
 				close.begin ();
 				throw e;
