@@ -139,6 +139,8 @@ namespace Frida {
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
+			yield helper.preload ();
+
 			var pid = helper.pid;
 
 			string remote_address;
