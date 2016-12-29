@@ -161,6 +161,7 @@ namespace Frida {
 				if (local_address[0] == '/') {
 					TunneledStream ts;
 					ts = yield connection.get_proxy (null, local_address);
+					(ts as DBusProxy).set_default_timeout (int.MAX);
 					return new SimpleIOStream (TunneledInputStream.create (ts), TunneledOutputStream.create (ts));
 				} else {
 					return new Pipe (local_address);
