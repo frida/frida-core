@@ -24,7 +24,12 @@ typedef char name_t[BOOTSTRAP_MAX_NAME_LEN];
 
 kern_return_t bootstrap_register2 (mach_port_t bp, const name_t service_name, mach_port_t sp, uint64_t flags);
 kern_return_t bootstrap_look_up2 (mach_port_t bp, const name_t service_name, mach_port_t * sp, pid_t target_pid, uint64_t flags);
+
+#ifdef HAVE_MAC
 pid_t audit_token_to_pid (audit_token_t atoken);
+#endif
+
+static pid_t frida_audit_token_to_pid (audit_token_t atoken);
 
 guint
 _frida_handshake_port_create_local (FridaHandshakePort * self, const gchar * name, GError ** error)
@@ -181,7 +186,7 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
 
   if (header_in->msgh_size != sizeof (FridaHandshakeMessageOut))
     goto handle_security_error;
-  if (audit_token_to_pid (msg_in.trailer.msgh_audit) != peer_pid)
+  if (frida_audit_token_to_pid (msg_in.trailer.msgh_audit) != peer_pid)
     goto handle_security_error;
 
   bzero (&msg_out, sizeof (msg_out));
@@ -236,4 +241,14 @@ void
 _frida_task_port_deallocate (FridaTaskPort * self)
 {
   mach_port_deallocate (mach_task_self (), frida_task_port_get_mach_port (self));
+}
+
+static pid_t
+frida_audit_token_to_pid (audit_token_t atoken)
+{
+#ifdef HAVE_MAC
+  return audit_token_to_pid (atoken);
+#else
+  return atoken.val[5];
+#endif
 }
