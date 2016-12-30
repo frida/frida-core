@@ -14,17 +14,27 @@ if [ $# -ne 2 ]; then
   echo "Usage: $0 frida-server output.deb" > /dev/stderr
   exit 3
 fi
-FRIDA_SERVER="$1"
-if [ ! -f "$FRIDA_SERVER" ]; then
-  echo "$FRIDA_SERVER: not found" > /dev/stderr
+executable="$1"
+if [ ! -f "$executable" ]; then
+  echo "$executable: not found" > /dev/stderr
   exit 4
 fi
-OUTPUT_DEB="$2"
+output_deb="$2"
+
+if file "$executable" | grep -q arm64; then
+  pkg_id=re.frida.server
+  pkg_name="Frida"
+  pkg_conflicts=re.frida.server32
+else
+  pkg_id=re.frida.server32
+  pkg_name="Frida for 32-bit devices"
+  pkg_conflicts=re.frida.server
+fi
 
 tmpdir="$(mktemp -d /tmp/package-server.XXXXXX)"
 
 mkdir -p "$tmpdir/usr/sbin/"
-cp "$FRIDA_SERVER" "$tmpdir/usr/sbin/frida-server"
+cp "$executable" "$tmpdir/usr/sbin/frida-server"
 chmod 755 "$tmpdir/usr/sbin/frida-server"
 
 mkdir -p "$tmpdir/Library/LaunchDaemons/"
@@ -66,20 +76,23 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 EOF
 chmod 644 "$tmpdir/Library/LaunchDaemons/re.frida.server.plist"
 
+installed_size=$(du -sk "$tmpdir" | cut -f1)
+
 mkdir -p "$tmpdir/DEBIAN/"
 cat >"$tmpdir/DEBIAN/control" <<EOF
-Package: re.frida.server
-Name: Frida
+Package: $pkg_id
+Name: $pkg_name
 Version: $FRIDA_VERSION
 Priority: optional
-Size: 15642966
-Installed-Size: 39000
+Size: 1337
+Installed-Size: $installed_size
 Architecture: iphoneos-arm
 Description: Inject JavaScript to explore iOS apps over USB.
-Homepage: http://frida.github.io/
+Homepage: https://www.frida.re/
 Maintainer: Ole André Vadla Ravnås <oleavr@nowsecure.com>
 Author: Frida Developers <oleavr@nowsecure.com>
 Section: Development
+Conflicts: $pkg_conflicts
 EOF
 chmod 644 "$tmpdir/DEBIAN/control"
 
@@ -108,8 +121,15 @@ exit 0
 EOF
 chmod 755 "$tmpdir/DEBIAN/prerm"
 
+$FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$output_deb"
+package_size=$(expr $(du -sk "$output_deb" | cut -f1) \* 1024)
+
 sudo chown -R 0:0 "$tmpdir"
-sudo $FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$OUTPUT_DEB"
-sudo chown -R $(whoami) "$tmpdir" "$OUTPUT_DEB"
+sudo sed \
+  -i "" \
+  -e "s,^Size: 1337$,Size: $package_size,g" \
+  "$tmpdir/DEBIAN/control"
+sudo $FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$output_deb"
+sudo chown -R $(whoami) "$tmpdir" "$output_deb"
 
 rm -rf "$tmpdir"
