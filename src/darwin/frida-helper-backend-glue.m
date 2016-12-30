@@ -992,7 +992,7 @@ _frida_darwin_helper_backend_do_inject (FridaDarwinHelperBackend * self, guint p
   if (mapper != NULL)
     instance->payload_size += gum_darwin_mapper_size (mapper);
 
-  ret = mach_vm_allocate (task, &payload_address, instance->payload_size, TRUE);
+  ret = mach_vm_allocate (task, &payload_address, instance->payload_size, VM_FLAGS_ANYWHERE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate");
   instance->payload_address = payload_address;
   instance->data_address = payload_address + layout.data_offset;
