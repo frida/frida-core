@@ -540,6 +540,8 @@ namespace Frida.HostSessionTest {
 						yield session.detach ();
 					}
 
+					yield device_manager.close ();
+
 					h.done ();
 				} catch (Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
