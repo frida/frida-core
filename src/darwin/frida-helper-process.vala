@@ -31,7 +31,7 @@ namespace Frida {
 
 		private MainContext main_context;
 		private Subprocess process;
-		private uint task;
+		private TaskPort task;
 		private DBusConnection connection;
 		private DarwinRemoteHelper proxy;
 		private Gee.Promise<DarwinRemoteHelper> obtain_request;
@@ -172,12 +172,12 @@ namespace Frida {
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob) throws Error {
-			yield obtain ();
-
-			if (task == 0)
+			if (!DarwinHelperBackend.is_mmap_available ())
 				return null;
 
-			return DarwinHelperBackend.mmap (task, blob);
+			yield obtain ();
+
+			return DarwinHelperBackend.mmap (task.mach_port, blob);
 		}
 
 		private async DarwinRemoteHelper obtain () throws Error {
@@ -191,57 +191,32 @@ namespace Frida {
 			obtain_request = new Gee.Promise<DarwinRemoteHelper> ();
 
 			Subprocess pending_process = null;
+			TaskPort pending_task_port = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
 			Error pending_error = null;
 
-			DBusServer server = null;
-			TimeoutSource timeout_source = null;
+			var service_name = make_service_name ();
 
 			try {
-				server = new DBusServer.sync ("unix:tmpdir=" + tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
-				server.start ();
-				var tokens = server.client_address.split ("=", 2);
-				resource_store.pipe = new TemporaryFile (File.new_for_path (tokens[1]), tempdir);
-				var connection_handler = server.new_connection.connect ((c) => {
-					pending_connection = c;
-					obtain.callback ();
-					return true;
-				});
-				timeout_source = new TimeoutSource.seconds (2);
-				timeout_source.set_callback (() => {
-					pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
-					obtain.callback ();
-					return false;
-				});
-				timeout_source.attach (main_context);
-				string[] argv = { resource_store.helper.path, server.client_address };
-				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
-				yield;
-				server.disconnect (connection_handler);
-				server.stop ();
-				server = null;
-				timeout_source.destroy ();
-				timeout_source = null;
+				var handshake_port = new HandshakePort.local (service_name);
 
-				if (pending_error == null)
-					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
+				string[] argv = { resource_store.helper.path, service_name };
+				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
+
+				var peer_pid = (uint) uint64.parse (pending_process.get_identifier ());
+				Pipe pipe;
+				yield handshake_port.exchange (peer_pid, out pending_task_port, out pipe);
+
+				pending_connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE, null, null);
+				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 			} catch (GLib.Error e) {
-				if (timeout_source != null)
-					timeout_source.destroy ();
-				if (server != null)
-					server.stop ();
 				pending_error = new Error.PERMISSION_DENIED (e.message);
 			}
 
 			if (pending_error == null) {
 				process = pending_process;
-				if (DarwinHelperBackend.is_mmap_available ()) {
-					try {
-						task = DarwinHelperBackend.task_for_pid (int.parse (process.get_identifier ()));
-					} catch (Error e) {
-					}
-				}
+				task = pending_task_port;
 
 				connection = pending_connection;
 				connection.closed.connect (on_connection_closed);
@@ -261,6 +236,17 @@ namespace Frida {
 			}
 		}
 
+		private static string make_service_name () {
+			var builder = new StringBuilder ("re.frida.Helper");
+
+			builder.append_printf (".%d.", Posix.getpid ());
+
+			for (var i = 0; i != 16; i++)
+				builder.append_printf ("%02x", Random.int_range (0, 256));
+
+			return builder.str;
+		}
+
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			obtain_request = null;
 
@@ -272,9 +258,7 @@ namespace Frida {
 			connection = null;
 
 			process = null;
-			if (task != 0)
-				DarwinHelperBackend.deallocate_port (task);
-			task = 0;
+			task = null;
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {

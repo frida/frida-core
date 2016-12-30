@@ -80,6 +80,7 @@
 /src/darwin/frida-helper-service.c
 /src/darwin/frida-helper-types.c
 /src/darwin/fruitjector.c
+/src/darwin/port.c
 /src/debugger.c
 /src/droidy/droidy-client.c
 /src/droidy/droidy-host-session.c

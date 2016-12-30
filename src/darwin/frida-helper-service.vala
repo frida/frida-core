@@ -5,9 +5,9 @@ namespace Frida {
 
 		Gum.init ();
 
-		var parent_address = args[1];
+		var parent_service_name = args[1];
 		var worker = new Thread<int> ("frida-helper-main-loop", () => {
-			var service = new DarwinHelperService (parent_address);
+			var service = new DarwinHelperService (parent_service_name);
 
 			var exit_code = service.run ();
 			_stop_run_loop ();
@@ -24,7 +24,7 @@ namespace Frida {
 	public extern void _stop_run_loop ();
 
 	public class DarwinHelperService : Object, DarwinRemoteHelper {
-		public string parent_address {
+		public string parent_service_name {
 			get;
 			construct;
 		}
@@ -40,8 +40,8 @@ namespace Frida {
 
 		private DarwinHelperBackend backend = new DarwinHelperBackend ();
 
-		public DarwinHelperService (string parent_address) {
-			Object (parent_address: parent_address);
+		public DarwinHelperService (string parent_service_name) {
+			Object (parent_service_name: parent_service_name);
 		}
 
 		construct {
@@ -104,7 +104,13 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				connection = yield DBusConnection.new_for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				TaskPort task_port;
+				Pipe pipe;
+				var handshake_port = new HandshakePort.remote (parent_service_name);
+
+				yield handshake_port.exchange (0, out task_port, out pipe);
+
+				connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
 
 				DarwinRemoteHelper helper = this;

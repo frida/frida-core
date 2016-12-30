@@ -55,5 +55,6 @@ AM_CPPFLAGS = \
 	-include config.h \
 	-I $(top_srcdir)/lib/selinux/include \
 	-I $(top_srcdir)/lib/interfaces \
+	-I $(top_srcdir)/lib/pipe \
 	-I $(top_srcdir)/src \
 	$(FRIDA_CFLAGS)

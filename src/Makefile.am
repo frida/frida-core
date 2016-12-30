@@ -216,9 +216,9 @@ frida_helper_SOURCES = \
 frida_helper_LDFLAGS = \
 	$(FRIDA_LDFLAGS)
 frida_helper_LDADD = \
+	libfrida-helper-backend.la \
 	libfrida-helper-service.la \
 	libfrida-helper-service-darwin.la \
-	libfrida-helper-backend.la \
 	$(FRIDA_LIBS)
 if OS_MAC
 frida_helper_LDFLAGS += \
@@ -226,11 +226,11 @@ frida_helper_LDFLAGS += \
 endif
 
 backend_libraries += \
+	libfrida-helper-backend.la \
+	libfrida-helper-backend-glue.la \
 	libfrida-helper-service.la \
 	libfrida-helper-service-darwin.la \
-	libfrida-helper-types.la \
-	libfrida-helper-backend.la \
-	libfrida-helper-backend-glue.la
+	libfrida-helper-types.la
 
 libfrida_helper_service_la_SOURCES = \
 	darwin/frida-helper-service.vala
@@ -267,7 +267,8 @@ libfrida_helper_types_la_VALAFLAGS = \
 	@FRIDA_VALAFLAGS@
 
 libfrida_helper_backend_la_SOURCES = \
-	darwin/frida-helper-backend.vala
+	darwin/frida-helper-backend.vala \
+	darwin/port.vala
 libfrida_helper_backend_la_CFLAGS = \
 	-w
 libfrida_helper_backend_la_LIBADD = \
@@ -292,6 +293,7 @@ libfrida_helper_backend_la_VALAFLAGS = \
 
 libfrida_helper_backend_glue_la_SOURCES = \
 	darwin/frida-helper-backend-glue.m \
+	darwin/port-glue.m \
 	$(springboard_sources)
 
 frida-helper.stamp: frida-helper

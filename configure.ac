@@ -221,7 +221,7 @@ PKG_CHECK_MODULES(FRIDA_TEST, [gmodule-2.0 >= $GLIB_VERSION])
 
 FRIDA_BACKEND_LIBS=
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
-  FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,Foundation"
+  FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,Foundation -lbsm"
 fi
 if [[ "x$HAVE_MAC" = "xyes" ]]; then
   FRIDA_BACKEND_LIBS="$FRIDA_BACKEND_LIBS -Wl,-framework -Wl,AppKit"
@@ -243,7 +243,7 @@ fi
 
 FRIDA_CORE_INTERNAL="--pkg=frida-core"
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
-  FRIDA_CORE_INTERNAL="$FRIDA_CORE_INTERNAL --pkg=frida-helper-types --pkg=frida-helper-backend"
+  FRIDA_CORE_INTERNAL="$FRIDA_CORE_INTERNAL --vapidir=\$(abs_top_srcdir)/lib/pipe --pkg=frida-pipe --pkg=frida-helper-types --pkg=frida-helper-backend"
 fi
 AC_SUBST(FRIDA_CORE_INTERNAL)
 
