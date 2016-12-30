@@ -35,8 +35,7 @@ namespace Frida {
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
-		private Gee.HashMap<PipeProxy, uint> pipe_proxies = new Gee.HashMap<PipeProxy, uint> ();
-		private uint last_pipe_proxy_id = 1;
+		private TaskPort parent_task;
 
 		private DarwinHelperBackend backend = new DarwinHelperBackend ();
 
@@ -73,10 +72,6 @@ namespace Frida {
 			shutdown_request = new Gee.Promise<bool> ();
 
 			if (connection != null) {
-				foreach (var registration_id in pipe_proxies.values)
-					connection.unregister_object (registration_id);
-				pipe_proxies.clear ();
-
 				if (helper_registration_id != 0)
 					connection.unregister_object (helper_registration_id);
 
@@ -104,11 +99,10 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				TaskPort task_port;
 				Pipe pipe;
 				var handshake_port = new HandshakePort.remote (parent_service_name);
 
-				yield handshake_port.exchange (0, out task_port, out pipe);
+				yield handshake_port.exchange (0, out parent_task, out pipe);
 
 				connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
@@ -173,46 +167,10 @@ namespace Frida {
 			return yield backend.inject_library_blob (pid, name, blob, entrypoint, data);
 		}
 
-		public async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws Error {
-			var local_task = backend.borrow_task_for_local_pid (local_pid);
+		public async PipeEndpoints make_pipe_endpoints (uint remote_pid) throws Error {
 			var remote_task = backend.borrow_task_for_remote_pid (remote_pid);
 
-			var endpoints = DarwinHelperBackend.make_pipe_endpoints (local_task, remote_pid, remote_task);
-
-			bool need_proxy = local_task == 0;
-			if (need_proxy) {
-				Pipe pipe;
-
-				try {
-					pipe = new Pipe (endpoints.local_address);
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-				var proxy = new PipeProxy (pipe);
-
-				var id = last_pipe_proxy_id++;
-				var proxy_object_path = Frida.ObjectPath.from_tunneled_stream_id (id);
-				TunneledStream ts = proxy;
-
-				uint registration_id;
-				try {
-					registration_id = connection.register_object (proxy_object_path, ts);
-					pipe_proxies[proxy] = registration_id;
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-
-				ulong closed_handler = 0;
-				closed_handler = proxy.closed.connect (() => {
-					connection.unregister_object (registration_id);
-					pipe_proxies.unset (proxy);
-					proxy.disconnect (closed_handler);
-				});
-
-				return PipeEndpoints (proxy_object_path, endpoints.remote_address);
-			}
-
-			return endpoints;
+			return DarwinHelperBackend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);
 		}
 
 		private void on_backend_output (uint pid, int fd, uint8[] data) {
@@ -221,65 +179,6 @@ namespace Frida {
 
 		private void on_backend_uninjected (uint id) {
 			uninjected (id);
-		}
-	}
-
-	private class PipeProxy : Object, TunneledStream {
-		public signal void closed ();
-
-		public Pipe pipe {
-			get;
-			construct;
-		}
-		private InputStream input;
-		private OutputStream output;
-
-		private Cancellable cancellable = new Cancellable ();
-
-		public PipeProxy (Pipe pipe) {
-			Object (pipe: pipe);
-		}
-
-		construct {
-			input = pipe.input_stream;
-			output = pipe.output_stream;
-		}
-
-		~PipeProxy () {
-			pipe.close_async.begin ();
-		}
-
-		public async void close () throws GLib.Error {
-			if (cancellable.is_cancelled ())
-				return;
-
-			cancellable.cancel ();
-
-			Idle.add (() => {
-				closed ();
-				return false;
-			});
-		}
-
-		public async uint8[] read () throws GLib.Error {
-			try {
-				var buf = new uint8[4096];
-				var n = yield input.read_async (buf, Priority.DEFAULT, cancellable);
-				return buf[0:n];
-			} catch (GLib.Error e) {
-				close.begin ();
-				throw e;
-			}
-		}
-
-		public async void write (uint8[] data) throws GLib.Error {
-			try {
-				var data_copy = data; /* FIXME: workaround for Vala compiler bug */
-				yield output.write_all_async (data_copy, Priority.DEFAULT, cancellable, null);
-			} catch (GLib.Error e) {
-				close.begin ();
-				throw e;
-			}
 		}
 	}
 }

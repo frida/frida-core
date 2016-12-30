@@ -18,7 +18,6 @@ namespace Frida {
 		}
 
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
-		private Gee.HashMap<uint, uint> local_task_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, uint> remote_task_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, uint> expiry_timer_by_pid = new Gee.HashMap<uint, uint> ();
 
@@ -171,21 +170,6 @@ namespace Frida {
 				return null;
 
 			return mmap (0, blob);
-		}
-
-		public uint borrow_task_for_local_pid (uint pid) throws Error {
-			if (local_task_by_pid.has_key (pid))
-				return local_task_by_pid[pid];
-
-			uint task;
-			try {
-				task = task_for_pid (pid);
-			} catch (Error e) {
-				task = 0;
-			}
-			local_task_by_pid[pid] = task;
-
-			return task;
 		}
 
 		public uint borrow_task_for_remote_pid (uint pid) throws Error {

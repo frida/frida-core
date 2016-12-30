@@ -44,14 +44,7 @@ namespace Frida {
 		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws GLib.Error;
 		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws GLib.Error;
 
-		public abstract async PipeEndpoints make_pipe_endpoints (uint local_pid, uint remote_pid) throws GLib.Error;
-	}
-
-	[DBus (name = "re.frida.Helper")]
-	public interface TunneledStream : Object {
-		public abstract async void close () throws GLib.Error;
-		public abstract async uint8[] read () throws GLib.Error;
-		public abstract async void write (uint8[] data) throws GLib.Error;
+		public abstract async PipeEndpoints make_pipe_endpoints (uint remote_pid) throws GLib.Error;
 	}
 
 	public struct PipeEndpoints {
@@ -74,11 +67,6 @@ namespace Frida {
 	namespace ObjectPath {
 		public const string HELPER = "/re/frida/Helper";
 		public const string SYSTEM_SESSION_PROVIDER = "/re/frida/SystemSessionProvider";
-		public const string TUNNELED_STREAM = "/re/frida/TunneledStream";
-
-		public static string from_tunneled_stream_id (uint id) {
-			return "%s/%u".printf (TUNNELED_STREAM, id);
-		}
 	}
 }
 #endif

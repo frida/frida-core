@@ -155,17 +155,11 @@ namespace Frida {
 		public async IOStream make_pipe_stream (uint remote_pid, out string remote_address) throws Error {
 			var helper = yield obtain ();
 			try {
-				var endpoints = yield helper.make_pipe_endpoints ((uint) Posix.getpid (), remote_pid);
-				var local_address = endpoints.local_address;
+				var endpoints = yield helper.make_pipe_endpoints (remote_pid);
+
 				remote_address = endpoints.remote_address;
-				if (local_address[0] == '/') {
-					TunneledStream ts;
-					ts = yield connection.get_proxy (null, local_address);
-					(ts as DBusProxy).set_default_timeout (int.MAX);
-					return new SimpleIOStream (TunneledInputStream.create (ts), TunneledOutputStream.create (ts));
-				} else {
-					return new Pipe (local_address);
-				}
+
+				return new Pipe (endpoints.local_address);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -276,11 +270,6 @@ namespace Frida {
 			private set;
 		}
 
-		public TemporaryFile pipe {
-			get;
-			set;
-		}
-
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
 			FileUtils.chmod (tempdir.path, 0755);
 
@@ -292,105 +281,8 @@ namespace Frida {
 		}
 
 		~ResourceStore () {
-			if (pipe != null)
-				pipe.destroy ();
 			helper.destroy ();
 		}
-	}
-
-	namespace TunneledInputStream {
-		private InputStream create (TunneledStream stream) {
-			var pipe = new LocalUnixPipe ();
-			process.begin (stream, pipe);
-			return pipe.input;
-		}
-
-		private async void process (TunneledStream stream, LocalUnixPipe pipe) {
-			var output = pipe.output;
-
-			while (true) {
-				uint8[] chunk;
-				try {
-					chunk = yield stream.read ();
-				} catch (GLib.Error e) {
-					output.close_async.begin ();
-					return;
-				}
-				if (chunk.length == 0) {
-					output.close_async.begin ();
-					return;
-				}
-				try {
-					yield output.write_all_async (chunk, Priority.DEFAULT, null, null);
-				} catch (GLib.Error e) {
-					stream.close.begin ();
-					return;
-				}
-			}
-		}
-	}
-
-	namespace TunneledOutputStream {
-		private OutputStream create (TunneledStream stream) {
-			var pipe = new LocalUnixPipe ();
-			process.begin (stream, pipe);
-			return pipe.output;
-		}
-
-		private async void process (TunneledStream stream, LocalUnixPipe pipe) {
-			var input = pipe.input;
-
-			var buf = new uint8[4096];
-			while (true) {
-				ssize_t n;
-				try {
-					n = yield input.read_async (buf);
-				} catch (GLib.Error e) {
-					stream.close.begin ();
-					return;
-				}
-				if (n == 0) {
-					stream.close.begin ();
-					return;
-				}
-				try {
-					yield stream.write (buf[0:n]);
-				} catch (GLib.Error e) {
-					input.close_async.begin ();
-					return;
-				}
-			}
-		}
-	}
-
-	private class LocalUnixPipe {
-		public UnixInputStream input {
-			get;
-			private set;
-		}
-
-		public UnixOutputStream output {
-			get;
-			private set;
-		}
-
-		public LocalUnixPipe () {
-			var fds = new int[2];
-			try {
-				open_pipe (fds, 0);
-				Unix.set_fd_nonblocking (fds[0], true);
-				Unix.set_fd_nonblocking (fds[1], true);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-
-			input = new UnixInputStream (fds[0], true);
-			output = new UnixOutputStream (fds[1], true);
-		}
-
-		/* FIXME: working around vapi bug */
-		[CCode (cheader_filename = "glib-unix.h", cname = "g_unix_open_pipe")]
-		public static extern bool open_pipe (int * fds, int flags) throws GLib.Error;
 	}
 }
 #endif
