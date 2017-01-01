@@ -69,7 +69,6 @@ struct _FridaSpawnInstance
   FridaDarwinHelperBackend * backend;
   guint pid;
   GumCpuType cpu_type;
-  mach_port_t task;
   mach_port_t thread;
   FridaDebugState previous_debug_state;
 
@@ -78,6 +77,8 @@ struct _FridaSpawnInstance
   FridaExceptionPortSet previous_ports;
 
   __Request__exception_raise_state_identity_t pending_request;
+
+  gboolean ready;
 };
 
 struct _FridaInjectInstance
@@ -437,9 +438,8 @@ _frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
 }
 
 guint
-_frida_darwin_helper_backend_do_spawn (FridaDarwinHelperBackend * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
+_frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
 {
-  FridaHelperContext * ctx = self->context;
   FridaSpawnInstance * instance = NULL;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
   pid_t pid = 0;
@@ -447,55 +447,11 @@ _frida_darwin_helper_backend_do_spawn (FridaDarwinHelperBackend * self, const gc
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
   int spawn_errno, result;
-  const gchar * failed_operation;
-  kern_return_t ret;
-  mach_port_t self_task, child_task, child_thread;
-  guint page_size;
-  thread_act_array_t threads;
-  guint thread_index;
-  mach_msg_type_number_t thread_count = 0;
-  GumDarwinUnifiedThreadState state;
-  mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
-  thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
-  GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  GumDarwinModule * dyld;
-  GumAddress dyld_init_address;
-  FridaDebugState breakpoint_debug_state;
-  FridaExceptionPortSet * previous_ports;
-  dispatch_source_t source;
 
   *pipes = NULL;
 
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     goto handle_path_error;
-
-  /*
-   * We POSIX_SPAWN_START_SUSPENDED which means that the kernel will create
-   * the task and its main thread, with the main thread's instruction pointer
-   * pointed at __dyld_start. At this point neither dyld nor libc have been
-   * initialized, so we won't be able to inject frida-agent at this point.
-   *
-   * So here's what we'll do before we consider spawn() done:
-   * - Get hold of the main thread to read its instruction pointer, which will
-   *   tell us where dyld is in memory.
-   * - Walk backwards to find dyld's Mach-O header.
-   * - Walk its symbols and find a function that's called at a point where the
-   *   process is sufficiently initialized to load frida-agent. For now this is
-   *   the point right before the entrypoint is called, but eventually we should
-   *   be able to move this earlier so the app's constructor functions don't get
-   *   a chance to run.
-   * - Set a hardware breakpoint on this function.
-   * - Swap out the thread's exception ports with our own.
-   * - Resume the task.
-   * - Wait until we get a message on our exception port, meaning our breakpoint
-   *   was hit.
-   * - Swap back the thread's orginal exception ports.
-   * - Clear the hardware breakpoint by restoring the thread's debug registers.
-   *
-   * Then later when resume() is called:
-   * - Send a response to the message we got on our exception port, so the
-   *   kernel considers it handled and resumes the main thread for us.
-   */
 
   instance = frida_spawn_instance_new (self);
 
@@ -531,107 +487,7 @@ _frida_darwin_helper_backend_do_spawn (FridaDarwinHelperBackend * self, const gc
 
   instance->pid = pid;
 
-  if (!gum_darwin_cpu_type_from_pid (instance->pid, &instance->cpu_type))
-    goto handle_cpu_type_error;
-
-  self_task = mach_task_self ();
-
-  ret = task_for_pid (self_task, pid, &child_task);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_for_pid");
-  instance->task = child_task;
-
-  if (!gum_darwin_query_page_size (instance->task, &page_size))
-    goto handle_page_size_error;
-
-  ret = task_threads (child_task, &threads, &thread_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_threads");
-
-  child_thread = threads[0];
-  instance->thread = child_thread;
-
-  for (thread_index = 1; thread_index < thread_count; thread_index++)
-    mach_port_deallocate (self_task, threads[thread_index]);
-  vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
-  threads = NULL;
-
-  ret = thread_get_state (child_thread, state_flavor, (thread_state_t) &state, &state_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_get_state");
-
-#ifdef HAVE_I386
-  dyld_start = (instance->cpu_type == GUM_CPU_AMD64) ? state.uts.ts64.__rip : state.uts.ts32.__eip;
-#else
-  dyld_start = (instance->cpu_type == GUM_CPU_ARM64) ? state.ts_64.__pc : state.ts_32.__pc;
-#endif
-
-  dyld_header = 0;
-  dyld_granularity = 4096;
-  for (dyld_chunk = (dyld_start & (dyld_granularity - 1)) == 0 ? (dyld_start - dyld_granularity) : (dyld_start & ~(dyld_granularity - 1));
-      dyld_header == 0;
-      dyld_chunk -= dyld_granularity)
-  {
-    guint32 * magic;
-
-    magic = (guint32 *) gum_darwin_read (child_task, dyld_chunk, sizeof (magic), NULL);
-    if (magic == NULL)
-      goto handle_probe_dyld_error;
-
-    if (*magic == MH_MAGIC || *magic == MH_MAGIC_64)
-      dyld_header = dyld_chunk;
-
-    g_free (magic);
-  }
-
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", child_task, instance->cpu_type, page_size, dyld_header);
-
-  /*
-   * Ideally we'd only run until __ZN4dyld24initializeMainExecutableEv, but for
-   * now we require libc to be initialized.
-   */
-  dyld_init_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZNK16ImageLoaderMachO11getThreadPCEv");
-
-  g_object_unref (dyld);
-
-  if (dyld_init_address == 0)
-    goto handle_probe_dyld_error;
-
-  ret = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_get_debug_state");
-
-  memcpy (&breakpoint_debug_state, &instance->previous_debug_state, sizeof (breakpoint_debug_state));
-  frida_set_hardware_breakpoint (&breakpoint_debug_state, dyld_init_address, instance->cpu_type);
-
-  ret = frida_set_debug_state (child_thread, &breakpoint_debug_state, instance->cpu_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_set_debug_state");
-
-  ret = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate server");
-
-  ret = mach_port_insert_right (self_task, instance->server_port, instance->server_port, MACH_MSG_TYPE_MAKE_SEND);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right server");
-
-  previous_ports = &instance->previous_ports;
-  ret = thread_swap_exception_ports (child_thread,
-      EXC_MASK_BREAKPOINT,
-      instance->server_port,
-      EXCEPTION_DEFAULT,
-      state_flavor,
-      previous_ports->masks,
-      &previous_ports->count,
-      previous_ports->ports,
-      previous_ports->behaviors,
-      previous_ports->flavors);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_swap_exception_ports");
-
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
-
-  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, instance->server_port, 0, ctx->dispatch_queue);
-  instance->server_recv_source = source;
-  dispatch_set_context (source, instance);
-  dispatch_source_set_event_handler_f (source, frida_spawn_instance_on_server_recv);
-  dispatch_resume (source);
-
-  ret = task_resume (child_task);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_resume");
 
   return pid;
 
@@ -664,42 +520,6 @@ handle_spawn_error:
     }
     goto error_epilogue;
   }
-handle_cpu_type_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing CPU type of child process '%s'",
-        path);
-    goto error_epilogue;
-  }
-handle_page_size_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing page size of child process '%s'",
-        path);
-    goto error_epilogue;
-  }
-handle_probe_dyld_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing dyld of child process '%s'",
-        path);
-    goto error_epilogue;
-  }
-handle_mach_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while spawning child process '%s' (%s returned '%s')",
-        path, failed_operation, mach_error_string (ret));
-    goto error_epilogue;
-  }
 error_epilogue:
   {
     if (instance != NULL)
@@ -720,7 +540,7 @@ error_epilogue:
 static void frida_kill_application (NSString * identifier);
 
 void
-_frida_darwin_helper_backend_do_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
+_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
 {
   NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
@@ -765,7 +585,7 @@ _frida_darwin_helper_backend_do_launch (FridaDarwinHelperBackend * self, const g
 }
 
 void
-_frida_darwin_helper_backend_do_kill_process (FridaDarwinHelperBackend * self, guint pid)
+_frida_darwin_helper_backend_kill_process (FridaDarwinHelperBackend * self, guint pid)
 {
   NSAutoreleasePool * pool;
   NSString * identifier;
@@ -788,7 +608,7 @@ _frida_darwin_helper_backend_do_kill_process (FridaDarwinHelperBackend * self, g
 }
 
 void
-_frida_darwin_helper_backend_do_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
+_frida_darwin_helper_backend_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
 {
   NSAutoreleasePool * pool;
 
@@ -883,7 +703,7 @@ frida_kill_application (NSString * identifier)
 #else
 
 void
-_frida_darwin_helper_backend_do_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
+_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
 {
   g_set_error (error,
       FRIDA_ERROR,
@@ -892,17 +712,276 @@ _frida_darwin_helper_backend_do_launch (FridaDarwinHelperBackend * self, const g
 }
 
 void
-_frida_darwin_helper_backend_do_kill_process (FridaDarwinHelperBackend * self, guint pid)
+_frida_darwin_helper_backend_kill_process (FridaDarwinHelperBackend * self, guint pid)
 {
   kill (pid, SIGKILL);
 }
 
 void
-_frida_darwin_helper_backend_do_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
+_frida_darwin_helper_backend_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
 {
 }
 
 #endif
+
+void
+_frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint pid, guint task, GError ** error)
+{
+  mach_task_basic_info_data_t info;
+  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
+
+  if (task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count) != KERN_SUCCESS)
+    goto handle_process_not_found;
+
+  if (info.suspend_count <= 0)
+    goto handle_process_not_suspended;
+
+  task_resume (task);
+
+  return;
+
+handle_process_not_found:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "No such process");
+    return;
+  }
+handle_process_not_suspended:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_OPERATION,
+        "Process is not suspended");
+    return;
+  }
+}
+
+void *
+_frida_darwin_helper_backend_create_spawn_instance_if_suspended (FridaDarwinHelperBackend * self, guint pid, guint task, GError ** error)
+{
+  mach_task_basic_info_data_t info;
+  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
+  const gchar * failed_operation;
+  kern_return_t ret;
+  FridaSpawnInstance * instance;
+
+  ret = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_info");
+
+  if (info.suspend_count <= 0)
+    return NULL;
+
+  instance = frida_spawn_instance_new (self);
+  instance->pid = pid;
+
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
+
+  return instance;
+
+handle_mach_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while interrogating target process (%s returned '%s')",
+        failed_operation, mach_error_string (ret));
+    return NULL;
+  }
+}
+
+void
+_frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHelperBackend * self, void * opaque_instance, guint task, GError ** error)
+{
+  FridaSpawnInstance * instance = opaque_instance;
+  FridaHelperContext * ctx = self->context;
+  const gchar * failed_operation;
+  kern_return_t ret;
+  mach_port_t self_task, child_thread;
+  guint page_size;
+  thread_act_array_t threads;
+  guint thread_index;
+  mach_msg_type_number_t thread_count = 0;
+  GumDarwinUnifiedThreadState state;
+  mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
+  thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
+  GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
+  GumDarwinModule * dyld;
+  GumAddress dyld_init_address;
+  FridaDebugState breakpoint_debug_state;
+  FridaExceptionPortSet * previous_ports;
+  dispatch_source_t source;
+
+  /*
+   * We POSIX_SPAWN_START_SUSPENDED which means that the kernel will create
+   * the task and its main thread, with the main thread's instruction pointer
+   * pointed at __dyld_start. At this point neither dyld nor libc have been
+   * initialized, so we won't be able to inject frida-agent at this point.
+   *
+   * So here's what we'll do before we consider spawn() done:
+   * - Get hold of the main thread to read its instruction pointer, which will
+   *   tell us where dyld is in memory.
+   * - Walk backwards to find dyld's Mach-O header.
+   * - Walk its symbols and find a function that's called at a point where the
+   *   process is sufficiently initialized to load frida-agent. For now this is
+   *   the point right before the entrypoint is called, but eventually we should
+   *   be able to move this earlier so the app's constructor functions don't get
+   *   a chance to run.
+   * - Set a hardware breakpoint on this function.
+   * - Swap out the thread's exception ports with our own.
+   * - Resume the task.
+   * - Wait until we get a message on our exception port, meaning our breakpoint
+   *   was hit.
+   * - Swap back the thread's orginal exception ports.
+   * - Clear the hardware breakpoint by restoring the thread's debug registers.
+   *
+   * Then later when resume() is called:
+   * - Send a response to the message we got on our exception port, so the
+   *   kernel considers it handled and resumes the main thread for us.
+   */
+
+  self_task = mach_task_self ();
+
+  if (!gum_darwin_cpu_type_from_pid (instance->pid, &instance->cpu_type))
+    goto handle_cpu_type_error;
+
+  if (!gum_darwin_query_page_size (task, &page_size))
+    goto handle_page_size_error;
+
+  ret = task_threads (task, &threads, &thread_count);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_threads");
+
+  child_thread = threads[0];
+  instance->thread = child_thread;
+
+  for (thread_index = 1; thread_index < thread_count; thread_index++)
+    mach_port_deallocate (self_task, threads[thread_index]);
+  vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
+  threads = NULL;
+
+  ret = thread_get_state (child_thread, state_flavor, (thread_state_t) &state, &state_count);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_get_state");
+
+#ifdef HAVE_I386
+  dyld_start = (instance->cpu_type == GUM_CPU_AMD64) ? state.uts.ts64.__rip : state.uts.ts32.__eip;
+#else
+  dyld_start = (instance->cpu_type == GUM_CPU_ARM64) ? state.ts_64.__pc : state.ts_32.__pc;
+#endif
+
+  dyld_header = 0;
+  dyld_granularity = 4096;
+  for (dyld_chunk = (dyld_start & (dyld_granularity - 1)) == 0 ? (dyld_start - dyld_granularity) : (dyld_start & ~(dyld_granularity - 1));
+      dyld_header == 0;
+      dyld_chunk -= dyld_granularity)
+  {
+    guint32 * magic;
+
+    magic = (guint32 *) gum_darwin_read (task, dyld_chunk, sizeof (magic), NULL);
+    if (magic == NULL)
+      goto handle_probe_dyld_error;
+
+    if (*magic == MH_MAGIC || *magic == MH_MAGIC_64)
+      dyld_header = dyld_chunk;
+
+    g_free (magic);
+  }
+
+  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header);
+
+  /*
+   * Ideally we'd only run until __ZN4dyld24initializeMainExecutableEv, but for
+   * now we require libc to be initialized.
+   */
+  dyld_init_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZNK16ImageLoaderMachO11getThreadPCEv");
+
+  g_object_unref (dyld);
+
+  if (dyld_init_address == 0)
+    goto handle_probe_dyld_error;
+
+  ret = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_get_debug_state");
+
+  memcpy (&breakpoint_debug_state, &instance->previous_debug_state, sizeof (breakpoint_debug_state));
+  frida_set_hardware_breakpoint (&breakpoint_debug_state, dyld_init_address, instance->cpu_type);
+
+  ret = frida_set_debug_state (child_thread, &breakpoint_debug_state, instance->cpu_type);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_set_debug_state");
+
+  ret = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate server");
+
+  ret = mach_port_insert_right (self_task, instance->server_port, instance->server_port, MACH_MSG_TYPE_MAKE_SEND);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right server");
+
+  previous_ports = &instance->previous_ports;
+  ret = thread_swap_exception_ports (child_thread,
+      EXC_MASK_BREAKPOINT,
+      instance->server_port,
+      EXCEPTION_DEFAULT,
+      state_flavor,
+      previous_ports->masks,
+      &previous_ports->count,
+      previous_ports->ports,
+      previous_ports->behaviors,
+      previous_ports->flavors);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_swap_exception_ports");
+
+  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, instance->server_port, 0, ctx->dispatch_queue);
+  instance->server_recv_source = source;
+  dispatch_set_context (source, instance);
+  dispatch_source_set_event_handler_f (source, frida_spawn_instance_on_server_recv);
+  dispatch_resume (source);
+
+  ret = task_resume (task);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_resume");
+
+  return;
+
+handle_cpu_type_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing CPU type of target process");
+    goto error_epilogue;
+  }
+handle_page_size_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing page size of target process");
+    goto error_epilogue;
+  }
+handle_probe_dyld_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while probing dyld of target process");
+    goto error_epilogue;
+  }
+handle_mach_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while preparing target process for injection (%s returned '%s')",
+        failed_operation, mach_error_string (ret));
+    goto error_epilogue;
+  }
+error_epilogue:
+  {
+    kill (instance->pid, SIGKILL);
+
+    gee_abstract_map_unset (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (instance->pid), NULL);
+    frida_spawn_instance_free (instance);
+
+    return;
+  }
+}
 
 void
 _frida_darwin_helper_backend_resume_spawn_instance (FridaDarwinHelperBackend * self, void * instance)
@@ -917,7 +996,7 @@ _frida_darwin_helper_backend_free_spawn_instance (FridaDarwinHelperBackend * sel
 }
 
 guint
-_frida_darwin_helper_backend_do_inject (FridaDarwinHelperBackend * self, guint pid, guint task, const gchar * path_or_name, FridaMappedLibraryBlob * blob,
+_frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, guint pid, guint task, const gchar * path_or_name, FridaMappedLibraryBlob * blob,
     const gchar * entrypoint, const gchar * data, GError ** error)
 {
   guint result = 0;
@@ -1259,8 +1338,7 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
   FridaSpawnInstance * instance;
 
   instance = g_slice_new0 (FridaSpawnInstance);
-  instance->backend = g_object_ref (backend);
-  instance->task = MACH_PORT_NULL;
+  instance->backend = backend;
   instance->thread = MACH_PORT_NULL;
 
   instance->server_port = MACH_PORT_NULL;
@@ -1268,6 +1346,8 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
 
   instance->pending_request.thread.name = MACH_PORT_NULL;
   instance->pending_request.task.name = MACH_PORT_NULL;
+
+  instance->ready = FALSE;
 
   return instance;
 }
@@ -1307,9 +1387,6 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
-  if (instance->task != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, instance->task);
-  g_object_unref (instance->backend);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -1321,6 +1398,20 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
   __Reply__exception_raise_t response;
   mach_msg_header_t * header;
   kern_return_t ret;
+
+  if (!self->ready)
+  {
+    guint task;
+    GError * error = NULL;
+
+    task = frida_darwin_helper_backend_steal_task_for_remote_pid (self->backend, self->pid, &error);
+    if (error == NULL)
+    {
+      _frida_darwin_helper_backend_resume_process (self->backend, self->pid, task, &error);
+    }
+
+    g_clear_error (&error);
+  }
 
   bzero (&response, sizeof (response));
   header = &response.Head;
@@ -1373,6 +1464,8 @@ frida_spawn_instance_on_server_recv (void * context)
   previous_ports->count = 0;
 
   frida_set_debug_state (self->thread, &self->previous_debug_state, self->cpu_type);
+
+  self->ready = TRUE;
 
   _frida_darwin_helper_backend_on_spawn_instance_ready (self->backend, self->pid);
 }

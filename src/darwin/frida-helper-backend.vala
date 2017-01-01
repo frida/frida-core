@@ -3,7 +3,7 @@ namespace Frida {
 	public class DarwinHelperBackend : Object, DarwinHelper {
 		public signal void idle ();
 		public signal void child_dead (uint pid);
-		public signal void child_ready (uint pid);
+		public signal void spawn_instance_ready (uint pid);
 
 		public uint pid {
 			get {
@@ -49,32 +49,13 @@ namespace Frida {
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			StdioPipes pipes;
-			var child_pid = _do_spawn (path, argv, envp, out pipes);
+			var child_pid = _spawn (path, argv, envp, out pipes);
 
 			ChildWatch.add ((Pid) child_pid, on_child_dead);
 
 			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
 			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
 			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
-
-			string error = null;
-			var death_handler = child_dead.connect ((pid) => {
-				if (pid == child_pid) {
-					error = "Unexpected error while spawning child process '%s' (child process crashed)".printf (path);
-					spawn.callback ();
-				}
-			});
-			var ready_handler = child_ready.connect ((pid) => {
-				if (pid == child_pid) {
-					spawn.callback ();
-				}
-			});
-			yield;
-			disconnect (death_handler);
-			disconnect (ready_handler);
-
-			if (error != null)
-				throw new Error.NOT_SUPPORTED (error);
 
 			return child_pid;
 		}
@@ -107,7 +88,7 @@ namespace Frida {
 		}
 
 		public async void launch (string identifier, string? url) throws Error {
-			_do_launch (identifier, url);
+			_launch (identifier, url);
 		}
 
 		public async void input (uint pid, uint8[] data) throws Error {
@@ -124,31 +105,61 @@ namespace Frida {
 
 		public async void resume (uint pid) throws Error {
 			void * instance;
-			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
-			if (!instance_found)
-				throw new Error.INVALID_ARGUMENT ("Invalid pid");
-			_resume_spawn_instance (instance);
-			_free_spawn_instance (instance);
+			if (spawn_instance_by_pid.unset (pid, out instance)) {
+				_resume_spawn_instance (instance);
+				_free_spawn_instance (instance);
+			} else {
+				_resume_process (pid, steal_task_for_remote_pid (pid));
+			}
 		}
 
 		public async void kill_process (uint pid) throws Error {
-			_do_kill_process (pid);
+			_kill_process (pid);
 		}
 
 		public async void kill_application (string identifier) throws Error {
-			_do_kill_application (identifier);
+			_kill_application (identifier);
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			var task = steal_task_for_remote_pid (pid);
-
-			return _do_inject (pid, task, path, null, entrypoint, data);
+			return yield _inject (pid, path, null, entrypoint, data);
 		}
 
 		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
+			return yield _inject (pid, name, blob, entrypoint, data);
+		}
+
+		private async uint _inject (uint pid, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error {
 			var task = steal_task_for_remote_pid (pid);
 
-			return _do_inject (pid, task, name, blob, entrypoint, data);
+			var spawn_instance = spawn_instance_by_pid[pid];
+			if (spawn_instance == null)
+				spawn_instance = _create_spawn_instance_if_suspended (pid, task);
+			if (spawn_instance != null) {
+				_prepare_spawn_instance_for_injection (spawn_instance, task);
+
+				bool timed_out = false;
+				var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
+					if (ready_pid == pid)
+						_inject.callback ();
+				});
+				var timeout = Timeout.add (10000, () => {
+					timed_out = true;
+					_inject.callback ();
+					return false;
+				});
+
+				yield;
+
+				if (!timed_out)
+					Source.remove (timeout);
+				disconnect (ready_handler);
+
+				if (timed_out)
+					throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
+			}
+
+			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
 		}
 
 		public async IOStream make_pipe_stream (uint remote_pid, out string remote_address) throws Error {
@@ -225,7 +236,7 @@ namespace Frida {
 
 		public void _on_spawn_instance_ready (uint pid) {
 			Idle.add (() => {
-				child_ready (pid);
+				spawn_instance_ready (pid);
 				return false;
 			});
 		}
@@ -278,14 +289,17 @@ namespace Frida {
 		protected extern void _create_context ();
 		protected extern void _destroy_context ();
 
-		protected extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
-		protected extern void _do_launch (string identifier, string? url) throws Error;
-		protected extern void _do_kill_process (uint pid);
-		protected extern void _do_kill_application (string identifier);
+		protected extern uint _spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
+		protected extern void _launch (string identifier, string? url) throws Error;
+		protected extern void _resume_process (uint pid, uint task) throws Error;
+		protected extern void _kill_process (uint pid);
+		protected extern void _kill_application (string identifier);
+		protected extern void * _create_spawn_instance_if_suspended (uint pid, uint task) throws Error;
+		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
 		protected extern void _free_spawn_instance (void * instance);
 
-		protected extern uint _do_inject (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
+		protected extern uint _inject_into_task (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
 		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
 		protected extern bool _is_instance_resident (void * instance);
 		protected extern void _free_inject_instance (void * instance);

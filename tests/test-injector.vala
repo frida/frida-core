@@ -17,6 +17,16 @@ namespace Frida.InjectorTest {
 		});
 
 		GLib.Test.add_func ("/Injector/resource-leaks", test_resource_leaks);
+
+#if DARWIN
+		GLib.Test.add_func ("/Injector/suspended-injection-current-arch", () => {
+			test_suspended_injection (Frida.Test.Arch.CURRENT);
+		});
+
+		GLib.Test.add_func ("/Injector/suspended-injection-other-arch", () => {
+			test_suspended_injection (Frida.Test.Arch.OTHER);
+		});
+#endif
 	}
 
 	private static void test_dynamic_injection (Frida.Test.Arch arch) {
@@ -128,6 +138,27 @@ namespace Frida.InjectorTest {
 		rat.close ();
 	}
 
+#if DARWIN
+	private static void test_suspended_injection (Frida.Test.Arch arch) {
+		var logfile = File.new_for_path (Frida.Test.path_to_temporary_file ("test-suspended-injection.log"));
+		try {
+			logfile.delete ();
+		} catch (GLib.Error delete_error) {
+		}
+		var envp = new string[] {
+			"FRIDA_LABRAT_LOGFILE=" + logfile.get_path ()
+		};
+
+		var rat = new Labrat.suspended ("sleeper", envp, arch);
+
+		rat.inject ("simple-agent", "", arch);
+		rat.wait_for_uninject ();
+		assert (content_of (logfile) == ">m<");
+
+		rat.close ();
+	}
+#endif
+
 	private static string content_of (File file) {
 		try {
 			uint8[] contents;
@@ -158,6 +189,15 @@ namespace Frida.InjectorTest {
 
 			/* TODO: improve injectors to handle injection into a process that hasn't yet finished initializing */
 			Thread.usleep (50000);
+		}
+
+		public Labrat.suspended (string name, string[] envp, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
+			try {
+				process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable (name), null, envp, arch);
+			} catch (Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
 		}
 
 		public void close () {
