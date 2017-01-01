@@ -170,7 +170,10 @@ namespace Frida.InjectorTest {
 		}
 
 		private async void do_close (MainLoop loop) {
-			injector = null;
+			if (injector != null) {
+				yield injector.close ();
+				injector = null;
+			}
 			process = null;
 
 			/* Queue an idle handler, allowing MainContext to perform any outstanding completions, in turn cleaning up resources */
