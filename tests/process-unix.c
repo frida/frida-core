@@ -110,9 +110,9 @@ frida_test_process_backend_self_id (void)
 }
 
 void
-frida_test_process_backend_start (const char * path, gchar ** argv,
+frida_test_process_backend_create (const char * path, gchar ** argv,
     int argv_length, gchar ** envp, int envp_length, FridaTestArch arch,
-    void ** handle, guint * id, GError ** error)
+    gboolean suspended, void ** handle, guint * id, GError ** error)
 {
   const gchar * override = g_getenv ("FRIDA_TARGET_PID");
   if (override != NULL)
@@ -133,7 +133,8 @@ frida_test_process_backend_start (const char * path, gchar ** argv,
     posix_spawnattr_init (&attr);
     sigemptyset (&signal_mask_set);
     posix_spawnattr_setsigmask (&attr, &signal_mask_set);
-    posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK);
+    posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT |
+        (suspended ? POSIX_SPAWN_START_SUSPENDED : 0));
 
 # if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
     pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86 : CPU_TYPE_X86_64;

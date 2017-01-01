@@ -30,9 +30,9 @@ frida_test_process_backend_self_id (void)
 }
 
 void
-frida_test_process_backend_start (const char * path, gchar ** argv,
+frida_test_process_backend_create (const char * path, gchar ** argv,
     int argv_length, gchar ** envp, int envp_length, FridaTestArch arch,
-    void ** handle, guint * id, GError ** error)
+    gboolean suspended, void ** handle, guint * id, GError ** error)
 {
   WCHAR * application_name, * command_line, * environment;
   STARTUPINFOW startup_info = { 0, };
@@ -40,6 +40,7 @@ frida_test_process_backend_start (const char * path, gchar ** argv,
   BOOL success;
 
   (void) arch;
+  (void) suspended;
 
   application_name = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
   command_line = frida_command_line_from_argv (argv, argv_length);

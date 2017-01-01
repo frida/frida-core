@@ -41,7 +41,15 @@ namespace Frida.Test {
 				kill ();
 		}
 
+		public static Process create (string path, string[]? args = null, string[]? env = null, Arch arch = Arch.CURRENT) throws Error {
+			return _create (path, args, env, arch, true);
+		}
+
 		public static Process start (string path, string[]? args = null, string[]? env = null, Arch arch = Arch.CURRENT) throws Error {
+			return _create (path, args, env, arch, false);
+		}
+
+		private static Process _create (string path, string[]? args, string[]? env, Arch arch, bool suspended) throws Error {
 			var argv = new string[1 + ((args != null) ? args.length : 0)];
 			argv[0] = path;
 			if (args != null) {
@@ -53,7 +61,7 @@ namespace Frida.Test {
 
 			void * handle;
 			uint id;
-			ProcessBackend.start (path, argv, envp, arch, out handle, out id);
+			ProcessBackend.create (path, argv, envp, arch, suspended, out handle, out id);
 
 			return new Process (handle, id, true);
 		}
@@ -134,7 +142,7 @@ namespace Frida.Test {
 		private extern void * self_handle ();
 		private extern uint self_id ();
 		private extern string filename_of (void * handle);
-		private extern void start (string path, string[] argv, string[] envp, Arch arch, out void * handle, out uint id) throws Error;
+		private extern void create (string path, string[] argv, string[] envp, Arch arch, bool suspended, out void * handle, out uint id) throws Error;
 		private extern int join (void * handle, uint timeout_msec) throws Error;
 		private extern void kill (void * handle);
 	}
