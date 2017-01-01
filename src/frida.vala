@@ -1735,6 +1735,22 @@ namespace Frida {
 #endif
 		}
 
+		public abstract async void close ();
+
+		public void close_sync () {
+			try {
+				(create<CloseTask> () as CloseTask).start_and_wait_for_completion ();
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		private class CloseTask : InjectorTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.close ();
+			}
+		}
+
 		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error;
 
 		public uint inject_library_file_sync (uint pid, string path, string entrypoint, string data) throws Error {

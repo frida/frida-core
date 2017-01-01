@@ -41,6 +41,9 @@ namespace Frida {
 				_free_instance (instance);
 		}
 
+		public async void close () {
+		}
+
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
 			var id = _do_inject (pid, path, entrypoint, data, resource_store.tempdir.path);
 
