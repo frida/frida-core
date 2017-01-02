@@ -1085,27 +1085,44 @@ namespace Frida.HostSessionTest {
 
 				try {
 					var host_session = yield prov.create ();
+
 					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, new string[] {});
+
 					var id = yield host_session.attach_to (pid);
 					var session = yield prov.obtain_agent_session (host_session, id);
+
+					bool waiting = false;
 					string received_message = null;
 					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 						received_message = message;
-						spawn_ios_app.callback ();
+						if (waiting)
+							spawn_ios_app.callback ();
 					});
+
 					var script_id = yield session.create_script ("spawn-ios-app",
-						"Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), {" +
-						"  onEnter: function (args) {" +
-						"    send('UIApplicationMain');" +
-						"  }" +
+						"Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), function () {" +
+						"  send('UIApplicationMain');" +
 						"});" +
 						"setTimeout(function () { send('ready'); }, 1);");
+
 					yield session.load_script (script_id);
-					yield;
+					if (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
+					received_message = null;
+
 					yield host_session.resume (pid);
-					yield;
+					if (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+
 					session.disconnect (message_handler);
+
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);

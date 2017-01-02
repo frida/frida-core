@@ -17,6 +17,8 @@ namespace Frida {
 			}
 		}
 
+		protected delegate void LaunchCompletionHandler (Error? error);
+
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 		private Gee.HashMap<uint, uint> remote_task_by_pid = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, uint> expiry_timer_by_pid = new Gee.HashMap<uint, uint> ();
@@ -88,7 +90,20 @@ namespace Frida {
 		}
 
 		public async void launch (string identifier, string? url) throws Error {
-			_launch (identifier, url);
+			Error pending_error = null;
+
+			_launch (identifier, url, (error) => {
+				Idle.add (() => {
+					pending_error = error;
+					launch.callback ();
+					return false;
+				});
+			});
+
+			yield;
+
+			if (pending_error != null)
+				throw pending_error;
 		}
 
 		public async void input (uint pid, uint8[] data) throws Error {
@@ -290,7 +305,7 @@ namespace Frida {
 		protected extern void _destroy_context ();
 
 		protected extern uint _spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
-		protected extern void _launch (string identifier, string? url) throws Error;
+		protected extern void _launch (string identifier, string? url, LaunchCompletionHandler on_complete);
 		protected extern void _resume_process (uint pid, uint task) throws Error;
 		protected extern void _kill_process (uint pid);
 		protected extern void _kill_application (string identifier);

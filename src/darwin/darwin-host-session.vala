@@ -217,11 +217,6 @@ namespace Frida {
 		}
 
 		public override async void resume (uint pid) throws Error {
-			if (fruit_launcher != null) {
-				if (yield fruit_launcher.try_resume (pid))
-					return;
-			}
-
 			yield helper.resume (pid);
 		}
 
@@ -249,7 +244,7 @@ namespace Frida {
 
 		private FruitLauncher get_fruit_launcher () {
 			if (fruit_launcher == null) {
-				fruit_launcher = new FruitLauncher (helper, agent);
+				fruit_launcher = new FruitLauncher (this, agent);
 				fruit_launcher.spawned.connect ((info) => { spawned (info); });
 			}
 			return fruit_launcher;
@@ -281,129 +276,48 @@ namespace Frida {
 		private AgentResource agent;
 		protected MainContext main_context;
 
-		private string plugin_directory;
-		private string plist_path;
-		private string dylib_path;
-		protected void * service;
-		private Gee.Promise<bool> service_closed = new Gee.Promise<bool> ();
-		private Gee.Promise<bool> close_request;
-		private Gee.Promise<bool> ensure_request;
-
+		private LaunchdAgent launchd_agent;
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_identifier = new Gee.HashMap<string, Gee.Promise<uint>> ();
-		private Gee.HashMap<uint, Loader> loader_by_pid = new Gee.HashMap<uint, Loader> ();
 
-		internal FruitLauncher (DarwinHelper helper, AgentResource agent) {
-			this.helper = helper;
+		internal FruitLauncher (DarwinHostSession host_session, AgentResource agent) {
+			this.helper = host_session.helper;
 			this.agent = agent;
 			this.main_context = MainContext.ref_thread_default ();
 
-			this.plugin_directory = "/Library/MobileSubstrate/DynamicLibraries";
-			var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
-			this.plist_path = Path.build_filename (this.plugin_directory, dylib_blob.name.split (".", 2)[0] + ".plist");
-			this.dylib_path = Path.build_filename (this.plugin_directory, dylib_blob.name);
-
-			open_xpc_service ();
+			this.launchd_agent = new LaunchdAgent (host_session);
+			this.launchd_agent.app_launch_completed.connect (on_app_launch_completed);
 		}
 
-		public override void dispose () {
-			if (close_request == null)
-				close.begin ();
-			else if (close_request.future.ready)
-				base.dispose ();
-		}
-
-		private void check_open () throws Error {
-			if (close_request != null)
-				throw new Error.INVALID_OPERATION ("XPC server is closed; is frida-server running outside launchd?");
+		~FruitLauncher () {
+			this.launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 		}
 
 		public async void close () {
-			if (close_request != null) {
-				try {
-					yield close_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					assert_not_reached ();
-				}
-				return;
-			}
-			close_request = new Gee.Promise<bool> ();
-
-			close_xpc_service ();
-
-			try {
-				yield service_closed.future.wait_async ();
-			} catch (Gee.FutureError e) {
-				assert_not_reached ();
-			}
-
-			foreach (var loader in loader_by_pid.values)
-				yield loader.close ();
-			loader_by_pid.clear ();
-
-			foreach (var request in spawn_request_by_identifier.values)
-				request.set_exception (new Error.INVALID_OPERATION ("XPC server is closed; is frida-server running outside launchd?"));
-			spawn_request_by_identifier.clear ();
-
-			FileUtils.unlink (plist_path);
-			FileUtils.unlink (dylib_path);
-
-			agent = null;
-
-			close_request.set_value (true);
-		}
-
-		protected void on_service_closed () {
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				service_closed.set_value (true);
-
-				if (close_request == null)
-					close.begin ();
-
-				return false;
-			});
-			source.attach (main_context);
+			yield launchd_agent.close ();
 		}
 
 		public async void enable_spawn_gating () throws Error {
-			check_open ();
-
-			yield ensure_loader_deployed ();
 			spawn_gating_enabled = true;
 		}
 
 		public async void disable_spawn_gating () throws Error {
-			check_open ();
-
 			spawn_gating_enabled = false;
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			check_open ();
-
 			var result = new HostSpawnInfo[0];
-			var i = 0;
-			foreach (var loader in loader_by_pid.values) {
-				var info = loader.spawn_info;
-				if (info != null) {
-					result.resize (i + 1);
-					result[i++] = info;
-				}
-			}
 			return result;
 		}
 
 		public async uint spawn (string identifier, string? url) throws Error {
-			check_open ();
-
-			yield ensure_loader_deployed ();
-
 			if (spawn_request_by_identifier.has_key (identifier))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified identifier");
 
 			var request = new Gee.Promise<uint> ();
 			spawn_request_by_identifier[identifier] = request;
+
+			yield launchd_agent.prepare_for_launch (identifier);
 
 			try {
 				yield helper.kill_application (identifier);
@@ -413,7 +327,7 @@ namespace Frida {
 				throw e;
 			}
 
-			var timeout = new TimeoutSource.seconds (10);
+			var timeout = new TimeoutSource.seconds (20);
 			timeout.set_callback (() => {
 				spawn_request_by_identifier.unset (identifier);
 				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
@@ -433,260 +347,288 @@ namespace Frida {
 			}
 		}
 
-		public async bool try_resume (uint pid) throws Error {
-			Loader loader;
-			if (!loader_by_pid.unset (pid, out loader))
-				return false;
+		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
+			Gee.Promise<uint> request;
+			if (spawn_request_by_identifier.unset (identifier, out request)) {
+				if (error == null)
+					request.set_value (pid);
+				else
+					request.set_exception (error);
+			}
+		}
+	}
 
-			check_open ();
+	private class LaunchdAgent : DarwinAgent {
+		public signal void app_launch_completed (string identifier, uint pid, Error? error);
 
-			yield loader.resume ();
-			return true;
+		public LaunchdAgent (DarwinHostSession host_session) {
+			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
+			Object (host_session: host_session, target_pid: 1, script_source: source);
 		}
 
-		private async void ensure_loader_deployed () throws Error {
+		public async void prepare_for_launch (string identifier) throws Error {
+			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) });
+		}
+
+		protected override void on_event (string type, Json.Array event) {
+			assert (type == "launch:app");
+			var identifier = event.get_string_element (1);
+			var pid = (uint) event.get_int_element (2);
+
+			launch_app.begin (identifier, pid);
+		}
+
+		private async void launch_app (string identifier, uint pid) {
+			try {
+				var agent = new AppLaunchAgent (host_session, identifier, pid);
+				yield agent.run_to_entrypoint ();
+				app_launch_completed (identifier, pid, null);
+			} catch (Error e) {
+				app_launch_completed (identifier, pid, e);
+			}
+		}
+	}
+
+	private class AppLaunchAgent : DarwinAgent {
+		public string identifier {
+			get;
+			construct;
+		}
+
+		public AppLaunchAgent (DarwinHostSession host_session, string identifier, uint pid) {
+			string * source = Frida.Data.Darwin.get_app_launch_js_blob ().data;
+			Object (host_session: host_session, identifier: identifier, target_pid: pid, script_source: source);
+		}
+
+		public async void run_to_entrypoint () throws Error {
+			yield ensure_loaded ();
+			yield host_session.helper.resume (target_pid);
+			yield wait_for_unload ();
+		}
+	}
+
+	private class DarwinAgent : Object {
+		public DarwinHostSession host_session {
+			get;
+			construct;
+		}
+
+		public uint target_pid {
+			get;
+			construct;
+		}
+
+		public string script_source {
+			get;
+			construct;
+		}
+
+		protected MainContext main_context;
+		private Gee.Promise<bool> ensure_request;
+		private Gee.Promise<bool> unloaded;
+
+		private AgentSession session;
+		private AgentScriptId script;
+
+		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
+		private int64 next_request_id = 1;
+
+		construct {
+			main_context = MainContext.ref_thread_default ();
+
+			host_session.agent_session_closed.connect (on_agent_session_closed);
+
+			unloaded = new Gee.Promise<bool> ();
+		}
+
+		~DarwinAgent () {
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+		}
+
+		public async void close () {
+			if (ensure_request != null) {
+				try {
+					yield ensure_loaded ();
+				} catch (Error e) {
+				}
+			}
+
+			if (script.handle != 0) {
+				try {
+					yield session.destroy_script (script);
+				} catch (GLib.Error e) {
+				}
+				script = AgentScriptId (0);
+			}
+
+			if (session != null) {
+				try {
+					yield session.close ();
+				} catch (GLib.Error e) {
+				}
+				session = null;
+			}
+		}
+
+		protected virtual void on_event (string type, Json.Array event) {
+		}
+
+		protected async Json.Node call (string method, Json.Node[] args) throws Error {
+			yield ensure_loaded ();
+
+			var request_id = next_request_id++;
+
+			var builder = new Json.Builder ();
+			builder
+			.begin_array ()
+			.add_string_value ("frida:rpc")
+			.add_int_value (request_id)
+			.add_string_value ("call")
+			.add_string_value (method)
+			.begin_array ();
+			foreach (var arg in args)
+				builder.add_value (arg);
+			builder
+			.end_array ()
+			.end_array ();
+
+			var generator = new Json.Generator ();
+			generator.set_root (builder.get_root ());
+			size_t length;
+			var request = generator.to_data (out length);
+
+			var response = new PendingResponse (() => call.callback ());
+			pending[request_id.to_string ()] = response;
+
+			post_call_request.begin (request, response, session, script);
+
+			yield;
+
+			if (response.error != null)
+				throw response.error;
+
+			return response.result;
+		}
+
+		private async void post_call_request (string request, PendingResponse response, AgentSession session, AgentScriptId script) {
+			try {
+				yield session.post_to_script (script, request, false, new uint8[0]);
+			} catch (GLib.Error e) {
+				response.complete_with_error (Marshal.from_dbus (e));
+			}
+		}
+
+		protected async void ensure_loaded () throws Error {
 			if (ensure_request != null) {
 				var future = ensure_request.future;
 				try {
 					yield future.wait_async ();
-					return;
 				} catch (Gee.FutureError e) {
 					throw (Error) future.exception;
 				}
+				return;
 			}
 			ensure_request = new Gee.Promise<bool> ();
 
 			try {
-				if (!FileUtils.test (plugin_directory, FileTest.IS_DIR))
-					throw new Error.NOT_SUPPORTED ("Cydia Substrate is required for launching iOS apps");
+				var id = yield host_session.attach_to (target_pid);
+				session = yield host_session.obtain_agent_session (id);
 
-				yield helper.preload ();
-
-				var dylib_blob = Frida.Data.Loader.get_fridaloader_dylib_blob ();
-				try {
-					FileUtils.set_data (plist_path, generate_loader_plist ());
-					FileUtils.chmod (plist_path, 0644);
-					FileUtils.set_data (dylib_path, dylib_blob.data);
-					FileUtils.chmod (dylib_path, 0755);
-				} catch (GLib.FileError e) {
-					throw new Error.NOT_SUPPORTED ("Failed to write loader: " + e.message);
-				}
+				script = yield session.create_script ("darwin-agent", script_source);
+				session.message_from_script.connect (on_message_from_script);
+				yield session.load_script (script);
 
 				ensure_request.set_value (true);
-			} catch (Error ensure_error) {
-				ensure_request.set_exception (ensure_error);
+			} catch (GLib.Error raw_error) {
+				script = AgentScriptId (0);
+
+				if (session != null) {
+					session.message_from_script.disconnect (on_message_from_script);
+					session = null;
+				}
+
+				var error = Marshal.from_dbus (raw_error);
+				ensure_request.set_exception (error);
 				ensure_request = null;
 
-				throw ensure_error;
+				throw error;
 			}
 		}
 
-		private uint8[] generate_loader_plist () {
-			/*
-			 * {
-			 *   "Filter": {
-			 *     "Bundles": ["com.apple.UIKit"]
-			 *   }
-			 * }
-			 */
-			return new uint8[] {
-				0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0xd1, 0x01, 0x02, 0x56, 0x46, 0x69, 0x6c, 0x74,
-				0x65, 0x72, 0xd1, 0x03, 0x04, 0x57, 0x42, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x73, 0xa1, 0x05, 0x5f,
-				0x10, 0x0f, 0x63, 0x6f, 0x6d, 0x2e, 0x61, 0x70, 0x70, 0x6c, 0x65, 0x2e, 0x55, 0x49, 0x4b, 0x69,
-				0x74, 0x08, 0x0b, 0x12, 0x15, 0x1d, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00,
-				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x31
-			};
-		}
-
-		protected void on_incoming_connection (Loader loader) {
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				perform_handshake.begin (loader);
-				return false;
-			});
-			source.attach (main_context);
-		}
-
-		private async void perform_handshake (Loader loader) {
+		protected async void wait_for_unload () {
 			try {
-				var details = yield loader.recv_string ();
-				var tokens = details.split (":", 2);
-				if (tokens.length == 2) {
-					var pid = (uint) uint64.parse (tokens[0]);
-					var identifier = tokens[1];
-
-					loader.pid = pid;
-					loader.identifier = identifier;
-
-					loader.check_open ();
-
-					loader_by_pid[pid] = loader;
-					loader.closed.connect (on_loader_closed);
-
-					Gee.Promise<uint> request;
-					if (spawn_request_by_identifier.unset (loader.identifier, out request)) {
-						request.set_value (pid);
-						return;
-					}
-
-					if (spawn_gating_enabled) {
-						var info = HostSpawnInfo (pid, identifier);
-						loader.spawn_info = info;
-						spawned (info);
-						return;
-					}
-
-					loader.closed.disconnect (on_loader_closed);
-					loader_by_pid.unset (pid);
-				}
-
-				yield loader.close ();
-			} catch (Error e) {
+				yield unloaded.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
 			}
 		}
 
-		private void on_loader_closed (Loader loader) {
-			loader_by_pid.unset (loader.pid);
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
+			if (session != this.session)
+				return;
+
+			unloaded.set_value (true);
 		}
 
-		protected extern void open_xpc_service ();
-		protected extern void close_xpc_service ();
+		private void on_message_from_script (AgentScriptId sid, string raw_message, bool has_data, uint8[] data) {
+			if (sid != script)
+				return;
 
-		protected class Loader : Object {
-			public signal void closed (Loader loader);
+			var parser = new Json.Parser ();
+			try {
+				parser.load_from_data (raw_message);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			var message = parser.get_root ().get_object ();
+			var type = message.get_string_member ("type");
+			if (type == "send") {
+				var event = message.get_array_member ("payload");
+				var event_type = event.get_string_element (0);
+				if (event_type == "frida:rpc") {
+					var request_id = event.get_int_element (1);
+					PendingResponse response;
+					pending.unset (request_id.to_string (), out response);
+					var status = event.get_string_element (2);
+					if (status == "ok")
+						response.complete_with_result (event.get_element (3));
+					else
+						response.complete_with_error (new Error.NOT_SUPPORTED (event.get_string_element (3)));
+				} else {
+					on_event (event_type, event);
+				}
+			} else {
+				stderr.printf ("%s\n", raw_message);
+			}
+		}
 
-			protected void * connection;
-			private Gee.Promise<bool> connection_closed = new Gee.Promise<bool> ();
-			private Gee.Promise<bool> close_request;
+		private class PendingResponse {
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
 
-			private MainContext main_context;
-			private Gee.LinkedList<string> pending_messages = new Gee.LinkedList<string> ();
-			private Gee.LinkedList<Gee.Promise<string>> pending_requests = new Gee.LinkedList<Gee.Promise<string>> ();
-
-			public uint pid {
+			public Json.Node? result {
 				get;
-				set;
+				private set;
 			}
 
-			public string identifier {
+			public Error? error {
 				get;
-				set;
+				private set;
 			}
 
-			public HostSpawnInfo? spawn_info {
-				get;
-				set;
+			public PendingResponse (owned CompletionHandler handler) {
+				this.handler = (owned) handler;
 			}
 
-			public Loader (void * connection, MainContext main_context) {
-				this.connection = connection;
-				this.main_context = main_context;
+			public void complete_with_result (Json.Node r) {
+				result = r;
+				handler ();
 			}
 
-			public override void dispose () {
-				if (close_request == null)
-					close.begin ();
-				else if (close_request.future.ready)
-					base.dispose ();
+			public void complete_with_error (Error e) {
+				error = e;
+				handler ();
 			}
-
-			public void check_open () throws Error {
-				if (close_request != null)
-					throw new Error.INVALID_OPERATION ("Connection is closed");
-			}
-
-			public async void close () {
-				if (close_request != null) {
-					try {
-						yield close_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
-						assert_not_reached ();
-					}
-					return;
-				}
-				close_request = new Gee.Promise<bool> ();
-
-				close_connection ();
-
-				try {
-					yield connection_closed.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					assert_not_reached ();
-				}
-
-				while (!pending_requests.is_empty) {
-					var request = pending_requests.poll ();
-					request.set_exception (new Error.INVALID_OPERATION ("Connection closed"));
-				}
-
-				closed (this);
-
-				close_request.set_value (true);
-			}
-
-			protected void on_connection_closed () {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					connection_closed.set_value (true);
-
-					if (close_request == null)
-						close.begin ();
-
-					return false;
-				});
-				source.attach (main_context);
-			}
-
-			public async void resume () throws Error {
-				send_string ("go");
-			}
-
-			public async string recv_string () throws Error {
-				check_open ();
-
-				var payload = pending_messages.poll ();
-				if (payload == null) {
-					var request = new Gee.Promise<string> ();
-
-					pending_requests.offer (request);
-
-					var future = request.future;
-					try {
-						return yield future.wait_async ();
-					} catch (Gee.FutureError e) {
-						throw (Error) future.exception;
-					}
-				}
-
-				return payload;
-			}
-
-			public void send_string (string str) throws Error {
-				check_open ();
-
-				send_string_to_connection (str);
-			}
-
-			protected void on_message (string payload) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					handle_message (payload);
-					return false;
-				});
-				source.attach (main_context);
-			}
-
-			private void handle_message (string payload) {
-				var request = pending_requests.poll ();
-				if (request != null)
-					request.set_value (payload);
-				else
-					pending_messages.offer (payload);
-			}
-
-			protected extern void close_connection ();
-			protected extern void send_string_to_connection (string str);
 		}
 	}
 }

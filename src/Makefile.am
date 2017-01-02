@@ -172,8 +172,6 @@ endif
 
 if OS_DARWIN
 HELPER = frida-helper
-LOADER ?= $(top_builddir)/lib/loader/.libs/libfrida-loader.dylib!FridaLoader.dylib
-LOADER_TARGETS = $(shell echo $(LOADER) | cut -f1 -d'!')
 AGENT ?= $(top_builddir)/lib/agent/.libs/libfrida-agent.dylib!frida-agent.dylib
 AGENT_TARGETS = $(shell echo $(AGENT) | cut -f1 -d'!')
 
@@ -189,16 +187,14 @@ backend_sources += \
 	darwin/fruitjector.vala \
 	darwin/frida-helper-process.vala
 backend_data += \
-	libfrida-data-helper-process.la \
-	libfrida-data-loader.la
+	libfrida-data-helper-process.la
 backend_libadd += \
 	libfrida-core-darwin.la \
 	libfrida-helper-backend.la
 backend_valaflags += \
 	--pkg=frida-helper-backend \
 	--pkg=frida-helper-types \
-	--pkg=frida-data-helper-process \
-	--pkg=frida-data-loader
+	--pkg=frida-data-helper-process
 
 backend_libraries += \
 	libfrida-core-darwin.la
@@ -324,17 +320,26 @@ backend_cleanfiles += \
 	frida-data-helper-process-blob.S
 
 backend_libraries += \
-	libfrida-data-loader.la
-libfrida_data_loader_la_SOURCES = \
-	frida-data-loader.c \
-	frida-data-loader-blob.S \
+	libfrida-data-darwin.la
+backend_data += \
+	libfrida-data-darwin.la
+backend_valaflags += \
+	--pkg=frida-data-darwin
+libfrida_data_darwin_la_SOURCES = \
+	frida-data-darwin.c \
+	frida-data-darwin-blob.S \
 	$(NULL)
-frida-data-loader.c frida-data-loader-blob.S: $(LOADER_TARGETS)
+frida-data-darwin.c frida-data-darwin-blob.S: darwin/agent/launchd.js darwin/agent/app-launch.js
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
-			-c "$(srcdir)/loader.resources" \
-			-o "$(builddir)/frida-data-loader" \
-			$(LOADER)
+			-c "$(srcdir)/darwin/frida-darwin.resources" \
+			-o "$(builddir)/frida-data-darwin" \
+			$^
+backend_cleanfiles += \
+	frida-data-darwin.vapi \
+	frida-data-darwin.h \
+	frida-data-darwin.c \
+	frida-data-darwin-blob.S
 endif
 
 if OS_QNX
