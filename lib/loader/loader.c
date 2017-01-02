@@ -1,4 +1,4 @@
-#if defined (HAVE_IOS) || defined (HAVE_ANDROID)
+#ifdef HAVE_ANDROID
 
 #include "channel.h"
 
@@ -17,136 +17,9 @@
 typedef void (* FridaAgentMainFunc) (const char * data, unsigned int * stay_resident, void * mapped_range);
 
 static void frida_loader_connect (const char * details);
-#ifdef HAVE_ANDROID
 static void * frida_loader_run (void * user_data);
-#endif
 
 static char frida_data_dir[256] = FRIDA_LOADER_DATA_DIR_MAGIC;
-
-#ifdef HAVE_IOS
-
-#include <float.h>
-
-#define kFridaCFStringEncodingUTF8 0x08000100
-
-typedef struct _FridaWaitForPermissionToResumeContext FridaWaitForPermissionToResumeContext;
-
-#if __LLP64__
-typedef unsigned long long FridaCFOptionFlags;
-typedef signed long long FridaCFIndex;
-#else
-typedef unsigned long FridaCFOptionFlags;
-typedef signed long FridaCFIndex;
-#endif
-typedef void * FridaCFRef;
-typedef uint32_t FridaCFStringEncoding;
-typedef unsigned char FridaCFBoolean;
-typedef double FridaCFAbsoluteTime;
-typedef double FridaCFTimeInterval;
-typedef struct _FridaCFRunLoopTimerContext FridaCFRunLoopTimerContext;
-
-typedef FridaCFRef (* FridaCFBundleGetMainBundleFunc) (void);
-typedef FridaCFRef (* FridaCFBundleGetIdentifierFunc) (FridaCFRef bundle);
-typedef FridaCFIndex (* FridaCFStringGetLengthFunc) (FridaCFRef str);
-typedef FridaCFIndex (* FridaCFStringGetMaximumSizeForEncodingFunc) (FridaCFIndex length, FridaCFStringEncoding encoding);
-typedef FridaCFBoolean (* FridaCFStringGetCString) (FridaCFRef str, char * buffer, FridaCFIndex buffer_size, FridaCFStringEncoding encoding);
-typedef void (* FridaCFRunLoopTimerCallBack) (FridaCFRef timer, void * info);
-typedef FridaCFRef (* FridaCFRunLoopTimerCreateFunc) (FridaCFRef allocator, FridaCFAbsoluteTime fire_date, FridaCFTimeInterval interval, FridaCFOptionFlags flags, FridaCFIndex order, FridaCFRunLoopTimerCallBack callout, FridaCFRunLoopTimerContext * context);
-typedef FridaCFRef (* FridaCFRunLoopGetMainFunc) (void);
-typedef void (* FridaCFRunLoopAddTimerFunc) (FridaCFRef loop, FridaCFRef timer, FridaCFRef mode);
-typedef void (* FridaCFRunLoopRunFunc) (void);
-typedef void (* FridaCFRunLoopStopFunc) (FridaCFRef loop);
-typedef void (* FridaCFRunLoopTimerInvalidateFunc) (FridaCFRef timer);
-typedef void (* FridaCFReleaseFunc) (FridaCFRef cf);
-
-struct _FridaWaitForPermissionToResumeContext
-{
-  FridaChannel * channel;
-  FridaCFRef loop;
-
-  FridaCFRunLoopStopFunc cf_run_loop_stop;
-};
-
-#define FRIDA_AGENT_FILENAME "frida-agent.dylib"
-
-__attribute__ ((constructor)) static void
-frida_loader_on_load (void)
-{
-  char * identifier = NULL, * details;
-  FridaCFBundleGetMainBundleFunc cf_bundle_get_main_bundle;
-
-  cf_bundle_get_main_bundle = dlsym (RTLD_DEFAULT, "CFBundleGetMainBundle");
-  if (cf_bundle_get_main_bundle != NULL)
-  {
-    FridaCFBundleGetIdentifierFunc cf_bundle_get_identifier;
-    FridaCFStringGetLengthFunc cf_string_get_length;
-    FridaCFStringGetMaximumSizeForEncodingFunc cf_string_get_maximum_size_for_encoding;
-    FridaCFStringGetCString cf_string_get_c_string;
-    FridaCFRef main_bundle;
-
-    cf_bundle_get_identifier = dlsym (RTLD_DEFAULT, "CFBundleGetIdentifier");
-    assert (cf_bundle_get_identifier != NULL);
-
-    cf_string_get_length = dlsym (RTLD_DEFAULT, "CFStringGetLength");
-    assert (cf_string_get_length != NULL);
-
-    cf_string_get_maximum_size_for_encoding = dlsym (RTLD_DEFAULT, "CFStringGetMaximumSizeForEncoding");
-    assert (cf_string_get_maximum_size_for_encoding != NULL);
-
-    cf_string_get_c_string = dlsym (RTLD_DEFAULT, "CFStringGetCString");
-    assert (cf_string_get_c_string != NULL);
-
-    main_bundle = cf_bundle_get_main_bundle ();
-    if (main_bundle != NULL)
-    {
-      FridaCFRef main_identifier;
-
-      main_identifier = cf_bundle_get_identifier (main_bundle);
-      if (main_identifier != NULL)
-      {
-        FridaCFIndex length, size;
-
-        length = cf_string_get_length (main_identifier);
-        size = cf_string_get_maximum_size_for_encoding (length, kFridaCFStringEncodingUTF8);
-        identifier = calloc (1, size + 1);
-        cf_string_get_c_string (main_identifier, identifier, size, kFridaCFStringEncodingUTF8);
-      }
-    }
-  }
-
-  asprintf (&details, "%d:%s", getpid (), (identifier != NULL) ? identifier : "");
-
-  frida_loader_connect (details);
-
-  free (details);
-  if (identifier != NULL)
-    free (identifier);
-}
-
-static void *
-frida_loader_wait_for_permission_to_resume (void * user_data)
-{
-  FridaWaitForPermissionToResumeContext * original_ctx = user_data;
-  FridaWaitForPermissionToResumeContext ctx;
-  char * permission_to_resume;
-
-  ctx = *original_ctx;
-
-  permission_to_resume = frida_channel_recv_string (ctx.channel);
-  if (permission_to_resume != NULL)
-    free (permission_to_resume);
-
-  ctx.cf_run_loop_stop (ctx.loop);
-
-  return NULL;
-}
-
-static void
-on_keep_alive_timer_fire (FridaCFRef timer, void * info)
-{
-}
-
-#else
 
 #include <gum/gum.h>
 #include <jni.h>
@@ -483,13 +356,11 @@ frida_zygote_monitor_init (FridaZygoteMonitor * self)
   self->state = FRIDA_ZYGOTE_MONITOR_PARENT_AWAITING_FORK;
 }
 
-#endif
-
 static void
 frida_loader_connect (const char * identifier)
 {
   FridaChannel * channel;
-  char * permission_to_resume;
+  char * pipe_address, * permission_to_resume;
   pthread_t thread;
 
   channel = frida_channel_open (frida_data_dir);
@@ -499,90 +370,21 @@ frida_loader_connect (const char * identifier)
   if (!frida_channel_send_string (channel, identifier))
     goto beach;
 
-#ifdef HAVE_ANDROID
-  {
-    char * pipe_address;
+  pipe_address = frida_channel_recv_string (channel);
+  if (pipe_address == NULL)
+    goto beach;
 
-    pipe_address = frida_channel_recv_string (channel);
-    if (pipe_address == NULL)
-      goto beach;
+  pthread_create (&thread, NULL, frida_loader_run, pipe_address);
+  pthread_detach (thread);
 
-    pthread_create (&thread, NULL, frida_loader_run, pipe_address);
-    pthread_detach (thread);
-  }
-#endif
-
-#ifdef HAVE_IOS
-  {
-    FridaCFRunLoopTimerCreateFunc cf_run_loop_timer_create;
-
-    cf_run_loop_timer_create = dlsym (RTLD_DEFAULT, "CFRunLoopTimerCreate");
-    if (cf_run_loop_timer_create != NULL)
-    {
-      FridaCFRunLoopGetMainFunc cf_run_loop_get_main;
-      FridaCFRef * cf_run_loop_common_modes;
-      FridaCFRunLoopAddTimerFunc cf_run_loop_add_timer;
-      FridaCFRunLoopRunFunc cf_run_loop_run;
-      FridaWaitForPermissionToResumeContext ctx;
-      FridaCFRef timer;
-      FridaCFAbsoluteTime distant_future;
-      FridaCFRunLoopTimerInvalidateFunc cf_run_loop_timer_invalidate;
-      FridaCFReleaseFunc cf_release;
-
-      cf_run_loop_get_main = dlsym (RTLD_DEFAULT, "CFRunLoopGetMain");
-      assert (cf_run_loop_get_main != NULL);
-
-      cf_run_loop_common_modes = dlsym (RTLD_DEFAULT, "kCFRunLoopCommonModes");
-      assert (cf_run_loop_common_modes != NULL);
-
-      cf_run_loop_add_timer = dlsym (RTLD_DEFAULT, "CFRunLoopAddTimer");
-      assert (cf_run_loop_add_timer != NULL);
-
-      cf_run_loop_run = dlsym (RTLD_DEFAULT, "CFRunLoopRun");
-      assert (cf_run_loop_run != NULL);
-
-      ctx.cf_run_loop_stop = dlsym (RTLD_DEFAULT, "CFRunLoopStop");
-      assert (ctx.cf_run_loop_stop != NULL);
-
-      cf_run_loop_timer_invalidate = dlsym (RTLD_DEFAULT, "CFRunLoopTimerInvalidate");
-      assert (cf_run_loop_timer_invalidate != NULL);
-
-      cf_release = dlsym (RTLD_DEFAULT, "CFRelease");
-      assert (cf_release != NULL);
-
-      ctx.channel = channel;
-      ctx.loop = cf_run_loop_get_main ();
-      distant_future = DBL_MAX;
-      timer = cf_run_loop_timer_create (NULL, distant_future, 0, 0, 0, on_keep_alive_timer_fire, NULL);
-      cf_run_loop_add_timer (ctx.loop, timer, *cf_run_loop_common_modes);
-
-      pthread_create (&thread, NULL, frida_loader_wait_for_permission_to_resume, &ctx);
-      pthread_detach (thread);
-
-      cf_run_loop_run ();
-
-      cf_run_loop_timer_invalidate (timer);
-      cf_release (timer);
-    }
-    else
-    {
-      permission_to_resume = frida_channel_recv_string (channel);
-      if (permission_to_resume != NULL)
-        free (permission_to_resume);
-    }
-  }
-#else
   permission_to_resume = frida_channel_recv_string (channel);
   if (permission_to_resume != NULL)
     free (permission_to_resume);
-#endif
 
 beach:
   if (channel != NULL)
     frida_channel_close (channel);
 }
-
-#ifdef HAVE_ANDROID
 
 static void *
 frida_loader_run (void * user_data)
@@ -616,7 +418,5 @@ beach:
 
   return NULL;
 }
-
-#endif
 
 #endif

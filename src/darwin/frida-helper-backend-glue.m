@@ -540,46 +540,58 @@ error_epilogue:
 static void frida_kill_application (NSString * identifier);
 
 void
-_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
+_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
-  NSAutoreleasePool * pool;
   FridaSpringboardApi * api;
+  NSAutoreleasePool * pool;
+  NSString * identifier_value;
+  NSURL * url_value;
   NSDictionary * params, * options;
-  UInt32 res;
-
-  pool = [[NSAutoreleasePool alloc] init];
 
   api = _frida_get_springboard_api ();
 
-  params = [NSDictionary dictionary];
+  pool = [[NSAutoreleasePool alloc] init];
 
+  identifier_value = [NSString stringWithUTF8String:identifier];
+  url_value = (url != NULL) ? [NSURL URLWithString:[NSString stringWithUTF8String:url]] : nil;
+  params = [NSDictionary dictionary];
   options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
-  if (url != NULL)
-  {
-    res = api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions (
-        [NSString stringWithUTF8String:identifier],
-        [NSURL URLWithString:[NSString stringWithUTF8String:url]],
-        params,
-        options,
-        NO);
-  }
-  else
-  {
-    res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
-        [NSString stringWithUTF8String:identifier],
-        options,
-        NO);
-  }
+  dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    UInt32 res;
+    GError * error = NULL;
 
-  if (res != 0)
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unable to launch iOS app: %s",
-        [api->SBSApplicationLaunchingErrorString (res) UTF8String]);
-  }
+    if (url_value != nil)
+    {
+      res = api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions (
+          identifier_value,
+          url_value,
+          params,
+          options,
+          NO);
+    }
+    else
+    {
+      res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
+          identifier_value,
+          options,
+          NO);
+    }
+
+    if (res != 0)
+    {
+      error = g_error_new (
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unable to launch iOS app: %s",
+          [api->SBSApplicationLaunchingErrorString (res) UTF8String]);
+    }
+
+    on_complete (error, on_complete_target);
+
+    g_clear_error (&error);
+  });
 
   [pool release];
 }
@@ -703,12 +715,21 @@ frida_kill_application (NSString * identifier)
 #else
 
 void
-_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url, GError ** error)
+_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
-  g_set_error (error,
-      FRIDA_ERROR,
-      FRIDA_ERROR_NOT_SUPPORTED,
-      "Not yet able to launch apps on Mac");
+  dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    GError * error;
+
+    error = g_error_new (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Not yet able to launch apps on Mac");
+
+    on_complete (error, on_complete_target);
+
+    g_error_free (error);
+  });
 }
 
 void
