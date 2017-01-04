@@ -223,12 +223,11 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   mach_port_t local_tx = MACH_PORT_NULL;
   mach_port_t remote_rx = MACH_PORT_NULL;
   mach_port_t remote_tx = MACH_PORT_NULL;
-  mach_port_t tx = MACH_PORT_NULL;
+  mach_msg_type_name_t acquired_type;
+  mach_msg_header_t init;
+  gchar * local_address, * remote_address;
   kern_return_t ret;
   const gchar * failed_operation;
-  mach_msg_type_name_t acquired_type;
-  guint offset;
-  gchar * local_address, * remote_address;
 
   self_task = mach_task_self ();
 
@@ -241,54 +240,41 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   ret = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
 
-  ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right local_tx");
+  ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right local_rx");
+
+  ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right remote_rx");
+
+  init.msgh_size = sizeof (init);
+  init.msgh_reserved = 0;
+  init.msgh_id = 3;
+
   if (local_task != self_task)
   {
-    offset = 1;
-    do
-    {
-      local_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (local_rx) + offset, MACH_PORT_GEN (local_rx));
-      ret = mach_port_insert_right (local_task, local_tx, tx, MACH_MSG_TYPE_COPY_SEND);
-      offset++;
-    }
-    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
-    if (ret != KERN_SUCCESS)
-      local_tx = MACH_PORT_NULL;
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right local_tx");
-    mach_port_deallocate (self_task, tx);
+    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_COPY_SEND);
+    init.msgh_remote_port = local_tx;
+    init.msgh_local_port = remote_tx;
+    ret = mach_msg_send (&init);
+    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_msg_send local_tx");
+
+    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
   }
   else
   {
-    local_tx = tx;
+    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MOVE_SEND);
   }
-  tx = MACH_PORT_NULL;
 
-  ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right remote_tx");
-  if (remote_task != self_task)
-  {
-    offset = 1;
-    do
-    {
-      remote_tx = MACH_PORT_MAKE (MACH_PORT_INDEX (remote_rx) + offset, MACH_PORT_GEN (remote_rx));
-      ret = mach_port_insert_right (remote_task, remote_tx, tx, MACH_MSG_TYPE_COPY_SEND);
-      offset++;
-    }
-    while (ret == KERN_NAME_EXISTS || ret == KERN_FAILURE);
-    if (ret != KERN_SUCCESS)
-      remote_tx = MACH_PORT_NULL;
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right remote_tx");
-    mach_port_deallocate (self_task, tx);
-  }
+  init.msgh_remote_port = remote_tx;
+  init.msgh_local_port = local_tx;
+  ret = mach_msg_send (&init);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_msg_send remote_tx");
+
+  if (local_task != self_task)
+    local_address = g_strdup_printf ("pipe:rx=%d", local_rx);
   else
-  {
-    remote_tx = tx;
-  }
-  tx = MACH_PORT_NULL;
-
-  local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
-  remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
+    local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, remote_tx);
+  remote_address = g_strdup_printf ("pipe:rx=%d", remote_rx);
   frida_pipe_endpoints_init (result, local_address, remote_address);
   g_free (remote_address);
   g_free (local_address);
@@ -303,12 +289,10 @@ handle_mach_error:
         "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
         remote_pid, failed_operation, mach_error_string (ret));
 
-    if (tx != MACH_PORT_NULL)
-      mach_port_deallocate (self_task, tx);
     if (remote_tx != MACH_PORT_NULL)
-      mach_port_deallocate (remote_task, remote_tx);
+      mach_port_deallocate (self_task, remote_tx);
     if (local_tx != MACH_PORT_NULL)
-      mach_port_deallocate (local_task, local_tx);
+      mach_port_deallocate (self_task, local_tx);
     if (remote_rx != MACH_PORT_NULL)
       mach_port_mod_refs (remote_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
     if (local_rx != MACH_PORT_NULL)

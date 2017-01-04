@@ -20,6 +20,7 @@
   }
 
 typedef struct _FridaPipeBackend FridaPipeBackend;
+typedef struct _FridaInitMessage FridaInitMessage;
 typedef struct _FridaPipeMessage FridaPipeMessage;
 
 struct _FridaPipeBackend
@@ -36,6 +37,12 @@ struct _FridaPipeBackend
   mach_port_t tx_port;
 
   mach_port_t notify_port;
+};
+
+struct _FridaInitMessage
+{
+  mach_msg_header_t header;
+  mach_msg_trailer_t trailer;
 };
 
 struct _FridaPipeMessage
@@ -119,7 +126,25 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   mach_port_t self_task, prev_notify_port;
 
   assigned = sscanf (address, "pipe:rx=%d,tx=%d", &rx, &tx);
-  g_assert_cmpint (assigned, ==, 2);
+
+  if (assigned == 1)
+  {
+    FridaInitMessage init;
+    kern_return_t kr;
+
+    bzero (&init, sizeof (init));
+    init.header.msgh_size = sizeof (init);
+    init.header.msgh_local_port = rx;
+
+    kr = mach_msg_receive (&init.header);
+    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
+    tx = init.header.msgh_remote_port;
+  }
+  else
+  {
+    g_assert_cmpint (assigned, ==, 2);
+  }
 
   backend = g_slice_new (FridaPipeBackend);
 
