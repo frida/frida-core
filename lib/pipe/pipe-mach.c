@@ -359,7 +359,7 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
   kern_return_t ret;
 
   len = MIN (buffer_length, FRIDA_PIPE_MAX_WRITE_SIZE);
-  msg_size = (sizeof (FridaPipeMessage) + len + 3) & ~3;
+  msg_size = (guint) (sizeof (FridaPipeMessage) + len + 3) & ~3;
   msg = g_malloc (msg_size);
   msg->header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, 0);
   msg->header.msgh_size = msg_size;
