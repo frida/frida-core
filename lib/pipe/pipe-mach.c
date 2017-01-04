@@ -246,7 +246,7 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
       handler_id = g_cancellable_connect (cancellable, G_CALLBACK (frida_pipe_input_stream_on_cancel), self, NULL);
     }
 
-    msg_size = sizeof (mach_msg_empty_rcv_t);
+    msg_size = 256;
     msg = g_realloc (NULL, msg_size);
     do
     {
