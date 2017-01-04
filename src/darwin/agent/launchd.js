@@ -11,12 +11,21 @@ var pointerSize = Process.pointerSize;
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
 var upcoming = {};
+var gating = false;
 var active = 0;
 
 rpc.exports = {
   prepareForLaunch: function (identifier) {
     upcoming[identifier] = true;
     active++;
+  },
+  enableSpawnGating: function () {
+    gating = true;
+    active++;
+  },
+  disableSpawnGating: function () {
+    gating = false;
+    active--;
   },
 };
 
@@ -29,13 +38,21 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
     if (path !== '/usr/libexec/xpcproxy')
       return;
 
-    var service = readString(readPointer(args[3].add(pointerSize)));
-    if (service.indexOf('UIKitApplication:') === -1)
-      return;
+    var rawIdentifier = readString(readPointer(args[3].add(pointerSize)));
 
-    var identifier = service.substring(17, service.lastIndexOf('['));
-    if (upcoming[identifier] === undefined)
-      return;
+    var identifier, event;
+    if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
+      identifier = rawIdentifier.substring(17, rawIdentifier.lastIndexOf('['));
+      if (upcoming[identifier] !== undefined)
+        event = 'launch:app';
+      else if (gating)
+        event = 'spawn';
+      else
+        return;
+    } else {
+      identifier = rawIdentifier;
+      event = 'spawn';
+    }
 
     var attrs = readPointer(args[2].add(pointerSize));
 
@@ -43,6 +60,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
     flags |= POSIX_SPAWN_START_SUSPENDED;
     writeU16(attrs, flags);
 
+    this.event = event;
     this.identifier = identifier;
     this.pidPtr = args[0];
   },
@@ -50,16 +68,20 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
     if (active === 0)
       return;
 
-    var identifier = this.identifier;
-    if (identifier === undefined)
+    var event = this.event;
+    if (event === undefined)
       return;
 
-    delete upcoming[identifier];
-    active--;
+    var identifier = this.identifier;
+
+    if (event === 'launch:app') {
+      delete upcoming[identifier];
+      active--;
+    }
 
     if (retval.toInt32() < 0)
       return;
 
-    send(['launch:app', identifier, readU32(this.pidPtr)]);
+    send([event, identifier, readU32(this.pidPtr)]);
   }
 });

@@ -329,7 +329,7 @@ libfrida_data_darwin_la_SOURCES = \
 	frida-data-darwin.c \
 	frida-data-darwin-blob.S \
 	$(NULL)
-frida-data-darwin.c frida-data-darwin-blob.S: darwin/agent/launchd.js darwin/agent/app-launch.js
+frida-data-darwin.c frida-data-darwin-blob.S: darwin/agent/launchd.js darwin/agent/xpcproxy.js
 	$(AM_V_GEN) \
 		$(RESOURCE_COMPILER) \
 			-c "$(srcdir)/darwin/frida-darwin.resources" \

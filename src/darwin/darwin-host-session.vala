@@ -217,6 +217,11 @@ namespace Frida {
 		}
 
 		public override async void resume (uint pid) throws Error {
+			if (fruit_launcher != null) {
+				if (yield fruit_launcher.try_resume (pid))
+					return;
+			}
+
 			yield helper.resume (pid);
 		}
 
@@ -279,6 +284,7 @@ namespace Frida {
 		private LaunchdAgent launchd_agent;
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_identifier = new Gee.HashMap<string, Gee.Promise<uint>> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn_by_pid = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		internal FruitLauncher (DarwinHostSession host_session, AgentResource agent) {
 			this.helper = host_session.helper;
@@ -287,26 +293,46 @@ namespace Frida {
 
 			this.launchd_agent = new LaunchdAgent (host_session);
 			this.launchd_agent.app_launch_completed.connect (on_app_launch_completed);
+			this.launchd_agent.spawned.connect (on_spawned);
 		}
 
 		~FruitLauncher () {
+			this.launchd_agent.spawned.disconnect (on_spawned);
 			this.launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 		}
 
 		public async void close () {
+			if (spawn_gating_enabled) {
+				try {
+					yield disable_spawn_gating ();
+				} catch (Error e) {
+				}
+			}
+
 			yield launchd_agent.close ();
 		}
 
 		public async void enable_spawn_gating () throws Error {
+			yield launchd_agent.enable_spawn_gating ();
+
 			spawn_gating_enabled = true;
 		}
 
 		public async void disable_spawn_gating () throws Error {
 			spawn_gating_enabled = false;
+
+			yield launchd_agent.disable_spawn_gating ();
+
+			foreach (var entry in pending_spawn_by_pid.entries)
+				helper.resume.begin (entry.key);
+			pending_spawn_by_pid.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			var result = new HostSpawnInfo[0];
+			var result = new HostSpawnInfo[pending_spawn_by_pid.size];
+			var index = 0;
+			foreach (var spawn in pending_spawn_by_pid.values)
+				result[index++] = spawn;
 			return result;
 		}
 
@@ -347,6 +373,15 @@ namespace Frida {
 			}
 		}
 
+		public async bool try_resume (uint pid) throws Error {
+			HostSpawnInfo? info;
+			if (!pending_spawn_by_pid.unset (pid, out info))
+				return false;
+
+			yield helper.resume (pid);
+			return true;
+		}
+
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
 			Gee.Promise<uint> request;
 			if (spawn_request_by_identifier.unset (identifier, out request)) {
@@ -356,10 +391,17 @@ namespace Frida {
 					request.set_exception (error);
 			}
 		}
+
+		private void on_spawned (HostSpawnInfo info) {
+			pending_spawn_by_pid[info.pid] = info;
+
+			spawned (info);
+		}
 	}
 
 	private class LaunchdAgent : DarwinAgent {
 		public signal void app_launch_completed (string identifier, uint pid, Error? error);
+		public signal void spawned (HostSpawnInfo info);
 
 		public LaunchdAgent (DarwinHostSession host_session) {
 			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
@@ -370,37 +412,62 @@ namespace Frida {
 			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) });
 		}
 
+		public async void enable_spawn_gating () throws Error {
+			yield call ("enableSpawnGating", new Json.Node[] {});
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			yield call ("disableSpawnGating", new Json.Node[] {});
+		}
+
 		protected override void on_event (string type, Json.Array event) {
-			assert (type == "launch:app");
 			var identifier = event.get_string_element (1);
 			var pid = (uint) event.get_int_element (2);
 
-			launch_app.begin (identifier, pid);
+			switch (type) {
+				case "launch:app":
+					prepare_app.begin (identifier, pid);
+					break;
+				case "spawn":
+					prepare_xpcproxy.begin (identifier, pid);
+					break;
+				default:
+					assert_not_reached ();
+			}
 		}
 
-		private async void launch_app (string identifier, uint pid) {
+		private async void prepare_app (string identifier, uint pid) {
 			try {
-				var agent = new AppLaunchAgent (host_session, identifier, pid);
-				yield agent.run_to_entrypoint ();
+				var agent = new XpcProxyAgent (host_session, identifier, pid);
+				yield agent.run_until_exec ();
 				app_launch_completed (identifier, pid, null);
 			} catch (Error e) {
 				app_launch_completed (identifier, pid, e);
 			}
 		}
+
+		private async void prepare_xpcproxy (string identifier, uint pid) {
+			try {
+				var agent = new XpcProxyAgent (host_session, identifier, pid);
+				yield agent.run_until_exec ();
+				spawned (HostSpawnInfo (pid, identifier));
+			} catch (Error e) {
+			}
+		}
 	}
 
-	private class AppLaunchAgent : DarwinAgent {
+	private class XpcProxyAgent : DarwinAgent {
 		public string identifier {
 			get;
 			construct;
 		}
 
-		public AppLaunchAgent (DarwinHostSession host_session, string identifier, uint pid) {
-			string * source = Frida.Data.Darwin.get_app_launch_js_blob ().data;
+		public XpcProxyAgent (DarwinHostSession host_session, string identifier, uint pid) {
+			string * source = Frida.Data.Darwin.get_xpcproxy_js_blob ().data;
 			Object (host_session: host_session, identifier: identifier, target_pid: pid, script_source: source);
 		}
 
-		public async void run_to_entrypoint () throws Error {
+		public async void run_until_exec () throws Error {
 			yield ensure_loaded ();
 			yield host_session.helper.resume (target_pid);
 			yield wait_for_unload ();

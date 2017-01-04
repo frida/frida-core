@@ -15,6 +15,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Manual/spawn-gating", () => {
+			var h = new Harness.without_timeout ((h) => Service.Manual.spawn_gating.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Manual/error-feedback", () => {
 			var h = new Harness.without_timeout ((h) => Service.Manual.error_feedback.begin (h as Harness));
 			h.run ();
@@ -416,6 +421,42 @@ namespace Frida.HostSessionTest {
 				stdout.printf ("%s ", message);
 				stdout.flush ();
 				return stdin.read_line ();
+			}
+
+			private static async void spawn_gating (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode on an iOS or Android system> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout ();
+
+				try {
+					var main_loop = new MainLoop ();
+
+					var device_manager = new DeviceManager ();
+
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+					var spawned_handler = device.spawned.connect ((spawn) => {
+						print ("spawned: pid=%u identifier=%s\n", spawn.pid, spawn.identifier);
+						device.resume.begin (spawn.pid);
+					});
+					var timer = new Timer ();
+					yield device.enable_spawn_gating ();
+					print ("spawn gating enabled in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					main_loop.run ();
+
+					device.disconnect (spawned_handler);
+
+					yield device_manager.close ();
+
+					h.done ();
+				} catch (Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+					assert_not_reached ();
+				}
 			}
 
 			private static async void error_feedback (Harness h) {
