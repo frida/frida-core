@@ -446,11 +446,19 @@ namespace Frida.HostSessionTest {
 					yield device.enable_spawn_gating ();
 					print ("spawn gating enabled in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
+					install_signal_handlers (main_loop);
+
 					main_loop.run ();
 
 					device.disconnect (spawned_handler);
 
+					timer.reset ();
+					yield device.disable_spawn_gating ();
+					print ("spawn gating disabled in %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					timer.reset ();
 					yield device_manager.close ();
+					print ("manager closed in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 					h.done ();
 				} catch (Error e) {
@@ -466,6 +474,27 @@ namespace Frida.HostSessionTest {
 					printerr ("perform_resume(%u) failed: %s\n", pid, e.message);
 				}
 			}
+
+#if WINDOWS
+			private static void install_signal_handlers (MainLoop loop) {
+			}
+#else
+			private static MainLoop current_main_loop = null;
+
+			private static void install_signal_handlers (MainLoop loop) {
+				current_main_loop = loop;
+				Posix.signal (Posix.SIGINT, on_stop_signal);
+				Posix.signal (Posix.SIGTERM, on_stop_signal);
+			}
+
+			private static void on_stop_signal (int sig) {
+				stdout.flush ();
+				Idle.add (() => {
+					current_main_loop.quit ();
+					return false;
+				});
+			}
+#endif
 
 			private static async void error_feedback (Harness h) {
 				if (!GLib.Test.slow ()) {
