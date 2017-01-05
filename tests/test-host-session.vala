@@ -440,7 +440,7 @@ namespace Frida.HostSessionTest {
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 					var spawned_handler = device.spawned.connect ((spawn) => {
 						print ("spawned: pid=%u identifier=%s\n", spawn.pid, spawn.identifier);
-						device.resume.begin (spawn.pid);
+						perform_resume.begin (device, spawn.pid);
 					});
 					var timer = new Timer ();
 					yield device.enable_spawn_gating ();
@@ -456,6 +456,14 @@ namespace Frida.HostSessionTest {
 				} catch (Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
+				}
+			}
+
+			private static async void perform_resume (Device device, uint pid) {
+				try {
+					yield device.resume (pid);
+				} catch (Error e) {
+					printerr ("perform_resume(%u) failed: %s\n", pid, e.message);
 				}
 			}
 
