@@ -118,6 +118,26 @@ namespace Frida {
 			}
 		}
 
+		public async void wait_until_suspended (uint pid) throws Error {
+			var timer = new Timer ();
+
+			do {
+				var task = borrow_task_for_remote_pid (pid);
+				if (_is_suspended (task))
+					return;
+
+				var delay_source = new TimeoutSource (20);
+				delay_source.set_callback (() => {
+					wait_until_suspended.callback ();
+					return false;
+				});
+				delay_source.attach (MainContext.get_thread_default ());
+				yield;
+			} while (timer.elapsed () < 2);
+
+			throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process to suspend");
+		}
+
 		public async void resume (uint pid) throws Error {
 			void * instance;
 			if (spawn_instance_by_pid.unset (pid, out instance)) {
@@ -148,8 +168,8 @@ namespace Frida {
 			var task = steal_task_for_remote_pid (pid);
 
 			var spawn_instance = spawn_instance_by_pid[pid];
-			if (spawn_instance == null)
-				spawn_instance = _create_spawn_instance_if_suspended (pid, task);
+			if (spawn_instance == null && _is_suspended (task))
+				spawn_instance = _create_spawn_instance (pid);
 			if (spawn_instance != null) {
 				_prepare_spawn_instance_for_injection (spawn_instance, task);
 
@@ -158,16 +178,17 @@ namespace Frida {
 					if (ready_pid == pid)
 						_inject.callback ();
 				});
-				var timeout = Timeout.add (10000, () => {
+				var timeout_source = new TimeoutSource.seconds (10);
+				timeout_source.set_callback (() => {
 					timed_out = true;
 					_inject.callback ();
 					return false;
 				});
+				timeout_source.attach (MainContext.get_thread_default ());
 
 				yield;
 
-				if (!timed_out)
-					Source.remove (timeout);
+				timeout_source.destroy ();
 				disconnect (ready_handler);
 
 				if (timed_out)
@@ -227,7 +248,8 @@ namespace Frida {
 			if (expiry_timer_by_pid.unset (pid, out previous_timer))
 				Source.remove (previous_timer);
 
-			expiry_timer_by_pid[pid] = Timeout.add (2000, () => {
+			var expiry_source = new TimeoutSource.seconds (2);
+			expiry_source.set_callback (() => {
 				var removed = expiry_timer_by_pid.unset (pid);
 				assert (removed);
 
@@ -239,6 +261,7 @@ namespace Frida {
 
 				return false;
 			});
+			expiry_timer_by_pid[pid] = expiry_source.attach (MainContext.get_thread_default ());
 		}
 
 		private void cancel_task_expiry_for_remote_pid (uint pid) {
@@ -306,10 +329,11 @@ namespace Frida {
 
 		protected extern uint _spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
 		protected extern void _launch (string identifier, string? url, LaunchCompletionHandler on_complete);
+		protected extern bool _is_suspended (uint task) throws Error;
 		protected extern void _resume_process (uint pid, uint task) throws Error;
 		protected extern void _kill_process (uint pid);
 		protected extern void _kill_application (string identifier);
-		protected extern void * _create_spawn_instance_if_suspended (uint pid, uint task) throws Error;
+		protected extern void * _create_spawn_instance (uint pid);
 		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
 		protected extern void _free_spawn_instance (void * instance);

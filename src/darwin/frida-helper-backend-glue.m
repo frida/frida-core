@@ -729,6 +729,30 @@ _frida_darwin_helper_backend_kill_application (FridaDarwinHelperBackend * self, 
 
 #endif
 
+gboolean
+_frida_darwin_helper_backend_is_suspended (FridaDarwinHelperBackend * self, guint task, GError ** error)
+{
+  mach_task_basic_info_data_t info;
+  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
+  const gchar * failed_operation;
+  kern_return_t ret;
+
+  ret = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_info");
+
+  return info.suspend_count >= 1;
+
+handle_mach_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while interrogating target process (%s returned '%s')",
+        failed_operation, mach_error_string (ret));
+    return FALSE;
+  }
+}
+
 void
 _frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint pid, guint task, GError ** error)
 {
@@ -764,19 +788,9 @@ handle_process_not_suspended:
 }
 
 void *
-_frida_darwin_helper_backend_create_spawn_instance_if_suspended (FridaDarwinHelperBackend * self, guint pid, guint task, GError ** error)
+_frida_darwin_helper_backend_create_spawn_instance (FridaDarwinHelperBackend * self, guint pid)
 {
-  mach_task_basic_info_data_t info;
-  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
-  const gchar * failed_operation;
-  kern_return_t ret;
   FridaSpawnInstance * instance;
-
-  ret = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_info");
-
-  if (info.suspend_count <= 0)
-    return NULL;
 
   instance = frida_spawn_instance_new (self);
   instance->pid = pid;
@@ -784,16 +798,6 @@ _frida_darwin_helper_backend_create_spawn_instance_if_suspended (FridaDarwinHelp
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
 
   return instance;
-
-handle_mach_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while interrogating target process (%s returned '%s')",
-        failed_operation, mach_error_string (ret));
-    return NULL;
-  }
 }
 
 void

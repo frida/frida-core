@@ -469,8 +469,13 @@ namespace Frida {
 
 		public async void run_until_exec () throws Error {
 			yield ensure_loaded ();
+
+			var helper = host_session.helper;
 			yield host_session.helper.resume (target_pid);
+
 			yield wait_for_unload ();
+
+			yield helper.wait_until_suspended (target_pid);
 		}
 	}
 

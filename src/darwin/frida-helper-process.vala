@@ -107,6 +107,15 @@ namespace Frida {
 			}
 		}
 
+		public async void wait_until_suspended (uint pid) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.wait_until_suspended (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async void resume (uint pid) throws Error {
 			var helper = yield obtain ();
 			try {

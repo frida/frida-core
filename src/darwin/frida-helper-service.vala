@@ -147,6 +147,10 @@ namespace Frida {
 			yield backend.input (pid, data);
 		}
 
+		public async void wait_until_suspended (uint pid) throws Error {
+			yield backend.wait_until_suspended (pid);
+		}
+
 		public async void resume (uint pid) throws Error {
 			yield backend.resume (pid);
 		}
