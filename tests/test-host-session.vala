@@ -25,6 +25,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Manual/performance", () => {
+			var h = new Harness.without_timeout ((h) => Service.Manual.performance.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Manual/torture", () => {
 			var h = new Harness.without_timeout ((h) => Service.Manual.torture.begin (h as Harness));
 			h.run ();
@@ -573,6 +578,52 @@ namespace Frida.HostSessionTest {
 						stdout.printf ("\nResult: \"%s\"\n\n", e.message);
 						assert (e is Error.PERMISSION_DENIED);
 						assert (e.message == "Unable to access process with pid %u from the current user account".printf (privileged_pid));
+					}
+
+					yield device_manager.close ();
+
+					h.done ();
+				} catch (Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+					assert_not_reached ();
+				}
+			}
+
+			private static async void performance (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with target application running> ");
+					h.done ();
+					return;
+				}
+
+				try {
+					var device_manager = new DeviceManager ();
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+					var process = yield device.get_process_by_name ("loop64");
+					var pid = process.pid;
+
+					var timer = new Timer ();
+
+					stdout.printf ("\n");
+					var num_iterations = 3;
+					for (var i = 0; i != num_iterations; i++) {
+						stdout.printf ("%u of %u\n", i + 1, num_iterations);
+						stdout.flush ();
+
+						timer.reset ();
+						var session = yield device.attach (pid);
+						print ("attach took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+						var script = yield session.create_script ("perf", "'use strict';");
+						yield script.load ();
+
+						yield script.unload ();
+						yield session.detach ();
+
+						Timeout.add (250, () => {
+							performance.callback ();
+							return false;
+						});
+						yield;
 					}
 
 					yield device_manager.close ();
