@@ -144,7 +144,7 @@ namespace Frida {
 				_resume_spawn_instance (instance);
 				_free_spawn_instance (instance);
 			} else {
-				_resume_process (pid, steal_task_for_remote_pid (pid));
+				_resume_process (pid, borrow_task_for_remote_pid (pid));
 			}
 		}
 
@@ -165,7 +165,7 @@ namespace Frida {
 		}
 
 		private async uint _inject (uint pid, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error {
-			var task = steal_task_for_remote_pid (pid);
+			var task = borrow_task_for_remote_pid (pid);
 
 			var spawn_instance = spawn_instance_by_pid[pid];
 			if (spawn_instance == null && _is_suspended (task))
