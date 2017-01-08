@@ -258,7 +258,7 @@ namespace Frida.HostSessionTest {
 								"3. Remove script\n" +
 								"4. Enable debugger\n" +
 								"5. Disable debugger\n" +
-								"6. Disable JIT\n"
+								"6. Enable JIT\n"
 							);
 
 							var command = prompt (">");
@@ -310,7 +310,7 @@ namespace Frida.HostSessionTest {
 									break;
 								case 6:
 									Idle.add (() => {
-										disable_jit.begin (session);
+										enable_jit.begin (session);
 										return false;
 									});
 									break;
@@ -414,11 +414,11 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static async void disable_jit (Session session) {
+			private static async void enable_jit (Session session) {
 				try {
-					yield session.disable_jit ();
+					yield session.enable_jit ();
 				} catch (Error e) {
-					printerr ("Unable to disable JIT: %s\n", e.message);
+					printerr ("Unable to enable JIT: %s\n", e.message);
 				}
 			}
 

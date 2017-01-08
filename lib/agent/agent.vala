@@ -51,7 +51,7 @@ namespace Frida.Agent {
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 
 		private Gum.ScriptBackend script_backend = null;
-		private bool jit_enabled = true;
+		private bool jit_enabled = false;
 		protected Gum.MemoryRange agent_range;
 
 		public AgentServer (string pipe_address, Gum.MemoryRange agent_range) {
@@ -136,10 +136,10 @@ namespace Frida.Agent {
 			return new ScriptEngine (script_backend, agent_range);
 		}
 
-		public void disable_jit () throws Error {
+		public void enable_jit () throws Error {
 			if (script_backend != null)
-				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
-			jit_enabled = false;
+				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
+			jit_enabled = true;
 		}
 
 		public void run () throws Error {
@@ -327,8 +327,8 @@ namespace Frida.Agent {
 			get_script_engine ().post_message_to_debugger (message);
 		}
 
-		public async void disable_jit () throws GLib.Error {
-			server.disable_jit ();
+		public async void enable_jit () throws GLib.Error {
+			server.enable_jit ();
 		}
 
 		private ScriptEngine get_script_engine () throws Error {

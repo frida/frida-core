@@ -1511,23 +1511,23 @@ namespace Frida {
 			}
 		}
 
-		public async void disable_jit () throws Error {
+		public async void enable_jit () throws Error {
 			check_open ();
 
 			try {
-				yield session.disable_jit ();
+				yield session.enable_jit ();
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 		}
 
-		public void disable_jit_sync () throws Error {
-			(create<DisableJitTask> () as DisableJitTask).start_and_wait_for_completion ();
+		public void enable_jit_sync () throws Error {
+			(create<EnableJitTask> () as EnableJitTask).start_and_wait_for_completion ();
 		}
 
-		private class DisableJitTask : ProcessTask<void> {
+		private class EnableJitTask : ProcessTask<void> {
 			protected override async void perform_operation () throws Error {
-				yield parent.disable_jit ();
+				yield parent.enable_jit ();
 			}
 		}
 

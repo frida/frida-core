@@ -89,7 +89,7 @@ namespace Frida.Gadget {
 		}
 
 		var script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
-		bool jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_DISABLE_JIT") == null;
+		bool jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT") != null;
 		if (script_file != null) {
 			var r = new ScriptRunner (script_file, jit_enabled, gadget_range);
 			try {
@@ -451,10 +451,10 @@ namespace Frida.Gadget {
 			return new ScriptEngine (script_backend, gadget_range);
 		}
 
-		public void disable_jit () throws Error {
+		public void enable_jit () throws Error {
 			if (script_backend != null)
-				throw new Error.INVALID_OPERATION ("JIT may only be disabled before the first script is created");
-			jit_enabled = false;
+				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
+			jit_enabled = true;
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -701,8 +701,8 @@ namespace Frida.Gadget {
 				get_script_engine ().post_message_to_debugger (message);
 			}
 
-			public async void disable_jit () throws GLib.Error {
-				server.disable_jit ();
+			public async void enable_jit () throws GLib.Error {
+				server.enable_jit ();
 			}
 
 			private ScriptEngine get_script_engine () throws Error {
