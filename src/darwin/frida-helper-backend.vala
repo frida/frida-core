@@ -123,8 +123,17 @@ namespace Frida {
 
 			do {
 				var task = borrow_task_for_remote_pid (pid);
-				if (_is_suspended (task))
-					return;
+
+				try {
+					if (_is_suspended (task))
+						return;
+				} catch (Error e) {
+					if (e is Error.PROCESS_NOT_FOUND) {
+						deallocate_port (steal_task_for_remote_pid (pid));
+					} else {
+						throw e;
+					}
+				}
 
 				var delay_source = new TimeoutSource (20);
 				delay_source.set_callback (() => {

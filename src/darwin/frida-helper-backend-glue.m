@@ -744,11 +744,21 @@ _frida_darwin_helper_backend_is_suspended (FridaDarwinHelperBackend * self, guin
 
 handle_mach_error:
   {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while interrogating target process (%s returned '%s')",
-        failed_operation, mach_error_string (ret));
+    if (ret == MACH_SEND_INVALID_DEST)
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_PROCESS_NOT_FOUND,
+          "Mach task is gone");
+    }
+    else
+    {
+      g_set_error (error,
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unexpected error while interrogating target process (%s returned '%s')",
+          failed_operation, mach_error_string (ret));
+    }
     return FALSE;
   }
 }
