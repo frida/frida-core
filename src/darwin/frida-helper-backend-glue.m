@@ -1045,6 +1045,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   dispatch_source_t source;
 
   instance = frida_inject_instance_new (self, self->last_id++);
+  mach_port_mod_refs (mach_task_self (), task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
   resolver = gum_darwin_module_resolver_new (task);
