@@ -44,6 +44,13 @@ namespace Frida {
 		}
 
 		public async void close () {
+			foreach (var id in expiry_timer_by_pid.values)
+				Source.remove (id);
+			expiry_timer_by_pid.clear ();
+
+			foreach (var task in remote_task_by_pid.values)
+				deallocate_port (task);
+			remote_task_by_pid.clear ();
 		}
 
 		public async void preload () throws Error {
