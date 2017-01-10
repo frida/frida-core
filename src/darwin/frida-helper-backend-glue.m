@@ -89,9 +89,9 @@ struct _FridaInjectInstance
   mach_port_t task;
 
   mach_vm_address_t payload_address;
-  mach_vm_address_t data_address;
   mach_vm_size_t payload_size;
-  gboolean is_resident;
+  FridaAgentContext * agent_context;
+  mach_vm_size_t agent_context_size;
   gboolean is_mapped;
 
   mach_port_t thread;
@@ -107,6 +107,7 @@ struct _FridaInjectPayloadLayout
   guint mach_code_offset;
   guint pthread_code_offset;
   guint data_offset;
+  guint data_size;
   guint stack_guard_offset;
   guint stack_bottom_offset;
   guint stack_top_offset;
@@ -1020,6 +1021,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 {
   guint result = 0;
   FridaHelperContext * ctx = self->context;
+  mach_port_t self_task;
   FridaInjectInstance * instance;
   GumDarwinModuleResolver * resolver = NULL;
   GumDarwinMapper * mapper = NULL;
@@ -1030,6 +1032,9 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   kern_return_t ret;
   guint base_payload_size;
   mach_vm_address_t payload_address = 0;
+  mach_vm_address_t agent_context_address = 0;
+  mach_vm_address_t data_address;
+  vm_prot_t cur_protection, max_protection;
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
   FridaAgentContext agent_ctx;
@@ -1044,8 +1049,10 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   thread_state_flavor_t state_flavor;
   dispatch_source_t source;
 
+  self_task = mach_task_self ();
+
   instance = frida_inject_instance_new (self, self->last_id++);
-  mach_port_mod_refs (mach_task_self (), task, MACH_PORT_RIGHT_SEND, 1);
+  mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
   resolver = gum_darwin_module_resolver_new (task);
@@ -1081,7 +1088,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   layout.mach_code_offset = 0;
   layout.pthread_code_offset = 512;
   layout.data_offset = page_size;
-  layout.stack_guard_offset = layout.data_offset + page_size;
+  layout.data_size = MAX (page_size, gum_query_page_size ());
+  layout.stack_guard_offset = layout.data_offset + layout.data_size;
   layout.stack_bottom_offset = layout.stack_guard_offset + layout.stack_guard_size;
   layout.stack_top_offset = layout.stack_bottom_offset + layout.stack_size;
 
@@ -1092,9 +1100,18 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     instance->payload_size += gum_darwin_mapper_size (mapper);
 
   ret = mach_vm_allocate (task, &payload_address, instance->payload_size, VM_FLAGS_ANYWHERE);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate");
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate(payload)");
   instance->payload_address = payload_address;
-  instance->data_address = payload_address + layout.data_offset;
+
+  ret = mach_vm_allocate (self_task, &agent_context_address, layout.data_size, VM_FLAGS_ANYWHERE);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate(agent_context)");
+  instance->agent_context = (FridaAgentContext *) agent_context_address;
+  instance->agent_context_size = layout.data_size;
+
+  data_address = payload_address + layout.data_offset;
+  ret = mach_vm_remap (task, &data_address, layout.data_size, 0, VM_FLAGS_OVERWRITE, self_task, agent_context_address,
+      FALSE, &cur_protection, &max_protection, VM_INHERIT_SHARE);
+  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap(data)");
 
   if (mapper != NULL)
   {
@@ -1117,7 +1134,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   {
     ret = mach_vm_write (task, payload_address + layout.mach_code_offset,
         (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write (mach_stub_code)");
+    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write(mach_stub_code)");
 
     ret = mach_vm_write (task, payload_address + layout.pthread_code_offset,
         (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
@@ -1131,7 +1148,6 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     GumCodeSegment * segment;
     guint8 * scratch_page;
     mach_vm_address_t code_address;
-    vm_prot_t cur_protection, max_protection;
 
     segment = gum_code_segment_new (page_size, NULL);
 
@@ -1143,12 +1159,12 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     gum_code_segment_map (segment, 0, page_size, scratch_page);
 
     code_address = payload_address + layout.code_offset;
-    ret = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, mach_task_self (), (mach_vm_address_t) scratch_page,
+    ret = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
         FALSE, &cur_protection, &max_protection, VM_INHERIT_COPY);
 
     gum_code_segment_free (segment);
 
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap");
+    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap(code)");
   }
 
   ret = mach_vm_write (task, payload_address + layout.data_offset, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
@@ -1273,28 +1289,17 @@ static void
 frida_inject_instance_on_mach_thread_dead (void * context)
 {
   FridaInjectInstance * self = context;
-  mach_port_t * posix_thread;
-  gpointer posix_thread_value = NULL;
+  mach_port_t posix_thread_right_in_remote_task = self->agent_context->posix_thread;
+  mach_port_t posix_thread_right_in_local_task = MACH_PORT_NULL;
 
-  posix_thread = (mach_port_t *) gum_darwin_read (self->task, self->data_address + G_STRUCT_OFFSET (FridaAgentContext, posix_thread),
-      sizeof (mach_port_t), NULL);
-  if (posix_thread != NULL)
+  if (posix_thread_right_in_remote_task != MACH_PORT_NULL)
   {
-    mach_port_t posix_thread_in_this_task;
     mach_msg_type_name_t acquired_type;
-    kern_return_t kr;
 
-    if (*posix_thread != MACH_PORT_NULL)
-    {
-      kr = mach_port_extract_right (self->task, *posix_thread, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_in_this_task, &acquired_type);
-      if (kr == KERN_SUCCESS)
-        posix_thread_value = GSIZE_TO_POINTER (posix_thread_in_this_task);
-    }
-
-    g_free (posix_thread);
+    mach_port_extract_right (self->task, posix_thread_right_in_remote_task, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_right_in_local_task, &acquired_type);
   }
 
-  _frida_darwin_helper_backend_on_mach_thread_dead (self->backend, self->id, posix_thread_value);
+  _frida_darwin_helper_backend_on_mach_thread_dead (self->backend, self->id, GSIZE_TO_POINTER (posix_thread_right_in_local_task));
 }
 
 void
@@ -1327,15 +1332,6 @@ static void
 frida_inject_instance_on_posix_thread_dead (void * context)
 {
   FridaInjectInstance * self = context;
-  gboolean * stay_resident;
-
-  stay_resident = (gboolean *) gum_darwin_read (self->task, self->data_address + G_STRUCT_OFFSET (FridaAgentContext, stay_resident),
-      sizeof (gboolean), NULL);
-  if (stay_resident != NULL)
-  {
-    self->is_resident = *stay_resident;
-    g_free (stay_resident);
-  }
 
   _frida_darwin_helper_backend_on_posix_thread_dead (self->backend, self->id);
 }
@@ -1518,9 +1514,9 @@ frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id)
   instance->task = MACH_PORT_NULL;
 
   instance->payload_address = 0;
-  instance->data_address = 0;
   instance->payload_size = 0;
-  instance->is_resident = FALSE;
+  instance->agent_context = NULL;
+  instance->agent_context_size = 0;
   instance->is_mapped = FALSE;
 
   instance->thread = MACH_PORT_NULL;
@@ -1532,6 +1528,7 @@ frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id)
 static void
 frida_inject_instance_free (FridaInjectInstance * instance)
 {
+  FridaAgentContext * agent_context = instance->agent_context;
   task_t self_task;
   gboolean can_deallocate_payload;
 
@@ -1542,7 +1539,9 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
 
-  can_deallocate_payload = !(instance->is_resident && instance->is_mapped);
+  can_deallocate_payload = !(agent_context != NULL && agent_context->stay_resident && instance->is_mapped);
+  if (agent_context != NULL)
+    mach_vm_deallocate (self_task, (mach_vm_address_t) agent_context, instance->agent_context_size);
   if (instance->payload_address != 0 && can_deallocate_payload)
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
 
@@ -1557,7 +1556,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
 static gboolean
 frida_inject_instance_is_resident (FridaInjectInstance * instance)
 {
-  return instance->is_resident;
+  return instance->agent_context->stay_resident;
 }
 
 static gboolean
