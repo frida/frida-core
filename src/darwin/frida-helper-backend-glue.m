@@ -1427,6 +1427,8 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
     }
 
     g_clear_error (&error);
+
+    return;
   }
 
   bzero (&response, sizeof (response));
