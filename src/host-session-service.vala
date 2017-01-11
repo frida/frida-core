@@ -114,7 +114,7 @@ namespace Frida {
 		public signal void host_session_closed (HostSession session);
 
 		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error;
-		public signal void agent_session_closed (AgentSessionId id);
+		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason);
 	}
 
 	public enum HostSessionProviderKind {
@@ -133,7 +133,7 @@ namespace Frida {
 
 	public abstract class BaseDBusHostSession : Object, HostSession {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
-		public signal void agent_session_closed (AgentSessionId id, AgentSession session);
+		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason);
 
 		private Gee.HashMap<uint, Gee.Promise<Entry>> entries = new Gee.HashMap<uint, Gee.Promise<Entry>> ();
 		private Gee.HashMap<uint, AgentSession> sessions = new Gee.HashMap<uint, AgentSession> ();
@@ -148,7 +148,7 @@ namespace Frida {
 				var request = iterator.get ();
 				try {
 					var entry = yield request.future.wait_async ();
-					yield destroy (entry);
+					yield destroy (entry, SessionDetachReason.APPLICATION_REQUESTED);
 				} catch (Gee.FutureError e) {
 				}
 			}
@@ -318,7 +318,7 @@ namespace Frida {
 			}
 			assert (entry_to_remove != null);
 
-			destroy.begin (entry_to_remove);
+			destroy.begin (entry_to_remove, SessionDetachReason.PROCESS_TERMINATED);
 		}
 
 		private void on_session_closed (AgentSessionId id) {
@@ -327,7 +327,7 @@ namespace Frida {
 			AgentSession session;
 			var found = sessions.unset (raw_id, out session);
 			assert (found);
-			agent_session_closed (id, session);
+			agent_session_closed (id, session, SessionDetachReason.APPLICATION_REQUESTED);
 			agent_session_destroyed (id);
 
 			foreach (var promise in entries.values) {
@@ -348,7 +348,7 @@ namespace Frida {
 			}
 		}
 
-		private async void destroy (Entry entry) {
+		private async void destroy (Entry entry, SessionDetachReason reason) {
 			if (!entries.unset (entry.pid))
 				return;
 
@@ -364,7 +364,7 @@ namespace Frida {
 				var found = sessions.unset (raw_id, out session);
 				assert (found);
 
-				agent_session_closed (id, session);
+				agent_session_closed (id, session, reason);
 				agent_session_destroyed (id);
 			}
 		}

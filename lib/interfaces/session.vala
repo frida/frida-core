@@ -18,7 +18,8 @@ namespace Frida {
 
 		public signal void spawned (HostSpawnInfo info);
 		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void agent_session_destroyed (AgentSessionId id);
+		public signal void agent_session_destroyed (AgentSessionId id); // TODO: remove in Frida 10.x
+		public signal void agent_session_destroyed_with_reason (AgentSessionId id, SessionDetachReason reason);
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
@@ -49,6 +50,13 @@ namespace Frida {
 		public signal void message_from_debugger (string message);
 
 		public abstract async void enable_jit () throws GLib.Error;
+	}
+
+	public enum SessionDetachReason {
+		APPLICATION_REQUESTED = 1,
+		PROCESS_TERMINATED,
+		SERVER_TERMINATED,
+		DEVICE_LOST
 	}
 
 	[DBus (name = "re.frida.Error")]

@@ -108,7 +108,7 @@ namespace Frida {
 
 		public async void close () {
 			foreach (var entry in entries)
-				yield destroy_entry (entry);
+				yield destroy_entry (entry, SessionDetachReason.APPLICATION_REQUESTED);
 			entries.clear ();
 		}
 
@@ -153,7 +153,7 @@ namespace Frida {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session) {
 					entries.remove (entry);
-					yield destroy_entry (entry);
+					yield destroy_entry (entry, SessionDetachReason.APPLICATION_REQUESTED);
 					return;
 				}
 			}
@@ -183,22 +183,22 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			entries.remove (entry_to_remove);
-			destroy_entry.begin (entry_to_remove);
+			destroy_entry.begin (entry_to_remove, SessionDetachReason.SERVER_TERMINATED);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id) {
-			agent_session_closed (id);
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason) {
+			agent_session_closed (id, reason);
 		}
 
-		private async void destroy_entry (Entry entry) {
+		private async void destroy_entry (Entry entry, SessionDetachReason reason) {
 			entry.connection.closed.disconnect (on_connection_closed);
-			yield entry.destroy ();
+			yield entry.destroy (reason);
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
 			host_session_closed (entry.host_session);
 		}
 
 		private class Entry : Object {
-			public signal void agent_session_closed (AgentSessionId id);
+			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason);
 
 			public uint port {
 				get;
@@ -226,13 +226,15 @@ namespace Frida {
 				Object (port: port, client: client, connection: connection, host_session: host_session);
 
 				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
+				host_session.agent_session_destroyed_with_reason.connect (on_agent_session_destroyed_with_reason);
 			}
 
-			public async void destroy () {
+			public async void destroy (SessionDetachReason reason) {
+				host_session.agent_session_destroyed_with_reason.disconnect (on_agent_session_destroyed_with_reason);
 				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
 
 				foreach (var agent_session_id in agent_session_by_id.keys)
-					agent_session_closed (agent_session_id);
+					agent_session_closed (agent_session_id, reason);
 				agent_session_by_id.clear ();
 
 				try {
@@ -255,8 +257,12 @@ namespace Frida {
 			}
 
 			private void on_agent_session_destroyed (AgentSessionId id) {
+				on_agent_session_destroyed_with_reason (id, SessionDetachReason.PROCESS_TERMINATED);
+			}
+
+			private void on_agent_session_destroyed_with_reason (AgentSessionId id, SessionDetachReason reason) {
 				agent_session_by_id.unset (id);
-				agent_session_closed (id);
+				agent_session_closed (id, reason);
 			}
 		}
 	}

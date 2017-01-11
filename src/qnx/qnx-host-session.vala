@@ -47,7 +47,7 @@ namespace Frida {
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
 			host_session = new QnxHostSession ();
-			host_session.agent_session_closed.connect ((id) => this.agent_session_closed (id));
+			host_session.agent_session_closed.connect (on_agent_session_closed);
 			return host_session;
 		}
 
@@ -65,8 +65,8 @@ namespace Frida {
 			return yield this.host_session.obtain_agent_session (agent_session_id);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
-			agent_session_closed (id);
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason) {
+			agent_session_closed (id, reason);
 		}
 	}
 

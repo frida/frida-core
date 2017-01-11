@@ -99,12 +99,12 @@ if __name__ == '__main__':
     interfaces_vapi = get_contents(interfaces_vapi_filename)
     interfaces_header = get_contents(interfaces_header_filename)
 
-    api_enums = [ApiEnum(m.group(1)) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala, re.MULTILINE)]
+    enums = [ApiEnum(m.group(1)) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala + "\n" + interfaces_vapi, re.MULTILINE)]
     enum_by_name = {}
-    for enum in api_enums:
+    for enum in enums:
         enum_by_name[enum.name] = enum
-    for enum in api_enums:
-        for m in re.finditer(r"typedef\s+enum\s+.*?\s+(\w+);", core_header, re.DOTALL):
+    for enum in enums:
+        for m in re.finditer(r"typedef\s+enum\s+.*?\s+(\w+);", core_header + "\n" + interfaces_header, re.DOTALL):
             if m.group(1) == enum.c_name:
                 enum.c_definition = beautify_cenum(m.group(0))
                 break
@@ -204,6 +204,11 @@ if __name__ == '__main__':
                         current_object_type.vapi_methods.append(stripped_line)
         for object_type in api_object_types:
             object_type.sort_members()
+    for enum in enums:
+        if enum.vapi_declaration is None:
+            m = re.match(r".+\s+(public\s+enum\s+" + enum.name + r"\s+{)(.+?)}", interfaces_vapi, re.MULTILINE | re.DOTALL)
+            enum.vapi_declaration = m.group(1)
+            enum.vapi_members.extend([line.lstrip() for line in m.group(2).strip().split("\n")])
 
     with open(os.path.join(output_dir, 'frida-core-1.0.deps'), 'wt') as output_deps_file:
         output_deps_file.write("glib-2.0\n")
@@ -218,7 +223,7 @@ if __name__ == '__main__':
         output_vapi_file.write("\n\tpublic static void deinit ();")
         output_vapi_file.write("\n\tpublic static unowned GLib.MainContext get_main_context ();")
 
-        for enum in api_enums:
+        for enum in enums:
             output_vapi_file.write("\n\n\t%s\n\t\t" % enum.vapi_declaration)
             output_vapi_file.write("\n\t\t".join(enum.vapi_members))
             output_vapi_file.write("\n\t}")
@@ -249,7 +254,7 @@ if __name__ == '__main__':
         for object_type in api_object_types:
             output_header_file.write("\ntypedef struct _%s %s;" % (object_type.c_name, object_type.c_name))
 
-        for enum in api_enums:
+        for enum in enums:
             output_header_file.write("\n\n" + enum.c_definition)
 
         output_header_file.write("\n\n/* Library lifetime */")
@@ -286,7 +291,7 @@ if __name__ == '__main__':
             output_header_file.write("\n\n".join(map(lambda enum: enum.c_definition, errors)))
 
         output_header_file.write("\n\n/* GTypes */")
-        for enum in api_enums:
+        for enum in enums:
             output_header_file.write("\nGType %s_get_type (void) G_GNUC_CONST;" % enum.c_name_lc)
         for object_type in api_object_types:
             if object_type.c_get_type is not None:
@@ -294,7 +299,7 @@ if __name__ == '__main__':
 
         output_header_file.write("\n\n/* Macros */")
         macros = []
-        for enum in api_enums:
+        for enum in enums:
             macros.append("#define FRIDA_TYPE_%(name_uc)s (frida_%(name_lc)s_get_type ())" \
                 % { 'name_lc': enum.name_lc, 'name_uc': enum.name_uc })
         for object_type in api_object_types:

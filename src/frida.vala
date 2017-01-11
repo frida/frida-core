@@ -242,7 +242,7 @@ namespace Frida {
 
 			foreach (var device in devices) {
 				if (device.id == id) {
-					yield device._do_close (true);
+					yield device._do_close (SessionDetachReason.APPLICATION_REQUESTED, true);
 					removed (device);
 					changed ();
 					return;
@@ -297,7 +297,7 @@ namespace Frida {
 					if (device.provider == provider) {
 						if (started)
 							removed (device);
-						device._do_close.begin (false);
+						device._do_close.begin (SessionDetachReason.DEVICE_LOST, false);
 						break;
 					}
 				}
@@ -336,7 +336,7 @@ namespace Frida {
 
 			if (service != null) {
 				foreach (var device in devices.to_array ())
-					yield device._do_close (true);
+					yield device._do_close (SessionDetachReason.APPLICATION_REQUESTED, true);
 				devices.clear ();
 
 				yield service.stop ();
@@ -977,7 +977,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Device is gone");
 		}
 
-		public async void _do_close (bool may_block) {
+		public async void _do_close (SessionDetachReason reason, bool may_block) {
 			if (close_request != null) {
 				try {
 					yield close_request.future.wait_async ();
@@ -1016,7 +1016,7 @@ namespace Frida {
 			}
 
 			foreach (var session in session_by_handle.values.to_array ()) {
-				yield session._do_close (may_block);
+				yield session._do_close (reason, may_block);
 			}
 			session_by_handle.clear ();
 
@@ -1119,12 +1119,12 @@ namespace Frida {
 			ensure_request = null;
 		}
 
-		private void on_agent_session_closed (AgentSessionId id) {
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason) {
 			var handle = id.handle;
 
 			var session = session_by_handle[handle];
 			if (session != null)
-				session._do_close.begin (false);
+				session._do_close.begin (reason, false);
 
 			Gee.Promise<bool> detach_request;
 			if (pending_detach_requests.unset (handle, out detach_request))
@@ -1308,7 +1308,7 @@ namespace Frida {
 	}
 
 	public class Session : Object {
-		public signal void detached ();
+		public signal void detached (SessionDetachReason reason);
 
 		public uint pid {
 			get;
@@ -1348,7 +1348,7 @@ namespace Frida {
 		}
 
 		public async void detach () {
-			yield _do_close (true);
+			yield _do_close (SessionDetachReason.APPLICATION_REQUESTED, true);
 		}
 
 		public void detach_sync () {
@@ -1547,7 +1547,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Session is detached");
 		}
 
-		public async void _do_close (bool may_block) {
+		public async void _do_close (SessionDetachReason reason, bool may_block) {
 			if (close_request != null) {
 				try {
 					yield close_request.future.wait_async ();
@@ -1574,7 +1574,7 @@ namespace Frida {
 			yield device._release_session (this, may_block);
 			device = null;
 
-			detached ();
+			detached (reason);
 			close_request.set_value (true);
 		}
 
