@@ -99,7 +99,31 @@ if __name__ == '__main__':
     interfaces_vapi = get_contents(interfaces_vapi_filename)
     interfaces_header = get_contents(interfaces_header_filename)
 
-    enums = [ApiEnum(m.group(1)) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala + "\n" + interfaces_vapi, re.MULTILINE)]
+    all_enum_names = [m.group(1) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala + "\n" + interfaces_vapi, re.MULTILINE)]
+    enums = []
+
+    internal_type_prefixes = [
+        "Fruity",
+        "HostSession",
+        "MessageType",
+        "ResultCode",
+        "Winjector"
+    ]
+    seen_enum_names = set()
+    for enum_name in all_enum_names:
+        if enum_name in seen_enum_names:
+            continue
+        seen_enum_names.add(enum_name)
+
+        is_public = True
+        for prefix in internal_type_prefixes:
+            if enum_name.startswith(prefix):
+                is_public = False
+                break
+
+        if is_public:
+            enums.append(ApiEnum(enum_name))
+
     enum_by_name = {}
     for enum in enums:
         enum_by_name[enum.name] = enum
