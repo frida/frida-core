@@ -153,7 +153,7 @@ namespace Frida {
 			DBusConnection conn;
 			AgentSessionProvider provider;
 			try {
-				conn = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE);
+				conn = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
 				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);

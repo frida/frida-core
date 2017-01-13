@@ -69,7 +69,7 @@ namespace Frida {
 
 			DBusConnection connection;
 			try {
-				connection = yield DBusConnection.new_for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				connection = yield new DBusConnection.for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 			} catch (GLib.Error e) {
 				if (e is IOError.CONNECTION_REFUSED)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");

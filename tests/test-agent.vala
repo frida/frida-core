@@ -150,7 +150,7 @@ namespace Frida.AgentTest {
 			main_thread = new Thread<bool> ("frida-test-agent-worker", agent_main_worker);
 
 			try {
-				connection = yield DBusConnection.new (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
+				connection = yield new DBusConnection (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
 
 				var session_id = AgentSessionId (1);

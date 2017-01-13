@@ -211,7 +211,7 @@ namespace Frida {
 				Pipe pipe;
 				yield handshake_port.exchange (peer_pid, out pending_task_port, out pipe);
 
-				pending_connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE, null, null);
+				pending_connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.NONE, null, null);
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 			} catch (GLib.Error e) {
 				pending_error = new Error.PERMISSION_DENIED (e.message);

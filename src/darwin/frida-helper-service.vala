@@ -104,7 +104,7 @@ namespace Frida {
 
 				yield handshake_port.exchange (0, out parent_task, out pipe);
 
-				connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
 
 				DarwinRemoteHelper helper = this;

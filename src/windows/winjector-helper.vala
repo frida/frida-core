@@ -120,7 +120,7 @@ namespace Winjector {
 					helper64.proxy.uninjected.connect (on_uninjected);
 				}
 
-				connection = yield DBusConnection.new (new Pipe (parent_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (new Pipe (parent_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
@@ -190,7 +190,7 @@ namespace Winjector {
 
 			public async void start () throws Frida.Error {
 				try {
-					connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE);
+					connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.NONE);
 				} catch (GLib.Error e) {
 					throw new Frida.Error.PERMISSION_DENIED (e.message);
 				}
@@ -227,7 +227,7 @@ namespace Winjector {
 
 		private async void start () {
 			try {
-				connection = yield DBusConnection.new (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.closed.connect (on_connection_closed);
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);

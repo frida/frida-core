@@ -202,7 +202,7 @@ namespace Frida {
 
 			public async void open () throws Error {
 				try {
-					connection = yield DBusConnection.new (pipe, null, DBusConnectionFlags.NONE);
+					connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.NONE);
 				} catch (GLib.Error e) {
 					throw new Error.PERMISSION_DENIED (e.message);
 				}

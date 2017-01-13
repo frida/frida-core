@@ -259,7 +259,7 @@ namespace Frida {
 					timeout_source.attach (MainContext.get_thread_default ());
 
 					try {
-						connection = yield DBusConnection.new (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+						connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
 					} catch (GLib.Error establish_error) {
 						if (establish_error is IOError.CANCELLED)

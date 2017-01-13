@@ -124,7 +124,7 @@ namespace Frida {
 			try {
 				yield client.request ("host:transport:" + device_serial);
 				yield client.request_protocol_change ("tcp:%u".printf (port));
-				connection = yield DBusConnection.new (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				connection = yield new DBusConnection (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
 			} catch (GLib.Error e) {
 				client.close.begin ();
 				if (e is IOError.CONNECTION_REFUSED)
