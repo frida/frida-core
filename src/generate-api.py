@@ -156,7 +156,7 @@ if __name__ == '__main__':
                 if method_name not in ('construct', 'get_main_context', 'get_provider', 'get_session'):
                     if (object_type.c_name + '*') in m.group(0):
                         if method_name == 'new':
-                            if not object_type.name.endswith("List") and method_cprototype.endswith("(void);"):
+                            if not object_type.name.endswith("List") and (method_cprototype.endswith("(void);") or method_cprototype.startswith("FridaFileMonitor")):
                                 object_type.c_constructor = method_cprototype
                         elif method_name.startswith('get_') and ', ' not in method_cprototype:
                             object_type.property_names.append(method_name[4:])

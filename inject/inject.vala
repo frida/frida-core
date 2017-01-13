@@ -153,7 +153,7 @@ namespace Frida.Inject {
 	private class ScriptRunner : Object {
 		private Script script;
 		private string script_file;
-		private FileMonitor script_monitor;
+		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private Session session;
 		private bool load_in_progress = false;
