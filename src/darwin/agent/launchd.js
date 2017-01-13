@@ -20,10 +20,14 @@ rpc.exports = {
     active++;
   },
   enableSpawnGating: function () {
+    if (gating)
+      throw new Error('Spawn gating already enabled');
     gating = true;
     active++;
   },
   disableSpawnGating: function () {
+    if (!gating)
+      throw new Error('Spawn gating already disabled');
     gating = false;
     active--;
   },
@@ -49,9 +53,11 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
         event = 'spawn';
       else
         return;
-    } else {
+    } else if (gating) {
       identifier = rawIdentifier;
       event = 'spawn';
+    } else {
+      return;
     }
 
     var attrs = readPointer(args[2].add(pointerSize));
