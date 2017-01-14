@@ -349,6 +349,7 @@ namespace Frida {
 				yield helper.kill_application (identifier);
 				yield helper.launch (identifier, url);
 			} catch (Error e) {
+				launchd_agent.cancel_launch.begin (identifier);
 				spawn_request_by_identifier.unset (identifier);
 				throw e;
 			}
@@ -368,6 +369,9 @@ namespace Frida {
 				} catch (Gee.FutureError e) {
 					throw (Error) future.exception;
 				}
+			} catch (Error e) {
+				launchd_agent.cancel_launch.begin (identifier);
+				throw e;
 			} finally {
 				timeout.destroy ();
 			}
@@ -410,6 +414,10 @@ namespace Frida {
 
 		public async void prepare_for_launch (string identifier) throws Error {
 			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) });
+		}
+
+		public async void cancel_launch (string identifier) throws Error {
+			yield call ("cancelLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) });
 		}
 
 		public async void enable_spawn_gating () throws Error {

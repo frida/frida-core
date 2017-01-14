@@ -19,6 +19,12 @@ rpc.exports = {
     upcoming[identifier] = true;
     active++;
   },
+  cancelLaunch: function (identifier) {
+    if (upcoming[identifier] !== undefined) {
+      delete upcoming[identifier];
+      active--;
+    }
+  },
   enableSpawnGating: function () {
     if (gating)
       throw new Error('Spawn gating already enabled');
