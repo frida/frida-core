@@ -497,10 +497,6 @@ namespace Frida {
 				reset_stream (_dll32);
 				return _dll32;
 			}
-
-			construct {
-				_dll32 = value;
-			}
 		}
 		private InputStream _dll32;
 
@@ -508,10 +504,6 @@ namespace Frida {
 			get {
 				reset_stream (_dll64);
 				return _dll64;
-			}
-
-			construct {
-				_dll64 = value;
 			}
 		}
 		private InputStream _dll64;
@@ -522,14 +514,19 @@ namespace Frida {
 		}
 
 		public AgentDescriptor (string name_template, InputStream dll32, InputStream dll64) {
-			AgentDescriptor.with_resources (name_template, dll32, dll64, new AgentResource[] {});
+			Object (name_template: name_template);
+
+			this._dll32 = dll32;
+			this._dll64 = dll64;
+
+			this.resources = new AgentResource[] {};
 		}
 
 		public AgentDescriptor.with_resources (string name_template, InputStream dll32, InputStream dll64, AgentResource[] resources) {
-			Object (name_template: name_template, dll32: dll32, dll64: dll64);
+			Object (name_template: name_template);
 
-			assert (dll32 is Seekable);
-			assert (dll64 is Seekable);
+			this._dll32 = dll32;
+			this._dll64 = dll64;
 
 			this.resources = resources;
 		}
@@ -554,17 +551,13 @@ namespace Frida {
 				reset_stream (_data);
 				return _data;
 			}
-
-			construct {
-				_data = value;
-			}
 		}
 		private InputStream _data;
 
 		public AgentResource (string name, InputStream data) {
-			Object (name: name, data: data);
+			Object (name: name);
 
-			assert (data is Seekable);
+			_data = data;
 		}
 
 		private void reset_stream (InputStream stream) {
