@@ -1255,8 +1255,24 @@ namespace Frida.HostSessionTest {
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
-					assert_not_reached ();
 				}
+
+				var done = false;
+
+				new Thread<bool> ("input-worker", () => {
+					print ("Hit a key to exit\n");
+					stdin.getc ();
+
+					Idle.add (() => {
+						done = true;
+						return false;
+					});
+
+					return true;
+				});
+
+				while (!done)
+					yield h.process_events ();
 
 				yield h.service.stop ();
 				h.service.remove_backend (backend);
