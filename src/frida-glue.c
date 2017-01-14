@@ -13,10 +13,8 @@ frida_init (void)
 {
   static gsize frida_initialized = FALSE;
 
-#if GLIB_CHECK_VERSION (2, 46, 0)
   glib_init ();
   gio_init ();
-#endif
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
   if (g_once_init_enter (&frida_initialized))
@@ -71,12 +69,10 @@ frida_deinit (void)
   g_main_context_unref (main_context);
   main_context = NULL;
 
-#if GLIB_CHECK_VERSION (2, 46, 0)
   gio_shutdown ();
   glib_shutdown ();
   gio_deinit ();
   glib_deinit ();
-#endif
 }
 
 GMainContext *

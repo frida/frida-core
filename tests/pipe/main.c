@@ -9,10 +9,8 @@ main (int argc, char * argv[])
   gchar c;
   GError * error = NULL;
 
-#if GLIB_CHECK_VERSION (2, 46, 0)
   glib_init ();
   gio_init ();
-#endif
 
   if (argc == 1)
   {
