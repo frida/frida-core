@@ -1130,7 +1130,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, details.cpu_type, mapper);
 
-  if (gum_query_is_rwx_supported ())
+  if (gum_query_is_rwx_supported () || !gum_code_segment_is_supported ())
   {
     ret = mach_vm_write (task, payload_address + layout.mach_code_offset,
         (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
