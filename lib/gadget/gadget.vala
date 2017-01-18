@@ -145,7 +145,7 @@ namespace Frida.Gadget {
 	private class ScriptRunner : Object {
 		private AgentScriptId script;
 		private string script_file;
-		private FileMonitor script_monitor;
+		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private ScriptEngine script_engine;
 		private bool load_in_progress = false;
@@ -483,7 +483,7 @@ namespace Frida.Gadget {
 					assert_not_reached ();
 				}
 
-				var pid = Posix.getpid ();
+				var pid = _getpid ();
 				var identifier = "re.frida.Gadget";
 				var name = "Gadget";
 				var no_icon = ImageData (0, 0, 0, "");
@@ -562,7 +562,7 @@ namespace Frida.Gadget {
 				} catch (GLib.Error e) {
 				}
 
-				Posix.kill ((Posix.pid_t) this_process.pid, Posix.SIGKILL);
+				_kill (this_process.pid);
 			}
 
 			public async AgentSessionId attach_to (uint pid) throws Error {
@@ -785,6 +785,9 @@ namespace Frida.Gadget {
 		private extern unowned MainContext get_main_context ();
 		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
 	}
+
+	public extern uint _getpid ();
+	public extern void _kill (uint pid);
 
 	private extern void log_info (string message);
 	private extern void log_error (string message);

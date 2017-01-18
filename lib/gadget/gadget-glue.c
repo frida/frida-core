@@ -1,6 +1,18 @@
 #include "frida-gadget.h"
 
-#include "frida-interfaces.h"
+#ifndef G_OS_WIN32
+# include "frida-interfaces.h"
+#endif
+
+#ifdef G_OS_WIN32
+# include <process.h>
+# define VC_EXTRALEAN
+# include <windows.h>
+# undef VC_EXTRALEAN
+#else
+# include <signal.h>
+# include <unistd.h>
+#endif
 
 #ifdef HAVE_DARWIN
 # include <CoreFoundation/CoreFoundation.h>
@@ -82,6 +94,51 @@ static GMainContext * main_context;
 
 static GPrivate frida_thread_create_context_key = G_PRIVATE_INIT ((GDestroyNotify) frida_thread_create_context_free);
 
+#ifdef G_OS_WIN32
+
+BOOL WINAPI
+DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
+{
+  (void) instance;
+  (void) reserved;
+
+  switch (reason)
+  {
+    case DLL_PROCESS_ATTACH:
+      frida_gadget_load ();
+      break;
+    case DLL_PROCESS_DETACH:
+      frida_gadget_unload ();
+      break;
+    default:
+      break;
+  }
+
+  return TRUE;
+}
+
+guint
+_frida_gadget_getpid (void)
+{
+  return GetCurrentProcessId ();
+}
+
+void
+_frida_gadget_kill (guint pid)
+{
+  HANDLE process;
+
+  process = OpenProcess (PROCESS_TERMINATE, FALSE, pid);
+  if (process == NULL)
+    return;
+
+  TerminateProcess (process, 1);
+
+  CloseHandle (process);
+}
+
+#else
+
 __attribute__ ((constructor)) static void
 on_load (void)
 {
@@ -124,6 +181,20 @@ on_unload (void)
 {
   frida_gadget_unload ();
 }
+
+guint
+_frida_gadget_getpid (void)
+{
+  return getpid ();
+}
+
+void
+_frida_gadget_kill (guint pid)
+{
+  kill (pid, SIGKILL);
+}
+
+#endif
 
 #ifdef HAVE_DARWIN
 
@@ -282,11 +353,11 @@ frida_replacement_thread_create (
     void * data)
 #endif
 {
-  GumInvocationContext * ctx;
+  GumInvocationContext * ic;
   FridaGadgetAutoIgnorer * self;
 
-  ctx = gum_interceptor_get_current_invocation ();
-  self = FRIDA_GADGET_AUTO_IGNORER (gum_invocation_context_get_replacement_function_data (ctx));
+  ic = gum_interceptor_get_current_invocation ();
+  self = FRIDA_GADGET_AUTO_IGNORER (gum_invocation_context_get_replacement_function_data (ic));
 
   if (GUM_MEMORY_RANGE_INCLUDES (&self->gadget_range, GUM_ADDRESS (GUM_FUNCPTR_TO_POINTER (func))))
   {
