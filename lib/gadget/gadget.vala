@@ -452,8 +452,12 @@ namespace Frida.Gadget {
 		}
 
 		public void enable_jit () throws Error {
+			if (jit_enabled)
+				return;
+
 			if (script_backend != null)
 				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
+
 			jit_enabled = true;
 		}
 
