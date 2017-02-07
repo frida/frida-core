@@ -1247,10 +1247,10 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   }
 #endif
 
-  ret = thread_create(task, &instance->thread);
+  ret = thread_create (task, &instance->thread);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_create");
 
-  ret = act_set_state(instance->thread, state_flavor, state_data, state_count);
+  ret = act_set_state (instance->thread, state_flavor, state_data, state_count);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "act_set_state");
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (instance->id), instance);
@@ -1262,7 +1262,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
   dispatch_resume (source);
 
-  ret = thread_resume(instance->thread);
+  ret = thread_resume (instance->thread);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_resume");
 
   result = instance->id;
