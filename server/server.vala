@@ -106,7 +106,6 @@ namespace Frida.Server {
 		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
-		private Gee.HashMap<string, DBusMessage> method_calls = new Gee.HashMap<string, DBusMessage> ();
 
 		private MainLoop loop;
 		private bool stopping;
@@ -217,7 +216,6 @@ namespace Frida.Server {
 
 		private bool on_connection_opened (DBusConnection connection) {
 			connection.closed.connect (on_connection_closed);
-			connection.add_filter (on_connection_message);
 
 			var client = new Client (connection);
 			client.register_host_session (host_session);
@@ -249,81 +247,6 @@ namespace Frida.Server {
 			}
 		}
 
-		private void on_session_opened (uint session_id, DBusConnection connection) {
-			var client = clients[connection];
-			if (client != null)
-				client.sessions.add (session_id);
-		}
-
-		private void on_session_closed (uint session_id, DBusConnection connection) {
-			var client = clients[connection];
-			if (client != null)
-				client.sessions.remove (session_id);
-		}
-
-		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
-			DBusMessage result = message;
-
-			var type = message.get_message_type ();
-			DBusMessage call = null;
-			switch (type) {
-				case DBusMessageType.METHOD_CALL:
-					method_calls[method_call_id (connection, message.get_serial ())] = message;
-					break;
-				case DBusMessageType.METHOD_RETURN:
-					method_calls.unset (method_call_id (connection, message.get_reply_serial ()), out call);
-					break;
-				case DBusMessageType.ERROR:
-					method_calls.unset (method_call_id (connection, message.get_reply_serial ()), out call);
-					break;
-				case DBusMessageType.SIGNAL:
-					break;
-				default:
-					assert_not_reached ();
-			}
-
-			if (type == DBusMessageType.SIGNAL || type == DBusMessageType.ERROR)
-				return result;
-
-			string path, iface, member;
-			if (call == null) {
-				path = message.get_path ();
-				iface = message.get_interface ();
-				member = message.get_member ();
-			} else {
-				path = call.get_path ();
-				iface = call.get_interface ();
-				member = call.get_member ();
-			}
-			if (iface == "re.frida.HostSession9") {
-				if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
-					uint32 session_id;
-					message.get_body ().get ("((u))", out session_id);
-					Idle.add (() => {
-						on_session_opened (session_id, connection);
-						return false;
-					});
-				}
-			} else if (iface == "re.frida.AgentSession9") {
-				uint session_id;
-				path.scanf ("/re/frida/AgentSession/%u", out session_id);
-				if (member == "Close") {
-					if (type != DBusMessageType.METHOD_CALL) {
-						Idle.add (() => {
-							on_session_closed (session_id, connection);
-							return false;
-						});
-					}
-				}
-			}
-
-			return result;
-		}
-
-		private static string method_call_id (DBusConnection connection, uint32 serial) {
-			return "%p:%u".printf (connection, serial);
-		}
-
 		private class Client : Object {
 			public DBusConnection connection {
 				get;
@@ -337,9 +260,14 @@ namespace Frida.Server {
 
 			private Gee.HashSet<uint> registrations = new Gee.HashSet<uint> ();
 			private Gee.HashMap<uint, uint> agent_registration_by_id = new Gee.HashMap<uint, uint> ();
+			private Gee.HashMap<uint32, DBusMessage> method_calls = new Gee.HashMap<uint32, DBusMessage> ();
 
 			public Client (DBusConnection connection) {
 				Object (connection: connection, sessions: new Gee.HashSet<uint> ());
+			}
+
+			construct {
+				connection.add_filter (on_connection_message);
 			}
 
 			public void close () {
@@ -373,6 +301,65 @@ namespace Frida.Server {
 				agent_registration_by_id.unset (id.handle, out registration_id);
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
+			}
+
+			private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
+				DBusMessage result = message;
+
+				var type = message.get_message_type ();
+				DBusMessage call = null;
+				switch (type) {
+					case DBusMessageType.METHOD_CALL:
+						method_calls[message.get_serial ()] = message;
+						break;
+					case DBusMessageType.METHOD_RETURN:
+						method_calls.unset (message.get_reply_serial (), out call);
+						break;
+					case DBusMessageType.ERROR:
+						method_calls.unset (message.get_reply_serial (), out call);
+						break;
+					case DBusMessageType.SIGNAL:
+						break;
+					default:
+						assert_not_reached ();
+				}
+
+				if (type == DBusMessageType.SIGNAL || type == DBusMessageType.ERROR)
+					return result;
+
+				string path, iface, member;
+				if (call == null) {
+					path = message.get_path ();
+					iface = message.get_interface ();
+					member = message.get_member ();
+				} else {
+					path = call.get_path ();
+					iface = call.get_interface ();
+					member = call.get_member ();
+				}
+				if (iface == "re.frida.HostSession9") {
+					if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
+						uint32 session_id;
+						message.get_body ().get ("((u))", out session_id);
+						Idle.add (() => {
+							sessions.add (session_id);
+							return false;
+						});
+					}
+				} else if (iface == "re.frida.AgentSession9") {
+					uint session_id;
+					path.scanf ("/re/frida/AgentSession/%u", out session_id);
+					if (member == "Close") {
+						if (type != DBusMessageType.METHOD_CALL) {
+							Idle.add (() => {
+								sessions.remove (session_id);
+								return false;
+							});
+						}
+					}
+				}
+
+				return result;
 			}
 		}
 	}
