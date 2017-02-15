@@ -106,7 +106,7 @@ namespace Frida.Server {
 		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
-		private Gee.HashMap<uint32, DBusMessage> method_calls = new Gee.HashMap<uint32, DBusMessage> ();
+		private Gee.HashMap<string, DBusMessage> method_calls = new Gee.HashMap<string, DBusMessage> ();
 
 		private MainLoop loop;
 		private bool stopping;
@@ -268,13 +268,13 @@ namespace Frida.Server {
 			DBusMessage call = null;
 			switch (type) {
 				case DBusMessageType.METHOD_CALL:
-					method_calls[message.get_serial ()] = message;
+					method_calls[method_call_id (connection, message.get_serial ())] = message;
 					break;
 				case DBusMessageType.METHOD_RETURN:
-					method_calls.unset (message.get_reply_serial (), out call);
+					method_calls.unset (method_call_id (connection, message.get_reply_serial ()), out call);
 					break;
 				case DBusMessageType.ERROR:
-					method_calls.unset (message.get_reply_serial (), out call);
+					method_calls.unset (method_call_id (connection, message.get_reply_serial ()), out call);
 					break;
 				case DBusMessageType.SIGNAL:
 					break;
@@ -318,6 +318,10 @@ namespace Frida.Server {
 			}
 
 			return result;
+		}
+
+		private static string method_call_id (DBusConnection connection, uint32 serial) {
+			return "%p:%u".printf (connection, serial);
 		}
 
 		private class Client : Object {
