@@ -1,20 +1,63 @@
 if OS_ANDROID
 noinst_LTLIBRARIES = \
 	libfrida-selinux.la \
+	libfrida-selinux-modern.la \
+	libfrida-selinux-legacy.la \
 	libselinux.la \
-	libsepol.la
+	libsepol-modern.la \
+	libsepol-legacy.la
 
 libfrida_selinux_la_SOURCES = \
-	src/policy.c \
+	src/dispatch.c \
 	$(NULL)
 libfrida_selinux_la_LIBADD = \
 	libselinux.la \
-	libsepol.la
+	libfrida-selinux-modern.la \
+	libfrida-selinux-legacy.la
 libfrida_selinux_la_CPPFLAGS = \
 	-DG_LOG_DOMAIN=\"Frida\" \
 	-include config.h \
 	$(FRIDA_CFLAGS) \
 	-I $(srcdir)/include
+libfrida_selinux_la_DEPENDENCIES = \
+	libselinux.la \
+	libfrida-selinux-modern.la \
+	libfrida-selinux-legacy.stamp
+
+libfrida_selinux_modern_la_SOURCES = \
+	src/patch.c \
+	src/patch.h \
+	$(NULL)
+libfrida_selinux_modern_la_LIBADD = \
+	libsepol-modern.la
+libfrida_selinux_modern_la_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
+	-DFRIDA_SELINUX_MODERN \
+	-include config.h \
+	$(FRIDA_CFLAGS) \
+	-I $(srcdir)/include \
+	-I $(srcdir)/src/sepol-modern/include
+
+libfrida_selinux_legacy_la_SOURCES = \
+	src/patch.c \
+	src/patch.h \
+	$(NULL)
+libfrida_selinux_legacy_la_LIBADD = \
+	libsepol-legacy.la
+libfrida_selinux_legacy_la_CPPFLAGS = \
+	-DG_LOG_DOMAIN=\"Frida\" \
+	-DFRIDA_SELINUX_LEGACY \
+	-include config.h \
+	$(FRIDA_CFLAGS) \
+	-I $(srcdir)/include \
+	-I $(srcdir)/src/sepol-legacy/include
+
+libfrida-selinux-legacy.stamp: libfrida-selinux-legacy.la
+	$(AM_V_GEN)$(NM) .libs/libfrida-selinux-legacy.a
+		| awk '{ if ($$0 ~ / D|T /) print $$3 " legacy_" $$3; }' \
+		> libfrida-selinux-legacy.mappings
+	$(AM_V_GEN)$(OBJCOPY) --redefine-syms libfrida-selinux-legacy.mappings .libs/libfrida-selinux-legacy.a
+	@touch $@
 
 libselinux_la_SOURCES = \
 	include/selinux/android.h \
@@ -22,7 +65,6 @@ libselinux_la_SOURCES = \
 	include/selinux/context.h \
 	include/selinux/label.h \
 	include/selinux/selinux.h \
-	##src/selinux/android.c \
 	src/selinux/avc.c \
 	src/selinux/avc_internal.c \
 	src/selinux/avc_internal.h \
@@ -50,9 +92,6 @@ libselinux_la_SOURCES = \
 	src/selinux/getfilecon.c \
 	src/selinux/getpeercon.c \
 	src/selinux/init.c \
-	##src/selinux/label.c \
-	##src/selinux/label_android_property.c \
-	##src/selinux/label_file.c \
 	src/selinux/label_internal.h \
 	src/selinux/lgetfilecon.c \
 	src/selinux/load_policy.c \
@@ -76,90 +115,173 @@ libselinux_la_CPPFLAGS = \
 	$(FRIDA_CFLAGS) \
 	-I $(srcdir)/include
 
-libsepol_la_SOURCES = \
-	include/sepol/boolean_record.h \
-	include/sepol/booleans.h \
-	include/sepol/context.h \
-	include/sepol/context_record.h \
-	include/sepol/debug.h \
-	include/sepol/errcodes.h \
-	include/sepol/handle.h \
-	include/sepol/iface_record.h \
-	include/sepol/interfaces.h \
-	include/sepol/module.h \
-	include/sepol/module_to_cil.h \
-	include/sepol/node_record.h \
-	include/sepol/nodes.h \
-	include/sepol/policydb.h \
-	include/sepol/policydb/avrule_block.h \
-	include/sepol/policydb/avtab.h \
-	include/sepol/policydb/conditional.h \
-	include/sepol/policydb/constraint.h \
-	include/sepol/policydb/context.h \
-	include/sepol/policydb/ebitmap.h \
-	include/sepol/policydb/expand.h \
-	include/sepol/policydb/flask.h \
-	include/sepol/policydb/flask_types.h \
-	include/sepol/policydb/hashtab.h \
-	include/sepol/policydb/hierarchy.h \
-	include/sepol/policydb/link.h \
-	include/sepol/policydb/mls_types.h \
-	include/sepol/policydb/module.h \
-	include/sepol/policydb/polcaps.h \
-	include/sepol/policydb/policydb.h \
-	include/sepol/policydb/services.h \
-	include/sepol/policydb/sidtab.h \
-	include/sepol/policydb/symtab.h \
-	include/sepol/policydb/util.h \
-	include/sepol/port_record.h \
-	include/sepol/ports.h \
-	include/sepol/roles.h \
-	include/sepol/sepol.h \
-	include/sepol/user_record.h \
-	include/sepol/users.h \
-	src/sepol/assertion.c \
-	src/sepol/avrule_block.c \
-	src/sepol/avtab.c \
-	src/sepol/boolean_record.c \
-	src/sepol/booleans.c \
-	src/sepol/conditional.c \
-	src/sepol/constraint.c \
-	src/sepol/context.c \
-	src/sepol/context_record.c \
-	src/sepol/debug.c \
-	src/sepol/ebitmap.c \
-	src/sepol/expand.c \
-	src/sepol/genbools.c \
-	src/sepol/genusers.c \
-	src/sepol/handle.c \
-	src/sepol/hashtab.c \
-	src/sepol/hierarchy.c \
-	src/sepol/iface_record.c \
-	src/sepol/interfaces.c \
-	src/sepol/link.c \
-	src/sepol/mls.c \
-	src/sepol/module.c \
-	src/sepol/module_to_cil.c \
-	src/sepol/node_record.c \
-	src/sepol/nodes.c \
-	src/sepol/polcaps.c \
-	src/sepol/policydb.c \
-	src/sepol/policydb_convert.c \
-	src/sepol/policydb_public.c \
-	src/sepol/port_record.c \
-	src/sepol/ports.c \
-	src/sepol/roles.c \
-	src/sepol/services.c \
-	src/sepol/sidtab.c \
-	src/sepol/symtab.c \
-	src/sepol/user_record.c \
-	src/sepol/users.c \
-	src/sepol/util.c \
-	src/sepol/write.c \
+libsepol_modern_la_SOURCES = \
+	src/sepol-modern/include/sepol/boolean_record.h \
+	src/sepol-modern/include/sepol/booleans.h \
+	src/sepol-modern/include/sepol/context.h \
+	src/sepol-modern/include/sepol/context_record.h \
+	src/sepol-modern/include/sepol/debug.h \
+	src/sepol-modern/include/sepol/errcodes.h \
+	src/sepol-modern/include/sepol/handle.h \
+	src/sepol-modern/include/sepol/iface_record.h \
+	src/sepol-modern/include/sepol/interfaces.h \
+	src/sepol-modern/include/sepol/module.h \
+	src/sepol-modern/include/sepol/module_to_cil.h \
+	src/sepol-modern/include/sepol/node_record.h \
+	src/sepol-modern/include/sepol/nodes.h \
+	src/sepol-modern/include/sepol/policydb.h \
+	src/sepol-modern/include/sepol/policydb/avrule_block.h \
+	src/sepol-modern/include/sepol/policydb/avtab.h \
+	src/sepol-modern/include/sepol/policydb/conditional.h \
+	src/sepol-modern/include/sepol/policydb/constraint.h \
+	src/sepol-modern/include/sepol/policydb/context.h \
+	src/sepol-modern/include/sepol/policydb/ebitmap.h \
+	src/sepol-modern/include/sepol/policydb/expand.h \
+	src/sepol-modern/include/sepol/policydb/flask.h \
+	src/sepol-modern/include/sepol/policydb/flask_types.h \
+	src/sepol-modern/include/sepol/policydb/hashtab.h \
+	src/sepol-modern/include/sepol/policydb/hierarchy.h \
+	src/sepol-modern/include/sepol/policydb/link.h \
+	src/sepol-modern/include/sepol/policydb/mls_types.h \
+	src/sepol-modern/include/sepol/policydb/module.h \
+	src/sepol-modern/include/sepol/policydb/polcaps.h \
+	src/sepol-modern/include/sepol/policydb/policydb.h \
+	src/sepol-modern/include/sepol/policydb/services.h \
+	src/sepol-modern/include/sepol/policydb/sidtab.h \
+	src/sepol-modern/include/sepol/policydb/symtab.h \
+	src/sepol-modern/include/sepol/policydb/util.h \
+	src/sepol-modern/include/sepol/port_record.h \
+	src/sepol-modern/include/sepol/ports.h \
+	src/sepol-modern/include/sepol/roles.h \
+	src/sepol-modern/include/sepol/sepol.h \
+	src/sepol-modern/include/sepol/user_record.h \
+	src/sepol-modern/include/sepol/users.h \
+	src/sepol-modern/assertion.c \
+	src/sepol-modern/avrule_block.c \
+	src/sepol-modern/avtab.c \
+	src/sepol-modern/boolean_record.c \
+	src/sepol-modern/booleans.c \
+	src/sepol-modern/conditional.c \
+	src/sepol-modern/constraint.c \
+	src/sepol-modern/context.c \
+	src/sepol-modern/context_record.c \
+	src/sepol-modern/debug.c \
+	src/sepol-modern/ebitmap.c \
+	src/sepol-modern/expand.c \
+	src/sepol-modern/handle.c \
+	src/sepol-modern/hashtab.c \
+	src/sepol-modern/hierarchy.c \
+	src/sepol-modern/iface_record.c \
+	src/sepol-modern/interfaces.c \
+	src/sepol-modern/link.c \
+	src/sepol-modern/mls.c \
+	src/sepol-modern/module.c \
+	src/sepol-modern/module_to_cil.c \
+	src/sepol-modern/node_record.c \
+	src/sepol-modern/nodes.c \
+	src/sepol-modern/polcaps.c \
+	src/sepol-modern/policydb.c \
+	src/sepol-modern/policydb_convert.c \
+	src/sepol-modern/policydb_public.c \
+	src/sepol-modern/port_record.c \
+	src/sepol-modern/ports.c \
+	src/sepol-modern/roles.c \
+	src/sepol-modern/services.c \
+	src/sepol-modern/sidtab.c \
+	src/sepol-modern/symtab.c \
+	src/sepol-modern/user_record.c \
+	src/sepol-modern/users.c \
+	src/sepol-modern/util.c \
+	src/sepol-modern/write.c \
 	$(NULL)
-libsepol_la_CPPFLAGS = \
+libsepol_modern_la_CPPFLAGS = \
 	-include config.h \
 	$(FRIDA_CFLAGS) \
-	-I $(srcdir)/src/sepol \
-	-I $(srcdir)/include
+	-I $(srcdir)/src/sepol-modern \
+	-I $(srcdir)/src/sepol-modern/include
+
+libsepol_legacy_la_SOURCES = \
+	src/sepol-legacy/include/sepol/boolean_record.h \
+	src/sepol-legacy/include/sepol/booleans.h \
+	src/sepol-legacy/include/sepol/context.h \
+	src/sepol-legacy/include/sepol/context_record.h \
+	src/sepol-legacy/include/sepol/debug.h \
+	src/sepol-legacy/include/sepol/errcodes.h \
+	src/sepol-legacy/include/sepol/handle.h \
+	src/sepol-legacy/include/sepol/iface_record.h \
+	src/sepol-legacy/include/sepol/interfaces.h \
+	src/sepol-legacy/include/sepol/module.h \
+	src/sepol-legacy/include/sepol/module_to_cil.h \
+	src/sepol-legacy/include/sepol/node_record.h \
+	src/sepol-legacy/include/sepol/nodes.h \
+	src/sepol-legacy/include/sepol/policydb.h \
+	src/sepol-legacy/include/sepol/policydb/avrule_block.h \
+	src/sepol-legacy/include/sepol/policydb/avtab.h \
+	src/sepol-legacy/include/sepol/policydb/conditional.h \
+	src/sepol-legacy/include/sepol/policydb/constraint.h \
+	src/sepol-legacy/include/sepol/policydb/context.h \
+	src/sepol-legacy/include/sepol/policydb/ebitmap.h \
+	src/sepol-legacy/include/sepol/policydb/expand.h \
+	src/sepol-legacy/include/sepol/policydb/flask.h \
+	src/sepol-legacy/include/sepol/policydb/flask_types.h \
+	src/sepol-legacy/include/sepol/policydb/hashtab.h \
+	src/sepol-legacy/include/sepol/policydb/hierarchy.h \
+	src/sepol-legacy/include/sepol/policydb/link.h \
+	src/sepol-legacy/include/sepol/policydb/mls_types.h \
+	src/sepol-legacy/include/sepol/policydb/module.h \
+	src/sepol-legacy/include/sepol/policydb/polcaps.h \
+	src/sepol-legacy/include/sepol/policydb/policydb.h \
+	src/sepol-legacy/include/sepol/policydb/services.h \
+	src/sepol-legacy/include/sepol/policydb/sidtab.h \
+	src/sepol-legacy/include/sepol/policydb/symtab.h \
+	src/sepol-legacy/include/sepol/policydb/util.h \
+	src/sepol-legacy/include/sepol/port_record.h \
+	src/sepol-legacy/include/sepol/ports.h \
+	src/sepol-legacy/include/sepol/roles.h \
+	src/sepol-legacy/include/sepol/sepol.h \
+	src/sepol-legacy/include/sepol/user_record.h \
+	src/sepol-legacy/include/sepol/users.h \
+	src/sepol-legacy/assertion.c \
+	src/sepol-legacy/avrule_block.c \
+	src/sepol-legacy/avtab.c \
+	src/sepol-legacy/boolean_record.c \
+	src/sepol-legacy/booleans.c \
+	src/sepol-legacy/conditional.c \
+	src/sepol-legacy/constraint.c \
+	src/sepol-legacy/context.c \
+	src/sepol-legacy/context_record.c \
+	src/sepol-legacy/debug.c \
+	src/sepol-legacy/ebitmap.c \
+	src/sepol-legacy/expand.c \
+	src/sepol-legacy/handle.c \
+	src/sepol-legacy/hashtab.c \
+	src/sepol-legacy/hierarchy.c \
+	src/sepol-legacy/iface_record.c \
+	src/sepol-legacy/interfaces.c \
+	src/sepol-legacy/link.c \
+	src/sepol-legacy/mls.c \
+	src/sepol-legacy/module.c \
+	src/sepol-legacy/module_to_cil.c \
+	src/sepol-legacy/node_record.c \
+	src/sepol-legacy/nodes.c \
+	src/sepol-legacy/polcaps.c \
+	src/sepol-legacy/policydb.c \
+	src/sepol-legacy/policydb_convert.c \
+	src/sepol-legacy/policydb_public.c \
+	src/sepol-legacy/port_record.c \
+	src/sepol-legacy/ports.c \
+	src/sepol-legacy/roles.c \
+	src/sepol-legacy/services.c \
+	src/sepol-legacy/sidtab.c \
+	src/sepol-legacy/symtab.c \
+	src/sepol-legacy/user_record.c \
+	src/sepol-legacy/users.c \
+	src/sepol-legacy/util.c \
+	src/sepol-legacy/write.c \
+	$(NULL)
+libsepol_legacy_la_CPPFLAGS = \
+	-include config.h \
+	$(FRIDA_CFLAGS) \
+	-I $(srcdir)/src/sepol-legacy \
+	-I $(srcdir)/src/sepol-legacy/include
 endif
