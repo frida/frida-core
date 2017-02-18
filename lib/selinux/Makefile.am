@@ -53,7 +53,7 @@ libfrida_selinux_legacy_la_CPPFLAGS = \
 	-I $(srcdir)/src/sepol-legacy/include
 
 libfrida-selinux-legacy.stamp: libfrida-selinux-legacy.la
-	$(AM_V_GEN)$(NM) .libs/libfrida-selinux-legacy.a
+	$(AM_V_GEN)$(NM) .libs/libfrida-selinux-legacy.a \
 		| awk '{ if ($$0 ~ / D|T /) print $$3 " legacy_" $$3; }' \
 		> libfrida-selinux-legacy.mappings
 	$(AM_V_GEN)$(OBJCOPY) --redefine-syms libfrida-selinux-legacy.mappings .libs/libfrida-selinux-legacy.a
