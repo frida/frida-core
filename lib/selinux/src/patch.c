@@ -38,13 +38,14 @@ static gboolean frida_set_file_contents (const gchar * filename, const gchar * c
 
 static const FridaSELinuxRule frida_selinux_rules[] =
 {
+  { { "domain", NULL }, "domain", "process", { "execmem", NULL } },
   { { "domain", NULL }, "frida_file", "dir", { "search", NULL } },
   { { "domain", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
   { { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", NULL } },
   { { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
   { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
+  { { "domain", NULL }, "zygote_exec", "file", { "execute", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
-  { { "zygote", NULL }, "zygote", "process", { "execmem", NULL } },
   { { "zygote", NULL }, "shell", "process", { "sigchld", NULL } },
 };
 
