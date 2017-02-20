@@ -832,6 +832,9 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
 #elif defined (HAVE_ARM)
 
+#define FRIDA_EMIT_STACK_ADJUSTMENT(delta) \
+  gum_thumb_writer_put_sub_reg_imm (&cw, ARM_REG_SP, delta * 4)
+
 static void
 frida_inject_instance_commit_arm_code (GumThumbWriter * cw, FridaCodeChunk * code)
 {
@@ -963,6 +966,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
 #endif
 
+  FRIDA_EMIT_STACK_ADJUSTMENT (3);
+
   gum_thumb_writer_put_ldr_reg_u32 (&cw, ARM_REG_R0, FALSE); /* stay_resident */
   gum_thumb_writer_put_push_regs (&cw, 1, ARM_REG_R0);
   gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R1, ARM_REG_SP);
@@ -999,7 +1004,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       GUM_ARG_REGISTER, ARM_REG_R1,
       GUM_ARG_ADDRESS, GUM_ADDRESS (1));
 
-  gum_thumb_writer_put_pop_regs (&cw, 1, ARM_REG_R0);
+  FRIDA_EMIT_STACK_ADJUSTMENT (-4);
 
   gum_thumb_writer_put_call_address_with_arguments (&cw,
       frida_resolve_libc_function (params->pid, "close"),
