@@ -258,6 +258,7 @@ namespace Frida.Server {
 				construct;
 			}
 
+			private uint filter_id;
 			private Gee.HashSet<uint> registrations = new Gee.HashSet<uint> ();
 			private Gee.HashMap<uint, uint> agent_registration_by_id = new Gee.HashMap<uint, uint> ();
 			private Gee.HashMap<uint32, DBusMessage> method_calls = new Gee.HashMap<uint32, DBusMessage> ();
@@ -267,7 +268,7 @@ namespace Frida.Server {
 			}
 
 			construct {
-				connection.add_filter (on_connection_message);
+				filter_id = connection.add_filter (on_connection_message);
 			}
 
 			public void close () {
@@ -276,6 +277,8 @@ namespace Frida.Server {
 				foreach (var registration_id in registrations)
 					connection.unregister_object (registration_id);
 				registrations.clear ();
+
+				connection.remove_filter (filter_id);
 			}
 
 			public void register_host_session (HostSession session) {
