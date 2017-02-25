@@ -110,7 +110,7 @@ namespace Frida.Agent {
 
 			public Gum.Script script {
 				get;
-				construct;
+				set;
 			}
 
 			public ScriptInstance (AgentScriptId sid, Gum.Script script) {
@@ -129,6 +129,15 @@ namespace Frida.Agent {
 					source.attach (MainContext.get_thread_default ());
 					yield;
 				}
+
+				script.weak_ref (() => {
+					Idle.add (() => {
+						destroy.callback ();
+						return false;
+					});
+				});
+				script = null;
+				yield;
 			}
 		}
 	}
