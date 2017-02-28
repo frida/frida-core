@@ -397,7 +397,14 @@ namespace Frida {
 		}
 
 		private void on_spawned (HostSpawnInfo info) {
-			pending_spawn_by_pid[info.pid] = info;
+			var pid = info.pid;
+
+			if (!spawn_gating_enabled) {
+				helper.resume.begin (pid);
+				return;
+			}
+
+			pending_spawn_by_pid[pid] = info;
 
 			spawned (info);
 		}
