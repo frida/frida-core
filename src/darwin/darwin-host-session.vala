@@ -350,7 +350,11 @@ namespace Frida {
 				yield helper.launch (identifier, url);
 			} catch (Error e) {
 				launchd_agent.cancel_launch.begin (identifier);
-				spawn_request_by_identifier.unset (identifier);
+				if (!spawn_request_by_identifier.unset (identifier)) {
+					var pid = request.future.value;
+					if (pid != 0)
+						helper.resume.begin (pid);
+				}
 				throw e;
 			}
 
@@ -393,6 +397,9 @@ namespace Frida {
 					request.set_value (pid);
 				else
 					request.set_exception (error);
+			} else {
+				if (error == null)
+					helper.resume.begin (pid);
 			}
 		}
 
