@@ -27,6 +27,7 @@ namespace Frida {
 		public void * context;
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<void *, uint> inject_instance_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
 		public uint last_id = 1;
 
 		public DarwinHelperBackend () {
@@ -44,6 +45,12 @@ namespace Frida {
 		}
 
 		public async void close () {
+			foreach (var entry in inject_instance_cleaner_by_instance.entries) {
+				_free_inject_instance (entry.key);
+				Source.remove (entry.value);
+			}
+			inject_instance_cleaner_by_instance.clear ();
+
 			foreach (var id in expiry_timer_by_pid.values)
 				Source.remove (id);
 			expiry_timer_by_pid.clear ();
@@ -323,13 +330,26 @@ namespace Frida {
 
 			var is_resident = _is_instance_resident (instance);
 
-			_free_inject_instance (instance);
+			schedule_inject_instance_cleanup (instance);
 
 			if (!is_resident)
 				uninjected (id);
 
 			if (inject_instance_by_id.is_empty)
 				idle ();
+		}
+
+		private void schedule_inject_instance_cleanup (void * instance) {
+			var cleanup_source = new TimeoutSource.seconds (2);
+			cleanup_source.set_callback (() => {
+				_free_inject_instance (instance);
+
+				var removed = inject_instance_cleaner_by_instance.unset (instance);
+				assert (removed);
+
+				return false;
+			});
+			inject_instance_cleaner_by_instance[instance] = cleanup_source.attach (MainContext.get_thread_default ());
 		}
 
 		public static extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;

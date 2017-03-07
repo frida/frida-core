@@ -91,6 +91,7 @@ struct _FridaInjectInstance
   mach_vm_address_t payload_address;
   mach_vm_size_t payload_size;
   FridaAgentContext * agent_context;
+  mach_vm_address_t remote_agent_context;
   mach_vm_size_t agent_context_size;
   gboolean is_mapped;
 
@@ -196,6 +197,7 @@ static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
+static gboolean frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_is_resident (FridaInjectInstance * instance);
 
 static void frida_inject_instance_on_mach_thread_dead (void * context);
@@ -1112,6 +1114,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   ret = mach_vm_remap (task, &data_address, layout.data_size, 0, VM_FLAGS_OVERWRITE, self_task, agent_context_address,
       FALSE, &cur_protection, &max_protection, VM_INHERIT_SHARE);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap(data)");
+  instance->remote_agent_context = data_address;
 
   if (mapper != NULL)
   {
@@ -1548,10 +1551,15 @@ frida_inject_instance_free (FridaInjectInstance * instance)
     mach_port_deallocate (self_task, instance->thread);
 
   can_deallocate_payload = !(agent_context != NULL && agent_context->stay_resident && instance->is_mapped);
+  if (instance->payload_address != 0 &&
+      can_deallocate_payload &&
+      frida_inject_instance_task_did_not_exec (instance))
+  {
+    mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
+  }
+
   if (agent_context != NULL)
     mach_vm_deallocate (self_task, (mach_vm_address_t) agent_context, instance->agent_context_size);
-  if (instance->payload_address != 0 && can_deallocate_payload)
-    mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
 
   if (instance->task != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->task);
@@ -1559,6 +1567,40 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   g_object_unref (instance->backend);
 
   g_slice_free (FridaInjectInstance, instance);
+}
+
+static gboolean
+frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance)
+{
+  gchar * local_cookie, * remote_cookie;
+  gboolean shared_memory_still_mapped;
+
+  local_cookie = g_uuid_string_random ();
+
+  strcpy ((gchar *) instance->agent_context, local_cookie);
+
+  remote_cookie = (gchar *) gum_darwin_read (instance->task, instance->remote_agent_context, strlen (local_cookie) + 1, NULL);
+  if (remote_cookie != NULL)
+  {
+    /*
+     * This is racy and the only way to avoid this TOCTOU issue is to perform the mach_vm_deallocate() from
+     * the remote process. That would however be very tricky to implement, so we mitigate this by deferring
+     * cleanup a couple of seconds.
+     *
+     * Note that this is not an issue on newer kernels like on iOS 10, where the task port gets invalidated
+     * by exec transitions.
+     */
+    shared_memory_still_mapped = strcmp (remote_cookie, local_cookie) == 0;
+  }
+  else
+  {
+    shared_memory_still_mapped = FALSE;
+  }
+
+  g_free (remote_cookie);
+  g_free (local_cookie);
+
+  return shared_memory_still_mapped;
 }
 
 static gboolean
