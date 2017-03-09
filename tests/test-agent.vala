@@ -140,8 +140,10 @@ namespace Frida.AgentTest {
 			assert (main_func_found);
 			main_impl = (AgentMainFunc) main_func_symbol;
 
+			IOStream stream;
 			try {
 				transport = new PipeTransport ();
+				stream = new Pipe (transport.local_address);
 			} catch (IOError transport_error) {
 				printerr ("Unable to create transport: %s\n", transport_error.message);
 				assert_not_reached ();
@@ -150,7 +152,7 @@ namespace Frida.AgentTest {
 			main_thread = new Thread<bool> ("frida-test-agent-worker", agent_main_worker);
 
 			try {
-				connection = yield new DBusConnection (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
 
 				var session_id = AgentSessionId (1);
