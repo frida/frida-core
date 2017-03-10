@@ -251,6 +251,7 @@ frida_gadget_environment_deinit (FridaGadgetAutoIgnorer * ignorer)
   g_main_context_unref (main_context);
   main_context = NULL;
 
+  gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();
 

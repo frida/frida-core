@@ -55,6 +55,7 @@ void
 frida_test_environment_deinit (void)
 {
 #if DEBUG_HEAP_LEAKS
+  gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();
   gum_deinit ();

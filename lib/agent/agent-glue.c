@@ -33,6 +33,7 @@ frida_agent_environment_init (void)
 void
 frida_agent_environment_deinit (FridaAgentAutoIgnorer * ignorer)
 {
+  gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();
 
