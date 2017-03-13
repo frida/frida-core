@@ -1211,7 +1211,7 @@ send(ranges);
 				if (!uncloaked_ranges.is_empty) {
 					printerr ("\n\nUH-OH, uncloaked_ranges.size=%d:\n", uncloaked_ranges.size);
 					foreach (var range in uncloaked_ranges) {
-						printerr ("\t'%s'\n", range);
+						printerr ("\t%s\n", range);
 					}
 				}
 
