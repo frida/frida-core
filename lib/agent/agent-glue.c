@@ -312,16 +312,17 @@ frida_thread_create_proxy (void * data)
 #ifdef HAVE_DARWIN
   pthread_t thread;
   gpointer stack_top;
-  gsize stack_size;
+  gsize stack_size, guard_size;
 
   thread = pthread_self ();
 
   stack_top = pthread_get_stackaddr_np (thread);
   stack_size = pthread_get_stacksize_np (thread);
+  guard_size = gum_query_page_size ();
 
   ctx->has_cloaked_range = TRUE;
-  ctx->cloaked_range.base_address = GUM_ADDRESS (stack_top) - stack_size;
-  ctx->cloaked_range.size = stack_size;
+  ctx->cloaked_range.base_address = GUM_ADDRESS (stack_top) - stack_size - guard_size;
+  ctx->cloaked_range.size = stack_size + guard_size;
 
   gum_cloak_add_range (&ctx->cloaked_range);
 #endif
