@@ -5,6 +5,7 @@ namespace Frida.Agent {
 		AutoIgnorer ignorer;
 		{
 			var agent_range = memory_range (mapped_range);
+			Gum.Cloak.add_range (agent_range);
 			var agent_thread_id = Gum.Process.get_current_thread_id ();
 
 			var interceptor = Gum.Interceptor.obtain ();
