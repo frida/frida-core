@@ -340,7 +340,7 @@ namespace Frida {
 		}
 
 		private void schedule_inject_instance_cleanup (void * instance) {
-			var cleanup_source = new TimeoutSource.seconds (2);
+			var cleanup_source = new TimeoutSource (50);
 			cleanup_source.set_callback (() => {
 				_free_inject_instance (instance);
 
