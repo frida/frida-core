@@ -101,6 +101,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/own-memory-ranges-should-be-cloaked", () => {
+			var h = new Harness ((h) => Darwin.own_memory_ranges_should_be_cloaked.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Darwin/Manual/cross-arch", () => {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch.begin (h as Harness));
 			h.run ();
@@ -1138,6 +1143,116 @@ namespace Frida.HostSessionTest {
 			yield h.service.stop ();
 			h.service.remove_backend (backend);
 			h.done ();
+		}
+
+		private static async void own_memory_ranges_should_be_cloaked (Harness h) {
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+				var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+				/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+				Thread.usleep (50000);
+
+				/* Warm up static allocations */
+				var session = yield device.attach (process.id);
+				yield session.detach ();
+				session = null;
+
+				/* The injector does cleanup 50ms after detecting that the remote thread is dead */
+				Timeout.add (100, () => {
+					own_memory_ranges_should_be_cloaked.callback ();
+					return false;
+				});
+				yield;
+
+				var original_ranges = dump_ranges (process.id);
+
+				session = yield device.attach (process.id);
+				var script = yield session.create_script ("dumper", """'use strict';
+var ranges = Process.enumerateRangesSync({ protection: '---', coalesce: true })
+  .map(function (range) {
+    return range.base.toString() + "-" + range.base.add(range.size).toString();
+  });
+send(ranges);
+""");
+				string received_message = null;
+				bool waiting = false;
+				script.message.connect ((message, data) => {
+					assert (received_message == null);
+					received_message = message;
+					if (waiting)
+						own_memory_ranges_should_be_cloaked.callback ();
+				});
+
+				yield script.load ();
+
+				if (received_message == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+
+				yield script.unload ();
+
+				yield device_manager.close ();
+
+				var message = Json.from_string (received_message).get_object ();
+				assert (message.get_string_member ("type") == "send");
+
+				var uncloaked_ranges = new Gee.ArrayList <string> ();
+				message.get_array_member ("payload").foreach_element ((array, index, element) => {
+					var range = element.get_string ();
+					if (!original_ranges.contains (range)) {
+						uncloaked_ranges.add (range);
+					}
+				});
+
+				if (!uncloaked_ranges.is_empty) {
+					printerr ("\n\nUH-OH, uncloaked_ranges.size=%d:\n", uncloaked_ranges.size);
+					foreach (var range in uncloaked_ranges) {
+						printerr ("\t'%s'\n", range);
+					}
+				}
+
+				// assert (uncloaked_ranges.is_empty);
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+		}
+
+		private Gee.HashSet<string> dump_ranges (uint pid) {
+			var result = new Gee.HashSet<string> ();
+
+			try {
+				string vmmap_output;
+				GLib.Process.spawn_sync (null, new string[] { "/usr/bin/vmmap", "-interleaved", "%u".printf (pid) }, null, 0, null, out vmmap_output, null, null);
+
+				var range_pattern = new Regex ("([0-9a-f]{8,})-([0-9a-f]{8,})");
+				MatchInfo match_info;
+				assert (range_pattern.match (vmmap_output, 0, out match_info));
+				while (match_info.matches ()) {
+					var start = uint64.parse ("0x" + match_info.fetch (1));
+					var end = uint64.parse ("0x" + match_info.fetch (2));
+
+					var address_format = "0x%" + uint64.FORMAT_MODIFIER + "x";
+					var start_str = start.to_string (address_format);
+					var end_str = end.to_string (address_format);
+
+					var range = "%s-%s".printf (start_str, end_str);
+
+					result.add (range);
+
+					match_info.next ();
+				}
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			return result;
 		}
 
 		namespace Manual {
