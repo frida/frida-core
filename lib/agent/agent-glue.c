@@ -76,6 +76,8 @@ struct _FridaThreadCreateContext
   NativeThreadFunc thread_func;
   void * thread_data;
 
+  gboolean has_cloaked_range;
+  GumMemoryRange cloaked_range;
   FridaAgentAutoIgnorer * ignorer;
 };
 
@@ -148,6 +150,7 @@ frida_replacement_thread_create (
     FridaThreadCreateContext * ctx;
 
     ctx = g_slice_new (FridaThreadCreateContext);
+    ctx->has_cloaked_range = FALSE;
     ctx->ignorer = g_object_ref (self);
     ctx->thread_func = func;
     ctx->thread_data = data;
@@ -306,6 +309,23 @@ frida_thread_create_proxy (void * data)
 {
   FridaThreadCreateContext * ctx = data;
 
+#ifdef HAVE_DARWIN
+  pthread_t thread;
+  gpointer stack_top;
+  gsize stack_size;
+
+  thread = pthread_self ();
+
+  stack_top = pthread_get_stackaddr_np (thread);
+  stack_size = pthread_get_stacksize_np (thread);
+
+  ctx->has_cloaked_range = TRUE;
+  ctx->cloaked_range.base_address = GUM_ADDRESS (stack_top) - stack_size;
+  ctx->cloaked_range.size = stack_size;
+
+  gum_cloak_add_range (&ctx->cloaked_range);
+#endif
+
   gum_script_backend_ignore (gum_process_get_current_thread_id ());
 
   /* This allows us to free the data no matter how the thread exits */
@@ -317,6 +337,8 @@ frida_thread_create_proxy (void * data)
 static void
 frida_thread_create_context_free (FridaThreadCreateContext * ctx)
 {
+  if (ctx->has_cloaked_range)
+    gum_cloak_remove_range (&ctx->cloaked_range);
   g_object_unref (ctx->ignorer);
   g_slice_free (FridaThreadCreateContext, ctx);
 
