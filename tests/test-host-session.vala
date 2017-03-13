@@ -1193,10 +1193,6 @@ send(ranges);
 					waiting = false;
 				}
 
-				yield script.unload ();
-
-				yield device_manager.close ();
-
 				var message = Json.from_string (received_message).get_object ();
 				assert (message.get_string_member ("type") == "send");
 
@@ -1214,8 +1210,13 @@ send(ranges);
 						printerr ("\t%s\n", range);
 					}
 				}
+				printerr ("\n");
 
 				// assert (uncloaked_ranges.is_empty);
+
+				yield script.unload ();
+
+				yield device_manager.close ();
 
 				h.done ();
 			} catch (GLib.Error e) {
@@ -1225,26 +1226,35 @@ send(ranges);
 		}
 
 		private Gee.HashSet<string> dump_ranges (uint pid) {
-			var result = new Gee.HashSet<string> ();
+			var ranges = new Gee.ArrayList<Range> ();
+			var range_by_end_address = new Gee.HashMap<string, Range> ();
 
 			try {
 				string vmmap_output;
 				GLib.Process.spawn_sync (null, new string[] { "/usr/bin/vmmap", "-interleaved", "%u".printf (pid) }, null, 0, null, out vmmap_output, null, null);
 
-				var range_pattern = new Regex ("([0-9a-f]{8,})-([0-9a-f]{8,})");
+				var range_pattern = new Regex ("([0-9a-f]{8,})-([0-9a-f]{8,})\\s+.+\\s+([rwx-]{3})\\/");
 				MatchInfo match_info;
 				assert (range_pattern.match (vmmap_output, 0, out match_info));
 				while (match_info.matches ()) {
 					var start = uint64.parse ("0x" + match_info.fetch (1));
 					var end = uint64.parse ("0x" + match_info.fetch (2));
+					var protection = match_info.fetch (3);
 
 					var address_format = "0x%" + uint64.FORMAT_MODIFIER + "x";
 					var start_str = start.to_string (address_format);
 					var end_str = end.to_string (address_format);
 
-					var range = "%s-%s".printf (start_str, end_str);
-
-					result.add (range);
+					Range range;
+					var existing_range = range_by_end_address[start_str];
+					if (existing_range != null && existing_range.protection == protection) {
+						existing_range.end = end_str;
+						range = existing_range;
+					} else {
+						range = new Range (start_str, end_str, protection);
+						ranges.add (range);
+					}
+					range_by_end_address[end_str] = range;
 
 					match_info.next ();
 				}
@@ -1252,7 +1262,22 @@ send(ranges);
 				assert_not_reached ();
 			}
 
+			var result = new Gee.HashSet<string> ();
+			foreach (var range in ranges)
+				result.add ("%s-%s".printf (range.start, range.end));
 			return result;
+		}
+
+		private class Range {
+			public string start;
+			public string end;
+			public string protection;
+
+			public Range (string start, string end, string protection) {
+				this.start = start;
+				this.end = end;
+				this.protection = protection;
+			}
 		}
 
 		namespace Manual {
