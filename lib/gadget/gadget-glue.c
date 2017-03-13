@@ -58,9 +58,9 @@ struct _FridaThreadCreateContext
   NativeThreadFunc thread_func;
   void * thread_data;
 
+  FridaGadgetAutoIgnorer * ignorer;
   gboolean has_cloaked_range;
   GumMemoryRange cloaked_range;
-  FridaGadgetAutoIgnorer * ignorer;
 };
 
 #ifndef G_OS_WIN32
@@ -88,6 +88,7 @@ static gpointer frida_get_address_of_thread_create_func (void);
 static NativeThreadFuncReturnType NATIVE_THREAD_FUNC_API frida_thread_create_proxy (void * data);
 static void frida_thread_create_context_free (FridaThreadCreateContext * ctx);
 
+static gboolean frida_try_cloak_current_thread (GumMemoryRange * cloaked_range);
 static void * frida_linker_stub_warmup_thread (void * data);
 
 static GThread * main_thread;
@@ -108,6 +109,7 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
   {
     case DLL_PROCESS_ATTACH:
       frida_gadget_load ();
+      frida_try_cloak_current_thread (NULL);
       break;
     case DLL_PROCESS_DETACH:
       frida_gadget_unload ();
@@ -145,6 +147,8 @@ __attribute__ ((constructor)) static void
 on_load (void)
 {
   frida_gadget_load ();
+
+  frida_try_cloak_current_thread (NULL);
 
 #ifdef HAVE_DARWIN
   FridaCFApi * api = frida_cf_api_try_get ();
@@ -367,8 +371,8 @@ frida_replacement_thread_create (
     FridaThreadCreateContext * ctx;
 
     ctx = g_slice_new (FridaThreadCreateContext);
-    ctx->has_cloaked_range = FALSE;
     ctx->ignorer = g_object_ref (self);
+    ctx->has_cloaked_range = FALSE;
     ctx->thread_func = func;
     ctx->thread_data = data;
 
@@ -518,25 +522,8 @@ frida_thread_create_proxy (void * data)
 {
   FridaThreadCreateContext * ctx = data;
 
-#ifdef HAVE_DARWIN
-  pthread_t thread;
-  gpointer stack_top;
-  gsize stack_size, guard_size;
-
-  thread = pthread_self ();
-
-  stack_top = pthread_get_stackaddr_np (thread);
-  stack_size = pthread_get_stacksize_np (thread);
-  guard_size = gum_query_page_size ();
-
-  ctx->has_cloaked_range = TRUE;
-  ctx->cloaked_range.base_address = GUM_ADDRESS (stack_top) - stack_size - guard_size;
-  ctx->cloaked_range.size = stack_size + guard_size;
-
-  gum_cloak_add_range (&ctx->cloaked_range);
-#endif
-
   gum_script_backend_ignore (gum_process_get_current_thread_id ());
+  ctx->has_cloaked_range = frida_try_cloak_current_thread (&ctx->cloaked_range);
 
   /* This allows us to free the data no matter how the thread exits */
   g_private_set (&frida_thread_create_context_key, ctx);
@@ -553,6 +540,41 @@ frida_thread_create_context_free (FridaThreadCreateContext * ctx)
   g_slice_free (FridaThreadCreateContext, ctx);
 
   gum_script_backend_unignore_later (gum_process_get_current_thread_id ());
+}
+
+static gboolean
+frida_try_cloak_current_thread (GumMemoryRange * cloaked_range)
+{
+#ifdef HAVE_DARWIN
+  pthread_t thread;
+  gpointer stack_top;
+  gsize stack_size, guard_size;
+  GumMemoryRange range;
+
+  thread = pthread_self ();
+
+  stack_top = pthread_get_stackaddr_np (thread);
+  stack_size = pthread_get_stacksize_np (thread);
+  guard_size = gum_query_page_size ();
+
+  range.base_address = GUM_ADDRESS (stack_top) - stack_size - guard_size;
+  range.size = stack_size + guard_size;
+
+  gum_cloak_add_range (&range);
+
+  if (cloaked_range != NULL)
+    *cloaked_range = range;
+
+  return TRUE;
+#else
+  if (cloaked_range != NULL)
+  {
+    cloaked_range->base_address = 0;
+    cloaked_range->size = 0;
+  }
+
+  return FALSE;
+#endif
 }
 
 static void *
