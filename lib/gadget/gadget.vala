@@ -14,7 +14,6 @@ namespace Frida.Gadget {
 	private Env env = Env.PRODUCTION;
 	private ScriptRunner script_runner;
 	private Server server;
-	private AutoIgnorer ignorer;
 	private Gum.Exceptor exceptor;
 	private Mutex mutex;
 	private Cond cond;
@@ -46,8 +45,6 @@ namespace Frida.Gadget {
 			return;
 		loaded = false;
 
-		var ign = ignorer;
-
 		{
 			var source = new IdleSource ();
 			source.set_callback (() => {
@@ -63,7 +60,7 @@ namespace Frida.Gadget {
 		mutex.unlock ();
 
 		if (env == Env.DEVELOPMENT)
-			Environment.deinit ((owned) ign);
+			Environment.deinit ();
 	}
 
 	public void resume () {
@@ -75,12 +72,12 @@ namespace Frida.Gadget {
 
 	private async void start () {
 		var gadget_range = memory_range ();
+		Gum.Cloak.add_range (gadget_range);
 
-		var interceptor = Gum.Interceptor.obtain ();
-
-		ignorer = new AutoIgnorer (interceptor, gadget_range);
-		ignorer.enable ();
-		ignorer.ignore (Gum.Process.get_current_thread_id (), 0);
+		Gum.Cloak.add_thread (Gum.Process.get_current_thread_id ());
+		Gum.MemoryRange stack;
+		if (Gum.Thread.try_get_range (out stack))
+			Gum.Cloak.add_range (stack);
 
 		exceptor = Gum.Exceptor.obtain ();
 
@@ -124,16 +121,7 @@ namespace Frida.Gadget {
 				server = null;
 			}
 
-			var interceptor = Gum.Interceptor.obtain ();
-			interceptor.begin_transaction ();
-
 			exceptor = null;
-
-			ignorer.unignore (Gum.Process.get_current_thread_id (), 0);
-			ignorer.disable ();
-			ignorer = null;
-
-			interceptor.end_transaction ();
 		}
 
 		mutex.lock ();
@@ -732,41 +720,6 @@ namespace Frida.Gadget {
 		}
 	}
 
-	protected class AutoIgnorer : Object {
-		protected Gum.Interceptor interceptor;
-		protected Gum.MemoryRange gadget_range;
-		protected SList tls_contexts;
-		protected Mutex mutex;
-
-		public AutoIgnorer (Gum.Interceptor interceptor, Gum.MemoryRange gadget_range) {
-			this.interceptor = interceptor;
-			this.gadget_range = gadget_range;
-		}
-
-		public void enable () {
-			replace_apis ();
-		}
-
-		public void disable () {
-			revert_apis ();
-		}
-
-		public void ignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
-			if (parent_thread_id != 0)
-				Gum.ScriptBackend.ignore (parent_thread_id);
-			Gum.ScriptBackend.ignore (agent_thread_id);
-		}
-
-		public void unignore (Gum.ThreadId agent_thread_id, Gum.ThreadId parent_thread_id) {
-			Gum.ScriptBackend.unignore (agent_thread_id);
-			if (parent_thread_id != 0)
-				Gum.ScriptBackend.unignore (parent_thread_id);
-		}
-
-		private extern void replace_apis ();
-		private extern void revert_apis ();
-	}
-
 	private Gum.MemoryRange memory_range () {
 		Gum.MemoryRange? result = null;
 
@@ -785,7 +738,7 @@ namespace Frida.Gadget {
 
 	namespace Environment {
 		private extern void init ();
-		private extern void deinit (owned AutoIgnorer ignorer);
+		private extern void deinit ();
 		private extern unowned MainContext get_main_context ();
 		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
 	}
