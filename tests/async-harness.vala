@@ -39,7 +39,7 @@ namespace Frida.Test {
 		}
 
 		protected virtual uint provide_timeout () {
-			return 20;
+			return 60;
 		}
 
 		public async void process_events () {
