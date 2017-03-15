@@ -698,13 +698,13 @@ namespace Frida.HostSessionTest {
 
 			/* Warm up static allocations */
 			var session = yield device.attach (process.id);
-			yield session.detach ();
+			yield detach_and_wait_for_cleanup (session);
 			session = null;
 
 			var usage_before = process.snapshot_resource_usage ();
 
 			session = yield device.attach (process.id);
-			yield session.detach ();
+			yield detach_and_wait_for_cleanup (session);
 			session = null;
 
 			var usage_after = process.snapshot_resource_usage ();
@@ -718,6 +718,17 @@ namespace Frida.HostSessionTest {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
 		}
+	}
+
+	private static async void detach_and_wait_for_cleanup (Session session) throws Error {
+		yield session.detach ();
+
+		/* The Darwin injector does cleanup 50ms after detecting that the remote thread is dead */
+		Timeout.add (100, () => {
+			detach_and_wait_for_cleanup.callback ();
+			return false;
+		});
+		yield;
 	}
 
 #if LINUX

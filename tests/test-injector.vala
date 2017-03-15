@@ -121,11 +121,13 @@ namespace Frida.InjectorTest {
 		/* Warm up static allocations */
 		rat.inject ("simple-agent", "");
 		rat.wait_for_uninject ();
+		rat.wait_for_cleanup ();
 
 		var usage_before = rat.process.snapshot_resource_usage ();
 
 		rat.inject ("simple-agent", "");
 		rat.wait_for_uninject ();
+		rat.wait_for_cleanup ();
 
 		var usage_after = rat.process.snapshot_resource_usage ();
 
@@ -275,6 +277,18 @@ namespace Frida.InjectorTest {
 			injector.disconnect (handler_id);
 
 			return !timed_out;
+		}
+
+		public void wait_for_cleanup () {
+			var loop = new MainLoop ();
+
+			/* The Darwin injector does cleanup 50ms after detecting that the remote thread is dead */
+			Timeout.add (100, () => {
+				loop.quit ();
+				return false;
+			});
+
+			loop.run ();
 		}
 
 		public int wait_for_process_to_exit () {
