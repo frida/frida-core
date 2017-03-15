@@ -66,11 +66,14 @@ namespace Frida.Test {
 			return new Process (handle, id, true);
 		}
 
+		public void resume () throws Error {
+			ProcessBackend.resume (handle);
+		}
+
 		public int join (uint timeout_msec = 0) throws Error {
 			if (handle == null)
 				throw new Error.INVALID_OPERATION ("Process already joined or killed");
-
-			var result = ProcessBackend.join (handle, timeout_msec);
+var result = ProcessBackend.join (handle, timeout_msec);
 
 			handle = null;
 
@@ -144,6 +147,7 @@ namespace Frida.Test {
 		private extern string filename_of (void * handle);
 		private extern void create (string path, string[] argv, string[] envp, Arch arch, bool suspended, out void * handle, out uint id) throws Error;
 		private extern int join (void * handle, uint timeout_msec) throws Error;
+		private extern void resume (void * handle) throws Error;
 		private extern void kill (void * handle);
 	}
 }

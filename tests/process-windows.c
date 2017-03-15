@@ -103,6 +103,17 @@ frida_test_process_backend_join (void * handle, guint timeout_msec, GError ** er
 }
 
 void
+frida_test_process_backend_resume (void * handle, GError ** error)
+{
+  (void) handle;
+
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented on this OS");
+}
+
+void
 frida_test_process_backend_kill (void * handle)
 {
   TerminateProcess (handle, 1);

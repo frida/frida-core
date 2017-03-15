@@ -341,6 +341,21 @@ frida_test_process_backend_join (void * handle, guint timeout_msec,
 }
 
 void
+frida_test_process_backend_resume (void * handle, GError ** error)
+{
+#ifdef HAVE_DARWIN
+  kill (GPOINTER_TO_SIZE (handle), SIGCONT);
+#else
+  (void) handle;
+
+  g_set_error (error,
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not implemented on this OS");
+#endif
+}
+
+void
 frida_test_process_backend_kill (void * handle)
 {
 #ifdef HAVE_DARWIN
