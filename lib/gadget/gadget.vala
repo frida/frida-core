@@ -748,4 +748,39 @@ namespace Frida.Gadget {
 
 	private extern void log_info (string message);
 	private extern void log_error (string message);
+
+	private Mutex gc_mutex;
+	private uint gc_generation = 0;
+	private bool gc_scheduled = false;
+
+	public void on_pending_garbage (void * data) {
+		gc_mutex.lock ();
+		gc_generation++;
+		bool already_scheduled = gc_scheduled;
+		gc_scheduled = true;
+		gc_mutex.unlock ();
+
+		if (already_scheduled)
+			return;
+
+		Timeout.add (50, () => {
+			gc_mutex.lock ();
+			uint generation = gc_generation;
+			gc_mutex.unlock ();
+
+			bool collected_everything = garbage_collect ();
+
+			gc_mutex.lock ();
+			bool same_generation = generation == gc_generation;
+			bool repeat = !collected_everything || !same_generation;
+			if (!repeat)
+				gc_scheduled = false;
+			gc_mutex.unlock ();
+
+			return repeat;
+		});
+	}
+
+	[CCode (cname = "g_thread_garbage_collect")]
+	private extern bool garbage_collect ();
 }

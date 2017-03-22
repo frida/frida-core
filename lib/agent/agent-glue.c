@@ -11,6 +11,8 @@ frida_agent_environment_init (void)
 {
   gum_init_embedded ();
 
+  g_thread_set_garbage_handler (frida_agent_on_pending_garbage, NULL);
+
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 }

@@ -13,6 +13,7 @@ frida_init (void)
 {
   static gsize frida_initialized = FALSE;
 
+  g_thread_set_garbage_handler (frida_on_pending_garbage, NULL);
   glib_init ();
   gio_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
