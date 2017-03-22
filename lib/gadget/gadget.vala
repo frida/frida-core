@@ -79,6 +79,9 @@ namespace Frida.Gadget {
 		if (Gum.Thread.try_get_range (out stack))
 			Gum.Cloak.add_range (stack);
 
+		var interceptor = Gum.Interceptor.obtain ();
+		interceptor.ignore_current_thread ();
+
 		exceptor = Gum.Exceptor.obtain ();
 
 		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {

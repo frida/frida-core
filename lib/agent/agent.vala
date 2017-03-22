@@ -11,6 +11,9 @@ namespace Frida.Agent {
 			if (Gum.Thread.try_get_range (out stack))
 				Gum.Cloak.add_range (stack);
 
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.ignore_current_thread ();
+
 			var exceptor = Gum.Exceptor.obtain ();
 
 			var server = new AgentServer (pipe_address, agent_range);
