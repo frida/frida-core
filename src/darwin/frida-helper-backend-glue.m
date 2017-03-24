@@ -2495,12 +2495,11 @@ frida_find_libc_initializer (guint task, GumAddress base)
        command_index++)
   {
     const struct load_command * lc = command;
+    gconstpointer sections;
+    gsize section_count, section_index;
 
     if (lc->cmd != LC_SEGMENT && lc->cmd != LC_SEGMENT_64)
       goto skip_command;
-
-    gconstpointer sections;
-    gsize section_count, section_index;
 
     if (lc->cmd == LC_SEGMENT)
     {
@@ -2621,45 +2620,45 @@ frida_find_libc_initializer_end (guint task, GumCpuType cpu_type, GumAddress sta
       break;
 
     case GUM_CPU_ARM:
+    {
+      int i, pop_lr = -1;
+
+      while (cs_disasm_iter (capstone, &code, &size, &address, insn))
       {
-        int i, pop_lr = -1;
-
-        while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+        if (insn->id == ARM_INS_PUSH &&
+            insn->address == (start & ~1))
         {
-          if (insn->id == ARM_INS_PUSH &&
-              insn->address == (start & ~1))
+          for (i = 0; i != insn->detail->arm.op_count; i++)
           {
-            for (i = 0; i != insn->detail->arm.op_count; i++)
+            if (insn->detail->arm.operands[i].reg == ARM_REG_LR)
             {
-              if (insn->detail->arm.operands[i].reg == ARM_REG_LR)
-              {
-                pop_lr = i;
-                break;
-              }
-            }
-          }
-
-          if ((insn->id == ARM_INS_BX || insn->id == ARM_INS_BXJ) &&
-              insn->detail->arm.operands[0].type == ARM_OP_REG &&
-              insn->detail->arm.operands[0].reg == ARM_REG_LR)
-          {
-            found = insn->address;
-            break;
-          }
-
-          if (insn->id == ARM_INS_POP &&
-              pop_lr >= 0 &&
-              pop_lr < insn->detail->arm.op_count)
-          {
-            if (insn->detail->arm.operands[pop_lr].reg == ARM_REG_PC)
-            {
-              found = insn->address;
+              pop_lr = i;
               break;
             }
           }
         }
+
+        if ((insn->id == ARM_INS_BX || insn->id == ARM_INS_BXJ) &&
+            insn->detail->arm.operands[0].type == ARM_OP_REG &&
+            insn->detail->arm.operands[0].reg == ARM_REG_LR)
+        {
+          found = insn->address;
+          break;
+        }
+
+        if (insn->id == ARM_INS_POP &&
+            pop_lr >= 0 &&
+            pop_lr < insn->detail->arm.op_count)
+        {
+          if (insn->detail->arm.operands[pop_lr].reg == ARM_REG_PC)
+          {
+            found = insn->address;
+            break;
+          }
+        }
       }
       break;
+    }
 
     case GUM_CPU_IA32:
     case GUM_CPU_AMD64:
