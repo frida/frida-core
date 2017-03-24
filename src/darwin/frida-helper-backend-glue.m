@@ -2503,25 +2503,25 @@ frida_find_libc_initializer (guint task, GumAddress base)
 
     if (lc->cmd == LC_SEGMENT)
     {
-        const struct segment_command * sc = command;
+      const struct segment_command * sc = command;
 
-        sections = sc + 1;
-        section_count = sc->nsects;
+      sections = sc + 1;
+      section_count = sc->nsects;
 
-        if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
-            strcmp (sc->segname, "__DATA") != 0)
-          goto skip_command;
+      if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
+          strcmp (sc->segname, "__DATA") != 0)
+        goto skip_command;
     }
     else
     {
-        const struct segment_command_64 * sc = command;
+      const struct segment_command_64 * sc = command;
 
-        sections = sc + 1;
-        section_count = sc->nsects;
+      sections = sc + 1;
+      section_count = sc->nsects;
 
-        if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
-            strcmp (sc->segname, "__DATA") != 0)
-          goto skip_command;
+      if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
+          strcmp (sc->segname, "__DATA") != 0)
+        goto skip_command;
     }
 
     for (section_index = 0;
@@ -2608,10 +2608,13 @@ frida_find_libc_initializer_end (guint task, GumCpuType cpu_type, GumAddress sta
 
   switch (cpu_type)
   {
-    case GUM_CPU_ARM64:
+    case GUM_CPU_IA32:
+    case GUM_CPU_AMD64:
       while (cs_disasm_iter (capstone, &code, &size, &address, insn))
       {
-        if (insn->id == ARM64_INS_RET)
+        if (insn->id == X86_INS_RET ||
+            insn->id == X86_INS_RETF ||
+            insn->id == X86_INS_RETFQ)
         {
           found = insn->address;
           break;
@@ -2657,16 +2660,14 @@ frida_find_libc_initializer_end (guint task, GumCpuType cpu_type, GumAddress sta
           }
         }
       }
+
       break;
     }
 
-    case GUM_CPU_IA32:
-    case GUM_CPU_AMD64:
+    case GUM_CPU_ARM64:
       while (cs_disasm_iter (capstone, &code, &size, &address, insn))
       {
-        if (insn->id == X86_INS_RET ||
-            insn->id == X86_INS_RETF ||
-            insn->id == X86_INS_RETFQ)
+        if (insn->id == ARM64_INS_RET)
         {
           found = insn->address;
           break;
