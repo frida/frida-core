@@ -217,6 +217,12 @@ static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, 
 static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
 static void frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType cpu_type);
 
+static gboolean frida_find_libc (const GumModuleDetails * details, gpointer user_data);
+static GumAddress frida_find_libc_initializer (guint task, GumAddress base);
+static GumAddress frida_get_module_slide (gconstpointer command, gsize ncmds, GumAddress base);
+static GumAddress frida_find_libc_initializer_end (guint task, GumCpuType cpu_type, GumAddress start, gsize max_size);
+static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
+
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
 void
@@ -814,292 +820,6 @@ _frida_darwin_helper_backend_create_spawn_instance (FridaDarwinHelperBackend * s
   return instance;
 }
 
-static gboolean
-find_libSystem (const GumModuleDetails * details, gpointer user_data)
-{
-  GumAddress * address = user_data;
-  if (g_str_has_suffix (details->path, "libSystem.B.dylib")) {
-    *address = details->range->base_address;
-    return FALSE;
-  }
-  return TRUE;
-}
-
-static GumAddress
-get_module_slide (gconstpointer command, gsize ncmds, GumAddress base) {
-  gsize command_index;
-  gsize slide = 0;
-
-  for (command_index = 0;
-       command_index != ncmds && slide == 0;
-       command_index++)
-  {
-    const struct load_command * lc = command;
-
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      if (lc->cmd == LC_SEGMENT)
-      {
-        const struct segment_command * sc = command;
-        if (strcmp (sc->segname, "__TEXT") == 0) {
-          slide = base - sc->vmaddr;
-        }
-      }
-      else
-      {
-        const struct segment_command_64 * sc = command;
-        if (strcmp (sc->segname, "__TEXT") == 0) {
-          slide = base - sc->vmaddr;
-        }
-      }
-    }
-
-    command += lc->cmdsize;
-  }
-  return slide;
-}
-
-static GumAddress
-find_libSystem_initializer (guint task, GumAddress base)
-{
-  gpointer image;
-  const struct mach_header * header;
-  gconstpointer command;
-  gsize command_index;
-  GumAddress initializer = 0;
-  gsize slide = 0;
-
-  image = gum_darwin_read (task, base, 4096, NULL);
-  header = image;
-
-  if (header->magic == MH_MAGIC)
-    command = image + sizeof (struct mach_header);
-  else
-    command = image + sizeof (struct mach_header_64);
-
-  slide = get_module_slide (command, header->ncmds, base);
-
-  for (command_index = 0;
-       command_index != header->ncmds && initializer == 0;
-       command_index++)
-  {
-    const struct load_command * lc = command;
-
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      gconstpointer sections;
-      gsize section_count, section_index;
-
-      if (lc->cmd == LC_SEGMENT)
-      {
-          const struct segment_command * sc = command;
-          sections = sc + 1;
-          section_count = sc->nsects;
-          if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
-              strcmp (sc->segname, "__DATA") != 0) {
-            command += lc->cmdsize;
-            continue;
-          }
-      }
-      else
-      {
-          const struct segment_command_64 * sc = command;
-          sections = sc + 1;
-          section_count = sc->nsects;
-          if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
-              strcmp (sc->segname, "__DATA") != 0) {
-            command += lc->cmdsize;
-            continue;
-          }
-      }
-
-      for (section_index = 0;
-          section_index != section_count && initializer == 0;
-          section_index++)
-      {
-        GumAddress addr;
-        const char *sectname;
-        gsize sectsize;
-
-        if (lc->cmd == LC_SEGMENT)
-        {
-          const struct section * s = sections +
-              (section_index * sizeof (struct section));
-          sectname = s->sectname;
-          addr = s->addr + (guint32) slide;
-          sectsize = s->size;
-        }
-        else
-        {
-          const struct section_64 * s = sections +
-              (section_index * sizeof (struct section_64));
-          sectname = s->sectname;
-          addr = s->addr + (guint64) slide;
-          sectsize = s->size;
-        }
-
-        if (strcmp (sectname, "__mod_init_func") == 0)
-        {
-          if (lc->cmd == LC_SEGMENT)
-          {
-            g_assert_cmpint (sectsize, ==, 4);
-            guint32 * initFunc = (guint32*) gum_darwin_read (task,
-                addr, sizeof (guint32), NULL);
-            initializer = *initFunc;
-            g_free (initFunc);
-          }
-          else
-          {
-            g_assert_cmpint (sectsize, ==, 8);
-            guint64 * initFunc = (guint64*) gum_darwin_read (task,
-                addr, sizeof (guint64), NULL);
-            initializer = *initFunc;
-            g_free (initFunc);
-          }
-        }
-      }
-    }
-    command += lc->cmdsize;
-  }
-
-  g_free (image);
-
-  return initializer;
-}
-
-static csh
-create_capstone (GumCpuType cpu_type, GumAddress start) {
-  csh capstone;
-  cs_err err;
-  switch (cpu_type)
-  {
-    case GUM_CPU_ARM64:
-      err = cs_open (CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, &capstone);
-      break;
-
-    case GUM_CPU_ARM:
-      if (start & 1)
-        err = cs_open (CS_ARCH_ARM, CS_MODE_THUMB, &capstone);
-      else
-        err = cs_open (CS_ARCH_ARM, CS_MODE_ARM, &capstone);
-      break;
-
-    case GUM_CPU_IA32:
-      err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
-      break;
-
-    case GUM_CPU_AMD64:
-      err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
-      break;
-
-    default:
-      g_assert_not_reached ();
-  }
-  g_assert_cmpint (err, ==, CS_ERR_OK);
-  return capstone;
-}
-
-static GumAddress
-find_libSystem_initializer_end (guint task, GumCpuType cpu_type,
-        GumAddress start, gsize max_size)
-{
-  uint64_t address = start & (~1);
-  csh capstone;
-  const uint8_t *code;
-  cs_err err;
-  GumAddress found = 0;
-  gpointer image;
-  cs_insn * insn = NULL;
-  size_t size;
-
-  capstone = create_capstone (cpu_type, start);
-
-  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
-
-  image = gum_darwin_read (task, address, max_size, NULL);
-
-  insn = cs_malloc (capstone);
-  code = image;
-  size = max_size;
-
-  switch (cpu_type)
-  {
-    case GUM_CPU_ARM64:
-      while(cs_disasm_iter(capstone, &code, &size, &address, insn))
-      {
-        if (insn->id == ARM64_INS_RET)
-        {
-          found = insn->address;
-          break;
-        }
-      }
-      break;
-
-    case GUM_CPU_ARM:
-      {
-        int i, pop_lr = -1;
-        while(cs_disasm_iter(capstone, &code, &size, &address, insn))
-        {
-          if (insn->id == ARM_INS_PUSH &&
-              insn->address == (start & (~1)))
-          {
-            for (i=0; i != insn->detail->arm.op_count; i++)
-            {
-              if (insn->detail->arm.operands[i].reg == ARM_REG_LR)
-              {
-                pop_lr = i;
-                break;
-              }
-            }
-          }
-
-          if ((insn->id == ARM_INS_BX || insn->id == ARM_INS_BXJ) &&
-              insn->detail->arm.operands[0].type == ARM_OP_REG &&
-              insn->detail->arm.operands[0].reg == ARM_REG_LR)
-          {
-            found = insn->address;
-            break;
-          }
-
-          if (insn->id == ARM_INS_POP &&
-              pop_lr >= 0 &&
-              pop_lr < insn->detail->arm.op_count)
-          {
-            if (insn->detail->arm.operands[pop_lr].reg == ARM_REG_PC)
-            {
-              found = insn->address;
-              break;
-            }
-          }
-        }
-      }
-      break;
-
-    case GUM_CPU_IA32:
-    case GUM_CPU_AMD64:
-      while(cs_disasm_iter(capstone, &code, &size, &address, insn))
-      {
-        if (insn->id == X86_INS_RET  ||
-            insn->id == X86_INS_RETF ||
-            insn->id == X86_INS_RETFQ)
-        {
-          found = insn->address;
-          break;
-        }
-      }
-      break;
-
-    default:
-      g_assert_not_reached ();
-  }
-
-  cs_free(insn, 1);
-  cs_close (&capstone);
-  g_free (image);
-  return found;
-}
-
 void
 _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHelperBackend * self, void * opaque_instance, guint task, GError ** error)
 {
@@ -1113,12 +833,12 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   guint thread_index;
   mach_msg_type_number_t thread_count = 0;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
-  GumAddress libSystem_header = 0;
+  GumAddress libc_header = 0;
   GumAddress probe_address;
   FridaDebugState breakpoint_debug_state;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
-  static GumAddress cached_address_for_breakpoint[6] = {0,};
+  static GumAddress cached_address_for_breakpoint[6] = { 0, };
 
   /*
    * We POSIX_SPAWN_START_SUSPENDED which means that the kernel will create
@@ -1166,24 +886,27 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
   threads = NULL;
 
-  if (cached_address_for_breakpoint[instance->cpu_type] == 0) {
-    gum_darwin_enumerate_modules (task, find_libSystem, &libSystem_header);
-    if (libSystem_header == 0)
-      goto handle_probe_libSystem_error;
+  if (cached_address_for_breakpoint[instance->cpu_type] == 0)
+  {
+    GumAddress initializer, ret_address;
 
-    GumAddress initializer = find_libSystem_initializer (task, libSystem_header);
+    gum_darwin_enumerate_modules (task, frida_find_libc, &libc_header);
+    if (libc_header == 0)
+      goto handle_probe_libc_error;
+
+    initializer = frida_find_libc_initializer (task, libc_header);
     if (initializer == 0)
-      goto handle_probe_libSystem_error;
+      goto handle_probe_libc_error;
 
-    GumAddress retAddress = find_libSystem_initializer_end (task, instance->cpu_type, initializer, 512);
+    ret_address = frida_find_libc_initializer_end (task, instance->cpu_type, initializer, 512);
 
-    cached_address_for_breakpoint[instance->cpu_type] = retAddress;
+    cached_address_for_breakpoint[instance->cpu_type] = ret_address;
   }
 
   probe_address = cached_address_for_breakpoint[instance->cpu_type];
 
   if (probe_address == 0)
-    goto handle_probe_libSystem_error;
+    goto handle_probe_libc_error;
 
   ret = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_get_debug_state");
@@ -1240,7 +963,7 @@ handle_page_size_error:
         "Unexpected error while probing page size of target process");
     goto error_epilogue;
   }
-handle_probe_libSystem_error:
+handle_probe_libc_error:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -2731,6 +2454,305 @@ frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType c
     s->__bcr[0] = (FRIDA_BAS_ANY << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
   }
 #endif
+}
+
+static gboolean
+frida_find_libc (const GumModuleDetails * details, gpointer user_data)
+{
+  GumAddress * address = user_data;
+
+  if (g_str_has_suffix (details->path, "libSystem.B.dylib"))
+  {
+    *address = details->range->base_address;
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+static GumAddress
+frida_find_libc_initializer (guint task, GumAddress base)
+{
+  gpointer image;
+  const struct mach_header * header;
+  gconstpointer command;
+  gsize command_index;
+  GumAddress initializer = 0;
+  gsize slide = 0;
+
+  image = gum_darwin_read (task, base, 4096, NULL);
+  header = image;
+
+  if (header->magic == MH_MAGIC)
+    command = image + sizeof (struct mach_header);
+  else
+    command = image + sizeof (struct mach_header_64);
+
+  slide = frida_get_module_slide (command, header->ncmds, base);
+
+  for (command_index = 0;
+       command_index != header->ncmds && initializer == 0;
+       command_index++)
+  {
+    const struct load_command * lc = command;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      gconstpointer sections;
+      gsize section_count, section_index;
+
+      if (lc->cmd == LC_SEGMENT)
+      {
+          const struct segment_command * sc = command;
+
+          sections = sc + 1;
+          section_count = sc->nsects;
+
+          if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
+              strcmp (sc->segname, "__DATA") != 0)
+          {
+            command += lc->cmdsize;
+            continue;
+          }
+      }
+      else
+      {
+          const struct segment_command_64 * sc = command;
+
+          sections = sc + 1;
+          section_count = sc->nsects;
+
+          if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
+              strcmp (sc->segname, "__DATA") != 0)
+          {
+            command += lc->cmdsize;
+            continue;
+          }
+      }
+
+      for (section_index = 0;
+          section_index != section_count && initializer == 0;
+          section_index++)
+      {
+        GumAddress addr;
+        const char * sectname;
+        gsize sectsize;
+
+        if (lc->cmd == LC_SEGMENT)
+        {
+          const struct section * s = sections + (section_index * sizeof (struct section));
+
+          sectname = s->sectname;
+          addr = s->addr + (guint32) slide;
+          sectsize = s->size;
+        }
+        else
+        {
+          const struct section_64 * s = sections + (section_index * sizeof (struct section_64));
+
+          sectname = s->sectname;
+          addr = s->addr + (guint64) slide;
+          sectsize = s->size;
+        }
+
+        if (strcmp (sectname, "__mod_init_func") == 0)
+        {
+          if (lc->cmd == LC_SEGMENT)
+          {
+            guint32 * init_func;
+            g_assert_cmpint (sectsize, ==, 4);
+            init_func = (guint32*) gum_darwin_read (task, addr, sizeof (guint32), NULL);
+            initializer = *init_func;
+            g_free (init_func);
+          }
+          else
+          {
+            guint64 * init_func;
+            g_assert_cmpint (sectsize, ==, 8);
+            init_func = (guint64*) gum_darwin_read (task, addr, sizeof (guint64), NULL);
+            initializer = *init_func;
+            g_free (init_func);
+          }
+        }
+      }
+    }
+
+    command += lc->cmdsize;
+  }
+
+  g_free (image);
+
+  return initializer;
+}
+
+static GumAddress
+frida_get_module_slide (gconstpointer command, gsize ncmds, GumAddress base)
+{
+  gsize command_index;
+  gsize slide = 0;
+
+  for (command_index = 0; command_index != ncmds && slide == 0; command_index++)
+  {
+    const struct load_command * lc = command;
+
+    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
+    {
+      if (lc->cmd == LC_SEGMENT)
+      {
+        const struct segment_command * sc = command;
+        if (strcmp (sc->segname, "__TEXT") == 0)
+          slide = base - sc->vmaddr;
+      }
+      else
+      {
+        const struct segment_command_64 * sc = command;
+        if (strcmp (sc->segname, "__TEXT") == 0)
+          slide = base - sc->vmaddr;
+      }
+    }
+
+    command += lc->cmdsize;
+  }
+
+  return slide;
+}
+
+static GumAddress
+frida_find_libc_initializer_end (guint task, GumCpuType cpu_type, GumAddress start, gsize max_size)
+{
+  uint64_t address = start & ~1;
+  GumAddress found = 0;
+  csh capstone;
+  cs_err err;
+  gpointer image;
+  cs_insn * insn = NULL;
+  const uint8_t * code;
+  size_t size;
+
+  capstone = frida_create_capstone (cpu_type, start);
+
+  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
+  g_assert_cmpint (err, ==, CS_ERR_OK);
+
+  image = gum_darwin_read (task, address, max_size, NULL);
+
+  insn = cs_malloc (capstone);
+  code = image;
+  size = max_size;
+
+  switch (cpu_type)
+  {
+    case GUM_CPU_ARM64:
+      while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+      {
+        if (insn->id == ARM64_INS_RET)
+        {
+          found = insn->address;
+          break;
+        }
+      }
+      break;
+
+    case GUM_CPU_ARM:
+      {
+        int i, pop_lr = -1;
+
+        while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+        {
+          if (insn->id == ARM_INS_PUSH &&
+              insn->address == (start & ~1))
+          {
+            for (i = 0; i != insn->detail->arm.op_count; i++)
+            {
+              if (insn->detail->arm.operands[i].reg == ARM_REG_LR)
+              {
+                pop_lr = i;
+                break;
+              }
+            }
+          }
+
+          if ((insn->id == ARM_INS_BX || insn->id == ARM_INS_BXJ) &&
+              insn->detail->arm.operands[0].type == ARM_OP_REG &&
+              insn->detail->arm.operands[0].reg == ARM_REG_LR)
+          {
+            found = insn->address;
+            break;
+          }
+
+          if (insn->id == ARM_INS_POP &&
+              pop_lr >= 0 &&
+              pop_lr < insn->detail->arm.op_count)
+          {
+            if (insn->detail->arm.operands[pop_lr].reg == ARM_REG_PC)
+            {
+              found = insn->address;
+              break;
+            }
+          }
+        }
+      }
+      break;
+
+    case GUM_CPU_IA32:
+    case GUM_CPU_AMD64:
+      while (cs_disasm_iter (capstone, &code, &size, &address, insn))
+      {
+        if (insn->id == X86_INS_RET ||
+            insn->id == X86_INS_RETF ||
+            insn->id == X86_INS_RETFQ)
+        {
+          found = insn->address;
+          break;
+        }
+      }
+      break;
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  cs_free (insn, 1);
+  cs_close (&capstone);
+  g_free (image);
+
+  return found;
+}
+
+static csh
+frida_create_capstone (GumCpuType cpu_type, GumAddress start)
+{
+  csh capstone;
+  cs_err err;
+
+  switch (cpu_type)
+  {
+    case GUM_CPU_ARM64:
+      err = cs_open (CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, &capstone);
+      break;
+
+    case GUM_CPU_ARM:
+      if (start & 1)
+        err = cs_open (CS_ARCH_ARM, CS_MODE_THUMB, &capstone);
+      else
+        err = cs_open (CS_ARCH_ARM, CS_MODE_ARM, &capstone);
+      break;
+
+    case GUM_CPU_IA32:
+      err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
+      break;
+
+    case GUM_CPU_AMD64:
+      err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
+      break;
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  g_assert_cmpint (err, ==, CS_ERR_OK);
+
+  return capstone;
 }
 
 static void
