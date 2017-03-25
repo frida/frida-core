@@ -32,6 +32,7 @@
 
 typedef struct _FridaHelperContext FridaHelperContext;
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
+typedef guint FridaBreakpointPhase;
 typedef struct _FridaInjectInstance FridaInjectInstance;
 typedef struct _FridaInjectPayloadLayout FridaInjectPayloadLayout;
 typedef struct _FridaAgentDetails FridaAgentDetails;
@@ -40,15 +41,6 @@ typedef struct _FridaAgentEmitContext FridaAgentEmitContext;
 
 typedef struct _FridaExceptionPortSet FridaExceptionPortSet;
 typedef union _FridaDebugState FridaDebugState;
-
-typedef guint FridaBreakpointPhase;
-
-enum _FridaBreakpointPhase
-{
-  FRIDA_BREAKPOINT_FIRST,
-  FRIDA_BREAKPOINT_SECOND,
-  FRIDA_BREAKPOINT_DONE
-};
 
 struct _FridaHelperContext
 {
@@ -90,6 +82,13 @@ struct _FridaSpawnInstance
   __Request__exception_raise_state_identity_t pending_request;
 
   FridaBreakpointPhase breakpoint_phase;
+};
+
+enum _FridaBreakpointPhase
+{
+  FRIDA_BREAKPOINT_FIRST,
+  FRIDA_BREAKPOINT_SECOND,
+  FRIDA_BREAKPOINT_DONE
 };
 
 struct _FridaInjectInstance
@@ -202,6 +201,8 @@ static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend *
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
+static void frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self);
+static void frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self);
 static void frida_spawn_instance_on_server_recv (void * context);
 
 static void frida_make_pipe (int fds[2]);
@@ -226,9 +227,6 @@ static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self
 static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type);
 static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
 static void frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType cpu_type);
-
-static void frida_breakpoint_receive_request (FridaSpawnInstance * self);
-static void frida_breakpoint_send_response (FridaSpawnInstance * self);
 
 static gboolean frida_store_base_address_if_libc (const GumModuleDetails * details, gpointer user_data);
 static GumAddress frida_find_libc_initializer (guint task, GumAddress base);
@@ -879,9 +877,9 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    *   was hit.
    * - Place a second hardware breakpoint at the end of dyld's
    *   ImageLoader::recursiveInitialization method, in order to let it release
-   *   the spin lock and notify the complete initialization of libSystem
-   * - Send a response to the message, resuming the thread
-   * - Wait until we get a second message on our exception port
+   *   the spin lock and notify the complete initialization of libSystem.
+   * - Send a response to the message, resuming the thread.
+   * - Wait until we get a second message on our exception port.
    * - Swap back the thread's orginal exception ports.
    * - Clear the hardware breakpoint by restoring the thread's debug registers.
    *
@@ -1506,7 +1504,45 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
     return;
   }
 
-  frida_breakpoint_send_response (self);
+  frida_spawn_instance_send_breakpoint_response (self);
+}
+
+static void
+frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
+{
+  __Request__exception_raise_state_identity_t * request = &self->pending_request;
+  mach_msg_header_t * header;
+  kern_return_t ret;
+
+  bzero (request, sizeof (*request));
+  header = &request->Head;
+  header->msgh_size = sizeof (*request);
+  header->msgh_local_port = self->server_port;
+  ret = mach_msg_receive (header);
+  g_assert_cmpint (ret, ==, 0);
+}
+
+static void
+frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
+{
+  __Request__exception_raise_state_identity_t * request = &self->pending_request;
+  __Reply__exception_raise_t response;
+  mach_msg_header_t * header;
+  kern_return_t ret;
+
+  bzero (&response, sizeof (response));
+  header = &response.Head;
+  header->msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+  header->msgh_size = sizeof (response);
+  header->msgh_remote_port = request->Head.msgh_remote_port;
+  header->msgh_local_port = MACH_PORT_NULL;
+  header->msgh_reserved = 0;
+  header->msgh_id = request->Head.msgh_id + 100;
+  response.NDR = NDR_record;
+  response.RetCode = KERN_SUCCESS;
+  ret = mach_msg_send (header);
+  if (ret == KERN_SUCCESS)
+    request->Head.msgh_remote_port = MACH_PORT_NULL;
 }
 
 static void
@@ -1514,14 +1550,14 @@ frida_spawn_instance_on_server_recv (void * context)
 {
   FridaSpawnInstance * self = context;
 
-  frida_breakpoint_receive_request (self);
+  frida_spawn_instance_receive_breakpoint_request (self);
 
   switch (self->breakpoint_phase)
   {
     case FRIDA_BREAKPOINT_FIRST:
       frida_set_debug_state (self->thread, &self->second_debug_state, self->cpu_type);
       self->breakpoint_phase = FRIDA_BREAKPOINT_SECOND;
-      frida_breakpoint_send_response (self);
+      frida_spawn_instance_send_breakpoint_response (self);
       break;
 
     case FRIDA_BREAKPOINT_SECOND:
@@ -2533,43 +2569,6 @@ frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType c
     s->__bcr[0] = (FRIDA_BAS_ANY << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
   }
 #endif
-}
-
-static void
-frida_breakpoint_receive_request (FridaSpawnInstance * self)
-{
-  __Request__exception_raise_state_identity_t * request = &self->pending_request;
-  mach_msg_header_t * header;
-  kern_return_t ret;
-  bzero (request, sizeof (*request));
-  header = &request->Head;
-  header->msgh_size = sizeof (*request);
-  header->msgh_local_port = self->server_port;
-  ret = mach_msg_receive (header);
-  g_assert_cmpint (ret, ==, 0);
-}
-
-static void
-frida_breakpoint_send_response (FridaSpawnInstance * self)
-{
-  __Request__exception_raise_state_identity_t * request = &self->pending_request;
-  __Reply__exception_raise_t response;
-  mach_msg_header_t * header;
-  kern_return_t ret;
-
-  bzero (&response, sizeof (response));
-  header = &response.Head;
-  header->msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
-  header->msgh_size = sizeof (response);
-  header->msgh_remote_port = request->Head.msgh_remote_port;
-  header->msgh_local_port = MACH_PORT_NULL;
-  header->msgh_reserved = 0;
-  header->msgh_id = request->Head.msgh_id + 100;
-  response.NDR = NDR_record;
-  response.RetCode = KERN_SUCCESS;
-  ret = mach_msg_send (header);
-  if (ret == KERN_SUCCESS)
-    request->Head.msgh_remote_port = MACH_PORT_NULL;
 }
 
 static gboolean
