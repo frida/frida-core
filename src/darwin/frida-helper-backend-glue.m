@@ -939,7 +939,17 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   recursive_init_address = gum_darwin_module_resolve_symbol_address (dyld,
       "__ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEjPKcRNS_21InitializerTimingListERNS_15UninitedUpwardsE");
 
+  if (recursive_init_address == 0)
+  {
+    /* iOS 8.4 has a different signature for dyld's ImageLoader::recursiveInitialization */
+    recursive_init_address = gum_darwin_module_resolve_symbol_address (dyld,
+        "__ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEjRNS_21InitializerTimingListERNS_15UninitedUpwardsE");
+  }
+
   g_object_unref (dyld);
+
+  if (recursive_init_address == 0)
+    goto handle_probe_dyld_error;
 
   if (cached_ret_offset[instance->cpu_type] == 0)
   {
