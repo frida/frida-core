@@ -32,6 +32,7 @@
 
 typedef struct _FridaHelperContext FridaHelperContext;
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
+typedef struct _FridaSpawnInstanceDyldData FridaSpawnInstanceDyldData;
 typedef guint FridaBreakpointPhase;
 typedef struct _FridaInjectInstance FridaInjectInstance;
 typedef struct _FridaInjectPayloadLayout FridaInjectPayloadLayout;
@@ -73,7 +74,9 @@ struct _FridaSpawnInstance
   GumCpuType cpu_type;
   mach_port_t thread;
   FridaDebugState previous_debug_state;
-  FridaDebugState second_debug_state;
+  FridaDebugState dlerror_clear_debug_state;
+  FridaDebugState ret_gadget_debug_state;
+  FridaDebugState breakpoint_debug_state;
 
   mach_port_t server_port;
   dispatch_source_t server_recv_source;
@@ -82,13 +85,32 @@ struct _FridaSpawnInstance
   __Request__exception_raise_state_identity_t pending_request;
 
   FridaBreakpointPhase breakpoint_phase;
+  mach_vm_address_t lib_name;
+  mach_vm_address_t fake_helpers;
+  mach_vm_address_t dyld_data;
+  GumAddress dlopen_address;
+  GumAddress info_address;
+  GumAddress register_helpers_address;
+  GumAddress helpers_ptr_address;
+  GumAddress ret_gadget;
+  mach_port_t task;
+  GumDarwinUnifiedThreadState previous_thread_state;
 };
 
 enum _FridaBreakpointPhase
 {
-  FRIDA_BREAKPOINT_FIRST,
-  FRIDA_BREAKPOINT_SECOND,
+  FRIDA_BREAKPOINT_SET_HELPERS,
+  FRIDA_BREAKPOINT_DLOPEN_LIBC,
+  FRIDA_BREAKPOINT_SKIP_CLEAR,
+  FRIDA_BREAKPOINT_JUST_RETURN,
+  FRIDA_BREAKPOINT_CLEANUP,
   FRIDA_BREAKPOINT_DONE
+};
+
+struct _FridaSpawnInstanceDyldData
+{
+  const char libc[32];
+  guint8 helpers[32];
 };
 
 struct _FridaInjectInstance
@@ -203,7 +225,13 @@ static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
 static void frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self);
 static void frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self);
+static void frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
+static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
+static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
+static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self);
 static void frida_spawn_instance_on_server_recv (void * context);
+static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState state, mach_vm_address_t helpers);
+static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState state, mach_vm_address_t lib_name, int mode);
 
 static void frida_make_pipe (int fds[2]);
 
@@ -228,11 +256,8 @@ static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, 
 static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
 static void frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType cpu_type);
 
-static gboolean frida_store_base_address_if_libc (const GumModuleDetails * details, gpointer user_data);
-static GumAddress frida_find_libc_initializer (guint task, GumAddress base);
 static GumAddress frida_find_function_end (guint task, GumCpuType cpu_type, GumAddress start, gsize max_size);
 static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
-static GumAddress frida_get_module_slide (gconstpointer command, gsize ncmds, GumAddress base);
 
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
@@ -847,13 +872,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  GumAddress libc_header, probe_address, recursive_init_address, second_probe_address;
+  GumAddress probe_address, dlerror_clear_address;
   GumDarwinModule * dyld;
-  FridaDebugState breakpoint_debug_state;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
-  static GumAddress cached_address_for_breakpoint[6] = { 0, };
-  static GumAddress cached_ret_offset[6] = { 0, };
 
   /*
    * We POSIX_SPAWN_START_SUSPENDED which means that the kernel will create
@@ -862,26 +884,45 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    * initialized, so we won't be able to inject frida-agent at this point.
    *
    * So here's what we'll do before we consider spawn() done:
-   * - Get the address of the libSystem.B.dylib module in memory.
-   * - Walk its header and find the initializer address (into __mod_init_func),
-   *   this function in turn will call all the initializers of libSystem's
-   *   sub-libraries.
-   * - Disassemble the function to find its only exit point (the RET instruction,
-   *   or equivalent).
-   * - Set a hardware breakpoint there - at that point things will be sufficiently
-   *   initialized to allow instrumentation, but the initialization of the lib
-   *   won't be finished yet.
+   * - Get hold of the main thread to read its instruction pointer, which will
+   *   tell us where dyld is in memory.
+   * - Walk backwards to find dyld's Mach-O header.
+   * - Walk its symbols and find a function that's called at a point where the
+   *   process is sufficiently initialized to load frida-agent, but early enough
+   *   so that app's initializer still didn't run. In this case we choose
+   *   dyld::initializeMainExecutable(). At the beginning of this function dyld is
+   *   initialized but libSystem is still missing.
+   * - Set a hardware breakpoint at the beginning of this function.
    * - Swap out the thread's exception ports with our own.
    * - Resume the task.
    * - Wait until we get a message on our exception port, meaning our breakpoint
    *   was hit.
-   * - Place a second hardware breakpoint at the end of dyld's
-   *   ImageLoader::recursiveInitialization method, in order to let it release
-   *   the spin lock and notify the complete initialization of libSystem.
-   * - Send a response to the message, resuming the thread.
-   * - Wait until we get a second message on our exception port.
+   * - Hijack thread's instruction pointer to call dlopen("/usr/lib/libSystem.B.dylib")
+   *   and then return back to the beginning of initializeMainExecutable() and restore
+   *   previous thread state.
    * - Swap back the thread's orginal exception ports.
    * - Clear the hardware breakpoint by restoring the thread's debug registers.
+   *
+   * It's actually more complex than that, because:
+   * - This doesn't work on newer versions of dyld because to call dlopen() it's
+   *   necessary to registerThreadHelpers() first, which is normally done by libSystem
+   *   itself during its initialization.
+   * - To overcome this catch-22 we alloc a fake LibSystemHelpers object and register
+   *   it (also by hijacking thread's instruction pointer as described above).
+   * - On older dyld versions, registering helpers before loading libSystem led to
+   *   crashes, so we detect this condition and unset the helpers before calling dlopen(),
+   *   by writing a NULL directly into the global dyld::gLibSystemHelpers because in
+   *   some dyld versions calling registerThreadHelpers(NULL) causes a NULL dereference.
+   * - At the end of dlopen(), we set the global "libSystemInitialized" flag present in
+   *   the global dyld::qProcessInfo structure, because on newer dyld versions that doesn't
+   *   happen automatically due to the presence of our fake helpers.
+   * - One of the functions provided by the helper should return a buffer for the errors,
+   *   but since our fake helpers object implements its functions only using a return,
+   *   it will not return any buffer. To avoid this to happen, we set a breakpoint also
+   *   on dyld:dlerrorClear function and inject an immediate return,
+   *   effectively disabling the function.
+   * - At the end of dlopen() we finally deallocate our fake helpers (because now they've 
+   *   been replaced by real libSystem ones) and the string we used as a parameter for dlopen.
    *
    * Then later when resume() is called:
    * - Send a response to the message we got on our exception port, so the
@@ -901,6 +942,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   child_thread = threads[0];
   instance->thread = child_thread;
+  instance->task = task;
 
   for (thread_index = 1; thread_index < thread_count; thread_index++)
     mach_port_deallocate (self_task, threads[thread_index]);
@@ -936,70 +978,47 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header);
 
-  recursive_init_address = gum_darwin_module_resolve_symbol_address (dyld,
-      "__ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEjPKcRNS_21InitializerTimingListERNS_15UninitedUpwardsE");
-
-  if (recursive_init_address == 0)
-  {
-    /* iOS 8.4 has a different signature for dyld's ImageLoader::recursiveInitialization */
-    recursive_init_address = gum_darwin_module_resolve_symbol_address (dyld,
-        "__ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEjRNS_21InitializerTimingListERNS_15UninitedUpwardsE");
-  }
+  probe_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
+  instance->dlopen_address = gum_darwin_module_resolve_symbol_address (dyld, "_dlopen");
+  instance->register_helpers_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE");
+  dlerror_clear_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12dlerrorClearv");
+  instance->info_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld12gProcessInfoE");
+  instance->helpers_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld17gLibSystemHelpersE");
 
   g_object_unref (dyld);
 
-  if (recursive_init_address == 0)
+  if (probe_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0
+      || dlerror_clear_address == 0 || instance->info_address == 0)
     goto handle_probe_dyld_error;
 
-  if (cached_ret_offset[instance->cpu_type] == 0)
+  if (instance->cpu_type == GUM_CPU_ARM)
   {
-    if (instance->cpu_type == GUM_CPU_ARM)
-      recursive_init_address |= 1;
-
-    second_probe_address = frida_find_function_end (task, instance->cpu_type, recursive_init_address, 1024);
-    if (second_probe_address == 0)
-      goto handle_probe_dyld_error;
-
-    cached_ret_offset[instance->cpu_type] = second_probe_address - recursive_init_address;
-  }
-  else
-  {
-    second_probe_address = recursive_init_address + cached_ret_offset[instance->cpu_type];
+    instance->dlopen_address |= 1;
+    instance->register_helpers_address |= 1;
   }
 
-  if (cached_address_for_breakpoint[instance->cpu_type] == 0)
-  {
-    GumAddress initializer, ret_address;
+  instance->ret_gadget = frida_find_function_end (task, instance->cpu_type, instance->register_helpers_address, 128);
+  if (instance->ret_gadget == 0)
+    goto handle_probe_dyld_error;
 
-    libc_header = 0;
-    gum_darwin_enumerate_modules (task, frida_store_base_address_if_libc, &libc_header);
-    if (libc_header == 0)
-      goto handle_probe_libc_error;
+  if (instance->cpu_type == GUM_CPU_ARM)
+    instance->ret_gadget |= 1;
 
-    initializer = frida_find_libc_initializer (task, libc_header);
-    if (initializer == 0)
-      goto handle_probe_libc_error;
-
-    ret_address = frida_find_function_end (task, instance->cpu_type, initializer, 512);
-
-    cached_address_for_breakpoint[instance->cpu_type] = ret_address;
-  }
-
-  probe_address = cached_address_for_breakpoint[instance->cpu_type];
-
-  if (probe_address == 0)
-    goto handle_probe_libc_error;
+  frida_spawn_instance_create_dyld_data (instance);
 
   ret = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_get_debug_state");
 
-  memcpy (&breakpoint_debug_state, &instance->previous_debug_state, sizeof (breakpoint_debug_state));
-  frida_set_hardware_breakpoint (&breakpoint_debug_state, probe_address, instance->cpu_type);
+  memcpy (&instance->breakpoint_debug_state, &instance->previous_debug_state, sizeof (instance->breakpoint_debug_state));
+  frida_set_hardware_breakpoint (&instance->breakpoint_debug_state, probe_address, instance->cpu_type);
 
-  memcpy (&instance->second_debug_state, &instance->previous_debug_state, sizeof (breakpoint_debug_state));
-  frida_set_hardware_breakpoint (&instance->second_debug_state, second_probe_address, instance->cpu_type);
+  memcpy (&instance->dlerror_clear_debug_state, &instance->previous_debug_state, sizeof (instance->previous_debug_state));
+  frida_set_hardware_breakpoint (&instance->dlerror_clear_debug_state, dlerror_clear_address, instance->cpu_type);
 
-  ret = frida_set_debug_state (child_thread, &breakpoint_debug_state, instance->cpu_type);
+  memcpy (&instance->ret_gadget_debug_state, &instance->previous_debug_state, sizeof (instance->previous_debug_state));
+  frida_set_hardware_breakpoint (&instance->ret_gadget_debug_state, instance->ret_gadget & ~1, instance->cpu_type);
+
+  ret = frida_set_debug_state (child_thread, &instance->breakpoint_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_set_debug_state");
 
   ret = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
@@ -1054,14 +1073,6 @@ handle_probe_dyld_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing dyld of target process");
-    goto error_epilogue;
-  }
-handle_probe_libc_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing libSystem initializer of target process");
     goto error_epilogue;
   }
 handle_mach_error:
@@ -1451,7 +1462,7 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
   instance->pending_request.thread.name = MACH_PORT_NULL;
   instance->pending_request.task.name = MACH_PORT_NULL;
 
-  instance->breakpoint_phase = FRIDA_BREAKPOINT_FIRST;
+  instance->breakpoint_phase = FRIDA_BREAKPOINT_SET_HELPERS;
 
   return instance;
 }
@@ -1556,26 +1567,276 @@ frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
 }
 
 static void
+frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
+{
+  kern_return_t ret;
+  gboolean write_succeeded;
+  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, } };
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 * helpers32 = (guint32 *) &data.helpers[0];
+
+      /* version */
+      helpers32[0] = 1;
+      /* acquireGlobalDyldLock (unused) */
+      helpers32[1] = 0;
+      /* releaseGlobalDyldLock */
+      helpers32[2] = (guint32) self->ret_gadget;
+      /* getThreadBufferFor_dlerror (unused) */
+      helpers32[3] = 0;
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 * helpers64 = (guint64 *) &data.helpers[0];
+
+      /* version */
+      helpers64[0] = 1;
+      /* acquireGlobalDyldLock (unused) */
+      helpers64[1] = 0;
+      /* releaseGlobalDyldLock */
+      helpers64[2] = (guint64) self->ret_gadget;
+      /* getThreadBufferFor_dlerror (unused) */
+      helpers64[3] = 0;
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  ret = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
+  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+
+  write_succeeded = gum_darwin_write (self->task, self->dyld_data, (const guint8 *) &data, sizeof (data));
+  g_assert (write_succeeded);
+
+  self->fake_helpers = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, helpers);
+  self->lib_name = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, libc);
+}
+
+static void
+frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
+{
+  kern_return_t ret;
+
+  if (self->dyld_data == 0)
+    return;
+
+  ret = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
+  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+
+  self->dyld_data = 0;
+}
+
+static void
+frida_spawn_instance_unset_helpers (FridaSpawnInstance * self)
+{
+  gboolean write_succeeded;
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 null_ptr = 0;
+
+      write_succeeded = gum_darwin_write (self->task, self->helpers_ptr_address, (const guint8 *) &null_ptr, sizeof (null_ptr));
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 null_ptr = 0;
+
+      write_succeeded = gum_darwin_write (self->task, self->helpers_ptr_address, (const guint8 *) &null_ptr, sizeof (null_ptr));
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  g_assert (write_succeeded);
+}
+
+static void
+frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self)
+{
+  GumAddress initialized_address;
+  gboolean write_succeeded;
+  guint8 yes = 1;
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 * info_ptr;
+
+      info_ptr = (guint32 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 17;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 * info_ptr;
+
+      info_ptr = (guint64 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 25;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  write_succeeded = gum_darwin_write (self->task, initialized_address, &yes, 1);
+  g_assert (write_succeeded);
+}
+
+static gboolean
+frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self)
+{
+  gboolean initialized;
+  GumAddress initialized_address;
+  guint8 * yes;
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 * info_ptr;
+
+      info_ptr = (guint32 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 17;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 * info_ptr;
+
+      info_ptr = (guint64 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 25;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  yes = (guint8 *) gum_darwin_read (self->task, initialized_address, sizeof (yes), NULL);
+  initialized = *yes;
+  g_free (yes);
+
+  return initialized;
+}
+
+static void
 frida_spawn_instance_on_server_recv (void * context)
 {
   FridaSpawnInstance * self = context;
+  kern_return_t ret;
+  thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
+  mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
+  GumDarwinUnifiedThreadState state;
 
   frida_spawn_instance_receive_breakpoint_request (self);
 
   switch (self->breakpoint_phase)
   {
-    case FRIDA_BREAKPOINT_FIRST:
-      frida_set_debug_state (self->thread, &self->second_debug_state, self->cpu_type);
-      self->breakpoint_phase = FRIDA_BREAKPOINT_SECOND;
+    case FRIDA_BREAKPOINT_SET_HELPERS:
+      ret = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
+      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+
+      memcpy (&self->previous_thread_state, &state, sizeof (state));
+
+      frida_spawn_instance_call_set_helpers (self, state, self->fake_helpers);
+
+      self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_LIBC;
       frida_spawn_instance_send_breakpoint_response (self);
+
       break;
 
-    case FRIDA_BREAKPOINT_SECOND:
+    case FRIDA_BREAKPOINT_DLOPEN_LIBC:
+      if (frida_spawn_instance_is_libc_initialized (self))
+        frida_spawn_instance_unset_helpers (self);
+
+      memcpy (&state, &self->previous_thread_state, sizeof (state));
+
+      frida_spawn_instance_call_dlopen (self, state, self->lib_name, RTLD_GLOBAL | RTLD_LAZY);
+
+      frida_set_debug_state (self->thread, &self->dlerror_clear_debug_state, self->cpu_type);
+      self->breakpoint_phase = FRIDA_BREAKPOINT_SKIP_CLEAR;
+
+      frida_spawn_instance_send_breakpoint_response (self);
+
+      break;
+
+    case FRIDA_BREAKPOINT_SKIP_CLEAR:
+    case FRIDA_BREAKPOINT_JUST_RETURN:
+      ret = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
+      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+
+#ifdef HAVE_I386
+      if (self->cpu_type == GUM_CPU_AMD64)
+        state.uts.ts64.__rip = self->ret_gadget;
+      else
+        state.uts.ts32.__eip = self->ret_gadget;
+#else
+      if (self->cpu_type == GUM_CPU_ARM64)
+        state.ts_64.__pc = state.ts_64.__lr;
+      else
+        state.ts_32.__pc = state.ts_32.__lr;
+#endif
+
+      ret = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
+      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+
+      if (self->breakpoint_phase == FRIDA_BREAKPOINT_SKIP_CLEAR && self->cpu_type == GUM_CPU_ARM)
+      {
+        frida_set_debug_state (self->thread, &self->ret_gadget_debug_state, self->cpu_type);
+        self->breakpoint_phase = FRIDA_BREAKPOINT_JUST_RETURN;
+      }
+      else
+      {
+        frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
+        self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+      }
+
+      frida_spawn_instance_send_breakpoint_response (self);
+
+      break;
+
+    case FRIDA_BREAKPOINT_CLEANUP:
     {
       task_t self_task;
       FridaExceptionPortSet * previous_ports;
       mach_msg_type_number_t port_index;
-      kern_return_t ret;
 
       self_task = mach_task_self ();
 
@@ -1594,7 +1855,14 @@ frida_spawn_instance_on_server_recv (void * context)
       }
       previous_ports->count = 0;
 
+      ret = thread_set_state (self->thread, state_flavor, (thread_state_t) &self->previous_thread_state, state_count);
+      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+
+      frida_spawn_instance_destroy_dyld_data (self);
+
       frida_set_debug_state (self->thread, &self->previous_debug_state, self->cpu_type);
+
+      frida_spawn_instance_set_libc_initialized (self);
 
       self->breakpoint_phase = FRIDA_BREAKPOINT_DONE;
 
@@ -1606,6 +1874,120 @@ frida_spawn_instance_on_server_recv (void * context)
     default:
       g_assert_not_reached ();
   }
+}
+
+static void
+frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState state, mach_vm_address_t helpers)
+{
+  kern_return_t ret;
+  GumAddress current_pc;
+
+#ifdef HAVE_I386
+  if (self->cpu_type == GUM_CPU_AMD64)
+  {
+    gboolean write_succeeded;
+
+    current_pc = state.uts.ts64.__rip;
+    state.uts.ts64.__rip = self->register_helpers_address;
+    state.uts.ts64.__rdi = helpers;
+
+    state.uts.ts64.__rsp -= 8;
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, &current_pc, sizeof (current_pc));
+    g_assert (write_succeeded);
+  }
+  else
+  {
+    uint32 temp[2];
+    gboolean write_succeeded;
+
+    current_pc = state.uts.ts32.__eip;
+    state.uts.ts32.__eip = self->register_helpers_address;
+
+    temp[0] = current_pc;
+    temp[1] = helpers;
+    state.uts.ts32.__esp -= 8;
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, &temp, sizeof (temp));
+    g_assert (write_succeeded);
+  }
+#else
+  if (self->cpu_type == GUM_CPU_ARM64)
+  {
+    current_pc = state.ts_64.__pc;
+    state.ts_64.__pc = self->register_helpers_address;
+    state.ts_64.__lr = current_pc;
+    state.ts_64.__x[0] = helpers;
+  }
+  else
+  {
+    current_pc = state.ts_32.__pc;
+    state.ts_32.__pc = self->register_helpers_address;
+    state.ts_32.__lr = current_pc | 1;
+    state.ts_32.__r[0] = helpers;
+  }
+#endif
+
+  ret = thread_set_state (self->thread, GUM_DARWIN_THREAD_STATE_FLAVOR,
+      (thread_state_t) &state, GUM_DARWIN_THREAD_STATE_COUNT);
+  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+}
+
+static void
+frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState state, mach_vm_address_t lib_name, int mode)
+{
+  kern_return_t ret;
+  GumAddress current_pc;
+
+#ifdef HAVE_I386
+  if (self->cpu_type == GUM_CPU_AMD64)
+  {
+    gboolean write_succeeded;
+
+    current_pc = state.uts.ts64.__rip;
+    state.uts.ts64.__rip = self->dlopen_address;
+    state.uts.ts64.__rdi = lib_name;
+    state.uts.ts64.__rsi = mode;
+
+    state.uts.ts64.__rsp -= 16;
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, &current_pc, sizeof (current_pc));
+    g_assert (write_succeeded, ==, TRUE);
+  }
+  else
+  {
+    uint32 temp[3];
+    gboolean write_succeeded;
+
+    current_pc = state.uts.ts32.__eip;
+    state.uts.ts32.__eip = self->dlopen_address;
+
+    temp[0] = current_pc;
+    temp[1] = lib_name;
+    temp[2] = mode;
+    state.uts.ts32.__esp -= 16;
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, &temp, sizeof (temp));
+    g_assert (write_succeeded, ==, TRUE);
+  }
+#else
+  if (self->cpu_type == GUM_CPU_ARM64)
+  {
+    current_pc = state.ts_64.__pc;
+    state.ts_64.__pc = self->dlopen_address;
+    state.ts_64.__lr = current_pc;
+    state.ts_64.__x[0] = lib_name;
+    state.ts_64.__x[1] = mode;
+  }
+  else
+  {
+    current_pc = state.ts_32.__pc;
+    state.ts_32.__pc = self->dlopen_address;
+    state.ts_32.__lr = current_pc | 1;
+    state.ts_32.__r[0] = lib_name;
+    state.ts_32.__r[1] = mode;
+  }
+#endif
+
+  ret = thread_set_state (self->thread, GUM_DARWIN_THREAD_STATE_FLAVOR,
+      (thread_state_t) &state, GUM_DARWIN_THREAD_STATE_COUNT);
+  g_assert_cmpint (ret, ==, KERN_SUCCESS);
 }
 
 static void
@@ -2581,133 +2963,6 @@ frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType c
 #endif
 }
 
-static gboolean
-frida_store_base_address_if_libc (const GumModuleDetails * details, gpointer user_data)
-{
-  GumAddress * address = user_data;
-
-  if (g_str_has_suffix (details->path, "libSystem.B.dylib"))
-  {
-    *address = details->range->base_address;
-    return FALSE;
-  }
-
-  return TRUE;
-}
-
-static GumAddress
-frida_find_libc_initializer (guint task, GumAddress base)
-{
-  GumAddress initializer = 0;
-  gpointer image;
-  const struct mach_header * header;
-  gconstpointer command;
-  gsize command_index;
-  gsize slide = 0;
-
-  image = gum_darwin_read (task, base, 4096, NULL);
-  header = image;
-
-  if (header->magic == MH_MAGIC)
-    command = image + sizeof (struct mach_header);
-  else
-    command = image + sizeof (struct mach_header_64);
-
-  slide = frida_get_module_slide (command, header->ncmds, base);
-
-  for (command_index = 0;
-       command_index != header->ncmds && initializer == 0;
-       command_index++)
-  {
-    const struct load_command * lc = command;
-    gconstpointer sections;
-    gsize section_count, section_index;
-
-    if (lc->cmd != LC_SEGMENT && lc->cmd != LC_SEGMENT_64)
-      goto skip_command;
-
-    if (lc->cmd == LC_SEGMENT)
-    {
-      const struct segment_command * sc = command;
-
-      sections = sc + 1;
-      section_count = sc->nsects;
-
-      if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
-          strcmp (sc->segname, "__DATA") != 0)
-        goto skip_command;
-    }
-    else
-    {
-      const struct segment_command_64 * sc = command;
-
-      sections = sc + 1;
-      section_count = sc->nsects;
-
-      if (strcmp (sc->segname, "__DATA_CONST") != 0 &&
-          strcmp (sc->segname, "__DATA") != 0)
-        goto skip_command;
-    }
-
-    for (section_index = 0;
-        section_index != section_count && initializer == 0;
-        section_index++)
-    {
-      GumAddress addr;
-      const char * sectname;
-      gsize sectsize;
-
-      if (lc->cmd == LC_SEGMENT)
-      {
-        const struct section * s = sections + (section_index * sizeof (struct section));
-
-        sectname = s->sectname;
-        addr = s->addr + (guint32) slide;
-        sectsize = s->size;
-      }
-      else
-      {
-        const struct section_64 * s = sections + (section_index * sizeof (struct section_64));
-
-        sectname = s->sectname;
-        addr = s->addr + (guint64) slide;
-        sectsize = s->size;
-      }
-
-      if (strcmp (sectname, "__mod_init_func") == 0)
-      {
-        if (lc->cmd == LC_SEGMENT)
-        {
-          guint32 * init_func;
-
-          g_assert_cmpint (sectsize, ==, 4);
-
-          init_func = (guint32 *) gum_darwin_read (task, addr, sizeof (guint32), NULL);
-          initializer = *init_func;
-          g_free (init_func);
-        }
-        else
-        {
-          guint64 * init_func;
-
-          g_assert_cmpint (sectsize, ==, 8);
-
-          init_func = (guint64 *) gum_darwin_read (task, addr, sizeof (guint64), NULL);
-          initializer = *init_func;
-          g_free (init_func);
-        }
-      }
-    }
-
-skip_command:
-    command += lc->cmdsize;
-  }
-
-  g_free (image);
-
-  return initializer;
-}
-
 static GumAddress
 frida_find_function_end (guint task, GumCpuType cpu_type, GumAddress start, gsize max_size)
 {
@@ -2845,38 +3100,6 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
   g_assert_cmpint (err, ==, CS_ERR_OK);
 
   return capstone;
-}
-
-static GumAddress
-frida_get_module_slide (gconstpointer command, gsize ncmds, GumAddress base)
-{
-  gsize slide = 0;
-  gsize command_index;
-
-  for (command_index = 0; command_index != ncmds && slide == 0; command_index++)
-  {
-    const struct load_command * lc = command;
-
-    if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64)
-    {
-      if (lc->cmd == LC_SEGMENT)
-      {
-        const struct segment_command * sc = command;
-        if (strcmp (sc->segname, "__TEXT") == 0)
-          slide = base - sc->vmaddr;
-      }
-      else
-      {
-        const struct segment_command_64 * sc = command;
-        if (strcmp (sc->segname, "__TEXT") == 0)
-          slide = base - sc->vmaddr;
-      }
-    }
-
-    command += lc->cmdsize;
-  }
-
-  return slide;
 }
 
 static void
