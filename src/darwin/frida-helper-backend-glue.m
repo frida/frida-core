@@ -1892,7 +1892,7 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
     state.uts.ts64.__rdi = helpers;
 
     state.uts.ts64.__rsp -= 8;
-    write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, &current_pc, sizeof (current_pc));
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, (const guint8 *) &current_pc, sizeof (current_pc));
     g_assert (write_succeeded);
   }
   else
@@ -1906,7 +1906,7 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
     temp[0] = current_pc;
     temp[1] = helpers;
     state.uts.ts32.__esp -= 8;
-    write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, &temp, sizeof (temp));
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, (const guint8 *) &temp, sizeof (temp));
     g_assert (write_succeeded);
   }
 #else
@@ -1948,8 +1948,8 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     state.uts.ts64.__rsi = mode;
 
     state.uts.ts64.__rsp -= 16;
-    write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, &current_pc, sizeof (current_pc));
-    g_assert (write_succeeded, ==, TRUE);
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, (const guint8 *) &current_pc, sizeof (current_pc));
+    g_assert (write_succeeded);
   }
   else
   {
@@ -1963,8 +1963,8 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     temp[1] = lib_name;
     temp[2] = mode;
     state.uts.ts32.__esp -= 16;
-    write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, &temp, sizeof (temp));
-    g_assert (write_succeeded, ==, TRUE);
+    write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, (const guint8 *) &temp, sizeof (temp));
+    g_assert (write_succeeded);
   }
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
