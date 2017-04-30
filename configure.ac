@@ -217,8 +217,8 @@ FRIDA_PACKAGES="--pkg glib-2.0 --pkg gmodule-2.0 --pkg gio-2.0 --pkg gio-unix-2.
 if [[ "x$HAVE_LINUX" = "xyes" ]]; then
   FRIDA_PACKAGES="$FRIDA_PACKAGES --pkg frida-gum-linux-1.0"
 fi
-PKG_CHECK_MODULES(FRIDA, [$pkg_modules])
-PKG_CHECK_MODULES(FRIDA_TEST, [gmodule-2.0 >= $GLIB_VERSION])
+PKG_CHECK_MODULES_STATIC(FRIDA, [$pkg_modules])
+PKG_CHECK_MODULES_STATIC(FRIDA_TEST, [gmodule-2.0 >= $GLIB_VERSION])
 
 FRIDA_BACKEND_LIBS=
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
@@ -239,7 +239,7 @@ AC_SUBST(FRIDA_BACKEND_LIBS)
 AC_SUBST(FRIDA_PACKAGES)
 
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
-  PKG_CHECK_MODULES(FRIDA_LOADER, [frida-gum-1.0])
+  PKG_CHECK_MODULES_STATIC(FRIDA_LOADER, [frida-gum-1.0])
 fi
 
 FRIDA_CORE_INTERNAL="--pkg=frida-core"
@@ -248,15 +248,15 @@ if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
 fi
 AC_SUBST(FRIDA_CORE_INTERNAL)
 
-PKG_CHECK_MODULES(FRIDA_AGENT, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, frida-gum-1.0, frida-gumjs-1.0])
+PKG_CHECK_MODULES_STATIC(FRIDA_AGENT, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, frida-gum-1.0, frida-gumjs-1.0])
 FRIDA_AGENT_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg frida-gum-1.0 --pkg frida-gumjs-1.0"
 AC_SUBST(FRIDA_AGENT_PACKAGES)
 
-PKG_CHECK_MODULES(FRIDA_GADGET, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, json-glib-1.0, frida-gum-1.0, frida-gumjs-1.0])
+PKG_CHECK_MODULES_STATIC(FRIDA_GADGET, [glib-2.0 >= $GLIB_VERSION, gobject-2.0 >= $GLIB_VERSION, gio-2.0 >= $GLIB_VERSION, gee-0.8 >= 0.5.2, json-glib-1.0, frida-gum-1.0, frida-gumjs-1.0])
 FRIDA_GADGET_PACKAGES="--pkg gio-2.0 --pkg gee-0.8 --pkg json-glib-1.0 --pkg frida-gum-1.0 --pkg frida-gumjs-1.0"
 AC_SUBST(FRIDA_GADGET_PACKAGES)
 
-PKG_CHECK_MODULES(FRIDA_INJECT, [json-glib-1.0])
+PKG_CHECK_MODULES_STATIC(FRIDA_INJECT, [json-glib-1.0])
 FRIDA_INJECT_PACKAGES="--pkg gee-0.8 --pkg json-glib-1.0"
 AC_SUBST(FRIDA_INJECT_PACKAGES)
 
