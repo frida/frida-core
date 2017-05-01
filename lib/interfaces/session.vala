@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession9")]
+	[DBus (name = "re.frida.HostSession10")]
 	public interface HostSession : Object {
 		public abstract async HostApplicationInfo get_frontmost_application () throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
@@ -22,7 +22,7 @@ namespace Frida {
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
-	[DBus (name = "re.frida.AgentSessionProvider9")]
+	[DBus (name = "re.frida.AgentSessionProvider10")]
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id) throws GLib.Error;
 		public abstract async void unload () throws GLib.Error;
@@ -31,7 +31,7 @@ namespace Frida {
 		public signal void closed (AgentSessionId id);
 	}
 
-	[DBus (name = "re.frida.AgentSession9")]
+	[DBus (name = "re.frida.AgentSession10")]
 	public interface AgentSession : Object {
 		public abstract async void close () throws GLib.Error;
 

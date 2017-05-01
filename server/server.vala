@@ -340,7 +340,7 @@ namespace Frida.Server {
 					iface = call.get_interface ();
 					member = call.get_member ();
 				}
-				if (iface == "re.frida.HostSession9") {
+				if (iface == "re.frida.HostSession10") {
 					if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
 						uint32 session_id;
 						message.get_body ().get ("((u))", out session_id);
@@ -349,7 +349,7 @@ namespace Frida.Server {
 							return false;
 						});
 					}
-				} else if (iface == "re.frida.AgentSession9") {
+				} else if (iface == "re.frida.AgentSession10") {
 					uint session_id;
 					path.scanf ("/re/frida/AgentSession/%u", out session_id);
 					if (member == "Close") {
