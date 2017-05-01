@@ -36,8 +36,8 @@ namespace Frida {
 		public abstract async void close () throws GLib.Error;
 
 		public abstract async AgentScriptId create_script (string name, string source) throws GLib.Error;
-		public abstract async AgentScriptId create_script_from_bytes (string name, uint8[] bytes) throws GLib.Error;
-		public abstract async uint8[] compile_script (string source) throws GLib.Error;
+		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes) throws GLib.Error;
+		public abstract async uint8[] compile_script (string name, string source) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId sid) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId sid) throws GLib.Error;
 		public abstract async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws GLib.Error;

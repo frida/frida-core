@@ -658,15 +658,15 @@ namespace Frida.Gadget {
 				return instance.sid;
 			}
 
-			public async AgentScriptId create_script_from_bytes (string name, uint8[] bytes) throws Error {
+			public async AgentScriptId create_script_from_bytes (uint8[] bytes) throws Error {
 				var engine = get_script_engine ();
-				var instance = yield engine.create_script ((name != "") ? name : null, null, new Bytes (bytes));
+				var instance = yield engine.create_script (null, null, new Bytes (bytes));
 				return instance.sid;
 			}
 
-			public async uint8[] compile_script (string source) throws Error {
+			public async uint8[] compile_script (string name, string source) throws Error {
 				var engine = get_script_engine ();
-				var bytes = yield engine.compile_script (source);
+				var bytes = yield engine.compile_script ((name != "") ? name : null, source);
 				return bytes.get_data ();
 			}
 

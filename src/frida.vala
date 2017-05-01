@@ -1399,12 +1399,12 @@ namespace Frida {
 			}
 		}
 
-		public async Script create_script_from_bytes (string? name, Bytes bytes) throws Error {
+		public async Script create_script_from_bytes (Bytes bytes) throws Error {
 			check_open ();
 
 			AgentScriptId sid;
 			try {
-				sid = yield session.create_script_from_bytes ((name == null) ? "" : name, bytes.get_data ());
+				sid = yield session.create_script_from_bytes (bytes.get_data ());
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1417,28 +1417,26 @@ namespace Frida {
 			return script;
 		}
 
-		public Script create_script_from_bytes_sync (string? name, Bytes bytes) throws Error {
+		public Script create_script_from_bytes_sync (Bytes bytes) throws Error {
 			var task = create<CreateScriptFromBytesTask> () as CreateScriptFromBytesTask;
-			task.name = name;
 			task.bytes = bytes;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class CreateScriptFromBytesTask : ProcessTask<Script> {
-			public string? name;
 			public Bytes bytes;
 
 			protected override async Script perform_operation () throws Error {
-				return yield parent.create_script_from_bytes (name, bytes);
+				return yield parent.create_script_from_bytes (bytes);
 			}
 		}
 
-		public async Bytes compile_script (string source) throws Error {
+		public async Bytes compile_script (string? name, string source) throws Error {
 			check_open ();
 
 			uint8[] data;
 			try {
-				data = yield session.compile_script (source);
+				data = yield session.compile_script ((name == null) ? "" : name, source);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1446,17 +1444,19 @@ namespace Frida {
 			return new Bytes (data);
 		}
 
-		public Bytes compile_script_sync (string source) throws Error {
+		public Bytes compile_script_sync (string? name, string source) throws Error {
 			var task = create<CompileScriptTask> () as CompileScriptTask;
+			task.name = name;
 			task.source = source;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class CompileScriptTask : ProcessTask<Bytes> {
+			public string? name;
 			public string source;
 
 			protected override async Bytes perform_operation () throws Error {
-				return yield parent.compile_script (source);
+				return yield parent.compile_script (name, source);
 			}
 		}
 
