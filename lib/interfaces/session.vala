@@ -18,8 +18,7 @@ namespace Frida {
 
 		public signal void spawned (HostSpawnInfo info);
 		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void agent_session_destroyed (AgentSessionId id); // TODO: remove in Frida 10.x
-		public signal void agent_session_destroyed_with_reason (AgentSessionId id, SessionDetachReason reason);
+		public signal void agent_session_destroyed (AgentSessionId id, SessionDetachReason reason);
 		public signal void uninjected (InjectorPayloadId id);
 	}
 

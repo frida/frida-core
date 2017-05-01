@@ -327,8 +327,9 @@ namespace Frida {
 			AgentSession session;
 			var found = sessions.unset (raw_id, out session);
 			assert (found);
-			agent_session_closed (id, session, SessionDetachReason.APPLICATION_REQUESTED);
-			agent_session_destroyed (id);
+			var reason = SessionDetachReason.APPLICATION_REQUESTED;
+			agent_session_closed (id, session, reason);
+			agent_session_destroyed (id, reason);
 
 			foreach (var promise in entries.values) {
 				var future = promise.future;
@@ -365,7 +366,7 @@ namespace Frida {
 				assert (found);
 
 				agent_session_closed (id, session, reason);
-				agent_session_destroyed (id);
+				agent_session_destroyed (id, reason);
 			}
 		}
 
