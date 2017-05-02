@@ -596,7 +596,7 @@ namespace Frida.Gadget {
 				session.closed.disconnect (on_session_closed);
 				sessions.remove (session);
 
-				agent_session_destroyed (session.id);
+				agent_session_destroyed (session.id, SessionDetachReason.APPLICATION_REQUESTED);
 			}
 
 			private void validate_pid (uint pid) throws Error {
