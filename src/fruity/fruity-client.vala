@@ -233,7 +233,7 @@ namespace Frida.Fruity {
 			var request = create_message (type, tag, body);
 			var pending = new PendingResponse (tag, () => query.callback ());
 			pending_responses.add (pending);
-			yield write_message (request);
+			write_message.begin (request);
 			yield;
 
 			return pending.result;
