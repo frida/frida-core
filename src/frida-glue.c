@@ -1,5 +1,7 @@
 #include "frida-core.h"
 
+#include <gum/gum.h>
+
 static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
@@ -16,6 +18,7 @@ frida_init (void)
   g_thread_set_garbage_handler (frida_on_pending_garbage, NULL);
   glib_init ();
   gio_init ();
+  gum_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
   if (g_once_init_enter (&frida_initialized))
