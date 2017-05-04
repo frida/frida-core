@@ -1735,6 +1735,23 @@ namespace Frida {
 #endif
 		}
 
+		public static Injector new_inprocess () {
+#if WINDOWS
+			return new Winjector ();
+#endif
+#if DARWIN
+			var tempdir = new TemporaryDirectory ();
+			var helper = new DarwinHelperBackend ();
+			return new Fruitjector (helper, true, tempdir);
+#endif
+#if LINUX
+			return new Linjector ();
+#endif
+#if QNX
+			return new Qinjector ();
+#endif
+		}
+
 		public abstract async void close ();
 
 		public void close_sync () {
