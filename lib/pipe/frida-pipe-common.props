@@ -20,7 +20,7 @@ echo &gt; "$(IntDir)valacode.stamp"
 
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-pipe.h" />
-    <ClInclude Include="pipe-impl.h" />
+    <ClInclude Include="pipe-glue.h" />
     <ClInclude Include="pipe-sddl.h" />
   </ItemGroup>
 

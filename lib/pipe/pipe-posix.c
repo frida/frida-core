@@ -1,4 +1,4 @@
-#include "pipe-impl.h"
+#include "pipe-glue.h"
 
 #include <gio/gunixsocketaddress.h>
 #ifdef HAVE_ANDROID

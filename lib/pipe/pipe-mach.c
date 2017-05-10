@@ -1,4 +1,4 @@
-#include "pipe-impl.h"
+#include "pipe-glue.h"
 
 #include <stdio.h>
 #include <mach/mach.h>
