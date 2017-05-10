@@ -8,7 +8,7 @@
 
 static struct kinfo_proc * frida_system_query_kinfo_procs (guint * count);
 
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
 
 # include <libproc.h>
 # import <AppKit/AppKit.h>
@@ -228,7 +228,7 @@ frida_system_enumerate_processes (int * result_length)
     else
 #endif
     {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
       NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info->_pid];
       if (app.icon != nil)
       {
@@ -239,7 +239,7 @@ frida_system_enumerate_processes (int * result_length)
       else
 #endif
       {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
         gchar path[PROC_PIDPATHINFO_MAXSIZE];
 
         proc_pidpath (info->_pid, path, sizeof (path));
@@ -293,7 +293,7 @@ frida_temporary_directory_get_system_tmp (void)
 {
   if (geteuid () == 0)
   {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
     /* Sandboxed system daemons are likely able to read from this location */
     return g_strdup ("/private/var/root");
 #else
@@ -302,7 +302,7 @@ frida_temporary_directory_get_system_tmp (void)
   }
   else
   {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
     /* Mac App Store apps are sandboxed but able to read ~/.Trash/ */
     return g_build_filename (g_get_home_dir (), ".Trash", NULL);
 #else
@@ -311,7 +311,7 @@ frida_temporary_directory_get_system_tmp (void)
   }
 }
 
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
 
 static void
 extract_icons_from_image (NSImage * image, FridaImageData * small_icon, FridaImageData * large_icon)

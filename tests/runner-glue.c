@@ -77,7 +77,7 @@ frida_test_os (void)
 {
 #if defined (G_OS_WIN32)
   return FRIDA_TEST_OS_WINDOWS;
-#elif defined (HAVE_MAC)
+#elif defined (HAVE_MACOS)
   return FRIDA_TEST_OS_MACOS;
 #elif defined (HAVE_IOS)
   return FRIDA_TEST_OS_IOS;

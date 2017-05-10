@@ -25,7 +25,7 @@ typedef char name_t[BOOTSTRAP_MAX_NAME_LEN];
 kern_return_t bootstrap_register2 (mach_port_t bp, const name_t service_name, mach_port_t sp, uint64_t flags);
 kern_return_t bootstrap_look_up2 (mach_port_t bp, const name_t service_name, mach_port_t * sp, pid_t target_pid, uint64_t flags);
 
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
 pid_t audit_token_to_pid (audit_token_t atoken);
 #endif
 
@@ -246,7 +246,7 @@ _frida_task_port_deallocate (FridaTaskPort * self)
 static pid_t
 frida_audit_token_to_pid (audit_token_t atoken)
 {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
   return audit_token_to_pid (atoken);
 #else
   return atoken.val[5];

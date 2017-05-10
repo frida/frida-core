@@ -94,12 +94,12 @@ case $host_os in
 #endif
       ]])],
       [
-        HAVE_MAC=no
+        HAVE_MACOS=no
         HAVE_IOS=yes
         AC_MSG_RESULT([iOS])
       ],
       [
-        HAVE_MAC=yes
+        HAVE_MACOS=yes
         HAVE_IOS=no
         AC_MSG_RESULT([Mac])
       ]
@@ -149,10 +149,10 @@ case $host_os in
   *)
     ;;
 esac
-if [[ "x$HAVE_MAC" = "xyes" ]]; then
-  AC_DEFINE(HAVE_MAC, 1, [Define to 1 if OS is Mac.])
+if [[ "x$HAVE_MACOS" = "xyes" ]]; then
+  AC_DEFINE(HAVE_MACOS, 1, [Define to 1 if OS is Mac.])
 fi
-AM_CONDITIONAL(OS_MAC, [test "x$HAVE_MAC" = "xyes"])
+AM_CONDITIONAL(OS_MAC, [test "x$HAVE_MACOS" = "xyes"])
 if [[ "x$HAVE_ANDROID" = "xyes" ]]; then
   AC_DEFINE(HAVE_ANDROID, 1, [Define to 1 if OS is Android based.])
 fi
@@ -200,7 +200,7 @@ fi
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D DARWIN"
 fi
-if [[ "x$HAVE_MAC" = "xyes" ]]; then
+if [[ "x$HAVE_MACOS" = "xyes" ]]; then
   FRIDA_VALAFLAGS="$FRIDA_VALAFLAGS -D MAC"
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
@@ -224,7 +224,7 @@ FRIDA_BACKEND_LIBS=
 if [[ "x$HAVE_DARWIN" = "xyes" ]]; then
   FRIDA_BACKEND_LIBS="-Wl,-framework -Wl,Foundation -lbsm"
 fi
-if [[ "x$HAVE_MAC" = "xyes" ]]; then
+if [[ "x$HAVE_MACOS" = "xyes" ]]; then
   FRIDA_BACKEND_LIBS="$FRIDA_BACKEND_LIBS -Wl,-framework -Wl,AppKit"
 fi
 if [[ "x$HAVE_IOS" = "xyes" ]]; then
@@ -274,7 +274,7 @@ AC_ARG_ENABLE(mapper,
                   [enable mapper when available [default=auto]])],,
   [enable_mapper=auto])
 if [[ "x$enable_mapper" = "xauto" ]]; then
-  if [[ "x$HAVE_MAC" = "xyes" ]]; then
+  if [[ "x$HAVE_MACOS" = "xyes" ]]; then
     enable_mapper=yes
   else
     enable_mapper=no
@@ -285,7 +285,7 @@ if [[ "x$enable_mapper" = "xyes" ]]; then
 fi
 
 FRIDA_TEST_LIBS=""
-if [[ "x$HAVE_MAC" = "xyes" ]]; then
+if [[ "x$HAVE_MACOS" = "xyes" ]]; then
   FRIDA_TEST_LIBS="$FRIDA_TEST_LIBS -Wl,-framework -Wl,AppKit"
 fi
 AC_SUBST(FRIDA_TEST_LIBS)

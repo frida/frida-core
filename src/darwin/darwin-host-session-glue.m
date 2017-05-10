@@ -4,7 +4,7 @@
 
 #include <sys/sysctl.h>
 
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
 
 typedef struct _FridaMacModel FridaMacModel;
 
@@ -30,7 +30,7 @@ static const FridaMacModel mac_models[] =
 FridaImageData *
 _frida_darwin_host_session_provider_extract_icon (void)
 {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
   size_t size;
   gchar * model_name;
   const FridaMacModel * model;

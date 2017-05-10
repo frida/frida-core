@@ -1,6 +1,6 @@
 #include "icon-helpers.h"
 
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
 # import <AppKit/AppKit.h>
 #else
 # import <UIKit/UIKit.h>
@@ -9,7 +9,7 @@
 FridaImageData *
 _frida_image_data_from_file (const gchar * filename, guint target_width, guint target_height)
 {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
   FridaImageData * result = NULL;
   NSAutoreleasePool * pool;
   NSImage * image;
@@ -35,7 +35,7 @@ _frida_image_data_from_file (const gchar * filename, guint target_width, guint t
 void
 _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, FridaNativeImage native_image, guint target_width, guint target_height)
 {
-#ifdef HAVE_MAC
+#ifdef HAVE_MACOS
   NSImage * image = (NSImage *) native_image;
   NSBitmapImageRep * rep;
   NSGraphicsContext * context;
