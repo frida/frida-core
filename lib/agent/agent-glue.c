@@ -1,10 +1,8 @@
 #include "agent-glue.h"
 
 #ifndef G_OS_WIN32
-# include <frida-interfaces.h>
+# include "frida-interfaces.h"
 #endif
-#include <gum/gum.h>
-#include <gumjs/gumscriptbackend.h>
 
 void
 frida_agent_environment_init (void)
