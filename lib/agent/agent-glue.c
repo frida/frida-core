@@ -1,4 +1,4 @@
-#include "frida-agent.h"
+#include "agent-glue.h"
 
 #ifndef G_OS_WIN32
 # include <frida-interfaces.h>
