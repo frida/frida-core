@@ -62,12 +62,6 @@
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
   </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="pipe-helpers.c" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="pipe-helpers.h" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

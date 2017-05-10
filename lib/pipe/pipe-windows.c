@@ -1,13 +1,6 @@
-#ifdef _MSC_VER
-# pragma warning (push)
-# pragma warning (disable: 4028 4090 4100)
-#endif
-#include "pipe.c"
-#ifdef _MSC_VER
-# pragma warning (pop)
-#endif
+#include "pipe-impl.h"
 
-#include "pipe-helpers.h"
+#include "pipe-sddl.h"
 
 #include <sddl.h>
 #include <windows.h>
@@ -41,25 +34,46 @@ enum _FridaPipeRole
   FRIDA_PIPE_CLIENT
 };
 
+struct _FridaPipeInputStream
+{
+  GInputStream parent;
+
+  FridaPipeBackend * backend;
+};
+
+struct _FridaPipeOutputStream
+{
+  GOutputStream parent;
+
+  FridaPipeBackend * backend;
+};
+
 static HANDLE frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error);
+
+static gssize frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error);
+static gboolean frida_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error);
+
+static gssize frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error);
+static gboolean frida_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error);
+
 static gchar * frida_pipe_generate_name (void);
 static WCHAR * frida_pipe_path_from_name (const gchar * name);
 
 static gboolean frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
 static void frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
 
+G_DEFINE_TYPE (FridaPipeInputStream, frida_pipe_input_stream, G_TYPE_INPUT_STREAM)
+G_DEFINE_TYPE (FridaPipeOutputStream, frida_pipe_output_stream, G_TYPE_OUTPUT_STREAM)
+
 void
 frida_pipe_transport_set_temp_directory (const gchar * path)
 {
-  (void) path;
 }
 
 void *
 _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_address, GError ** error)
 {
   gchar * name;
-
-  (void) error;
 
   name = frida_pipe_generate_name ();
 
@@ -74,7 +88,6 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
 void
 _frida_pipe_transport_destroy_backend (void * backend)
 {
-  (void) backend;
 }
 
 void *
@@ -106,9 +119,9 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
 }
 
 void
-_frida_pipe_destroy_backend (void * b)
+_frida_pipe_destroy_backend (void * opaque_backend)
 {
-  FridaPipeBackend * backend = (FridaPipeBackend *) b;
+  FridaPipeBackend * backend = opaque_backend;
 
   if (backend->read_complete != NULL)
     CloseHandle (backend->read_complete);
@@ -123,6 +136,77 @@ _frida_pipe_destroy_backend (void * b)
     CloseHandle (backend->pipe);
 
   g_slice_free (FridaPipeBackend, backend);
+}
+
+static HANDLE
+frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
+{
+  HANDLE result = INVALID_HANDLE_VALUE;
+  BOOL success;
+  const gchar * failed_operation;
+  WCHAR * path;
+  LPCWSTR sddl;
+  PSECURITY_DESCRIPTOR sd = NULL;
+  SECURITY_ATTRIBUTES sa;
+
+  path = frida_pipe_path_from_name (name);
+  sddl = frida_pipe_get_sddl_string_for_pipe ();
+  success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
+  CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
+
+  sa.nLength = sizeof (sa);
+  sa.lpSecurityDescriptor = sd;
+  sa.bInheritHandle = FALSE;
+
+  if (role == FRIDA_PIPE_SERVER)
+  {
+    result = CreateNamedPipeW (path,
+        PIPE_ACCESS_DUPLEX |
+        FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE |
+        PIPE_READMODE_BYTE |
+        PIPE_WAIT,
+        1,
+        PIPE_BUFSIZE,
+        PIPE_BUFSIZE,
+        0,
+        &sa);
+    CHECK_WINAPI_RESULT (result, !=, INVALID_HANDLE_VALUE, "CreateNamedPipe");
+  }
+  else
+  {
+    result = CreateFileW (path,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        &sa,
+        OPEN_EXISTING,
+        FILE_FLAG_OVERLAPPED,
+        NULL);
+    CHECK_WINAPI_RESULT (result, !=, INVALID_HANDLE_VALUE, "CreateFile");
+  }
+
+  goto beach;
+
+handle_winapi_error:
+  {
+    DWORD last_error = GetLastError ();
+    g_set_error (error,
+        G_IO_ERROR,
+        g_io_error_from_win32_error (last_error),
+        "Error opening named pipe (%s returned 0x%08lx)",
+        failed_operation, last_error);
+    goto beach;
+  }
+
+beach:
+  {
+    if (sd != NULL)
+      LocalFree (sd);
+
+    g_free (path);
+
+    return result;
+  }
 }
 
 static gboolean
@@ -215,15 +299,13 @@ frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
 {
   HANDLE cancel = (HANDLE) user_data;
 
-  (void) cancellable;
-
   SetEvent (cancel);
 }
 
 gboolean
-_frida_pipe_close (FridaPipe * self, GError ** error)
+_frida_pipe_close_backend (void * opaque_backend, GError ** error)
 {
-  FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
+  FridaPipeBackend * backend = opaque_backend;
 
   if (!CloseHandle (backend->pipe))
     goto handle_error;
@@ -240,11 +322,47 @@ handle_error:
   }
 }
 
+GInputStream *
+_frida_pipe_make_input_stream (void * backend)
+{
+  FridaPipeInputStream * stream;
+
+  stream = g_object_new (FRIDA_TYPE_PIPE_INPUT_STREAM, NULL);
+  stream->backend = backend;
+
+  return G_INPUT_STREAM (stream);
+}
+
+GOutputStream *
+_frida_pipe_make_output_stream (void * backend)
+{
+  FridaPipeOutputStream * stream;
+
+  stream = g_object_new (FRIDA_TYPE_PIPE_OUTPUT_STREAM, NULL);
+  stream->backend = backend;
+
+  return G_OUTPUT_STREAM (stream);
+}
+
+static void
+frida_pipe_input_stream_class_init (FridaPipeInputStreamClass * klass)
+{
+  GInputStreamClass * stream_class = G_INPUT_STREAM_CLASS (klass);
+
+  stream_class->read_fn = frida_pipe_input_stream_read;
+  stream_class->close_fn = frida_pipe_input_stream_close;
+}
+
+static void
+frida_pipe_input_stream_init (FridaPipeInputStream * self)
+{
+}
+
 static gssize
-frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error)
 {
   FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
-  FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
+  FridaPipeBackend * backend = self->backend;
   gssize result = -1;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
@@ -254,7 +372,7 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
     goto beach;
 
   overlapped.hEvent = backend->read_complete;
-  ret = ReadFile (backend->pipe, buffer, buffer_length, NULL, &overlapped);
+  ret = ReadFile (backend->pipe, buffer, count, NULL, &overlapped);
   if (!ret && GetLastError () != ERROR_IO_PENDING)
     goto handle_error;
 
@@ -281,11 +399,31 @@ beach:
   }
 }
 
+static gboolean
+frida_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error)
+{
+  return TRUE;
+}
+
+static void
+frida_pipe_output_stream_class_init (FridaPipeOutputStreamClass * klass)
+{
+  GOutputStreamClass * stream_class = G_OUTPUT_STREAM_CLASS (klass);
+
+  stream_class->write_fn = frida_pipe_output_stream_write;
+  stream_class->close_fn = frida_pipe_output_stream_close;
+}
+
+static void
+frida_pipe_output_stream_init (FridaPipeOutputStream * self)
+{
+}
+
 static gssize
-frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error)
 {
   FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
-  FridaPipeBackend * backend = (FridaPipeBackend *) self->_backend;
+  FridaPipeBackend * backend = self->backend;
   gssize result = -1;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
@@ -295,7 +433,7 @@ frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int 
     goto beach;
 
   overlapped.hEvent = backend->write_complete;
-  ret = WriteFile (backend->pipe, buffer, buffer_length, NULL, &overlapped);
+  ret = WriteFile (backend->pipe, buffer, count, NULL, &overlapped);
   if (!ret && GetLastError () != ERROR_IO_PENDING)
     goto handle_error;
 
@@ -322,75 +460,10 @@ beach:
   }
 }
 
-static HANDLE
-frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
+static gboolean
+frida_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error)
 {
-  HANDLE result = INVALID_HANDLE_VALUE;
-  BOOL success;
-  const gchar * failed_operation;
-  WCHAR * path;
-  LPCWSTR sddl;
-  PSECURITY_DESCRIPTOR sd = NULL;
-  SECURITY_ATTRIBUTES sa;
-
-  path = frida_pipe_path_from_name (name);
-  sddl = frida_pipe_get_sddl_string_for_pipe ();
-  success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
-  CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
-
-  sa.nLength = sizeof (sa);
-  sa.lpSecurityDescriptor = sd;
-  sa.bInheritHandle = FALSE;
-
-  if (role == FRIDA_PIPE_SERVER)
-  {
-    result = CreateNamedPipeW (path,
-        PIPE_ACCESS_DUPLEX |
-        FILE_FLAG_OVERLAPPED,
-        PIPE_TYPE_BYTE |
-        PIPE_READMODE_BYTE |
-        PIPE_WAIT,
-        1,
-        PIPE_BUFSIZE,
-        PIPE_BUFSIZE,
-        0,
-        &sa);
-    CHECK_WINAPI_RESULT (result, !=, INVALID_HANDLE_VALUE, "CreateNamedPipe");
-  }
-  else
-  {
-    result = CreateFileW (path,
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        &sa,
-        OPEN_EXISTING,
-        FILE_FLAG_OVERLAPPED,
-        NULL);
-    CHECK_WINAPI_RESULT (result, !=, INVALID_HANDLE_VALUE, "CreateFile");
-  }
-
-  goto beach;
-
-handle_winapi_error:
-  {
-    DWORD last_error = GetLastError ();
-    g_set_error (error,
-        G_IO_ERROR,
-        g_io_error_from_win32_error (last_error),
-        "Error opening named pipe (%s returned 0x%08lx)",
-        failed_operation, last_error);
-    goto beach;
-  }
-
-beach:
-  {
-    if (sd != NULL)
-      LocalFree (sd);
-
-    g_free (path);
-
-    return result;
-  }
+  return TRUE;
 }
 
 static gchar *

@@ -1,11 +1,4 @@
-#ifdef __clang__
-# pragma clang diagnostic push
-# pragma clang diagnostic ignored "-Wincompatible-pointer-types"
-#endif
-#include "pipe.c"
-#ifdef __clang__
-# pragma clang diagnostic pop
-#endif
+#include "pipe-impl.h"
 
 #include <stdio.h>
 #include <mach/mach.h>
@@ -25,18 +18,30 @@ typedef struct _FridaPipeMessage FridaPipeMessage;
 
 struct _FridaPipeBackend
 {
-  gboolean eof;
-
   mach_port_t rx_set;
-
   mach_port_t rx_port;
+  mach_port_t tx_port;
+  mach_port_t notify_port;
+
+  gboolean eof;
+};
+
+struct _FridaPipeInputStream
+{
+  GInputStream parent;
+
+  FridaPipeBackend * backend;
+
   gpointer rx_buffer;
   guint8 * rx_buffer_cur;
   guint rx_buffer_length;
+};
 
-  mach_port_t tx_port;
+struct _FridaPipeOutputStream
+{
+  GOutputStream parent;
 
-  mach_port_t notify_port;
+  FridaPipeBackend * backend;
 };
 
 struct _FridaInitMessage
@@ -52,7 +57,18 @@ struct _FridaPipeMessage
   guint8 payload[0];
 };
 
+static gboolean frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error);
+
+static void frida_pipe_input_stream_finalize (GObject * object);
+static gssize frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error);
 static void frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data);
+static gboolean frida_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error);
+
+static gssize frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error);
+static gboolean frida_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error);
+
+G_DEFINE_TYPE (FridaPipeInputStream, frida_pipe_input_stream, G_TYPE_INPUT_STREAM)
+G_DEFINE_TYPE (FridaPipeOutputStream, frida_pipe_output_stream, G_TYPE_OUTPUT_STREAM)
 
 void
 frida_pipe_transport_set_temp_directory (const gchar * path)
@@ -148,17 +164,12 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
 
   backend = g_slice_new (FridaPipeBackend);
 
-  backend->eof = FALSE;
-
   self_task = mach_task_self ();
 
   mach_port_allocate (self_task, MACH_PORT_RIGHT_PORT_SET, &backend->rx_set);
 
   backend->rx_port = rx;
   mach_port_move_member (self_task, backend->rx_port, backend->rx_set);
-  backend->rx_buffer = NULL;
-  backend->rx_buffer_cur = NULL;
-  backend->rx_buffer_length = 0;
 
   backend->tx_port = tx;
 
@@ -168,17 +179,21 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
       backend->notify_port, MACH_MSG_TYPE_MAKE_SEND_ONCE, &prev_notify_port);
   mach_port_move_member (self_task, backend->notify_port, backend->rx_set);
 
+  backend->eof = FALSE;
+
   return backend;
 }
 
 void
-_frida_pipe_destroy_backend (void * b)
+_frida_pipe_destroy_backend (void * backend)
 {
-  FridaPipeBackend * backend = (FridaPipeBackend *) b;
-
-  g_free (backend->rx_buffer);
-
   g_slice_free (FridaPipeBackend, backend);
+}
+
+gboolean
+_frida_pipe_close_backend (void * backend, GError ** error)
+{
+  return frida_pipe_backend_close_ports (backend, error);
 }
 
 static gboolean
@@ -216,19 +231,60 @@ frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
   return TRUE;
 }
 
-gboolean
-_frida_pipe_close (FridaPipe * self, GError ** error)
+GInputStream *
+_frida_pipe_make_input_stream (void * backend)
 {
-  FridaPipeBackend * backend = self->_backend;
+  FridaPipeInputStream * stream;
 
-  return frida_pipe_backend_close_ports (backend, error);
+  stream = g_object_new (FRIDA_TYPE_PIPE_INPUT_STREAM, NULL);
+  stream->backend = backend;
+
+  return G_INPUT_STREAM (stream);
+}
+
+GOutputStream *
+_frida_pipe_make_output_stream (void * backend)
+{
+  FridaPipeOutputStream * stream;
+
+  stream = g_object_new (FRIDA_TYPE_PIPE_OUTPUT_STREAM, NULL);
+  stream->backend = backend;
+
+  return G_OUTPUT_STREAM (stream);
+}
+
+static void
+frida_pipe_input_stream_class_init (FridaPipeInputStreamClass * klass)
+{
+  GObjectClass * object_class = G_OBJECT_CLASS (klass);
+  GInputStreamClass * stream_class = G_INPUT_STREAM_CLASS (klass);
+
+  object_class->finalize = frida_pipe_input_stream_finalize;
+
+  stream_class->read_fn = frida_pipe_input_stream_read;
+  stream_class->close_fn = frida_pipe_input_stream_close;
+}
+
+static void
+frida_pipe_input_stream_init (FridaPipeInputStream * self)
+{
+}
+
+static void
+frida_pipe_input_stream_finalize (GObject * object)
+{
+  FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (object);
+
+  g_free (self->rx_buffer);
+
+  G_OBJECT_CLASS (frida_pipe_input_stream_parent_class)->finalize (object);
 }
 
 static gssize
-frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error)
 {
   FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
-  FridaPipeBackend * backend = self->_backend;
+  FridaPipeBackend * backend = self->backend;
   FridaPipeMessage * msg = NULL;
   kern_return_t ret;
   gssize n;
@@ -236,7 +292,7 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
   if (backend->eof)
     goto handle_eof;
 
-  if (backend->rx_buffer == NULL)
+  if (self->rx_buffer == NULL)
   {
     gulong handler_id = 0;
     gulong msg_size;
@@ -271,9 +327,9 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
     {
       if (msg->header.msgh_id == 1)
       {
-        backend->rx_buffer = msg;
-        backend->rx_buffer_cur = msg->payload;
-        backend->rx_buffer_length = msg->size;
+        self->rx_buffer = msg;
+        self->rx_buffer_cur = msg->payload;
+        self->rx_buffer_length = msg->size;
       }
       else
       {
@@ -295,16 +351,16 @@ frida_pipe_input_stream_real_read (GInputStream * base, guint8 * buffer, int buf
       goto handle_eof;
   }
 
-  n = MIN (buffer_length, backend->rx_buffer_length);
-  memcpy (buffer, backend->rx_buffer_cur, n);
-  backend->rx_buffer_cur += n;
-  backend->rx_buffer_length -= n;
-  if (backend->rx_buffer_length == 0)
+  n = MIN (count, self->rx_buffer_length);
+  memcpy (buffer, self->rx_buffer_cur, n);
+  self->rx_buffer_cur += n;
+  self->rx_buffer_length -= n;
+  if (self->rx_buffer_length == 0)
   {
-    g_free (backend->rx_buffer);
-    backend->rx_buffer = NULL;
-    backend->rx_buffer_cur = NULL;
-    backend->rx_buffer_length = 0;
+    g_free (self->rx_buffer);
+    self->rx_buffer = NULL;
+    self->rx_buffer_cur = NULL;
+    self->rx_buffer_length = 0;
   }
 
   return n;
@@ -335,12 +391,11 @@ static void
 frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_data)
 {
   FridaPipeInputStream * self = user_data;
-  FridaPipeBackend * backend = self->_backend;
   FridaPipeMessage msg;
 
   msg.header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MAKE_SEND_ONCE, 0);
   msg.header.msgh_size = sizeof (msg);
-  msg.header.msgh_remote_port = backend->rx_port;
+  msg.header.msgh_remote_port = self->backend->rx_port;
   msg.header.msgh_local_port = MACH_PORT_NULL;
   msg.header.msgh_reserved = 0;
   msg.header.msgh_id = 2;
@@ -348,22 +403,41 @@ frida_pipe_input_stream_on_cancel (GCancellable * cancellable, gpointer user_dat
   mach_msg_send (&msg.header);
 }
 
+static gboolean
+frida_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error)
+{
+  return TRUE;
+}
+
+static void
+frida_pipe_output_stream_class_init (FridaPipeOutputStreamClass * klass)
+{
+  GOutputStreamClass * stream_class = G_OUTPUT_STREAM_CLASS (klass);
+
+  stream_class->write_fn = frida_pipe_output_stream_write;
+  stream_class->close_fn = frida_pipe_output_stream_close;
+}
+
+static void
+frida_pipe_output_stream_init (FridaPipeOutputStream * self)
+{
+}
+
 static gssize
-frida_pipe_output_stream_real_write (GOutputStream * base, guint8 * buffer, int buffer_length, GCancellable * cancellable, GError ** error)
+frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error)
 {
   FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
-  FridaPipeBackend * backend = self->_backend;
   gint len;
   guint msg_size;
   FridaPipeMessage * msg;
   kern_return_t ret;
 
-  len = MIN (buffer_length, FRIDA_PIPE_MAX_WRITE_SIZE);
+  len = MIN (count, FRIDA_PIPE_MAX_WRITE_SIZE);
   msg_size = (guint) (sizeof (FridaPipeMessage) + len + 3) & ~3;
   msg = g_malloc (msg_size);
   msg->header.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, 0);
   msg->header.msgh_size = msg_size;
-  msg->header.msgh_remote_port = backend->tx_port;
+  msg->header.msgh_remote_port = self->backend->tx_port;
   msg->header.msgh_local_port = MACH_PORT_NULL;
   msg->header.msgh_reserved = 0;
   msg->header.msgh_id = 1;
@@ -385,4 +459,10 @@ handle_error:
         mach_error_string (ret));
     return -1;
   }
+}
+
+static gboolean
+frida_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error)
+{
+  return TRUE;
 }

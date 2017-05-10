@@ -35,6 +35,11 @@ namespace Frida {
 			construct;
 		}
 
+		public void * backend {
+			get;
+			construct;
+		}
+
 		public MainContext main_context {
 			get;
 			construct;
@@ -52,58 +57,37 @@ namespace Frida {
 			}
 		}
 
-		public void * _backend;
-
-		private PipeInputStream input;
-		private PipeOutputStream output;
+		private InputStream input;
+		private OutputStream output;
 
 		public Pipe (string address) throws IOError {
 			var backend = _create_backend (address);
-			Object (address: address, main_context: MainContext.get_thread_default ());
-			_backend = backend;
 
-			input = new PipeInputStream (_backend);
-			output = new PipeOutputStream (_backend);
+			Object (
+				address: address,
+				backend: backend,
+				main_context: MainContext.get_thread_default ()
+			);
+		}
+
+		construct {
+			input = _make_input_stream (backend);
+			output = _make_output_stream (backend);
 		}
 
 		~Pipe () {
-			_destroy_backend (_backend);
+			_destroy_backend (backend);
 		}
 
 		public override bool close (Cancellable? cancellable = null) throws IOError {
-			return _close ();
+			return _close_backend (backend);
 		}
 
-		public static extern void * _create_backend (string address) throws IOError;
-		public static extern void _destroy_backend (void * backend);
-		public extern bool _close () throws IOError;
-	}
+		protected static extern void * _create_backend (string address) throws IOError;
+		protected static extern void _destroy_backend (void * backend);
+		protected static extern bool _close_backend (void * backend) throws IOError;
 
-	public class PipeInputStream : InputStream {
-		public void * _backend;
-
-		public PipeInputStream (void * backend) {
-			this._backend = backend;
-		}
-
-		public override bool close (GLib.Cancellable? cancellable = null) throws IOError {
-			return true;
-		}
-
-		public override extern ssize_t read (uint8[] buffer, Cancellable? cancellable = null) throws IOError;
-	}
-
-	public class PipeOutputStream : OutputStream {
-		public void * _backend;
-
-		public PipeOutputStream (void * backend) {
-			this._backend = backend;
-		}
-
-		public override bool close (GLib.Cancellable? cancellable = null) throws IOError {
-			return true;
-		}
-
-		public override extern ssize_t write (uint8[] buffer, Cancellable? cancellable = null) throws IOError;
+		protected static extern InputStream _make_input_stream (void * backend);
+		protected static extern OutputStream _make_output_stream (void * backend);
 	}
 }

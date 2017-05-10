@@ -1,4 +1,4 @@
-#include "pipe-helpers.h"
+#include "pipe-sddl.h"
 
 static BOOL frida_pipe_is_windows_vista_or_greater (void);
 static BOOL frida_pipe_is_windows_8_or_greater (void);

@@ -20,16 +20,14 @@ echo &gt; "$(IntDir)valacode.stamp"
 
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-pipe.h" />
+    <ClInclude Include="pipe-impl.h" />
+    <ClInclude Include="pipe-sddl.h" />
   </ItemGroup>
 
   <ItemGroup>
+    <ClCompile Include="$(IntDir)pipe.c" />
     <ClCompile Include="pipe-windows.c" />
-    <ClCompile Include="$(IntDir)pipe.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </ClCompile>
+    <ClCompile Include="pipe-sddl.c" />
   </ItemGroup>
 
 </Project>
