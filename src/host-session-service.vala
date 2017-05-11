@@ -325,8 +325,9 @@ namespace Frida {
 			var raw_id = id.handle;
 
 			AgentSession session;
-			var found = sessions.unset (raw_id, out session);
-			assert (found);
+			var closed_after_opening = sessions.unset (raw_id, out session);
+			if (!closed_after_opening)
+				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
 			agent_session_closed (id, session, reason);
 			agent_session_destroyed (id, reason);
