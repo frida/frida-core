@@ -183,42 +183,19 @@ namespace Frida {
 			var raw_id = id.handle;
 			AgentSession session;
 
+			entry.sessions.add (raw_id);
+
 			try {
 				yield entry.provider.open (id);
-			} catch (GLib.Error e) {
-				/*
-				 * We might be attempting to open a new session on an agent that is about to unload,
-				 * so if we fail here wait a bit and consider re-establishing.
-				 */
-				var timeout_source = new TimeoutSource (10);
-				timeout_source.set_callback (() => {
-					attach_to.callback ();
-					return false;
-				});
-				timeout_source.attach (MainContext.get_thread_default ());
 
-				yield;
-
-				if (entries.has_key (pid))
-					throw new Error.PROTOCOL (e.message);
-
-				entry = yield establish (pid);
-
-				try {
-					yield entry.provider.open (id);
-				} catch (GLib.Error e) {
-					throw new Error.PROTOCOL (e.message);
-				}
-			}
-
-			try {
 				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id), DBusProxyFlags.NONE, null);
 			} catch (GLib.Error e) {
+				entry.sessions.remove (raw_id);
+
 				throw new Error.PROTOCOL (e.message);
 			}
 
 			sessions[raw_id] = session;
-			entry.sessions.add (raw_id);
 
 			agent_session_opened (id, session);
 
@@ -341,19 +318,38 @@ namespace Frida {
 				var entry = future.value;
 
 				var sessions = entry.sessions;
-				sessions.remove (raw_id);
-				if (sessions.is_empty) {
-					var is_system_session = entry.pid == 0;
-					if (!is_system_session)
-						entry.provider.unload.begin ();
+				if (sessions.remove (raw_id)) {
+					if (sessions.is_empty) {
+						var is_system_session = entry.pid == 0;
+						if (!is_system_session)
+							unload_and_destroy.begin (entry, reason);
+					}
+
+					break;
 				}
 			}
+		}
+
+		private async void unload_and_destroy (Entry entry, SessionDetachReason reason) {
+			if (!entries.unset (entry.pid))
+				return;
+
+			try {
+				yield entry.provider.unload ();
+			} catch (GLib.Error e) {
+			}
+
+			yield teardown (entry, reason);
 		}
 
 		private async void destroy (Entry entry, SessionDetachReason reason) {
 			if (!entries.unset (entry.pid))
 				return;
 
+			yield teardown (entry, reason);
+		}
+
+		private async void teardown (Entry entry, SessionDetachReason reason) {
 			entry.provider.closed.disconnect (on_session_closed);
 			entry.connection.closed.disconnect (on_connection_closed);
 
@@ -363,11 +359,10 @@ namespace Frida {
 				var id = AgentSessionId (raw_id);
 
 				AgentSession session;
-				var found = sessions.unset (raw_id, out session);
-				assert (found);
-
-				agent_session_closed (id, session, reason);
-				agent_session_destroyed (id, reason);
+				if (sessions.unset (raw_id, out session)) {
+					agent_session_closed (id, session, reason);
+					agent_session_destroyed (id, reason);
+				}
 			}
 		}
 
