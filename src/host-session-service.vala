@@ -331,7 +331,7 @@ namespace Frida {
 		}
 
 		private async void unload_and_destroy (Entry entry, SessionDetachReason reason) {
-			if (!entries.unset (entry.pid))
+			if (!prepare_teardown (entry))
 				return;
 
 			try {
@@ -343,16 +343,23 @@ namespace Frida {
 		}
 
 		private async void destroy (Entry entry, SessionDetachReason reason) {
-			if (!entries.unset (entry.pid))
+			if (!prepare_teardown (entry))
 				return;
 
 			yield teardown (entry, reason);
 		}
 
-		private async void teardown (Entry entry, SessionDetachReason reason) {
+		private bool prepare_teardown (Entry entry) {
+			if (!entries.unset (entry.pid))
+				return false;
+
 			entry.provider.closed.disconnect (on_session_closed);
 			entry.connection.closed.disconnect (on_connection_closed);
 
+			return true;
+		}
+
+		private async void teardown (Entry entry, SessionDetachReason reason) {
 			yield entry.close ();
 
 			foreach (var raw_id in entry.sessions) {
