@@ -1,6 +1,6 @@
 namespace Frida.Agent {
 	public void main (string pipe_address, ref bool stay_resident, Gum.MemoryRange? mapped_range) {
-		Environment.init ();
+		Environment._init ();
 
 		{
 			var agent_range = memory_range (mapped_range);
@@ -27,7 +27,7 @@ namespace Frida.Agent {
 			exceptor = null;
 		}
 
-		Environment.deinit ();
+		Environment._deinit ();
 	}
 
 	private class AgentServer : Object, AgentSessionProvider {
@@ -125,7 +125,7 @@ namespace Frida.Agent {
 
 		public ScriptEngine create_script_engine () {
 			if (script_backend == null)
-				script_backend = Environment.obtain_script_backend (jit_enabled);
+				script_backend = Environment._obtain_script_backend (jit_enabled);
 
 			return new ScriptEngine (script_backend, agent_range);
 		}
@@ -369,16 +369,16 @@ namespace Frida.Agent {
 	}
 
 	namespace Environment {
-		private extern void init ();
-		private extern void deinit ();
-		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
+		public extern void _init ();
+		public extern void _deinit ();
+		public extern unowned Gum.ScriptBackend _obtain_script_backend (bool jit_enabled);
 	}
 
 	private Mutex gc_mutex;
 	private uint gc_generation = 0;
 	private bool gc_scheduled = false;
 
-	public void on_pending_garbage (void * data) {
+	public void _on_pending_garbage (void * data) {
 		gc_mutex.lock ();
 		gc_generation++;
 		bool already_scheduled = gc_scheduled;

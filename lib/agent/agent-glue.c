@@ -1,28 +1,28 @@
-#include "agent-glue.h"
+#include "frida-agent.h"
 
 #ifndef G_OS_WIN32
 # include "frida-interfaces.h"
 #endif
 
 void
-frida_agent_environment_init (void)
+_frida_agent_environment_init (void)
 {
   gum_init_embedded ();
 
-  g_thread_set_garbage_handler (frida_agent_on_pending_garbage, NULL);
+  g_thread_set_garbage_handler (_frida_agent_on_pending_garbage, NULL);
 
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
 }
 
 void
-frida_agent_environment_deinit (void)
+_frida_agent_environment_deinit (void)
 {
   gum_deinit_embedded ();
 }
 
 GumScriptBackend *
-frida_agent_environment_obtain_script_backend (gboolean jit_enabled)
+_frida_agent_environment_obtain_script_backend (gboolean jit_enabled)
 {
   GumScriptBackend * backend = NULL;
 
