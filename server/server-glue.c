@@ -1,4 +1,4 @@
-#include "frida-server.h"
+#include "server-glue.h"
 
 #ifdef HAVE_ANDROID
 # include "frida-selinux.h"

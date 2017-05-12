@@ -1,4 +1,4 @@
-#include "frida-helper-service.h"
+#include "frida-helper-service-glue.h"
 
 #import <Foundation/Foundation.h>
 
