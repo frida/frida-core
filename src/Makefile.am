@@ -1,4 +1,4 @@
-RESOURCE_COMPILER = $(top_builddir)/tools/resource-compiler
+RESOURCE_COMPILER = $(top_builddir)/tools/frida-resource-compiler
 
 backend_programs = $(NULL)
 backend_libraries = $(NULL)

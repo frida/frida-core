@@ -137,5 +137,5 @@
 /tests/test-system.c
 /tools/Makefile
 /tools/Makefile.in
-/tools/resource-compiler
-/tools/resource-compiler.c
+/tools/frida-resource-compiler
+/tools/frida-resource-compiler.c

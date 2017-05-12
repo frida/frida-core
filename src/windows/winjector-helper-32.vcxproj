@@ -83,7 +83,7 @@
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
-    <ProjectReference Include="..\..\tools\resource-compiler.vcxproj">
+    <ProjectReference Include="..\..\tools\frida-resource-compiler.vcxproj">
       <Project>{81b3e411-8676-41eb-84c6-1e5307f0c5ff}</Project>
       <Private>false</Private>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
