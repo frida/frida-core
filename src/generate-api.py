@@ -79,11 +79,6 @@ def emit_header(api, output_dir):
         output_header_file.write("\n\n#endif\n")
 
 def emit_vapi(api, output_dir):
-    with open(os.path.join(output_dir, 'frida-core-1.0.deps'), 'wt') as output_deps_file:
-        output_deps_file.write("glib-2.0\n")
-        output_deps_file.write("gobject-2.0\n")
-        output_deps_file.write("gio-2.0\n")
-
     with open(os.path.join(output_dir, 'frida-core-1.0.vapi'), 'wt') as output_vapi_file:
         output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
         output_vapi_file.write("\nnamespace Frida {")
@@ -112,6 +107,11 @@ def emit_vapi(api, output_dir):
             output_vapi_file.write("\n\t}")
 
         output_vapi_file.write("\n}\n")
+
+    with open(os.path.join(output_dir, 'frida-core-1.0.deps'), 'wt') as output_deps_file:
+        output_deps_file.write("glib-2.0\n")
+        output_deps_file.write("gobject-2.0\n")
+        output_deps_file.write("gio-2.0\n")
 
 def parse_api(api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header):
     all_enum_names = [m.group(1) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala + "\n" + interfaces_vapi, re.MULTILINE)]
@@ -338,13 +338,13 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
+    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi'], default='bundle')
     parser.add_argument('api_vala', metavar='/path/to/frida.vala', type=argparse.FileType('r'))
     parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r'))
     parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r'))
     parser.add_argument('interfaces_vapi', metavar='/path/to/frida-interfaces.vapi', type=argparse.FileType('r'))
     parser.add_argument('interfaces_header', metavar='/path/to/frida-interfaces.h', type=argparse.FileType('r'))
     parser.add_argument('output_dir', metavar='/output/dir')
-    parser.add_argument('--output-type', dest='output_type', choices=['bundle', 'header', 'vapi'], default='bundle')
 
     args = parser.parse_args()
 
@@ -355,9 +355,9 @@ if __name__ == '__main__':
     interfaces_header = args.interfaces_header.read()
     output_dir = args.output_dir
 
-    output_type = args.output_type
     enable_header = False
     enable_vapi = False
+    output_type = args.output_type
     if output_type == 'bundle':
         enable_header = True
         enable_vapi = True
