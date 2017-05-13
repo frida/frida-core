@@ -6,6 +6,7 @@
 
 #include <gio/gio.h>
 #include <gum/gum.h>
+#include <stdlib.h>
 
 #if defined (HAVE_DARWIN)
 # include <CoreFoundation/CoreFoundation.h>
