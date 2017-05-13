@@ -79,7 +79,7 @@ def emit_header(api, output_dir):
         output_header_file.write("\n\n#endif\n")
 
 def emit_vapi(api, output_dir):
-    with open(os.path.join(output_dir, "frida-core-{}.vapi".format(api.version)), "wt") as output_vapi_file:
+    with open(os.path.join(output_dir, "frida-core-{0}.vapi".format(api.version)), "wt") as output_vapi_file:
         output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
         output_vapi_file.write("\nnamespace Frida {")
         output_vapi_file.write("\n\tpublic static void init ();")
@@ -108,7 +108,7 @@ def emit_vapi(api, output_dir):
 
         output_vapi_file.write("\n}\n")
 
-    with open(os.path.join(output_dir, "frida-core-{}.deps".format(api.version)), "wt") as output_deps_file:
+    with open(os.path.join(output_dir, "frida-core-{0}.deps".format(api.version)), "wt") as output_deps_file:
         output_deps_file.write("glib-2.0\n")
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
