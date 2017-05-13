@@ -1,4 +1,4 @@
-#include "frida-inject.h"
+#include "inject-glue.h"
 
 #ifdef HAVE_ANDROID
 # include "frida-selinux.h"
@@ -26,4 +26,3 @@ frida_inject_environment_deinit (void)
 
   gio_deinit ();
 }
-
