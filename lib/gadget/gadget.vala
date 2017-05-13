@@ -398,8 +398,12 @@ namespace Frida.Gadget {
 		}
 
 		public async void start () throws Error {
+			string listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
+			if (listen_address == null){
+				listen_address = LISTEN_ADDRESS;
+			}
 			try {
-				server = new DBusServer.sync (LISTEN_ADDRESS, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server = new DBusServer.sync (listen_address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			} catch (GLib.Error listen_error) {
 				throw new Error.ADDRESS_IN_USE (listen_error.message);
 			}
