@@ -73,6 +73,27 @@ namespace Frida.Gadget {
 		mutex.unlock ();
 	}
 
+	private bool try_get_listen_address (out string listen_address, out uint16 listen_port, out string listen_uri) {
+		try {
+			var env_listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
+			var raw_address = (env_listen_address != null) ? env_listen_address : DEFAULT_LISTEN_ADDRESS;
+			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
+			if (socket_address is InetSocketAddress) {
+				var inet_socket_address = socket_address as InetSocketAddress;
+				var inet_address = inet_socket_address.get_address ();
+				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
+				listen_address = inet_address.to_string ();
+				listen_port = inet_socket_address.get_port ();
+				listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, listen_address, listen_port);
+				return true;
+			} else {
+				return false;
+			}
+		} catch (GLib.Error e) {
+			return false;
+		}
+	}
+
 	private async void start () {
 		var gadget_range = memory_range ();
 		Gum.Cloak.add_range (gadget_range);
@@ -105,28 +126,19 @@ namespace Frida.Gadget {
 			resume ();
 		} else {
 
+			string listen_address;
+			uint16 listen_port;
 			string listen_uri;
+			if (!try_get_listen_address (out listen_address, out listen_port, out listen_uri)) {
+				log_error ("Invalid listen address");
+				return;
+			}
+
 			try {
-				string? listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
-				var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
-				var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-				if (socket_address is InetSocketAddress) {
-					var inet_socket_address = socket_address as InetSocketAddress;
-					var inet_address = inet_socket_address.get_address ();
-					var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-					string address = inet_address.to_string ();
-					uint16 port = inet_socket_address.get_port ();
-					listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, address, port);
-
 					var s = new Server (listen_uri, jit_enabled, gadget_range);
-
 					yield s.start ();
 					server = s;
-					log_info ("Listening on " + address + " TCP port " + port.to_string ());
-
-				} else {
-					log_error ("Invalid listen address\n");
-				}
+					log_info ("Listening on " + listen_address + " TCP port " + listen_port.to_string());
 			} catch (GLib.Error e) {
 				log_error ("Failed to start: " + e.message);
 			}
@@ -406,17 +418,18 @@ namespace Frida.Gadget {
 	}
 
 	private class Server : Object {
+
 		private unowned Gum.ScriptBackend script_backend = null;
+		private string listen_uri;
 		private bool jit_enabled;
 		private Gum.MemoryRange gadget_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
-		private string listen_uri;
 
 		public Server (string listen_uri, bool jit_enabled, Gum.MemoryRange gadget_range) {
+			this.listen_uri = listen_uri;
 			this.jit_enabled = jit_enabled;
 			this.gadget_range = gadget_range;
-			this.listen_uri = listen_uri;
 		}
 
 		public async void start () throws Error {
