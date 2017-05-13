@@ -79,7 +79,7 @@ def emit_header(api, output_dir):
         output_header_file.write("\n\n#endif\n")
 
 def emit_vapi(api, output_dir):
-    with open(os.path.join(output_dir, 'frida-core-1.0.vapi'), 'wt') as output_vapi_file:
+    with open(os.path.join(output_dir, "frida-core-{}.vapi".format(api.version)), "wt") as output_vapi_file:
         output_vapi_file.write("[CCode (cheader_filename = \"frida-core.h\", cprefix = \"Frida\", lower_case_cprefix = \"frida_\")]")
         output_vapi_file.write("\nnamespace Frida {")
         output_vapi_file.write("\n\tpublic static void init ();")
@@ -108,12 +108,12 @@ def emit_vapi(api, output_dir):
 
         output_vapi_file.write("\n}\n")
 
-    with open(os.path.join(output_dir, 'frida-core-1.0.deps'), 'wt') as output_deps_file:
+    with open(os.path.join(output_dir, "frida-core-{}.deps".format(api.version)), "wt") as output_deps_file:
         output_deps_file.write("glib-2.0\n")
         output_deps_file.write("gobject-2.0\n")
         output_deps_file.write("gio-2.0\n")
 
-def parse_api(api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header):
+def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header):
     all_enum_names = [m.group(1) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala + "\n" + interfaces_vapi, re.MULTILINE)]
     enum_types = []
 
@@ -248,10 +248,11 @@ def parse_api(api_vala, core_vapi, core_header, interfaces_vapi, interfaces_head
             enum.vapi_declaration = m.group(1)
             enum.vapi_members.extend([line.lstrip() for line in m.group(2).strip().split("\n")])
 
-    return ApiSpec(object_types, enum_types, error_types)
+    return ApiSpec(api_version, object_types, enum_types, error_types)
 
 class ApiSpec:
-    def __init__(self, object_types, enum_types, error_types):
+    def __init__(self, version, object_types, enum_types, error_types):
+        self.version = version
         self.object_types = object_types
         self.enum_types = enum_types
         self.error_types = error_types
@@ -339,6 +340,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
     parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi'], default='bundle')
+    parser.add_argument('api_version', metavar='api-version', type=str)
     parser.add_argument('api_vala', metavar='/path/to/frida.vala', type=argparse.FileType('r'))
     parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r'))
     parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r'))
@@ -348,6 +350,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    api_version = args.api_version
     api_vala = args.api_vala.read()
     core_vapi = args.core_vapi.read()
     core_header = args.core_header.read()
@@ -366,7 +369,7 @@ if __name__ == '__main__':
     elif output_type == 'vapi':
         enable_vapi = True
 
-    api = parse_api(api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header)
+    api = parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header)
 
     if enable_header:
         emit_header(api, output_dir)
