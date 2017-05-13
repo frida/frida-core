@@ -18,6 +18,9 @@ namespace Frida.Gadget {
 	private Mutex mutex;
 	private Cond cond;
 
+	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
+	private const uint16 DEFAULT_LISTEN_PORT = 27042;
+
 	public void load () {
 		if (loaded)
 			return;
@@ -90,6 +93,7 @@ namespace Frida.Gadget {
 
 		var script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
 		bool jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT") != null;
+
 		if (script_file != null) {
 			var r = new ScriptRunner (script_file, jit_enabled, gadget_range);
 			try {
@@ -100,12 +104,30 @@ namespace Frida.Gadget {
 			}
 			resume ();
 		} else {
-			var s = new Server (jit_enabled, gadget_range);
+
+			string listen_uri;
 			try {
-				yield s.start ();
-				server = s;
-				log_info ("Listening on TCP port 27042");
-			} catch (Error e) {
+				string? listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
+				var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
+				var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
+				if (socket_address is InetSocketAddress) {
+					var inet_socket_address = socket_address as InetSocketAddress;
+					var inet_address = inet_socket_address.get_address ();
+					var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
+					string address = inet_address.to_string ();
+					uint16 port = inet_socket_address.get_port ();
+					listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, address, port);
+
+					var s = new Server (listen_uri, jit_enabled, gadget_range);
+
+					yield s.start ();
+					server = s;
+					log_info ("Listening on " + address + " TCP port " + port.to_string ());
+
+				} else {
+					log_error ("Invalid listen address\n");
+				}
+			} catch (GLib.Error e) {
 				log_error ("Failed to start: " + e.message);
 			}
 		}
@@ -384,26 +406,22 @@ namespace Frida.Gadget {
 	}
 
 	private class Server : Object {
-		private const string LISTEN_ADDRESS = "tcp:host=127.0.0.1,port=27042";
-
 		private unowned Gum.ScriptBackend script_backend = null;
 		private bool jit_enabled;
 		private Gum.MemoryRange gadget_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+		private string listen_uri;
 
-		public Server (bool jit_enabled, Gum.MemoryRange gadget_range) {
+		public Server (string listen_uri, bool jit_enabled, Gum.MemoryRange gadget_range) {
 			this.jit_enabled = jit_enabled;
 			this.gadget_range = gadget_range;
+			this.listen_uri = listen_uri;
 		}
 
 		public async void start () throws Error {
-			string listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
-			if (listen_address == null){
-				listen_address = LISTEN_ADDRESS;
-			}
 			try {
-				server = new DBusServer.sync (listen_address, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 			} catch (GLib.Error listen_error) {
 				throw new Error.ADDRESS_IN_USE (listen_error.message);
 			}
