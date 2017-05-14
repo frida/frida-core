@@ -5,7 +5,7 @@ if OS_LINUX
 extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-gadget.version
 else
 if OS_QNX
-extra_ldflags += -Wl,--version-script -Wl,$(srcdir)/frida-gadget.version
+extra_ldflags += -lm -Wl,--version-script -Wl,$(srcdir)/frida-gadget.version
 else
 extra_ldflags += -export-symbols-regex "^frida_gadget_no_exports$$"
 endif
