@@ -116,7 +116,7 @@ namespace Frida.Gadget {
 					var s = new Server (listen_uri, jit_enabled, gadget_range);
 					yield s.start ();
 					server = s;
-					log_info ("Listening on " + listen_address + " TCP port " + listen_port.to_string());
+					log_info ("Listening on %s TCP port %hu".printf (listen_address, listen_port));
 			} catch (GLib.Error e) {
 				log_error ("Failed to start: " + e.message);
 			}
@@ -131,8 +131,7 @@ namespace Frida.Gadget {
 		try {
 			var env_listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
 			var raw_address = (env_listen_address != null) ? env_listen_address : DEFAULT_LISTEN_ADDRESS;
-			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-			
+			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();			
 			if (!(socket_address is InetSocketAddress))
 				return false;
 
