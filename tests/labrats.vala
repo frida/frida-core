@@ -15,7 +15,7 @@ namespace Frida.Test.Labrats {
 			data_dir = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Path.get_dirname (tests_dir)))),
 				"frida-core", "tests", "labrats");
 		} else {
-			data_dir = Path.build_filename (tests_dir, "data");
+			data_dir = Path.build_filename (tests_dir, "labrats");
 		}
 
 		return Path.build_filename (data_dir, name);

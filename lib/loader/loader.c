@@ -90,7 +90,7 @@ static gpointer fork_impl = NULL;
 static gpointer set_argv0_impl = NULL;
 
 void
-frida_agent_main (const char * data_dir, void * mapped_range, size_t parent_thread_id)
+frida_loader_main (const char * data_dir, unsigned int * stay_resident, void * mapped_range)
 {
   bool already_loaded;
 
@@ -153,7 +153,7 @@ frida_loader_prevent_unload (void)
   Dl_info info;
   int res;
 
-  res = dladdr (frida_agent_main, &info);
+  res = dladdr (frida_loader_main, &info);
   assert (res != 0);
 
   module = dlopen (info.dli_fname, RTLD_LAZY);

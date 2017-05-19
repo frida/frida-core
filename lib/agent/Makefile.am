@@ -17,8 +17,7 @@ endif
 
 noinst_LTLIBRARIES = \
 	libfrida-agent.la \
-	libfrida-agent-glue.la \
-	libfrida-agent-container.la
+	libfrida-agent-glue.la
 
 libfrida_agent_la_SOURCES = \
 	agent.vala \
@@ -60,24 +59,6 @@ endif
 
 libfrida_agent_glue_la_SOURCES = \
 	agent-glue.c
-
-libfrida_agent_container_la_SOURCES = \
-	agent-container.vala
-libfrida_agent_container_la_CFLAGS = \
-	-w
-libfrida_agent_container_la_LIBADD = \
-	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
-	$(top_builddir)/lib/pipe/libfrida-pipe.la
-libfrida_agent_container_la_VALAFLAGS = \
-	--vapi=frida-agent-container.vapi \
-	--library=frida-agent-container \
-	--header=frida-agent-container.h \
-	--vapidir=$(abs_top_srcdir)/lib/interfaces \
-	--vapidir=$(abs_top_srcdir)/lib/pipe \
-	--pkg=frida-interfaces \
-	--pkg=frida-pipe \
-	@FRIDA_PACKAGES@ \
-	@FRIDA_VALAFLAGS@
 
 AM_CPPFLAGS = \
 	-DG_LOG_DOMAIN=\"Frida\" \

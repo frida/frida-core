@@ -7,7 +7,7 @@
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|Win32'">
-    <TargetName>$(ProjectName)-windows-i386</TargetName>
+    <TargetName>$(ProjectName)-windows-x86</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Labrat|x64'">
     <TargetName>$(ProjectName)-windows-x86_64</TargetName>

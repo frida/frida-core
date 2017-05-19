@@ -371,9 +371,9 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 			shlib_extension = "so";
 #endif
 			var frida_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
-			agent_filename = Path.build_filename (frida_root_dir, "lib", "frida", "libfrida-agent." + shlib_extension);
+			agent_filename = Path.build_filename (frida_root_dir, "lib", "frida", "frida-agent." + shlib_extension);
 			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
-				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", ".libs", "libfrida-agent." + shlib_extension);
+				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", "frida-agent." + shlib_extension);
 #endif
 
 			module = GLib.Module.open (agent_filename, 0);

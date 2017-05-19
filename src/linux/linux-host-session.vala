@@ -450,14 +450,14 @@ namespace Frida {
 
 			try {
 				if (should_inject_32bit_loader) {
-					loader32 = yield injector.inject_library_resource (LocalProcesses.get_pid ("zygote"), loader, "frida_agent_main", data_dir);
+					loader32 = yield injector.inject_library_resource (LocalProcesses.get_pid ("zygote"), loader, "frida_loader_main", data_dir);
 					pending.add (loader32);
 				}
 
 				if (should_inject_64bit_loader) {
 					var zygote64_pid = LocalProcesses.find_pid ("zygote64");
 					if (zygote64_pid != 0) {
-						loader64 = yield injector.inject_library_resource (zygote64_pid, loader, "frida_agent_main", data_dir);
+						loader64 = yield injector.inject_library_resource (zygote64_pid, loader, "frida_loader_main", data_dir);
 						pending.add (loader64);
 					} else {
 						loader64 = 1;

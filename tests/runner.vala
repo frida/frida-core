@@ -63,7 +63,7 @@ namespace Frida.Test {
 		string cpu_name;
 		switch (Frida.Test.cpu ()) {
 			case CPU.X86_32:
-				cpu_name = "i386";
+				cpu_name = "x86";
 				break;
 			case CPU.X86_64:
 				cpu_name = "x86_64";

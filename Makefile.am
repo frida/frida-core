@@ -33,9 +33,9 @@ check: all
 	cp "$(top_builddir)/lib/agent/.libs/libfrida-agent.so" "$(top_builddir)/lib/agent/.libs/libfrida-agent.so.stripped"
 	$$STRIP --strip-all "$(top_builddir)/lib/agent/.libs/libfrida-agent.so.stripped"
 	adb push "$(top_builddir)/lib/agent/.libs/libfrida-agent.so.stripped" "${RPFX}/lib/frida/libfrida-agent.so"
-	adb push "$(top_builddir)/tests/data/sleeper-android-i386" "${RPFX}/tests/data/"
-	adb push "$(top_builddir)/tests/data/simple-agent-android-i386.so" "${RPFX}/tests/data/"
-	adb push "$(top_builddir)/tests/data/resident-agent-android-i386.so" "${RPFX}/tests/data/"
+	adb push "$(top_builddir)/tests/data/sleeper-android-x86" "${RPFX}/tests/data/"
+	adb push "$(top_builddir)/tests/data/simple-agent-android-x86.so" "${RPFX}/tests/data/"
+	adb push "$(top_builddir)/tests/data/resident-agent-android-x86.so" "${RPFX}/tests/data/"
 	adb shell "su root \"${RPFX}/tests/frida-tests\""
 
 check-gdb: $(top_builddir)/tests/android-gdb.setup

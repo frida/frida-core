@@ -5,15 +5,15 @@ LDFLAGS := -Wl,--gc-sections
 all: \
 	sleeper-linux-arm \
 	sleeper-linux-armhf \
-	sleeper-linux-i386 \
+	sleeper-linux-x86 \
 	sleeper-linux-x86_64 \
 	simple-agent-linux-arm.so \
 	simple-agent-linux-armhf.so \
-	simple-agent-linux-i386.so \
+	simple-agent-linux-x86.so \
 	simple-agent-linux-x86_64.so \
 	resident-agent-linux-arm.so \
 	resident-agent-linux-armhf.so \
-	resident-agent-linux-i386.so \
+	resident-agent-linux-x86.so \
 	resident-agent-linux-x86_64.so \
 	$(NULL)
 
@@ -27,7 +27,7 @@ sleeper-linux-armhf: sleeper-unix.c
 	arm-linux-gnueabihf-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-sleeper-linux-i386: sleeper-unix.c
+sleeper-linux-x86: sleeper-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m32 $< -o $@.tmp
 	strip --strip-all $@.tmp
 	mv $@.tmp $@
@@ -57,7 +57,7 @@ sleeper-linux-mipsel: sleeper-unix.c
 	arm-linux-gnueabihf-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
-%-agent-linux-i386.so: %-agent.c
+%-agent-linux-x86.so: %-agent.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -m32 -shared $< -o $@.tmp
 	strip --strip-all $@.tmp
 	mv $@.tmp $@

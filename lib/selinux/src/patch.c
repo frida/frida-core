@@ -1,3 +1,8 @@
+#ifdef FRIDA_SELINUX_LEGACY
+# define frida_selinux_apply_policy_patch legacy_frida_selinux_apply_policy_patch
+# define frida_selinux_error_quark legacy_frida_selinux_error_quark
+#endif
+
 #include "patch.h"
 
 #include <fcntl.h>
