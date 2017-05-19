@@ -1897,7 +1897,7 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
   }
   else
   {
-    uint32 temp[2];
+    guint32 temp[2];
     gboolean write_succeeded;
 
     current_pc = state.uts.ts32.__eip;
@@ -1953,7 +1953,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
   }
   else
   {
-    uint32 temp[3];
+    guint32 temp[3];
     gboolean write_succeeded;
 
     current_pc = state.uts.ts32.__eip;
