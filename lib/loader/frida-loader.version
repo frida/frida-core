@@ -1,6 +1,6 @@
-LIBFRIDA_AGENT_1.0 {
+LIBFRIDA_LOADER_1.0 {
   global:
-    frida_agent_main;
+    frida_loader_main;
 
   local:
     *;

@@ -1,0 +1,2 @@
+EXPORTS
+	frida_loader_main

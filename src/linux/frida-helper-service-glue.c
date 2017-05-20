@@ -1,4 +1,4 @@
-#include "frida-helper.h"
+#include "frida-helper-service.h"
 
 #include <gio/gunixinputstream.h>
 #include <glib-unix.h>

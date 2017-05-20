@@ -38,10 +38,7 @@
 /lib/Makefile.in
 /lib/agent/Makefile
 /lib/agent/Makefile.in
-/lib/agent/agent-container.c
 /lib/agent/agent.c
-/lib/agent/frida-agent-container.h
-/lib/agent/frida-agent-container.vapi
 /lib/agent/frida-agent.h
 /lib/agent/frida-agent.vapi
 /lib/agent/script-engine.c
@@ -74,6 +71,7 @@
 /server/server.c
 /src/Makefile
 /src/Makefile.in
+/src/agent-container.c
 /src/darwin/darwin-host-session.c
 /src/darwin/frida-helper-backend.c
 /src/darwin/frida-helper-process.c

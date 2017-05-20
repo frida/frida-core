@@ -270,7 +270,6 @@ libfrida_helper_backend_la_CFLAGS = \
 libfrida_helper_backend_la_LIBADD = \
 	libfrida-helper-backend-glue.la \
 	libfrida-helper-types.la \
-	$(top_builddir)/lib/agent/libfrida-agent-container.la \
 	$(FRIDA_LIBS)
 libfrida_helper_backend_la_VALAFLAGS = \
 	--vapi=frida-helper-backend.vapi \
@@ -282,7 +281,6 @@ libfrida_helper_backend_la_VALAFLAGS = \
 	--vapidir=$(abs_srcdir) \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
-	--pkg=frida-agent-container \
 	--pkg=frida-helper-types \
 	@FRIDA_PACKAGES@ \
 	@FRIDA_VALAFLAGS@
@@ -389,9 +387,9 @@ vapi_DATA = \
 	$(builddir)/api/frida-core-1.0.deps \
 	$(builddir)/api/frida-core-1.0.vapi
 
-frida-api-stamp: libfrida-core-1.0.la $(srcdir)/generate-api.py
+frida-api-stamp: libfrida-core-1.0.la $(srcdir)/api/generate.py
 	mkdir -p $(builddir)/api
-	python $(srcdir)/generate-api.py 1.0 $(srcdir)/frida.vala $(srcdir)/frida-core.vapi $(srcdir)/frida-core.h $(top_srcdir)/lib/interfaces/frida-interfaces.vapi $(top_srcdir)/lib/interfaces/frida-interfaces.h $(builddir)/api
+	python $(srcdir)/api/generate.py 1.0 $(srcdir)/frida.vala $(srcdir)/frida-core.vapi $(srcdir)/frida-core.h $(top_srcdir)/lib/interfaces/frida-interfaces.vapi $(top_srcdir)/lib/interfaces/frida-interfaces.h $(builddir)/api
 	touch $@
 
 libfrida_core_1_0_la_SOURCES = \
@@ -399,7 +397,6 @@ libfrida_core_1_0_la_SOURCES = \
 libfrida_core_1_0_la_LIBADD = \
 	$(top_builddir)/lib/interfaces/libfrida-interfaces.la \
 	$(top_builddir)/lib/pipe/libfrida-pipe.la \
-	$(top_builddir)/lib/agent/libfrida-agent-container.la \
 	libfrida-data-agent.la \
 	$(backend_data) \
 	libfrida-core.la \
@@ -412,6 +409,7 @@ libfrida_core_la_SOURCES = \
 	frida.vala \
 	debugger.vala \
 	host-session-service.vala \
+	agent-container.vala \
 	$(backend_sources) \
 	tcp/tcp-host-session.vala \
 	system.vala
@@ -430,7 +428,6 @@ libfrida_core_la_VALAFLAGS = \
 	--pkg=config \
 	--pkg=frida-interfaces \
 	--pkg=frida-pipe \
-	--pkg=frida-agent-container \
 	--pkg=frida-data-agent \
 	$(backend_valaflags) \
 	@FRIDA_PACKAGES@ \
