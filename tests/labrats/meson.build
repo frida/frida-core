@@ -11,6 +11,18 @@ if host_os == 'macos'
   ]
 endif
 
+if host_os == 'linux'
+  labrat_files += [
+    'sleeper-linux-' + host_machine.cpu_family(),
+    'simple-agent-linux-' + host_machine.cpu_family() + '.so',
+  ]
+  if host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'x86_64'
+    labrat_files += [
+      'resident-agent-linux-' + host_machine.cpu_family() + '.so',
+    ]
+  endif
+endif
+
 if host_os == 'ios'
   labrat_files += [
     'sleeper-ios',
@@ -27,6 +39,13 @@ if host_os == 'android'
     'sleeper-android-' + host_machine.cpu_family(),
     'simple-agent-android-' + host_machine.cpu_family() + '.so',
     'resident-agent-android-' + host_machine.cpu_family() + '.so',
+  ]
+endif
+
+if host_os == 'qnx'
+  labrat_files += [
+    'sleeper-qnx-arm',
+    'simple-agent-qnx-arm.so',
   ]
 endif
 

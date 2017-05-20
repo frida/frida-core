@@ -20,6 +20,10 @@ backend_vala_args = []
 backend_libs = []
 backend_deps = []
 
+if host_os_family == 'windows'
+  # TODO
+endif
+
 if host_os_family == 'darwin'
   darwin_sources = [
     'darwin/darwin-host-session.vala',
@@ -123,7 +127,6 @@ if host_os_family == 'darwin'
   )
   darwin_sources += [helper_process_data]
 
-
   backend_vala_args += ['--pkg=posix']
 endif
 
@@ -138,6 +141,7 @@ if host_os_family == 'linux'
   ]
 
   if host_os == 'android'
+    backend_vala_args += [frida_selinux_vala_args]
     backend_libs += [frida_selinux]
     backend_deps += [frida_selinux_dep]
 
@@ -170,9 +174,13 @@ if host_os_family == 'linux'
     'linux/frida-helper-service.vala',
     'linux/frida-helper-service-glue.c',
   ]
+  helper_service_extra_deps = []
+  if host_os == 'android'
+    helper_service_extra_deps += [frida_selinux_dep]
+  endif
   helper_service = static_library('frida-helper-service', helper_service_sources + helper_types_sources,
     vala_args: ['--pkg=posix'],
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, frida_selinux_dep, interfaces_dep],
+    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep] + helper_service_extra_deps,
   )
 
   helper = executable('frida-helper', 'linux/frida-helper.vala',
@@ -214,7 +222,7 @@ if host_os_family == 'linux'
   )
   linux_sources += [helper_process_data]
 
-  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-linux-1.0'] + frida_selinux_vala_args
+  backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-linux-1.0']
 endif
 
 if need_loader
@@ -251,6 +259,16 @@ if need_loader
       get_option('strip').to_string(),
     ],
   )
+endif
+
+if host_os_family == 'qnx'
+  qnx_sources = [
+    'qnx/qnx-host-session.vala',
+    'qnx/qnx-host-session-glue.c',
+    'qnx/qinjector.vala',
+    'qnx/qinjector-glue.c',
+    'qnx/system-qnx.c',
+  ]
 endif
 
 agent32 = get_option('with-32bit-agent')

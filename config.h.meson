@@ -12,6 +12,9 @@
 /* Define to 1 if OS is Darwin based. */
 #mesondefine HAVE_DARWIN
 
+/* Define to 1 if libc is glibc. */
+#mesondefine HAVE_GLIBC
+
 /* Define to 1 if target is x86 based. */
 #mesondefine HAVE_I386
 
@@ -38,3 +41,6 @@
 
 /* Define to 1 if OS is QNX based. */
 #mesondefine HAVE_QNX
+
+/* Define to 1 if libc is uClibc. */
+#mesondefine HAVE_UCLIBC

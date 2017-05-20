@@ -88,6 +88,29 @@ foreach h : headers
   endif
 endforeach
 
+glibc_src = '''
+#include <features.h>
+
+#if defined (__GLIBC__) && !defined (__UCLIBC__)
+#else
+# error Not glibc
+#endif
+'''
+if cc.compiles(glibc_src, name: 'compiling for glibc')
+  cdata.set('HAVE_GLIBC', 1)
+endif
+
+uclibc_src = '''
+#include <features.h>
+
+#if !defined (__UCLIBC__)
+# error Not uClibc
+#endif
+'''
+if cc.compiles(uclibc_src, name: 'compiling for uClibc')
+  cdata.set('HAVE_UCLIBC', 1)
+endif
+
 glib_dep = dependency('glib-2.0', version: '>=2.53')
 gobject_dep = dependency('gobject-2.0')
 gmodule_dep = dependency('gmodule-2.0')
