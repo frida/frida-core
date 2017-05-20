@@ -156,7 +156,7 @@ if enable_mapper
   cdata.set('HAVE_MAPPER', 1)
 endif
 
-configure_file(input: 'config.h.meson',
+configure_file(input: 'config.h.in',
   output: 'config.h',
   configuration: cdata)
 
