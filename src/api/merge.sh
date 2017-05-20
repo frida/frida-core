@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ar_binary="$1"
 libtool_binary="$2"
