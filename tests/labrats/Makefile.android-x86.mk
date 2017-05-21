@@ -22,28 +22,28 @@ LDFLAGS := \
 	-Wl,--gc-sections
 
 all: \
-	sleeper-android-i386 \
-	simple-agent-android-i386.so \
-	resident-agent-android-i386.so \
+	sleeper-android-x86 \
+	simple-agent-android-x86.so \
+	resident-agent-android-x86.so \
 	$(NULL)
 
-sleeper-android-i386: sleeper-unix.c
+sleeper-android-x86: sleeper-unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-%-agent-android-i386.so: %-agent.c %-agent-android-i386.version
+%-agent-android-x86.so: %-agent.c %-agent-android-x86.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \
 		-shared \
-		-Wl,-soname,$*-agent-android-i386.so \
-		-Wl,--version-script=$*-agent-android-i386.version \
+		-Wl,-soname,$*-agent-android-x86.so \
+		-Wl,--version-script=$*-agent-android-x86.version \
 		$< \
 		-o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@
 
-%-agent-android-i386.version:
-	echo "LABRAT_AGENT_ANDROID_I386_1.0 {"  > $@.tmp
+%-agent-android-x86.version:
+	echo "LABRAT_AGENT_ANDROID_X86_1.0 {"   > $@.tmp
 	echo "  global:"                       >> $@.tmp
 	echo "    frida_agent_main;"           >> $@.tmp
 	echo ""                                >> $@.tmp
