@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Frida {
 	public class WindowsHostSessionBackend : Object, HostSessionBackend {
 		private WindowsHostSessionProvider local_provider;
@@ -332,4 +331,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

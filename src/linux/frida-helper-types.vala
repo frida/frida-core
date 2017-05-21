@@ -1,4 +1,3 @@
-#if LINUX
 namespace Frida {
 	[DBus (name = "re.frida.Helper")]
 	public interface Helper : Object {
@@ -17,4 +16,3 @@ namespace Frida {
 		public const string HELPER = "/re/frida/Helper";
 	}
 }
-#endif

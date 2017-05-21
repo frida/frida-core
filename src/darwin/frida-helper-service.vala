@@ -1,4 +1,3 @@
-#if DARWIN
 namespace Frida {
 	public int main (string[] args) {
 		Posix.setsid ();
@@ -186,4 +185,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

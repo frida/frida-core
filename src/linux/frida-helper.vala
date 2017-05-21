@@ -1,4 +1,3 @@
-#if LINUX
 namespace Frida {
 	public int main (string[] args) {
 		Posix.setsid ();
@@ -10,4 +9,3 @@ namespace Frida {
 		return service.run ();
 	}
 }
-#endif

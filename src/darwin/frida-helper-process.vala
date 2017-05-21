@@ -1,4 +1,3 @@
-#if DARWIN
 namespace Frida {
 	public class DarwinHelperProcess : Object, DarwinHelper {
 		public uint pid {
@@ -294,4 +293,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

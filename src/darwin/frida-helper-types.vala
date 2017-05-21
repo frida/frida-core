@@ -1,4 +1,3 @@
-#if DARWIN
 namespace Frida {
 	public interface DarwinHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
@@ -71,4 +70,3 @@ namespace Frida {
 		public const string SYSTEM_SESSION_PROVIDER = "/re/frida/SystemSessionProvider";
 	}
 }
-#endif

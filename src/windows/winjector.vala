@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Frida {
 	public class Winjector : Object, Injector {
 		public ResourceStore normal_resource_store {
@@ -569,4 +568,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

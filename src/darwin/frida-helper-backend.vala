@@ -1,4 +1,3 @@
-#if DARWIN
 namespace Frida {
 	public class DarwinHelperBackend : Object, DarwinHelper {
 		public signal void idle ();
@@ -417,4 +416,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

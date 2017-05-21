@@ -1,4 +1,3 @@
-#if WINDOWS
 using Frida;
 
 namespace Winjector {
@@ -345,4 +344,3 @@ namespace Winjector {
 
 	private extern Source wait_handle_source_new (void * handle, bool owns_handle);
 }
-#endif

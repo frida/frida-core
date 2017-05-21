@@ -1,4 +1,3 @@
-#if LINUX
 using Gee;
 
 namespace Frida {
@@ -210,4 +209,3 @@ namespace Frida {
 		public static extern InputStream _clone_so (InputStream dylib);
 	}
 }
-#endif

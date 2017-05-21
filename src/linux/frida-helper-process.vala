@@ -1,4 +1,3 @@
-#if LINUX
 namespace Frida {
 	internal class HelperProcess {
 		public signal void output (uint pid, int fd, uint8[] data);
@@ -399,4 +398,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

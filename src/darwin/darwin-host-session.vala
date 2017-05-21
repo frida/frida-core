@@ -1,4 +1,3 @@
-#if DARWIN
 namespace Frida {
 	public class DarwinHostSessionBackend : Object, HostSessionBackend {
 		private DarwinHostSessionProvider local_provider;
@@ -90,7 +89,9 @@ namespace Frida {
 		}
 
 		private AgentResource agent;
+#if IOS
 		private FruitLauncher fruit_launcher;
+#endif
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
@@ -177,28 +178,32 @@ namespace Frida {
 		}
 
 		public override async void enable_spawn_gating () throws Error {
-			if (_is_running_on_ios ())
-				yield get_fruit_launcher ().enable_spawn_gating ();
-			else
-				throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#if IOS
+			yield get_fruit_launcher ().enable_spawn_gating ();
+#else
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#endif
 		}
 
 		public override async void disable_spawn_gating () throws Error {
-			if (_is_running_on_ios ())
-				yield get_fruit_launcher ().disable_spawn_gating ();
-			else
-				throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#if IOS
+			yield get_fruit_launcher ().disable_spawn_gating ();
+#else
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#endif
 		}
 
 		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			if (_is_running_on_ios ())
-				return get_fruit_launcher ().enumerate_pending_spawns ();
-			else
-				throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#if IOS
+			return get_fruit_launcher ().enumerate_pending_spawns ();
+#else
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+#endif
 		}
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			if (_is_running_on_ios () && !path.has_prefix ("/")) {
+#if IOS
+			if (!path.has_prefix ("/")) {
 				string identifier = path;
 				string? url = null;
 				if (argv.length == 2)
@@ -207,9 +212,10 @@ namespace Frida {
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
 
 				return yield get_fruit_launcher ().spawn (identifier, url);
-			} else {
-				return yield helper.spawn (path, argv, envp);
 			}
+#endif
+
+			return yield helper.spawn (path, argv, envp);
 		}
 
 		public override async void input (uint pid, uint8[] data) throws Error {
@@ -247,6 +253,7 @@ namespace Frida {
 			return stream;
 		}
 
+#if IOS
 		private FruitLauncher get_fruit_launcher () {
 			if (fruit_launcher == null) {
 				fruit_launcher = new FruitLauncher (this, agent);
@@ -254,6 +261,7 @@ namespace Frida {
 			}
 			return fruit_launcher;
 		}
+#endif
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
@@ -269,11 +277,9 @@ namespace Frida {
 
 			uninjected (InjectorPayloadId (id));
 		}
-
-		// TODO: use Vala's preprocessor when the build system has been fixed
-		public static extern bool _is_running_on_ios ();
 	}
 
+#if IOS
 	protected class FruitLauncher : Object {
 		public signal void spawned (HostSpawnInfo info);
 
@@ -725,5 +731,5 @@ namespace Frida {
 			}
 		}
 	}
-}
 #endif
+}

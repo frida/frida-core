@@ -1,4 +1,3 @@
-#if DARWIN
 namespace Frida {
 	public class HandshakePort : Object {
 		protected uint mach_port;
@@ -78,4 +77,3 @@ namespace Frida {
 		protected extern void _deallocate ();
 	}
 }
-#endif

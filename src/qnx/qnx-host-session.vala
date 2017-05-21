@@ -1,4 +1,3 @@
-#if QNX
 namespace Frida {
 	public class QnxHostSessionBackend : Object, HostSessionBackend {
 		private QnxHostSessionProvider local_provider;
@@ -210,4 +209,3 @@ namespace Frida {
 		public extern void _free_instance (void * instance);
 	}
 }
-#endif

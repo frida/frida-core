@@ -1,4 +1,3 @@
-#if LINUX
 namespace Frida {
 	public class HelperService : Object, Helper {
 		public string parent_address {
@@ -276,4 +275,3 @@ namespace Frida {
 		}
 	}
 }
-#endif

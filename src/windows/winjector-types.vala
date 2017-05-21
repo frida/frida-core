@@ -1,4 +1,3 @@
-#if WINDOWS
 namespace Frida {
 	[DBus (name = "re.frida.WinjectorHelper")]
 	public interface WinjectorHelper : Object {
@@ -12,4 +11,3 @@ namespace Frida {
 		public const string HELPER = "/re/frida/WinjectorHelper";
 	}
 }
-#endif
