@@ -115,10 +115,12 @@ namespace Frida {
 		public override async void close () {
 			yield base.close ();
 
+#if IOS
 			if (fruit_launcher != null) {
 				yield fruit_launcher.close ();
 				fruit_launcher = null;
 			}
+#endif
 
 			var fruitjector = injector as Fruitjector;
 
@@ -223,10 +225,12 @@ namespace Frida {
 		}
 
 		public override async void resume (uint pid) throws Error {
+#if IOS
 			if (fruit_launcher != null) {
 				if (yield fruit_launcher.try_resume (pid))
 					return;
 			}
+#endif
 
 			yield helper.resume (pid);
 		}
