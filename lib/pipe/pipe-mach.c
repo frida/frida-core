@@ -212,6 +212,7 @@ frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
 
   if (self->tx_port != MACH_PORT_NULL)
   {
+    mach_port_mod_refs (self_task, self->tx_port, MACH_PORT_RIGHT_DEAD_NAME, -1);
     mach_port_deallocate (self_task, self->tx_port);
     self->tx_port = MACH_PORT_NULL;
   }
