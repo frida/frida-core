@@ -21,6 +21,7 @@ struct _FridaPipeBackend
   mach_port_t rx_set;
   mach_port_t rx_port;
   mach_port_t tx_port;
+  gboolean exclusive;
   mach_port_t notify_port;
 
   gboolean eof;
@@ -102,8 +103,8 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
   ret = mach_port_extract_right (self_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
   CHECK_MACH_RESULT (ret, ==, 0, "mach_port_extract_right local_tx");
 
-  *local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, local_tx);
-  *remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d", remote_rx, remote_tx);
+  *local_address = g_strdup_printf ("pipe:rx=%d,tx=%d,exclusive=0", local_rx, local_tx);
+  *remote_address = g_strdup_printf ("pipe:rx=%d,tx=%d,exclusive=0", remote_rx, remote_tx);
 
   return NULL;
 
@@ -138,10 +139,11 @@ void *
 _frida_pipe_create_backend (const gchar * address, GError ** error)
 {
   int rx, tx, assigned;
+  gboolean exclusive;
   FridaPipeBackend * backend;
   mach_port_t self_task, prev_notify_port;
 
-  assigned = sscanf (address, "pipe:rx=%d,tx=%d", &rx, &tx);
+  assigned = sscanf (address, "pipe:rx=%d,tx=%d,exclusive=%d", &rx, &tx, &exclusive);
 
   if (assigned == 1)
   {
@@ -156,10 +158,11 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
     g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
     tx = init.header.msgh_remote_port;
+    exclusive = TRUE;
   }
   else
   {
-    g_assert_cmpint (assigned, ==, 2);
+    g_assert_cmpint (assigned, ==, 3);
   }
 
   backend = g_slice_new (FridaPipeBackend);
@@ -172,6 +175,8 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   mach_port_move_member (self_task, backend->rx_port, backend->rx_set);
 
   backend->tx_port = tx;
+
+  backend->exclusive = exclusive;
 
   mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &backend->notify_port);
   mach_port_insert_right (self_task, backend->notify_port, backend->notify_port, MACH_MSG_TYPE_MAKE_SEND);
@@ -212,14 +217,14 @@ frida_pipe_backend_close_ports (FridaPipeBackend * self, GError ** error)
 
   if (self->tx_port != MACH_PORT_NULL)
   {
-    mach_port_mod_refs (self_task, self->tx_port, MACH_PORT_RIGHT_DEAD_NAME, -1);
-    mach_port_deallocate (self_task, self->tx_port);
+    if (self->exclusive)
+      mach_port_destroy (self_task, self->tx_port);
     self->tx_port = MACH_PORT_NULL;
   }
 
   if (self->rx_port != MACH_PORT_NULL)
   {
-    mach_port_mod_refs (self_task, self->rx_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    mach_port_destroy (self_task, self->rx_port);
     self->rx_port = MACH_PORT_NULL;
   }
 
@@ -340,7 +345,7 @@ frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, G
     else
     {
       g_assert_cmpuint (msg->header.msgh_local_port, ==, backend->notify_port);
-      g_assert_cmpuint (msg->header.msgh_id, ==, MACH_NOTIFY_DEAD_NAME);
+      g_assert (msg->header.msgh_id == MACH_NOTIFY_DEAD_NAME || msg->header.msgh_id == MACH_NOTIFY_PORT_DELETED);
 
       backend->eof = TRUE;
     }

@@ -319,7 +319,7 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   if (local_task != self_task)
     local_address = g_strdup_printf ("pipe:rx=%d", local_rx);
   else
-    local_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, remote_tx);
+    local_address = g_strdup_printf ("pipe:rx=%d,tx=%d,exclusive=0", local_rx, remote_tx);
   remote_address = g_strdup_printf ("pipe:rx=%d", remote_rx);
   frida_pipe_endpoints_init (result, local_address, remote_address);
   g_free (remote_address);

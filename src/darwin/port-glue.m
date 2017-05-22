@@ -141,7 +141,7 @@ _frida_handshake_port_perform_exchange_as_sender (FridaHandshakePort * self, gui
     goto handle_mach_error;
 
   *task_port = msg_in.task.name;
-  *pipe_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, header_in->msgh_remote_port);
+  *pipe_address = g_strdup_printf ("pipe:rx=%d,tx=%d,exclusive=1", local_rx, header_in->msgh_remote_port);
 
   return;
 
@@ -209,7 +209,7 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
     goto handle_mach_error;
 
   *task_port = msg_in.task.name;
-  *pipe_address = g_strdup_printf ("pipe:rx=%d,tx=%d", local_rx, header_in->msgh_remote_port);
+  *pipe_address = g_strdup_printf ("pipe:rx=%d,tx=%d,exclusive=1", local_rx, header_in->msgh_remote_port);
 
   return;
 
