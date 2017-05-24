@@ -41,7 +41,7 @@ namespace Frida.SuperSU {
 			if (capture_output) {
 				var fds = new int[2];
 				try {
-					open_pipe (fds, 0);
+					Unix.open_pipe (fds, 0);
 					Unix.set_fd_nonblocking (fds[0], true);
 					Unix.set_fd_nonblocking (fds[1], true);
 				} catch (GLib.Error e) {
@@ -112,10 +112,6 @@ namespace Frida.SuperSU {
 				exit_promise.set_exception (e);
 			}
 		}
-
-		/* FIXME: working around vapi bug */
-		[CCode (cheader_filename = "glib-unix.h", cname = "g_unix_open_pipe")]
-		public static extern bool open_pipe (int * fds, int flags) throws GLib.Error;
 	}
 
 	private class Connection : Object {
