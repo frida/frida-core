@@ -124,7 +124,9 @@ need_loader = host_os == 'android'
 
 enable_diet_value = get_option('enable_diet')
 if enable_diet_value == 'auto'
-  enable_diet = host_os == 'ios'
+  cpu = host_machine.cpu_family()
+  is_embedded_linux = host_os == 'linux' and (cpu == 'arm' or cpu == 'arm64' or cpu == 'mips')
+  enable_diet = host_os == 'ios' or is_embedded_linux or host_os == 'qnx'
 else
   enable_diet = enable_diet_value == 'yes'
 endif
