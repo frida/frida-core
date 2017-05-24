@@ -754,11 +754,8 @@ namespace Frida {
 
 			uint pid;
 			try {
-				/* FIXME: workaround for Vala compiler bug: */
-				var argv_copy = argv;
-				var envp_copy = envp;
 				yield ensure_host_session ();
-				pid = yield host_session.spawn (path, argv_copy, envp_copy);
+				pid = yield host_session.spawn (path, argv, envp);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

@@ -75,23 +75,18 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			/* FIXME: workaround for Vala compiler bug */
-			var argv_copy = argv;
-			var envp_copy = envp;
 			var helper = yield obtain ();
 			try {
-				return yield helper.spawn (path, argv_copy, envp_copy);
+				return yield helper.spawn (path, argv, envp);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 		}
 
 		public async void input (uint pid, uint8[] data) throws Error {
-			/* FIXME: workaround for Vala compiler bug */
-			var data_copy = data;
 			var helper = yield obtain ();
 			try {
-				yield helper.input (pid, data_copy);
+				yield helper.input (pid, data);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

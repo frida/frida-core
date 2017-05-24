@@ -206,9 +206,8 @@ namespace Frida {
 			var process = process_by_pid[pid];
 			if (process == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid pid");
-			var data_copy = data; /* FIXME: workaround for Vala compiler bug */
 			try {
-				yield process.pipes.input.write_all_async (data_copy, Priority.DEFAULT, null, null);
+				yield process.pipes.input.write_all_async (data, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT (e.message);
 			}

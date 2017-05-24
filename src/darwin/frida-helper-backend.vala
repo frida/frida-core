@@ -123,9 +123,8 @@ namespace Frida {
 			var stream = stdin_streams[pid];
 			if (stream == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid pid");
-			var data_copy = data; /* FIXME: workaround for Vala compiler bug */
 			try {
-				yield stream.write_all_async (data_copy, Priority.DEFAULT, null, null);
+				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT (e.message);
 			}

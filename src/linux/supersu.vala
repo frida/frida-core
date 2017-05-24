@@ -1,18 +1,12 @@
 namespace Frida.SuperSU {
 	public async Process spawn (string working_directory, string[] argv, string[]? envp = null, bool capture_output = false) throws Error {
-		/* FIXME: workaround for Vala compiler bug */
-		var argv_copy = argv;
-		var envp_copy = envp;
-		if (envp_copy == null)
-			envp_copy = Environ.get ();
-
 		var connection = new Connection ();
 
 		yield connection.open ();
 
 		try {
-			yield connection.write_strv (argv_copy);
-			yield connection.write_strv (envp_copy);
+			yield connection.write_strv (argv);
+			yield connection.write_strv ((envp != null) ? envp : Environ.get ());
 			yield connection.write_string (working_directory);
 			yield connection.write_string ("");
 		} catch (GLib.Error e) {
@@ -204,11 +198,8 @@ namespace Frida.SuperSU {
 		}
 
 		public async void write_strv (string[] strv) throws GLib.Error {
-			/* FIXME: workaround for Vala compiler bug */
-			var strv_copy = strv;
-
-			write_size (strv_copy.length);
-			foreach (string s in strv_copy)
+			write_size (strv.length);
+			foreach (string s in strv)
 				yield write_string (s);
 		}
 
