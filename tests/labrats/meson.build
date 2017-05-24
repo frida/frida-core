@@ -12,13 +12,30 @@ if host_os == 'macos'
 endif
 
 if host_os == 'linux'
+  if host_machine.cpu_family() == 'arm'
+    if host_machine.cpu().endswith('hf')
+      host_arch = 'armhf'
+    else
+      host_arch = 'arm'
+    endif
+  elif host_machine.cpu_family() == 'mips'
+    if host_machine.endian() == 'little'
+      host_arch = 'mipsel'
+    else
+      host_arch = 'mips'
+    endif
+  else
+    host_arch = host_machine.cpu_family()
+  endif
+
   labrat_files += [
-    'sleeper-linux-' + host_machine.cpu_family(),
-    'simple-agent-linux-' + host_machine.cpu_family() + '.so',
+    'sleeper-linux-' + host_arch,
+    'simple-agent-linux-' + host_arch + '.so',
   ]
-  if host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'x86_64'
+
+  if host_arch == 'x86' or host_arch == 'x86_64'
     labrat_files += [
-      'resident-agent-linux-' + host_machine.cpu_family() + '.so',
+      'resident-agent-linux-' + host_arch + '.so',
     ]
   endif
 endif
