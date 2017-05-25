@@ -22,17 +22,8 @@ struct dlopen_handle
 #endif
 
 #ifndef HAVE_DARWIN
-typedef struct _FridaTestSuperSUSpawnContext FridaTestSuperSUSpawnContext;
-typedef struct _FridaTestWaitContext FridaTestWaitContext;
 
-struct _FridaTestSuperSUSpawnContext
-{
-  GMainLoop * loop;
-  FridaSuperSUProcess * process;
-  GDataInputStream * output;
-  guint pid;
-  GError ** error;
-};
+typedef struct _FridaTestWaitContext FridaTestWaitContext;
 
 struct _FridaTestWaitContext
 {
@@ -43,15 +34,29 @@ struct _FridaTestWaitContext
 };
 
 # ifdef HAVE_ANDROID
+
+typedef struct _FridaTestSuperSUSpawnContext FridaTestSuperSUSpawnContext;
+
+struct _FridaTestSuperSUSpawnContext
+{
+  GMainLoop * loop;
+  FridaSuperSUProcess * process;
+  GDataInputStream * output;
+  guint pid;
+  GError ** error;
+};
+
 static void frida_test_process_backend_on_super_su_spawn_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
 static void frida_test_process_backend_on_super_su_read_line_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
 # endif
+
 static void frida_test_process_backend_on_wait_ready (GObject * source_object, GAsyncResult * res, gpointer user_data);
 static gboolean frida_test_process_backend_on_wait_timeout (gpointer user_data);
 
 static FridaTestWaitContext * frida_test_wait_context_new (gpointer process);
 static FridaTestWaitContext * frida_test_wait_context_ref (FridaTestWaitContext * context);
 static void frida_test_wait_context_unref (FridaTestWaitContext * context);
+
 #endif
 
 static int frida_magic_self_handle = -1;
