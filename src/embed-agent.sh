@@ -71,6 +71,24 @@ case $host_os in
 
     exec "$resource_compiler" --toolchain=apple -c "$resource_config" -o "$output_dir/frida-data-agent" "$embedded_agent"
     ;;
+  qnx)
+    embedded_agent="$priv_dir/frida-agent.so"
+
+    if [ -f "$agent32" ]; then
+      cp "$agent32" "$embedded_agent" || exit 1
+    elif [ -f "$agent64" ]; then
+      cp "$agent64" "$embedded_agent" || exit 1
+    else
+      echo "An agent must be provided"
+      exit 1
+    fi
+
+    if [ "$strip_enabled" = "true" ]; then
+      "$strip_binary" "$embedded_agent" || exit 1
+    fi
+
+    exec "$resource_compiler" --toolchain=gnu -c "$resource_config" -o "$output_dir/frida-data-agent" "$embedded_agent"
+    ;;
   *)
     embedded_agents=()
 
