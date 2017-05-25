@@ -44,3 +44,7 @@
 
 /* Define to 1 if libc is uClibc. */
 #mesondefine HAVE_UCLIBC
+
+#if defined (HAVE_QNX) && !defined (__cplusplus)
+# define NULL ((void *) 0)
+#endif
