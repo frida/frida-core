@@ -72,7 +72,6 @@ namespace Frida {
 	public class QnxHostSession : BaseDBusHostSession {
 		private AgentContainer system_session_container;
 
-		public Gee.HashMap<uint, void *> instance_by_pid = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		private AgentDescriptor agent_desc;
@@ -142,7 +141,7 @@ namespace Frida {
 		}
 
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			return _do_spawn (path, argv, envp);
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
 		public override async void input (uint pid, uint8[] data) throws Error {
@@ -150,19 +149,10 @@ namespace Frida {
 		}
 
 		public override async void resume (uint pid) throws Error {
-			void * instance;
-			bool instance_found = instance_by_pid.unset (pid, out instance);
-			if (!instance_found)
-				throw new Error.NOT_SUPPORTED ("no such pid");
-			_resume_instance (instance);
-			_free_instance (instance);
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
 		public override async void kill (uint pid) throws Error {
-			void * instance;
-			bool instance_found = instance_by_pid.unset (pid, out instance);
-			if (instance_found)
-				_free_instance (instance);
 			System.kill (pid);
 		}
 
@@ -203,9 +193,5 @@ namespace Frida {
 
 			uninjected (InjectorPayloadId (id));
 		}
-
-		public extern uint _do_spawn (string path, string[] argv, string[] envp) throws Error;
-		public extern void _resume_instance (void * instance);
-		public extern void _free_instance (void * instance);
 	}
 }

@@ -264,7 +264,6 @@ endif
 if host_os_family == 'qnx'
   qnx_sources = [
     'qnx/qnx-host-session.vala',
-    'qnx/qnx-host-session-glue.c',
     'qnx/qinjector.vala',
     'qnx/qinjector-glue.c',
     'qnx/system-qnx.c',
