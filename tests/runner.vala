@@ -146,6 +146,7 @@ namespace Frida.Test {
 		APPLE,
 		GLIBC,
 		UCLIBC,
-		BIONIC
+		BIONIC,
+		QNX
 	}
 }

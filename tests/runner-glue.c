@@ -123,5 +123,7 @@ frida_test_libc (void)
   return FRIDA_TEST_LIBC_UCLIBC;
 #elif defined (HAVE_ANDROID)
   return FRIDA_TEST_LIBC_BIONIC;
+#elif defined (HAVE_QNX)
+  return FRIDA_TEST_LIBC_QNX;
 #endif
 }
