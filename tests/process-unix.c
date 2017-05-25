@@ -15,9 +15,9 @@
 # include <sys/link.h>
 struct dlopen_handle
 {
-    struct unk0 * p_next;
-    struct unk0 * p_prev;
-    Link_map * p_lm;
+  struct unk0 * p_next;
+  struct unk0 * p_prev;
+  Link_map * p_lm;
 };
 #endif
 
