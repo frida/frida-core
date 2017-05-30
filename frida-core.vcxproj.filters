@@ -102,19 +102,14 @@
     <None Include="src\host-session-service.vala">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="src\agent-container.vala">
-      <Filter>Source Files\src</Filter>
-    </None>
     <None Include="src\debugger.vala">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="src\agent-container.vala" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\host-session-service.c">
       <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\agent-container.c">
-      <Filter>Source Files\generated\src</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\windows\winjector.c">
       <Filter>Source Files\generated\windows</Filter>
@@ -181,6 +176,9 @@
     </ClCompile>
     <ClCompile Include="src\windows\access-helpers.c">
       <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\agent-container.c">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -27,6 +27,9 @@
     <ClCompile Include="$(IntDir)pipe.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="pipe-sddl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="pipe.vala">
@@ -36,6 +39,12 @@
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-pipe.h">
       <Filter>Header Files\generated</Filter>
+    </ClInclude>
+    <ClInclude Include="pipe-glue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pipe-sddl.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
