@@ -59,10 +59,11 @@ namespace Frida.AgentTest {
 				sid = yield session.create_script ("performance",
 					("var buf = Memory.readByteArray(ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), %d);" +
 					 "var startTime = new Date();" +
+					 "var iterations = 0;" +
 					 "var sendNext = function sendNext() {" +
 					 "  send({}, buf);" +
 					 "  if (new Date().getTime() - startTime.getTime() <= 1000) {" +
-					 "    setTimeout(sendNext, 0);" +
+					 "    setTimeout(sendNext, ((++iterations %% 10) === 0) ? 1 : 0);" +
 					 "  } else {" +
 					 "    send(null);" +
 					 "  }" +
