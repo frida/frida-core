@@ -767,6 +767,7 @@ namespace Frida {
 					var pid = LocalProcesses.get_pid (target_process);
 					var id = yield host_session.attach_to (pid);
 					var pending_session = yield host_session.obtain_agent_session (id);
+					yield pending_session.enable_jit ();
 
 					var pending_script = yield pending_session.create_script ("parasite-service", script_source);
 					cached_session = pending_session;
