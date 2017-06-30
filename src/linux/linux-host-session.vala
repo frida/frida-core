@@ -681,6 +681,8 @@ namespace Frida {
 		private AgentSession cached_session;
 		private AgentScriptId cached_script;
 
+		private Gee.Promise<bool> get_agent_request;
+
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
@@ -758,20 +760,40 @@ namespace Frida {
 		}
 
 		private async void get_agent (out AgentSession session, out AgentScriptId script) throws Error {
-			try {
-				if (cached_session == null) {
+			if (get_agent_request == null) {
+				get_agent_request = new Gee.Promise<bool> ();
+
+				try {
 					var pid = LocalProcesses.get_pid (target_process);
 					var id = yield host_session.attach_to (pid);
-					cached_session = yield host_session.obtain_agent_session (id);
-				}
+					var pending_session = yield host_session.obtain_agent_session (id);
 
-				if (cached_script.handle == 0) {
-					cached_script = yield cached_session.create_script ("parasite-service", script_source);
-					cached_session.message_from_script.connect (on_message_from_script);
-					yield cached_session.load_script (cached_script);
+					var pending_script = yield pending_session.create_script ("parasite-service", script_source);
+					cached_session = pending_session;
+					cached_script = pending_script;
+					pending_session.message_from_script.connect (on_message_from_script);
+					yield pending_session.load_script (pending_script);
+
+					get_agent_request.set_value (true);
+				} catch (GLib.Error raw_error) {
+					if (cached_session != null) {
+						cached_session.message_from_script.disconnect (on_message_from_script);
+						cached_session = null;
+					}
+					cached_script = AgentScriptId (0);
+
+					var error = Marshal.from_dbus (raw_error);
+					get_agent_request.set_exception (error);
+					get_agent_request = null;
+					throw error;
 				}
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+			} else {
+				var future = get_agent_request.future;
+				try {
+					yield future.wait_async ();
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
+				}
 			}
 
 			session = cached_session;
