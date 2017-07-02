@@ -32,7 +32,7 @@ namespace Frida {
 			}
 			container.transport = transport;
 
-			container.thread = new Thread<bool> ("frida-agent-container", container.run);
+			container.start_worker_thread ();
 
 			DBusConnection connection;
 			AgentSessionProvider provider;
@@ -62,11 +62,21 @@ namespace Frida {
 			}
 			connection = null;
 
+			stop_worker_thread ();
+
+			transport = null;
+
+			module = null;
+		}
+
+		private void start_worker_thread () {
+			thread = new Thread<bool> ("frida-agent-container", run);
+		}
+
+		private void stop_worker_thread () {
 			Thread<bool> t = thread;
 			t.join ();
 			thread = null;
-
-			module = null;
 		}
 
 		private bool run () {
