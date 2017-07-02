@@ -282,32 +282,39 @@ namespace Frida {
 			}
 			ensure_request = new Gee.Promise<bool> ();
 
-			bool started = false;
 			service = new HostSessionService.with_default_backends ();
-			service.provider_available.connect ((provider) => {
-				var device = new Device (this, provider.id, provider.name, provider.kind, provider);
-				devices.add (device);
-				if (started) {
-					added (device);
-					changed ();
-				}
-			});
-			service.provider_unavailable.connect ((provider) => {
-				foreach (var device in devices) {
-					if (device.provider == provider) {
-						if (started)
-							removed (device);
-						device._do_close.begin (SessionDetachReason.DEVICE_LOST, false);
-						break;
-					}
-				}
-				if (started)
-					changed ();
-			});
+			service.provider_available.connect (on_provider_available);
+			service.provider_unavailable.connect (on_provider_unavailable);
 			yield service.start ();
-			started = true;
 
 			ensure_request.set_value (true);
+		}
+
+		private void on_provider_available (HostSessionProvider provider) {
+			var device = new Device (this, provider.id, provider.name, provider.kind, provider);
+			devices.add (device);
+
+			var started = ensure_request.future.ready;
+			if (started) {
+				added (device);
+				changed ();
+			}
+		}
+
+		private void on_provider_unavailable (HostSessionProvider provider) {
+			var started = ensure_request.future.ready;
+
+			foreach (var device in devices) {
+				if (device.provider == provider) {
+					if (started)
+						removed (device);
+					device._do_close.begin (SessionDetachReason.DEVICE_LOST, false);
+					break;
+				}
+			}
+
+			if (started)
+				changed ();
 		}
 
 		private void check_open () throws Error {
@@ -340,6 +347,8 @@ namespace Frida {
 				devices.clear ();
 
 				yield service.stop ();
+				service.provider_available.disconnect (on_provider_available);
+				service.provider_unavailable.disconnect (on_provider_unavailable);
 				service = null;
 			}
 
