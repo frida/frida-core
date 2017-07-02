@@ -36,9 +36,11 @@ namespace Frida {
 		private QnxHostSession host_session;
 
 		public async void close () {
-			if (host_session != null)
+			if (host_session != null) {
+				host_session.agent_session_closed.disconnect (on_agent_session_closed);
 				yield host_session.close ();
-			host_session = null;
+				host_session = null;
+			}
 		}
 
 		public async HostSession create (string? location = null) throws Error {
