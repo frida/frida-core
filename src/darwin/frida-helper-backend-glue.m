@@ -921,7 +921,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    *   it will not return any buffer. To avoid this to happen, we set a breakpoint also
    *   on dyld:dlerrorClear function and inject an immediate return,
    *   effectively disabling the function.
-   * - At the end of dlopen() we finally deallocate our fake helpers (because now they've 
+   * - At the end of dlopen() we finally deallocate our fake helpers (because now they've
    *   been replaced by real libSystem ones) and the string we used as a parameter for dlopen.
    *
    * Then later when resume() is called:
