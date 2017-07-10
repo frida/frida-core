@@ -3,20 +3,24 @@ namespace Frida.Server {
 
 	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
 	private const uint16 DEFAULT_LISTEN_PORT = 27042;
-	private static bool output_version;
-	private static string listen_address;
+	private static bool output_version = false;
+	private static string listen_address = null;
+#if !WINDOWS
+	private static bool daemonize = false;
+#endif
+
+	private delegate void ReadyHandler (bool success);
 
 	const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ "listen", 'l', 0, OptionArg.STRING, ref listen_address, "Listen on ADDRESS", "ADDRESS" },
+#if !WINDOWS
+		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
+#endif
 		{ null }
 	};
 
 	private static int main (string[] args) {
-#if !WINDOWS
-		Posix.setsid ();
-#endif
-
 		Environment.init ();
 
 		try {
@@ -52,9 +56,63 @@ namespace Frida.Server {
 			return 1;
 		}
 
+		ReadyHandler on_ready = null;
+#if !WINDOWS
+		if (daemonize) {
+			var sync_fds = new int[2];
+
+			try {
+				Unix.open_pipe (sync_fds, 0);
+				Unix.set_fd_nonblocking (sync_fds[0], true);
+				Unix.set_fd_nonblocking (sync_fds[1], true);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			var sync_in = new UnixInputStream (sync_fds[0], true);
+			var sync_out = new UnixOutputStream (sync_fds[1], true);
+
+			var pid = Posix.fork ();
+			if (pid != 0) {
+				try {
+					var status = new uint8[1];
+					sync_in.read (status);
+					return status[0];
+				} catch (GLib.Error e) {
+					return 1;
+				}
+			}
+
+			sync_in = null;
+			on_ready = (success) => {
+				if (success) {
+					Posix.setsid ();
+
+					var null_in = Posix.open ("/dev/null", Posix.O_RDONLY);
+					var null_out = Posix.open ("/dev/null", Posix.O_WRONLY);
+					Posix.dup2 (null_in, Posix.STDIN_FILENO);
+					Posix.dup2 (null_out, Posix.STDOUT_FILENO);
+					Posix.dup2 (null_out, Posix.STDERR_FILENO);
+					Posix.close (null_in);
+					Posix.close (null_out);
+				}
+
+				var status = new uint8[1];
+				status[0] = success ? 0 : 1;
+				try {
+					sync_out.write (status);
+				} catch (GLib.Error e) {
+				}
+				sync_out = null;
+			};
+		}
+#endif
+
+		Environment.configure ();
+
 #if DARWIN
 		var worker = new Thread<int> ("frida-server-main-loop", () => {
-			var exit_code = run_application (listen_uri);
+			var exit_code = run_application (listen_uri, on_ready);
 
 			_stop_run_loop ();
 
@@ -66,11 +124,11 @@ namespace Frida.Server {
 
 		return exit_code;
 #else
-		return run_application (listen_uri);
+		return run_application (listen_uri, on_ready);
 #endif
 	}
 
-	private static int run_application (string listen_uri) {
+	private static int run_application (string listen_uri, ReadyHandler on_ready) {
 		application = new Application ();
 
 #if !WINDOWS
@@ -83,9 +141,24 @@ namespace Frida.Server {
 #endif
 
 		try {
+			Idle.add (() => {
+				if (on_ready != null) {
+					on_ready (true);
+					on_ready = null;
+				}
+
+				return false;
+			});
+
 			application.run (listen_uri);
 		} catch (Error e) {
 			printerr ("Unable to start server: %s\n", e.message);
+
+			if (on_ready != null) {
+				on_ready (false);
+				on_ready = null;
+			}
+
 			return 1;
 		}
 
@@ -94,6 +167,7 @@ namespace Frida.Server {
 
 	namespace Environment {
 		public extern void init ();
+		public extern void configure ();
 	}
 
 #if DARWIN

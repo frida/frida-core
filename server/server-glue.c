@@ -45,15 +45,19 @@ static void frida_server_on_log_message (const gchar * log_domain, GLogLevelFlag
 void
 frida_server_environment_init (void)
 {
-#ifdef HAVE_IOS
-  memorystatus_control (MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT, getpid (), 256, NULL, 0);
-#endif
-
   g_assertion_set_handler (frida_server_on_assert_failure, NULL);
   g_log_set_default_handler (frida_server_on_log_message, NULL);
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
   gum_init ();
+}
+
+void
+frida_server_environment_configure (void)
+{
+#ifdef HAVE_IOS
+  memorystatus_control (MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT, getpid (), 256, NULL, 0);
+#endif
 
 #ifdef HAVE_ANDROID
   frida_selinux_patch_policy ();
