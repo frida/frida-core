@@ -8,6 +8,12 @@ system_vala_args = []
 if host_os_family == 'darwin'
   server_sources += ['server-darwin.m']
 endif
+if host_os == 'ios'
+  server_sources += [
+    'server-ios.c',
+    'server-ios-jit.c',
+  ]
+endif
 
 if host_os_family != 'windows'
   system_vala_args += ['--pkg=posix']
