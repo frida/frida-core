@@ -95,8 +95,11 @@ extern
 #endif	/* mig_external */
 kern_return_t frida_jit_alloc
 (
-	mach_port_t server_port,
-	int foo
+	mach_port_t server,
+	vm_task_entry_t task,
+	mach_vm_address_t *address,
+	mach_vm_size_t size,
+	int flags
 );
 
 #ifdef	mig_external
@@ -138,8 +141,14 @@ extern const struct frida_jit_subsystem {
 #endif
 	typedef struct {
 		mach_msg_header_t Head;
+		/* start of the kernel processed data */
+		mach_msg_body_t msgh_body;
+		mach_msg_port_descriptor_t task;
+		/* end of the kernel processed data */
 		NDR_record_t NDR;
-		int foo;
+		mach_vm_address_t address;
+		mach_vm_size_t size;
+		int flags;
 	} __Request__frida_jit_alloc_t __attribute__((unused));
 #ifdef  __MigPackStructs
 #pragma pack()
@@ -167,6 +176,7 @@ union __RequestUnion__frida_jit_subsystem {
 		mach_msg_header_t Head;
 		NDR_record_t NDR;
 		kern_return_t RetCode;
+		mach_vm_address_t address;
 	} __Reply__frida_jit_alloc_t __attribute__((unused));
 #ifdef  __MigPackStructs
 #pragma pack()
