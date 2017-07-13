@@ -82,10 +82,10 @@ frida_jit_server_process_messages (gpointer data)
     header_out = (mach_msg_header_t *) &reply;
 
     handled = frida_jit_server (header_in, header_out);
-    if (!handled)
-      continue;
+    if (handled)
+      mach_msg_send (header_out);
 
-    mach_msg_send (header_out);
+    mach_msg_destroy (header_in);
   }
 
   return NULL;
