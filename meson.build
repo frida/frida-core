@@ -63,13 +63,16 @@ endforeach
 
 headers = [
   'sys/user.h',
-  'sys/xattr.h',
 ]
 foreach h : headers
   if cc.has_header(h)
     cdata.set('HAVE_' + h.underscorify().to_upper(), 1)
   endif
 endforeach
+
+if cc.has_header_symbol('sys/xattr.h', 'getxattr')
+  cdata.set('HAVE_SYS_XATTR_H', 1)
+endif
 
 glibc_src = '''
 #include <features.h>

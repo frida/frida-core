@@ -5,6 +5,7 @@
 # include <sys/xattr.h>
 #else
 # include <stdint.h>
+# include <unistd.h>
 
 ssize_t selinux_getxattr(const char *path, const char *name, void *value, size_t size);
 ssize_t selinux_lgetxattr(const char *path, const char *name, void *value, size_t size);
