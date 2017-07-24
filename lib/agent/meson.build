@@ -4,6 +4,10 @@ agent_sources = [
   'script-engine.vala',
 ]
 
+if host_os_family == 'linux'
+  agent_sources += ['syscall-linux-@0@.S'.format(host_machine.cpu_family())]
+endif
+
 if not enable_diet
   agent_sources += ['dummy.cpp']
 endif
