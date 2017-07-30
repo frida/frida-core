@@ -2392,7 +2392,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
     FRIDA_EMIT_LOAD (EAX, stay_resident);
     gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
-    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
 
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_destructor (ctx->mapper));
     gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
@@ -2433,7 +2433,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
     FRIDA_EMIT_LOAD (EAX, stay_resident);
     gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
-    gum_x86_writer_put_jcc_short_label (&ctx->cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
 
     gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP, (ctx->cw.target_cpu == GUM_CPU_IA32) ? 12 : 0);
     FRIDA_EMIT_CALL (dlclose_impl, 1,

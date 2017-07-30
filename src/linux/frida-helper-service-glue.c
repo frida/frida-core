@@ -781,7 +781,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_XBP, stay_resident_offset);
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
-  gum_x86_writer_put_jcc_short_label (&cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
+  gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
 
   gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
 #ifdef HAVE_ANDROID

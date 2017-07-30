@@ -346,7 +346,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       1,
       GUM_ARG_REGISTER, GUM_REG_XCX);
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
-  gum_x86_writer_put_jcc_near_label (&cw, GUM_X86_JZ, loadlibrary_failed_label, GUM_UNLIKELY);
+  gum_x86_writer_put_jcc_near_label (&cw, X86_INS_JE, loadlibrary_failed_label, GUM_UNLIKELY);
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
 
   /* xax = GetProcAddress (xsi, xbx->entrypoint_name) */
@@ -369,7 +369,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   /* if (!stay_resident) { */
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, stay_resident));
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
-  gum_x86_writer_put_jcc_short_label (&cw, GUM_X86_JNZ, skip_unload_label, GUM_NO_HINT);
+  gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
 
   /* FreeLibrary (xsi) */
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
