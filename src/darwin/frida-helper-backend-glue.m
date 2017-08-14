@@ -2236,7 +2236,7 @@ frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code
   frida_agent_context_emit_mach_stub_body (self, &ctx);
   gum_x86_writer_put_breakpoint (&ctx.cw);
 
-  gum_x86_writer_free (&ctx.cw);
+  gum_x86_writer_clear (&ctx.cw);
 }
 
 static void
@@ -2274,7 +2274,7 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
   gum_x86_writer_put_leave (&ctx.cw);
   gum_x86_writer_put_ret (&ctx.cw);
 
-  gum_x86_writer_free (&ctx.cw);
+  gum_x86_writer_clear (&ctx.cw);
 }
 
 #define FRIDA_EMIT_LOAD(reg, field) \
@@ -2514,7 +2514,7 @@ frida_agent_context_emit_arm_mach_stub_code (FridaAgentContext * self, guint8 * 
 
   frida_agent_context_emit_arm_mach_stub_body (self, &ctx);
 
-  gum_thumb_writer_free (&ctx.tw);
+  gum_thumb_writer_clear (&ctx.tw);
 }
 
 static void
@@ -2531,7 +2531,7 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
   frida_agent_context_emit_arm_pthread_stub_body (self, &ctx);
   gum_thumb_writer_put_pop_regs (&ctx.tw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
-  gum_thumb_writer_free (&ctx.tw);
+  gum_thumb_writer_clear (&ctx.tw);
 }
 
 #define EMIT_ARM_LOAD(reg, field) \
@@ -2713,7 +2713,7 @@ frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_ret (&ctx.aw);
 
-  gum_arm64_writer_free (&ctx.aw);
+  gum_arm64_writer_clear (&ctx.aw);
 }
 
 static void
@@ -2733,7 +2733,7 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_X19, ARM64_REG_X20);
   gum_arm64_writer_put_pop_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_ret (&ctx.aw);
-  gum_arm64_writer_free (&ctx.aw);
+  gum_arm64_writer_clear (&ctx.aw);
 }
 
 #define EMIT_ARM64_LOAD(reg, field) \

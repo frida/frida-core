@@ -287,7 +287,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   gum_arm_writer_flush (&caw);
   code->cur = gum_arm_writer_cur (&caw);
   code->size += gum_arm_writer_offset (&caw);
-  gum_arm_writer_free (&caw);
+  gum_arm_writer_clear (&caw);
 
   /*
    * The actual (thumb) payload starts here:
@@ -344,7 +344,7 @@ frida_emit_payload_code (const FridaInjectionParams * params, GumAddress remote_
   gum_thumb_writer_put_pop_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   frida_thumb_commit_code (&cw, code);
-  gum_thumb_writer_free (&cw);
+  gum_thumb_writer_clear (&cw);
 }
 
 static GumAddress

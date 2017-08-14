@@ -568,7 +568,7 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
     gum_thumb_writer_flush (&cw);
     code.cur = gum_thumb_writer_cur (&cw);
     code.size += gum_thumb_writer_offset (&cw);
-    gum_thumb_writer_free (&cw);
+    gum_thumb_writer_clear (&cw);
   }
 #endif
 
@@ -695,7 +695,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   while (gum_x86_writer_offset (&cw) != worker_offset - code->size)
     gum_x86_writer_put_nop (&cw);
   frida_inject_instance_commit_x86_code (&cw, code);
-  gum_x86_writer_free (&cw);
+  gum_x86_writer_clear (&cw);
 
   gum_x86_writer_init (&cw, code->cur);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
@@ -827,7 +827,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_x86_writer_put_ret (&cw);
 
   frida_inject_instance_commit_x86_code (&cw, code);
-  gum_x86_writer_free (&cw);
+  gum_x86_writer_clear (&cw);
 }
 
 #elif defined (HAVE_ARM)
@@ -916,7 +916,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   while (gum_thumb_writer_offset (&cw) != worker_offset - code->size)
     gum_thumb_writer_put_nop (&cw);
   frida_inject_instance_commit_arm_code (&cw, code);
-  gum_thumb_writer_free (&cw);
+  gum_thumb_writer_clear (&cw);
 
   gum_thumb_writer_init (&cw, code->cur);
 
@@ -1014,7 +1014,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_put_pop_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   frida_inject_instance_commit_arm_code (&cw, code);
-  gum_thumb_writer_free (&cw);
+  gum_thumb_writer_clear (&cw);
 }
 
 #elif defined (HAVE_ARM64)
@@ -1059,7 +1059,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   while (gum_arm64_writer_offset (&cw) != worker_offset - code->size)
     gum_arm64_writer_put_nop (&cw);
   frida_inject_instance_commit_arm64_code (&cw, code);
-  gum_arm64_writer_free (&cw);
+  gum_arm64_writer_clear (&cw);
 
   gum_arm64_writer_init (&cw, code->cur);
 
@@ -1135,7 +1135,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_arm64_writer_put_ret (&cw);
 
   frida_inject_instance_commit_arm64_code (&cw, code);
-  gum_arm64_writer_free (&cw);
+  gum_arm64_writer_clear (&cw);
 #else
 # error Not yet ported to Linux/ARM64
 #endif
@@ -1210,7 +1210,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   while (gum_mips_writer_offset (&cw) != worker_offset - code->size)
     gum_mips_writer_put_nop (&cw);
   frida_inject_instance_commit_mips_code (&cw, code);
-  gum_mips_writer_free (&cw);
+  gum_mips_writer_clear (&cw);
 
   gum_mips_writer_init (&cw, code->cur);
 
@@ -1270,7 +1270,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_mips_writer_put_ret (&cw);
 
   frida_inject_instance_commit_mips_code (&cw, code);
-  gum_mips_writer_free (&cw);
+  gum_mips_writer_clear (&cw);
 }
 
 #endif
