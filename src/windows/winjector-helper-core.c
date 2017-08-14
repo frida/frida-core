@@ -364,7 +364,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       3,
       GUM_ARG_REGISTER, GUM_REG_XCX,
       GUM_ARG_REGISTER, GUM_REG_XDX,
-      GUM_ARG_POINTER, GSIZE_TO_POINTER (0));
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
   /* if (!stay_resident) { */
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, stay_resident));

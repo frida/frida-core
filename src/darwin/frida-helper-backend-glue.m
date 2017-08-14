@@ -2324,7 +2324,7 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
   FRIDA_EMIT_LOAD (XCX, pthread_create_arg);
   FRIDA_EMIT_CALL (pthread_create_impl, 4,
       GUM_ARG_REGISTER, GUM_REG_XDI,
-      GUM_ARG_POINTER, NULL,
+      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
       GUM_ARG_REGISTER, GUM_REG_XDX,
       GUM_ARG_REGISTER, GUM_REG_XCX);
 
@@ -2426,7 +2426,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
         GUM_CALL_CAPI, GUM_REG_XAX, 3,
         GUM_ARG_REGISTER, GUM_REG_XDI,
         GUM_ARG_REGISTER, GUM_REG_XSI,
-        GUM_ARG_POINTER, NULL);
+        GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
     if (ctx->cw.target_cpu == GUM_CPU_IA32)
       gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
