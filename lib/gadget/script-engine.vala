@@ -118,17 +118,7 @@ namespace Frida.Gadget {
 			}
 
 			public async void destroy () {
-				Gum.Stalker stalker = script.get_stalker ();
 				yield script.unload ();
-				while (stalker.garbage_collect ()) {
-					var source = new TimeoutSource (50);
-					source.set_callback (() => {
-						destroy.callback ();
-						return false;
-					});
-					source.attach (MainContext.get_thread_default ());
-					yield;
-				}
 
 				script.weak_ref (() => {
 					Idle.add (() => {
