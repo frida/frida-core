@@ -206,6 +206,7 @@ frida_gadget_environment_stop_system_loop (void)
 {
 #ifdef HAVE_DARWIN
   FridaCFApi * api;
+
   api = frida_cf_api_try_get ();
   g_assert (api != NULL);
 
