@@ -55,15 +55,14 @@ namespace Frida.Gadget {
 		});
 		source.attach (Environment.get_main_context ());
 
-		if (wait_for_resume_context != null) {
-			wait_for_resume_loop = new MainLoop (wait_for_resume_context, true);
+		var context = wait_for_resume_context;
+		if (context != null) {
+			var loop = new MainLoop (context, true);
+			wait_for_resume_loop = loop;
 
-			wait_for_resume_context.push_thread_default ();
-			wait_for_resume_loop.run ();
-			wait_for_resume_context.pop_thread_default ();
-
-			wait_for_resume_loop = null;
-			wait_for_resume_context = null;
+			context.push_thread_default ();
+			loop.run ();
+			context.pop_thread_default ();
 
 			scheduler.enable_background_thread ();
 		} else {
