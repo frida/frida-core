@@ -15,6 +15,11 @@ namespace Frida.Gadget {
 	private bool loaded = false;
 	private State state = State.CREATED;
 	private Env env = Env.PRODUCTION;
+	private string script_file;
+	private bool jit_enabled = false;
+	private MainLoop wait_for_resume_loop;
+	private MainContext wait_for_resume_context;
+	private ThreadIgnoreScope worker_ignore_scope;
 	private ScriptRunner script_runner;
 	private Server server;
 	private Gum.Exceptor exceptor;
@@ -28,19 +33,44 @@ namespace Frida.Gadget {
 
 		Environment.init ();
 
+		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {
+			env = Env.DEVELOPMENT;
+		}
+		script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
+		jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT") != null;
+
+		var scheduler = Environment.obtain_script_backend (jit_enabled).get_scheduler ();
+
+		if (!Environment.has_system_loop ()) {
+			scheduler.disable_background_thread ();
+			wait_for_resume_context = scheduler.get_js_context ();
+		}
+
+		var ignore_scope = new ThreadIgnoreScope ();
+
 		var source = new IdleSource ();
 		source.set_callback (() => {
 			start.begin ();
 			return false;
 		});
 		source.attach (Environment.get_main_context ());
-	}
 
-	public void wait_for_permission_to_resume () {
-		mutex.lock ();
-		while (state != State.RUNNING)
-			cond.wait (mutex);
-		mutex.unlock ();
+		if (wait_for_resume_context != null) {
+			wait_for_resume_loop = new MainLoop (wait_for_resume_context, true);
+
+			wait_for_resume_context.push_thread_default ();
+			wait_for_resume_loop.run ();
+			wait_for_resume_context.pop_thread_default ();
+
+			wait_for_resume_loop = null;
+			wait_for_resume_context = null;
+
+			scheduler.enable_background_thread ();
+		} else {
+			Environment.run_system_loop ();
+		}
+
+		ignore_scope = null;
 	}
 
 	public void unload () {
@@ -71,28 +101,26 @@ namespace Frida.Gadget {
 		state = State.RUNNING;
 		cond.signal ();
 		mutex.unlock ();
+
+		if (wait_for_resume_context != null) {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				wait_for_resume_loop.quit ();
+				return false;
+			});
+			source.attach (wait_for_resume_context);
+		} else {
+			Environment.stop_system_loop ();
+		}
 	}
 
 	private async void start () {
 		var gadget_range = memory_range ();
 		Gum.Cloak.add_range (gadget_range);
 
-		Gum.Cloak.add_thread (Gum.Process.get_current_thread_id ());
-		Gum.MemoryRange stack;
-		if (Gum.Thread.try_get_range (out stack))
-			Gum.Cloak.add_range (stack);
-
-		var interceptor = Gum.Interceptor.obtain ();
-		interceptor.ignore_current_thread ();
+		worker_ignore_scope = new ThreadIgnoreScope ();
 
 		exceptor = Gum.Exceptor.obtain ();
-
-		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {
-			env = Env.DEVELOPMENT;
-		}
-
-		var script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
-		bool jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT") != null;
 
 		if (script_file != null) {
 			var r = new ScriptRunner (script_file, jit_enabled, gadget_range);
@@ -162,6 +190,8 @@ namespace Frida.Gadget {
 
 			exceptor = null;
 		}
+
+		worker_ignore_scope = null;
 
 		mutex.lock ();
 		state = State.STOPPED;
@@ -759,6 +789,37 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private class ThreadIgnoreScope {
+		private Gum.Interceptor interceptor;
+
+		private Gum.ThreadId thread_id;
+
+		private bool stack_known;
+		private Gum.MemoryRange stack;
+
+		public ThreadIgnoreScope () {
+			interceptor = Gum.Interceptor.obtain ();
+			interceptor.ignore_current_thread ();
+
+			thread_id = Gum.Process.get_current_thread_id ();
+			Gum.Cloak.add_thread (thread_id);
+
+			stack_known = Gum.Thread.try_get_range (out stack);
+			if (stack_known)
+				Gum.Cloak.add_range (stack);
+
+		}
+
+		~ThreadIgnoreScope () {
+			if (stack_known)
+				Gum.Cloak.remove_range (stack);
+
+			Gum.Cloak.remove_thread (thread_id);
+
+			interceptor.unignore_current_thread ();
+		}
+	}
+
 	private Gum.MemoryRange memory_range () {
 		Gum.MemoryRange? result = null;
 
@@ -778,6 +839,9 @@ namespace Frida.Gadget {
 	namespace Environment {
 		private extern void init ();
 		private extern void deinit ();
+		private extern bool has_system_loop ();
+		private extern void run_system_loop ();
+		private extern void stop_system_loop ();
 		private extern unowned MainContext get_main_context ();
 		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
 	}

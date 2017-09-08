@@ -35,7 +35,6 @@ struct _FridaCFApi
   void (* CFRunLoopTimerInvalidate) (CFRunLoopTimerRef timer);
 };
 
-static void * frida_gadget_wait_for_permission_to_resume_then_stop_loop (void * user_data);
 static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 
 static FridaCFApi * frida_cf_api_try_get (void);
@@ -98,35 +97,6 @@ __attribute__ ((constructor)) static void
 on_load (void)
 {
   frida_gadget_load ();
-
-#ifdef HAVE_DARWIN
-  FridaCFApi * api = frida_cf_api_try_get ();
-  if (api != NULL)
-  {
-    CFRunLoopRef loop;
-    CFAbsoluteTime distant_future;
-    CFRunLoopTimerRef timer;
-    pthread_t thread;
-
-    loop = api->CFRunLoopGetMain ();
-
-    distant_future = DBL_MAX;
-    timer = api->CFRunLoopTimerCreate (*(api->kCFAllocatorDefault), distant_future, 0, 0, 0, on_keep_alive_timer_fire, NULL);
-    api->CFRunLoopAddTimer (loop, timer, *(api->kCFRunLoopCommonModes));
-
-    pthread_create (&thread, NULL, frida_gadget_wait_for_permission_to_resume_then_stop_loop, loop);
-    pthread_detach (thread);
-
-    api->CFRunLoopRun ();
-
-    api->CFRunLoopTimerInvalidate (timer);
-    api->CFRelease (timer);
-  }
-  else
-#endif
-  {
-    frida_gadget_wait_for_permission_to_resume ();
-  }
 }
 
 __attribute__ ((destructor)) static void
@@ -150,18 +120,6 @@ _frida_gadget_kill (guint pid)
 #endif
 
 #ifdef HAVE_DARWIN
-
-static void *
-frida_gadget_wait_for_permission_to_resume_then_stop_loop (void * user_data)
-{
-  CFRunLoopRef loop = user_data;
-
-  frida_gadget_wait_for_permission_to_resume ();
-
-  frida_cf_api_try_get ()->CFRunLoopStop (loop);
-
-  return NULL;
-}
 
 static void
 on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info)
@@ -207,6 +165,54 @@ frida_gadget_environment_deinit (void)
   main_context = NULL;
 
   gum_deinit_embedded ();
+}
+
+gboolean
+frida_gadget_environment_has_system_loop (void)
+{
+#ifdef HAVE_DARWIN
+  return frida_cf_api_try_get () != NULL;
+#else
+  return FALSE;
+#endif
+}
+
+void
+frida_gadget_environment_run_system_loop (void)
+{
+#ifdef HAVE_DARWIN
+  FridaCFApi * api;
+  CFAbsoluteTime distant_future;
+  CFRunLoopTimerRef timer;
+
+  api = frida_cf_api_try_get ();
+  g_assert (api != NULL);
+
+  distant_future = DBL_MAX;
+  timer = api->CFRunLoopTimerCreate (*(api->kCFAllocatorDefault), distant_future, 0, 0, 0, on_keep_alive_timer_fire, NULL);
+  api->CFRunLoopAddTimer (api->CFRunLoopGetMain (), timer, *(api->kCFRunLoopCommonModes));
+
+  api->CFRunLoopRun ();
+
+  api->CFRunLoopTimerInvalidate (timer);
+  api->CFRelease (timer);
+#else
+  g_assert_not_reached ();
+#endif
+}
+
+void
+frida_gadget_environment_stop_system_loop (void)
+{
+#ifdef HAVE_DARWIN
+  FridaCFApi * api;
+  api = frida_cf_api_try_get ();
+  g_assert (api != NULL);
+
+  api->CFRunLoopStop (api->CFRunLoopGetMain ());
+#else
+  g_assert_not_reached ();
+#endif
 }
 
 GMainContext *
