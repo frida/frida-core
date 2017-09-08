@@ -39,37 +39,44 @@ namespace Frida.Gadget {
 		script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
 		jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT") != null;
 
-		var scheduler = Environment.obtain_script_backend (jit_enabled).get_scheduler ();
+		if (Environment.can_block_at_load_time ()) {
+			var scheduler = Environment.obtain_script_backend (jit_enabled).get_scheduler ();
 
-		if (!Environment.has_system_loop ()) {
-			scheduler.disable_background_thread ();
-			wait_for_resume_context = scheduler.get_js_context ();
-		}
+			if (!Environment.has_system_loop ()) {
+				scheduler.disable_background_thread ();
 
-		var ignore_scope = new ThreadIgnoreScope ();
+				wait_for_resume_context = scheduler.get_js_context ();
+			}
 
-		var source = new IdleSource ();
-		source.set_callback (() => {
-			start.begin ();
-			return false;
-		});
-		source.attach (Environment.get_main_context ());
+			var ignore_scope = new ThreadIgnoreScope ();
 
-		var context = wait_for_resume_context;
-		if (context != null) {
-			var loop = new MainLoop (context, true);
-			wait_for_resume_loop = loop;
+			schedule_start ();
 
-			context.push_thread_default ();
-			loop.run ();
-			context.pop_thread_default ();
+			var context = wait_for_resume_context;
+			if (context != null) {
+				var loop = new MainLoop (context, true);
+				wait_for_resume_loop = loop;
 
-			scheduler.enable_background_thread ();
+				context.push_thread_default ();
+				loop.run ();
+				context.pop_thread_default ();
+
+				scheduler.enable_background_thread ();
+			} else {
+				Environment.run_system_loop ();
+			}
+
+			ignore_scope = null;
 		} else {
-			Environment.run_system_loop ();
+			schedule_start ();
 		}
+	}
 
-		ignore_scope = null;
+	public void wait_for_permission_to_resume () {
+		mutex.lock ();
+		while (state != State.RUNNING)
+			cond.wait (mutex);
+		mutex.unlock ();
 	}
 
 	public void unload () {
@@ -111,6 +118,15 @@ namespace Frida.Gadget {
 		} else {
 			Environment.stop_system_loop ();
 		}
+	}
+
+	private void schedule_start () {
+		var source = new IdleSource ();
+		source.set_callback (() => {
+			start.begin ();
+			return false;
+		});
+		source.attach (Environment.get_main_context ());
 	}
 
 	private async void start () {
@@ -838,6 +854,7 @@ namespace Frida.Gadget {
 	namespace Environment {
 		private extern void init ();
 		private extern void deinit ();
+		private extern bool can_block_at_load_time ();
 		private extern bool has_system_loop ();
 		private extern void run_system_loop ();
 		private extern void stop_system_loop ();

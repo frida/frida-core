@@ -168,6 +168,16 @@ frida_gadget_environment_deinit (void)
 }
 
 gboolean
+frida_gadget_environment_can_block_at_load_time (void)
+{
+#ifdef G_OS_WIN32
+  return FALSE;
+#else
+  return TRUE;
+#endif
+}
+
+gboolean
 frida_gadget_environment_has_system_loop (void)
 {
 #ifdef HAVE_DARWIN
