@@ -174,7 +174,7 @@ namespace Frida.Gadget {
 		try {
 			var env_listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
 			var raw_address = (env_listen_address != null) ? env_listen_address : DEFAULT_LISTEN_ADDRESS;
-			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();			
+			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
 			if (!(socket_address is InetSocketAddress))
 				return false;
 
