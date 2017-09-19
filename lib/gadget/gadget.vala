@@ -2,21 +2,47 @@ namespace Frida.Gadget {
 	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
 	private const uint16 DEFAULT_LISTEN_PORT = 27042;
 
+	private class Config : Object {
+		public Env env {
+			get;
+			set;
+			default = Env.PRODUCTION;
+		}
+
+		public string? script_file {
+			get;
+			set;
+			default = null;
+		}
+
+		public InetSocketAddress listen_address {
+			get;
+			set;
+			default = new InetSocketAddress.from_string (DEFAULT_LISTEN_ADDRESS, DEFAULT_LISTEN_PORT);
+		}
+
+		public bool jit_enabled {
+			get;
+			set;
+			default = false;
+		}
+	}
+
+	private enum Env {
+		PRODUCTION,
+		DEVELOPMENT
+	}
+
 	private enum State {
 		CREATED,
 		STARTED,
 		RUNNING,
 		STOPPED
 	}
-	private enum Env {
-		PRODUCTION,
-		DEVELOPMENT
-	}
+
 	private bool loaded = false;
 	private State state = State.CREATED;
-	private Env env = Env.PRODUCTION;
-	private string script_file;
-	private bool jit_enabled = false;
+	private Config config;
 	private MainLoop wait_for_resume_loop;
 	private MainContext wait_for_resume_context;
 	private ThreadIgnoreScope worker_ignore_scope;
@@ -33,14 +59,15 @@ namespace Frida.Gadget {
 
 		Environment.init ();
 
-		if (GLib.Environment.get_variable ("FRIDA_GADGET_ENV") == "development") {
-			env = Env.DEVELOPMENT;
+		try {
+			config = load_config ();
+		} catch (IOError e) {
+			log_error (e.message);
+			return;
 		}
-		script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
-		jit_enabled = GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT") != null;
 
 		if (Environment.can_block_at_load_time ()) {
-			var scheduler = Environment.obtain_script_backend (jit_enabled).get_scheduler ();
+			var scheduler = Environment.obtain_script_backend (config.jit_enabled).get_scheduler ();
 
 			if (!Environment.has_system_loop ()) {
 				scheduler.disable_background_thread ();
@@ -98,8 +125,11 @@ namespace Frida.Gadget {
 			cond.wait (mutex);
 		mutex.unlock ();
 
-		if (env == Env.DEVELOPMENT)
+		if (config.env == Env.DEVELOPMENT) {
+			config = null;
+
 			Environment.deinit ();
+		}
 	}
 
 	public void resume () {
@@ -137,8 +167,8 @@ namespace Frida.Gadget {
 
 		exceptor = Gum.Exceptor.obtain ();
 
-		if (script_file != null) {
-			var r = new ScriptRunner (script_file, jit_enabled, gadget_range);
+		if (config.script_file != null) {
+			var r = new ScriptRunner (config, gadget_range);
 			try {
 				yield r.start ();
 				script_runner = r;
@@ -147,51 +177,19 @@ namespace Frida.Gadget {
 			}
 			resume ();
 		} else {
-			string listen_address;
-			uint16 listen_port;
-			string listen_uri;
-			if (!try_get_listen_address (out listen_address, out listen_port, out listen_uri)) {
-				log_error ("Invalid listen address");
-				return;
-			}
-
 			try {
-					var s = new Server (listen_uri, jit_enabled, gadget_range);
+					var s = new Server (config, gadget_range);
 					yield s.start ();
 					server = s;
-					log_info ("Listening on %s TCP port %hu".printf (listen_address, listen_port));
+					log_info ("Listening on %s TCP port %hu".printf (s.listen_host, s.listen_port));
 			} catch (GLib.Error e) {
 				log_error ("Failed to start: " + e.message);
 			}
 		}
 	}
 
-	private bool try_get_listen_address (out string listen_address, out uint16 listen_port, out string listen_uri) {
-		listen_address = null;
-		listen_port = 0;
-		listen_uri = null;
-
-		try {
-			var env_listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
-			var raw_address = (env_listen_address != null) ? env_listen_address : DEFAULT_LISTEN_ADDRESS;
-			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-			if (!(socket_address is InetSocketAddress))
-				return false;
-
-			var inet_socket_address = socket_address as InetSocketAddress;
-			var inet_address = inet_socket_address.get_address ();
-			var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-			listen_address = inet_address.to_string ();
-			listen_port = inet_socket_address.get_port ();
-			listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, listen_address, listen_port);
-			return true;
-		} catch (GLib.Error e) {
-			return false;
-		}
-	}
-
 	private async void stop () {
-		if (env == Env.PRODUCTION) {
+		if (config.env == Env.PRODUCTION) {
 			if (script_runner != null)
 				yield script_runner.flush ();
 		} else {
@@ -214,9 +212,75 @@ namespace Frida.Gadget {
 		mutex.unlock ();
 	}
 
+	private Config load_config () throws IOError {
+		return load_config_from_environment ();
+	}
+
+	private Config load_config_from_environment () throws IOError {
+		var config = new Config ();
+		config.env = parse_env (GLib.Environment.get_variable ("FRIDA_GADGET_ENV"));
+		config.script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
+		config.listen_address = parse_listen_address (GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS"));
+		config.jit_enabled = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
+		return config;
+	}
+
+	private Env parse_env (string? nick) throws IOError {
+		if (nick == null)
+			return Env.PRODUCTION;
+
+		var klass = (EnumClass) typeof (Env).class_ref ();
+		var enum_value = klass.get_value_by_nick (nick);
+		if (enum_value == null)
+			throw new IOError.INVALID_ARGUMENT ("Invalid environment");
+
+		return (Env) enum_value.value;
+	}
+
+	private InetSocketAddress parse_listen_address (string? listen_address) throws IOError {
+		var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
+
+		SocketConnectable connectable;
+		try {
+			connectable = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
+		} catch (GLib.Error e) {
+			throw new IOError.INVALID_ARGUMENT ("Invalid listen address");
+		}
+
+		if (!(connectable is InetSocketAddress))
+			throw new IOError.INVALID_ARGUMENT ("Invalid listen address");
+
+		return connectable as InetSocketAddress;
+	}
+
+	private bool parse_enable_jit (string? enable_jit) throws IOError {
+		if (enable_jit == null)
+			return false;
+
+		switch (enable_jit) {
+			case "yes":
+			case "1":
+				return true;
+			case "no":
+			case "0":
+				return false;
+		}
+
+		throw new IOError.INVALID_ARGUMENT ("Invalid JIT preference");
+	}
+
 	private class ScriptRunner : Object {
+		public Config config {
+			get;
+			construct;
+		}
+
+		public Gum.MemoryRange gadget_range {
+			get;
+			construct;
+		}
+
 		private AgentScriptId script;
-		private string script_file;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private ScriptEngine script_engine;
@@ -225,19 +289,21 @@ namespace Frida.Gadget {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (string script_file, bool jit_enabled, Gum.MemoryRange gadget_range) {
-			this.script_file = script_file;
+		public ScriptRunner (Config config, Gum.MemoryRange gadget_range) {
+			Object (config: config, gadget_range: gadget_range);
+		}
 
-			script_engine = new ScriptEngine (Environment.obtain_script_backend (jit_enabled), gadget_range);
+		construct {
+			script_engine = new ScriptEngine (Environment.obtain_script_backend (config.jit_enabled), gadget_range);
 			script_engine.message_from_script.connect (on_message);
 		}
 
 		public async void start () throws Error {
 			yield load ();
 
-			if (env == Env.DEVELOPMENT) {
+			if (config.env == Env.DEVELOPMENT) {
 				try {
-					script_monitor = File.new_for_path (script_file).monitor_file (FileMonitorFlags.NONE);
+					script_monitor = File.new_for_path (config.script_file).monitor_file (FileMonitorFlags.NONE);
 					script_monitor.changed.connect (on_script_file_changed);
 				} catch (GLib.Error e) {
 					printerr (e.message);
@@ -278,6 +344,8 @@ namespace Frida.Gadget {
 			load_in_progress = true;
 
 			try {
+				var script_file = config.script_file;
+
 				var name = Path.get_basename (script_file).split (".", 2)[0];
 
 				string source;
@@ -465,17 +533,47 @@ namespace Frida.Gadget {
 	}
 
 	private class Server : Object {
+		public Config config {
+			get;
+			construct;
+		}
+
+		public Gum.MemoryRange gadget_range {
+			get;
+			construct;
+		}
+
+		public string listen_host {
+			owned get {
+				return config.listen_address.get_address ().to_string ();
+			}
+		}
+
+		public uint16 listen_port {
+			get {
+				return config.listen_address.get_port ();
+			}
+		}
+
+		public string listen_uri {
+			owned get {
+				var listen_address = config.listen_address;
+				var inet_address = listen_address.get_address ();
+
+				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
+				var host = inet_address.to_string ();
+				var port = listen_address.get_port ();
+
+				return "tcp:family=%s,host=%s,port=%hu".printf (family, host, port);
+			}
+		}
+
 		private unowned Gum.ScriptBackend script_backend = null;
-		private string listen_uri;
-		private bool jit_enabled;
-		private Gum.MemoryRange gadget_range;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
-		public Server (string listen_uri, bool jit_enabled, Gum.MemoryRange gadget_range) {
-			this.listen_uri = listen_uri;
-			this.jit_enabled = jit_enabled;
-			this.gadget_range = gadget_range;
+		public Server (Config config, Gum.MemoryRange gadget_range) {
+			Object (config: config, gadget_range: gadget_range);
 		}
 
 		public async void start () throws Error {
@@ -518,19 +616,19 @@ namespace Frida.Gadget {
 
 		public ScriptEngine create_script_engine () {
 			if (script_backend == null)
-				script_backend = Environment.obtain_script_backend (jit_enabled);
+				script_backend = Environment.obtain_script_backend (config.jit_enabled);
 
 			return new ScriptEngine (script_backend, gadget_range);
 		}
 
 		public void enable_jit () throws Error {
-			if (jit_enabled)
+			if (config.jit_enabled)
 				return;
 
 			if (script_backend != null)
 				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
 
-			jit_enabled = true;
+			config.jit_enabled = true;
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
