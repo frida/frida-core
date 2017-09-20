@@ -28,6 +28,22 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private class Location : Object {
+		public string path {
+			get;
+			construct;
+		}
+
+		public Gum.MemoryRange range {
+			get;
+			construct;
+		}
+
+		public Location (string path, Gum.MemoryRange range) {
+			Object (path: path, range: range);
+		}
+	}
+
 	private enum Env {
 		PRODUCTION,
 		DEVELOPMENT
@@ -43,6 +59,7 @@ namespace Frida.Gadget {
 	private bool loaded = false;
 	private State state = State.CREATED;
 	private Config config;
+	private Location location;
 	private MainLoop wait_for_resume_loop;
 	private MainContext wait_for_resume_context;
 	private ThreadIgnoreScope worker_ignore_scope;
@@ -59,12 +76,16 @@ namespace Frida.Gadget {
 
 		Environment.init ();
 
+		location = detect_location ();
+
 		try {
-			config = load_config ();
+			config = load_config (location);
 		} catch (IOError e) {
 			log_error (e.message);
 			return;
 		}
+
+		Gum.Cloak.add_range (location.range);
 
 		if (Environment.can_block_at_load_time ()) {
 			var scheduler = Environment.obtain_script_backend (config.jit_enabled).get_scheduler ();
@@ -160,15 +181,12 @@ namespace Frida.Gadget {
 	}
 
 	private async void start () {
-		var gadget_range = memory_range ();
-		Gum.Cloak.add_range (gadget_range);
-
 		worker_ignore_scope = new ThreadIgnoreScope ();
 
 		exceptor = Gum.Exceptor.obtain ();
 
 		if (config.script_file != null) {
-			var r = new ScriptRunner (config, gadget_range);
+			var r = new ScriptRunner (config, location);
 			try {
 				yield r.start ();
 				script_runner = r;
@@ -178,7 +196,7 @@ namespace Frida.Gadget {
 			resume ();
 		} else {
 			try {
-					var s = new Server (config, gadget_range);
+					var s = new Server (config, location);
 					yield s.start ();
 					server = s;
 					log_info ("Listening on %s TCP port %hu".printf (s.listen_host, s.listen_port));
@@ -212,7 +230,7 @@ namespace Frida.Gadget {
 		mutex.unlock ();
 	}
 
-	private Config load_config () throws IOError {
+	private Config load_config (Location location) throws IOError {
 		return load_config_from_environment ();
 	}
 
@@ -269,13 +287,35 @@ namespace Frida.Gadget {
 		throw new IOError.INVALID_ARGUMENT ("Invalid JIT preference");
 	}
 
+	private Location detect_location () {
+		string? our_path = null;
+		Gum.MemoryRange? our_range = null;
+
+		Gum.Address our_address = (Gum.Address) detect_location;
+
+		Gum.Process.enumerate_modules ((details) => {
+			var range = details.range;
+
+			if (our_address >= range.base_address && our_address < range.base_address + range.size) {
+				our_path = details.path;
+				our_range = range;
+				return false;
+			}
+
+			return true;
+		});
+		assert (our_path != null && our_range != null);
+
+		return new Location (our_path, our_range);
+	}
+
 	private class ScriptRunner : Object {
 		public Config config {
 			get;
 			construct;
 		}
 
-		public Gum.MemoryRange gadget_range {
+		public Location location {
 			get;
 			construct;
 		}
@@ -289,12 +329,12 @@ namespace Frida.Gadget {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (Config config, Gum.MemoryRange gadget_range) {
-			Object (config: config, gadget_range: gadget_range);
+		public ScriptRunner (Config config, Location location) {
+			Object (config: config, location: location);
 		}
 
 		construct {
-			script_engine = new ScriptEngine (Environment.obtain_script_backend (config.jit_enabled), gadget_range);
+			script_engine = new ScriptEngine (Environment.obtain_script_backend (config.jit_enabled), location.range);
 			script_engine.message_from_script.connect (on_message);
 		}
 
@@ -538,7 +578,7 @@ namespace Frida.Gadget {
 			construct;
 		}
 
-		public Gum.MemoryRange gadget_range {
+		public Location location {
 			get;
 			construct;
 		}
@@ -572,8 +612,8 @@ namespace Frida.Gadget {
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
-		public Server (Config config, Gum.MemoryRange gadget_range) {
-			Object (config: config, gadget_range: gadget_range);
+		public Server (Config config, Location location) {
+			Object (config: config, location: location);
 		}
 
 		public async void start () throws Error {
@@ -618,7 +658,7 @@ namespace Frida.Gadget {
 			if (script_backend == null)
 				script_backend = Environment.obtain_script_backend (config.jit_enabled);
 
-			return new ScriptEngine (script_backend, gadget_range);
+			return new ScriptEngine (script_backend, location.range);
 		}
 
 		public void enable_jit () throws Error {
@@ -931,22 +971,6 @@ namespace Frida.Gadget {
 
 			interceptor.unignore_current_thread ();
 		}
-	}
-
-	private Gum.MemoryRange memory_range () {
-		Gum.MemoryRange? result = null;
-
-		Gum.Process.enumerate_modules ((details) => {
-			var name = details.name;
-			if (name.index_of ("FridaGadget") != -1 || name.index_of ("frida-gadget") != -1) {
-				result = details.range;
-				return false;
-			}
-			return true;
-		});
-		assert (result != null);
-
-		return result;
 	}
 
 	namespace Environment {
