@@ -15,10 +15,10 @@ namespace Frida.Gadget {
 			default = null;
 		}
 
-		public InetSocketAddress listen_address {
+		public string? listen_address {
 			get;
 			set;
-			default = new InetSocketAddress.from_string (DEFAULT_LISTEN_ADDRESS, DEFAULT_LISTEN_PORT);
+			default = null;
 		}
 
 		public bool jit_enabled {
@@ -238,7 +238,7 @@ namespace Frida.Gadget {
 		var config = new Config ();
 		config.env = parse_env (GLib.Environment.get_variable ("FRIDA_GADGET_ENV"));
 		config.script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
-		config.listen_address = parse_listen_address (GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS"));
+		config.listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
 		config.jit_enabled = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
 		return config;
 	}
@@ -253,22 +253,6 @@ namespace Frida.Gadget {
 			throw new IOError.INVALID_ARGUMENT ("Invalid environment");
 
 		return (Env) enum_value.value;
-	}
-
-	private InetSocketAddress parse_listen_address (string? listen_address) throws IOError {
-		var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
-
-		SocketConnectable connectable;
-		try {
-			connectable = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-		} catch (GLib.Error e) {
-			throw new IOError.INVALID_ARGUMENT ("Invalid listen address");
-		}
-
-		if (!(connectable is InetSocketAddress))
-			throw new IOError.INVALID_ARGUMENT ("Invalid listen address");
-
-		return connectable as InetSocketAddress;
 	}
 
 	private bool parse_enable_jit (string? enable_jit) throws IOError {
@@ -583,21 +567,26 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		public InetSocketAddress listen_address {
+			get;
+			construct;
+		}
+
 		public string listen_host {
 			owned get {
-				return config.listen_address.get_address ().to_string ();
+				return listen_address.get_address ().to_string ();
 			}
 		}
 
 		public uint16 listen_port {
 			get {
-				return config.listen_address.get_port ();
+				return listen_address.get_port ();
 			}
 		}
 
 		public string listen_uri {
 			owned get {
-				var listen_address = config.listen_address;
+				var listen_address = listen_address;
 				var inet_address = listen_address.get_address ();
 
 				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
@@ -612,8 +601,28 @@ namespace Frida.Gadget {
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
-		public Server (Config config, Location location) {
-			Object (config: config, location: location);
+		public Server (Config config, Location location) throws Error {
+			Object (
+				config: config,
+				location: location,
+				listen_address: parse_listen_address (config.listen_address)
+			);
+		}
+
+		private static InetSocketAddress parse_listen_address (string? listen_address) throws Error {
+			var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
+
+			SocketConnectable connectable;
+			try {
+				connectable = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
+			} catch (GLib.Error e) {
+				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
+			}
+
+			if (!(connectable is InetSocketAddress))
+				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
+
+			return connectable as InetSocketAddress;
 		}
 
 		public async void start () throws Error {
