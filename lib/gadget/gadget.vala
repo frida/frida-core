@@ -2,29 +2,93 @@ namespace Frida.Gadget {
 	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
 	private const uint16 DEFAULT_LISTEN_PORT = 27042;
 
-	private class Config : Object {
-		public Env env {
+	private class Config : Object, Json.Serializable {
+		public Object interaction {
+			get;
+			set;
+			default = new ListenInteraction ();
+		}
+
+		public Env environment {
 			get;
 			set;
 			default = Env.PRODUCTION;
 		}
 
-		public string? script_file {
-			get;
-			set;
-			default = null;
-		}
-
-		public string? listen_address {
-			get;
-			set;
-			default = null;
-		}
-
-		public bool jit_enabled {
+		public bool jit {
 			get;
 			set;
 			default = false;
+		}
+
+		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
+			return default_serialize_property (property_name, value, pspec);
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "interaction" && property_node.get_node_type () == Json.NodeType.OBJECT) {
+				var interaction_node = property_node.get_object ();
+				var interaction_type = interaction_node.get_string_member ("type");
+				if (interaction_type != null) {
+					Type t = 0;
+
+					switch (interaction_type) {
+						case "script":
+							t = typeof (ScriptInteraction);
+							break;
+						case "listen":
+							t = typeof (ListenInteraction);
+							break;
+					}
+
+					if (t != 0) {
+						var obj = Json.gobject_deserialize (t, property_node);
+						if (obj != null) {
+							bool valid = true;
+
+							if (obj is ScriptInteraction) {
+								valid = (obj as ScriptInteraction).path != null;
+							}
+
+							if (valid) {
+								var v = Value (t);
+								v.set_object (obj);
+								value = v;
+								return true;
+							}
+						}
+					}
+				}
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		public unowned ParamSpec? find_property (string name) {
+			var klass = (ObjectClass) typeof (Config).class_ref ();
+			return klass.find_property (name);
+		}
+	}
+
+	private class ScriptInteraction : Object {
+		public string path {
+			get;
+			set;
+		}
+	}
+
+	private class ListenInteraction : Object {
+		public string address {
+			get;
+			set;
+			default = DEFAULT_LISTEN_ADDRESS;
+		}
+
+		public uint port {
+			get;
+			set;
+			default = DEFAULT_LISTEN_PORT;
 		}
 	}
 
@@ -80,7 +144,7 @@ namespace Frida.Gadget {
 
 		try {
 			config = load_config (location);
-		} catch (IOError e) {
+		} catch (Error e) {
 			log_error (e.message);
 			return;
 		}
@@ -88,7 +152,7 @@ namespace Frida.Gadget {
 		Gum.Cloak.add_range (location.range);
 
 		if (Environment.can_block_at_load_time ()) {
-			var scheduler = Environment.obtain_script_backend (config.jit_enabled).get_scheduler ();
+			var scheduler = Environment.obtain_script_backend (config.jit).get_scheduler ();
 
 			if (!Environment.has_system_loop ()) {
 				scheduler.disable_background_thread ();
@@ -146,7 +210,7 @@ namespace Frida.Gadget {
 			cond.wait (mutex);
 		mutex.unlock ();
 
-		if (config.env == Env.DEVELOPMENT) {
+		if (config.environment == Env.DEVELOPMENT) {
 			config = null;
 
 			Environment.deinit ();
@@ -185,16 +249,17 @@ namespace Frida.Gadget {
 
 		exceptor = Gum.Exceptor.obtain ();
 
-		if (config.script_file != null) {
-			var r = new ScriptRunner (config, location);
+		var interaction = config.interaction;
+		if (interaction is ScriptInteraction) {
 			try {
+				var r = new ScriptRunner (config, location);
 				yield r.start ();
 				script_runner = r;
 			} catch (Error e) {
 				log_error ("Failed to load script: " + e.message);
 			}
 			resume ();
-		} else {
+		} else if (interaction is ListenInteraction) {
 			try {
 					var s = new Server (config, location);
 					yield s.start ();
@@ -203,11 +268,13 @@ namespace Frida.Gadget {
 			} catch (GLib.Error e) {
 				log_error ("Failed to start: " + e.message);
 			}
+		} else {
+			log_error ("Failed to start: invalid interaction specified");
 		}
 	}
 
 	private async void stop () {
-		if (config.env == Env.PRODUCTION) {
+		if (config.environment == Env.PRODUCTION) {
 			if (script_runner != null)
 				yield script_runner.flush ();
 		} else {
@@ -230,14 +297,14 @@ namespace Frida.Gadget {
 		mutex.unlock ();
 	}
 
-	private Config load_config (Location location) throws IOError {
+	private Config load_config (Location location) throws Error {
 		var config = try_load_config_from_file (location);
 		if (config == null)
 			config = load_config_from_environment ();
 		return config;
 	}
 
-	private Config? try_load_config_from_file (Location location) throws IOError {
+	private Config? try_load_config_from_file (Location location) throws Error {
 		var config_path = derive_config_path_from_location (location);
 
 		try {
@@ -247,21 +314,50 @@ namespace Frida.Gadget {
 			try {
 				return Json.gobject_from_data (typeof (Config), config_data) as Config;
 			} catch (GLib.Error e) {
-				throw new IOError.INVALID_ARGUMENT ("Invalid config: %s", e.message);
+				throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 			}
 		} catch (FileError e) {
 			if (e is FileError.NOENT)
 				return null;
-			throw new IOError.FAILED ("%s", e.message);
+			throw new Error.PERMISSION_DENIED ("%s", e.message);
 		}
 	}
 
-	private Config load_config_from_environment () throws IOError {
+	private Config load_config_from_environment () throws Error {
 		var config = new Config ();
-		config.env = parse_env (GLib.Environment.get_variable ("FRIDA_GADGET_ENV"));
-		config.script_file = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
-		config.listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
-		config.jit_enabled = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
+
+		var script_path = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
+		if (script_path != null) {
+			var interaction = new ScriptInteraction ();
+			interaction.path = script_path;
+
+			config.interaction = interaction;
+		} else {
+			var raw_listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
+			if (raw_listen_address != null) {
+				var interaction = new ListenInteraction ();
+
+				SocketConnectable connectable;
+				try {
+					connectable = NetworkAddress.parse (raw_listen_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("Invalid listen address");
+				}
+
+				if (!(connectable is InetSocketAddress))
+					throw new Error.INVALID_ARGUMENT ("Invalid listen address");
+
+				var socket_address = connectable as InetSocketAddress;
+				interaction.address = socket_address.get_address ().to_string ();
+				interaction.port = socket_address.get_port ();
+
+				config.interaction = interaction;
+			}
+		}
+
+		config.environment = parse_environment (GLib.Environment.get_variable ("FRIDA_GADGET_ENV"));
+		config.jit = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
+
 		return config;
 	}
 
@@ -280,19 +376,19 @@ namespace Frida.Gadget {
 		return Path.build_filename (dirname, stem + ".config");
 	}
 
-	private Env parse_env (string? nick) throws IOError {
+	private Env parse_environment (string? nick) throws Error {
 		if (nick == null)
 			return Env.PRODUCTION;
 
 		var klass = (EnumClass) typeof (Env).class_ref ();
 		var enum_value = klass.get_value_by_nick (nick);
 		if (enum_value == null)
-			throw new IOError.INVALID_ARGUMENT ("Invalid environment");
+			throw new Error.INVALID_ARGUMENT ("Invalid environment");
 
 		return (Env) enum_value.value;
 	}
 
-	private bool parse_enable_jit (string? enable_jit) throws IOError {
+	private bool parse_enable_jit (string? enable_jit) throws Error {
 		if (enable_jit == null)
 			return false;
 
@@ -305,7 +401,7 @@ namespace Frida.Gadget {
 				return false;
 		}
 
-		throw new IOError.INVALID_ARGUMENT ("Invalid JIT preference");
+		throw new Error.INVALID_ARGUMENT ("Invalid JIT preference");
 	}
 
 	private Location detect_location () {
@@ -341,6 +437,11 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		public string script_path {
+			get;
+			construct;
+		}
+
 		private AgentScriptId script;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
@@ -350,21 +451,25 @@ namespace Frida.Gadget {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (Config config, Location location) {
-			Object (config: config, location: location);
+		public ScriptRunner (Config config, Location location) throws Error {
+			Object (
+				config: config,
+				location: location,
+				script_path: parse_script_path (config, location)
+			);
 		}
 
 		construct {
-			script_engine = new ScriptEngine (Environment.obtain_script_backend (config.jit_enabled), location.range);
+			script_engine = new ScriptEngine (Environment.obtain_script_backend (config.jit), location.range);
 			script_engine.message_from_script.connect (on_message);
 		}
 
 		public async void start () throws Error {
 			yield load ();
 
-			if (config.env == Env.DEVELOPMENT) {
+			if (config.environment == Env.DEVELOPMENT) {
 				try {
-					script_monitor = File.new_for_path (config.script_file).monitor_file (FileMonitorFlags.NONE);
+					script_monitor = File.new_for_path (script_path).monitor_file (FileMonitorFlags.NONE);
 					script_monitor.changed.connect (on_script_file_changed);
 				} catch (GLib.Error e) {
 					printerr (e.message);
@@ -405,13 +510,11 @@ namespace Frida.Gadget {
 			load_in_progress = true;
 
 			try {
-				var script_file = config.script_file;
-
-				var name = Path.get_basename (script_file).split (".", 2)[0];
+				var name = Path.get_basename (script_path).split (".", 2)[0];
 
 				string source;
 				try {
-					FileUtils.get_contents (script_file, out source);
+					FileUtils.get_contents (script_path, out source);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT (e.message);
 				}
@@ -591,6 +694,17 @@ namespace Frida.Gadget {
 				handler ();
 			}
 		}
+
+		private static string parse_script_path (Config config, Location location) throws Error {
+			var raw_path = (config.interaction as ScriptInteraction).path;
+
+			if (!Path.is_absolute (raw_path)) {
+				var base_dir = Path.get_dirname (location.path);
+				return Path.build_filename (base_dir, raw_path);
+			}
+
+			return raw_path;
+		}
 	}
 
 	private class Server : Object {
@@ -642,24 +756,8 @@ namespace Frida.Gadget {
 			Object (
 				config: config,
 				location: location,
-				listen_address: parse_listen_address (config.listen_address)
+				listen_address: parse_listen_address (config)
 			);
-		}
-
-		private static InetSocketAddress parse_listen_address (string? listen_address) throws Error {
-			var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
-
-			SocketConnectable connectable;
-			try {
-				connectable = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
-			}
-
-			if (!(connectable is InetSocketAddress))
-				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
-
-			return connectable as InetSocketAddress;
 		}
 
 		public async void start () throws Error {
@@ -702,19 +800,19 @@ namespace Frida.Gadget {
 
 		public ScriptEngine create_script_engine () {
 			if (script_backend == null)
-				script_backend = Environment.obtain_script_backend (config.jit_enabled);
+				script_backend = Environment.obtain_script_backend (config.jit);
 
 			return new ScriptEngine (script_backend, location.range);
 		}
 
 		public void enable_jit () throws Error {
-			if (config.jit_enabled)
+			if (config.jit)
 				return;
 
 			if (script_backend != null)
 				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
 
-			config.jit_enabled = true;
+			config.jit = true;
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -985,6 +1083,16 @@ namespace Frida.Gadget {
 				if (close_request != null)
 					throw new Error.INVALID_OPERATION ("Session is closing");
 			}
+		}
+
+		private static InetSocketAddress parse_listen_address (Config config) throws Error {
+			var interaction = config.interaction as ListenInteraction;
+
+			var address = new InetSocketAddress.from_string (interaction.address, interaction.port);
+			if (address == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
+
+			return address;
 		}
 	}
 
