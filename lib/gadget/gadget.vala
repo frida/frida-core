@@ -231,7 +231,29 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws IOError {
-		return load_config_from_environment ();
+		var config = try_load_config_from_file (location);
+		if (config == null)
+			config = load_config_from_environment ();
+		return config;
+	}
+
+	private Config? try_load_config_from_file (Location location) throws IOError {
+		var config_path = derive_config_path_from_location (location);
+
+		try {
+			string config_data;
+			FileUtils.get_contents (config_path, out config_data);
+
+			try {
+				return Json.gobject_from_data (typeof (Config), config_data) as Config;
+			} catch (GLib.Error e) {
+				throw new IOError.INVALID_ARGUMENT ("Invalid config: %s", e.message);
+			}
+		} catch (FileError e) {
+			if (e is FileError.NOENT)
+				return null;
+			throw new IOError.FAILED ("%s", e.message);
+		}
 	}
 
 	private Config load_config_from_environment () throws IOError {
@@ -241,6 +263,21 @@ namespace Frida.Gadget {
 		config.listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
 		config.jit_enabled = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
 		return config;
+	}
+
+	private string derive_config_path_from_location (Location location) {
+		var path = location.path;
+		var dirname = Path.get_dirname (path);
+		var filename = Path.get_basename (path);
+
+		string stem;
+		var ext_index = filename.last_index_of_char ('.');
+		if (ext_index != -1)
+			stem = filename[0:ext_index];
+		else
+			stem = filename;
+
+		return Path.build_filename (dirname, stem + ".config");
 	}
 
 	private Env parse_env (string? nick) throws IOError {
