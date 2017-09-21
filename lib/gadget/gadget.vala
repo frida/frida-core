@@ -300,70 +300,22 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
-		var config = try_load_config_from_file (location);
-		if (config == null)
-			config = load_config_from_environment ();
-		return config;
-	}
-
-	private Config? try_load_config_from_file (Location location) throws Error {
 		var config_path = derive_config_path_from_location (location);
 
+		string config_data;
 		try {
-			string config_data;
 			FileUtils.get_contents (config_path, out config_data);
-
-			try {
-				return Json.gobject_from_data (typeof (Config), config_data) as Config;
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
-			}
 		} catch (FileError e) {
 			if (e is FileError.NOENT)
-				return null;
+				return new Config ();
 			throw new Error.PERMISSION_DENIED ("%s", e.message);
 		}
-	}
 
-	private Config load_config_from_environment () throws Error {
-		var config = new Config ();
-
-		var env = GLib.Environment.get_variable ("FRIDA_GADGET_ENV");
-		config.skip_teardown = env != null && env == "production";
-
-		var script_path = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
-		if (script_path != null) {
-			var interaction = new ScriptInteraction ();
-			interaction.path = script_path;
-			interaction.watch = env != null && env == "development";
-
-			config.interaction = interaction;
-		} else {
-			var raw_listen_address = GLib.Environment.get_variable ("FRIDA_GADGET_LISTEN_ADDRESS");
-			if (raw_listen_address != null) {
-				var interaction = new ListenInteraction ();
-
-				SocketConnectable connectable;
-				try {
-					connectable = NetworkAddress.parse (raw_listen_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-				} catch (GLib.Error e) {
-					throw new Error.INVALID_ARGUMENT ("Invalid listen address");
-				}
-
-				if (!(connectable is InetSocketAddress))
-					throw new Error.INVALID_ARGUMENT ("Invalid listen address");
-
-				var socket_address = connectable as InetSocketAddress;
-				interaction.address = socket_address.get_address ().to_string ();
-				interaction.port = socket_address.get_port ();
-
-				config.interaction = interaction;
-			}
+		try {
+			return Json.gobject_from_data (typeof (Config), config_data) as Config;
+		} catch (GLib.Error e) {
+			throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
 		}
-
-		config.jit = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
-
-		return config;
 	}
 
 	private string derive_config_path_from_location (Location location) {
@@ -379,22 +331,6 @@ namespace Frida.Gadget {
 			stem = filename;
 
 		return Path.build_filename (dirname, stem + ".config");
-	}
-
-	private bool parse_enable_jit (string? enable_jit) throws Error {
-		if (enable_jit == null)
-			return false;
-
-		switch (enable_jit) {
-			case "yes":
-			case "1":
-				return true;
-			case "no":
-			case "0":
-				return false;
-		}
-
-		throw new Error.INVALID_ARGUMENT ("Invalid JIT preference");
 	}
 
 	private Location detect_location () {
