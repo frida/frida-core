@@ -17,8 +17,10 @@
 #ifdef HAVE_DARWIN
 # include <CoreFoundation/CoreFoundation.h>
 # include <dlfcn.h>
+# include <objc/runtime.h>
 
 typedef struct _FridaCFApi FridaCFApi;
+typedef struct _FridaObjCApi FridaObjCApi;
 
 struct _FridaCFApi
 {
@@ -33,11 +35,24 @@ struct _FridaCFApi
   CFRunLoopTimerRef (* CFRunLoopTimerCreate) (CFAllocatorRef allocator, CFAbsoluteTime fire_date, CFTimeInterval interval, CFOptionFlags flags, CFIndex order, CFRunLoopTimerCallBack callout, CFRunLoopTimerContext * context);
   void (* CFRunLoopAddTimer) (CFRunLoopRef loop, CFRunLoopTimerRef timer, CFStringRef mode);
   void (* CFRunLoopTimerInvalidate) (CFRunLoopTimerRef timer);
+
+  CFBundleRef (* CFBundleGetMainBundle) (void);
+  CFStringRef (* CFBundleGetIdentifier) (CFBundleRef bundle);
+
+  CFIndex (* CFStringGetLength) (CFStringRef string);
+  CFIndex (* CFStringGetMaximumSizeForEncoding) (CFIndex length, CFStringEncoding encoding);
+  Boolean (* CFStringGetCString) (CFStringRef string, char * buffer, CFIndex buffer_size, CFStringEncoding encoding);
+};
+
+struct _FridaObjCApi
+{
+  Class (* objc_getClass) (const char * name);
 };
 
 static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 
 static FridaCFApi * frida_cf_api_try_get (void);
+static FridaObjCApi * frida_objc_api_try_get (void);
 
 #endif
 
@@ -137,6 +152,12 @@ frida_gadget_environment_init (void)
 
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
+
+#ifdef HAVE_DARWIN
+  /* Ensure any initializers run on the main thread. */
+  frida_cf_api_try_get ();
+  frida_objc_api_try_get ();
+#endif
 
   main_context = g_main_context_ref (g_main_context_default ());
   main_loop = g_main_loop_new (main_context, FALSE);
@@ -249,6 +270,59 @@ frida_gadget_environment_obtain_script_backend (gboolean jit_enabled)
   return backend;
 }
 
+gchar *
+frida_gadget_environment_detect_bundle_id (void)
+{
+#ifdef HAVE_DARWIN
+  FridaCFApi * api;
+  CFBundleRef bundle;
+  CFStringRef identifier;
+  CFIndex length, size;
+  gchar * identifier_utf8;
+
+  api = frida_cf_api_try_get ();
+  if (api == NULL)
+    return NULL;
+
+  bundle = api->CFBundleGetMainBundle ();
+  if (bundle == NULL)
+    return NULL;
+
+  identifier = api->CFBundleGetIdentifier (bundle);
+  if (identifier == NULL)
+    return NULL;
+
+  length = api->CFStringGetLength (identifier);
+  size = api->CFStringGetMaximumSizeForEncoding (length, kCFStringEncodingUTF8) + 1;
+
+  identifier_utf8 = g_malloc (size);
+  if (!api->CFStringGetCString (identifier, identifier_utf8, size, kCFStringEncodingUTF8))
+  {
+    g_clear_pointer (&identifier_utf8, g_free);
+  }
+
+  return identifier_utf8;
+#else
+  return NULL;
+#endif
+}
+
+gboolean
+frida_gadget_environment_has_objc_class (const gchar * name)
+{
+#ifdef HAVE_DARWIN
+  FridaObjCApi * api;
+
+  api = frida_objc_api_try_get ();
+  if (api == NULL)
+    return FALSE;
+
+  return api->objc_getClass (name) != NULL;
+#else
+  return FALSE;
+#endif
+}
+
 static gpointer
 run_main_loop (gpointer data)
 {
@@ -296,13 +370,16 @@ frida_cf_api_try_get (void)
     const gchar * cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
     void * cf;
 
-    /*
-     * CoreFoundation must be loaded by the main thread, so we should avoid loading it.
-     */
-    if (gum_module_find_base_address (cf_path) != 0)
+    cf = dlopen (cf_path, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOLOAD);
+    if (cf != NULL)
     {
+      /*
+       * Okay the process has CoreFoundation loaded!
+       *
+       * Now let's make sure initializers have been run:
+       */
+      dlclose (cf);
       cf = dlopen (cf_path, RTLD_GLOBAL | RTLD_LAZY);
-      g_assert (cf != NULL);
 
       api = g_slice_new (FridaCFApi);
 
@@ -322,9 +399,63 @@ frida_cf_api_try_get (void)
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopAddTimer);
       FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerInvalidate);
 
+      FRIDA_ASSIGN_CF_SYMBOL (CFBundleGetMainBundle);
+      FRIDA_ASSIGN_CF_SYMBOL (CFBundleGetIdentifier);
+
+      FRIDA_ASSIGN_CF_SYMBOL (CFStringGetLength);
+      FRIDA_ASSIGN_CF_SYMBOL (CFStringGetMaximumSizeForEncoding);
+      FRIDA_ASSIGN_CF_SYMBOL (CFStringGetCString);
+
 #undef FRIDA_ASSIGN_CF_SYMBOL
 
       dlclose (cf);
+    }
+    else
+    {
+      api = NULL;
+    }
+
+    g_once_init_leave (&api_value, 1 + GPOINTER_TO_SIZE (api));
+  }
+
+  api = GSIZE_TO_POINTER (api_value - 1);
+
+  return api;
+}
+
+static FridaObjCApi *
+frida_objc_api_try_get (void)
+{
+  static gsize api_value = 0;
+  FridaObjCApi * api;
+
+  if (g_once_init_enter (&api_value))
+  {
+    const gchar * objc_path = "/usr/lib/libobjc.A.dylib";
+    void * objc;
+
+    objc = dlopen (objc_path, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOLOAD);
+    if (objc != NULL)
+    {
+      /*
+       * Okay the process has the Objective-C runtime loaded!
+       *
+       * Now let's make sure initializers have been run:
+       */
+      dlclose (objc);
+      objc = dlopen (objc_path, RTLD_GLOBAL | RTLD_LAZY);
+
+      api = g_slice_new (FridaObjCApi);
+
+#define FRIDA_ASSIGN_OBJC_SYMBOL(n) \
+    api->n = dlsym (objc, G_STRINGIFY (n)); \
+    g_assert (api->n != NULL)
+
+      FRIDA_ASSIGN_OBJC_SYMBOL (objc_getClass);
+
+#undef FRIDA_ASSIGN_OBJC_SYMBOL
+
+      dlclose (objc);
     }
     else
     {

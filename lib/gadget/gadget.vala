@@ -36,6 +36,9 @@ namespace Frida.Gadget {
 						case "script":
 							t = typeof (ScriptInteraction);
 							break;
+						case "script-directory":
+							t = typeof (ScriptDirectoryInteraction);
+							break;
 						case "listen":
 							t = typeof (ListenInteraction);
 							break;
@@ -48,6 +51,8 @@ namespace Frida.Gadget {
 
 							if (obj is ScriptInteraction) {
 								valid = (obj as ScriptInteraction).path != null;
+							} else if (obj is ScriptDirectoryInteraction) {
+								valid = (obj as ScriptDirectoryInteraction).path != null;
 							}
 
 							if (valid) {
@@ -85,6 +90,54 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private class ScriptDirectoryInteraction : Object {
+		public string path {
+			get;
+			set;
+			default = null;
+		}
+
+		public bool watch {
+			get;
+			set;
+			default = false;
+		}
+	}
+
+	private class ScriptConfig : Object {
+		public ProcessFilter? filter {
+			get;
+			set;
+			default = null;
+		}
+
+		public bool watch {
+			get;
+			set;
+			default = false;
+		}
+	}
+
+	private class ProcessFilter : Object {
+		public string[] executables {
+			get;
+			set;
+			default = new string[0];
+		}
+
+		public string[] bundles {
+			get;
+			set;
+			default = new string[0];
+		}
+
+		public string[] objc_classes {
+			get;
+			set;
+			default = new string[0];
+		}
+	}
+
 	private class ListenInteraction : Object {
 		public string address {
 			get;
@@ -100,6 +153,19 @@ namespace Frida.Gadget {
 	}
 
 	private class Location : Object {
+		public string executable_name {
+			get;
+			construct;
+		}
+
+		public string bundle_id {
+			get {
+				if (cached_bundle_id == null)
+					cached_bundle_id = Environment.detect_bundle_id ();
+				return cached_bundle_id;
+			}
+		}
+
 		public string path {
 			get;
 			construct;
@@ -110,8 +176,14 @@ namespace Frida.Gadget {
 			construct;
 		}
 
-		public Location (string path, Gum.MemoryRange range) {
-			Object (path: path, range: range);
+		private string? cached_bundle_id = null;
+
+		public Location (string executable_name, string path, Gum.MemoryRange range) {
+			Object (
+				executable_name: executable_name,
+				path: path,
+				range: range
+			);
 		}
 	}
 
@@ -129,8 +201,7 @@ namespace Frida.Gadget {
 	private MainLoop wait_for_resume_loop;
 	private MainContext wait_for_resume_context;
 	private ThreadIgnoreScope worker_ignore_scope;
-	private ScriptRunner script_runner;
-	private Server server;
+	private Controller controller;
 	private Gum.Exceptor exceptor;
 	private Mutex mutex;
 	private Cond cond;
@@ -251,42 +322,43 @@ namespace Frida.Gadget {
 
 		exceptor = Gum.Exceptor.obtain ();
 
-		var interaction = config.interaction;
-		if (interaction is ScriptInteraction) {
-			try {
-				var r = new ScriptRunner (config, location);
-				yield r.start ();
-				script_runner = r;
-			} catch (Error e) {
-				log_error ("Failed to load script: " + e.message);
+		Controller ctrl = null;
+		try {
+			var interaction = config.interaction;
+			if (interaction is ScriptInteraction) {
+				var runner = new ScriptRunner (config, location);
+				yield runner.start ();
+				ctrl = runner;
+
+				resume ();
+			} else if (interaction is ScriptDirectoryInteraction) {
+				var runner = new ScriptDirectoryRunner (config, location);
+				yield runner.start ();
+				ctrl = runner;
+
+				resume ();
+			} else if (interaction is ListenInteraction) {
+				var server = new Server (config, location);
+				yield server.start ();
+				ctrl = server;
+
+				log_info ("Listening on %s TCP port %hu".printf (server.listen_host, server.listen_port));
+			} else {
+				log_error ("Failed to start: invalid interaction specified");
 			}
-			resume ();
-		} else if (interaction is ListenInteraction) {
-			try {
-					var s = new Server (config, location);
-					yield s.start ();
-					server = s;
-					log_info ("Listening on %s TCP port %hu".printf (s.listen_host, s.listen_port));
-			} catch (GLib.Error e) {
-				log_error ("Failed to start: " + e.message);
-			}
-		} else {
-			log_error ("Failed to start: invalid interaction specified");
+		} catch (Error e) {
+			log_error ("Failed to start: " + e.message);
 		}
+		assert (ctrl != null);
+		controller = ctrl;
 	}
 
 	private async void stop () {
 		if (config.skip_teardown) {
-			if (script_runner != null)
-				yield script_runner.flush ();
+			yield controller.flush ();
 		} else {
-			if (script_runner != null) {
-				yield script_runner.stop ();
-				script_runner = null;
-			} else {
-				yield server.stop ();
-				server = null;
-			}
+			yield controller.stop ();
+			controller = null;
 
 			exceptor = null;
 		}
@@ -300,7 +372,7 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
-		var config_path = derive_config_path_from_location (location);
+		var config_path = derive_config_path_from_file_path (location.path);
 
 		string config_data;
 		try {
@@ -318,29 +390,20 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private string derive_config_path_from_location (Location location) {
-		var path = location.path;
-		var dirname = Path.get_dirname (path);
-		var filename = Path.get_basename (path);
-
-		string stem;
-		var ext_index = filename.last_index_of_char ('.');
-		if (ext_index != -1)
-			stem = filename[0:ext_index];
-		else
-			stem = filename;
-
-		return Path.build_filename (dirname, stem + ".config");
-	}
-
 	private Location detect_location () {
+		string? executable_name = null;
 		string? our_path = null;
 		Gum.MemoryRange? our_range = null;
 
 		Gum.Address our_address = (Gum.Address) detect_location;
 
+		var index = 0;
 		Gum.Process.enumerate_modules ((details) => {
 			var range = details.range;
+
+			if (index == 0) {
+				executable_name = details.name;
+			}
 
 			if (our_address >= range.base_address && our_address < range.base_address + range.size) {
 				our_path = details.path;
@@ -348,14 +411,21 @@ namespace Frida.Gadget {
 				return false;
 			}
 
+			index++;
+
 			return true;
 		});
-		assert (our_path != null && our_range != null);
 
-		return new Location (our_path, our_range);
+		return new Location (executable_name, our_path, our_range);
 	}
 
-	private class ScriptRunner : Object {
+	private interface Controller : Object {
+		public abstract async void start () throws Error;
+		public abstract async void flush ();
+		public abstract async void stop ();
+	}
+
+	private class ScriptRunner : Object, Controller {
 		public Config config {
 			get;
 			construct;
@@ -366,49 +436,326 @@ namespace Frida.Gadget {
 			construct;
 		}
 
-		public string script_path {
+		private ScriptEngine engine;
+		private Script script;
+
+		public ScriptRunner (Config config, Location location) {
+			Object (config: config, location: location);
+		}
+
+		construct {
+			engine = new ScriptEngine (Environment.obtain_script_backend (config.jit), location.range);
+
+			var path = parse_script_path (config, location);
+			var watch = (config.interaction as ScriptInteraction).watch;
+			script = new Script (path, watch, engine);
+		}
+
+		public async void start () throws Error {
+			yield script.start ();
+		}
+
+		public async void flush () {
+			yield script.flush ();
+		}
+
+		public async void stop () {
+			yield script.stop ();
+
+			yield engine.shutdown ();
+		}
+
+		private static string parse_script_path (Config config, Location location) {
+			var raw_path = (config.interaction as ScriptInteraction).path;
+
+			if (!Path.is_absolute (raw_path)) {
+				var base_dir = Path.get_dirname (location.path);
+				return Path.build_filename (base_dir, raw_path);
+			}
+
+			return raw_path;
+		}
+	}
+
+	private class ScriptDirectoryRunner : Object, Controller {
+		public Config config {
 			get;
 			construct;
 		}
 
-		private AgentScriptId script;
-		private GLib.FileMonitor script_monitor;
-		private Source script_unchanged_timeout;
-		private ScriptEngine script_engine;
-		private bool load_in_progress = false;
+		public Location location {
+			get;
+			construct;
+		}
 
-		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
-		private int64 next_request_id = 1;
+		public string directory_path {
+			get;
+			construct;
+		}
 
-		public ScriptRunner (Config config, Location location) throws Error {
+		private ScriptEngine engine;
+		private Gee.HashMap<string, Script> scripts = new Gee.HashMap<string, Script> ();
+		private bool scan_in_progress = false;
+		private GLib.FileMonitor monitor;
+		private Source unchanged_timeout;
+
+		public ScriptDirectoryRunner (Config config, Location location) {
 			Object (
 				config: config,
 				location: location,
-				script_path: parse_script_path (config, location)
+				directory_path: parse_script_directory_path (config, location)
 			);
 		}
 
 		construct {
-			script_engine = new ScriptEngine (Environment.obtain_script_backend (config.jit), location.range);
-			script_engine.message_from_script.connect (on_message);
+			engine = new ScriptEngine (Environment.obtain_script_backend (config.jit), location.range);
 		}
 
 		public async void start () throws Error {
-			yield load ();
+			var watch = (config.interaction as ScriptDirectoryInteraction).watch;
 
-			var interaction = config.interaction as ScriptInteraction;
-			if (interaction.watch) {
+			if (watch) {
 				try {
-					script_monitor = File.new_for_path (script_path).monitor_file (FileMonitorFlags.NONE);
-					script_monitor.changed.connect (on_script_file_changed);
+					var path = directory_path;
+					var monitor = File.new_for_path (path).monitor_directory (FileMonitorFlags.NONE);
+					monitor.changed.connect (on_file_changed);
+					this.monitor = monitor;
 				} catch (GLib.Error e) {
-					printerr (e.message);
+					log_info ("Failed to watch directory: " + e.message);
+				}
+			}
+
+			yield scan ();
+		}
+
+		public async void flush () {
+			foreach (var script in scripts.values.to_array ())
+				yield script.flush ();
+		}
+
+		public async void stop () {
+			if (monitor != null) {
+				monitor.changed.disconnect (on_file_changed);
+				monitor.cancel ();
+				monitor = null;
+			}
+
+			foreach (var script in scripts.values.to_array ())
+				yield script.stop ();
+			scripts.clear ();
+
+			yield engine.shutdown ();
+		}
+
+		private async void scan () throws Error {
+			scan_in_progress = true;
+
+			try {
+				var directory_path = this.directory_path;
+
+				Dir dir;
+				try {
+					dir = Dir.open (directory_path);
+				} catch (FileError e) {
+					return;
+				}
+
+				string? name;
+				var names_seen = new Gee.HashSet<string> ();
+				while ((name = dir.read_name ()) != null) {
+					if (name[0] == '.' || !name.has_suffix (".js"))
+						continue;
+
+					names_seen.add (name);
+
+					var script_path = Path.build_filename (directory_path, name);
+
+					try {
+						bool load = true;
+						bool watch = false;
+
+						var config_path = derive_config_path_from_file_path (script_path);
+
+						var config = try_load_config (config_path);
+						if (config != null) {
+							load = current_process_matches (config.filter);
+							watch = config.watch;
+						}
+
+						if (load && !scripts.has_key (name)) {
+							var script = new Script (script_path, watch, engine);
+
+							yield script.start ();
+
+							scripts[name] = script;
+						}
+
+						Script script = null;
+						if (!load && scripts.unset (name, out script)) {
+							yield script.stop ();
+						}
+					} catch (Error e) {
+						log_info ("Skipping %s: %s".printf (name, e.message));
+						continue;
+					}
+				}
+
+				foreach (var script_name in scripts.keys.to_array ()) {
+					var deleted = !names_seen.contains (script_name);
+					if (deleted) {
+						Script script;
+						scripts.unset (script_name, out script);
+						yield script.stop ();
+					}
+				}
+			} finally {
+				scan_in_progress = false;
+			}
+		}
+
+		private bool current_process_matches (ProcessFilter? filter) {
+			if (filter == null)
+				return true;
+
+			var executables = filter.executables;
+			var num_executables = executables.length;
+			if (num_executables > 0) {
+				var executable_name = location.executable_name;
+
+				for (var index = 0; index != num_executables; index++) {
+					if (executables[index] == executable_name)
+						return true;
+				}
+			}
+
+			var bundles = filter.bundles;
+			var num_bundles = bundles.length;
+			if (num_bundles > 0) {
+				var bundle_id = location.bundle_id;
+				if (bundle_id != null) {
+					for (var index = 0; index != num_bundles; index++) {
+						if (bundles[index] == bundle_id)
+							return true;
+					}
+				}
+			}
+
+			var classes = filter.objc_classes;
+			var num_classes = classes.length;
+			for (var index = 0; index != num_classes; index++) {
+				if (Environment.has_objc_class (classes[index]))
+					return true;
+			}
+
+			return false;
+		}
+
+		private void on_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
+			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
+				return;
+
+			var source = new TimeoutSource (50);
+			source.set_callback (() => {
+				if (scan_in_progress)
+					return true;
+				scan.begin ();
+				return false;
+			});
+			source.attach (Environment.get_main_context ());
+
+			if (unchanged_timeout != null)
+				unchanged_timeout.destroy ();
+			unchanged_timeout = source;
+		}
+
+		private static string parse_script_directory_path (Config config, Location location) {
+			var raw_path = (config.interaction as ScriptDirectoryInteraction).path;
+
+			if (!Path.is_absolute (raw_path)) {
+				var base_dir = Path.get_dirname (location.path);
+				return Path.build_filename (base_dir, raw_path);
+			}
+
+			return raw_path;
+		}
+
+		private ScriptConfig? try_load_config (string path) throws Error {
+			string data;
+			try {
+				FileUtils.get_contents (path, out data);
+			} catch (FileError e) {
+				if (e is FileError.NOENT)
+					return null;
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
+			}
+
+			try {
+				return Json.gobject_from_data (typeof (ScriptConfig), data) as ScriptConfig;
+			} catch (GLib.Error e) {
+				throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
+			}
+		}
+	}
+
+	private class Script : Object {
+		public signal void message (string message, Bytes? data);
+
+		public string path {
+			get;
+			construct;
+		}
+
+		public bool watch {
+			get;
+			construct;
+		}
+
+		public ScriptEngine engine {
+			get;
+			construct;
+		}
+
+		private AgentScriptId id;
+		private bool load_in_progress = false;
+		private GLib.FileMonitor monitor;
+		private Source unchanged_timeout;
+
+		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
+		private int64 next_request_id = 1;
+
+		public Script (string path, bool watch, ScriptEngine engine) {
+			Object (
+				path: path,
+				watch: watch,
+				engine: engine
+			);
+		}
+
+		public async void start () throws Error {
+			engine.message_from_script.connect (on_message);
+
+			if (watch) {
+				try {
+					var monitor = File.new_for_path (path).monitor_file (FileMonitorFlags.NONE);
+					monitor.changed.connect (on_file_changed);
+					this.monitor = monitor;
+				} catch (GLib.Error e) {
+					log_info ("Failed to watch %s: %s".printf (path, e.message));
+				}
+
+				yield try_reload ();
+			} else {
+				try {
+					yield load ();
+				} catch (Error e) {
+					engine.message_from_script.disconnect (on_message);
+					throw e;
 				}
 			}
 		}
 
 		public async void flush () {
-			if (script.handle != 0) {
+			if (id.handle != 0) {
 				try {
 					yield call ("dispose", new Json.Node[] {});
 				} catch (Error e) {
@@ -417,22 +764,30 @@ namespace Frida.Gadget {
 		}
 
 		public async void stop () {
-			yield flush ();
-
-			if (script_monitor != null) {
-				script_monitor.changed.disconnect (on_script_file_changed);
-				script_monitor.cancel ();
-				script_monitor = null;
+			if (monitor != null) {
+				monitor.changed.disconnect (on_file_changed);
+				monitor.cancel ();
+				monitor = null;
 			}
 
-			yield script_engine.shutdown ();
+			yield flush ();
+
+			if (id.handle != 0) {
+				try {
+					yield engine.destroy_script (id);
+				} catch (Error e) {
+				}
+				id = AgentScriptId (0);
+			}
+
+			engine.message_from_script.disconnect (on_message);
 		}
 
 		private async void try_reload () {
 			try {
 				yield load ();
 			} catch (Error e) {
-				printerr ("Failed to reload script: %s\n", e.message);
+				log_info ("Failed to load %s: %s".printf (path, e.message));
 			}
 		}
 
@@ -440,29 +795,30 @@ namespace Frida.Gadget {
 			load_in_progress = true;
 
 			try {
-				var name = Path.get_basename (script_path).split (".", 2)[0];
+				var path = this.path;
+
+				var name = Path.get_basename (path).split (".", 2)[0];
 
 				string source;
 				try {
-					FileUtils.get_contents (script_path, out source);
+					FileUtils.get_contents (path, out source);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT (e.message);
 				}
 
-				var instance = yield script_engine.create_script (name, source, null);
+				var instance = yield engine.create_script (name, source, null);
 
-				if (script.handle != 0) {
+				if (id.handle != 0) {
 					try {
 						yield call ("dispose", new Json.Node[] {});
 					} catch (Error e) {
 					}
 
-					yield script_engine.destroy_script (script);
-					script = AgentScriptId (0);
+					yield engine.destroy_script (id);
 				}
-				script = instance.sid;
+				id = instance.sid;
 
-				yield script_engine.load_script (script);
+				yield engine.load_script (id);
 
 				try {
 					yield call ("init", new Json.Node[] {});
@@ -510,13 +866,13 @@ namespace Frida.Gadget {
 
 		private async void post_call_request (string request, PendingResponse response) {
 			try {
-				script_engine.post_to_script (script, request);
+				engine.post_to_script (id, request);
 			} catch (GLib.Error e) {
 				response.complete_with_error (Marshal.from_dbus (e));
 			}
 		}
 
-		private void on_script_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
+		private void on_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
 			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
 				return;
 
@@ -529,12 +885,15 @@ namespace Frida.Gadget {
 			});
 			source.attach (Environment.get_main_context ());
 
-			if (script_unchanged_timeout != null)
-				script_unchanged_timeout.destroy ();
-			script_unchanged_timeout = source;
+			if (unchanged_timeout != null)
+				unchanged_timeout.destroy ();
+			unchanged_timeout = source;
 		}
 
 		private void on_message (AgentScriptId sid, string raw_message, Bytes? data) {
+			if (sid.handle != this.id.handle)
+				return;
+
 			var parser = new Json.Parser ();
 			try {
 				parser.load_from_data (raw_message);
@@ -624,20 +983,9 @@ namespace Frida.Gadget {
 				handler ();
 			}
 		}
-
-		private static string parse_script_path (Config config, Location location) throws Error {
-			var raw_path = (config.interaction as ScriptInteraction).path;
-
-			if (!Path.is_absolute (raw_path)) {
-				var base_dir = Path.get_dirname (location.path);
-				return Path.build_filename (base_dir, raw_path);
-			}
-
-			return raw_path;
-		}
 	}
 
-	private class Server : Object {
+	private class Server : Object, Controller {
 		public Config config {
 			get;
 			construct;
@@ -708,6 +1056,15 @@ namespace Frida.Gadget {
 			});
 
 			server.start ();
+		}
+
+		public async void flush () {
+			foreach (var connection in clients.keys.to_array ()) {
+				try {
+					yield connection.flush ();
+				} catch (GLib.Error e) {
+				}
+			}
 		}
 
 		public async void stop () {
@@ -1026,6 +1383,20 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private string derive_config_path_from_file_path (string path) {
+		var dirname = Path.get_dirname (path);
+		var filename = Path.get_basename (path);
+
+		string stem;
+		var ext_index = filename.last_index_of_char ('.');
+		if (ext_index != -1)
+			stem = filename[0:ext_index];
+		else
+			stem = filename;
+
+		return Path.build_filename (dirname, stem + ".config");
+	}
+
 	private class ThreadIgnoreScope {
 		private Gum.Interceptor interceptor;
 
@@ -1060,12 +1431,19 @@ namespace Frida.Gadget {
 	namespace Environment {
 		private extern void init ();
 		private extern void deinit ();
+
 		private extern bool can_block_at_load_time ();
+
 		private extern bool has_system_loop ();
 		private extern void run_system_loop ();
 		private extern void stop_system_loop ();
+
 		private extern unowned MainContext get_main_context ();
+
 		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
+
+		private extern string? detect_bundle_id ();
+		private extern bool has_objc_class (string name);
 	}
 
 	public extern uint _getpid ();
