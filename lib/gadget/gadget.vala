@@ -9,10 +9,10 @@ namespace Frida.Gadget {
 			default = new ListenInteraction ();
 		}
 
-		public Env environment {
+		public bool skip_teardown {
 			get;
 			set;
-			default = Env.PRODUCTION;
+			default = true;
 		}
 
 		public bool jit {
@@ -75,6 +75,13 @@ namespace Frida.Gadget {
 		public string path {
 			get;
 			set;
+			default = null;
+		}
+
+		public bool watch {
+			get;
+			set;
+			default = false;
 		}
 	}
 
@@ -106,11 +113,6 @@ namespace Frida.Gadget {
 		public Location (string path, Gum.MemoryRange range) {
 			Object (path: path, range: range);
 		}
-	}
-
-	private enum Env {
-		PRODUCTION,
-		DEVELOPMENT
 	}
 
 	private enum State {
@@ -210,7 +212,7 @@ namespace Frida.Gadget {
 			cond.wait (mutex);
 		mutex.unlock ();
 
-		if (config.environment == Env.DEVELOPMENT) {
+		if (!config.skip_teardown) {
 			config = null;
 
 			Environment.deinit ();
@@ -274,7 +276,7 @@ namespace Frida.Gadget {
 	}
 
 	private async void stop () {
-		if (config.environment == Env.PRODUCTION) {
+		if (config.skip_teardown) {
 			if (script_runner != null)
 				yield script_runner.flush ();
 		} else {
@@ -326,10 +328,14 @@ namespace Frida.Gadget {
 	private Config load_config_from_environment () throws Error {
 		var config = new Config ();
 
+		var env = GLib.Environment.get_variable ("FRIDA_GADGET_ENV");
+		config.skip_teardown = env != null && env == "production";
+
 		var script_path = GLib.Environment.get_variable ("FRIDA_GADGET_SCRIPT");
 		if (script_path != null) {
 			var interaction = new ScriptInteraction ();
 			interaction.path = script_path;
+			interaction.watch = env != null && env == "development";
 
 			config.interaction = interaction;
 		} else {
@@ -355,7 +361,6 @@ namespace Frida.Gadget {
 			}
 		}
 
-		config.environment = parse_environment (GLib.Environment.get_variable ("FRIDA_GADGET_ENV"));
 		config.jit = parse_enable_jit (GLib.Environment.get_variable ("FRIDA_GADGET_ENABLE_JIT"));
 
 		return config;
@@ -374,18 +379,6 @@ namespace Frida.Gadget {
 			stem = filename;
 
 		return Path.build_filename (dirname, stem + ".config");
-	}
-
-	private Env parse_environment (string? nick) throws Error {
-		if (nick == null)
-			return Env.PRODUCTION;
-
-		var klass = (EnumClass) typeof (Env).class_ref ();
-		var enum_value = klass.get_value_by_nick (nick);
-		if (enum_value == null)
-			throw new Error.INVALID_ARGUMENT ("Invalid environment");
-
-		return (Env) enum_value.value;
 	}
 
 	private bool parse_enable_jit (string? enable_jit) throws Error {
@@ -467,7 +460,8 @@ namespace Frida.Gadget {
 		public async void start () throws Error {
 			yield load ();
 
-			if (config.environment == Env.DEVELOPMENT) {
+			var interaction = config.interaction as ScriptInteraction;
+			if (interaction.watch) {
 				try {
 					script_monitor = File.new_for_path (script_path).monitor_file (FileMonitorFlags.NONE);
 					script_monitor.changed.connect (on_script_file_changed);
