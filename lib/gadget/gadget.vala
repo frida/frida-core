@@ -245,7 +245,7 @@ namespace Frida.Gadget {
 		try {
 			config = load_config (location);
 		} catch (Error e) {
-			log_error (e.message);
+			log_warning (e.message);
 			return;
 		}
 
@@ -387,23 +387,24 @@ namespace Frida.Gadget {
 
 				log_info ("Listening on %s TCP port %hu".printf (server.listen_host, server.listen_port));
 			} else {
-				log_error ("Failed to start: invalid interaction specified");
+				log_warning ("Failed to start: invalid interaction specified");
 			}
 		} catch (Error e) {
-			log_error ("Failed to start: " + e.message);
+			log_warning ("Failed to start: " + e.message);
 		}
-		assert (ctrl != null);
 		controller = ctrl;
 	}
 
 	private async void stop () {
-		if (config.teardown == TeardownRequirement.MINIMAL) {
-			yield controller.flush ();
-		} else {
-			yield controller.stop ();
-			controller = null;
+		if (controller != null) {
+			if (config.teardown == TeardownRequirement.MINIMAL) {
+				yield controller.flush ();
+			} else {
+				yield controller.stop ();
+				controller = null;
 
-			exceptor = null;
+				exceptor = null;
+			}
 		}
 
 		worker_ignore_scope = null;
@@ -564,7 +565,7 @@ namespace Frida.Gadget {
 					monitor.changed.connect (on_file_changed);
 					this.monitor = monitor;
 				} catch (GLib.Error e) {
-					log_info ("Failed to watch directory: " + e.message);
+					log_warning ("Failed to watch directory: " + e.message);
 				}
 			}
 
@@ -638,7 +639,7 @@ namespace Frida.Gadget {
 							yield script.stop ();
 						}
 					} catch (Error e) {
-						log_info ("Skipping %s: %s".printf (name, e.message));
+						log_warning ("Skipping %s: %s".printf (name, e.message));
 						continue;
 					}
 				}
@@ -788,7 +789,7 @@ namespace Frida.Gadget {
 					monitor.changed.connect (on_file_changed);
 					this.monitor = monitor;
 				} catch (GLib.Error e) {
-					log_info ("Failed to watch %s: %s".printf (path, e.message));
+					log_warning ("Failed to watch %s: %s".printf (path, e.message));
 				}
 
 				yield try_reload ();
@@ -835,7 +836,7 @@ namespace Frida.Gadget {
 			try {
 				yield load ();
 			} catch (Error e) {
-				log_info ("Failed to load %s: %s".printf (path, e.message));
+				log_warning ("Failed to load %s: %s".printf (path, e.message));
 			}
 		}
 
@@ -1498,7 +1499,7 @@ namespace Frida.Gadget {
 	public extern void _kill (uint pid);
 
 	private extern void log_info (string message);
-	private extern void log_error (string message);
+	private extern void log_warning (string message);
 
 	private Mutex gc_mutex;
 	private uint gc_generation = 0;

@@ -352,9 +352,9 @@ frida_gadget_log_info (const gchar * message)
 }
 
 void
-frida_gadget_log_error (const gchar * message)
+frida_gadget_log_warning (const gchar * message)
 {
-  g_error ("%s", message);
+  g_warning ("%s", message);
 }
 
 #ifdef HAVE_DARWIN
