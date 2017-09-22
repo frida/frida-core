@@ -806,10 +806,7 @@ namespace Frida.Gadget {
 
 		public async void flush () {
 			if (id.handle != 0) {
-				try {
-					yield call ("dispose", new Json.Node[] {});
-				} catch (Error e) {
-				}
+				yield call_dispose ();
 			}
 		}
 
@@ -859,23 +856,29 @@ namespace Frida.Gadget {
 				var instance = yield engine.create_script (name, source, null);
 
 				if (id.handle != 0) {
-					try {
-						yield call ("dispose", new Json.Node[] {});
-					} catch (Error e) {
-					}
-
+					yield call_dispose ();
 					yield engine.destroy_script (id);
 				}
 				id = instance.sid;
 
 				yield engine.load_script (id);
-
-				try {
-					yield call ("init", new Json.Node[] {});
-				} catch (Error e) {
-				}
+				yield call_init ();
 			} finally {
 				load_in_progress = false;
+			}
+		}
+
+		private async void call_init () {
+			try {
+				yield call ("init", new Json.Node[] {});
+			} catch (Error e) {
+			}
+		}
+
+		private async void call_dispose () {
+			try {
+				yield call ("dispose", new Json.Node[] {});
+			} catch (Error e) {
 			}
 		}
 
