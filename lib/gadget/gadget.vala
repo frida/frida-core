@@ -257,6 +257,9 @@ namespace Frida.Gadget {
 			wait_for_resume_needed = false;
 		}
 
+		if (!wait_for_resume_needed)
+			resume ();
+
 		if (wait_for_resume_needed && Environment.can_block_at_load_time ()) {
 			var scheduler = Environment.obtain_script_backend (config.runtime).get_scheduler ();
 
@@ -288,9 +291,6 @@ namespace Frida.Gadget {
 		} else {
 			schedule_start ();
 		}
-
-		if (!wait_for_resume_needed)
-			resume ();
 	}
 
 	public void wait_for_permission_to_resume () {
