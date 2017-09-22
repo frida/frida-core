@@ -254,14 +254,14 @@ frida_gadget_environment_get_main_context (void)
 }
 
 GumScriptBackend *
-frida_gadget_environment_obtain_script_backend (gboolean jit_enabled)
+frida_gadget_environment_obtain_script_backend (FridaGadgetRuntimeFlavor runtime)
 {
   GumScriptBackend * backend = NULL;
 
 #ifdef HAVE_DIET
   backend = gum_script_backend_obtain_duk ();
 #else
-  if (jit_enabled)
+  if (runtime == FRIDA_GADGET_RUNTIME_FLAVOR_JIT)
     backend = gum_script_backend_obtain_v8 ();
   if (backend == NULL)
     backend = gum_script_backend_obtain_duk ();

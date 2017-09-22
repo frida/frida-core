@@ -9,16 +9,16 @@ namespace Frida.Gadget {
 			default = new ListenInteraction ();
 		}
 
-		public bool skip_teardown {
+		public TeardownRequirement teardown {
 			get;
 			set;
-			default = true;
+			default = TeardownRequirement.MINIMAL;
 		}
 
-		public bool jit {
+		public RuntimeFlavor runtime {
 			get;
 			set;
-			default = false;
+			default = RuntimeFlavor.INTERPRETER;
 		}
 
 		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
@@ -76,6 +76,16 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private enum TeardownRequirement {
+		MINIMAL,
+		FULL
+	}
+
+	protected enum RuntimeFlavor {
+		INTERPRETER,
+		JIT
+	}
+
 	private class ScriptInteraction : Object {
 		public string path {
 			get;
@@ -83,10 +93,10 @@ namespace Frida.Gadget {
 			default = null;
 		}
 
-		public bool watch {
+		public Script.ChangeBehavior on_change {
 			get;
 			set;
-			default = false;
+			default = Script.ChangeBehavior.IGNORE;
 		}
 	}
 
@@ -97,10 +107,15 @@ namespace Frida.Gadget {
 			default = null;
 		}
 
-		public bool watch {
+		public ChangeBehavior on_change {
 			get;
 			set;
-			default = false;
+			default = ChangeBehavior.IGNORE;
+		}
+
+		public enum ChangeBehavior {
+			IGNORE,
+			RESCAN
 		}
 	}
 
@@ -111,10 +126,10 @@ namespace Frida.Gadget {
 			default = null;
 		}
 
-		public bool watch {
+		public Script.ChangeBehavior on_change {
 			get;
 			set;
-			default = false;
+			default = Script.ChangeBehavior.IGNORE;
 		}
 	}
 
@@ -149,6 +164,17 @@ namespace Frida.Gadget {
 			get;
 			set;
 			default = DEFAULT_LISTEN_PORT;
+		}
+
+		public LoadBehavior on_load {
+			get;
+			set;
+			default = LoadBehavior.WAIT;
+		}
+
+		public enum LoadBehavior {
+			RESUME,
+			WAIT
 		}
 	}
 
@@ -198,6 +224,7 @@ namespace Frida.Gadget {
 	private State state = State.CREATED;
 	private Config config;
 	private Location location;
+	private bool wait_for_resume_needed;
 	private MainLoop wait_for_resume_loop;
 	private MainContext wait_for_resume_context;
 	private ThreadIgnoreScope worker_ignore_scope;
@@ -224,8 +251,15 @@ namespace Frida.Gadget {
 
 		Gum.Cloak.add_range (location.range);
 
-		if (Environment.can_block_at_load_time ()) {
-			var scheduler = Environment.obtain_script_backend (config.jit).get_scheduler ();
+		wait_for_resume_needed = true;
+
+		var listen_interaction = config.interaction as ListenInteraction;
+		if (listen_interaction != null && listen_interaction.on_load == ListenInteraction.LoadBehavior.RESUME) {
+			wait_for_resume_needed = false;
+		}
+
+		if (wait_for_resume_needed && Environment.can_block_at_load_time ()) {
+			var scheduler = Environment.obtain_script_backend (config.runtime).get_scheduler ();
 
 			if (!Environment.has_system_loop ()) {
 				scheduler.disable_background_thread ();
@@ -255,6 +289,9 @@ namespace Frida.Gadget {
 		} else {
 			schedule_start ();
 		}
+
+		if (!wait_for_resume_needed)
+			resume ();
 	}
 
 	public void wait_for_permission_to_resume () {
@@ -283,7 +320,7 @@ namespace Frida.Gadget {
 			cond.wait (mutex);
 		mutex.unlock ();
 
-		if (!config.skip_teardown) {
+		if (config.teardown == TeardownRequirement.FULL) {
 			config = null;
 
 			Environment.deinit ();
@@ -292,19 +329,25 @@ namespace Frida.Gadget {
 
 	public void resume () {
 		mutex.lock ();
+		if (state != State.CREATED) {
+			mutex.unlock ();
+			return;
+		}
 		state = State.RUNNING;
 		cond.signal ();
 		mutex.unlock ();
 
-		if (wait_for_resume_context != null) {
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				wait_for_resume_loop.quit ();
-				return false;
-			});
-			source.attach (wait_for_resume_context);
-		} else {
-			Environment.stop_system_loop ();
+		if (wait_for_resume_needed) {
+			if (wait_for_resume_context != null) {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					wait_for_resume_loop.quit ();
+					return false;
+				});
+				source.attach (wait_for_resume_context);
+			} else if (Environment.has_system_loop ()) {
+				Environment.stop_system_loop ();
+			}
 		}
 	}
 
@@ -354,7 +397,7 @@ namespace Frida.Gadget {
 	}
 
 	private async void stop () {
-		if (config.skip_teardown) {
+		if (config.teardown == TeardownRequirement.MINIMAL) {
 			yield controller.flush ();
 		} else {
 			yield controller.stop ();
@@ -444,11 +487,11 @@ namespace Frida.Gadget {
 		}
 
 		construct {
-			engine = new ScriptEngine (Environment.obtain_script_backend (config.jit), location.range);
+			engine = new ScriptEngine (Environment.obtain_script_backend (config.runtime), location.range);
 
 			var path = parse_script_path (config, location);
-			var watch = (config.interaction as ScriptInteraction).watch;
-			script = new Script (path, watch, engine);
+			var interaction = config.interaction as ScriptInteraction;
+			script = new Script (path, interaction.on_change, engine);
 		}
 
 		public async void start () throws Error {
@@ -508,13 +551,13 @@ namespace Frida.Gadget {
 		}
 
 		construct {
-			engine = new ScriptEngine (Environment.obtain_script_backend (config.jit), location.range);
+			engine = new ScriptEngine (Environment.obtain_script_backend (config.runtime), location.range);
 		}
 
 		public async void start () throws Error {
-			var watch = (config.interaction as ScriptDirectoryInteraction).watch;
+			var interaction = config.interaction as ScriptDirectoryInteraction;
 
-			if (watch) {
+			if (interaction.on_change == ScriptDirectoryInteraction.ChangeBehavior.RESCAN) {
 				try {
 					var path = directory_path;
 					var monitor = File.new_for_path (path).monitor_directory (FileMonitorFlags.NONE);
@@ -572,18 +615,18 @@ namespace Frida.Gadget {
 
 					try {
 						bool load = true;
-						bool watch = false;
+						Script.ChangeBehavior on_change = Script.ChangeBehavior.IGNORE;
 
 						var config_path = derive_config_path_from_file_path (script_path);
 
 						var config = try_load_config (config_path);
 						if (config != null) {
 							load = current_process_matches (config.filter);
-							watch = config.watch;
+							on_change = config.on_change;
 						}
 
 						if (load && !scripts.has_key (name)) {
-							var script = new Script (script_path, watch, engine);
+							var script = new Script (script_path, on_change, engine);
 
 							yield script.start ();
 
@@ -698,6 +741,11 @@ namespace Frida.Gadget {
 	}
 
 	private class Script : Object {
+		public enum ChangeBehavior {
+			IGNORE,
+			RELOAD
+		}
+
 		public signal void message (string message, Bytes? data);
 
 		public string path {
@@ -705,7 +753,7 @@ namespace Frida.Gadget {
 			construct;
 		}
 
-		public bool watch {
+		public ChangeBehavior on_change {
 			get;
 			construct;
 		}
@@ -723,10 +771,10 @@ namespace Frida.Gadget {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public Script (string path, bool watch, ScriptEngine engine) {
+		public Script (string path, ChangeBehavior on_change, ScriptEngine engine) {
 			Object (
 				path: path,
-				watch: watch,
+				on_change: on_change,
 				engine: engine
 			);
 		}
@@ -734,7 +782,7 @@ namespace Frida.Gadget {
 		public async void start () throws Error {
 			engine.message_from_script.connect (on_message);
 
-			if (watch) {
+			if (on_change == ChangeBehavior.RELOAD) {
 				try {
 					var monitor = File.new_for_path (path).monitor_file (FileMonitorFlags.NONE);
 					monitor.changed.connect (on_file_changed);
@@ -1087,19 +1135,19 @@ namespace Frida.Gadget {
 
 		public ScriptEngine create_script_engine () {
 			if (script_backend == null)
-				script_backend = Environment.obtain_script_backend (config.jit);
+				script_backend = Environment.obtain_script_backend (config.runtime);
 
 			return new ScriptEngine (script_backend, location.range);
 		}
 
 		public void enable_jit () throws Error {
-			if (config.jit)
+			if (config.runtime == RuntimeFlavor.JIT)
 				return;
 
 			if (script_backend != null)
 				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
 
-			config.jit = true;
+			config.runtime = RuntimeFlavor.JIT;
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -1440,7 +1488,7 @@ namespace Frida.Gadget {
 
 		private extern unowned MainContext get_main_context ();
 
-		private extern unowned Gum.ScriptBackend obtain_script_backend (bool jit_enabled);
+		private extern unowned Gum.ScriptBackend obtain_script_backend (RuntimeFlavor runtime);
 
 		private extern string? detect_bundle_id ();
 		private extern bool has_objc_class (string name);
