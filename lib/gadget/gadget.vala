@@ -350,6 +350,16 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private State peek_state () {
+		State result;
+
+		mutex.lock ();
+		result = state;
+		mutex.unlock ();
+
+		return result;
+	}
+
 	private void schedule_start () {
 		var source = new IdleSource ();
 		source.set_callback (() => {
@@ -869,8 +879,11 @@ namespace Frida.Gadget {
 		}
 
 		private async void call_init () {
+			var stage = new Json.Node (Json.NodeType.VALUE);
+			stage.set_string ((peek_state () == State.CREATED) ? "early" : "late");
+
 			try {
-				yield call ("init", new Json.Node[] {});
+				yield call ("init", new Json.Node[] { stage });
 			} catch (Error e) {
 			}
 		}
