@@ -388,9 +388,11 @@ namespace Frida.Gadget {
 				log_info ("Listening on %s TCP port %hu".printf (server.listen_host, server.listen_port));
 			} else {
 				log_warning ("Failed to start: invalid interaction specified");
+				resume ();
 			}
 		} catch (Error e) {
 			log_warning ("Failed to start: " + e.message);
+			resume ();
 		}
 		controller = ctrl;
 	}
