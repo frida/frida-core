@@ -216,7 +216,6 @@ namespace Frida.Gadget {
 	private enum State {
 		CREATED,
 		STARTED,
-		RUNNING,
 		STOPPED
 	}
 
@@ -296,7 +295,7 @@ namespace Frida.Gadget {
 
 	public void wait_for_permission_to_resume () {
 		mutex.lock ();
-		while (state != State.RUNNING)
+		while (state != State.STARTED)
 			cond.wait (mutex);
 		mutex.unlock ();
 	}
@@ -333,7 +332,7 @@ namespace Frida.Gadget {
 			mutex.unlock ();
 			return;
 		}
-		state = State.RUNNING;
+		state = State.STARTED;
 		cond.signal ();
 		mutex.unlock ();
 
