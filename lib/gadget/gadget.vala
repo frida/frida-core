@@ -681,23 +681,15 @@ namespace Frida.Gadget {
 					names_seen.add (name);
 
 					var script_path = Path.build_filename (directory_path, name);
+					var config_path = derive_config_path_from_file_path (script_path);
 
 					try {
-						bool matches_filters = true;
-						Json.Node parameters = make_empty_json_object ();
-						Script.ChangeBehavior on_change = Script.ChangeBehavior.IGNORE;
+						var config = load_config (config_path);
 
-						var config_path = derive_config_path_from_file_path (script_path);
-
-						var config = try_load_config (config_path);
-						if (config != null) {
-							matches_filters = current_process_matches (config.filter);
-							parameters = config.parameters;
-							on_change = config.on_change;
-						}
-
-						if (matches_filters) {
+						var matches_filter = current_process_matches (config.filter);
+						if (matches_filter) {
 							var script = scripts[name];
+							var parameters = config.parameters;
 
 							if (script != null && !script.parameters.equal (parameters)) {
 								yield script.stop ();
@@ -705,7 +697,7 @@ namespace Frida.Gadget {
 							}
 
 							if (script == null) {
-								script = new Script (script_path, parameters, on_change, engine);
+								script = new Script (script_path, parameters, config.on_change, engine);
 								yield script.start ();
 							}
 
@@ -713,7 +705,7 @@ namespace Frida.Gadget {
 						}
 
 						Script script = null;
-						if (!matches_filters && scripts.unset (name, out script)) {
+						if (!matches_filter && scripts.unset (name, out script)) {
 							yield script.stop ();
 						}
 					} catch (Error e) {
@@ -801,13 +793,13 @@ namespace Frida.Gadget {
 			return raw_path;
 		}
 
-		private ScriptConfig? try_load_config (string path) throws Error {
+		private ScriptConfig load_config (string path) throws Error {
 			string data;
 			try {
 				FileUtils.get_contents (path, out data);
 			} catch (FileError e) {
 				if (e is FileError.NOENT)
-					return null;
+					return new ScriptConfig ();
 				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 
