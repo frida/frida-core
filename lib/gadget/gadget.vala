@@ -21,6 +21,8 @@ namespace Frida.Gadget {
 			default = RuntimeFlavor.INTERPRETER;
 		}
 
+		private ObjectClass klass = (ObjectClass) typeof (Config).class_ref ();
+
 		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
 			return default_serialize_property (property_name, value, pspec);
 		}
@@ -71,7 +73,6 @@ namespace Frida.Gadget {
 		}
 
 		public unowned ParamSpec? find_property (string name) {
-			var klass = (ObjectClass) typeof (Config).class_ref ();
 			return klass.find_property (name);
 		}
 	}
@@ -86,17 +87,45 @@ namespace Frida.Gadget {
 		JIT
 	}
 
-	private class ScriptInteraction : Object {
+	private class ScriptInteraction : Object, Json.Serializable {
 		public string path {
 			get;
 			set;
 			default = null;
 		}
 
+		public Json.Node parameters {
+			get;
+			set;
+			default = make_empty_json_object ();
+		}
+
 		public Script.ChangeBehavior on_change {
 			get;
 			set;
 			default = Script.ChangeBehavior.IGNORE;
+		}
+
+		private ObjectClass klass = (ObjectClass) typeof (ScriptInteraction).class_ref ();
+
+		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
+			return default_serialize_property (property_name, value, pspec);
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
+				var v = Value (typeof (Json.Node));
+				v.set_boxed (property_node);
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		public unowned ParamSpec? find_property (string name) {
+			return klass.find_property (name);
 		}
 	}
 
@@ -119,17 +148,45 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ScriptConfig : Object {
+	private class ScriptConfig : Object, Json.Serializable {
 		public ProcessFilter? filter {
 			get;
 			set;
 			default = null;
 		}
 
+		public Json.Node parameters {
+			get;
+			set;
+			default = make_empty_json_object ();
+		}
+
 		public Script.ChangeBehavior on_change {
 			get;
 			set;
 			default = Script.ChangeBehavior.IGNORE;
+		}
+
+		private ObjectClass klass = (ObjectClass) typeof (ScriptConfig).class_ref ();
+
+		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
+			return default_serialize_property (property_name, value, pspec);
+		}
+
+		public bool deserialize_property (string property_name, out Value value, ParamSpec pspec, Json.Node property_node) {
+			if (property_name == "parameters" && property_node.get_node_type () == Json.NodeType.OBJECT) {
+				var v = Value (typeof (Json.Node));
+				v.set_boxed (property_node.copy ());
+				value = v;
+				return true;
+			}
+
+			value = Value (pspec.value_type);
+			return false;
+		}
+
+		public unowned ParamSpec? find_property (string name) {
+			return klass.find_property (name);
 		}
 	}
 
@@ -503,7 +560,7 @@ namespace Frida.Gadget {
 
 			var path = parse_script_path (config, location);
 			var interaction = config.interaction as ScriptInteraction;
-			script = new Script (path, interaction.on_change, engine);
+			script = new Script (path, interaction.parameters, interaction.on_change, engine);
 		}
 
 		public async void start () throws Error {
@@ -626,27 +683,37 @@ namespace Frida.Gadget {
 					var script_path = Path.build_filename (directory_path, name);
 
 					try {
-						bool load = true;
+						bool matches_filters = true;
+						Json.Node parameters = make_empty_json_object ();
 						Script.ChangeBehavior on_change = Script.ChangeBehavior.IGNORE;
 
 						var config_path = derive_config_path_from_file_path (script_path);
 
 						var config = try_load_config (config_path);
 						if (config != null) {
-							load = current_process_matches (config.filter);
+							matches_filters = current_process_matches (config.filter);
+							parameters = config.parameters;
 							on_change = config.on_change;
 						}
 
-						if (load && !scripts.has_key (name)) {
-							var script = new Script (script_path, on_change, engine);
+						if (matches_filters) {
+							var script = scripts[name];
 
-							yield script.start ();
+							if (script != null && !script.parameters.equal (parameters)) {
+								yield script.stop ();
+								script = null;
+							}
+
+							if (script == null) {
+								script = new Script (script_path, parameters, on_change, engine);
+								yield script.start ();
+							}
 
 							scripts[name] = script;
 						}
 
 						Script script = null;
-						if (!load && scripts.unset (name, out script)) {
+						if (!matches_filters && scripts.unset (name, out script)) {
 							yield script.stop ();
 						}
 					} catch (Error e) {
@@ -765,6 +832,11 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		public Json.Node parameters {
+			get;
+			construct;
+		}
+
 		public ChangeBehavior on_change {
 			get;
 			construct;
@@ -783,9 +855,10 @@ namespace Frida.Gadget {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public Script (string path, ChangeBehavior on_change, ScriptEngine engine) {
+		public Script (string path, Json.Node parameters, ChangeBehavior on_change, ScriptEngine engine) {
 			Object (
 				path: path,
+				parameters: parameters,
 				on_change: on_change,
 				engine: engine
 			);
@@ -883,7 +956,7 @@ namespace Frida.Gadget {
 			stage.set_string ((peek_state () == State.CREATED) ? "early" : "late");
 
 			try {
-				yield call ("init", new Json.Node[] { stage });
+				yield call ("init", new Json.Node[] { stage, parameters });
 			} catch (Error e) {
 			}
 		}
@@ -1461,6 +1534,12 @@ namespace Frida.Gadget {
 			stem = filename;
 
 		return Path.build_filename (dirname, stem + ".config");
+	}
+
+	private static Json.Node make_empty_json_object () {
+		var parameters = new Json.Node (Json.NodeType.OBJECT);
+		parameters.set_object (new Json.Object ());
+		return parameters;
 	}
 
 	private class ThreadIgnoreScope {
