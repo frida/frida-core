@@ -690,14 +690,15 @@ namespace Frida.Gadget {
 						if (matches_filter) {
 							var script = scripts[name];
 							var parameters = config.parameters;
+							var on_change = config.on_change;
 
-							if (script != null && !script.parameters.equal (parameters)) {
+							if (script != null && (!script.parameters.equal (parameters) || script.on_change != on_change)) {
 								yield script.stop ();
 								script = null;
 							}
 
 							if (script == null) {
-								script = new Script (script_path, parameters, config.on_change, engine);
+								script = new Script (script_path, parameters, on_change, engine);
 								yield script.start ();
 							}
 
