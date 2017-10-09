@@ -1,6 +1,7 @@
 namespace Frida {
 	public interface DarwinHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
+		public signal void spawned (HostSpawnInfo info);
 		public signal void uninjected (uint id);
 
 		public abstract uint pid {
@@ -11,6 +12,9 @@ namespace Frida {
 
 		public abstract async void preload () throws Error;
 
+		public abstract async void enable_spawn_gating () throws Error;
+		public abstract async void disable_spawn_gating () throws Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws Error;
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 		public abstract async void input (uint pid, uint8[] data) throws Error;
 		public abstract async void launch (string identifier, string? url) throws Error;
@@ -30,10 +34,14 @@ namespace Frida {
 	[DBus (name = "re.frida.Helper")]
 	public interface DarwinRemoteHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
+		public signal void spawned (HostSpawnInfo info);
 		public signal void uninjected (uint id);
 
 		public abstract async void stop () throws GLib.Error;
 
+		public abstract async void enable_spawn_gating () throws GLib.Error;
+		public abstract async void disable_spawn_gating () throws GLib.Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws GLib.Error;
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
 		public abstract async void launch (string identifier, string url) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;

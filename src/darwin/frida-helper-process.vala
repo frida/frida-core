@@ -74,6 +74,33 @@ namespace Frida {
 			yield obtain ();
 		}
 
+		public async void enable_spawn_gating () throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.enable_spawn_gating ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.disable_spawn_gating ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			var helper = yield obtain ();
+			try {
+				return yield helper.enumerate_pending_spawns ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			var helper = yield obtain ();
 			try {
@@ -220,6 +247,7 @@ namespace Frida {
 
 				proxy = pending_proxy;
 				proxy.output.connect (on_output);
+				proxy.spawned.connect (on_spawned);
 				proxy.uninjected.connect (on_uninjected);
 
 				obtain_request.set_value (proxy);
@@ -248,6 +276,7 @@ namespace Frida {
 			obtain_request = null;
 
 			proxy.output.disconnect (on_output);
+			proxy.spawned.disconnect (on_spawned);
 			proxy.uninjected.disconnect (on_uninjected);
 			proxy = null;
 
@@ -260,6 +289,10 @@ namespace Frida {
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_spawned (HostSpawnInfo info) {
+			spawned (info);
 		}
 
 		private void on_uninjected (uint id) {

@@ -29,10 +29,16 @@ namespace Frida {
 		private Gee.HashMap<void *, uint> inject_instance_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
 		public uint last_id = 1;
 
+		private KernelAgent kernel_agent;
+
 		public DarwinHelperBackend () {
 			Object ();
 
 			_create_context ();
+
+			kernel_agent = KernelAgent.try_open ();
+			if (kernel_agent != null)
+				kernel_agent.spawned.connect (on_kernel_agent_spawned);
 		}
 
 		~DarwinHelperBackend () {
@@ -57,9 +63,33 @@ namespace Frida {
 			foreach (var task in remote_task_by_pid.values)
 				deallocate_port (task);
 			remote_task_by_pid.clear ();
+
+			if (kernel_agent != null) {
+				kernel_agent.spawned.disconnect (on_kernel_agent_spawned);
+				kernel_agent.close ();
+				kernel_agent = null;
+			}
 		}
 
 		public async void preload () throws Error {
+		}
+
+		public async void enable_spawn_gating () throws Error {
+			if (kernel_agent == null)
+				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
+			kernel_agent.enable_spawn_gating ();
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			if (kernel_agent == null)
+				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
+			kernel_agent.disable_spawn_gating ();
+		}
+
+		public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			if (kernel_agent == null)
+				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
+			return kernel_agent.enumerate_pending_spawns ();
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -160,12 +190,15 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid) throws Error {
+			if (kernel_agent != null && kernel_agent.try_resume (pid))
+				return;
+
 			void * instance;
 			if (spawn_instance_by_pid.unset (pid, out instance)) {
 				_resume_spawn_instance (instance);
 				_free_spawn_instance (instance);
 			} else {
-				_resume_process (pid, borrow_task_for_remote_pid (pid));
+				_resume_process (borrow_task_for_remote_pid (pid));
 			}
 		}
 
@@ -193,6 +226,9 @@ namespace Frida {
 				spawn_instance = _create_spawn_instance (pid);
 			if (spawn_instance != null) {
 				_prepare_spawn_instance_for_injection (spawn_instance, task);
+
+				if (kernel_agent == null || !kernel_agent.try_resume (pid))
+					_resume_process_fast (task);
 
 				bool timed_out = false;
 				var ready_handler = spawn_instance_ready.connect ((ready_pid) => {
@@ -350,9 +386,20 @@ namespace Frida {
 			inject_instance_cleaner_by_instance[instance] = cleanup_source.attach (MainContext.get_thread_default ());
 		}
 
+		public uint task_for_pid (uint pid) throws Error {
+			if (kernel_agent != null)
+				return kernel_agent.task_for_pid (pid);
+
+			return task_for_pid_fallback (pid);
+		}
+
+		private void on_kernel_agent_spawned (HostSpawnInfo info) {
+			spawned (info);
+		}
+
 		public static extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
 
-		public static extern uint task_for_pid (uint pid) throws Error;
+		public static extern uint task_for_pid_fallback (uint pid) throws Error;
 		public static extern void deallocate_port (uint port);
 
 		public static extern bool is_mmap_available ();
@@ -364,7 +411,8 @@ namespace Frida {
 		protected extern uint _spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
 		protected extern void _launch (string identifier, string? url, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
-		protected extern void _resume_process (uint pid, uint task) throws Error;
+		protected extern void _resume_process (uint task) throws Error;
+		protected extern void _resume_process_fast (uint task) throws Error;
 		protected extern void _kill_process (uint pid);
 		protected extern void _kill_application (string identifier);
 		protected extern void * _create_spawn_instance (uint pid);
@@ -376,6 +424,130 @@ namespace Frida {
 		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
 		protected extern bool _is_instance_resident (void * instance);
 		protected extern void _free_inject_instance (void * instance);
+	}
+
+	public class KernelAgent : Object {
+		public signal void spawned (HostSpawnInfo info);
+
+		public int fd {
+			get;
+			construct;
+		}
+
+		private bool spawn_gating_enabled = false;
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn_by_pid = new Gee.HashMap<uint, HostSpawnInfo?> ();
+
+		private DataInputStream input;
+		private Cancellable input_cancellable = new Cancellable ();
+
+		private const ulong IOCTL_ENABLE_SPAWN_GATING  = 0x20005201U;
+		private const ulong IOCTL_DISABLE_SPAWN_GATING = 0x20005202U;
+		private const ulong IOCTL_RESUME               = 0x80045203U;
+		private const ulong IOCTL_TASK_FOR_PID         = 0xc0085204U;
+
+		public static KernelAgent? try_open () {
+			var fd = Posix.open ("/dev/frida", Posix.O_RDONLY);
+			if (fd == -1)
+				return null;
+
+			return new KernelAgent (fd);
+		}
+
+		private KernelAgent (int fd) {
+			Object (fd: fd);
+		}
+
+		construct {
+			var fd = this.fd;
+
+			try {
+				Unix.set_fd_nonblocking (fd, true);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			input = new DataInputStream (new UnixInputStream (fd, true));
+
+			process_incoming_messages.begin ();
+		}
+
+		public void close () {
+			input_cancellable.cancel ();
+		}
+
+		public void enable_spawn_gating () throws Error {
+			var status = ioctl (fd, IOCTL_ENABLE_SPAWN_GATING);
+			if (status != 0)
+				throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
+			spawn_gating_enabled = true;
+		}
+
+		public void disable_spawn_gating () throws Error {
+			var status = ioctl (fd, IOCTL_DISABLE_SPAWN_GATING);
+			if (status != 0)
+				throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
+			spawn_gating_enabled = false;
+		}
+
+		public HostSpawnInfo[] enumerate_pending_spawns () {
+			var result = new HostSpawnInfo[pending_spawn_by_pid.size];
+			var index = 0;
+			foreach (var spawn in pending_spawn_by_pid.values)
+				result[index++] = spawn;
+			return result;
+		}
+
+		public bool try_resume (uint pid) throws Error {
+			HostSpawnInfo? info;
+			if (!pending_spawn_by_pid.unset (pid, out info))
+				return false;
+
+			var status = ioctl (fd, IOCTL_RESUME, ref pid);
+			if (status != 0)
+				throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
+
+			return true;
+		}
+
+		public uint task_for_pid (uint pid) throws Error {
+			uint val = pid;
+			var status = ioctl (fd, IOCTL_TASK_FOR_PID, ref val);
+			if (status != 0) {
+				var error = Posix.errno;
+				if (error == Posix.ESRCH)
+					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
+				else
+					throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
+			}
+			return val;
+		}
+
+		private async void process_incoming_messages () {
+			try {
+				while (true) {
+					var line = yield input.read_line_async (Priority.DEFAULT, input_cancellable);
+					if (line == null)
+						break;
+
+					var tokens = line.split(":");
+
+					var state = tokens[2];
+					if (state != "suspended" || !spawn_gating_enabled)
+						continue;
+
+					var pid = int.parse (tokens[0]);
+					var executable_path = tokens[1];
+
+					var info = HostSpawnInfo (pid, executable_path);
+					pending_spawn_by_pid[pid] = info;
+					spawned (info);
+				}
+			} catch (IOError e) {
+			}
+		}
+
+		[CCode (cheader_filename = "sys/ioctl.h", cname = "ioctl", sentinel = "")]
+		private static extern int ioctl (int fildes, ulong request, ...);
 	}
 
 	public class StdioPipes : Object {

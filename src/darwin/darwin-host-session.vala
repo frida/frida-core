@@ -106,6 +106,7 @@ namespace Frida {
 
 		construct {
 			helper.output.connect (on_output);
+			helper.spawned.connect (on_spawned);
 
 			injector = new Fruitjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
@@ -139,6 +140,7 @@ namespace Frida {
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);
+			helper.spawned.disconnect (on_spawned);
 
 			tempdir.destroy ();
 		}
@@ -185,7 +187,7 @@ namespace Frida {
 #if IOS
 			yield get_fruit_launcher ().enable_spawn_gating ();
 #else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			yield helper.enable_spawn_gating ();
 #endif
 		}
 
@@ -193,7 +195,7 @@ namespace Frida {
 #if IOS
 			yield get_fruit_launcher ().disable_spawn_gating ();
 #else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			yield helper.disable_spawn_gating ();
 #endif
 		}
 
@@ -201,7 +203,7 @@ namespace Frida {
 #if IOS
 			return get_fruit_launcher ().enumerate_pending_spawns ();
 #else
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			return yield helper.enumerate_pending_spawns ();
 #endif
 		}
 
@@ -271,6 +273,10 @@ namespace Frida {
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_spawned (HostSpawnInfo info) {
+			spawned (info);
 		}
 
 		private void on_uninjected (uint id) {

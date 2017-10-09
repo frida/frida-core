@@ -349,7 +349,7 @@ handle_mach_error:
 }
 
 guint
-frida_darwin_helper_backend_task_for_pid (guint pid, GError ** error)
+frida_darwin_helper_backend_task_for_pid_fallback (guint pid, GError ** error)
 {
   gboolean remote_pid_exists;
   mach_port_t task;
@@ -810,7 +810,7 @@ handle_mach_error:
 }
 
 void
-_frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint pid, guint task, GError ** error)
+_frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
@@ -839,6 +839,28 @@ handle_process_not_suspended:
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_OPERATION,
         "Process is not suspended");
+    return;
+  }
+}
+
+void
+_frida_darwin_helper_backend_resume_process_fast (FridaDarwinHelperBackend * self, guint task, GError ** error)
+{
+  kern_return_t ret;
+
+  ret = task_resume (task);
+  if (ret != KERN_SUCCESS)
+    goto unexpected_error;
+
+  return;
+
+unexpected_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while resuming process: %s",
+        mach_error_string (ret));
     return;
   }
 }
@@ -1045,9 +1067,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   dispatch_set_context (source, instance);
   dispatch_source_set_event_handler_f (source, frida_spawn_instance_on_server_recv);
   dispatch_resume (source);
-
-  ret = task_resume (task);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_resume");
 
   return;
 
@@ -1517,7 +1536,7 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
     task = frida_darwin_helper_backend_steal_task_for_remote_pid (self->backend, self->pid, &error);
     if (error == NULL)
     {
-      _frida_darwin_helper_backend_resume_process (self->backend, self->pid, task, &error);
+      _frida_darwin_helper_backend_resume_process (self->backend, task, &error);
     }
 
     g_clear_error (&error);

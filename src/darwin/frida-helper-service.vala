@@ -45,6 +45,7 @@ namespace Frida {
 		construct {
 			backend.idle.connect (on_backend_idle);
 			backend.output.connect (on_backend_output);
+			backend.spawned.connect (on_backend_spawned);
 			backend.uninjected.connect (on_backend_uninjected);
 		}
 
@@ -85,6 +86,7 @@ namespace Frida {
 			yield backend.close ();
 			backend.idle.disconnect (on_backend_idle);
 			backend.output.disconnect (on_backend_output);
+			backend.spawned.disconnect (on_backend_spawned);
 			backend.uninjected.disconnect (on_backend_uninjected);
 			backend = null;
 
@@ -134,6 +136,18 @@ namespace Frida {
 				shutdown.begin ();
 		}
 
+		public async void enable_spawn_gating () throws Error {
+			yield backend.enable_spawn_gating ();
+		}
+
+		public async void disable_spawn_gating () throws Error {
+			yield backend.disable_spawn_gating ();
+		}
+
+		public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			return yield backend.enumerate_pending_spawns ();
+		}
+
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 			return yield backend.spawn (path, argv, envp);
 		}
@@ -178,6 +192,10 @@ namespace Frida {
 
 		private void on_backend_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
+		}
+
+		private void on_backend_spawned (HostSpawnInfo info) {
+			spawned (info);
 		}
 
 		private void on_backend_uninjected (uint id) {
