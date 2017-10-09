@@ -517,7 +517,7 @@ namespace Frida {
 				if (error == Posix.ESRCH)
 					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
 				else
-					throw new Error.INVALID_OPERATION ("%s", strerror (Posix.errno));
+					throw new Error.INVALID_OPERATION ("%s", strerror (error));
 			}
 			return val;
 		}
