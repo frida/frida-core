@@ -1,14 +1,16 @@
 # FridaKernelAgent.kext
 
-Experimental kernel driver for system-wide early instrumentation on macOS.
+Experimental kernel driver for boosting Frida's capabilities on macOS:
 
-Also improves Frida's stealthiness and allows it to get into any process.
+- [Spawn-gating](https://gist.github.com/oleavr/ae7bcbbb9179852a4731)
+- Attach to any process
+- Improved stealth by avoiding `task_for_pid()`, which modifies the extmod stats
 
 ## Installation
 
-1. Open `FridaKernelAgent.xcodeproj` and build it with Xcode.
-2. Review `reload.sh`, adjusting it to match your system.
-3. Run `reload.sh` to install and load the driver.
+1. Open `FridaKernelAgent.xcodeproj` and build it with Xcode
+2. Review `reload.sh`, adjusting it to match your system
+3. Run `reload.sh` to install and load the driver
 
 To verify the installation, run this in a terminal:
 
