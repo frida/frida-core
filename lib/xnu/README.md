@@ -8,9 +8,7 @@ Experimental kernel driver for boosting Frida's capabilities on macOS:
 
 ## Installation
 
-1. Open `FridaKernelAgent.xcodeproj` and build it with Xcode
-2. Review `reload.sh`, adjusting it to match your system
-3. Run `reload.sh` to install and load the driver
+Run `reload.sh` to install and load the driver
 
 To verify the installation, run this in a terminal:
 
