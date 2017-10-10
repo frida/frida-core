@@ -529,7 +529,7 @@ namespace Frida {
 					if (line == null)
 						break;
 
-					var tokens = line.split(":");
+					var tokens = line.split (":");
 
 					var state = tokens[2];
 					if (state != "suspended" || !spawn_gating_enabled)
