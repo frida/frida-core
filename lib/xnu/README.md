@@ -10,6 +10,9 @@ Experimental kernel driver for boosting Frida's capabilities on macOS:
 
 Run `reload.sh` to install and load the driver
 
+If it fails to load, set `CODE_SIGN_IDENTITY` enviroment variable to
+identity valid for Kext signing, or disable SIP
+
 To verify the installation, run this in a terminal:
 
 ```sh
