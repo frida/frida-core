@@ -9,3 +9,17 @@ Also improves Frida's stealthiness and allows it to get into any process.
 1. Open `FridaKernelAgent.xcodeproj` and build it with Xcode.
 2. Review `reload.sh`, adjusting it to match your system.
 3. Run `reload.sh` to install and load the driver.
+
+To verify the installation, run this in a terminal:
+
+```sh
+$ cat /dev/frida
+```
+
+And you should see a real-time feed of all processes being spawned on
+your system.
+
+## Usage
+
+The driver is used transparently by Frida >= 10.6.9 if `/dev/frida` is
+available.
