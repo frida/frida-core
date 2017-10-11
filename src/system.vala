@@ -129,7 +129,7 @@ namespace Frida {
 					file = File.new_for_path (Path.build_filename (get_system_tmp (), name));
 
 					try {
-						file.make_directory ();
+						file.make_directory_with_parents ();
 					} catch (GLib.Error e) {
 						// Following operations will fail
 					}
