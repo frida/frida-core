@@ -62,7 +62,7 @@ ENTRY_PRIVATE(syscall)
   .cfi_rel_offset ebp, 0
 
   # Get and save the system call entry address.
-  lea     frida_kernel_syscall, %eax
+  lea frida_kernel_syscall@GOTOFF(%ebx), %eax
   push    %eax
   .cfi_adjust_cfa_offset 4
   .cfi_rel_offset eax, 0
