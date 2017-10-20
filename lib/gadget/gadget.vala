@@ -21,6 +21,12 @@ namespace Frida.Gadget {
 			default = RuntimeFlavor.INTERPRETER;
 		}
 
+		public Gum.CodeSigningPolicy code_signing {
+			get;
+			set;
+			default = Gum.CodeSigningPolicy.OPTIONAL;
+		}
+
 		private ObjectClass klass = (ObjectClass) typeof (Config).class_ref ();
 
 		public Json.Node serialize_property (string property_name, GLib.Value value, GLib.ParamSpec pspec) {
@@ -304,6 +310,8 @@ namespace Frida.Gadget {
 			log_warning (e.message);
 			return;
 		}
+
+		Gum.Process.set_code_signing_policy (config.code_signing);
 
 		Gum.Cloak.add_range (location.range);
 
