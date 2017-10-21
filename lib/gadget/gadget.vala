@@ -566,7 +566,7 @@ namespace Frida.Gadget {
 		construct {
 			engine = new ScriptEngine (Environment.obtain_script_backend (config.runtime), location.range);
 
-			var path = parse_script_path (config, location);
+			var path = resolve_script_path (config, location);
 			var interaction = config.interaction as ScriptInteraction;
 			script = new Script (path, interaction.parameters, interaction.on_change, engine);
 		}
@@ -585,10 +585,17 @@ namespace Frida.Gadget {
 			yield engine.shutdown ();
 		}
 
-		private static string parse_script_path (Config config, Location location) {
+		private static string resolve_script_path (Config config, Location location) {
 			var raw_path = (config.interaction as ScriptInteraction).path;
 
 			if (!Path.is_absolute (raw_path)) {
+				var documents_dir = Environment.detect_documents_dir ();
+				if (documents_dir != null) {
+					var script_path = Path.build_filename (documents_dir, raw_path);
+					if (FileUtils.test (script_path, FileTest.EXISTS))
+						return script_path;
+				}
+
 				var base_dir = Path.get_dirname (location.path);
 				return Path.build_filename (base_dir, raw_path);
 			}
@@ -1589,6 +1596,7 @@ namespace Frida.Gadget {
 		private extern unowned Gum.ScriptBackend obtain_script_backend (RuntimeFlavor runtime);
 
 		private extern string? detect_bundle_id ();
+		private extern string? detect_documents_dir ();
 		private extern bool has_objc_class (string name);
 	}
 

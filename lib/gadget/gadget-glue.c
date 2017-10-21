@@ -19,8 +19,22 @@
 # include <dlfcn.h>
 # include <objc/runtime.h>
 
+# define NSDocumentDirectory 9
+# define NSUserDomainMask 1
+
+typedef struct _FridaFoundationApi FridaFoundationApi;
 typedef struct _FridaCFApi FridaCFApi;
 typedef struct _FridaObjCApi FridaObjCApi;
+
+typedef gsize NSSearchPathDirectory;
+typedef gsize NSSearchPathDomainMask;
+
+struct _FridaFoundationApi
+{
+  gpointer (* NSSearchPathForDirectoriesInDomains) (NSSearchPathDirectory directory, NSSearchPathDomainMask domain_mask, Boolean expand_tilde);
+
+  Class NSAutoreleasePool;
+};
 
 struct _FridaCFApi
 {
@@ -47,10 +61,15 @@ struct _FridaCFApi
 struct _FridaObjCApi
 {
   Class (* objc_getClass) (const char * name);
+  SEL (* sel_registerName) (const char * str);
+
+  void (* objc_msgSend_void_void) (gpointer self, SEL op);
+  gpointer (* objc_msgSend_pointer_void) (gpointer self, SEL op);
 };
 
 static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 
+static FridaFoundationApi * frida_foundation_api_try_get (void);
 static FridaCFApi * frida_cf_api_try_get (void);
 static FridaObjCApi * frida_objc_api_try_get (void);
 
@@ -155,6 +174,7 @@ frida_gadget_environment_init (void)
 
 #ifdef HAVE_DARWIN
   /* Ensure any initializers run on the main thread. */
+  frida_foundation_api_try_get ();
   frida_cf_api_try_get ();
   frida_objc_api_try_get ();
 #endif
@@ -307,6 +327,39 @@ frida_gadget_environment_detect_bundle_id (void)
 #endif
 }
 
+gchar *
+frida_gadget_environment_detect_documents_dir (void)
+{
+#ifdef HAVE_IOS
+  FridaFoundationApi * foundation;
+  FridaObjCApi * objc;
+  gpointer pool, paths, path_value;
+  gchar * path;
+
+  foundation = frida_foundation_api_try_get ();
+  if (foundation == NULL)
+    return NULL;
+
+  objc = frida_objc_api_try_get ();
+  g_assert (objc != NULL);
+
+  pool = objc->objc_msgSend_pointer_void (foundation->NSAutoreleasePool, objc->sel_registerName ("alloc"));
+  pool = objc->objc_msgSend_pointer_void (pool, objc->sel_registerName ("init"));
+
+  paths = foundation->NSSearchPathForDirectoriesInDomains (NSDocumentDirectory, NSUserDomainMask, TRUE);
+
+  path_value = objc->objc_msgSend_pointer_void (paths, objc->sel_registerName ("firstObject"));
+
+  path = g_strdup (objc->objc_msgSend_pointer_void (path_value, objc->sel_registerName ("UTF8String")));
+
+  objc->objc_msgSend_void_void (pool, objc->sel_registerName ("release"));
+
+  return path;
+#else
+  return NULL;
+#endif
+}
+
 gboolean
 frida_gadget_environment_has_objc_class (const gchar * name)
 {
@@ -359,6 +412,61 @@ frida_gadget_log_warning (const gchar * message)
 
 #ifdef HAVE_DARWIN
 
+static FridaFoundationApi *
+frida_foundation_api_try_get (void)
+{
+  static gsize api_value = 0;
+  FridaFoundationApi * api;
+
+  if (g_once_init_enter (&api_value))
+  {
+    const gchar * foundation_path = "/System/Library/Frameworks/Foundation.framework/Foundation";
+    void * foundation;
+
+    foundation = dlopen (foundation_path, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOLOAD);
+    if (foundation != NULL)
+    {
+      FridaObjCApi * objc;
+
+      /*
+       * Okay the process has Foundation loaded!
+       *
+       * Now let's make sure initializers have been run:
+       */
+      dlclose (foundation);
+      foundation = dlopen (foundation_path, RTLD_GLOBAL | RTLD_LAZY);
+
+      api = g_slice_new (FridaFoundationApi);
+
+#define FRIDA_ASSIGN_FOUNDATION_SYMBOL(n) \
+    api->n = dlsym (foundation, G_STRINGIFY (n)); \
+    g_assert (api->n != NULL)
+
+      FRIDA_ASSIGN_FOUNDATION_SYMBOL (NSSearchPathForDirectoriesInDomains);
+
+#undef FRIDA_ASSIGN_FOUNDATION_SYMBOL
+
+      objc = frida_objc_api_try_get ();
+      g_assert (objc != NULL);
+
+      api->NSAutoreleasePool = objc->objc_getClass ("NSAutoreleasePool");
+      g_assert (api->NSAutoreleasePool != NULL);
+
+      dlclose (foundation);
+    }
+    else
+    {
+      api = NULL;
+    }
+
+    g_once_init_leave (&api_value, 1 + GPOINTER_TO_SIZE (api));
+  }
+
+  api = GSIZE_TO_POINTER (api_value - 1);
+
+  return api;
+}
+
 static FridaCFApi *
 frida_cf_api_try_get (void)
 {
@@ -373,11 +481,6 @@ frida_cf_api_try_get (void)
     cf = dlopen (cf_path, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOLOAD);
     if (cf != NULL)
     {
-      /*
-       * Okay the process has CoreFoundation loaded!
-       *
-       * Now let's make sure initializers have been run:
-       */
       dlclose (cf);
       cf = dlopen (cf_path, RTLD_GLOBAL | RTLD_LAZY);
 
@@ -437,11 +540,8 @@ frida_objc_api_try_get (void)
     objc = dlopen (objc_path, RTLD_GLOBAL | RTLD_LAZY | RTLD_NOLOAD);
     if (objc != NULL)
     {
-      /*
-       * Okay the process has the Objective-C runtime loaded!
-       *
-       * Now let's make sure initializers have been run:
-       */
+      gpointer send_impl;
+
       dlclose (objc);
       objc = dlopen (objc_path, RTLD_GLOBAL | RTLD_LAZY);
 
@@ -452,8 +552,15 @@ frida_objc_api_try_get (void)
     g_assert (api->n != NULL)
 
       FRIDA_ASSIGN_OBJC_SYMBOL (objc_getClass);
+      FRIDA_ASSIGN_OBJC_SYMBOL (sel_registerName);
 
 #undef FRIDA_ASSIGN_OBJC_SYMBOL
+
+      send_impl = dlsym (objc, "objc_msgSend");
+      g_assert (send_impl != NULL);
+
+      api->objc_msgSend_void_void = send_impl;
+      api->objc_msgSend_pointer_void = send_impl;
 
       dlclose (objc);
     }
