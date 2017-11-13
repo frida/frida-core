@@ -494,6 +494,25 @@ namespace Frida.Gadget {
 	private Config load_config (Location location) throws Error {
 		var config_path = derive_config_path_from_file_path (location.path);
 
+		if(FileUtils.test (config_path, FileTest.EXISTS)) {
+			log_info ("Config file found: %s".printf (config_path));
+		}
+		else {
+			log_warning ("Config file not found: %s".printf (config_path));
+
+			#if ANDROID
+				var ext_index = config_path.last_index_of_char ('.');
+				if (ext_index != -1) {
+					config_path = config_path[0:ext_index] + ".config.so";
+				}
+				else{
+					config_path = config_path + ".config.so";
+				}
+
+				log_info ("Trying to load the config file with the alternative extension: %s".printf (config_path));
+			#endif
+		}
+
 		string config_data;
 		try {
 			FileUtils.get_contents (config_path, out config_data);
@@ -1541,12 +1560,7 @@ namespace Frida.Gadget {
 		else
 			stem = filename;
 
-		#if ANDROID
-			var configpath = Path.build_filename (dirname, stem + ".config.so");
-		#else
-			var configpath = Path.build_filename (dirname, stem + ".config");
-		#endif
-
+		var configpath = Path.build_filename (dirname, stem + ".config");
 		return configpath;
 	}
 
