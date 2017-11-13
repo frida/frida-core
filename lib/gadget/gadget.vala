@@ -1541,7 +1541,13 @@ namespace Frida.Gadget {
 		else
 			stem = filename;
 
-		return Path.build_filename (dirname, stem + ".config");
+		#if ANDROID
+			var configpath = Path.build_filename (dirname, stem + ".config.so");
+		#else
+			var configpath = Path.build_filename (dirname, stem + ".config");
+		#endif
+
+		return configpath;
 	}
 
 	private static Json.Node make_empty_json_object () {
