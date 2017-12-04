@@ -309,6 +309,9 @@ namespace Frida.Server {
 			clients.unset (connection, out client);
 			client.close ();
 
+			if (client.is_spawn_gating)
+				host_session.disable_spawn_gating.begin ();
+
 			foreach (var raw_session_id in client.sessions)
 				close_session.begin (AgentSessionId (raw_session_id));
 		}
@@ -325,6 +328,11 @@ namespace Frida.Server {
 			public DBusConnection connection {
 				get;
 				construct;
+			}
+
+			public bool is_spawn_gating {
+				get;
+				private set;
 			}
 
 			public Gee.HashSet<uint> sessions {
@@ -415,7 +423,17 @@ namespace Frida.Server {
 					member = call.get_member ();
 				}
 				if (iface == "re.frida.HostSession10") {
-					if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
+					if (member == "EnableSpawnGating" && type == DBusMessageType.METHOD_RETURN) {
+						Idle.add (() => {
+							is_spawn_gating = true;
+							return false;
+						});
+					} else if (member == "DisableSpawnGating" && type == DBusMessageType.METHOD_RETURN) {
+						Idle.add (() => {
+							is_spawn_gating = false;
+							return false;
+						});
+					} else if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
 						uint32 session_id;
 						message.get_body ().get ("((u))", out session_id);
 						Idle.add (() => {
