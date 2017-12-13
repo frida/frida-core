@@ -1345,15 +1345,6 @@ namespace Frida.Gadget {
 			public async void kill (uint pid) throws Error {
 				validate_pid (pid);
 
-				suicide.begin ();
-			}
-
-			private async void suicide () {
-				try {
-					yield connection.flush ();
-				} catch (GLib.Error e) {
-				}
-
 				_kill (this_process.pid);
 			}
 
