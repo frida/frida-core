@@ -847,9 +847,16 @@ namespace Frida {
 
 			try {
 				yield ensure_host_session ();
-				yield host_session.kill (pid);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
+			}
+
+			try {
+				yield host_session.kill (pid);
+			} catch (GLib.Error e) {
+				/* The process being killed might be the other end of the connection. */
+				if (!(e is IOError.CLOSED))
+					throw Marshal.from_dbus (e);
 			}
 		}
 
