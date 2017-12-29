@@ -62,7 +62,7 @@ union _FridaDebugState
 #ifdef HAVE_I386
   x86_debug_state_t state;
 #else
-  arm_debug_state32_t s32;
+  arm_debug_state_t s32;
   arm_debug_state64_t s64;
 #endif
 };
@@ -2907,8 +2907,8 @@ frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type)
   }
   else
   {
-    state_count = ARM_DEBUG_STATE32_COUNT;
-    ret = thread_get_state (thread, ARM_DEBUG_STATE32, state, &state_count);
+    state_count = ARM_DEBUG_STATE_COUNT;
+    ret = thread_get_state (thread, ARM_DEBUG_STATE, state, &state_count);
   }
 #endif
 
@@ -2932,8 +2932,8 @@ frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_t
   }
   else
   {
-    state_count = ARM_DEBUG_STATE32_COUNT;
-    ret = thread_set_state (thread, ARM_DEBUG_STATE32, (thread_state_t) state, state_count);
+    state_count = ARM_DEBUG_STATE_COUNT;
+    ret = thread_set_state (thread, ARM_DEBUG_STATE, (thread_state_t) state, state_count);
   }
 #endif
 
@@ -2974,7 +2974,7 @@ frida_set_hardware_breakpoint (gpointer state, GumAddress break_at, GumCpuType c
   }
   else
   {
-    arm_debug_state32_t * s = state;
+    arm_debug_state_t * s = state;
 
     s->__bvr[0] = break_at;
     s->__bcr[0] = (FRIDA_BAS_ANY << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
