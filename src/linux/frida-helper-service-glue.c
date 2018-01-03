@@ -127,17 +127,15 @@ struct _FridaRegs
 # error Unsupported architecture
 #endif
 
-#define FRIDA_REMOTE_PAYLOAD_SIZE (8192)
-#define FRIDA_REMOTE_DATA_OFFSET (512)
-#define FRIDA_REMOTE_STACK_OFFSET (FRIDA_REMOTE_PAYLOAD_SIZE - 512)
 #define FRIDA_REMOTE_DATA_FIELD(n) \
-  (remote_address + FRIDA_REMOTE_DATA_OFFSET + G_STRUCT_OFFSET (FridaTrampolineData, n))
+  (remote_address + params->data.offset + G_STRUCT_OFFSET (FridaTrampolineData, n))
 
 #define FRIDA_DUMMY_RETURN_ADDRESS 0x320
 
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
 typedef struct _FridaInjectInstance FridaInjectInstance;
 typedef struct _FridaInjectParams FridaInjectParams;
+typedef struct _FridaInjectRegion FridaInjectRegion;
 typedef struct _FridaCodeChunk FridaCodeChunk;
 typedef struct _FridaTrampolineData FridaTrampolineData;
 typedef struct _FridaProbeElfContext FridaProbeElfContext;
@@ -159,6 +157,13 @@ struct _FridaInjectInstance
   gchar * fifo_path;
   gint fifo;
   GumAddress remote_payload;
+  guint remote_size;
+};
+
+struct _FridaInjectRegion
+{
+  guint offset;
+  guint size;
 };
 
 struct _FridaInjectParams
@@ -169,14 +174,20 @@ struct _FridaInjectParams
   const gchar * entrypoint_data;
 
   const gchar * fifo_path;
+
+  FridaInjectRegion code;
+  FridaInjectRegion data;
+  FridaInjectRegion guard;
+  FridaInjectRegion stack;
+
   GumAddress remote_address;
+  guint remote_size;
 };
 
 struct _FridaCodeChunk
 {
   guint8 * cur;
   gsize size;
-  guint8 bytes[2048];
 };
 
 struct _FridaTrampolineData
@@ -223,6 +234,7 @@ static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * deta
 
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
 static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
+static gboolean frida_remote_mprotect (pid_t pid, GumAddress address, size_t size, int prot, GError ** error);
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, gboolean * exited, GError ** error);
 static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, gboolean * exited, GError ** error);
@@ -326,9 +338,39 @@ guint
 _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, GError ** error)
 {
   FridaInjectInstance * instance;
-  FridaInjectParams params = { pid, path, entrypoint, data };
+  FridaInjectParams params;
+  guint offset, page_size;
   FridaRegs saved_regs;
   gboolean exited;
+
+  params.pid = pid;
+  params.so_path = path;
+  params.entrypoint_name = entrypoint;
+  params.entrypoint_data = data;
+
+  params.fifo_path = NULL;
+
+  offset = 0;
+  page_size = gum_query_page_size ();
+
+  params.code.offset = offset;
+  params.code.size = page_size;
+  offset += params.code.size;
+
+  params.data.offset = offset;
+  params.data.size = page_size;
+  offset += params.data.size;
+
+  params.guard.offset = offset;
+  params.guard.size = page_size;
+  offset += params.guard.size;
+
+  params.stack.offset = offset;
+  params.stack.size = page_size;
+  offset += params.stack.size;
+
+  params.remote_address = 0;
+  params.remote_size = offset;
 
   if (self->next_id == 0 || self->next_id >= G_MAXINT)
   {
@@ -342,10 +384,11 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     goto beach;
 
   params.fifo_path = instance->fifo_path;
-  params.remote_address = frida_remote_alloc (pid, FRIDA_REMOTE_PAYLOAD_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, error);
+  params.remote_address = frida_remote_alloc (pid, params.remote_size, PROT_READ | PROT_WRITE, error);
   if (params.remote_address == 0)
     goto beach;
   instance->remote_payload = params.remote_address;
+  instance->remote_size = params.remote_size;
 
   if (!frida_inject_instance_emit_and_remote_execute (frida_inject_instance_emit_payload_code, &params, NULL, &exited, error) && !exited)
     goto beach;
@@ -447,7 +490,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
 
     if (frida_inject_instance_attach (instance, &saved_regs, NULL))
     {
-      frida_remote_dealloc (instance->pid, instance->remote_payload, FRIDA_REMOTE_PAYLOAD_SIZE, NULL);
+      frida_remote_dealloc (instance->pid, instance->remote_payload, instance->remote_size, NULL);
       frida_inject_instance_detach (instance, &saved_regs, NULL);
     }
   }
@@ -549,12 +592,17 @@ handle_os_error:
 static gboolean
 frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error)
 {
-  FridaCodeChunk code = { 0, };
+  gboolean success = FALSE;
+  gpointer scratch_buffer;
+  FridaCodeChunk code;
   guint padding = 0;
   GumAddress address_mask = 0;
   FridaTrampolineData * data;
 
-  code.cur = code.bytes;
+  scratch_buffer = g_malloc0 (params->remote_size);
+
+  code.cur = scratch_buffer + params->code.offset;
+  code.size = 0;
 
 #if defined (HAVE_ARM)
   {
@@ -574,7 +622,7 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
 
   func (params, params->remote_address, &code);
 
-  data = (FridaTrampolineData *) (code.bytes + FRIDA_REMOTE_DATA_OFFSET);
+  data = (FridaTrampolineData *) (scratch_buffer + params->data.offset);
   strcpy (data->pthread_so, "libpthread.so.0");
   strcpy (data->pthread_create, "pthread_create");
   strcpy (data->pthread_detach, "pthread_detach");
@@ -583,13 +631,26 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   strcpy (data->entrypoint_name, params->entrypoint_name);
   strcpy (data->entrypoint_data, params->entrypoint_data);
 
-  if (!frida_remote_write (params->pid, params->remote_address, code.bytes, FRIDA_REMOTE_DATA_OFFSET + sizeof (FridaTrampolineData), error))
-    return FALSE;
+  if (!frida_remote_write (params->pid, params->remote_address + params->code.offset, scratch_buffer + params->code.offset, code.size, error))
+    goto beach;
+  if (!frida_remote_write (params->pid, params->remote_address + params->data.offset, data, sizeof (FridaTrampolineData), error))
+    goto beach;
 
-  if (!frida_remote_exec (params->pid, (params->remote_address + padding) | address_mask, params->remote_address + FRIDA_REMOTE_STACK_OFFSET, result, exited, error))
-    return FALSE;
+  if (!frida_remote_mprotect (params->pid, params->remote_address + params->code.offset, params->code.size, PROT_READ | PROT_EXEC, error))
+    goto beach;
+  if (!frida_remote_mprotect (params->pid, params->remote_address + params->guard.offset, params->guard.size, PROT_NONE, error))
+    goto beach;
 
-  return TRUE;
+  if (!frida_remote_exec (params->pid, (params->remote_address + params->code.offset + padding) | address_mask,
+      params->remote_address + params->stack.offset + params->stack.size, result, exited, error))
+    goto beach;
+
+  success = TRUE;
+
+beach:
+  g_free (scratch_buffer);
+
+  return success;
 }
 
 #if defined (HAVE_I386)
@@ -1559,6 +1620,22 @@ frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** erro
     return -1;
 
   return retval;
+}
+
+static gboolean
+frida_remote_mprotect (pid_t pid, GumAddress address, size_t size, int prot, GError ** error)
+{
+  GumAddress args[] = {
+    address,
+    size,
+    prot
+  };
+  GumAddress retval = 1;
+
+  if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "mprotect"), args, G_N_ELEMENTS (args), &retval, NULL, error))
+    return 0;
+
+  return retval == 0;
 }
 
 static gboolean
