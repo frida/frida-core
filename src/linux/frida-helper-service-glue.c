@@ -2025,7 +2025,13 @@ frida_resolve_linker_function (pid_t pid, gpointer func)
 #else
   const gchar * linker_path = "/system/bin/linker64";
 #endif
+  Dl_info info;
   GumAddress local_base, remote_base, remote_address;
+
+  if (dladdr (func, &info))
+  {
+    linker_path = info.dli_fname;
+  }
 
   local_base = frida_find_library_base (getpid (), linker_path, NULL);
   g_assert (local_base != 0);
