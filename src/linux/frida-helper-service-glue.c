@@ -2118,7 +2118,7 @@ frida_resolve_inner_dlopen (pid_t pid)
       (insn[1].id == ARM_INS_MOV &&
           insn[1].detail->arm.operands[0].reg == ARM_REG_R2 &&
           insn[1].detail->arm.operands[1].reg == ARM_REG_LR) &&
-      insn[2].id == ARM_INS_BL &&
+      (insn[2].id == ARM_INS_BL || insn[2].id == ARM_INS_BLX) &&
       insn[3].id == ARM_INS_POP)
   {
     impl = GSIZE_TO_POINTER (insn[2].detail->arm.operands[0].imm);
