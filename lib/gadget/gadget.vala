@@ -494,6 +494,17 @@ namespace Frida.Gadget {
 	private Config load_config (Location location) throws Error {
 		var config_path = derive_config_path_from_file_path (location.path);
 
+#if ANDROID
+		if (!FileUtils.test (config_path, FileTest.EXISTS)) {
+			var ext_index = config_path.last_index_of_char ('.');
+			if (ext_index != -1) {
+				config_path = config_path[0:ext_index] + ".config.so";
+			} else {
+				config_path = config_path + ".config.so";
+			}
+		}
+#endif
+
 		string config_data;
 		try {
 			FileUtils.get_contents (config_path, out config_data);
