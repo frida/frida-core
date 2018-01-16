@@ -499,8 +499,7 @@ namespace Frida.Gadget {
 			var ext_index = config_path.last_index_of_char ('.');
 			if (ext_index != -1) {
 				config_path = config_path[0:ext_index] + ".config.so";
-			}
-			else{
+			} else{
 				config_path = config_path + ".config.so";
 			}
 		}
