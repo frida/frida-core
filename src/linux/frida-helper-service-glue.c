@@ -25,6 +25,7 @@
 #include <pthread.h>
 #ifdef HAVE_ANDROID
 # include <selinux/selinux.h>
+# include <sys/system_properties.h>
 #endif
 #include <stdio.h>
 #include <sys/mman.h>
@@ -246,6 +247,7 @@ static GumAddress frida_resolve_linker_address (pid_t pid, gpointer func);
 #endif
 #if defined (HAVE_ANDROID)
 static GumAddress frida_resolve_inner_dlopen (pid_t pid, GumAddress * pic_value);
+static guint frida_get_android_api_level (void);
 #endif
 static GumAddress frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
@@ -2045,6 +2047,11 @@ frida_resolve_inner_dlopen (pid_t pid,
   if (pic_value != NULL)
     *pic_value = 0;
 
+  if (frida_get_android_api_level () < 26)
+  {
+    return frida_resolve_linker_address (pid, impl);
+  }
+
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
   g_assert_cmpint (err, ==, CS_ERR_OK);
@@ -2159,6 +2166,17 @@ frida_resolve_inner_dlopen (pid_t pid,
   cs_close (&capstone);
 
   return frida_resolve_linker_address (pid, impl);
+}
+
+static guint
+frida_get_android_api_level (void)
+{
+  gchar sdk_version[PROP_VALUE_MAX];
+
+  sdk_version[0] = '\0';
+  __system_property_get ("ro.build.version.sdk", sdk_version);
+
+  return atoi (sdk_version);
 }
 
 #elif defined (HAVE_UCLIBC)
