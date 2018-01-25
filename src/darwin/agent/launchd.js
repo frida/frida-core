@@ -52,7 +52,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 
     var identifier, event;
     if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
-      identifier = rawIdentifier.substring(17, rawIdentifier.lastIndexOf('['));
+      identifier = rawIdentifier.substring(17, rawIdentifier.indexOf('['));
       if (upcoming[identifier] !== undefined)
         event = 'launch:app';
       else if (gating)
