@@ -142,7 +142,7 @@ if host_os_family == 'linux'
 
   if host_os == 'android'
     backend_vala_args += [frida_selinux_vala_args]
-    backend_libs += [frida_selinux]
+    backend_libs += [frida_selinux, frida_selinux_modern, frida_selinux_legacy, sepol_modern, sepol_legacy, selinux]
     backend_deps += [frida_selinux_dep]
 
     android_data = custom_target('frida-data-android',
