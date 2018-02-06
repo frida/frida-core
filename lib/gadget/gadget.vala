@@ -948,14 +948,14 @@ namespace Frida.Gadget {
 
 				var name = Path.get_basename (path).split (".", 2)[0];
 
-				string source;
+				uint8[] bytecode;
 				try {
-					FileUtils.get_contents (path, out source);
+					FileUtils.get_data (path, out bytecode);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT (e.message);
 				}
 
-				var instance = yield engine.create_script (name, source, null);
+				var instance = yield engine.create_script (name, null, new Bytes(bytecode));
 
 				if (id.handle != 0) {
 					yield call_dispose ();
