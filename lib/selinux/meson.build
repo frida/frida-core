@@ -133,7 +133,7 @@ frida_selinux_modern = static_library('frida-selinux-modern', 'src/patch.c',
   dependencies: [glib_dep],
 )
 
-frida_selinux_legacy = static_library('frida-selinux-legacy-pristine', 'src/patch.c',
+frida_selinux_legacy = static_library('frida-selinux-legacy', 'src/patch.c',
   c_args: ['-DFRIDA_SELINUX_LEGACY', '-include', 'sepol-legacy-renames.h'],
   include_directories: [frida_selinux_incdir, include_directories('src/sepol-legacy/include')],
   link_with: sepol_legacy,
