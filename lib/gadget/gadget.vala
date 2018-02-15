@@ -958,7 +958,7 @@ namespace Frida.Gadget {
 				}
 
 				ScriptEngine.ScriptInstance instance;
-				if (contents.length >= 0 && contents[0] == DUKTAPE_BYTECODE_MAGIC) {
+				if (contents.length > 0 && contents[0] == DUKTAPE_BYTECODE_MAGIC) {
 					instance = yield engine.create_script (name, null, new Bytes (contents));
 				} else {
 					instance = yield engine.create_script (name, (string) contents, null);
