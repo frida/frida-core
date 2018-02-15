@@ -839,6 +839,8 @@ namespace Frida.Gadget {
 	}
 
 	private class Script : Object {
+		private const uint8 DUKTAPE_BYTECODE_MAGIC = 0xbf;
+
 		public enum ChangeBehavior {
 			IGNORE,
 			RELOAD
@@ -948,14 +950,19 @@ namespace Frida.Gadget {
 
 				var name = Path.get_basename (path).split (".", 2)[0];
 
-				uint8[] bytecode;
+				uint8[] contents;
 				try {
-					FileUtils.get_data (path, out bytecode);
+					FileUtils.get_data (path, out contents);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT (e.message);
 				}
 
-				var instance = yield engine.create_script (name, null, new Bytes(bytecode));
+				ScriptEngine.ScriptInstance instance;
+				if (contents.length > 0 && contents[0] == DUKTAPE_BYTECODE_MAGIC) {
+					instance = yield engine.create_script (name, null, new Bytes (contents));
+				} else {
+					instance = yield engine.create_script (name, (string) contents, null);
+				}
 
 				if (id.handle != 0) {
 					yield call_dispose ();
