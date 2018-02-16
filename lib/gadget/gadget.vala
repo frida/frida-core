@@ -523,6 +523,8 @@ namespace Frida.Gadget {
 
 	private Location detect_location () {
 		string? executable_name = null;
+		string? executable_path = null;
+		Gum.MemoryRange? executable_range = null;
 		string? our_path = null;
 		Gum.MemoryRange? our_range = null;
 
@@ -534,6 +536,8 @@ namespace Frida.Gadget {
 
 			if (index == 0) {
 				executable_name = details.name;
+				executable_path = details.path;
+				executable_range = details.range;
 			}
 
 			if (our_address >= range.base_address && our_address < range.base_address + range.size) {
@@ -546,6 +550,11 @@ namespace Frida.Gadget {
 
 			return true;
 		});
+
+		if (our_path == null) {
+			our_path = executable_path;
+			our_range = executable_range;
+		}
 
 		return new Location (executable_name, our_path, our_range);
 	}
