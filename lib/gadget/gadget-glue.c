@@ -162,6 +162,10 @@ on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info)
 
 #endif
 
+void glib_empty_log_handler (const gchar *log_domain, GLogLevelFlags log_level, const gchar *message, gpointer user_data)
+{
+}
+
 void
 frida_gadget_environment_init (void)
 {
@@ -178,7 +182,7 @@ frida_gadget_environment_init (void)
   frida_cf_api_try_get ();
   frida_objc_api_try_get ();
 #endif
-
+  g_log_set_default_handler (glib_empty_log_handler, NULL);
   main_context = g_main_context_ref (g_main_context_default ());
   main_loop = g_main_loop_new (main_context, FALSE);
   main_thread = g_thread_new ("gadget-main-loop", run_main_loop, NULL);

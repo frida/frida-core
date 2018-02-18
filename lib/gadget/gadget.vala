@@ -379,10 +379,10 @@ namespace Frida.Gadget {
 			source.attach (Environment.get_main_context ());
 		}
 
-		mutex.lock ();
-		while (state != State.STOPPED)
-			cond.wait (mutex);
-		mutex.unlock ();
+		// mutex.lock ();
+		// while (state != State.STOPPED)
+		// 	cond.wait (mutex);
+		// mutex.unlock ();
 
 		if (config.teardown == TeardownRequirement.FULL) {
 			config = null;
