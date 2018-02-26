@@ -179,6 +179,14 @@ frida_gadget_environment_init (void)
   frida_objc_api_try_get ();
 #endif
 
+#if defined (HAVE_ANDROID) && __ANDROID_API__ < __ANDROID_API_L__
+  /*
+   * We might be holding the dynamic linker's lock, so force-initialize
+   * our bsd_signal() wrapper on this thread.
+   */
+  bsd_signal (G_MAXINT32, SIG_DFL);
+#endif
+
   main_context = g_main_context_ref (g_main_context_default ());
   main_loop = g_main_loop_new (main_context, FALSE);
   main_thread = g_thread_new ("gadget-main-loop", run_main_loop, NULL);
