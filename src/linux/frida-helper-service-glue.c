@@ -43,6 +43,7 @@
 #include <sys/wait.h>
 
 #define FRIDA_STACK_ALIGNMENT 16
+#define FRIDA_STACK_BIAS_X86_SYSENTER 12
 #define FRIDA_RED_ZONE_SIZE 128
 #define FRIDA_OFFSET_E_ENTRY 0x18
 #define FRIDA_RTLD_DLOPEN (0x80000000)
@@ -1687,6 +1688,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+  regs.esp -= FRIDA_STACK_BIAS_X86_SYSENTER;
   regs.esp -= (regs.esp - (args_length * 4)) % FRIDA_STACK_ALIGNMENT;
 
   regs.orig_eax = -1;
