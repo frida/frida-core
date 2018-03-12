@@ -7,9 +7,12 @@ namespace Frida.Agent {
 			Gum.Cloak.add_range (agent_range);
 
 			Gum.Cloak.add_thread (Gum.Process.get_current_thread_id ());
-			Gum.MemoryRange stack;
-			if (Gum.Thread.try_get_range (out stack))
-				Gum.Cloak.add_range (stack);
+
+			Gum.MemoryRange thread_ranges[2];
+			var num_thread_ranges = Gum.Thread.try_get_ranges (thread_ranges);
+			for (var i = 0; i < num_thread_ranges; i++) {
+				Gum.Cloak.add_range (thread_ranges[i]);
+			}
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.ignore_current_thread ();

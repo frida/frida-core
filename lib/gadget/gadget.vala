@@ -1573,8 +1573,8 @@ namespace Frida.Gadget {
 
 		private Gum.ThreadId thread_id;
 
-		private bool stack_known;
-		private Gum.MemoryRange stack;
+		private uint num_ranges;
+		private Gum.MemoryRange ranges[2];
 
 		public ThreadIgnoreScope () {
 			interceptor = Gum.Interceptor.obtain ();
@@ -1583,15 +1583,16 @@ namespace Frida.Gadget {
 			thread_id = Gum.Process.get_current_thread_id ();
 			Gum.Cloak.add_thread (thread_id);
 
-			stack_known = Gum.Thread.try_get_range (out stack);
-			if (stack_known)
-				Gum.Cloak.add_range (stack);
-
+			num_ranges = Gum.Thread.try_get_ranges (ranges);
+			for (var i = 0; i < num_ranges; i++) {
+				Gum.Cloak.add_range (ranges[i]);
+			}
 		}
 
 		~ThreadIgnoreScope () {
-			if (stack_known)
-				Gum.Cloak.remove_range (stack);
+			for (var i = 0; i < num_ranges; i++) {
+				Gum.Cloak.remove_range (ranges[i]);
+			}
 
 			Gum.Cloak.remove_thread (thread_id);
 
