@@ -1584,15 +1584,13 @@ namespace Frida.Gadget {
 			Gum.Cloak.add_thread (thread_id);
 
 			num_ranges = Gum.Thread.try_get_ranges (ranges);
-			for (var i = 0; i != num_ranges; i++) {
+			for (var i = 0; i != num_ranges; i++)
 				Gum.Cloak.add_range (ranges[i]);
-			}
 		}
 
 		~ThreadIgnoreScope () {
-			for (var i = 0; i != num_ranges; i++) {
+			for (var i = 0; i != num_ranges; i++)
 				Gum.Cloak.remove_range (ranges[i]);
-			}
 
 			Gum.Cloak.remove_thread (thread_id);
 
