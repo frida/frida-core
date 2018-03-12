@@ -10,7 +10,7 @@ namespace Frida.Agent {
 
 			Gum.MemoryRange thread_ranges[2];
 			var num_thread_ranges = Gum.Thread.try_get_ranges (thread_ranges);
-			for (var i = 0; i < num_thread_ranges; i++) {
+			for (var i = 0; i != num_thread_ranges; i++) {
 				Gum.Cloak.add_range (thread_ranges[i]);
 			}
 
