@@ -60,6 +60,7 @@ if host_os_family == 'darwin'
   helper_backend_sources = [
     'darwin/frida-helper-backend.vala',
     'darwin/frida-helper-backend-glue.m',
+    'darwin/policy-softener.vala',
     'darwin/port.vala',
     'darwin/port-glue.m',
   ]
