@@ -14,6 +14,10 @@ var upcoming = {};
 var gating = false;
 var active = 0;
 
+var jbdCallImpl = Module.findExportByName(null, 'jbd_call');
+var jbdPidsToIgnore = {};
+var runningOnElectra = jbdCallImpl !== null;
+
 rpc.exports = {
   prepareForLaunch: function (identifier) {
     upcoming[identifier] = true;
@@ -94,6 +98,33 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
     if (retval.toInt32() < 0)
       return;
 
-    send([event, identifier, readU32(this.pidPtr)]);
+    var pid = readU32(this.pidPtr);
+
+    send([event, identifier, pid]);
+
+    if (runningOnElectra) {
+      jbdPidsToIgnore[pid] = true;
+    }
   }
 });
+
+if (runningOnElectra) {
+  sabotageJbdCallForOurPids();
+}
+
+function sabotageJbdCallForOurPids() {
+  var retType = 'int';
+  var argTypes = ['uint', 'uint', 'uint'];
+
+  var jbdCall = new NativeFunction(jbdCallImpl, retType, argTypes);
+
+  Interceptor.replace(jbdCall, new NativeCallback(function (port, command, pid) {
+    var isIgnored = jbdPidsToIgnore[pid] !== undefined;
+    if (isIgnored) {
+      delete jbdPidsToIgnore[pid];
+      return 0;
+    }
+
+    return jbdCall(port, command, pid);
+  }, retType, argTypes));
+}
