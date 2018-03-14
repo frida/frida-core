@@ -908,13 +908,13 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    * pointed at __dyld_start. At this point neither dyld nor libc have been
    * initialized, so we won't be able to inject frida-agent at this point.
    *
-   * So here's what we'll do before we consider spawn() done:
+   * So here's what we'll do before we try to inject our dylib:
    * - Get hold of the main thread to read its instruction pointer, which will
    *   tell us where dyld is in memory.
    * - Walk backwards to find dyld's Mach-O header.
-   * - Walk its symbols and find a function that's called at a point where the
-   *   process is sufficiently initialized to load frida-agent, but early enough
-   *   so that app's initializer still didn't run.
+   * - Walk its symbols and find a function that's called at a point where the process is
+   *   sufficiently initialized to load frida-agent, but still early enough so the app's
+   *   initializer(s) didn't get a chance to run.
    * - For processes using dyld v3's closure support we put a hardware breakpoint inside
    *   dyld::launchWithClosure() right after setInitialImageList() has been called.
    *   At that point we have a fully initialized libSystem and are ready to go.
@@ -924,8 +924,9 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    * - Resume the task.
    * - Wait until we get a message on our exception port, meaning one of our two breakpoints
    *   was hit.
-   * - If the breakpoint hit was the one in dyld::launchWithClosure() we are done. Otherwise
-   *   we hijack the thread's instruction pointer to call dlopen("/usr/lib/libSystem.B.dylib")
+   * - If the breakpoint hit was the one in dyld::launchWithClosure(), then great, we are done.
+   *   Otherwise we hijack the thread's instruction pointer to call:
+   *   dlopen("/usr/lib/libSystem.B.dylib", RTLD_GLOBAL | RTLD_LAZY)
    *   and then return back to the beginning of initializeMainExecutable() and restore the
    *   previous thread state.
    * - Swap back the thread's orginal exception ports.
