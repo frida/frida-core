@@ -914,21 +914,25 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    * - Walk backwards to find dyld's Mach-O header.
    * - Walk its symbols and find a function that's called at a point where the
    *   process is sufficiently initialized to load frida-agent, but early enough
-   *   so that app's initializer still didn't run. In this case we choose
-   *   dyld::initializeMainExecutable(). At the beginning of this function dyld is
-   *   initialized but libSystem is still missing.
-   * - Set a hardware breakpoint at the beginning of this function.
+   *   so that app's initializer still didn't run.
+   * - For processes using dyld v3's closure support we put a hardware breakpoint inside
+   *   dyld::launchWithClosure() right after setInitialImageList() has been called.
+   *   At that point we have a fully initialized libSystem and are ready to go.
+   *   For all other processes we also put a breakpoint on dyld::initializeMainExecutable().
+   *   At the beginning of this function dyld is initialized but libSystem is still missing.
    * - Swap out the thread's exception ports with our own.
    * - Resume the task.
-   * - Wait until we get a message on our exception port, meaning our breakpoint
+   * - Wait until we get a message on our exception port, meaning one of our two breakpoints
    *   was hit.
-   * - Hijack thread's instruction pointer to call dlopen("/usr/lib/libSystem.B.dylib")
-   *   and then return back to the beginning of initializeMainExecutable() and restore
+   * - If the breakpoint hit was the one in dyld::launchWithClosure() we are done. Otherwise
+   *   we hijack the thread's instruction pointer to call dlopen("/usr/lib/libSystem.B.dylib")
+   *   and then return back to the beginning of initializeMainExecutable() and restore the
    *   previous thread state.
    * - Swap back the thread's orginal exception ports.
    * - Clear the hardware breakpoint by restoring the thread's debug registers.
    *
-   * It's actually more complex than that, because:
+   * For processes not using the new closure support it's actually more complex than that,
+   * because:
    * - This doesn't work on newer versions of dyld because to call dlopen() it's
    *   necessary to registerThreadHelpers() first, which is normally done by libSystem
    *   itself during its initialization.
