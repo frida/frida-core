@@ -6,15 +6,7 @@ namespace Frida.Agent {
 			var agent_range = memory_range (mapped_range);
 			Gum.Cloak.add_range (agent_range);
 
-			Gum.Cloak.add_thread (Gum.Process.get_current_thread_id ());
-
-			Gum.MemoryRange thread_ranges[2];
-			var num_thread_ranges = Gum.Thread.try_get_ranges (thread_ranges);
-			for (var i = 0; i != num_thread_ranges; i++)
-				Gum.Cloak.add_range (thread_ranges[i]);
-
-			var interceptor = Gum.Interceptor.obtain ();
-			interceptor.ignore_current_thread ();
+			var ignore_scope = new ThreadIgnoreScope ();
 
 			var exceptor = Gum.Exceptor.obtain ();
 
@@ -27,6 +19,8 @@ namespace Frida.Agent {
 			}
 
 			exceptor = null;
+
+			ignore_scope = null;
 		}
 
 		Environment._deinit ();
@@ -368,6 +362,36 @@ namespace Frida.Agent {
 		}
 
 		return result;
+	}
+
+	private class ThreadIgnoreScope {
+		private Gum.Interceptor interceptor;
+
+		private Gum.ThreadId thread_id;
+
+		private uint num_ranges;
+		private Gum.MemoryRange ranges[2];
+
+		public ThreadIgnoreScope () {
+			interceptor = Gum.Interceptor.obtain ();
+			interceptor.ignore_current_thread ();
+
+			thread_id = Gum.Process.get_current_thread_id ();
+			Gum.Cloak.add_thread (thread_id);
+
+			num_ranges = Gum.Thread.try_get_ranges (ranges);
+			for (var i = 0; i != num_ranges; i++)
+				Gum.Cloak.add_range (ranges[i]);
+		}
+
+		~ThreadIgnoreScope () {
+			for (var i = 0; i != num_ranges; i++)
+				Gum.Cloak.remove_range (ranges[i]);
+
+			Gum.Cloak.remove_thread (thread_id);
+
+			interceptor.unignore_current_thread ();
+		}
 	}
 
 	namespace Environment {
