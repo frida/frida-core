@@ -17,17 +17,17 @@ namespace Frida {
 			_deallocate ();
 		}
 
-		public async void exchange (uint peer_pid, out TaskPort task_port, out Pipe pipe) throws Error {
+		public async void exchange (uint peer_pid, out TaskPort task_port, out IOStream stream) throws Error {
 			uint raw_task_port = 0;
-			string pipe_address = null;
+			int fd = -1;
 			Error error = null;
 
 			new Thread<bool> ("frida-handshake-port-exchange", () => {
 				try {
 					if (is_sender)
-						_perform_exchange_as_sender (out raw_task_port, out pipe_address);
+						_perform_exchange_as_sender (out raw_task_port, out fd);
 					else
-						_perform_exchange_as_receiver (peer_pid, out raw_task_port, out pipe_address);
+						_perform_exchange_as_receiver (peer_pid, out raw_task_port, out fd);
 				} catch (Error e) {
 					error = e;
 				}
@@ -46,9 +46,9 @@ namespace Frida {
 
 			task_port = new TaskPort (raw_task_port);
 			try {
-				pipe = new Pipe (pipe_address);
-			} catch (IOError e) {
-				assert_not_reached ();
+				stream = SocketConnection.factory_create_connection (new Socket.from_fd (fd));
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT (e.message);
 			}
 		}
 
@@ -56,8 +56,8 @@ namespace Frida {
 		protected extern uint _create_remote (string name) throws Error;
 		protected extern void _deallocate ();
 
-		protected extern void _perform_exchange_as_sender (out uint task_port, out string pipe_address) throws Error;
-		protected extern void _perform_exchange_as_receiver (uint peer_pid, out uint task_port, out string pipe_address) throws Error;
+		protected extern void _perform_exchange_as_sender (out uint task_port, out int fd) throws Error;
+		protected extern void _perform_exchange_as_receiver (uint peer_pid, out uint task_port, out int fd) throws Error;
 	}
 
 	public class TaskPort : Object {

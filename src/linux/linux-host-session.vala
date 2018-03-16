@@ -25,7 +25,7 @@ namespace Frida {
 			get { return "Local System"; }
 		}
 
-		public ImageData? icon {
+		public Image? icon {
 			get { return null; }
 		}
 
@@ -81,8 +81,6 @@ namespace Frida {
 		private RoboLauncher robo_launcher;
 		private RoboAgent robo_agent;
 #endif
-
-		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		construct {
 			helper = new HelperProcess ();
@@ -212,7 +210,7 @@ namespace Frida {
 			yield helper.input (pid, data);
 		}
 
-		public override async void resume (uint pid) throws Error {
+		protected override async void perform_resume (uint pid) throws Error {
 #if ANDROID
 			if (robo_launcher != null) {
 				if (yield robo_launcher.try_resume (pid))
@@ -226,23 +224,23 @@ namespace Frida {
 			yield helper.kill (pid);
 		}
 
-		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
+		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
 			PipeTransport.set_temp_directory (helper.tempdir.path);
 
 			PipeTransport t;
-			Pipe pipe;
 			try {
 				t = new PipeTransport ();
-				pipe = new Pipe (t.local_address);
-			} catch (IOError stream_error) {
-				throw new Error.NOT_SUPPORTED (stream_error.message);
+			} catch (IOError e) {
+				throw new Error.NOT_SUPPORTED (e.message);
 			}
+
+			var stream_request = Pipe.open (t.local_address);
 
 #if ANDROID
 			if (robo_launcher != null) {
 				if (yield robo_launcher.try_establish (pid, t.remote_address)) {
 					transport = t;
-					return pipe;
+					return stream_request;
 				}
 			}
 #endif
@@ -258,7 +256,17 @@ namespace Frida {
 
 			transport = t;
 
-			return pipe;
+			return stream_request;
+		}
+
+		protected override uint get_injectee_id_from_pid (uint pid) throws Error {
+			if (!injectee_by_pid.has_key (pid))
+				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", pid);
+			return injectee_by_pid[pid];
+		}
+
+		protected override void associate_pid_with_injectee_id (uint pid, uint injectee_id) {
+			injectee_by_pid[pid] = injectee_id;
 		}
 
 #if ANDROID

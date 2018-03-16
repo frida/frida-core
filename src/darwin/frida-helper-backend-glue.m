@@ -7,6 +7,9 @@
 #import <Foundation/Foundation.h>
 #include <glib-unix.h>
 #include <spawn.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
 #else
@@ -28,6 +31,12 @@
   { \
     failed_operation = op; \
     goto handle_mach_error; \
+  }
+#define CHECK_BSD_RESULT(n1, cmp, n2, op) \
+  if (!(n1 cmp n2)) \
+  { \
+    failed_operation = op; \
+    goto handle_bsd_error; \
   }
 
 typedef struct _FridaHelperContext FridaHelperContext;
@@ -131,6 +140,15 @@ struct _FridaInjectInstance
 
   mach_port_t thread;
   dispatch_source_t thread_monitor_source;
+#ifdef HAVE_I386
+  x86_thread_state_t thread_state;
+#else
+  arm_thread_state_t thread_state32;
+  arm_unified_thread_state_t thread_state64;
+#endif
+  thread_state_t thread_state_data;
+  mach_msg_type_number_t thread_state_count;
+  thread_state_flavor_t thread_state_flavor;
 };
 
 struct _FridaInjectPayloadLayout
@@ -160,10 +178,12 @@ struct _FridaAgentDetails
 struct _FridaAgentContext
 {
   /* State */
-  gboolean stay_resident;
+  FridaUnloadPolicy unload_policy;
   mach_port_t task;
   mach_port_t mach_thread;
   mach_port_t posix_thread;
+  gboolean constructed;
+  gpointer module_handle;
 
   /* Mach thread */
   GumAddress mach_task_self_impl;
@@ -238,10 +258,12 @@ static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarw
 static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id);
+static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_is_resident (FridaInjectInstance * instance);
 
+static gboolean frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error);
 static void frida_inject_instance_on_mach_thread_dead (void * context);
 static void frida_inject_instance_join_posix_thread (FridaInjectInstance * self, mach_port_t posix_thread);
 static void frida_inject_instance_on_posix_thread_dead (void * context);
@@ -264,10 +286,15 @@ static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
 
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
+extern int fileport_makeport (int fd, mach_port_t * port);
+
 void
 frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
 {
   mach_port_t self_task;
+  int status, sockets[2] = { -1, -1 };
+  mach_port_t local_wrapper = MACH_PORT_NULL;
+  mach_port_t remote_wrapper = MACH_PORT_NULL;
   mach_port_t local_rx = MACH_PORT_NULL;
   mach_port_t local_tx = MACH_PORT_NULL;
   mach_port_t remote_rx = MACH_PORT_NULL;
@@ -275,7 +302,7 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   mach_msg_type_name_t acquired_type;
   mach_msg_header_t init;
   gchar * local_address, * remote_address;
-  kern_return_t ret;
+  kern_return_t kr;
   const gchar * failed_operation;
 
   self_task = mach_task_self ();
@@ -283,52 +310,56 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
   if (local_task == MACH_PORT_NULL)
     local_task = self_task;
 
-  ret = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
+  status = socketpair (AF_UNIX, SOCK_STREAM, 0, sockets);
+  CHECK_BSD_RESULT (status, ==, 0, "socketpair");
 
-  ret = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
+  status = fileport_makeport (sockets[0], &local_wrapper);
+  CHECK_BSD_RESULT (status, ==, KERN_SUCCESS, "fileport_makeport local");
 
-  ret = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right local_rx");
+  status = fileport_makeport (sockets[1], &remote_wrapper);
+  CHECK_BSD_RESULT (status, ==, KERN_SUCCESS, "fileport_makeport remote");
 
-  ret = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_extract_right remote_rx");
+  kr = mach_port_allocate (local_task, MACH_PORT_RIGHT_RECEIVE, &local_rx);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate local_rx");
+
+  kr = mach_port_allocate (remote_task, MACH_PORT_RIGHT_RECEIVE, &remote_rx);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate remote_rx");
+
+  kr = mach_port_extract_right (local_task, local_rx, MACH_MSG_TYPE_MAKE_SEND, &local_tx, &acquired_type);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right local_rx");
+
+  kr = mach_port_extract_right (remote_task, remote_rx, MACH_MSG_TYPE_MAKE_SEND, &remote_tx, &acquired_type);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_extract_right remote_rx");
 
   init.msgh_size = sizeof (init);
   init.msgh_reserved = 0;
   init.msgh_id = 3;
 
-  if (local_task != self_task)
-  {
-    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_COPY_SEND);
-    init.msgh_remote_port = local_tx;
-    init.msgh_local_port = remote_tx;
-    ret = mach_msg_send (&init);
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_msg_send local_tx");
+  init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
+  init.msgh_remote_port = local_tx;
+  init.msgh_local_port = local_wrapper;
+  kr = mach_msg_send (&init);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg_send local_tx");
+  local_tx = MACH_PORT_NULL;
+  local_wrapper = MACH_PORT_NULL;
 
-    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
-  }
-  else
-  {
-    init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MOVE_SEND);
-  }
-
+  init.msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND, MACH_MSG_TYPE_MOVE_SEND);
   init.msgh_remote_port = remote_tx;
-  init.msgh_local_port = local_tx;
-  ret = mach_msg_send (&init);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_msg_send remote_tx");
+  init.msgh_local_port = remote_wrapper;
+  kr = mach_msg_send (&init);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_msg_send remote_tx");
+  remote_tx = MACH_PORT_NULL;
+  remote_wrapper = MACH_PORT_NULL;
 
-  if (local_task != self_task)
-    local_address = g_strdup_printf ("pipe:rx=%d", local_rx);
-  else
-    local_address = g_strdup_printf ("pipe:rx=%d,tx=%d,exclusive=0", local_rx, remote_tx);
-  remote_address = g_strdup_printf ("pipe:rx=%d", remote_rx);
+  local_address = g_strdup_printf ("pipe:port=0x%x", local_rx);
+  remote_address = g_strdup_printf ("pipe:port=0x%x", remote_rx);
+  local_rx = MACH_PORT_NULL;
+  remote_rx = MACH_PORT_NULL;
   frida_pipe_endpoints_init (result, local_address, remote_address);
   g_free (remote_address);
   g_free (local_address);
 
-  return;
+  goto beach;
 
 handle_mach_error:
   {
@@ -336,16 +367,43 @@ handle_mach_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
-        remote_pid, failed_operation, mach_error_string (ret));
+        remote_pid, failed_operation, mach_error_string (kr));
+    goto beach;
+  }
+handle_bsd_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while preparing pipe endpoints for process with pid %u (%s returned '%s')",
+        remote_pid, failed_operation, strerror (errno));
+    goto beach;
+  }
+beach:
+  {
+    guint i;
 
     if (remote_tx != MACH_PORT_NULL)
       mach_port_deallocate (self_task, remote_tx);
     if (local_tx != MACH_PORT_NULL)
       mach_port_deallocate (self_task, local_tx);
+
     if (remote_rx != MACH_PORT_NULL)
       mach_port_mod_refs (remote_task, remote_rx, MACH_PORT_RIGHT_RECEIVE, -1);
     if (local_rx != MACH_PORT_NULL)
       mach_port_mod_refs (local_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
+
+    if (remote_wrapper != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, remote_wrapper);
+    if (local_wrapper != MACH_PORT_NULL)
+      mach_port_deallocate (self_task, local_wrapper);
+
+    for (i = 0; i != G_N_ELEMENTS (sockets); i++)
+    {
+      int fd = sockets[i];
+      if (fd != -1)
+        close (fd);
+    }
 
     return;
   }
@@ -784,16 +842,16 @@ _frida_darwin_helper_backend_is_suspended (FridaDarwinHelperBackend * self, guin
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
   const gchar * failed_operation;
-  kern_return_t ret;
+  kern_return_t kr;
 
-  ret = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_info");
+  kr = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_info");
 
   return info.suspend_count >= 1;
 
 handle_mach_error:
   {
-    if (ret == MACH_SEND_INVALID_DEST)
+    if (kr == MACH_SEND_INVALID_DEST)
     {
       g_set_error (error,
           FRIDA_ERROR,
@@ -806,7 +864,7 @@ handle_mach_error:
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
           "Unexpected error while interrogating target process (%s returned '%s')",
-          failed_operation, mach_error_string (ret));
+          failed_operation, mach_error_string (kr));
     }
     return FALSE;
   }
@@ -849,10 +907,10 @@ handle_process_not_suspended:
 void
 _frida_darwin_helper_backend_resume_process_fast (FridaDarwinHelperBackend * self, guint task, GError ** error)
 {
-  kern_return_t ret;
+  kern_return_t kr;
 
-  ret = task_resume (task);
-  if (ret != KERN_SUCCESS)
+  kr = task_resume (task);
+  if (kr != KERN_SUCCESS)
     goto unexpected_error;
 
   return;
@@ -863,7 +921,7 @@ unexpected_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while resuming process: %s",
-        mach_error_string (ret));
+        mach_error_string (kr));
     return;
   }
 }
@@ -887,7 +945,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   FridaSpawnInstance * instance = opaque_instance;
   FridaHelperContext * ctx = self->context;
   const gchar * failed_operation;
-  kern_return_t ret;
+  kern_return_t kr;
   mach_port_t self_task, child_thread;
   guint page_size;
   thread_act_array_t threads;
@@ -967,8 +1025,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   if (!gum_darwin_query_page_size (task, &page_size))
     goto handle_page_size_error;
 
-  ret = task_threads (task, &threads, &thread_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "task_threads");
+  kr = task_threads (task, &threads, &thread_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_threads");
 
   child_thread = threads[0];
   instance->thread = child_thread;
@@ -979,8 +1037,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
   threads = NULL;
 
-  ret = thread_get_state (child_thread, state_flavor, (thread_state_t) &state, &state_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_get_state");
+  kr = thread_get_state (child_thread, state_flavor, (thread_state_t) &state, &state_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_get_state");
 
 #ifdef HAVE_I386
   dyld_start = (instance->cpu_type == GUM_CPU_AMD64) ? state.uts.ts64.__rip : state.uts.ts32.__eip;
@@ -1045,8 +1103,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   frida_spawn_instance_create_dyld_data (instance);
 
-  ret = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_get_debug_state");
+  kr = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "frida_get_debug_state");
 
   memcpy (&instance->breakpoint_debug_state, &instance->previous_debug_state, sizeof (instance->breakpoint_debug_state));
   frida_set_nth_hardware_breakpoint (&instance->breakpoint_debug_state, 0, legacy_entry_address, instance->cpu_type);
@@ -1061,17 +1119,17 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   memcpy (&instance->ret_gadget_debug_state, &instance->previous_debug_state, sizeof (instance->previous_debug_state));
   frida_set_nth_hardware_breakpoint (&instance->ret_gadget_debug_state, 0, instance->ret_gadget & ~1, instance->cpu_type);
 
-  ret = frida_set_debug_state (child_thread, &instance->breakpoint_debug_state, instance->cpu_type);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "frida_set_debug_state");
+  kr = frida_set_debug_state (child_thread, &instance->breakpoint_debug_state, instance->cpu_type);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "frida_set_debug_state");
 
-  ret = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_allocate server");
+  kr = mach_port_allocate (self_task, MACH_PORT_RIGHT_RECEIVE, &instance->server_port);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_allocate server");
 
-  ret = mach_port_insert_right (self_task, instance->server_port, instance->server_port, MACH_MSG_TYPE_MAKE_SEND);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_port_insert_right server");
+  kr = mach_port_insert_right (self_task, instance->server_port, instance->server_port, MACH_MSG_TYPE_MAKE_SEND);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_port_insert_right server");
 
   previous_ports = &instance->previous_ports;
-  ret = thread_swap_exception_ports (child_thread,
+  kr = thread_swap_exception_ports (child_thread,
       EXC_MASK_BREAKPOINT,
       instance->server_port,
       EXCEPTION_DEFAULT,
@@ -1081,7 +1139,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
       previous_ports->ports,
       previous_ports->behaviors,
       previous_ports->flavors);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_swap_exception_ports");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_swap_exception_ports");
 
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_RECV, instance->server_port, 0, ctx->dispatch_queue);
   instance->server_recv_source = source;
@@ -1121,7 +1179,7 @@ handle_mach_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while preparing target process for injection (%s returned '%s')",
-        failed_operation, mach_error_string (ret));
+        failed_operation, mach_error_string (kr));
     goto error_epilogue;
   }
 error_epilogue:
@@ -1152,7 +1210,6 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     const gchar * entrypoint, const gchar * data, GError ** error)
 {
   guint result = 0;
-  FridaHelperContext * ctx = self->context;
   mach_port_t self_task;
   FridaInjectInstance * instance;
   GumDarwinModuleResolver * resolver = NULL;
@@ -1160,8 +1217,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   FridaAgentDetails details = { 0, };
   guint page_size;
   FridaInjectPayloadLayout layout;
+  kern_return_t kr;
   const gchar * failed_operation;
-  kern_return_t ret;
   guint base_payload_size;
   mach_vm_address_t payload_address = 0;
   mach_vm_address_t agent_context_address = 0;
@@ -1170,20 +1227,10 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
   FridaAgentContext agent_ctx;
-#ifdef HAVE_I386
-  x86_thread_state_t state;
-#else
-  arm_thread_state_t state32;
-  arm_unified_thread_state_t state64;
-#endif
-  thread_state_t state_data;
-  mach_msg_type_number_t state_count;
-  thread_state_flavor_t state_flavor;
-  dispatch_source_t source;
 
   self_task = mach_task_self ();
 
-  instance = frida_inject_instance_new (self, self->last_id++);
+  instance = frida_inject_instance_new (self, self->next_id++);
   mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
@@ -1231,19 +1278,19 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   if (mapper != NULL)
     instance->payload_size += gum_darwin_mapper_size (mapper);
 
-  ret = mach_vm_allocate (task, &payload_address, instance->payload_size, VM_FLAGS_ANYWHERE);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate(payload)");
+  kr = mach_vm_allocate (task, &payload_address, instance->payload_size, VM_FLAGS_ANYWHERE);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_allocate(payload)");
   instance->payload_address = payload_address;
 
-  ret = mach_vm_allocate (self_task, &agent_context_address, layout.data_size, VM_FLAGS_ANYWHERE);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_allocate(agent_context)");
+  kr = mach_vm_allocate (self_task, &agent_context_address, layout.data_size, VM_FLAGS_ANYWHERE);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
   instance->agent_context = (FridaAgentContext *) agent_context_address;
   instance->agent_context_size = layout.data_size;
 
   data_address = payload_address + layout.data_offset;
-  ret = mach_vm_remap (task, &data_address, layout.data_size, 0, VM_FLAGS_OVERWRITE, self_task, agent_context_address,
+  kr = mach_vm_remap (task, &data_address, layout.data_size, 0, VM_FLAGS_OVERWRITE, self_task, agent_context_address,
       FALSE, &cur_protection, &max_protection, VM_INHERIT_SHARE);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap(data)");
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_remap(data)");
   instance->remote_agent_context = data_address;
 
   if (mapper != NULL)
@@ -1253,8 +1300,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     instance->is_mapped = TRUE;
   }
 
-  ret = mach_vm_protect (task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
+  kr = mach_vm_protect (task, payload_address + layout.stack_guard_offset, layout.stack_guard_size, FALSE, VM_PROT_NONE);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
   if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, resolver, mapper, error))
     goto error_epilogue;
@@ -1265,16 +1312,16 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   if (gum_query_is_rwx_supported () || !gum_code_segment_is_supported ())
   {
-    ret = mach_vm_write (task, payload_address + layout.mach_code_offset,
+    kr = mach_vm_write (task, payload_address + layout.mach_code_offset,
         (vm_offset_t) mach_stub_code, sizeof (mach_stub_code));
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write(mach_stub_code)");
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_write(mach_stub_code)");
 
-    ret = mach_vm_write (task, payload_address + layout.pthread_code_offset,
+    kr = mach_vm_write (task, payload_address + layout.pthread_code_offset,
         (vm_offset_t) pthread_stub_code, sizeof (pthread_stub_code));
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write(pthread_stub_code)");
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_write(pthread_stub_code)");
 
-    ret = mach_vm_protect (task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
+    kr = mach_vm_protect (task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
   }
   else
   {
@@ -1292,66 +1339,71 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     gum_code_segment_map (segment, 0, page_size, scratch_page);
 
     code_address = payload_address + layout.code_offset;
-    ret = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
+    kr = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
         FALSE, &cur_protection, &max_protection, VM_INHERIT_COPY);
 
     gum_code_segment_free (segment);
 
-    CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_remap(code)");
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_remap(code)");
   }
 
-  ret = mach_vm_write (task, payload_address + layout.data_offset, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_write(data)");
+  kr = mach_vm_write (task, payload_address + layout.data_offset, (vm_offset_t) &agent_ctx, sizeof (agent_ctx));
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_write(data)");
 
-  ret = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "mach_vm_protect");
+  kr = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
 #ifdef HAVE_I386
-  bzero (&state, sizeof (state));
-
-  if (details.cpu_type == GUM_CPU_AMD64)
   {
-    x86_thread_state64_t * ts;
+    x86_thread_state_t * state = &instance->thread_state;
 
-    state.tsh.flavor = x86_THREAD_STATE64;
-    state.tsh.count = x86_THREAD_STATE64_COUNT;
+    bzero (state, sizeof (x86_thread_state_t));
 
-    ts = &state.uts.ts64;
+    if (details.cpu_type == GUM_CPU_AMD64)
+    {
+      x86_thread_state64_t * ts;
 
-    ts->__rbx = payload_address + layout.data_offset;
+      state->tsh.flavor = x86_THREAD_STATE64;
+      state->tsh.count = x86_THREAD_STATE64_COUNT;
 
-    ts->__rsp = payload_address + layout.stack_top_offset;
-    ts->__rip = payload_address + layout.mach_code_offset;
+      ts = &state->uts.ts64;
+
+      ts->__rbx = payload_address + layout.data_offset;
+
+      ts->__rsp = payload_address + layout.stack_top_offset;
+      ts->__rip = payload_address + layout.mach_code_offset;
+    }
+    else
+    {
+      x86_thread_state32_t * ts;
+
+      state->tsh.flavor = x86_THREAD_STATE32;
+      state->tsh.count = x86_THREAD_STATE32_COUNT;
+
+      ts = &state->uts.ts32;
+
+      ts->__ebx = payload_address + layout.data_offset;
+
+      ts->__esp = payload_address + layout.stack_top_offset;
+      ts->__eip = payload_address + layout.mach_code_offset;
+    }
+
+    instance->thread_state_data = (thread_state_t) state;
+    instance->thread_state_count = x86_THREAD_STATE_COUNT;
+    instance->thread_state_flavor = x86_THREAD_STATE;
   }
-  else
-  {
-    x86_thread_state32_t * ts;
-
-    state.tsh.flavor = x86_THREAD_STATE32;
-    state.tsh.count = x86_THREAD_STATE32_COUNT;
-
-    ts = &state.uts.ts32;
-
-    ts->__ebx = payload_address + layout.data_offset;
-
-    ts->__esp = payload_address + layout.stack_top_offset;
-    ts->__eip = payload_address + layout.mach_code_offset;
-  }
-
-  state_data = (thread_state_t) &state;
-  state_count = x86_THREAD_STATE_COUNT;
-  state_flavor = x86_THREAD_STATE;
 #else
   if (details.cpu_type == GUM_CPU_ARM64)
   {
+    arm_unified_thread_state_t * state64 = &instance->thread_state64;
     arm_thread_state64_t * ts;
 
-    bzero (&state64, sizeof (state64));
+    bzero (state64, sizeof (arm_unified_thread_state_t));
 
-    state64.ash.flavor = ARM_THREAD_STATE64;
-    state64.ash.count = ARM_THREAD_STATE64_COUNT;
+    state64->ash.flavor = ARM_THREAD_STATE64;
+    state64->ash.count = ARM_THREAD_STATE64_COUNT;
 
-    ts = &state64.ts_64;
+    ts = &state64->ts_64;
 
     ts->__x[20] = payload_address + layout.data_offset;
 
@@ -1359,44 +1411,33 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     ts->__lr = 0xcafebabe;
     ts->__pc = payload_address + layout.mach_code_offset;
 
-    state_data = (thread_state_t) &state64;
-    state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
-    state_flavor = ARM_UNIFIED_THREAD_STATE;
+    instance->thread_state_data = (thread_state_t) state64;
+    instance->thread_state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
+    instance->thread_state_flavor = ARM_UNIFIED_THREAD_STATE;
   }
   else
   {
-    bzero (&state32, sizeof (state32));
+    arm_thread_state_t * state32 = &instance->thread_state32;
 
-    state32.__r[7] = payload_address + layout.data_offset;
+    bzero (state32, sizeof (arm_thread_state_t));
 
-    state32.__sp = payload_address + layout.stack_top_offset;
-    state32.__lr = 0xcafebabe;
-    state32.__pc = payload_address + layout.mach_code_offset;
-    state32.__cpsr = FRIDA_PSR_THUMB;
+    state32->__r[7] = payload_address + layout.data_offset;
 
-    state_data = (thread_state_t) &state32;
-    state_count = ARM_THREAD_STATE_COUNT;
-    state_flavor = ARM_THREAD_STATE;
+    state32->__sp = payload_address + layout.stack_top_offset;
+    state32->__lr = 0xcafebabe;
+    state32->__pc = payload_address + layout.mach_code_offset;
+    state32->__cpsr = FRIDA_PSR_THUMB;
+
+    instance->thread_state_data = (thread_state_t) state32;
+    instance->thread_state_count = ARM_THREAD_STATE_COUNT;
+    instance->thread_state_flavor = ARM_THREAD_STATE;
   }
 #endif
 
-  ret = thread_create (task, &instance->thread);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_create");
-
-  ret = act_set_state (instance->thread, state_flavor, state_data, state_count);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "act_set_state");
+  if (!frida_inject_instance_start_thread (instance, error))
+    goto error_epilogue;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (instance->id), instance);
-
-  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, instance->thread, DISPATCH_MACH_SEND_DEAD,
-      ctx->dispatch_queue);
-  instance->thread_monitor_source = source;
-  dispatch_set_context (source, instance);
-  dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
-  dispatch_resume (source);
-
-  ret = thread_resume (instance->thread);
-  CHECK_MACH_RESULT (ret, ==, KERN_SUCCESS, "thread_resume");
 
   result = instance->id;
   goto beach;
@@ -1407,7 +1448,7 @@ handle_mach_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while attaching to process with pid %u (%s returned '%s')",
-        pid, failed_operation, mach_error_string (ret));
+        pid, failed_operation, mach_error_string (kr));
     goto error_epilogue;
   }
 error_epilogue:
@@ -1421,6 +1462,128 @@ beach:
     g_clear_object (&resolver);
 
     return result;
+  }
+}
+
+guint
+_frida_darwin_helper_backend_demonitor_and_clone_injectee_state (FridaDarwinHelperBackend * self, void * raw_instance)
+{
+  FridaInjectInstance * instance = raw_instance;
+  FridaInjectInstance * clone;
+
+  dispatch_release (instance->thread_monitor_source);
+  instance->thread_monitor_source = NULL;
+
+  mach_port_deallocate (mach_task_self (), instance->thread);
+  instance->thread = MACH_PORT_NULL;
+
+  clone = frida_inject_instance_clone (instance, self->next_id++);
+
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (clone->id), clone);
+
+  /* TODO: timeout logic */
+
+  return clone->id;
+}
+
+void
+_frida_darwin_helper_backend_recreate_injectee_thread (FridaDarwinHelperBackend * self, void * raw_instance, guint pid, guint task, GError ** error)
+{
+  FridaInjectInstance * instance = raw_instance;
+  FridaAgentContext * agent_context = instance->agent_context;
+  mach_port_t self_task;
+  gboolean is_uninitialized_clone;
+  const gchar * failed_operation;
+  kern_return_t kr;
+
+  agent_context->unload_policy = FRIDA_UNLOAD_POLICY_IMMEDIATE;
+  agent_context->task = MACH_PORT_NULL;
+  agent_context->mach_thread = MACH_PORT_NULL;
+  agent_context->posix_thread = MACH_PORT_NULL;
+
+  self_task = mach_task_self ();
+
+  is_uninitialized_clone = instance->task == MACH_PORT_NULL;
+
+  if (is_uninitialized_clone)
+  {
+    mach_vm_address_t data_address;
+    vm_prot_t cur_protection, max_protection;
+
+    mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
+    instance->task = task;
+
+    data_address = instance->remote_agent_context;
+    kr = mach_vm_remap (task, &data_address, instance->agent_context_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) agent_context,
+        FALSE, &cur_protection, &max_protection, VM_INHERIT_SHARE);
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_remap(data)");
+  }
+
+  if (!frida_inject_instance_start_thread (instance, error))
+    goto error_epilogue;
+
+  goto beach;
+
+handle_mach_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while recreating thread in process with pid %u (%s returned '%s')",
+        pid, failed_operation, mach_error_string (kr));
+    goto error_epilogue;
+  }
+error_epilogue:
+  {
+    _frida_darwin_helper_backend_destroy_inject_instance (self, instance->id);
+    goto beach;
+  }
+beach:
+  {
+    return;
+  }
+}
+
+static gboolean
+frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
+{
+  gboolean success = FALSE;
+  kern_return_t kr;
+  const gchar * failed_operation;
+  FridaHelperContext * ctx = self->backend->context;
+  dispatch_source_t source;
+
+  kr = thread_create (self->task, &self->thread);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_create");
+
+  kr = act_set_state (self->thread, self->thread_state_flavor, self->thread_state_data, self->thread_state_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "act_set_state");
+
+  source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
+  self->thread_monitor_source = source;
+  dispatch_set_context (source, self);
+  dispatch_source_set_event_handler_f (source, frida_inject_instance_on_mach_thread_dead);
+  dispatch_resume (source);
+
+  kr = thread_resume (self->thread);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_resume");
+
+  success = TRUE;
+
+  goto beach;
+
+handle_mach_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while starting thread (%s returned '%s')",
+        failed_operation, mach_error_string (kr));
+    goto beach;
+  }
+beach:
+  {
+    return success;
   }
 }
 
@@ -1573,14 +1736,14 @@ frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
 {
   __Request__exception_raise_state_identity_t * request = &self->pending_request;
   mach_msg_header_t * header;
-  kern_return_t ret;
+  kern_return_t kr;
 
   bzero (request, sizeof (*request));
   header = &request->Head;
   header->msgh_size = sizeof (*request);
   header->msgh_local_port = self->server_port;
-  ret = mach_msg_receive (header);
-  g_assert_cmpint (ret, ==, 0);
+  kr = mach_msg_receive (header);
+  g_assert_cmpint (kr, ==, 0);
 }
 
 static void
@@ -1589,7 +1752,7 @@ frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
   __Request__exception_raise_state_identity_t * request = &self->pending_request;
   __Reply__exception_raise_t response;
   mach_msg_header_t * header;
-  kern_return_t ret;
+  kern_return_t kr;
 
   bzero (&response, sizeof (response));
   header = &response.Head;
@@ -1601,15 +1764,15 @@ frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
   header->msgh_id = request->Head.msgh_id + 100;
   response.NDR = NDR_record;
   response.RetCode = KERN_SUCCESS;
-  ret = mach_msg_send (header);
-  if (ret == KERN_SUCCESS)
+  kr = mach_msg_send (header);
+  if (kr == KERN_SUCCESS)
     request->Head.msgh_remote_port = MACH_PORT_NULL;
 }
 
 static void
 frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 {
-  kern_return_t ret;
+  kern_return_t kr;
   gboolean write_succeeded;
   FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, } };
 
@@ -1653,8 +1816,8 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
       g_assert_not_reached ();
   }
 
-  ret = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
-  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+  kr = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
   write_succeeded = gum_darwin_write (self->task, self->dyld_data, (const guint8 *) &data, sizeof (data));
   g_assert (write_succeeded);
@@ -1666,13 +1829,13 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 static void
 frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
 {
-  kern_return_t ret;
+  kern_return_t kr;
 
   if (self->dyld_data == 0)
     return;
 
-  ret = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
-  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+  kr = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
   self->dyld_data = 0;
 }
@@ -1800,7 +1963,7 @@ static void
 frida_spawn_instance_on_server_recv (void * context)
 {
   FridaSpawnInstance * self = context;
-  kern_return_t ret;
+  kern_return_t kr;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   GumDarwinUnifiedThreadState state;
@@ -1811,8 +1974,8 @@ frida_spawn_instance_on_server_recv (void * context)
   {
     GumAddress pc;
 
-    ret = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
-    g_assert_cmpint (ret, ==, KERN_SUCCESS);
+    kr = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
+    g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
     memcpy (&self->previous_thread_state, &state, sizeof (state));
 
@@ -1858,8 +2021,8 @@ frida_spawn_instance_on_server_recv (void * context)
 
     case FRIDA_BREAKPOINT_SKIP_CLEAR:
     case FRIDA_BREAKPOINT_JUST_RETURN:
-      ret = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
-      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+      kr = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
+      g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
 #ifdef HAVE_I386
       if (self->cpu_type == GUM_CPU_AMD64)
@@ -1873,8 +2036,8 @@ frida_spawn_instance_on_server_recv (void * context)
         state.ts_32.__pc = state.ts_32.__lr;
 #endif
 
-      ret = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+      kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
+      g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
       if (self->breakpoint_phase == FRIDA_BREAKPOINT_SKIP_CLEAR && self->cpu_type == GUM_CPU_ARM)
       {
@@ -1902,20 +2065,20 @@ frida_spawn_instance_on_server_recv (void * context)
       previous_ports = &self->previous_ports;
       for (port_index = 0; port_index != previous_ports->count; port_index++)
       {
-        ret = thread_set_exception_ports (self->thread,
+        kr = thread_set_exception_ports (self->thread,
             previous_ports->masks[port_index],
             previous_ports->ports[port_index],
             previous_ports->behaviors[port_index],
             previous_ports->flavors[port_index]);
-        if (ret != KERN_SUCCESS)
+        if (kr != KERN_SUCCESS)
         {
           mach_port_deallocate (self_task, previous_ports->ports[port_index]);
         }
       }
       previous_ports->count = 0;
 
-      ret = thread_set_state (self->thread, state_flavor, (thread_state_t) &self->previous_thread_state, state_count);
-      g_assert_cmpint (ret, ==, KERN_SUCCESS);
+      kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &self->previous_thread_state, state_count);
+      g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
       frida_spawn_instance_destroy_dyld_data (self);
 
@@ -1938,7 +2101,7 @@ frida_spawn_instance_on_server_recv (void * context)
 static void
 frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState state, mach_vm_address_t helpers)
 {
-  kern_return_t ret;
+  kern_return_t kr;
   GumAddress current_pc;
 
 #ifdef HAVE_I386
@@ -1985,15 +2148,15 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
   }
 #endif
 
-  ret = thread_set_state (self->thread, GUM_DARWIN_THREAD_STATE_FLAVOR,
+  kr = thread_set_state (self->thread, GUM_DARWIN_THREAD_STATE_FLAVOR,
       (thread_state_t) &state, GUM_DARWIN_THREAD_STATE_COUNT);
-  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
 }
 
 static void
 frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState state, mach_vm_address_t lib_name, int mode)
 {
-  kern_return_t ret;
+  kern_return_t kr;
   GumAddress current_pc;
 
 #ifdef HAVE_I386
@@ -2044,9 +2207,9 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
   }
 #endif
 
-  ret = thread_set_state (self->thread, GUM_DARWIN_THREAD_STATE_FLAVOR,
+  kr = thread_set_state (self->thread, GUM_DARWIN_THREAD_STATE_FLAVOR,
       (thread_state_t) &state, GUM_DARWIN_THREAD_STATE_COUNT);
-  g_assert_cmpint (ret, ==, KERN_SUCCESS);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
 }
 
 static void
@@ -2088,6 +2251,34 @@ frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id)
   return instance;
 }
 
+static FridaInjectInstance *
+frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
+{
+  FridaInjectInstance * clone;
+  mach_port_t self_task;
+  mach_vm_address_t agent_context_address = 0;
+  kern_return_t kr;
+
+  clone = g_slice_dup (FridaInjectInstance, instance);
+  g_object_ref (clone->backend);
+  clone->id = id;
+
+  clone->task = MACH_PORT_NULL;
+
+  self_task = mach_task_self ();
+
+  kr = mach_vm_allocate (self_task, &agent_context_address, instance->agent_context_size, VM_FLAGS_ANYWHERE);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
+  clone->agent_context = (FridaAgentContext *) agent_context_address;
+  memcpy (clone->agent_context, instance->agent_context, instance->agent_context_size);
+
+  clone->thread = MACH_PORT_NULL;
+  clone->thread_monitor_source = NULL;
+
+  return clone;
+}
+
 static void
 frida_inject_instance_free (FridaInjectInstance * instance)
 {
@@ -2102,7 +2293,7 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
 
-  can_deallocate_payload = !(agent_context != NULL && agent_context->stay_resident && instance->is_mapped);
+  can_deallocate_payload = !(agent_context != NULL && agent_context->unload_policy != FRIDA_UNLOAD_POLICY_IMMEDIATE && instance->is_mapped);
   if (instance->payload_address != 0 &&
       can_deallocate_payload &&
       frida_inject_instance_task_did_not_exec (instance))
@@ -2158,7 +2349,7 @@ frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance)
 static gboolean
 frida_inject_instance_is_resident (FridaInjectInstance * instance)
 {
-  return instance->agent_context->stay_resident;
+  return instance->agent_context->unload_policy != FRIDA_UNLOAD_POLICY_IMMEDIATE;
 }
 
 static gboolean
@@ -2166,6 +2357,13 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
     mach_vm_address_t payload_base, mach_vm_size_t payload_size, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
 {
   bzero (self, sizeof (FridaAgentContext));
+
+  self->unload_policy = FRIDA_UNLOAD_POLICY_IMMEDIATE;
+  self->task = MACH_PORT_NULL;
+  self->mach_thread = MACH_PORT_NULL;
+  self->posix_thread = MACH_PORT_NULL;
+  self->constructed = FALSE;
+  self->module_handle = NULL;
 
   if (!frida_agent_context_init_functions (self, resolver, mapper, error))
     return FALSE;
@@ -2345,12 +2543,12 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
 #define FRIDA_EMIT_MOVE(dstreg, srcreg) \
     gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_##dstreg, GUM_REG_##srcreg)
 #define FRIDA_EMIT_CALL(fun, ...) \
-    gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
+    gum_x86_writer_put_call_reg_offset_ptr_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
 
 static void
 frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * again_label = "again";
+  const gchar * again = "again";
 
   FRIDA_EMIT_CALL (mach_task_self_impl, 0);
   FRIDA_EMIT_STORE (task, EAX);
@@ -2358,10 +2556,7 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
   FRIDA_EMIT_CALL (mach_thread_self_impl, 0);
   FRIDA_EMIT_STORE (mach_thread, EAX);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
-  else
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+  gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
 
   FRIDA_EMIT_LOAD (EDI, task);
   FRIDA_EMIT_LOAD (ESI, mach_port_allocate_right);
@@ -2375,9 +2570,6 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
   FRIDA_EMIT_LOAD (XDI, message_that_never_arrives);
   gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XDI, G_STRUCT_OFFSET (mach_msg_header_t, msgh_local_port), GUM_REG_EAX);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
-
   gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP);
   FRIDA_EMIT_LOAD (XDX, pthread_create_start_routine);
   FRIDA_EMIT_LOAD (XCX, pthread_create_arg);
@@ -2387,30 +2579,27 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
       GUM_ARG_REGISTER, GUM_REG_XDX,
       GUM_ARG_REGISTER, GUM_REG_XCX);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
-  else
-    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
+  gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 16);
 
-  gum_x86_writer_put_label (&ctx->cw, again_label);
+  gum_x86_writer_put_label (&ctx->cw, again);
 
   FRIDA_EMIT_LOAD (XAX, message_that_never_arrives);
   FRIDA_EMIT_CALL (mach_msg_receive_impl, 1,
       GUM_ARG_REGISTER, GUM_REG_XAX);
 
-  gum_x86_writer_put_jmp_short_label (&ctx->cw, again_label);
+  gum_x86_writer_put_jmp_short_label (&ctx->cw, again);
 }
 
 static void
 frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * skip_unload_label = "skip_unload";
+  const gchar * skip_construction = "skip_construction";
+  const gchar * skip_dlopen = "skip_dlopen";
+  const gchar * skip_destruction = "skip_destruction";
+  const gchar * skip_detach = "skip_detach";
 
   FRIDA_EMIT_CALL (mach_thread_self_impl, 0);
   FRIDA_EMIT_STORE (posix_thread, EAX);
-
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
 
   FRIDA_EMIT_LOAD (EDI, task);
   FRIDA_EMIT_LOAD (ESI, receive_port);
@@ -2418,102 +2607,88 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
       GUM_ARG_REGISTER, GUM_REG_EDI,
       GUM_ARG_REGISTER, GUM_REG_ESI);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
-
   FRIDA_EMIT_LOAD (EDI, mach_thread);
   FRIDA_EMIT_CALL (thread_terminate_impl, 1,
       GUM_ARG_REGISTER, GUM_REG_EDI);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
-
   if (ctx->mapper != NULL)
   {
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_constructor (ctx->mapper));
-    gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
+    FRIDA_EMIT_LOAD (EAX, constructed);
+    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_construction, GUM_NO_HINT);
 
-    if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_constructor (ctx->mapper));
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX, 0);
+    gum_x86_writer_put_mov_reg_u32 (&ctx->cw, GUM_REG_EAX, TRUE);
+    FRIDA_EMIT_STORE (constructed, EAX);
+
+    gum_x86_writer_put_label (&ctx->cw, skip_construction);
 
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     FRIDA_EMIT_LOAD (XDI, entrypoint_data);
-    FRIDA_EMIT_LOAD_ADDRESS_OF (XSI, stay_resident);
+    FRIDA_EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
     FRIDA_EMIT_LOAD (XDX, mapped_range);
-    gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
-        GUM_CALL_CAPI, GUM_REG_XAX, 3,
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX, 3,
         GUM_ARG_REGISTER, GUM_REG_XDI,
         GUM_ARG_REGISTER, GUM_REG_XSI,
         GUM_ARG_REGISTER, GUM_REG_XDX);
-
-    if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
-
-    FRIDA_EMIT_LOAD (EAX, stay_resident);
-    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
-    gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
-
-    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_destructor (ctx->mapper));
-    gum_x86_writer_put_call_reg (&ctx->cw, GUM_REG_XAX);
-
-    gum_x86_writer_put_label (&ctx->cw, skip_unload_label);
   }
   else
   {
-    if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
+    FRIDA_EMIT_LOAD (XAX, module_handle);
+    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_XAX, GUM_REG_XAX);
+    gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_dlopen, GUM_NO_HINT);
 
     FRIDA_EMIT_LOAD (XDI, dylib_path);
     FRIDA_EMIT_LOAD (ESI, dlopen_mode);
     FRIDA_EMIT_CALL (dlopen_impl, 2,
         GUM_ARG_REGISTER, GUM_REG_XDI,
         GUM_ARG_REGISTER, GUM_REG_ESI);
+    FRIDA_EMIT_STORE (module_handle, XAX);
 
-    gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XSP, (ctx->cw.target_cpu == GUM_CPU_IA32) ? 8 : 0, GUM_REG_XAX);
+    gum_x86_writer_put_label (&ctx->cw, skip_dlopen);
 
     FRIDA_EMIT_LOAD (XSI, entrypoint_name);
     FRIDA_EMIT_CALL (dlsym_impl, 2,
         GUM_ARG_REGISTER, GUM_REG_XAX,
         GUM_ARG_REGISTER, GUM_REG_XSI);
 
-    if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 4);
-
     FRIDA_EMIT_LOAD (XDI, entrypoint_data);
-    FRIDA_EMIT_LOAD_ADDRESS_OF (XSI, stay_resident);
-    gum_x86_writer_put_call_reg_with_arguments (&ctx->cw,
-        GUM_CALL_CAPI, GUM_REG_XAX, 3,
+    FRIDA_EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX, 3,
         GUM_ARG_REGISTER, GUM_REG_XDI,
         GUM_ARG_REGISTER, GUM_REG_XSI,
         GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-
-    if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 8);
-
-    FRIDA_EMIT_LOAD (EAX, stay_resident);
-    gum_x86_writer_put_test_reg_reg (&ctx->cw, GUM_REG_EAX, GUM_REG_EAX);
-    gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
-
-    gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_XDI, GUM_REG_XSP, (ctx->cw.target_cpu == GUM_CPU_IA32) ? 12 : 0);
-    FRIDA_EMIT_CALL (dlclose_impl, 1,
-        GUM_ARG_REGISTER, GUM_REG_XDI);
-
-    gum_x86_writer_put_label (&ctx->cw, skip_unload_label);
-
-    if (ctx->cw.target_cpu == GUM_CPU_IA32)
-      gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
   }
 
-  FRIDA_EMIT_CALL (pthread_self_impl, 0);
+  FRIDA_EMIT_LOAD (EAX, unload_policy);
+  gum_x86_writer_put_cmp_reg_i32 (&ctx->cw, GUM_REG_EAX, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JNE, skip_destruction, GUM_NO_HINT);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_sub_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
+  if (ctx->mapper != NULL)
+  {
+    gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_destructor (ctx->mapper));
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX, 0);
+  }
+  else
+  {
+    FRIDA_EMIT_LOAD (XDI, module_handle);
+    FRIDA_EMIT_CALL (dlclose_impl, 1,
+        GUM_ARG_REGISTER, GUM_REG_XDI);
+  }
+
+  gum_x86_writer_put_label (&ctx->cw, skip_destruction);
+
+  FRIDA_EMIT_LOAD (EAX, unload_policy);
+  gum_x86_writer_put_cmp_reg_i32 (&ctx->cw, GUM_REG_EAX, FRIDA_UNLOAD_POLICY_DEFERRED);
+  gum_x86_writer_put_jcc_short_label (&ctx->cw, X86_INS_JE, skip_detach, GUM_NO_HINT);
+
+  FRIDA_EMIT_CALL (pthread_self_impl, 0);
 
   FRIDA_EMIT_CALL (pthread_detach_impl, 1,
       GUM_ARG_REGISTER, GUM_REG_XAX);
 
-  if (ctx->cw.target_cpu == GUM_CPU_IA32)
-    gum_x86_writer_put_add_reg_imm (&ctx->cw, GUM_REG_XSP, 12);
+  gum_x86_writer_put_label (&ctx->cw, skip_detach);
 }
 
 #undef FRIDA_EMIT_LOAD
@@ -2609,7 +2784,7 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
 static void
 frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * again_label = "again";
+  const gchar * again = "again";
 
   EMIT_ARM_LOAD (R4, mach_task_self_impl);
   EMIT_ARM_CALL (R4);
@@ -2639,19 +2814,22 @@ frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgen
   EMIT_ARM_CALL (R4);
   gum_thumb_writer_put_pop_regs (&ctx->tw, 1, ARM_REG_R0);
 
-  gum_thumb_writer_put_label (&ctx->tw, again_label);
+  gum_thumb_writer_put_label (&ctx->tw, again);
 
   EMIT_ARM_LOAD (R0, message_that_never_arrives);
   EMIT_ARM_LOAD (R4, mach_msg_receive_impl);
   EMIT_ARM_CALL (R4);
 
-  gum_thumb_writer_put_b_label (&ctx->tw, again_label);
+  gum_thumb_writer_put_b_label (&ctx->tw, again);
 }
 
 static void
 frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * skip_unload_label = "skip_unload";
+  const gchar * skip_construction = "skip_construction";
+  const gchar * skip_dlopen = "skip_dlopen";
+  const gchar * skip_destruction = "skip_destruction";
+  const gchar * skip_detach = "skip_detach";
 
   EMIT_ARM_LOAD (R4, mach_thread_self_impl);
   EMIT_ARM_CALL (R4);
@@ -2668,22 +2846,35 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
   if (ctx->mapper != NULL)
   {
+    EMIT_ARM_LOAD (R0, constructed);
+    gum_thumb_writer_put_cbnz_reg_label (&ctx->tw, ARM_REG_R0, skip_construction);
+
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_constructor (ctx->mapper));
     EMIT_ARM_CALL (R4);
+    gum_thumb_writer_put_mov_reg_u8 (&ctx->tw, ARM_REG_R0, TRUE);
+    EMIT_ARM_STORE (constructed, R0);
+
+    gum_thumb_writer_put_label (&ctx->tw, skip_construction);
 
     EMIT_ARM_LOAD (R0, entrypoint_data);
-    EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, unload_policy);
     EMIT_ARM_LOAD (R2, mapped_range);
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM_CALL (R4);
   }
   else
   {
+    EMIT_ARM_LOAD (R5, module_handle);
+    gum_thumb_writer_put_cbnz_reg_label (&ctx->tw, ARM_REG_R5, skip_dlopen);
+
     EMIT_ARM_LOAD (R0, dylib_path);
     EMIT_ARM_LOAD (R1, dlopen_mode);
     EMIT_ARM_LOAD (R4, dlopen_impl);
     EMIT_ARM_CALL (R4);
     EMIT_ARM_MOVE (R5, R0);
+    EMIT_ARM_STORE (module_handle, R5);
+
+    gum_thumb_writer_put_label (&ctx->tw, skip_dlopen);
 
     EMIT_ARM_MOVE (R0, R5);
     EMIT_ARM_LOAD (R1, entrypoint_name);
@@ -2692,13 +2883,14 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
     EMIT_ARM_MOVE (R4, R0);
 
     EMIT_ARM_LOAD (R0, entrypoint_data);
-    EMIT_ARM_LOAD_ADDRESS_OF (R1, stay_resident);
+    EMIT_ARM_LOAD_ADDRESS_OF (R1, unload_policy);
     EMIT_ARM_LOAD_U32 (R2, 0);
     EMIT_ARM_CALL (R4);
   }
 
-  EMIT_ARM_LOAD (R0, stay_resident);
-  gum_thumb_writer_put_cbnz_reg_label (&ctx->tw, ARM_REG_R0, skip_unload_label);
+  EMIT_ARM_LOAD (R0, unload_policy);
+  gum_thumb_writer_put_cmp_reg_imm (&ctx->tw, ARM_REG_R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  gum_thumb_writer_put_bne_label (&ctx->tw, skip_destruction);
 
   if (ctx->mapper != NULL)
   {
@@ -2712,13 +2904,19 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
     EMIT_ARM_CALL (R4);
   }
 
-  gum_thumb_writer_put_label (&ctx->tw, skip_unload_label);
+  gum_thumb_writer_put_label (&ctx->tw, skip_destruction);
+
+  EMIT_ARM_LOAD (R0, unload_policy);
+  gum_thumb_writer_put_cmp_reg_imm (&ctx->tw, ARM_REG_R0, FRIDA_UNLOAD_POLICY_DEFERRED);
+  gum_thumb_writer_put_beq_label (&ctx->tw, skip_detach);
 
   EMIT_ARM_LOAD (R4, pthread_self_impl);
   EMIT_ARM_CALL (R4);
 
   EMIT_ARM_LOAD (R4, pthread_detach_impl);
   EMIT_ARM_CALL (R4);
+
+  gum_thumb_writer_put_label (&ctx->tw, skip_detach);
 }
 
 #undef EMIT_ARM_LOAD
@@ -2811,7 +3009,7 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
 static void
 frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * again_label = "again";
+  const gchar * again = "again";
 
   EMIT_ARM64_LOAD (X8, mach_task_self_impl);
   EMIT_ARM64_CALL (X8);
@@ -2841,19 +3039,22 @@ frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAg
   EMIT_ARM64_CALL (X8);
   gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
 
-  gum_arm64_writer_put_label (&ctx->aw, again_label);
+  gum_arm64_writer_put_label (&ctx->aw, again);
 
   EMIT_ARM64_LOAD (X0, message_that_never_arrives);
   EMIT_ARM64_LOAD (X8, mach_msg_receive_impl);
   EMIT_ARM64_CALL (X8);
 
-  gum_arm64_writer_put_b_label (&ctx->aw, again_label);
+  gum_arm64_writer_put_b_label (&ctx->aw, again);
 }
 
 static void
 frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
-  const gchar * skip_unload_label = "skip_unload";
+  const gchar * skip_construction = "skip_construction";
+  const gchar * skip_dlopen = "skip_dlopen";
+  const gchar * skip_destruction = "skip_destruction";
+  const gchar * skip_detach = "skip_detach";
 
   EMIT_ARM64_LOAD (X8, mach_thread_self_impl);
   EMIT_ARM64_CALL (X8);
@@ -2870,22 +3071,35 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 
   if (ctx->mapper != NULL)
   {
+    EMIT_ARM64_LOAD (W0, constructed);
+    gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_W0, skip_construction);
+
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_constructor (ctx->mapper));
     EMIT_ARM64_CALL (X8);
+    gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_X1, TRUE);
+    EMIT_ARM64_STORE (constructed, W1);
+
+    gum_arm64_writer_put_label (&ctx->aw, skip_construction);
 
     EMIT_ARM64_LOAD (X0, entrypoint_data);
-    EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, unload_policy);
     EMIT_ARM64_LOAD (X2, mapped_range);
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM64_CALL (X8);
   }
   else
   {
+    EMIT_ARM64_LOAD (X19, module_handle);
+    gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_X19, skip_dlopen);
+
     EMIT_ARM64_LOAD (X0, dylib_path);
     EMIT_ARM64_LOAD (X1, dlopen_mode);
     EMIT_ARM64_LOAD (X8, dlopen_impl);
     EMIT_ARM64_CALL (X8);
     EMIT_ARM64_MOVE (X19, X0);
+    EMIT_ARM64_STORE (module_handle, X19);
+
+    gum_arm64_writer_put_label (&ctx->aw, skip_dlopen);
 
     EMIT_ARM64_MOVE (X0, X19);
     EMIT_ARM64_LOAD (X1, entrypoint_name);
@@ -2894,13 +3108,15 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_MOVE (X8, X0);
 
     EMIT_ARM64_LOAD (X0, entrypoint_data);
-    EMIT_ARM64_LOAD_ADDRESS_OF (X1, stay_resident);
+    EMIT_ARM64_LOAD_ADDRESS_OF (X1, unload_policy);
     EMIT_ARM64_LOAD_U64 (X2, 0);
     EMIT_ARM64_CALL (X8);
   }
 
-  EMIT_ARM64_LOAD (W0, stay_resident);
-  gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_W0, skip_unload_label);
+  EMIT_ARM64_LOAD (W0, unload_policy);
+  gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_X1, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  gum_arm64_writer_put_cmp_reg_reg (&ctx->aw, ARM64_REG_W0, ARM64_REG_W1);
+  gum_arm64_writer_put_b_cond_label (&ctx->aw, ARM64_CC_NE, skip_destruction);
 
   if (ctx->mapper != NULL)
   {
@@ -2914,13 +3130,20 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_CALL (X8);
   }
 
-  gum_arm64_writer_put_label (&ctx->aw, skip_unload_label);
+  gum_arm64_writer_put_label (&ctx->aw, skip_destruction);
+
+  EMIT_ARM64_LOAD (W0, unload_policy);
+  gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_X1, FRIDA_UNLOAD_POLICY_DEFERRED);
+  gum_arm64_writer_put_cmp_reg_reg (&ctx->aw, ARM64_REG_W0, ARM64_REG_W1);
+  gum_arm64_writer_put_b_cond_label (&ctx->aw, ARM64_CC_EQ, skip_detach);
 
   EMIT_ARM64_LOAD (X8, pthread_self_impl);
   EMIT_ARM64_CALL (X8);
 
   EMIT_ARM64_LOAD (X8, pthread_detach_impl);
   EMIT_ARM64_CALL (X8);
+
+  gum_arm64_writer_put_label (&ctx->aw, skip_detach);
 }
 
 #undef EMIT_ARM64_LOAD
@@ -2934,50 +3157,50 @@ static kern_return_t
 frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type)
 {
   mach_msg_type_number_t state_count;
-  kern_return_t ret;
+  kern_return_t kr;
 
 #ifdef HAVE_I386
   state_count = x86_DEBUG_STATE_COUNT;
-  ret = thread_get_state (thread, x86_DEBUG_STATE, state, &state_count);
+  kr = thread_get_state (thread, x86_DEBUG_STATE, state, &state_count);
 #else
   if (cpu_type == GUM_CPU_ARM64)
   {
     state_count = ARM_DEBUG_STATE64_COUNT;
-    ret = thread_get_state (thread, ARM_DEBUG_STATE64, state, &state_count);
+    kr = thread_get_state (thread, ARM_DEBUG_STATE64, state, &state_count);
   }
   else
   {
     state_count = ARM_DEBUG_STATE_COUNT;
-    ret = thread_get_state (thread, ARM_DEBUG_STATE, state, &state_count);
+    kr = thread_get_state (thread, ARM_DEBUG_STATE, state, &state_count);
   }
 #endif
 
-  return ret;
+  return kr;
 }
 
 static kern_return_t
 frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type)
 {
   mach_msg_type_number_t state_count;
-  kern_return_t ret;
+  kern_return_t kr;
 
 #ifdef HAVE_I386
   state_count = x86_DEBUG_STATE_COUNT;
-  ret = thread_set_state (thread, x86_DEBUG_STATE, (thread_state_t) state, state_count);
+  kr = thread_set_state (thread, x86_DEBUG_STATE, (thread_state_t) state, state_count);
 #else
   if (cpu_type == GUM_CPU_ARM64)
   {
     state_count = ARM_DEBUG_STATE64_COUNT;
-    ret = thread_set_state (thread, ARM_DEBUG_STATE64, (thread_state_t) state, state_count);
+    kr = thread_set_state (thread, ARM_DEBUG_STATE64, (thread_state_t) state, state_count);
   }
   else
   {
     state_count = ARM_DEBUG_STATE_COUNT;
-    ret = thread_set_state (thread, ARM_DEBUG_STATE, (thread_state_t) state, state_count);
+    kr = thread_set_state (thread, ARM_DEBUG_STATE, (thread_state_t) state, state_count);
   }
 #endif
 
-  return ret;
+  return kr;
 }
 
 static void

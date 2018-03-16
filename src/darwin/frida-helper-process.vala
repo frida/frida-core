@@ -182,14 +182,32 @@ namespace Frida {
 			}
 		}
 
-		public async IOStream make_pipe_stream (uint remote_pid, out string remote_address) throws Error {
+		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+			var helper = yield obtain ();
+			try {
+				return yield helper.demonitor_and_clone_injectee_state (id);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.recreate_injectee_thread (pid, id);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error {
 			var helper = yield obtain ();
 			try {
 				var endpoints = yield helper.make_pipe_endpoints (remote_pid);
 
 				remote_address = endpoints.remote_address;
 
-				return new Pipe (endpoints.local_address);
+				return Pipe.open (endpoints.local_address);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -229,10 +247,10 @@ namespace Frida {
 				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
 
 				var peer_pid = (uint) uint64.parse (pending_process.get_identifier ());
-				Pipe pipe;
-				yield handshake_port.exchange (peer_pid, out pending_task_port, out pipe);
+				IOStream stream;
+				yield handshake_port.exchange (peer_pid, out pending_task_port, out stream);
 
-				pending_connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.NONE, null, null);
+				pending_connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, null);
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
 			} catch (GLib.Error e) {
 				pending_error = new Error.PERMISSION_DENIED (e.message);
@@ -243,7 +261,7 @@ namespace Frida {
 				task = pending_task_port;
 
 				connection = pending_connection;
-				connection.closed.connect (on_connection_closed);
+				connection.on_closed.connect (on_connection_closed);
 
 				proxy = pending_proxy;
 				proxy.output.connect (on_output);
@@ -280,7 +298,7 @@ namespace Frida {
 			proxy.uninjected.disconnect (on_uninjected);
 			proxy = null;
 
-			connection.closed.disconnect (on_connection_closed);
+			connection.on_closed.disconnect (on_connection_closed);
 			connection = null;
 
 			process = null;

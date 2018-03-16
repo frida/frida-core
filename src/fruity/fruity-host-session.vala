@@ -145,10 +145,10 @@ namespace Frida {
 		}
 		private string _name = "iOS Device";
 
-		public ImageData? icon {
+		public Image? icon {
 			get { return _icon; }
 		}
-		private ImageData? _icon = null;
+		private Image? _icon = null;
 
 		public HostSessionProviderKind kind {
 			get { return HostSessionProviderKind.LOCAL_TETHER; }
@@ -191,7 +191,9 @@ namespace Frida {
 			bool got_details = false;
 			for (int i = 1; !got_details; i++) {
 				try {
-					_extract_details_for_device (device_product_id, device_udid, out _name, out _icon);
+					ImageData? icon_data;
+					_extract_details_for_device (device_product_id, device_udid, out _name, out icon_data);
+					_icon = Image.from_data (icon_data);
 					got_details = true;
 				} catch (Error e) {
 					if (i != 60) {
@@ -251,7 +253,7 @@ namespace Frida {
 			entry.agent_session_closed.connect (on_agent_session_closed);
 			entries.add (entry);
 
-			connection.closed.connect (on_connection_closed);
+			connection.on_closed.connect (on_connection_closed);
 
 			return session;
 		}
@@ -300,7 +302,7 @@ namespace Frida {
 		}
 
 		private async void destroy_entry (Entry entry, SessionDetachReason reason) {
-			entry.connection.closed.disconnect (on_connection_closed);
+			entry.connection.on_closed.disconnect (on_connection_closed);
 			yield entry.destroy (reason);
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
 			host_session_closed (entry.host_session);

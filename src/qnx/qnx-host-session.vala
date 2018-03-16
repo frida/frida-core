@@ -25,7 +25,7 @@ namespace Frida {
 			get { return "Local System"; }
 		}
 
-		public ImageData? icon {
+		public Image? icon {
 			get { return null; }
 		}
 
@@ -73,8 +73,6 @@ namespace Frida {
 
 	public class QnxHostSession : BaseDBusHostSession {
 		private AgentContainer system_session_container;
-
-		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		private AgentDescriptor agent_desc;
 
@@ -150,7 +148,7 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async void resume (uint pid) throws Error {
+		protected override async void perform_resume (uint pid) throws Error {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
@@ -158,19 +156,19 @@ namespace Frida {
 			System.kill (pid);
 		}
 
-		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
+		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
 			var qinjector = injector as Qinjector;
 
 			PipeTransport.set_temp_directory (qinjector.temp_directory);
 
 			PipeTransport t;
-			Pipe stream;
 			try {
 				t = new PipeTransport ();
-				stream = new Pipe (t.local_address);
-			} catch (IOError stream_error) {
-				throw new Error.NOT_SUPPORTED (stream_error.message);
+			} catch (IOError e) {
+				throw new Error.NOT_SUPPORTED (e.message);
 			}
+
+			var stream_request = Pipe.open (t.local_address);
 
 			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
 			while (injectee_by_pid.has_key (pid))
@@ -182,7 +180,7 @@ namespace Frida {
 
 			transport = t;
 
-			return stream;
+			return stream_request;
 		}
 
 		private void on_uninjected (uint id) {

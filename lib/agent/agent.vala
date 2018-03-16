@@ -1,56 +1,319 @@
 namespace Frida.Agent {
-	public void main (string pipe_address, ref bool stay_resident, Gum.MemoryRange? mapped_range) {
-		Environment._init ();
-
-		{
-			var agent_range = memory_range (mapped_range);
-			Gum.Cloak.add_range (agent_range);
-
-			var ignore_scope = new ThreadIgnoreScope ();
-
-			var exceptor = Gum.Exceptor.obtain ();
-
-			var server = new AgentServer (pipe_address, agent_range);
-
-			try {
-				server.run ();
-			} catch (Error e) {
-				printerr ("Unable to start agent server: %s\n", e.message);
-			}
-
-			exceptor = null;
-
-			ignore_scope = null;
-		}
-
-		Environment._deinit ();
+	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
+		if (Runner.shared_instance == null)
+			Runner.create_and_run (pipe_address, ref unload_policy, mapped_range);
+		else
+			Runner.resume_after_fork (ref unload_policy);
 	}
 
-	private class AgentServer : Object, AgentSessionProvider {
+	private enum StopReason {
+		UNLOAD,
+		FORK
+	}
+
+	private class Runner : Object, AgentSessionProvider, ForkHandler {
+		public static Runner shared_instance = null;
+		public static Mutex shared_mutex;
+
 		public string pipe_address {
 			get;
 			construct;
 		}
 
-		private MainLoop main_loop = new MainLoop ();
+		public StopReason stop_reason {
+			default = UNLOAD;
+			get;
+			set;
+		}
+
+		private void * agent_pthread;
+
+		private MainContext main_context;
+		private MainLoop main_loop;
 		private DBusConnection connection;
+		private AgentController controller;
 		private bool unloading = false;
+		private uint filter_id = 0;
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
-		private Gee.Promise<bool> pending_close = null;
+		private Gee.Promise<bool> pending_close;
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 
-		private Gum.ScriptBackend script_backend = null;
+		private Gum.ScriptBackend script_backend;
+		private Gum.Exceptor exceptor;
 		private bool jit_enabled = false;
 		protected Gum.MemoryRange agent_range;
 
-		public AgentServer (string pipe_address, Gum.MemoryRange agent_range) {
+		private uint child_gating_subscriber_count = 0;
+		private ForkListener? fork_listener;
+		private ThreadIgnoreScope fork_ignore_scope;
+		private uint fork_parent_pid;
+		private uint fork_child_pid;
+		private HostChildId fork_child_id;
+		private uint fork_parent_injectee_id;
+		private uint fork_child_injectee_id;
+		private Socket fork_child_socket;
+		private ForkRecoveryState fork_recovery_state;
+		private Mutex fork_mutex;
+		private Cond fork_cond;
+
+		private enum ForkRecoveryState {
+			RECOVERING,
+			RECOVERED
+		}
+
+		private enum ForkActor {
+			PARENT,
+			CHILD
+		}
+
+		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
+			Environment._init ();
+
+			{
+				var agent_range = memory_range (mapped_range);
+				Gum.Cloak.add_range (agent_range);
+
+				var ignore_scope = new ThreadIgnoreScope ();
+
+				shared_instance = new Runner (pipe_address, agent_range);
+
+				try {
+					shared_instance.run ();
+				} catch (Error e) {
+					printerr ("Unable to start agent: %s\n", e.message);
+				}
+
+				if (shared_instance.stop_reason == FORK) {
+					unload_policy = DEFERRED;
+					return;
+				} else {
+					release_shared_instance ();
+				}
+
+				ignore_scope = null;
+			}
+
+			Environment._deinit ();
+		}
+
+		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy) {
+			{
+				var ignore_scope = new ThreadIgnoreScope ();
+
+				shared_instance.run_after_fork ();
+
+				if (shared_instance.stop_reason == FORK) {
+					unload_policy = DEFERRED;
+					return;
+				} else {
+					release_shared_instance ();
+				}
+
+				ignore_scope = null;
+			}
+
+			Environment._deinit ();
+		}
+
+		private static void release_shared_instance () {
+			shared_mutex.lock ();
+			var instance = shared_instance;
+			shared_instance = null;
+			shared_mutex.unlock ();
+
+			instance = null;
+		}
+
+		private Runner (string pipe_address, Gum.MemoryRange agent_range) {
 			Object (pipe_address: pipe_address);
 
 			this.agent_range = agent_range;
 		}
 
-		public async void open (AgentSessionId id) throws Error {
+		construct {
+			agent_pthread = Environment._get_current_pthread ();
+
+			main_context = new MainContext ();
+			main_loop = new MainLoop (main_context);
+
+			exceptor = Gum.Exceptor.obtain ();
+		}
+
+		~Runner () {
+			disable_child_gating ();
+		}
+
+		private void run () throws Error {
+			main_context.push_thread_default ();
+
+			setup_connection_with_pipe_address.begin (pipe_address);
+
+			main_loop.run ();
+
+			main_context.pop_thread_default ();
+		}
+
+		private void run_after_fork () {
+			fork_mutex.lock ();
+			fork_mutex.unlock ();
+
+			stop_reason = UNLOAD;
+			agent_pthread = Environment._get_current_pthread ();
+
+			main_context.push_thread_default ();
+			main_loop.run ();
+			main_context.pop_thread_default ();
+		}
+
+#if WINDOWS
+		private void prepare_to_fork () {
+		}
+
+		private void recover_from_fork_in_parent () {
+		}
+
+		private void recover_from_fork_in_child () {
+		}
+#else
+		private void prepare_to_fork () {
+			fork_ignore_scope = new ThreadIgnoreScope ();
+
+			schedule_idle (() => {
+				do_prepare_to_fork.begin ();
+				return false;
+			});
+			Environment._join_pthread (agent_pthread);
+
+			GumJS.prepare_to_fork ();
+			Gum.prepare_to_fork ();
+			GIOFork.prepare_to_fork ();
+			GLibFork.prepare_to_fork ();
+			Gum.Memory.prepare_to_fork ();
+		}
+
+		private async void do_prepare_to_fork () {
+			stop_reason = FORK;
+
+			try {
+				fork_parent_pid = Posix.getpid ();
+				fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			main_loop.quit ();
+		}
+
+		private void recover_from_fork_in_parent () {
+			recover_from_fork (ForkActor.PARENT);
+		}
+
+		private void recover_from_fork_in_child () {
+			recover_from_fork (ForkActor.CHILD);
+		}
+
+		private void recover_from_fork (ForkActor actor) {
+			if (actor == PARENT) {
+				Gum.Memory.recover_from_fork_in_parent ();
+				GLibFork.recover_from_fork_in_parent ();
+				GIOFork.recover_from_fork_in_parent ();
+				Gum.recover_from_fork_in_parent ();
+				GumJS.recover_from_fork_in_parent ();
+			} else if (actor == CHILD) {
+				Gum.Memory.recover_from_fork_in_child ();
+				GLibFork.recover_from_fork_in_child ();
+				GIOFork.recover_from_fork_in_child ();
+				Gum.recover_from_fork_in_child ();
+				GumJS.recover_from_fork_in_child ();
+
+				fork_child_pid = Posix.getpid ();
+
+				acquire_child_gating ();
+
+				discard_connection ();
+			}
+
+			fork_mutex.lock ();
+
+			fork_recovery_state = RECOVERING;
+
+			schedule_idle (() => {
+				recreate_agent_thread.begin (actor);
+				return false;
+			});
+
+			main_context.push_thread_default ();
+			main_loop.run ();
+			main_context.pop_thread_default ();
+
+			schedule_idle (() => {
+				finish_recovery_from_fork.begin (actor);
+				return false;
+			});
+
+			while (fork_recovery_state != RECOVERED)
+				fork_cond.wait (fork_mutex);
+
+			fork_mutex.unlock ();
+
+			fork_ignore_scope = null;
+		}
+
+		private async void recreate_agent_thread (ForkActor actor) {
+			uint pid, injectee_id;
+			if (actor == PARENT) {
+				pid = fork_parent_pid;
+				injectee_id = fork_parent_injectee_id;
+			} else if (actor == CHILD) {
+				yield close_all_clients ();
+
+				var stream = SocketConnection.factory_create_connection (fork_child_socket);
+				yield setup_connection_with_stream (stream);
+
+				pid = fork_child_pid;
+				injectee_id = fork_child_injectee_id;
+			} else {
+				assert_not_reached ();
+			}
+
+			try {
+				yield controller.recreate_agent_thread (pid, injectee_id);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			main_loop.quit ();
+		}
+
+		private async void finish_recovery_from_fork (ForkActor actor) {
+			if (actor == CHILD) {
+				var info = HostChildInfo (fork_child_pid, Environment.get_program_name (), fork_parent_pid);
+				try {
+					yield controller.wait_for_permission_to_resume (fork_child_id, info);
+				} catch (GLib.Error e) {
+					// The connection will/did get closed and we will unload...
+				}
+			}
+
+			fork_parent_pid = 0;
+			fork_child_pid = 0;
+			fork_child_id = HostChildId (0);
+			fork_parent_injectee_id = 0;
+			fork_child_injectee_id = 0;
+			fork_child_socket = null;
+
+			fork_mutex.lock ();
+			fork_recovery_state = RECOVERED;
+			fork_cond.signal ();
+			fork_mutex.unlock ();
+
+			if (actor == CHILD)
+				release_child_gating ();
+		}
+#endif
+
+		private async void open (AgentSessionId id) throws Error {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
@@ -68,16 +331,31 @@ namespace Frida.Agent {
 			opened (id);
 		}
 
+		private async void close_all_clients () {
+			foreach (var client in clients.to_array ()) {
+				try {
+					yield client.close ();
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+			}
+			assert (clients.is_empty);
+		}
+
 		private void on_client_closed (AgentClient client) {
 			closed (client.id);
 
-			connection.unregister_object (client.registration_id);
+			var id = client.registration_id;
+			if (id != 0) {
+				connection.unregister_object (id);
+				client.registration_id = 0;
+			}
 
 			client.closed.disconnect (on_client_closed);
 			clients.remove (client);
 		}
 
-		public async void unload () throws Error {
+		private async void unload () throws Error {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is already unloading");
 			unloading = true;
@@ -102,21 +380,60 @@ namespace Frida.Agent {
 				}
 			}
 
-			foreach (var client in clients.to_array ()) {
-				try {
-					yield client.close ();
-				} catch (GLib.Error e) {
-					assert_not_reached ();
-				}
-			}
-			assert (clients.is_empty);
+			yield close_all_clients ();
 
 			yield teardown_connection ();
 
-			Idle.add (() => {
+			schedule_idle (() => {
 				main_loop.quit ();
 				return false;
 			});
+		}
+
+		public void acquire_child_gating () {
+			child_gating_subscriber_count++;
+			if (child_gating_subscriber_count == 1)
+				enable_child_gating ();
+		}
+
+		public void release_child_gating () {
+			child_gating_subscriber_count--;
+			if (child_gating_subscriber_count == 0)
+				disable_child_gating ();
+		}
+
+		private void enable_child_gating () {
+#if !WINDOWS
+			if (fork_listener != null)
+				return;
+
+			fork_listener = new ForkListener (this);
+
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.begin_transaction ();
+
+			interceptor.attach_listener ((void *) Posix.fork, fork_listener);
+			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
+
+			interceptor.end_transaction ();
+#endif
+		}
+
+		private void disable_child_gating () {
+#if !WINDOWS
+			if (fork_listener == null)
+				return;
+
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.begin_transaction ();
+
+			interceptor.revert_function ((void *) Posix.vfork);
+			interceptor.detach_listener (fork_listener);
+
+			interceptor.end_transaction ();
+
+			fork_listener = null;
+#endif
 		}
 
 		public ScriptEngine create_script_engine () {
@@ -136,49 +453,105 @@ namespace Frida.Agent {
 			jit_enabled = true;
 		}
 
-		public void run () throws Error {
-			setup_connection.begin ();
-			main_loop = new MainLoop ();
-			main_loop.run ();
+		public void schedule_idle (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (main_context);
 		}
 
-		private async void setup_connection () {
+		public void schedule_timeout (uint delay, owned SourceFunc function) {
+			var source = new TimeoutSource (delay);
+			source.set_callback ((owned) function);
+			source.attach (main_context);
+		}
+
+		private async void setup_connection_with_pipe_address (string pipe_address) {
+			IOStream stream;
 			try {
-				connection = yield new DBusConnection (new Pipe (pipe_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				stream = yield Pipe.open (pipe_address).future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
+
+			yield setup_connection_with_stream (stream);
+		}
+
+		private async void setup_connection_with_stream (IOStream stream) {
+			try {
+				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING);
 			} catch (GLib.Error connection_error) {
 				printerr ("Unable to create connection: %s\n", connection_error.message);
 				return;
 			}
-			connection.closed.connect (on_connection_closed);
-			connection.add_filter (on_connection_message);
+
+			connection.on_closed.connect (on_connection_closed);
+			filter_id = connection.add_filter (on_connection_message);
+
 			try {
 				AgentSessionProvider provider = this;
 				registration_id = connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider);
+
 				connection.start_message_processing ();
 			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+
+			try {
+				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DBusProxyFlags.NONE, null);
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}
 
 		private async void teardown_connection () {
-			if (connection != null) {
-				connection.closed.disconnect (on_connection_closed);
+			if (connection == null)
+				return;
 
-				try {
-					yield connection.flush ();
-				} catch (GLib.Error e) {
-				}
+			connection.on_closed.disconnect (on_connection_closed);
 
-				if (registration_id != 0) {
-					connection.unregister_object (registration_id);
-				}
+			try {
+				yield connection.flush ();
+			} catch (GLib.Error e) {
+			}
 
-				try {
-					yield connection.close ();
-				} catch (GLib.Error e) {
-				}
+			try {
+				yield connection.close ();
+			} catch (GLib.Error e) {
+			}
 
-				connection = null;
+			unregister_connection ();
+
+			connection = null;
+		}
+
+		private void discard_connection () {
+			if (connection == null)
+				return;
+
+			connection.on_closed.disconnect (on_connection_closed);
+
+			unregister_connection ();
+
+			connection.dispose ();
+			connection = null;
+		}
+
+		private void unregister_connection () {
+			foreach (var client in clients) {
+				connection.unregister_object (client.registration_id);
+				client.registration_id = 0;
+			}
+
+			controller = null;
+
+			if (registration_id != 0) {
+				connection.unregister_object (registration_id);
+				registration_id = 0;
+			}
+
+			if (filter_id != 0) {
+				connection.remove_filter (filter_id);
+				filter_id = 0;
 			}
 		}
 
@@ -214,7 +587,7 @@ namespace Frida.Agent {
 							var operation = pending_close;
 							if (pending_calls == 0 && operation != null) {
 								pending_close = null;
-								Idle.add (() => {
+								schedule_idle (() => {
 									operation.set_value (true);
 									return false;
 								});
@@ -233,7 +606,7 @@ namespace Frida.Agent {
 	private class AgentClient : Object, AgentSession {
 		public signal void closed (AgentClient client);
 
-		public weak AgentServer server {
+		public weak Runner runner {
 			get;
 			construct;
 		}
@@ -250,10 +623,11 @@ namespace Frida.Agent {
 
 		private Gee.Promise<bool> close_request;
 
+		private bool child_gating_enabled = false;
 		private ScriptEngine script_engine;
 
-		public AgentClient (AgentServer server, AgentSessionId id) {
-			Object (server: server, id: id);
+		public AgentClient (Runner runner, AgentSessionId id) {
+			Object (runner: runner, id: id);
 		}
 
 		public async void close () throws Error {
@@ -267,6 +641,12 @@ namespace Frida.Agent {
 			}
 			close_request = new Gee.Promise<bool> ();
 
+			try {
+				yield disable_child_gating ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
 			if (script_engine != null) {
 				yield script_engine.shutdown ();
 				script_engine = null;
@@ -275,6 +655,24 @@ namespace Frida.Agent {
 			closed (this);
 
 			close_request.set_value (true);
+		}
+
+		public async void enable_child_gating () throws Error {
+			if (child_gating_enabled)
+				return;
+
+			runner.acquire_child_gating ();
+
+			child_gating_enabled = true;
+		}
+
+		public async void disable_child_gating () throws Error {
+			if (!child_gating_enabled)
+				return;
+
+			runner.release_child_gating ();
+
+			child_gating_enabled = false;
 		}
 
 		public async AgentScriptId create_script (string name, string source) throws Error {
@@ -322,14 +720,14 @@ namespace Frida.Agent {
 		}
 
 		public async void enable_jit () throws GLib.Error {
-			server.enable_jit ();
+			runner.enable_jit ();
 		}
 
 		private ScriptEngine get_script_engine () throws Error {
 			check_open ();
 
 			if (script_engine == null) {
-				script_engine = server.create_script_engine ();
+				script_engine = runner.create_script_engine ();
 				script_engine.message_from_script.connect ((script_id, message, data) => {
 					var has_data = data != null;
 					var data_param = has_data ? data.get_data () : new uint8[0];
@@ -394,10 +792,58 @@ namespace Frida.Agent {
 		}
 	}
 
+	private class ForkListener : Object, Gum.InvocationListener {
+		public weak ForkHandler handler {
+			get;
+			construct;
+		}
+
+		public ForkListener (ForkHandler handler) {
+			Object (handler: handler);
+		}
+
+		public void on_enter (Gum.InvocationContext context) {
+			handler.prepare_to_fork ();
+		}
+
+		public void on_leave (Gum.InvocationContext context) {
+			int result = (int) context.get_return_value ();
+			if (result != 0)
+				handler.recover_from_fork_in_parent ();
+			else
+				handler.recover_from_fork_in_child ();
+		}
+	}
+
+	public interface ForkHandler : Object {
+		public abstract void prepare_to_fork ();
+		public abstract void recover_from_fork_in_parent ();
+		public abstract void recover_from_fork_in_child ();
+	}
+
 	namespace Environment {
 		public extern void _init ();
 		public extern void _deinit ();
+
 		public extern unowned Gum.ScriptBackend _obtain_script_backend (bool jit_enabled);
+
+		public string get_program_name () {
+			var name = _try_get_program_name ();
+			if (name != null)
+				return name;
+
+			Gum.Process.enumerate_modules ((details) => {
+				name = details.name;
+				return false;
+			});
+			assert (name != null);
+
+			return name;
+		}
+
+		public extern string? _try_get_program_name ();
+		public extern void * _get_current_pthread ();
+		public extern void _join_pthread (void * thread);
 	}
 
 	private Mutex gc_mutex;
@@ -414,7 +860,14 @@ namespace Frida.Agent {
 		if (already_scheduled)
 			return;
 
-		Timeout.add (50, () => {
+		Runner.shared_mutex.lock ();
+		var runner = Runner.shared_instance;
+		Runner.shared_mutex.unlock ();
+
+		if (runner == null)
+			return;
+
+		runner.schedule_timeout (50, () => {
 			gc_mutex.lock ();
 			uint generation = gc_generation;
 			gc_mutex.unlock ();
@@ -434,4 +887,18 @@ namespace Frida.Agent {
 
 	[CCode (cname = "g_thread_garbage_collect")]
 	private extern bool garbage_collect ();
+
+	[CCode (cheader_filename = "glib.h", lower_case_cprefix = "glib_")]
+	namespace GLibFork {
+		public extern void prepare_to_fork ();
+		public extern void recover_from_fork_in_parent ();
+		public extern void recover_from_fork_in_child ();
+	}
+
+	[CCode (cheader_filename = "gio/gio.h", lower_case_cprefix = "gio_")]
+	namespace GIOFork {
+		public extern void prepare_to_fork ();
+		public extern void recover_from_fork_in_parent ();
+		public extern void recover_from_fork_in_child ();
+	}
 }

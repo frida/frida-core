@@ -25,8 +25,10 @@ namespace Frida {
 
 		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error;
 		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error;
+		public abstract async uint demonitor_and_clone_injectee_state (uint id) throws Error;
+		public abstract async void recreate_injectee_thread (uint pid, uint id) throws Error;
 
-		public abstract async IOStream make_pipe_stream (uint remote_pid, out string remote_address) throws Error;
+		public abstract async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error;
 
 		public abstract async MappedLibraryBlob? try_mmap (Bytes blob) throws Error;
 	}
@@ -52,6 +54,8 @@ namespace Frida {
 
 		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws GLib.Error;
 		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws GLib.Error;
+		public abstract async uint demonitor_and_clone_injectee_state (uint id) throws GLib.Error;
+		public abstract async void recreate_injectee_thread (uint pid, uint id) throws GLib.Error;
 
 		public abstract async PipeEndpoints make_pipe_endpoints (uint remote_pid) throws GLib.Error;
 	}

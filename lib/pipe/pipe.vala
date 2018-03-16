@@ -29,7 +29,20 @@ namespace Frida {
 		public static extern void _destroy_backend (void * backend);
 	}
 
-	public class Pipe : IOStream {
+	namespace Pipe {
+		public Gee.Promise<IOStream> open (string address) {
+#if WINDOWS
+			return WindowsPipe.open (address);
+#elif DARWIN
+			return DarwinPipe.open (address);
+#else
+			return UnixPipe.open (address);
+#endif
+		}
+	}
+
+#if WINDOWS
+	public class WindowsPipe : IOStream {
 		public string address {
 			get;
 			construct;
@@ -60,7 +73,20 @@ namespace Frida {
 		private InputStream input;
 		private OutputStream output;
 
-		public Pipe (string address) throws IOError {
+		public static Gee.Promise<WindowsPipe> open (string address) {
+			var request = new Gee.Promise<WindowsPipe> ();
+
+			try {
+				var pipe = new WindowsPipe (address);
+				request.set_value (pipe);
+			} catch (IOError e) {
+				request.set_exception (e);
+			}
+
+			return request;
+		}
+
+		public WindowsPipe (string address) throws IOError {
 			var backend = _create_backend (address);
 
 			Object (
@@ -75,7 +101,7 @@ namespace Frida {
 			output = _make_output_stream (backend);
 		}
 
-		~Pipe () {
+		~WindowsPipe () {
 			_destroy_backend (backend);
 		}
 
@@ -90,4 +116,85 @@ namespace Frida {
 		protected static extern InputStream _make_input_stream (void * backend);
 		protected static extern OutputStream _make_output_stream (void * backend);
 	}
+#elif DARWIN
+	namespace DarwinPipe {
+		public static Gee.Promise<SocketConnection> open (string address) {
+			var request = new Gee.Promise<SocketConnection> ();
+
+			try {
+				var fd = _consume_stashed_file_descriptor (address);
+				var socket = new Socket.from_fd (fd);
+				var connection = SocketConnection.factory_create_connection (socket);
+				request.set_value (connection);
+			} catch (GLib.Error e) {
+				request.set_exception (e);
+			}
+
+			return request;
+		}
+
+		public extern int _consume_stashed_file_descriptor (string address) throws IOError;
+	}
+#else
+	namespace UnixPipe {
+		public static Gee.Promise<SocketConnection> open (string address) {
+			var request = new Gee.Promise<SocketConnection> ();
+
+			MatchInfo info;
+			var valid_address = /^pipe:role=(.+?),path=(.+?)$/.match (address, 0, out info);
+			assert (valid_address);
+			var role = info.fetch (1);
+			var path = info.fetch (2);
+
+			try {
+				var server_address = new UnixSocketAddress (path);
+
+				if (role == "server") {
+					var socket = new Socket (SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);
+					socket.bind (server_address, true);
+					socket.listen ();
+
+					Posix.chmod (path, Posix.S_IRUSR | Posix.S_IWUSR | Posix.S_IRGRP | Posix.S_IWGRP | Posix.S_IROTH | Posix.S_IWOTH);
+#if ANDROID
+					SELinux.setfilecon (path, "u:object_r:frida_file:s0");
+#endif
+
+					establish_server.begin (socket, request);
+				} else {
+					establish_client.begin (server_address, request);
+				}
+			} catch (GLib.Error e) {
+				request.set_exception (e);
+				return request;
+			}
+
+
+			return request;
+		}
+
+		private async void establish_server (Socket socket, Gee.Promise<SocketConnection> request) {
+			var listener = new SocketListener ();
+			try {
+				listener.add_socket (socket, null);
+
+				var connection = yield listener.accept_async ();
+				request.set_value (connection);
+			} catch (GLib.Error e) {
+				request.set_exception (e);
+			} finally {
+				listener.close ();
+			}
+		}
+
+		private async void establish_client (UnixSocketAddress address, Gee.Promise<SocketConnection> request) {
+			var client = new SocketClient ();
+			try {
+				var connection = yield client.connect_async (address);
+				request.set_value (connection);
+			} catch (GLib.Error e) {
+				request.set_exception (e);
+			}
+		}
+	}
+#endif
 }

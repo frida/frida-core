@@ -101,7 +101,7 @@ namespace Frida {
 			get;
 		}
 
-		public abstract ImageData? icon {
+		public abstract Image? icon {
 			get;
 		}
 
@@ -131,23 +131,36 @@ namespace Frida {
 		public abstract async void stop ();
 	}
 
-	public abstract class BaseDBusHostSession : Object, HostSession {
+	public abstract class BaseDBusHostSession : Object, HostSession, AgentController {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
 		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason);
 
-		private Gee.HashMap<uint, Gee.Promise<Entry>> entries = new Gee.HashMap<uint, Gee.Promise<Entry>> ();
-		private Gee.HashMap<uint, AgentSession> sessions = new Gee.HashMap<uint, AgentSession> ();
-		private uint next_session_id = 1;
+		private Gee.HashMap<uint, Gee.Promise<AgentEntry>> agent_entries = new Gee.HashMap<uint, Gee.Promise<AgentEntry>> ();
+
+		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
+		private uint next_agent_session_id = 1;
+
+		private Gee.HashMap<uint, ChildEntry> child_entries = new Gee.HashMap<uint, ChildEntry> ();
+		private uint next_host_child_id = 1;
+		private Gee.HashMap<uint, HostChildInfo?> pending_children = new Gee.HashMap<uint, HostChildInfo?> ();
 
 		protected Injector injector;
+		protected Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		public virtual async void close () {
-			while (!entries.is_empty) {
-				var iterator = entries.values.iterator ();
+			while (!agent_entries.is_empty) {
+				var iterator = agent_entries.values.iterator ();
 				iterator.next ();
-				var request = iterator.get ();
+				var entry_request = iterator.get ();
 				try {
-					var entry = yield request.future.wait_async ();
+					var entry = yield entry_request.future.wait_async ();
+
+					var resume_request = entry.resume_request;
+					if (resume_request != null) {
+						resume_request.set_value (true);
+						entry.resume_request = null;
+					}
+
 					yield destroy (entry, SessionDetachReason.APPLICATION_REQUESTED);
 				} catch (Gee.FutureError e) {
 				}
@@ -168,18 +181,57 @@ namespace Frida {
 
 		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws Error;
 
+		public async HostChildInfo[] enumerate_pending_children () throws Error {
+			var result = new HostChildInfo[pending_children.size];
+			var index = 0;
+			foreach (var child in pending_children.values)
+				result[index++] = child;
+			return result;
+		}
+
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 
 		public abstract async void input (uint pid, uint8[] data) throws Error;
 
-		public abstract async void resume (uint pid) throws Error;
+		public async void resume (uint pid) throws Error {
+			if (try_resume_child (pid))
+				return;
+
+			yield perform_resume (pid);
+		}
+
+		private bool try_resume_child (uint pid) {
+			if (!pending_children.unset (pid))
+				return false;
+
+			var entry_request = agent_entries[pid];
+			if (entry_request == null)
+				return false;
+
+			var entry_future = entry_request.future;
+			if (!entry_future.ready)
+				return false;
+
+			var entry = entry_future.value;
+
+			var resume_request = entry.resume_request;
+			if (resume_request == null)
+				return false;
+
+			resume_request.set_value (true);
+			entry.resume_request = null;
+
+			return true;
+		}
+
+		protected abstract async void perform_resume (uint pid) throws Error;
 
 		public abstract async void kill (uint pid) throws Error;
 
 		public async Frida.AgentSessionId attach_to (uint pid) throws Error {
 			var entry = yield establish (pid);
 
-			var id = AgentSessionId (next_session_id++);
+			var id = AgentSessionId (next_agent_session_id++);
 			var raw_id = id.handle;
 			AgentSession session;
 
@@ -195,15 +247,15 @@ namespace Frida {
 				throw new Error.PROTOCOL (e.message);
 			}
 
-			sessions[raw_id] = session;
+			agent_sessions[raw_id] = session;
 
 			agent_session_opened (id, session);
 
 			return id;
 		}
 
-		private async Entry establish (uint pid) throws Error {
-			var promise = entries[pid];
+		private async AgentEntry establish (uint pid) throws Error {
+			var promise = agent_entries[pid];
 			if (promise != null) {
 				var future = promise.future;
 				try {
@@ -212,20 +264,27 @@ namespace Frida {
 					throw (Error) future.exception;
 				}
 			}
-			promise = new Gee.Promise<Entry> ();
-			entries[pid] = promise;
+			promise = new Gee.Promise<AgentEntry> ();
+			agent_entries[pid] = promise;
 
-			Entry entry;
+			AgentEntry entry;
 			try {
 				DBusConnection connection;
 				AgentSessionProvider provider;
 
 				if (pid == 0) {
 					provider = yield create_system_session_provider (out connection);
-					entry = new Entry (pid, null, connection, provider);
+					entry = new AgentEntry (pid, null, connection, provider);
 				} else {
 					Object transport;
-					var stream = yield perform_attach_to (pid, out transport);
+					var stream_request = yield perform_attach_to (pid, out transport);
+
+					IOStream stream;
+					try {
+						stream = yield stream_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						throw new Error.TRANSPORT (e.message);
+					}
 
 					var cancellable = new Cancellable ();
 					var timeout_source = new TimeoutSource.seconds (10);
@@ -235,8 +294,15 @@ namespace Frida {
 					});
 					timeout_source.attach (MainContext.get_thread_default ());
 
+					uint controller_registration_id;
 					try {
-						connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+						connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING, null, cancellable);
+
+						AgentController controller = this;
+						controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
+
+						connection.start_message_processing ();
+
 						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
 					} catch (GLib.Error establish_error) {
 						if (establish_error is IOError.CANCELLED)
@@ -249,15 +315,15 @@ namespace Frida {
 
 					timeout_source.destroy ();
 
-					entry = new Entry (pid, transport, connection, provider);
+					entry = new AgentEntry (pid, transport, connection, provider, controller_registration_id);
 				}
 
-				connection.closed.connect (on_connection_closed);
-				provider.closed.connect (on_session_closed);
+				connection.on_closed.connect (on_agent_connection_closed);
+				provider.closed.connect (on_agent_session_provider_closed);
 
 				promise.set_value (entry);
 			} catch (Error e) {
-				entries.unset (pid);
+				agent_entries.unset (pid);
 
 				promise.set_exception (e);
 				throw e;
@@ -266,22 +332,22 @@ namespace Frida {
 			return entry;
 		}
 
-		protected abstract async IOStream perform_attach_to (uint pid, out Object? transport) throws Error;
+		protected abstract async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error;
 
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			var session = sessions[id.handle];
+			var session = agent_sessions[id.handle];
 			if (session == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 			return session;
 		}
 
-		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+		private void on_agent_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (closed_by_us)
 				return;
 
-			Entry entry_to_remove = null;
-			foreach (var promise in entries.values) {
+			AgentEntry entry_to_remove = null;
+			foreach (var promise in agent_entries.values) {
 				var future = promise.future;
 
 				if (!future.ready)
@@ -298,18 +364,18 @@ namespace Frida {
 			destroy.begin (entry_to_remove, SessionDetachReason.PROCESS_TERMINATED);
 		}
 
-		private void on_session_closed (AgentSessionId id) {
+		private void on_agent_session_provider_closed (AgentSessionId id) {
 			var raw_id = id.handle;
 
 			AgentSession session;
-			var closed_after_opening = sessions.unset (raw_id, out session);
+			var closed_after_opening = agent_sessions.unset (raw_id, out session);
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
 			agent_session_closed (id, session, reason);
 			agent_session_destroyed (id, reason);
 
-			foreach (var promise in entries.values) {
+			foreach (var promise in agent_entries.values) {
 				var future = promise.future;
 
 				if (!future.ready)
@@ -330,7 +396,7 @@ namespace Frida {
 			}
 		}
 
-		private async void unload_and_destroy (Entry entry, SessionDetachReason reason) {
+		private async void unload_and_destroy (AgentEntry entry, SessionDetachReason reason) {
 			if (!prepare_teardown (entry))
 				return;
 
@@ -342,38 +408,168 @@ namespace Frida {
 			yield teardown (entry, reason);
 		}
 
-		private async void destroy (Entry entry, SessionDetachReason reason) {
+		private async void destroy (AgentEntry entry, SessionDetachReason reason) {
 			if (!prepare_teardown (entry))
 				return;
 
 			yield teardown (entry, reason);
 		}
 
-		private bool prepare_teardown (Entry entry) {
-			if (!entries.unset (entry.pid))
+		private bool prepare_teardown (AgentEntry entry) {
+			if (!agent_entries.unset (entry.pid))
 				return false;
 
-			entry.provider.closed.disconnect (on_session_closed);
-			entry.connection.closed.disconnect (on_connection_closed);
+			entry.provider.closed.disconnect (on_agent_session_provider_closed);
+			entry.connection.on_closed.disconnect (on_agent_connection_closed);
 
 			return true;
 		}
 
-		private async void teardown (Entry entry, SessionDetachReason reason) {
+		private async void teardown (AgentEntry entry, SessionDetachReason reason) {
 			yield entry.close ();
 
 			foreach (var raw_id in entry.sessions) {
 				var id = AgentSessionId (raw_id);
 
 				AgentSession session;
-				if (sessions.unset (raw_id, out session)) {
+				if (agent_sessions.unset (raw_id, out session)) {
 					agent_session_closed (id, session, reason);
 					agent_session_destroyed (id, reason);
 				}
 			}
 		}
 
-		private class Entry : Object {
+		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			var raw_id = yield injector.inject_library_file (pid, path, entrypoint, data);
+			return InjectorPayloadId (raw_id);
+		}
+
+		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
+			var blob_bytes = new Bytes (blob);
+			var raw_id = yield injector.inject_library_blob (pid, blob_bytes, entrypoint, data);
+			return InjectorPayloadId (raw_id);
+		}
+
+#if !WINDOWS
+		public async HostChildId prepare_to_fork (uint parent_pid, out uint parent_injectee_id, out uint child_injectee_id, out GLib.Socket child_socket) throws Error {
+			var id = HostChildId (next_host_child_id++);
+
+			if (!injectee_by_pid.has_key (parent_pid))
+				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", parent_pid);
+			parent_injectee_id = injectee_by_pid[parent_pid];
+			child_injectee_id = yield injector.demonitor_and_clone_state (parent_injectee_id);
+
+			var fds = new int[2];
+			Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds);
+
+			Socket local_socket, remote_socket;
+			try {
+				local_socket = new Socket.from_fd (fds[0]);
+				remote_socket = new Socket.from_fd (fds[1]);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			start_child_connection.begin (id, local_socket);
+
+			child_socket = remote_socket;
+
+			return id;
+		}
+
+		private async void start_child_connection (HostChildId id, Socket local_socket) {
+			DBusConnection connection;
+			uint controller_registration_id;
+			try {
+				var stream = SocketConnection.factory_create_connection (local_socket);
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING, null, null);
+
+				AgentController controller = this;
+				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
+
+				connection.start_message_processing ();
+			} catch (GLib.Error e) {
+				return;
+			}
+
+			var entry = new ChildEntry (connection, controller_registration_id);
+			child_entries[id.handle] = entry;
+			connection.on_closed.connect (on_child_connection_closed);
+		}
+
+		private void on_child_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			ChildEntry entry_to_remove = null;
+			uint child_id = 0;
+			foreach (var e in child_entries.entries) {
+				var entry = e.value;
+				if (entry.connection == connection) {
+					entry_to_remove = entry;
+					child_id = e.key;
+					break;
+				}
+			}
+			assert (entry_to_remove != null);
+
+			connection.on_closed.disconnect (on_child_connection_closed);
+			child_entries.unset (child_id);
+
+			entry_to_remove.close.begin ();
+		}
+#endif
+
+		public async void recreate_agent_thread (uint pid, uint injectee_id) throws Error {
+			injectee_by_pid[pid] = injectee_id;
+
+			yield injector.recreate_thread (pid, injectee_id);
+		}
+
+		public async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws Error {
+			var raw_id = id.handle;
+
+			var child_entry = child_entries[raw_id];
+			if (child_entry == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			var pid = info.pid;
+			var connection = child_entry.connection;
+
+			var promise = new Gee.Promise<AgentEntry> ();
+			agent_entries[pid] = promise;
+
+			AgentSessionProvider provider;
+			try {
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, null);
+			} catch (GLib.Error e) {
+				agent_entries.unset (pid);
+				promise.set_exception (new Error.TRANSPORT (e.message));
+
+				child_entry.close_soon ();
+
+				return;
+			}
+
+			connection.on_closed.disconnect (on_child_connection_closed);
+			child_entries.unset (raw_id);
+
+			var resume_request = new Gee.Promise<bool> ();
+
+			var agent_entry = new AgentEntry (pid, null, connection, provider, child_entry.controller_registration_id);
+			agent_entry.resume_request = resume_request;
+			promise.set_value (agent_entry);
+
+			connection.on_closed.connect (on_agent_connection_closed);
+
+			pending_children[pid] = info;
+			delivered (info);
+
+			try {
+				yield resume_request.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
+		}
+
+		private class AgentEntry : Object {
 			public uint pid {
 				get;
 				construct;
@@ -394,19 +590,30 @@ namespace Frida {
 				construct;
 			}
 
+			public uint controller_registration_id {
+				get;
+				construct;
+			}
+
 			public Gee.HashSet<uint> sessions {
 				get;
 				construct;
 			}
 
+			public Gee.Promise<bool>? resume_request {
+				get;
+				set;
+			}
+
 			private Gee.Promise<bool> close_request;
 
-			public Entry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider) {
+			public AgentEntry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider, uint controller_registration_id = 0) {
 				Object (
 					pid: pid,
 					transport: transport,
 					connection: connection,
 					provider: provider,
+					controller_registration_id: controller_registration_id,
 					sessions: new Gee.HashSet<uint> ()
 				);
 			}
@@ -429,19 +636,68 @@ namespace Frida {
 					}
 				}
 
+				var id = controller_registration_id;
+				if (id != 0) {
+					connection.unregister_object (id);
+				}
+
 				close_request.set_value (true);
 			}
 		}
 
-		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			var raw_id = yield injector.inject_library_file (pid, path, entrypoint, data);
-			return InjectorPayloadId (raw_id);
-		}
+		private class ChildEntry : Object {
+			public DBusConnection connection {
+				get;
+				construct;
+			}
 
-		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
-			var blob_bytes = new Bytes (blob);
-			var raw_id = yield injector.inject_library_blob (pid, blob_bytes, entrypoint, data);
-			return InjectorPayloadId (raw_id);
+			public uint controller_registration_id {
+				get;
+				construct;
+			}
+
+			private Gee.Promise<bool> close_request;
+
+			public ChildEntry (DBusConnection connection, uint controller_registration_id = 0) {
+				Object (
+					connection: connection,
+					controller_registration_id: controller_registration_id
+				);
+			}
+
+			public async void close () {
+				if (close_request != null) {
+					try {
+						yield close_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+					return;
+				}
+				close_request = new Gee.Promise<bool> ();
+
+				try {
+					yield connection.close ();
+				} catch (GLib.Error e) {
+				}
+
+				var id = controller_registration_id;
+				if (id != 0) {
+					connection.unregister_object (id);
+				}
+
+				close_request.set_value (true);
+			}
+
+			public void close_soon () {
+				var source = new IdleSource ();
+				source.set_priority (Priority.LOW);
+				source.set_callback (() => {
+					close.begin ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+			}
 		}
 	}
 }

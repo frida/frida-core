@@ -1227,7 +1227,7 @@ namespace Frida.Gadget {
 					return false;
 
 				clients[connection] = new Client (this, connection);
-				connection.closed.connect (on_connection_closed);
+				connection.on_closed.connect (on_connection_closed);
 
 				return true;
 			});
@@ -1353,6 +1353,10 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
+			public async HostChildInfo[] enumerate_pending_children () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			}
+
 			public async uint spawn (string path, string[] argv, string[] envp) throws Error {
 				if (argv.length < 1 || argv[0] != this_app.identifier)
 					throw new Error.NOT_SUPPORTED ("Unable to spawn other apps when embedded");
@@ -1468,6 +1472,14 @@ namespace Frida.Gadget {
 				closed (this);
 
 				close_request.set_value (true);
+			}
+
+			public async void enable_child_gating () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
+			}
+
+			public async void disable_child_gating () throws Error {
+				throw new Error.NOT_SUPPORTED ("Not yet implemented");
 			}
 
 			public async AgentScriptId create_script (string name, string source) throws Error {

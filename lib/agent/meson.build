@@ -12,6 +12,11 @@ if not enable_diet
   agent_sources += ['dummy.cpp']
 endif
 
+extra_vala_args = []
+if host_os_family != 'windows'
+  extra_vala_args += ['--pkg=posix']
+endif
+
 extra_link_args = []
 if host_os_family == 'darwin'
   extra_link_args += ['-Wl,-exported_symbol,_frida_agent_main', '-Wl,-dead_strip_dylibs']
@@ -21,6 +26,7 @@ endif
 
 agent = shared_library('frida-agent', agent_sources,
   name_prefix: '',
+  vala_args: extra_vala_args,
   link_args: extra_link_args,
   vs_module_defs: 'frida-agent.def',
   dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep],

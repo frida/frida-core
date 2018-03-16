@@ -132,10 +132,10 @@ namespace Frida.Server {
 		application = new Application ();
 
 #if !WINDOWS
-		Posix.signal (Posix.SIGINT, (sig) => {
+		Posix.signal (Posix.Signal.INT, (sig) => {
 			application.stop ();
 		});
-		Posix.signal (Posix.SIGTERM, (sig) => {
+		Posix.signal (Posix.Signal.TERM, (sig) => {
 			application.stop ();
 		});
 #endif
@@ -291,7 +291,7 @@ namespace Frida.Server {
 		}
 
 		private bool on_connection_opened (DBusConnection connection) {
-			connection.closed.connect (on_connection_closed);
+			connection.on_closed.connect (on_connection_closed);
 
 			var client = new Client (connection);
 			client.register_host_session (host_session);

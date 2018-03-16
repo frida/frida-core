@@ -15,11 +15,11 @@
   }
 
 typedef struct _FridaPipeBackend FridaPipeBackend;
-typedef enum _FridaPipeRole FridaPipeRole;
+typedef enum _FridaWindowsPipeRole FridaWindowsPipeRole;
 
 struct _FridaPipeBackend
 {
-  FridaPipeRole role;
+  FridaWindowsPipeRole role;
   HANDLE pipe;
   gboolean connected;
   HANDLE read_complete;
@@ -28,42 +28,42 @@ struct _FridaPipeBackend
   HANDLE write_cancel;
 };
 
-enum _FridaPipeRole
+enum _FridaWindowsPipeRole
 {
-  FRIDA_PIPE_SERVER = 1,
-  FRIDA_PIPE_CLIENT
+  FRIDA_WINDOWS_PIPE_SERVER = 1,
+  FRIDA_WINDOWS_PIPE_CLIENT
 };
 
-struct _FridaPipeInputStream
+struct _FridaWindowsPipeInputStream
 {
   GInputStream parent;
 
   FridaPipeBackend * backend;
 };
 
-struct _FridaPipeOutputStream
+struct _FridaWindowsPipeOutputStream
 {
   GOutputStream parent;
 
   FridaPipeBackend * backend;
 };
 
-static HANDLE frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error);
+static HANDLE frida_windows_pipe_open (const gchar * name, FridaWindowsPipeRole role, GError ** error);
 
-static gssize frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error);
-static gboolean frida_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error);
+static gssize frida_windows_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error);
+static gboolean frida_windows_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error);
 
-static gssize frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error);
-static gboolean frida_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error);
+static gssize frida_windows_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error);
+static gboolean frida_windows_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error);
 
 static gchar * frida_pipe_generate_name (void);
 static WCHAR * frida_pipe_path_from_name (const gchar * name);
 
-static gboolean frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
-static void frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
+static gboolean frida_windows_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error);
+static void frida_windows_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data);
 
-G_DEFINE_TYPE (FridaPipeInputStream, frida_pipe_input_stream, G_TYPE_INPUT_STREAM)
-G_DEFINE_TYPE (FridaPipeOutputStream, frida_pipe_output_stream, G_TYPE_OUTPUT_STREAM)
+G_DEFINE_TYPE (FridaWindowsPipeInputStream, frida_windows_pipe_input_stream, G_TYPE_INPUT_STREAM)
+G_DEFINE_TYPE (FridaWindowsPipeOutputStream, frida_windows_pipe_output_stream, G_TYPE_OUTPUT_STREAM)
 
 void
 frida_pipe_transport_set_temp_directory (const gchar * path)
@@ -91,7 +91,7 @@ _frida_pipe_transport_destroy_backend (void * backend)
 }
 
 void *
-_frida_pipe_create_backend (const gchar * address, GError ** error)
+_frida_windows_pipe_create_backend (const gchar * address, GError ** error)
 {
   FridaPipeBackend * backend;
   const gchar * role, * name;
@@ -99,9 +99,9 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   backend = g_slice_new0 (FridaPipeBackend);
 
   role = strstr (address, "role=") + 5;
-  backend->role = role[0] == 's' ? FRIDA_PIPE_SERVER : FRIDA_PIPE_CLIENT;
+  backend->role = role[0] == 's' ? FRIDA_WINDOWS_PIPE_SERVER : FRIDA_WINDOWS_PIPE_CLIENT;
   name = strstr (address, "name=") + 5;
-  backend->pipe = frida_pipe_open (name, backend->role, error);
+  backend->pipe = frida_windows_pipe_open (name, backend->role, error);
   if (backend->pipe != INVALID_HANDLE_VALUE)
   {
     backend->read_complete = CreateEvent (NULL, TRUE, FALSE, NULL);
@@ -111,7 +111,7 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
   }
   else
   {
-    _frida_pipe_destroy_backend (backend);
+    _frida_windows_pipe_destroy_backend (backend);
     backend = NULL;
   }
 
@@ -119,7 +119,7 @@ _frida_pipe_create_backend (const gchar * address, GError ** error)
 }
 
 void
-_frida_pipe_destroy_backend (void * opaque_backend)
+_frida_windows_pipe_destroy_backend (void * opaque_backend)
 {
   FridaPipeBackend * backend = opaque_backend;
 
@@ -139,7 +139,7 @@ _frida_pipe_destroy_backend (void * opaque_backend)
 }
 
 static HANDLE
-frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
+frida_windows_pipe_open (const gchar * name, FridaWindowsPipeRole role, GError ** error)
 {
   HANDLE result = INVALID_HANDLE_VALUE;
   BOOL success;
@@ -150,7 +150,7 @@ frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
   SECURITY_ATTRIBUTES sa;
 
   path = frida_pipe_path_from_name (name);
-  sddl = frida_pipe_get_sddl_string_for_pipe ();
+  sddl = frida_windows_pipe_get_sddl_string_for_pipe ();
   success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
   CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
 
@@ -158,7 +158,7 @@ frida_pipe_open (const gchar * name, FridaPipeRole role, GError ** error)
   sa.lpSecurityDescriptor = sd;
   sa.bInheritHandle = FALSE;
 
-  if (role == FRIDA_PIPE_SERVER)
+  if (role == FRIDA_WINDOWS_PIPE_SERVER)
   {
     result = CreateNamedPipeW (path,
         PIPE_ACCESS_DUPLEX |
@@ -210,7 +210,7 @@ beach:
 }
 
 static gboolean
-frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error)
+frida_windows_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellable, GError ** error)
 {
   gboolean success = FALSE;
   HANDLE connect, cancel;
@@ -222,7 +222,7 @@ frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellab
   {
     return TRUE;
   }
-  else if (backend->role == FRIDA_PIPE_CLIENT)
+  else if (backend->role == FRIDA_WINDOWS_PIPE_CLIENT)
   {
     backend->connected = TRUE;
     return TRUE;
@@ -239,7 +239,7 @@ frida_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * cancellab
 
   if (last_error == ERROR_IO_PENDING)
   {
-    if (!frida_pipe_backend_await (backend, connect, cancel, cancellable, error))
+    if (!frida_windows_pipe_backend_await (backend, connect, cancel, cancellable, error))
       goto beach;
 
     if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
@@ -267,14 +267,14 @@ beach:
 }
 
 static gboolean
-frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error)
+frida_windows_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cancel, GCancellable * cancellable, GError ** error)
 {
   gulong handler_id = 0;
   HANDLE events[2];
 
   if (cancellable != NULL)
   {
-    handler_id = g_cancellable_connect (cancellable, G_CALLBACK (frida_pipe_backend_on_cancel), cancel, NULL);
+    handler_id = g_cancellable_connect (cancellable, G_CALLBACK (frida_windows_pipe_backend_on_cancel), cancel, NULL);
   }
 
   events[0] = complete;
@@ -295,7 +295,7 @@ frida_pipe_backend_await (FridaPipeBackend * self, HANDLE complete, HANDLE cance
 }
 
 static void
-frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
+frida_windows_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
 {
   HANDLE cancel = (HANDLE) user_data;
 
@@ -303,7 +303,7 @@ frida_pipe_backend_on_cancel (GCancellable * cancellable, gpointer user_data)
 }
 
 gboolean
-_frida_pipe_close_backend (void * opaque_backend, GError ** error)
+_frida_windows_pipe_close_backend (void * opaque_backend, GError ** error)
 {
   FridaPipeBackend * backend = opaque_backend;
 
@@ -323,9 +323,9 @@ handle_error:
 }
 
 GInputStream *
-_frida_pipe_make_input_stream (void * backend)
+_frida_windows_pipe_make_input_stream (void * backend)
 {
-  FridaPipeInputStream * stream;
+  FridaWindowsPipeInputStream * stream;
 
   stream = g_object_new (FRIDA_TYPE_PIPE_INPUT_STREAM, NULL);
   stream->backend = backend;
@@ -334,9 +334,9 @@ _frida_pipe_make_input_stream (void * backend)
 }
 
 GOutputStream *
-_frida_pipe_make_output_stream (void * backend)
+_frida_windows_pipe_make_output_stream (void * backend)
 {
-  FridaPipeOutputStream * stream;
+  FridaWindowsPipeOutputStream * stream;
 
   stream = g_object_new (FRIDA_TYPE_PIPE_OUTPUT_STREAM, NULL);
   stream->backend = backend;
@@ -345,30 +345,30 @@ _frida_pipe_make_output_stream (void * backend)
 }
 
 static void
-frida_pipe_input_stream_class_init (FridaPipeInputStreamClass * klass)
+frida_windows_pipe_input_stream_class_init (FridaWindowsPipeInputStreamClass * klass)
 {
   GInputStreamClass * stream_class = G_INPUT_STREAM_CLASS (klass);
 
-  stream_class->read_fn = frida_pipe_input_stream_read;
-  stream_class->close_fn = frida_pipe_input_stream_close;
+  stream_class->read_fn = frida_windows_pipe_input_stream_read;
+  stream_class->close_fn = frida_windows_pipe_input_stream_close;
 }
 
 static void
-frida_pipe_input_stream_init (FridaPipeInputStream * self)
+frida_windows_pipe_input_stream_init (FridaWindowsPipeInputStream * self)
 {
 }
 
 static gssize
-frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error)
+frida_windows_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error)
 {
-  FridaPipeInputStream * self = FRIDA_PIPE_INPUT_STREAM (base);
+  FridaWindowsPipeInputStream * self = FRIDA_WINDOWS_PIPE_INPUT_STREAM (base);
   FridaPipeBackend * backend = self->backend;
   gssize result = -1;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
   DWORD bytes_transferred;
 
-  if (!frida_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_windows_pipe_backend_connect (backend, cancellable, error))
     goto beach;
 
   overlapped.hEvent = backend->read_complete;
@@ -376,7 +376,7 @@ frida_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, G
   if (!ret && GetLastError () != ERROR_IO_PENDING)
     goto handle_error;
 
-  if (!frida_pipe_backend_await (backend, backend->read_complete, backend->read_cancel, cancellable, error))
+  if (!frida_windows_pipe_backend_await (backend, backend->read_complete, backend->read_cancel, cancellable, error))
     goto beach;
 
   if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
@@ -400,36 +400,36 @@ beach:
 }
 
 static gboolean
-frida_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error)
+frida_windows_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error)
 {
   return TRUE;
 }
 
 static void
-frida_pipe_output_stream_class_init (FridaPipeOutputStreamClass * klass)
+frida_windows_pipe_output_stream_class_init (FridaWindowsPipeOutputStreamClass * klass)
 {
   GOutputStreamClass * stream_class = G_OUTPUT_STREAM_CLASS (klass);
 
-  stream_class->write_fn = frida_pipe_output_stream_write;
-  stream_class->close_fn = frida_pipe_output_stream_close;
+  stream_class->write_fn = frida_windows_pipe_output_stream_write;
+  stream_class->close_fn = frida_windows_pipe_output_stream_close;
 }
 
 static void
-frida_pipe_output_stream_init (FridaPipeOutputStream * self)
+frida_windows_pipe_output_stream_init (FridaWindowsPipeOutputStream * self)
 {
 }
 
 static gssize
-frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error)
+frida_windows_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize count, GCancellable * cancellable, GError ** error)
 {
-  FridaPipeOutputStream * self = FRIDA_PIPE_OUTPUT_STREAM (base);
+  FridaWindowsPipeOutputStream * self = FRIDA_WINDOWS_PIPE_OUTPUT_STREAM (base);
   FridaPipeBackend * backend = self->backend;
   gssize result = -1;
   OVERLAPPED overlapped = { 0, };
   BOOL ret;
   DWORD bytes_transferred;
 
-  if (!frida_pipe_backend_connect (backend, cancellable, error))
+  if (!frida_windows_pipe_backend_connect (backend, cancellable, error))
     goto beach;
 
   overlapped.hEvent = backend->write_complete;
@@ -437,7 +437,7 @@ frida_pipe_output_stream_write (GOutputStream * base, const void * buffer, gsize
   if (!ret && GetLastError () != ERROR_IO_PENDING)
     goto handle_error;
 
-  if (!frida_pipe_backend_await (backend, backend->write_complete, backend->write_cancel, cancellable, error))
+  if (!frida_windows_pipe_backend_await (backend, backend->write_complete, backend->write_cancel, cancellable, error))
     goto beach;
 
   if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
@@ -461,7 +461,7 @@ beach:
 }
 
 static gboolean
-frida_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error)
+frida_windows_pipe_output_stream_close (GOutputStream * base, GCancellable * cancellable, GError ** error)
 {
   return TRUE;
 }

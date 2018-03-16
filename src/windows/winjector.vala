@@ -160,6 +160,14 @@ namespace Frida {
 			return id;
 		}
 
+		public async uint demonitor_and_clone_state (uint id) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+		}
+
+		public async void recreate_thread (uint pid, uint id) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+		}
+
 		public bool any_still_injected () {
 			return !pid_by_id.is_empty;
 		}

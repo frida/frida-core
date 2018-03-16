@@ -106,6 +106,16 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/fork-native", () => {
+			var h = new Harness ((h) => Darwin.fork_native.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/fork-other", () => {
+			var h = new Harness ((h) => Darwin.fork_other.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Darwin/Manual/cross-arch", () => {
 			var h = new Harness ((h) => Darwin.Manual.cross_arch.begin (h as Harness));
 			h.run ();
@@ -201,10 +211,9 @@ namespace Frida.HostSessionTest {
 				get { return "Stub"; }
 			}
 
-			public ImageData? icon {
-				get { return _icon; }
+			public Image? icon {
+				get { return null; }
 			}
-			private ImageData? _icon;
 
 			public HostSessionProviderKind kind {
 				get { return HostSessionProviderKind.LOCAL_SYSTEM; }
@@ -493,8 +502,8 @@ namespace Frida.HostSessionTest {
 
 			private static void install_signal_handlers (MainLoop loop) {
 				current_main_loop = loop;
-				Posix.signal (Posix.SIGINT, on_stop_signal);
-				Posix.signal (Posix.SIGTERM, on_stop_signal);
+				Posix.signal (Posix.Signal.INT, on_stop_signal);
+				Posix.signal (Posix.Signal.TERM, on_stop_signal);
 			}
 
 			private static void on_stop_signal (int sig) {
@@ -951,9 +960,10 @@ namespace Frida.HostSessionTest {
 			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
 				var icon = prov.icon;
 				assert (icon != null);
-				assert (icon.width == 16 && icon.height == 16);
-				assert (icon.rowstride == icon.width * 4);
-				assert (icon.pixels.length > 0);
+				var icon_data = icon.data;
+				assert (icon_data.width == 16 && icon_data.height == 16);
+				assert (icon_data.rowstride == icon_data.width * 4);
+				assert (icon_data.pixels.length > 0);
 			}
 
 			try {
@@ -1291,6 +1301,164 @@ send(ranges);
 			}
 		}
 
+		private static async void fork_native (Harness h) {
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "forker-macos" : "forker-ios";
+			yield run_fork_scenario (h, target_name);
+		}
+
+		private static async void fork_other (Harness h) {
+			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "forker-macos32" : "forker-ios32";
+			yield run_fork_scenario (h, target_name);
+		}
+
+		private static async void run_fork_scenario (Harness h, string target_name) {
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				string parent_detach_reason = null;
+				string child_detach_reason = null;
+				var parent_messages = new Gee.ArrayList <string> ();
+				var child_messages = new Gee.ArrayList <string> ();
+				Child delivered_child = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.delivered.connect (child => {
+					delivered_child = child;
+					if (waiting)
+						run_fork_scenario.callback ();
+				});
+
+				var target_path = Frida.Test.Labrats.path_to_file (target_name);
+				string[] argv = { target_path };
+				string[] envp = {};
+				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_session = yield device.attach (parent_pid);
+				parent_session.detached.connect (reason => {
+					parent_detach_reason = reason.to_string ();
+					if (waiting)
+						run_fork_scenario.callback ();
+				});
+				yield parent_session.enable_child_gating ();
+				var parent_script = yield parent_session.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName(null, 'puts'), {
+  onEnter: function (args) {
+    send('[PARENT] ' + Memory.readUtf8String(args[0]));
+  }
+});
+""");
+				parent_script.message.connect ((message, data) => {
+					if (GLib.Test.verbose ())
+						printerr ("Message from parent: %s\n", message);
+					parent_messages.add (message);
+					if (waiting)
+						run_fork_scenario.callback ();
+				});
+				yield parent_script.load ();
+				yield device.resume (parent_pid);
+				while (parent_messages.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (parent_messages.size == 1);
+				assert (parse_string_message_payload (parent_messages[0]) == "[PARENT] Parent speaking");
+
+				while (delivered_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (delivered_child.parent_pid == parent_pid);
+				assert (delivered_child.identifier.has_prefix ("forker-"));
+				var child_pid = delivered_child.pid;
+				var child_session = yield device.attach (child_pid);
+				child_session.detached.connect (reason => {
+					child_detach_reason = reason.to_string ();
+					if (waiting)
+						run_fork_scenario.callback ();
+				});
+				var child_script = yield child_session.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName(null, 'puts'), {
+  onEnter: function (args) {
+    send('[CHILD] ' + Memory.readUtf8String(args[0]));
+  }
+});
+""");
+				child_script.message.connect ((message, data) => {
+					if (GLib.Test.verbose ())
+						printerr ("Message from child: %s\n", message);
+					child_messages.add (message);
+					if (waiting)
+						run_fork_scenario.callback ();
+				});
+				yield child_script.load ();
+				yield device.resume (child_pid);
+				while (child_messages.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_messages.size == 1);
+				assert (parse_string_message_payload (child_messages[0]) == "[CHILD] Child speaking");
+
+				while (parent_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				while (child_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield h.process_events ();
+				assert (parent_messages.size == 1);
+				assert (child_messages.size == 1);
+
+				yield device_manager.close ();
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+		}
+
+		private static string parse_string_message_payload (string raw_message) {
+			Json.Object message;
+			try {
+				message = Json.from_string (raw_message).get_object ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			assert (message.get_string_member ("type") == "send");
+
+			return message.get_string_member ("payload");
+		}
+
 		namespace Manual {
 
 			private static async void cross_arch (Harness h) {
@@ -1451,9 +1619,10 @@ send(ranges);
 
 			var icon = prov.icon;
 			assert (icon != null);
-			assert (icon.width == 16 && icon.height == 16);
-			assert (icon.rowstride == icon.width * 4);
-			assert (icon.pixels.length > 0);
+			var icon_data = icon.data;
+			assert (icon_data.width == 16 && icon_data.height == 16);
+			assert (icon_data.rowstride == icon_data.width * 4);
+			assert (icon_data.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
@@ -1588,9 +1757,10 @@ send(ranges);
 
 			var icon = prov.icon;
 			assert (icon != null);
-			assert (icon.width == 16 && icon.height == 16);
-			assert (icon.rowstride == icon.width * 4);
-			assert (icon.pixels.length > 0);
+			var icon_data = icon.data;
+			assert (icon_data.width == 16 && icon_data.height == 16);
+			assert (icon_data.rowstride == icon_data.width * 4);
+			assert (icon_data.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
@@ -1791,9 +1961,10 @@ send(ranges);
 
 			var icon = prov.icon;
 			assert (icon != null);
-			assert (icon.width == 16 && icon.height == 16);
-			assert (icon.rowstride == icon.width * 4);
-			assert (icon.pixels.length > 0);
+			var icon_data = icon.data;
+			assert (icon_data.width == 16 && icon_data.height == 16);
+			assert (icon_data.rowstride == icon_data.width * 4);
+			assert (icon_data.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
