@@ -295,7 +295,7 @@ namespace Frida.Gadget {
 	private Mutex mutex;
 	private Cond cond;
 
-	public void load () {
+	public void load (Gum.MemoryRange? mapped_range) {
 		if (loaded)
 			return;
 		loaded = true;
@@ -313,7 +313,10 @@ namespace Frida.Gadget {
 
 		Gum.Process.set_code_signing_policy (config.code_signing);
 
-		Gum.Cloak.add_range (location.range);
+		if (mapped_range != null)
+			Gum.Cloak.add_range (mapped_range);
+		else
+			Gum.Cloak.add_range (location.range);
 
 		wait_for_resume_needed = true;
 
