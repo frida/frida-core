@@ -72,13 +72,7 @@ static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 static FridaFoundationApi * frida_foundation_api_try_get (void);
 static FridaCFApi * frida_cf_api_try_get (void);
 static FridaObjCApi * frida_objc_api_try_get (void);
-static gboolean frida_dylib_range_try_get (const char * apple[], GumMemoryRange * range);
-
-# if GLIB_SIZEOF_VOID_P == 4
-#  define GUM_PFMT "%llx"
-# else
-#  define GUM_PFMT "%lx"
-# endif
+static gboolean frida_dylib_range_try_get (const gchar * apple[], GumMemoryRange * range);
 
 #endif
 
@@ -610,16 +604,17 @@ frida_objc_api_try_get (void)
 }
 
 static gboolean
-frida_dylib_range_try_get (const char * apple[], GumMemoryRange * range)
+frida_dylib_range_try_get (const gchar * apple[], GumMemoryRange * range)
 {
-  const char * entry;
-  int i = 0;
+  const gchar * entry;
+  guint i = 0;
 
   while ((entry = apple[i++]) != NULL)
   {
-    if (!strncmp (entry, "frida_dylib_range=", 18))
+    if (g_str_has_prefix (entry, "frida_dylib_range="))
     {
-      if (sscanf (entry, "frida_dylib_range=0x" GUM_PFMT ",0x%lx", &range->base_address, &range->size) == 2)
+      if (sscanf (entry, "frida_dylib_range=0x%" G_GINT64_MODIFIER "x,0x%" G_GSIZE_MODIFIER "x",
+          &range->base_address, &range->size) == 2)
         return TRUE;
     }
   }
