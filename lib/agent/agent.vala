@@ -189,7 +189,6 @@ namespace Frida.Agent {
 			Gum.prepare_to_fork ();
 			GIOFork.prepare_to_fork ();
 			GLibFork.prepare_to_fork ();
-			Gum.Memory.prepare_to_fork ();
 		}
 
 		private async void do_prepare_to_fork () {
@@ -215,13 +214,11 @@ namespace Frida.Agent {
 
 		private void recover_from_fork (ForkActor actor) {
 			if (actor == PARENT) {
-				Gum.Memory.recover_from_fork_in_parent ();
 				GLibFork.recover_from_fork_in_parent ();
 				GIOFork.recover_from_fork_in_parent ();
 				Gum.recover_from_fork_in_parent ();
 				GumJS.recover_from_fork_in_parent ();
 			} else if (actor == CHILD) {
-				Gum.Memory.recover_from_fork_in_child ();
 				GLibFork.recover_from_fork_in_child ();
 				GIOFork.recover_from_fork_in_child ();
 				Gum.recover_from_fork_in_child ();
