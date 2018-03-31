@@ -385,6 +385,7 @@ namespace Frida {
 
 	public class Device : Object {
 		public signal void spawned (Spawn spawn);
+		public signal void delivered (Child child);
 		public signal void output (uint pid, int fd, Bytes data);
 		public signal void uninjected (uint id);
 		public signal void lost ();
@@ -435,7 +436,7 @@ namespace Frida {
 			this.manager = manager;
 			this.id = id;
 			this.name = name;
-			this.icon = icon_from_image_data (provider.icon);
+			this.icon = icon_from_image (provider.icon);
 			switch (kind) {
 				case HostSessionProviderKind.LOCAL_SYSTEM:
 					this.dtype = DeviceType.LOCAL;
@@ -631,7 +632,7 @@ namespace Frida {
 		}
 
 		public Process? find_process_sync (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null) throws Error {
-			var task = create<FindProcessTask> () as FindProcessTask;
+			var task = create<FindSessionTask> () as FindSessionTask;
 			task.predicate = (process) => {
 				return predicate (process);
 			};
@@ -640,7 +641,7 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class FindProcessTask : DeviceTask<Process?> {
+		private class FindSessionTask : DeviceTask<Process?> {
 			public ProcessPredicate predicate;
 			public int timeout;
 			public Cancellable? cancellable;
@@ -678,10 +679,16 @@ namespace Frida {
 			}
 		}
 
-		private Icon? icon_from_image_data (ImageData? img) {
-			if (img == null || img.width == 0)
+		private Icon? icon_from_image (Image? image) {
+			if (image == null)
 				return null;
-			return new Icon (img.width, img.height, img.rowstride, new Bytes.take (Base64.decode (img.pixels)));
+			return icon_from_image_data (image.data);
+		}
+
+		private Icon? icon_from_image_data (ImageData image) {
+			if (image.width == 0)
+				return null;
+			return new Icon (image.width, image.height, image.rowstride, new Bytes.take (Base64.decode (image.pixels)));
 		}
 
 		public async void enable_spawn_gating () throws Error {
@@ -756,6 +763,38 @@ namespace Frida {
 		private Spawn spawn_from_info (HostSpawnInfo info) {
 			var identifier = info.identifier;
 			return new Spawn (info.pid, (identifier.length > 0) ? identifier : null);
+		}
+
+		public async ChildList enumerate_pending_children () throws Error {
+			check_open ();
+
+			HostChildInfo[] pending_children;
+			try {
+				yield ensure_host_session ();
+				pending_children = yield host_session.enumerate_pending_children ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+
+			var result = new Gee.ArrayList<Child> ();
+			foreach (var p in pending_children)
+				result.add (child_from_info (p));
+			return new ChildList (result);
+		}
+
+		public ChildList enumerate_pending_children_sync () throws Error {
+			return (create<EnumeratePendingChildrenTask> () as EnumeratePendingChildrenTask).start_and_wait_for_completion ();
+		}
+
+		private class EnumeratePendingChildrenTask : DeviceTask<ChildList> {
+			protected override async ChildList perform_operation () throws Error {
+				return yield parent.enumerate_pending_children ();
+			}
+		}
+
+		private Child child_from_info (HostChildInfo info) {
+			var identifier = info.identifier;
+			return new Child (info.pid, (identifier.length > 0) ? identifier : null, info.parent_pid);
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -1038,6 +1077,7 @@ namespace Frida {
 
 			if (host_session != null) {
 				host_session.spawned.disconnect (on_spawned);
+				host_session.delivered.disconnect (on_delivered);
 				host_session.output.disconnect (on_output);
 				host_session.uninjected.disconnect (on_uninjected);
 				if (may_block) {
@@ -1098,6 +1138,7 @@ namespace Frida {
 			try {
 				host_session = yield provider.create (location);
 				host_session.spawned.connect (on_spawned);
+				host_session.delivered.connect (on_delivered);
 				host_session.output.connect (on_output);
 				host_session.uninjected.connect (on_uninjected);
 				ensure_request.set_value (true);
@@ -1110,6 +1151,10 @@ namespace Frida {
 
 		private void on_spawned (HostSpawnInfo info) {
 			spawned (spawn_from_info (info));
+		}
+
+		private void on_delivered (HostChildInfo info) {
+			delivered (child_from_info (info));
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
@@ -1291,6 +1336,45 @@ namespace Frida {
 		}
 	}
 
+	public class ChildList : Object {
+		private Gee.List<Child> items;
+
+		public ChildList (Gee.List<Child> items) {
+			this.items = items;
+		}
+
+		public int size () {
+			return items.size;
+		}
+
+		public new Child get (int index) {
+			return items.get (index);
+		}
+	}
+
+	public class Child : Object {
+		public uint pid {
+			get;
+			private set;
+		}
+
+		public string? identifier {
+			get;
+			private set;
+		}
+
+		public uint parent_pid {
+			get;
+			private set;
+		}
+
+		public Child (uint pid, string? identifier, uint parent_pid) {
+			this.pid = pid;
+			this.identifier = identifier;
+			this.parent_pid = parent_pid;
+		}
+	}
+
 	public class Icon : Object {
 		public int width {
 			get;
@@ -1372,9 +1456,49 @@ namespace Frida {
 			}
 		}
 
-		private class DetachTask : ProcessTask<void> {
+		private class DetachTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
 				yield parent.detach ();
+			}
+		}
+
+		public async void enable_child_gating () throws Error {
+			check_open ();
+
+			try {
+				yield session.enable_child_gating ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void enable_child_gating_sync () throws Error {
+			(create<EnableChildGatingTask> () as EnableChildGatingTask).start_and_wait_for_completion ();
+		}
+
+		private class EnableChildGatingTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.enable_child_gating ();
+			}
+		}
+
+		public async void disable_child_gating () throws Error {
+			check_open ();
+
+			try {
+				yield session.disable_child_gating ();
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void disable_child_gating_sync () throws Error {
+			(create<DisableChildGatingTask> () as DisableChildGatingTask).start_and_wait_for_completion ();
+		}
+
+		private class DisableChildGatingTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.disable_child_gating ();
 			}
 		}
 
@@ -1403,7 +1527,7 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class CreateScriptTask : ProcessTask<Script> {
+		private class CreateScriptTask : SessionTask<Script> {
 			public string? name;
 			public string source;
 
@@ -1436,7 +1560,7 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class CreateScriptFromBytesTask : ProcessTask<Script> {
+		private class CreateScriptFromBytesTask : SessionTask<Script> {
 			public Bytes bytes;
 
 			protected override async Script perform_operation () throws Error {
@@ -1464,7 +1588,7 @@ namespace Frida {
 			return task.start_and_wait_for_completion ();
 		}
 
-		private class CompileScriptTask : ProcessTask<Bytes> {
+		private class CompileScriptTask : SessionTask<Bytes> {
 			public string? name;
 			public string source;
 
@@ -1496,7 +1620,7 @@ namespace Frida {
 			task.start_and_wait_for_completion ();
 		}
 
-		private class EnableScriptDebuggerTask : ProcessTask<void> {
+		private class EnableScriptDebuggerTask : SessionTask<void> {
 			public uint16 port;
 
 			protected override async void perform_operation () throws Error {
@@ -1518,7 +1642,7 @@ namespace Frida {
 			(create<DisableScriptDebuggerTask> () as DisableScriptDebuggerTask).start_and_wait_for_completion ();
 		}
 
-		private class DisableScriptDebuggerTask : ProcessTask<void> {
+		private class DisableScriptDebuggerTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
 				yield parent.disable_debugger ();
 			}
@@ -1538,7 +1662,7 @@ namespace Frida {
 			(create<EnableJitTask> () as EnableJitTask).start_and_wait_for_completion ();
 		}
 
-		private class EnableJitTask : ProcessTask<void> {
+		private class EnableJitTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error {
 				yield parent.enable_jit ();
 			}
@@ -1595,7 +1719,7 @@ namespace Frida {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
-		private abstract class ProcessTask<T> : AsyncTask<T> {
+		private abstract class SessionTask<T> : AsyncTask<T> {
 			public weak Session parent {
 				get;
 				construct;
@@ -1822,6 +1946,40 @@ namespace Frida {
 
 			protected override async uint perform_operation () throws Error {
 				return yield parent.inject_library_blob (pid, blob, entrypoint, data);
+			}
+		}
+
+		public abstract async uint demonitor_and_clone_state (uint id) throws Error;
+
+		public uint demonitor_and_clone_state_sync (uint id) throws Error {
+			var task = create<DemonitorAndCloneStateTask> () as DemonitorAndCloneStateTask;
+			task.id = id;
+			return task.start_and_wait_for_completion ();
+		}
+
+		private class DemonitorAndCloneStateTask : InjectorTask<uint> {
+			public uint id;
+
+			protected override async uint perform_operation () throws Error {
+				return yield parent.demonitor_and_clone_state (id);
+			}
+		}
+
+		public abstract async void recreate_thread (uint pid, uint id) throws Error;
+
+		public void recreate_thread_sync (uint pid, uint id) throws Error {
+			var task = create<RecreateThreadTask> () as RecreateThreadTask;
+			task.pid = pid;
+			task.id = id;
+			task.start_and_wait_for_completion ();
+		}
+
+		private class RecreateThreadTask : InjectorTask<void> {
+			public uint pid;
+			public uint id;
+
+			protected override async void perform_operation () throws Error {
+				yield parent.recreate_thread (pid, id);
 			}
 		}
 

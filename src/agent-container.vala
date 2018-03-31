@@ -37,7 +37,8 @@ namespace Frida {
 			DBusConnection connection;
 			AgentSessionProvider provider;
 			try {
-				connection = yield new DBusConnection (new Pipe (transport.local_address), null, DBusConnectionFlags.NONE);
+				var stream = yield Pipe.open (transport.local_address).future.wait_async ();
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
 				provider.opened.connect (container.on_session_opened);
 				provider.closed.connect (container.on_session_closed);

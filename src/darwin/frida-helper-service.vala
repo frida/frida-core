@@ -75,7 +75,7 @@ namespace Frida {
 				if (helper_registration_id != 0)
 					connection.unregister_object (helper_registration_id);
 
-				connection.closed.disconnect (on_connection_closed);
+				connection.on_closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
 				} catch (GLib.Error connection_error) {
@@ -100,13 +100,13 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				Pipe pipe;
+				IOStream stream;
 				var handshake_port = new HandshakePort.remote (parent_service_name);
 
-				yield handshake_port.exchange (0, out parent_task, out pipe);
+				yield handshake_port.exchange (0, out parent_task, out stream);
 
-				connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
-				connection.closed.connect (on_connection_closed);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection.on_closed.connect (on_connection_closed);
 
 				DarwinRemoteHelper helper = this;
 				helper_registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
@@ -182,6 +182,14 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
 			return yield backend.inject_library_blob (pid, name, blob, entrypoint, data);
+		}
+
+		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+			return yield backend.demonitor_and_clone_injectee_state (id);
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+			yield backend.recreate_injectee_thread (pid, id);
 		}
 
 		public async PipeEndpoints make_pipe_endpoints (uint remote_pid) throws Error {

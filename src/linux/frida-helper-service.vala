@@ -54,7 +54,7 @@ namespace Frida {
 			if (connection != null) {
 				if (registration_id != 0)
 					connection.unregister_object (registration_id);
-				connection.closed.disconnect (on_connection_closed);
+				connection.on_closed.disconnect (on_connection_closed);
 				try {
 					yield connection.close ();
 				} catch (GLib.Error connection_error) {
@@ -73,7 +73,7 @@ namespace Frida {
 		private async void start () {
 			try {
 				connection = yield new DBusConnection.for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
-				connection.closed.connect (on_connection_closed);
+				connection.on_closed.connect (on_connection_closed);
 				Helper helper = this;
 				registration_id = connection.register_object (Frida.ObjectPath.HELPER, helper);
 				connection.start_message_processing ();
@@ -144,7 +144,7 @@ namespace Frida {
 		}
 
 		public async void kill (uint pid) throws Error {
-			Posix.kill ((Posix.pid_t) pid, Posix.SIGKILL);
+			Posix.kill ((Posix.pid_t) pid, Posix.Signal.KILL);
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {

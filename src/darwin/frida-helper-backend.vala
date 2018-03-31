@@ -27,7 +27,7 @@ namespace Frida {
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<void *, uint> inject_instance_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
-		public uint last_id = 1;
+		public uint next_id = 1;
 
 		private PolicySoftener policy_softener;
 		private KernelAgent kernel_agent;
@@ -263,7 +263,25 @@ namespace Frida {
 			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
 		}
 
-		public async IOStream make_pipe_stream (uint remote_pid, out string remote_address) throws Error {
+		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+			var instance = inject_instance_by_id[id];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			return _demonitor_and_clone_injectee_state (instance);
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+			var instance = inject_instance_by_id[id];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			var task = borrow_task_for_remote_pid (pid);
+
+			_recreate_injectee_thread (instance, pid, task);
+		}
+
+		public async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error {
 			yield policy_softener.soften (remote_pid);
 
 			var remote_task = borrow_task_for_remote_pid (remote_pid);
@@ -272,11 +290,7 @@ namespace Frida {
 
 			remote_address = endpoints.remote_address;
 
-			try {
-				return new Pipe (endpoints.local_address);
-			} catch (IOError e) {
-				throw new Error.TRANSPORT (e.message);
-			}
+			return Pipe.open (endpoints.local_address);
 		}
 
 		public async MappedLibraryBlob? try_mmap (Bytes blob) throws Error {
@@ -354,7 +368,7 @@ namespace Frida {
 				if (posix_thread != null)
 					_join_inject_instance_posix_thread (instance, posix_thread);
 				else
-					destroy_inject_instance (id);
+					_destroy_inject_instance (id);
 
 				return false;
 			});
@@ -362,12 +376,12 @@ namespace Frida {
 
 		public void _on_posix_thread_dead (uint id) {
 			Idle.add (() => {
-				destroy_inject_instance (id);
+				_destroy_inject_instance (id);
 				return false;
 			});
 		}
 
-		private void destroy_inject_instance (uint id) {
+		protected void _destroy_inject_instance (uint id) {
 			void * instance;
 			bool instance_id_found = inject_instance_by_id.unset (id, out instance);
 			assert (instance_id_found);
@@ -431,6 +445,8 @@ namespace Frida {
 		protected extern void _free_spawn_instance (void * instance);
 
 		protected extern uint _inject_into_task (uint pid, uint task, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error;
+		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
+		protected extern void _recreate_injectee_thread (void * instance, uint pid, uint task) throws Error;
 		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
 		protected extern bool _is_instance_resident (void * instance);
 		protected extern void _free_inject_instance (void * instance);

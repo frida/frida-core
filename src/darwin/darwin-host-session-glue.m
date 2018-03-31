@@ -28,7 +28,7 @@ static const FridaMacModel mac_models[] =
 #endif
 
 FridaImageData *
-_frida_darwin_host_session_provider_extract_icon (void)
+_frida_darwin_host_session_provider_try_extract_icon (void)
 {
 #ifdef HAVE_MACOS
   size_t size;

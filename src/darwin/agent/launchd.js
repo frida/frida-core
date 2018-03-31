@@ -31,13 +31,13 @@ rpc.exports = {
   },
   enableSpawnGating: function () {
     if (gating)
-      throw new Error('Spawn gating already enabled');
+      return;
     gating = true;
     active++;
   },
   disableSpawnGating: function () {
     if (!gating)
-      throw new Error('Spawn gating already disabled');
+      return;
     gating = false;
     active--;
   },

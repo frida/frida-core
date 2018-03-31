@@ -8,6 +8,8 @@ if host_os == 'macos'
     'stdio-writer-macos32',
     'simple-agent-macos.dylib',
     'resident-agent-macos.dylib',
+    'forker-macos',
+    'forker-macos32',
   ]
 endif
 
@@ -48,6 +50,8 @@ if host_os == 'ios'
     'stdio-writer-ios32',
     'simple-agent-ios.dylib',
     'resident-agent-ios.dylib',
+    'forker-ios',
+    'forker-ios32',
   ]
 endif
 

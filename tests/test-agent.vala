@@ -339,14 +339,15 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 		public extern static uint target_function (int level, string message);
 	}
 
-	private class Harness : Frida.Test.AsyncHarness {
+	private class Harness : Frida.Test.AsyncHarness, AgentController {
 		private GLib.Module module;
 		[CCode (has_target = false)]
-		private delegate void AgentMainFunc (string data, Gum.MemoryRange? mapped_range, Gum.ThreadId parent_thread_id);
+		private delegate void AgentMainFunc (string data, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range);
 		private AgentMainFunc main_impl;
 		private PipeTransport transport;
 		private Thread<bool> main_thread;
 		private DBusConnection connection;
+		private uint controller_registration_id;
 		private AgentSessionProvider provider;
 		private AgentSession session;
 
@@ -385,10 +386,10 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 			assert (main_func_found);
 			main_impl = (AgentMainFunc) main_func_symbol;
 
-			IOStream stream;
+			Gee.Promise<IOStream> stream_request;
 			try {
 				transport = new PipeTransport ();
-				stream = new Pipe (transport.local_address);
+				stream_request = Pipe.open (transport.local_address);
 			} catch (IOError transport_error) {
 				printerr ("Unable to create transport: %s\n", transport_error.message);
 				assert_not_reached ();
@@ -397,7 +398,14 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 			main_thread = new Thread<bool> ("frida-test-agent-worker", agent_main_worker);
 
 			try {
-				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
+				var stream = yield stream_request.future.wait_async ();
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING);
+
+				AgentController controller = this;
+				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
+
+				connection.start_message_processing ();
+
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
 
 				var session_id = AgentSessionId (1);
@@ -426,6 +434,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 				yield connection.close ();
 			} catch (GLib.Error connection_error) {
 			}
+			connection.unregister_object (controller_registration_id);
 			connection = null;
 
 			Thread<bool> t = main_thread;
@@ -448,6 +457,26 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 			return message;
 		}
 
+		private bool agent_main_worker () {
+			Frida.UnloadPolicy unload_policy = IMMEDIATE;
+			main_impl (transport.remote_address, ref unload_policy, null);
+			return true;
+		}
+
+#if !WINDOWS
+		private async HostChildId prepare_to_fork (uint parent_pid, out uint parent_injectee_id, out uint child_injectee_id, out GLib.Socket child_socket) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+#endif
+
+		private async void recreate_agent_thread (uint pid, uint injectee_id) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
+		private async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
 		public class ScriptMessage {
 			public AgentScriptId sender_id {
 				get;
@@ -463,11 +492,6 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 				this.sender_id = sender_id;
 				this.content = content;
 			}
-		}
-
-		private bool agent_main_worker () {
-			main_impl (transport.remote_address, null, 0);
-			return true;
 		}
 	}
 }

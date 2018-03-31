@@ -55,10 +55,10 @@ namespace Frida.Inject {
 		application = new Application ();
 
 #if !WINDOWS
-		Posix.signal (Posix.SIGINT, (sig) => {
+		Posix.signal (Posix.Signal.INT, (sig) => {
 			application.shutdown ();
 		});
-		Posix.signal (Posix.SIGTERM, (sig) => {
+		Posix.signal (Posix.Signal.TERM, (sig) => {
 			application.shutdown ();
 		});
 #endif

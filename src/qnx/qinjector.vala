@@ -99,6 +99,14 @@ namespace Frida {
 			return yield inject_library_file (pid, path, entrypoint, data);
 		}
 
+		public async uint demonitor_and_clone_state (uint id) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
+		public async void recreate_thread (uint pid, uint id) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+		}
+
 		private async void _monitor_instance (uint id) {
 			var fifo = _get_fifo_for_instance (instance_by_id[id]);
 			while (true) {

@@ -297,7 +297,7 @@ namespace Frida {
 					process = pending_subprocess;
 
 				connection = pending_connection;
-				connection.closed.connect (on_connection_closed);
+				connection.on_closed.connect (on_connection_closed);
 
 				proxy = pending_proxy;
 				proxy.output.connect (on_output);
@@ -321,7 +321,7 @@ namespace Frida {
 			proxy.uninjected.disconnect (on_uninjected);
 			proxy = null;
 
-			connection.closed.disconnect (on_connection_closed);
+			connection.on_closed.disconnect (on_connection_closed);
 			connection = null;
 
 			process = null;

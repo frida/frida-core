@@ -25,10 +25,10 @@ namespace Frida {
 			get { return "Local System"; }
 		}
 
-		public ImageData? icon {
+		public Image? icon {
 			get { return _icon; }
 		}
-		private ImageData? _icon;
+		private Image? _icon;
 
 		public HostSessionProviderKind kind {
 			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
@@ -37,10 +37,7 @@ namespace Frida {
 		private WindowsHostSession host_session;
 
 		construct {
-			try {
-				_icon = _extract_icon ();
-			} catch (Error e) {
-			}
+			_icon = Image.from_data (_try_extract_icon ());
 		}
 
 		public async void close () {
@@ -78,7 +75,7 @@ namespace Frida {
 			agent_session_closed (id, reason);
 		}
 
-		public static extern ImageData? _extract_icon () throws Error;
+		public static extern ImageData? _try_extract_icon ();
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
@@ -90,7 +87,6 @@ namespace Frida {
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
 		private Gee.HashMap<uint, ChildProcess> process_by_pid = new Gee.HashMap<uint, ChildProcess> ();
-		private Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		construct {
 			injector = new Winjector ();
@@ -215,7 +211,7 @@ namespace Frida {
 			}
 		}
 
-		public override async void resume (uint pid) throws Error {
+		protected override async void perform_resume (uint pid) throws Error {
 			var process = process_by_pid[pid];
 			if (process == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid pid");
@@ -226,15 +222,15 @@ namespace Frida {
 			System.kill (pid);
 		}
 
-		protected override async IOStream perform_attach_to (uint pid, out Object? transport) throws Error {
+		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
 			PipeTransport t;
-			Pipe stream;
 			try {
 				t = new PipeTransport ();
-				stream = new Pipe (t.local_address);
-			} catch (IOError stream_error) {
-				throw new Error.NOT_SUPPORTED (stream_error.message);
+			} catch (IOError e) {
+				throw new Error.NOT_SUPPORTED (e.message);
 			}
+
+			var stream_request = Pipe.open (t.local_address);
 
 			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
 			while (injectee_by_pid.has_key (pid))
@@ -247,7 +243,7 @@ namespace Frida {
 
 			transport = t;
 
-			return stream;
+			return stream_request;
 		}
 
 		private void on_uninjected (uint id) {

@@ -25,15 +25,13 @@ static void frida_make_pipe (HANDLE * read, HANDLE * write);
 static void frida_ensure_not_inherited (HANDLE handle);
 
 FridaImageData *
-_frida_windows_host_session_provider_extract_icon (GError ** error)
+_frida_windows_host_session_provider_try_extract_icon (void)
 {
   FridaImageData * result = NULL;
   OLECHAR my_computer_parse_string[PARSE_STRING_MAX_LENGTH];
   IShellFolder * desktop_folder = NULL;
   IEnumIDList * children = NULL;
   ITEMIDLIST * child;
-
-  (void) error;
 
   wcscpy_s (my_computer_parse_string, PARSE_STRING_MAX_LENGTH, L"::");
   StringFromGUID2 (&CLSID_MyComputer, my_computer_parse_string + 2, PARSE_STRING_MAX_LENGTH - 2);

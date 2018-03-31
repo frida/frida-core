@@ -118,13 +118,17 @@ namespace Frida.Agent {
 			}
 
 			public async void destroy () {
+				var main_context = MainContext.get_thread_default ();
+
 				yield script.unload ();
 
 				script.weak_ref (() => {
-					Idle.add (() => {
+					var source = new IdleSource ();
+					source.set_callback (() => {
 						destroy.callback ();
 						return false;
 					});
+					source.attach (main_context);
 				});
 				script = null;
 				yield;
