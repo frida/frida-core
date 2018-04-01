@@ -154,6 +154,10 @@ add_project_arguments(
   '-DG_LOG_DOMAIN="Frida"',
   language: c_languages)
 
+if host_os_family == 'linux'
+  add_project_arguments('-D_GNU_SOURCE=1', language: c_languages)
+endif
+
 vala_flags = ['--define=' + host_os_family.to_upper()]
 if host_os != host_os_family
   vala_flags += ['--define=' + host_os.to_upper()]
