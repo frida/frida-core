@@ -259,16 +259,6 @@ namespace Frida {
 			return stream_request;
 		}
 
-		protected override uint get_injectee_id_from_pid (uint pid) throws Error {
-			if (!injectee_by_pid.has_key (pid))
-				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", pid);
-			return injectee_by_pid[pid];
-		}
-
-		protected override void associate_pid_with_injectee_id (uint pid, uint injectee_id) {
-			injectee_by_pid[pid] = injectee_id;
-		}
-
 #if ANDROID
 		private RoboLauncher get_robo_launcher () {
 			if (robo_launcher == null) {
