@@ -162,7 +162,7 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
     seen_cfunctions = set()
     seen_cdelegates = set()
     for object_type in sorted(object_types, key=lambda klass: len(klass.c_name_lc), reverse=True):
-        for m in re.finditer(r"^.*?\s+" + object_type.c_name_lc + r"_(\w+)\s+.*;", core_header, re.MULTILINE):
+        for m in re.finditer(r"^.*?\s+" + object_type.c_name_lc + r"_(\w+)\s+[^;]+;", core_header, re.MULTILINE):
             method_cprototype = beautify_cprototype(m.group(0))
             method_name = m.group(1)
             method_cname_lc = object_type.c_name_lc + '_' + method_name
@@ -313,7 +313,9 @@ def beautify_cenum(cenum):
     return cenum.replace("  ", " ").replace("\t", "  ")
 
 def beautify_cprototype(cprototype):
-    result = re.sub(r"([a-z0-9])\*", r"\1 *", cprototype)
+    result = cprototype.replace("\n", "")
+    result = re.sub(r"\s+", " ", result)
+    result = re.sub(r"([a-z0-9])\*", r"\1 *", result)
     result = re.sub(r"\(\*", r"(* ", result)
     result = re.sub(r"(, )void \* (.+?)_target\b", r"\1gpointer \2_data", result)
     result = result.replace("void * user_data", "gpointer user_data")
