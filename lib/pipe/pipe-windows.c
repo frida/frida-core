@@ -48,7 +48,7 @@ struct _FridaWindowsPipeOutputStream
   FridaPipeBackend * backend;
 };
 
-static HANDLE frida_windows_pipe_open (const gchar * name, FridaWindowsPipeRole role, GError ** error);
+static HANDLE frida_windows_pipe_open_named_pipe (const gchar * name, FridaWindowsPipeRole role, GError ** error);
 
 static gssize frida_windows_pipe_input_stream_read (GInputStream * base, void * buffer, gsize count, GCancellable * cancellable, GError ** error);
 static gboolean frida_windows_pipe_input_stream_close (GInputStream * base, GCancellable * cancellable, GError ** error);
@@ -101,7 +101,7 @@ _frida_windows_pipe_create_backend (const gchar * address, GError ** error)
   role = strstr (address, "role=") + 5;
   backend->role = role[0] == 's' ? FRIDA_WINDOWS_PIPE_SERVER : FRIDA_WINDOWS_PIPE_CLIENT;
   name = strstr (address, "name=") + 5;
-  backend->pipe = frida_windows_pipe_open (name, backend->role, error);
+  backend->pipe = frida_windows_pipe_open_named_pipe (name, backend->role, error);
   if (backend->pipe != INVALID_HANDLE_VALUE)
   {
     backend->read_complete = CreateEvent (NULL, TRUE, FALSE, NULL);
@@ -139,7 +139,7 @@ _frida_windows_pipe_destroy_backend (void * opaque_backend)
 }
 
 static HANDLE
-frida_windows_pipe_open (const gchar * name, FridaWindowsPipeRole role, GError ** error)
+frida_windows_pipe_open_named_pipe (const gchar * name, FridaWindowsPipeRole role, GError ** error)
 {
   HANDLE result = INVALID_HANDLE_VALUE;
   BOOL success;
