@@ -16,6 +16,8 @@
 
 typedef struct _FridaPipeBackend FridaPipeBackend;
 typedef enum _FridaWindowsPipeRole FridaWindowsPipeRole;
+typedef struct _FridaWindowsPipeInputStream FridaWindowsPipeInputStream;
+typedef struct _FridaWindowsPipeOutputStream FridaWindowsPipeOutputStream;
 
 struct _FridaPipeBackend
 {
