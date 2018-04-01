@@ -2,8 +2,10 @@ namespace Frida.Agent {
 	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
 		if (Runner.shared_instance == null)
 			Runner.create_and_run (pipe_address, ref unload_policy, mapped_range);
+#if !WINDOWS
 		else
 			Runner.resume_after_fork (ref unload_policy);
+#endif
 	}
 
 	private enum StopReason {
@@ -45,6 +47,7 @@ namespace Frida.Agent {
 		protected Gum.MemoryRange agent_range;
 
 		private uint child_gating_subscriber_count = 0;
+#if !WINDOWS
 		private ForkListener? fork_listener;
 		private ThreadIgnoreScope fork_ignore_scope;
 		private uint fork_parent_pid;
@@ -56,6 +59,7 @@ namespace Frida.Agent {
 		private ForkRecoveryState fork_recovery_state;
 		private Mutex fork_mutex;
 		private Cond fork_cond;
+#endif
 
 		private enum ForkRecoveryState {
 			RECOVERING,
@@ -97,6 +101,7 @@ namespace Frida.Agent {
 			Environment._deinit ();
 		}
 
+#if !WINDOWS
 		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy) {
 			{
 				var ignore_scope = new ThreadIgnoreScope ();
@@ -115,6 +120,7 @@ namespace Frida.Agent {
 
 			Environment._deinit ();
 		}
+#endif
 
 		private static void release_shared_instance () {
 			shared_mutex.lock ();
@@ -154,6 +160,7 @@ namespace Frida.Agent {
 			main_context.pop_thread_default ();
 		}
 
+#if !WINDOWS
 		private void run_after_fork () {
 			fork_mutex.lock ();
 			fork_mutex.unlock ();
@@ -166,16 +173,6 @@ namespace Frida.Agent {
 			main_context.pop_thread_default ();
 		}
 
-#if WINDOWS
-		private void prepare_to_fork () {
-		}
-
-		private void recover_from_fork_in_parent () {
-		}
-
-		private void recover_from_fork_in_child () {
-		}
-#else
 		private void prepare_to_fork () {
 			fork_ignore_scope = new ThreadIgnoreScope ();
 
@@ -307,6 +304,15 @@ namespace Frida.Agent {
 
 			if (actor == CHILD)
 				release_child_gating ();
+		}
+#else
+		private void prepare_to_fork () {
+		}
+
+		private void recover_from_fork_in_parent () {
+		}
+
+		private void recover_from_fork_in_child () {
 		}
 #endif
 
@@ -521,6 +527,7 @@ namespace Frida.Agent {
 			connection = null;
 		}
 
+#if !WINDOWS
 		private void discard_connection () {
 			if (connection == null)
 				return;
@@ -532,6 +539,7 @@ namespace Frida.Agent {
 			connection.dispose ();
 			connection = null;
 		}
+#endif
 
 		private void unregister_connection () {
 			foreach (var client in clients) {

@@ -16,8 +16,6 @@
 
 typedef struct _FridaPipeBackend FridaPipeBackend;
 typedef enum _FridaWindowsPipeRole FridaWindowsPipeRole;
-typedef struct _FridaWindowsPipeInputStream FridaWindowsPipeInputStream;
-typedef struct _FridaWindowsPipeOutputStream FridaWindowsPipeOutputStream;
 
 struct _FridaPipeBackend
 {
@@ -152,7 +150,7 @@ frida_windows_pipe_open_named_pipe (const gchar * name, FridaWindowsPipeRole rol
   SECURITY_ATTRIBUTES sa;
 
   path = frida_pipe_path_from_name (name);
-  sddl = frida_windows_pipe_get_sddl_string_for_pipe ();
+  sddl = frida_pipe_get_sddl_string_for_pipe ();
   success = ConvertStringSecurityDescriptorToSecurityDescriptor (sddl, SDDL_REVISION_1, &sd, NULL);
   CHECK_WINAPI_RESULT (success, !=, FALSE, "ConvertStringSecurityDescriptorToSecurityDescriptor");
 
@@ -329,7 +327,7 @@ _frida_windows_pipe_make_input_stream (void * backend)
 {
   FridaWindowsPipeInputStream * stream;
 
-  stream = g_object_new (FRIDA_TYPE_PIPE_INPUT_STREAM, NULL);
+  stream = g_object_new (FRIDA_TYPE_WINDOWS_PIPE_INPUT_STREAM, NULL);
   stream->backend = backend;
 
   return G_INPUT_STREAM (stream);
@@ -340,7 +338,7 @@ _frida_windows_pipe_make_output_stream (void * backend)
 {
   FridaWindowsPipeOutputStream * stream;
 
-  stream = g_object_new (FRIDA_TYPE_PIPE_OUTPUT_STREAM, NULL);
+  stream = g_object_new (FRIDA_TYPE_WINDOWS_PIPE_OUTPUT_STREAM, NULL);
   stream->backend = backend;
 
   return G_OUTPUT_STREAM (stream);

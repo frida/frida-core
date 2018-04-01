@@ -119,10 +119,15 @@ namespace Winjector {
 					helper64.proxy.uninjected.connect (on_uninjected);
 				}
 
-				connection = yield new DBusConnection (new Pipe (parent_address), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				var stream_request = Pipe.open (parent_address);
+				var stream = yield stream_request.future.wait_async ();
+
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
+
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
 				printerr ("Unable to start: %s\n", e.message);
@@ -175,21 +180,19 @@ namespace Winjector {
 			}
 
 			private string name;
-			private Pipe pipe;
+			private Gee.Promise<IOStream> stream_request;
 			private DBusConnection connection;
 
-			public HelperService (string name) throws Frida.Error {
+			public HelperService (string name) {
 				this.name = name;
-				try {
-					this.pipe = new Pipe ("pipe:role=server,name=" + name);
-				} catch (IOError e) {
-					throw new Frida.Error.ADDRESS_IN_USE (e.message);
-				}
+				this.stream_request = Pipe.open ("pipe:role=server,name=" + name);
 			}
 
 			public async void start () throws Frida.Error {
 				try {
-					connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.NONE);
+					var stream = yield this.stream_request.future.wait_async ();
+
+					connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
 				} catch (GLib.Error e) {
 					throw new Frida.Error.PERMISSION_DENIED (e.message);
 				}
@@ -226,10 +229,15 @@ namespace Winjector {
 
 		private async void start () {
 			try {
-				connection = yield new DBusConnection (new Pipe ("pipe:role=client,name=" + derive_svcname_for_self ()), null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				var stream_request = Pipe.open ("pipe:role=client,name=" + derive_svcname_for_self ());
+				var stream = yield stream_request.future.wait_async ();
+
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
+
 				WinjectorHelper helper = this;
 				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
 				printerr ("Unable to start: %s\n", e.message);

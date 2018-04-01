@@ -141,7 +141,9 @@ namespace Frida {
 		private uint next_agent_session_id = 1;
 
 		private Gee.HashMap<uint, ChildEntry> child_entries = new Gee.HashMap<uint, ChildEntry> ();
+#if !WINDOWS
 		private uint next_host_child_id = 1;
+#endif
 		private Gee.HashMap<uint, HostChildInfo?> pending_children = new Gee.HashMap<uint, HostChildInfo?> ();
 
 		protected Injector injector;
@@ -496,6 +498,7 @@ namespace Frida {
 			child_entries[id.handle] = entry;
 			connection.on_closed.connect (on_child_connection_closed);
 		}
+#endif
 
 		private void on_child_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			ChildEntry entry_to_remove = null;
@@ -515,7 +518,6 @@ namespace Frida {
 
 			entry_to_remove.close.begin ();
 		}
-#endif
 
 		public async void recreate_agent_thread (uint pid, uint injectee_id) throws Error {
 			injectee_by_pid[pid] = injectee_id;

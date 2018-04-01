@@ -189,16 +189,16 @@ namespace Frida {
 			private TemporaryFile helper32;
 			private TemporaryFile helper64;
 			private PipeTransport transport;
-			private Pipe pipe;
+			private Gee.Promise<IOStream> stream_request;
 			private DBusConnection connection;
 			private WinjectorHelper proxy;
 			private void * process;
 
-			public HelperInstance (TemporaryFile helper32, TemporaryFile helper64, PipeTransport transport, Pipe pipe, void * process) {
+			public HelperInstance (TemporaryFile helper32, TemporaryFile helper64, PipeTransport transport, Gee.Promise<IOStream> stream_request, void * process) {
 				this.helper32 = helper32;
 				this.helper64 = helper64;
 				this.transport = transport;
-				this.pipe = pipe;
+				this.stream_request = stream_request;
 				this.process = process;
 			}
 
@@ -209,7 +209,9 @@ namespace Frida {
 
 			public async void open () throws Error {
 				try {
-					connection = yield new DBusConnection (pipe, null, DBusConnectionFlags.NONE);
+					var stream = yield stream_request.future.wait_async ();
+
+					connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
 				} catch (GLib.Error e) {
 					throw new Error.PERMISSION_DENIED (e.message);
 				}
@@ -284,6 +286,8 @@ namespace Frida {
 			private MainContext main_context;
 			private HelperInstance helper;
 			private Gee.ArrayList<ObtainRequest> obtain_requests = new Gee.ArrayList<ObtainRequest> ();
+			private PipeTransport transport;
+			private Gee.Promise<IOStream> stream_request;
 
 			public ResourceStore? resource_store {
 				get;
@@ -310,7 +314,13 @@ namespace Frida {
 				if (helper != null)
 					return helper;
 
-				if (obtain_requests.size == 0) {
+				if (obtain_requests.is_empty) {
+					try {
+						transport = new PipeTransport ();
+					} catch (IOError e) {
+						throw new Error.PERMISSION_DENIED (e.message);
+					}
+					stream_request = Pipe.open (transport.local_address);
 					new Thread<bool> ("frida-winjector", obtain_worker);
 				}
 
@@ -326,15 +336,11 @@ namespace Frida {
 				Error error = null;
 
 				try {
-					var transport = new PipeTransport ();
-					var pipe = new Pipe (transport.local_address);
 					var level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
 					void * process = spawn (resource_store.helper32.path, "MANAGER %s %s".printf (level_str, transport.remote_address), level);
-					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, pipe, process);
+					instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport, stream_request, process);
 				} catch (Error e) {
 					error = e;
-				} catch (IOError e) {
-					error = new Error.PERMISSION_DENIED (e.message);
 				}
 
 				var source = new IdleSource ();
@@ -360,8 +366,11 @@ namespace Frida {
 					}
 				}
 
-				this.helper = completed_instance;
-				this.helper.uninjected.connect (on_uninjected);
+				helper = completed_instance;
+				helper.uninjected.connect (on_uninjected);
+
+				stream_request = null;
+				transport = null;
 
 				foreach (var request in obtain_requests)
 					request.complete (completed_instance, completed_error);
@@ -515,10 +524,7 @@ namespace Frida {
 		}
 		private InputStream _dll64;
 
-		public AgentResource[] resources {
-			get;
-			private set;
-		}
+		public AgentResource[] resources;
 
 		public AgentDescriptor (string name_template, InputStream dll32, InputStream dll64) {
 			Object (name_template: name_template);
