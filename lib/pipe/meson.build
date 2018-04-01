@@ -21,6 +21,7 @@ endif
 
 if host_os == 'android'
   system_deps += [frida_selinux_dep]
+  vala_args += frida_selinux_vala_args
 endif
 
 pipe = static_library('frida-pipe', pipe_sources,
