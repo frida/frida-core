@@ -68,21 +68,21 @@ _frida_agent_environment_try_get_program_name (void)
 #endif
 }
 
-void *
+gpointer
 _frida_agent_environment_get_current_pthread (void)
 {
 #ifndef HAVE_WINDOWS
-  return pthread_self ();
+  return (gpointer) pthread_self ();
 #else
   return NULL;
 #endif
 }
 
 void
-_frida_agent_environment_join_pthread (void * pthread)
+_frida_agent_environment_join_pthread (gpointer pthread)
 {
 #ifndef HAVE_WINDOWS
-  pthread_join (pthread, NULL);
+  pthread_join ((pthread_t) pthread, NULL);
 #endif
 }
 
