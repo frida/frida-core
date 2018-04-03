@@ -7,6 +7,8 @@ all: \
 	sleeper-linux-armhf \
 	sleeper-linux-x86 \
 	sleeper-linux-x86_64 \
+	forker-linux-x86 \
+	forker-linux-x86_64 \
 	simple-agent-linux-arm.so \
 	simple-agent-linux-armhf.so \
 	simple-agent-linux-x86.so \
@@ -45,6 +47,16 @@ sleeper-linux-mips: sleeper-unix.c
 sleeper-linux-mipsel: sleeper-unix.c
 	mipsel-linux-gcc $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
 	mipsel-linux-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+forker-linux-x86: forker.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -m32 $< -o $@.tmp
+	strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+forker-linux-x86_64: forker.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -m64 $< -o $@.tmp
+	strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 %-agent-linux-arm.so: %-agent.c

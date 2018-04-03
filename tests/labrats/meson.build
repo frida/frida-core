@@ -40,6 +40,12 @@ if host_os == 'linux'
       'resident-agent-linux-' + host_arch + '.so',
     ]
   endif
+
+  if host_arch == 'x86_64'
+    labrat_files += [
+      'forker-linux-x86_64',
+    ]
+  endif
 endif
 
 if host_os == 'ios'
