@@ -16,6 +16,8 @@ namespace Frida {
 		/* these should be private, but must be accessible to glue code */
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, RemoteThreadSession> inject_session_by_id = new Gee.HashMap<uint, RemoteThreadSession> ();
+		private Gee.HashMap<uint, uint> inject_expiry_by_id = new Gee.HashMap<uint, uint> ();
 		public uint next_id = 0;
 
 		public HelperService (string parent_address) {
@@ -26,7 +28,7 @@ namespace Frida {
 			foreach (var instance in spawn_instance_by_pid.values)
 				_free_spawn_instance (instance);
 			foreach (var instance in inject_instance_by_id.values)
-				_free_inject_instance (instance);
+				_free_inject_instance (instance, RESIDENT);
 		}
 
 		public int run () {
@@ -150,77 +152,108 @@ namespace Frida {
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
 			var id = _do_inject (pid, path, entrypoint, data, temp_path);
 
-			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
-			var buf = new uint8[1];
-			var cancellable = new Cancellable ();
-			var timeout = Timeout.add_seconds (2, () => {
-				cancellable.cancel ();
-				return false;
-			});
-			ssize_t size;
-			try {
-				size = yield fifo.read_async (buf, Priority.DEFAULT, cancellable);
-			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while waiting for FIFO to establish");
-				else
-					throw new Error.PROCESS_NOT_RESPONDING (e.message);
-			}
-			Source.remove (timeout);
-			if (size == 0) {
-				Idle.add (() => {
-					_on_uninject (id, false);
-					return false;
-				});
-			} else {
-				_monitor_inject_instance.begin (id);
-			}
+			yield establish_session (id);
 
 			return id;
 		}
 
-		private async void _monitor_inject_instance (uint id) {
+		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
 			var instance = inject_instance_by_id[id];
 			if (instance == null)
-				return;
-			var fifo = _get_fifo_for_inject_instance (instance);
-			var is_resident = false;
-			while (true) {
-				var buf = new uint8[1];
-				try {
-					var size = yield fifo.read_async (buf);
-					if (size == 0) {
-						/*
-						 * Give it some time to execute its final instructions before we free the memory being executed
-						 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
-						 */
-						Timeout.add (50, () => {
-							_on_uninject (id, is_resident);
-							return false;
-						});
-						return;
-					} else {
-						is_resident = (bool) buf[0];
-					}
-				} catch (IOError e) {
-					_on_uninject (id, false);
-					return;
-				}
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			RemoteThreadSession session;
+			if (inject_session_by_id.unset (id, out session)) {
+				session.ended.disconnect (on_remote_thread_session_ended);
+				yield session.cancel ();
 			}
+
+			var clone_id = _demonitor_and_clone_injectee_state (instance);
+
+			schedule_inject_expiry_for_id (id);
+			schedule_inject_expiry_for_id (clone_id);
+
+			return clone_id;
 		}
 
-		private void _on_uninject (uint id, bool is_resident) {
+		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+			var instance = inject_instance_by_id[id];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid ID");
+
+			cancel_inject_expiry_for_id (id);
+
+			_recreate_injectee_thread (instance, pid);
+
+			yield establish_session (id);
+		}
+
+		private async void establish_session (uint id) throws Error {
+			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
+
+			var session = new RemoteThreadSession (id, fifo);
+			try {
+				yield session.establish ();
+			} catch (Error e) {
+				_destroy_inject_instance (id, IMMEDIATE);
+				throw e;
+			}
+
+			inject_session_by_id[id] = session;
+			session.ended.connect (on_remote_thread_session_ended);
+		}
+
+		private void on_remote_thread_session_ended (RemoteThreadSession session, UnloadPolicy unload_policy) {
+			var id = session.id;
+
+			session.ended.disconnect (on_remote_thread_session_ended);
+			inject_session_by_id.unset (id);
+
+			/*
+			 * Give it some time to execute its final instructions before we free the memory being executed
+			 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
+			 */
+			Timeout.add (50, () => {
+				_destroy_inject_instance (id, unload_policy);
+				return false;
+			});
+		}
+
+		protected void _destroy_inject_instance (uint id, UnloadPolicy unload_policy) {
 			void * instance;
 			bool found = inject_instance_by_id.unset (id, out instance);
 			assert (found);
 
-			_free_inject_instance (instance);
+			_free_inject_instance (instance, unload_policy);
 
-			if (!is_resident)
+			if (unload_policy == IMMEDIATE)
 				uninjected (id);
 
 			if (connection.is_closed () && inject_instance_by_id.is_empty)
 				shutdown.begin ();
+		}
+
+		private void schedule_inject_expiry_for_id (uint id) {
+			uint previous_timer;
+			if (inject_expiry_by_id.unset (id, out previous_timer))
+				Source.remove (previous_timer);
+
+			inject_expiry_by_id[id] = Timeout.add_seconds (20, () => {
+				var removed = inject_expiry_by_id.unset (id);
+				assert (removed);
+
+				_destroy_inject_instance (id, IMMEDIATE);
+
+				return false;
+			});
+		}
+
+		private void cancel_inject_expiry_for_id (uint id) {
+			uint timer;
+			var found = inject_expiry_by_id.unset (id, out timer);
+			assert (found);
+
+			Source.remove (timer);
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
@@ -228,16 +261,112 @@ namespace Frida {
 				shutdown.begin ();
 		}
 
-		public extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
-		public extern void _resume_spawn_instance (void * instance);
-		public extern void _free_spawn_instance (void * instance);
+		protected extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
+		protected extern void _resume_spawn_instance (void * instance);
+		protected extern void _free_spawn_instance (void * instance);
 
-		public extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
-		public extern InputStream _get_fifo_for_inject_instance (void * instance);
-		public extern void _free_inject_instance (void * instance);
+		protected extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
+		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
+		protected extern void _recreate_injectee_thread (void * instance, uint pid) throws Error;
+		protected extern InputStream _get_fifo_for_inject_instance (void * instance);
+		protected extern void _free_inject_instance (void * instance, UnloadPolicy unload_policy);
 	}
 
-	public class StdioPipes : Object {
+	private class RemoteThreadSession : Object {
+		public signal void ended (UnloadPolicy unload_policy);
+
+		public uint id {
+			get;
+			construct;
+		}
+
+		public InputStream input {
+			get;
+			construct;
+		}
+
+		private Gee.Promise<bool> cancel_request = new Gee.Promise<bool> ();
+		private Cancellable cancellable = new Cancellable ();
+
+		public RemoteThreadSession (uint id, InputStream input) {
+			Object (id: id, input: input);
+		}
+
+		public async void establish () throws Error {
+			var timeout = Timeout.add_seconds (2, () => {
+				cancellable.cancel ();
+				return false;
+			});
+
+			ssize_t size = 0;
+			try {
+				var buf = new uint8[1];
+				do {
+					size = yield input.read_async (buf, Priority.DEFAULT, cancellable);
+				} while (size == 1 && buf[0] != ProgressMessageType.HELLO);
+			} catch (IOError e) {
+				if (e is IOError.CANCELLED) {
+					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while waiting for FIFO to establish");
+				} else {
+					Source.remove (timeout);
+
+					throw new Error.PROCESS_NOT_RESPONDING (e.message);
+				}
+			}
+
+			Source.remove (timeout);
+
+			if (size == 0) {
+				cancel_request.set_value (true);
+
+				Idle.add (() => {
+					ended (IMMEDIATE);
+					return false;
+				});
+			} else {
+				monitor.begin ();
+			}
+		}
+
+		public async void cancel () {
+			cancellable.cancel ();
+
+			try {
+				yield cancel_request.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
+		}
+
+		private async void monitor () {
+			try {
+				var unload_policy = UnloadPolicy.IMMEDIATE;
+
+				var running = true;
+				var buf = new uint8[1];
+				do {
+					var size = yield input.read_async (buf, Priority.DEFAULT, cancellable);
+					if (size == 0)
+						running = false;
+					else
+						unload_policy = (UnloadPolicy) buf[0];
+				} while (running);
+
+				ended (unload_policy);
+			} catch (IOError e) {
+				if (!(e is IOError.CANCELLED))
+					ended (IMMEDIATE);
+			}
+
+			cancel_request.set_value (true);
+		}
+	}
+
+	protected enum ProgressMessageType {
+		HELLO = 0xff
+	}
+
+	protected class StdioPipes : Object {
 		public int input {
 			get;
 			construct;

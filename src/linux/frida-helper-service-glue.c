@@ -46,6 +46,11 @@
 #define FRIDA_RED_ZONE_SIZE 128
 #define FRIDA_OFFSET_E_ENTRY 0x18
 #define FRIDA_RTLD_DLOPEN (0x80000000)
+#if GLIB_SIZEOF_VOID_P == 8
+# define FRIDA_MAP_FAILED G_MAXUINT64
+#else
+# define FRIDA_MAP_FAILED G_MAXUINT32
+#endif
 
 #define CHECK_OS_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
@@ -129,7 +134,7 @@ struct _FridaRegs
 #endif
 
 #define FRIDA_REMOTE_DATA_FIELD(n) \
-  (remote_address + params->data.offset + G_STRUCT_OFFSET (FridaTrampolineData, n))
+    (remote_address + params->data.offset + G_STRUCT_OFFSET (FridaTrampolineData, n))
 
 #define FRIDA_DUMMY_RETURN_ADDRESS 0x320
 
@@ -145,20 +150,30 @@ typedef void (* FridaInjectEmitFunc) (const FridaInjectParams * params, GumAddre
 
 struct _FridaSpawnInstance
 {
-  FridaHelperService * service;
   pid_t pid;
+
+  FridaHelperService * service;
 };
 
 struct _FridaInjectInstance
 {
-  FridaHelperService * service;
   guint id;
+
   pid_t pid;
   gboolean already_attached;
+
+  gchar * temp_path;
+
   gchar * fifo_path;
   gint fifo;
+
   GumAddress remote_payload;
   guint remote_size;
+  GumAddress entrypoint;
+  GumAddress stack_top;
+  GumAddress trampoline_data;
+
+  FridaHelperService * service;
 };
 
 struct _FridaInjectRegion
@@ -183,6 +198,15 @@ struct _FridaInjectParams
 
   GumAddress remote_address;
   guint remote_size;
+
+  GumAddress open_impl;
+  GumAddress close_impl;
+  GumAddress write_impl;
+
+  GumAddress dlopen_impl;
+  GumAddress dlopen_pic_value;
+  GumAddress dlclose_impl;
+  GumAddress dlsym_impl;
 };
 
 struct _FridaCodeChunk
@@ -193,15 +217,18 @@ struct _FridaCodeChunk
 
 struct _FridaTrampolineData
 {
-  gchar pthread_so[32];
-  gchar pthread_create[32];
-  gchar pthread_detach[32];
+  gchar pthread_so_string[32];
+  gchar pthread_create_string[32];
+  gchar pthread_detach_string[32];
   gchar fifo_path[256];
   gchar so_path[256];
   gchar entrypoint_name[256];
   gchar entrypoint_data[256];
+  guint8 hello_byte;
 
+  gpointer pthread_so;
   pthread_t worker_thread;
+  gpointer module_handle;
 };
 
 struct _FridaProbeElfContext
@@ -212,6 +239,8 @@ struct _FridaProbeElfContext
   gsize word_size;
 };
 
+static guint frida_helper_service_generate_id (FridaHelperService * self);
+
 static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * service);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
@@ -219,10 +248,13 @@ static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path);
-static void frida_inject_instance_free (FridaInjectInstance * instance);
-static gboolean frida_inject_instance_attach (FridaInjectInstance * instance, FridaRegs * saved_regs, GError ** error);
-static gboolean frida_inject_instance_detach (FridaInjectInstance * instance, const FridaRegs * saved_regs, GError ** error);
-static gboolean frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error);
+static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
+static void frida_inject_instance_init_fifo (FridaInjectInstance * self);
+static void frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy unload_policy);
+static gboolean frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs, GError ** error);
+static gboolean frida_inject_instance_detach (FridaInjectInstance * self, const FridaRegs * saved_regs, GError ** error);
+static gboolean frida_inject_instance_start_remote_thread (FridaInjectInstance * self, gboolean * exited, GError ** error);
+static gboolean frida_inject_instance_emit_and_transfer_payload (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * entrypoint, GError ** error);
 static void frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code);
 
 static gboolean frida_wait_for_attach_signal (pid_t pid);
@@ -234,7 +266,7 @@ static gboolean frida_run_to_entry_point (pid_t pid, GError ** error);
 static gboolean frida_examine_range_for_elf_header (const GumRangeDetails * details, gpointer user_data);
 
 static GumAddress frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error);
-static int frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
+static gboolean frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error);
 static gboolean frida_remote_mprotect (pid_t pid, GumAddress address, size_t size, int prot, GError ** error);
 static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gsize size, GError ** error);
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, gboolean * exited, GError ** error);
@@ -377,13 +409,27 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   params.remote_address = 0;
   params.remote_size = offset;
 
-  if (self->next_id == 0 || self->next_id >= G_MAXINT)
-  {
-    /* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
-    self->next_id = (GLIB_SIZEOF_VOID_P == 4) ? 1 : 2;
-  }
-  instance = frida_inject_instance_new (self, self->next_id, pid, temp_path);
-  self->next_id += 2;
+  params.open_impl = frida_resolve_libc_function (pid, "open");
+  params.close_impl = frida_resolve_libc_function (pid, "close");
+  params.write_impl = frida_resolve_libc_function (pid, "write");
+
+#if defined (HAVE_GLIBC)
+  params.dlopen_impl = frida_resolve_libc_function (pid, "__libc_dlopen_mode");
+  params.dlopen_pic_value = 0;
+  params.dlclose_impl = frida_resolve_libc_function (pid, "__libc_dlclose");
+  params.dlsym_impl = frida_resolve_libc_function (pid, "__libc_dlsym");
+#elif defined (HAVE_UCLIBC)
+  params.dlopen_impl = frida_resolve_linker_address (params->pid, dlopen);
+  params.dlopen_pic_value = 0;
+  params.dlclose_impl = frida_resolve_linker_address (params->pid, dlclose);
+  params.dlsym_impl = frida_resolve_linker_address (params->pid, dlsym);
+#elif defined (HAVE_ANDROID)
+  params.dlopen_impl = frida_resolve_inner_dlopen (pid, &params.dlopen_pic_value);
+  params.dlclose_impl = frida_resolve_linker_address (pid, dlclose);
+  params.dlsym_impl = frida_resolve_linker_address (pid, dlsym);
+#endif
+
+  instance = frida_inject_instance_new (self, frida_helper_service_generate_id (self), pid, temp_path);
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
     goto beach;
@@ -395,7 +441,12 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   instance->remote_payload = params.remote_address;
   instance->remote_size = params.remote_size;
 
-  if (!frida_inject_instance_emit_and_remote_execute (frida_inject_instance_emit_payload_code, &params, NULL, &exited, error) && !exited)
+  if (!frida_inject_instance_emit_and_transfer_payload (frida_inject_instance_emit_payload_code, &params, &instance->entrypoint, error))
+    goto beach;
+  instance->stack_top = params.remote_address + params.stack.offset + params.stack.size;
+  instance->trampoline_data = params.remote_address + params.data.offset;
+
+  if (!frida_inject_instance_start_remote_thread (instance, &exited, error) && !exited)
     goto beach;
 
   if (!exited)
@@ -409,9 +460,77 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
 beach:
   {
-    frida_inject_instance_free (instance);
+    frida_inject_instance_free (instance, FRIDA_UNLOAD_POLICY_IMMEDIATE);
     return 0;
   }
+}
+
+guint
+_frida_helper_service_demonitor_and_clone_injectee_state (FridaHelperService * self, void * raw_instance)
+{
+  FridaInjectInstance * instance = raw_instance;
+  FridaInjectInstance * clone;
+
+  clone = frida_inject_instance_clone (instance, frida_helper_service_generate_id (self));
+
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (clone->id), clone);
+
+  return clone->id;
+}
+
+void
+_frida_helper_service_recreate_injectee_thread (FridaHelperService * self, void * raw_instance, guint pid, GError ** error)
+{
+  FridaInjectInstance * instance = raw_instance;
+  gboolean is_uninitialized_clone;
+  FridaRegs saved_regs;
+  gboolean exited;
+
+  is_uninitialized_clone = instance->pid == 0;
+
+  instance->pid = pid;
+
+  if (!frida_inject_instance_attach (instance, &saved_regs, error))
+    goto handle_error;
+
+  if (is_uninitialized_clone)
+  {
+    if (!frida_remote_write (instance->pid, instance->trampoline_data + G_STRUCT_OFFSET (FridaTrampolineData, fifo_path),
+        instance->fifo_path, strlen (instance->fifo_path) + 1, error))
+      goto handle_error;
+  }
+
+  if (!frida_inject_instance_start_remote_thread (instance, &exited, error) && !exited)
+    goto handle_error;
+
+  if (!exited)
+    frida_inject_instance_detach (instance, &saved_regs, NULL);
+  else
+    g_clear_error (error);
+
+  return;
+
+handle_error:
+  {
+    _frida_helper_service_destroy_inject_instance (self, instance->id, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+    return;
+  }
+}
+
+static guint
+frida_helper_service_generate_id (FridaHelperService * self)
+{
+  guint id;
+
+  if (self->next_id == 0 || self->next_id >= G_MAXINT)
+  {
+    /* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
+    self->next_id = (GLIB_SIZEOF_VOID_P == 4) ? 1 : 2;
+  }
+  id = self->next_id;
+  self->next_id += 2;
+
+  return id;
 }
 
 GInputStream *
@@ -421,9 +540,9 @@ _frida_helper_service_get_fifo_for_inject_instance (FridaHelperService * self, v
 }
 
 void
-_frida_helper_service_free_inject_instance (FridaHelperService * self, void * instance)
+_frida_helper_service_free_inject_instance (FridaHelperService * self, void * instance, FridaUnloadPolicy unload_policy)
 {
-  frida_inject_instance_free (instance);
+  frida_inject_instance_free (instance, unload_policy);
 }
 
 static FridaSpawnInstance *
@@ -464,32 +583,68 @@ static FridaInjectInstance *
 frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path)
 {
   FridaInjectInstance * instance;
-  const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  int ret;
 
   instance = g_slice_new0 (FridaInjectInstance);
-  instance->service = g_object_ref (service);
   instance->id = id;
+
   instance->pid = pid;
   instance->already_attached = FALSE;
-  instance->fifo_path = g_strdup_printf ("%s/linjector-%u", temp_path, id);
-  ret = mkfifo (instance->fifo_path, mode);
-  g_assert_cmpint (ret, ==, 0);
-  ret = chmod (instance->fifo_path, mode);
-  g_assert_cmpint (ret, ==, 0);
-#ifdef HAVE_ANDROID
-  setfilecon (instance->fifo_path, "u:object_r:frida_file:s0");
-#endif
-  instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
-  g_assert (instance->fifo != -1);
+
+  instance->temp_path = g_strdup (temp_path);
+
+  frida_inject_instance_init_fifo (instance);
+
+  instance->service = g_object_ref (service);
 
   return instance;
 }
 
-static void
-frida_inject_instance_free (FridaInjectInstance * instance)
+static FridaInjectInstance *
+frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
 {
-  if (instance->remote_payload != 0)
+  FridaInjectInstance * clone;
+
+  clone = g_slice_dup (FridaInjectInstance, instance);
+  clone->id = id;
+
+  clone->pid = 0;
+  clone->already_attached = FALSE;
+
+  clone->temp_path = g_strdup (instance->temp_path);
+
+  frida_inject_instance_init_fifo (clone);
+
+  g_object_ref (clone->service);
+
+  return clone;
+}
+
+static void
+frida_inject_instance_init_fifo (FridaInjectInstance * self)
+{
+  const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+  int ret;
+
+  self->fifo_path = g_strdup_printf ("%s/linjector-%u", self->temp_path, self->id);
+
+  ret = mkfifo (self->fifo_path, mode);
+  g_assert_cmpint (ret, ==, 0);
+
+  ret = chmod (self->fifo_path, mode);
+  g_assert_cmpint (ret, ==, 0);
+
+#ifdef HAVE_ANDROID
+  setfilecon (self->fifo_path, "u:object_r:frida_file:s0");
+#endif
+
+  self->fifo = open (self->fifo_path, O_RDONLY | O_NONBLOCK);
+  g_assert (self->fifo != -1);
+}
+
+static void
+frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy unload_policy)
+{
+  if (instance->pid != 0 && instance->remote_payload != 0 && unload_policy == FRIDA_UNLOAD_POLICY_IMMEDIATE)
   {
     FridaRegs saved_regs;
 
@@ -503,14 +658,18 @@ frida_inject_instance_free (FridaInjectInstance * instance)
   close (instance->fifo);
   unlink (instance->fifo_path);
   g_free (instance->fifo_path);
+
+  g_free (instance->temp_path);
+
   g_object_unref (instance->service);
+
   g_slice_free (FridaInjectInstance, instance);
 }
 
 static gboolean
-frida_inject_instance_attach (FridaInjectInstance * instance, FridaRegs * saved_regs, GError ** error)
+frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs, GError ** error)
 {
-  const pid_t pid = instance->pid;
+  const pid_t pid = self->pid;
   long ret;
   int attach_errno;
   const gchar * failed_operation;
@@ -524,13 +683,13 @@ frida_inject_instance_attach (FridaInjectInstance * instance, FridaRegs * saved_
     ret = frida_get_regs (pid, saved_regs);
     CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
-    instance->already_attached = TRUE;
+    self->already_attached = TRUE;
   }
   else
   {
     CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
 
-    instance->already_attached = FALSE;
+    self->already_attached = FALSE;
 
     success = frida_wait_for_attach_signal (pid);
     CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
@@ -566,16 +725,16 @@ handle_os_error:
 }
 
 static gboolean
-frida_inject_instance_detach (FridaInjectInstance * instance, const FridaRegs * saved_regs, GError ** error)
+frida_inject_instance_detach (FridaInjectInstance * self, const FridaRegs * saved_regs, GError ** error)
 {
-  const pid_t pid = instance->pid;
+  const pid_t pid = self->pid;
   long ret;
   const gchar * failed_operation;
 
   ret = frida_set_regs (pid, saved_regs);
   CHECK_OS_RESULT (ret, ==, 0, "frida_set_regs");
 
-  if (!instance->already_attached)
+  if (!self->already_attached)
   {
     ret = ptrace (PTRACE_DETACH, pid, NULL, NULL);
     CHECK_OS_RESULT (ret, ==, 0, "PTRACE_DETACH");
@@ -595,7 +754,13 @@ handle_os_error:
 }
 
 static gboolean
-frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * result, gboolean * exited, GError ** error)
+frida_inject_instance_start_remote_thread (FridaInjectInstance * self, gboolean * exited, GError ** error)
+{
+  return frida_remote_exec (self->pid, self->entrypoint, self->stack_top, NULL, exited, error);
+}
+
+static gboolean
+frida_inject_instance_emit_and_transfer_payload (FridaInjectEmitFunc func, const FridaInjectParams * params, GumAddress * entrypoint, GError ** error)
 {
   gboolean success = FALSE;
   gpointer scratch_buffer;
@@ -628,13 +793,14 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   func (params, params->remote_address, &code);
 
   data = (FridaTrampolineData *) (scratch_buffer + params->data.offset);
-  strcpy (data->pthread_so, "libpthread.so.0");
-  strcpy (data->pthread_create, "pthread_create");
-  strcpy (data->pthread_detach, "pthread_detach");
+  strcpy (data->pthread_so_string, "libpthread.so.0");
+  strcpy (data->pthread_create_string, "pthread_create");
+  strcpy (data->pthread_detach_string, "pthread_detach");
   strcpy (data->fifo_path, params->fifo_path);
   strcpy (data->so_path, params->so_path);
   strcpy (data->entrypoint_name, params->entrypoint_name);
   strcpy (data->entrypoint_data, params->entrypoint_data);
+  data->hello_byte = FRIDA_PROGRESS_MESSAGE_TYPE_HELLO;
 
   if (!frida_remote_write (params->pid, params->remote_address + params->code.offset, scratch_buffer + params->code.offset, code.size, error))
     goto beach;
@@ -646,9 +812,7 @@ frida_inject_instance_emit_and_remote_execute (FridaInjectEmitFunc func, const F
   if (!frida_remote_mprotect (params->pid, params->remote_address + params->guard.offset, params->guard.size, PROT_NONE, error))
     goto beach;
 
-  if (!frida_remote_exec (params->pid, (params->remote_address + params->code.offset + padding) | address_mask,
-      params->remote_address + params->stack.offset + params->stack.size, result, exited, error))
-    goto beach;
+  *entrypoint = (params->remote_address + params->code.offset + padding) | address_mask;
 
   success = TRUE;
 
@@ -658,7 +822,54 @@ beach:
   return success;
 }
 
+#define ARG_IMM(value) \
+    GUM_ARG_ADDRESS, GUM_ADDRESS (value)
+
 #if defined (HAVE_I386)
+
+#define EMIT_MOVE(dst, src) \
+    gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_##dst, GUM_REG_##src)
+#define EMIT_LEA(dst, src, offset) \
+    gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_##dst, GUM_REG_##src, offset)
+#define EMIT_SUB(reg, value) \
+    gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_##reg, value)
+#define EMIT_PUSH(reg) \
+    gum_x86_writer_put_push_reg (&cw, GUM_REG_##reg)
+#define EMIT_POP(reg) \
+    gum_x86_writer_put_pop_reg (&cw, GUM_REG_##reg)
+#define EMIT_LOAD_FIELD(reg, field) \
+    gum_x86_writer_put_mov_reg_near_ptr (&cw, GUM_REG_##reg, FRIDA_REMOTE_DATA_FIELD (field))
+#define EMIT_STORE_FIELD(field, reg) \
+    gum_x86_writer_put_mov_near_ptr_reg (&cw, FRIDA_REMOTE_DATA_FIELD (field), GUM_REG_##reg)
+#define EMIT_LOAD_IMM(reg, value) \
+    gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_##reg, value)
+#define EMIT_LOAD_REG(dst, src, offset) \
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_##dst, GUM_REG_##src, offset)
+#define EMIT_LOAD_REGV(dst, src, offset) \
+    gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, dst, GUM_REG_##src, offset)
+#define EMIT_STORE_IMM(dst, offset, value) \
+    gum_x86_writer_put_mov_reg_offset_ptr_u32 (&cw, GUM_REG_##dst, offset, value)
+#define EMIT_STORE_REG(dst, offset, src) \
+    gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_##dst, offset, GUM_REG_##src)
+#define EMIT_CALL_IMM(func, n_args, ...) \
+    gum_x86_writer_put_call_address_with_aligned_arguments (&cw, GUM_CALL_CAPI, func, n_args, __VA_ARGS__)
+#define EMIT_CALL_REG(reg, n_args, ...) \
+    gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_##reg, n_args, __VA_ARGS__)
+#define EMIT_RET() \
+    gum_x86_writer_put_ret (&cw)
+#define EMIT_LABEL(name) \
+    gum_x86_writer_put_label (&cw, name)
+#define EMIT_CMP(reg, value) \
+    gum_x86_writer_put_cmp_reg_i32 (&cw, GUM_REG_##reg, value)
+#define EMIT_JE(label) \
+    gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JE, label, GUM_NO_HINT)
+#define EMIT_JNE(label) \
+    gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, label, GUM_NO_HINT)
+
+#define ARG_REG(reg) \
+    GUM_ARG_REGISTER, GUM_REG_##reg
+#define ARG_REGV(reg) \
+    GUM_ARG_REGISTER, reg
 
 static void
 frida_inject_instance_commit_x86_code (GumX86Writer * cw, FridaCodeChunk * code)
@@ -673,75 +884,35 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
   GumX86Writer cw;
   const guint worker_offset = 172;
-  gssize fd_offset, library_offset, stay_resident_offset;
-  const gchar * skip_unload_label = "skip_unload";
-  GumAddress libc_open, libc_write;
-#ifdef HAVE_ANDROID
-  GumAddress dlopen_pic_value;
-#endif
+  gssize fd_offset, unload_policy_offset;
+  const gchar * skip_dlopen = "skip_dlopen";
+  const gchar * skip_dlclose = "skip_dlclose";
+  const gchar * skip_detach = "skip_detach";
   GumCpuReg fd_reg;
 
   gum_x86_writer_init (&cw, code->cur);
+  cw.pc = remote_address + params->code.offset + code->size;
 
 #ifdef HAVE_ANDROID
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "pthread_create"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      4,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (worker_thread),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "pthread_detach"));
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX, FRIDA_REMOTE_DATA_FIELD (worker_thread));
-  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XCX, GUM_REG_XCX);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
+  EMIT_LOAD_IMM (XAX, frida_resolve_libc_function (params->pid, "pthread_create"));
 #else
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  EMIT_CALL_IMM (params->dlopen_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_so),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XAX);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
+      ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+  EMIT_STORE_FIELD (pthread_so, XAX);
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "__libc_dlsym"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  EMIT_CALL_IMM (params->dlsym_impl,
       2,
-      GUM_ARG_REGISTER, GUM_REG_XBP,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_create));
-
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      4,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (worker_thread),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "__libc_dlsym"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_REGISTER, GUM_REG_XBP,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_detach));
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX, FRIDA_REMOTE_DATA_FIELD (worker_thread));
-  gum_x86_writer_put_mov_reg_reg_ptr (&cw, GUM_REG_XCX, GUM_REG_XCX);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "__libc_dlclose"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      1,
-      GUM_ARG_REGISTER, GUM_REG_XBP);
+      ARG_REG (XAX),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_create_string)));
 #endif
+  EMIT_CALL_REG (XAX,
+      4,
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      ARG_IMM (0),
+      ARG_IMM (remote_address + worker_offset),
+      ARG_IMM (0));
 
   gum_x86_writer_put_breakpoint (&cw);
   gum_x86_writer_flush (&cw);
@@ -752,120 +923,120 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_x86_writer_clear (&cw);
 
   gum_x86_writer_init (&cw, code->cur);
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBP);
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XBP, GUM_REG_XSP);
-  gum_x86_writer_put_sub_reg_imm (&cw, GUM_REG_XSP, 32 + ((cw.target_cpu == GUM_CPU_IA32) ? 4 : 8));
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
+  cw.pc = remote_address + params->code.offset + worker_offset;
+
+  EMIT_PUSH (XBP);
+  EMIT_MOVE (XBP, XSP);
+  EMIT_SUB (XSP, 32 + ((cw.target_cpu == GUM_CPU_IA32) ? 4 : 8));
+  EMIT_PUSH (XBX);
 
   fd_offset = -4;
-  library_offset = (cw.target_cpu == GUM_CPU_IA32) ? -8 : -16;
-  stay_resident_offset = library_offset - 4;
+  unload_policy_offset = -8;
 
-  libc_open = frida_resolve_libc_function (params->pid, "open");
-  libc_write = frida_resolve_libc_function (params->pid, "write");
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, libc_open);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  EMIT_CALL_IMM (params->open_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (fifo_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY));
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, fd_offset,
-      GUM_REG_EAX);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      ARG_IMM (O_WRONLY));
+  EMIT_STORE_REG (XBP, fd_offset, EAX);
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX, libc_write);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XCX,
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, GUM_REG_EAX,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REG (EAX),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (hello_byte)),
+      ARG_IMM (1));
 
+  EMIT_LOAD_FIELD (XAX, module_handle);
+  EMIT_CMP (XAX, 0);
+  EMIT_JNE (skip_dlopen);
+  {
+    if (params->dlopen_pic_value != 0)
+      EMIT_LOAD_IMM (XBX, params->dlopen_pic_value);
 #ifdef HAVE_ANDROID
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_inner_dlopen (params->pid, &dlopen_pic_value));
-  if (dlopen_pic_value != 0)
-    gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XBX, dlopen_pic_value);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY),
-      GUM_ARG_ADDRESS, libc_open);
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, library_offset,
-      GUM_REG_XAX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX,
-      frida_resolve_linker_address (params->pid, dlsym));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XCX,
-      2,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
+    EMIT_CALL_IMM (params->dlopen_impl,
+        3,
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+        ARG_IMM (RTLD_LAZY),
+        ARG_IMM (params->open_impl));
 #else
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
-      2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
-  gum_x86_writer_put_mov_reg_offset_ptr_reg (&cw, GUM_REG_XBP, library_offset,
-      GUM_REG_XAX);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XCX,
-      frida_resolve_libc_function (params->pid, "__libc_dlsym"));
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XCX,
-      2,
-      GUM_ARG_REGISTER, GUM_REG_XAX,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
+    EMIT_CALL_IMM (params->dlopen_impl,
+        2,
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+        ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
 #endif
+    EMIT_STORE_FIELD (module_handle, XAX);
+  }
+  EMIT_LABEL (skip_dlopen);
 
-  gum_x86_writer_put_mov_reg_offset_ptr_u32 (&cw, GUM_REG_XBP, stay_resident_offset, FALSE);
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBP, stay_resident_offset);
+  EMIT_CALL_IMM (params->dlsym_impl,
+      2,
+      ARG_REG (XAX),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
 
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  EMIT_STORE_IMM (XBP, unload_policy_offset, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  EMIT_LEA (XCX, XBP, unload_policy_offset);
+
+  EMIT_CALL_REG (XAX,
       3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_data),
-      GUM_ARG_REGISTER, GUM_REG_XCX,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
+      ARG_REG (XCX),
+      ARG_IMM (0));
 
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_XBP, stay_resident_offset);
-  gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
-  gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
+  EMIT_LOAD_REG (EAX, XBP, unload_policy_offset);
+  EMIT_CMP (EAX, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  EMIT_JNE (skip_dlclose);
+  {
+    EMIT_LOAD_FIELD (XAX, module_handle);
+    EMIT_CALL_IMM (params->dlclose_impl,
+        1,
+        ARG_REG (XAX));
+  }
+  EMIT_LABEL (skip_dlclose);
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
+  EMIT_LOAD_REG (EAX, XBP, unload_policy_offset);
+  EMIT_CMP (EAX, FRIDA_UNLOAD_POLICY_DEFERRED);
+  EMIT_JE (skip_detach);
+  {
 #ifdef HAVE_ANDROID
-      frida_resolve_linker_address (params->pid, dlclose)
+    EMIT_LOAD_IMM (XAX, frida_resolve_libc_function (params->pid, "pthread_detach"));
 #else
-      frida_resolve_libc_function (params->pid, "__libc_dlclose")
+    EMIT_LOAD_FIELD (XAX, pthread_so);
+    EMIT_CALL_IMM (params->dlsym_impl,
+        2,
+        ARG_REG (XAX),
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
 #endif
-  );
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_XCX,
-      GUM_REG_XBP, library_offset);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+    EMIT_LOAD_FIELD (XCX, worker_thread);
+    EMIT_CALL_REG (XAX,
+        1,
+        ARG_REG (XCX));
+  }
+  EMIT_LABEL (skip_detach);
+
+#ifndef HAVE_ANDROID
+  EMIT_LOAD_FIELD (XAX, pthread_so);
+  EMIT_CALL_IMM (params->dlclose_impl,
       1,
-      GUM_ARG_REGISTER, GUM_REG_XCX);
+      ARG_REG (XAX));
+#endif
 
-  gum_x86_writer_put_label (&cw, skip_unload_label);
-
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX, libc_write);
   fd_reg = (cw.target_cpu == GUM_CPU_IA32) ? GUM_REG_EDX : GUM_REG_EDI;
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, fd_reg, GUM_REG_XBP, fd_offset);
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBP, stay_resident_offset);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  EMIT_LOAD_REGV (fd_reg, XBP, fd_offset);
+  EMIT_LEA (XCX, XBP, unload_policy_offset);
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, fd_reg,
-      GUM_ARG_REGISTER, GUM_REG_XCX,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REGV (fd_reg),
+      ARG_REG (XCX),
+      ARG_IMM (1));
 
-  gum_x86_writer_put_mov_reg_address (&cw, GUM_REG_XAX,
-      frida_resolve_libc_function (params->pid, "close"));
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_ECX,
-      GUM_REG_XBP, fd_offset);
-  gum_x86_writer_put_call_reg_with_aligned_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
+  EMIT_LOAD_REG (ECX, XBP, fd_offset);
+  EMIT_CALL_IMM (params->close_impl,
       1,
-      GUM_ARG_REGISTER, GUM_REG_ECX);
+      ARG_REG (ECX));
 
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
-  gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSP, GUM_REG_XBP);
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBP);
-  gum_x86_writer_put_ret (&cw);
+  EMIT_POP (XBX);
+  EMIT_MOVE (XSP, XBP);
+  EMIT_POP (XBP);
+  EMIT_RET ();
 
   frida_inject_instance_commit_x86_code (&cw, code);
   gum_x86_writer_clear (&cw);
@@ -873,8 +1044,37 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
 #elif defined (HAVE_ARM)
 
-#define FRIDA_EMIT_STACK_ADJUSTMENT(delta) \
-  gum_thumb_writer_put_sub_reg_imm (&cw, ARM_REG_SP, delta * 4)
+#define EMIT_MOVE(dst, src) \
+    gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_##dst, ARM_REG_##src)
+#define EMIT_LOAD_FIELD(reg, field) \
+    gum_thumb_writer_put_ldr_reg_reg_offset (&cw, ARM_REG_##reg, ARM_REG_R6, G_STRUCT_OFFSET (FridaTrampolineData, field))
+#define EMIT_STORE_FIELD(field, reg) \
+    gum_thumb_writer_put_str_reg_reg_offset (&cw, ARM_REG_##reg, ARM_REG_R6, G_STRUCT_OFFSET (FridaTrampolineData, field))
+#define EMIT_LDR(dst, src) \
+    gum_thumb_writer_put_ldr_reg_reg (&cw, ARM_REG_##dst, ARM_REG_##src)
+#define EMIT_LDR_ADDRESS(reg, value) \
+    gum_thumb_writer_put_ldr_reg_address (&cw, ARM_REG_##reg, value)
+#define EMIT_LDR_U32(reg, value) \
+    gum_thumb_writer_put_ldr_reg_u32 (&cw, ARM_REG_##reg, value)
+#define EMIT_CALL_IMM(func, n_args, ...) \
+    gum_thumb_writer_put_call_address_with_arguments (&cw, func, n_args, __VA_ARGS__)
+#define EMIT_CALL_REG(reg, n_args, ...) \
+    gum_thumb_writer_put_call_reg_with_arguments (&cw, ARM_REG_##reg, n_args, __VA_ARGS__)
+#define EMIT_LABEL(name) \
+    gum_thumb_writer_put_label (&cw, name)
+#define EMIT_CBNZ(reg, label) \
+    gum_thumb_writer_put_cbnz_reg_label (&cw, ARM_REG_##reg, label)
+#define EMIT_CMP(reg, imm) \
+    gum_thumb_writer_put_cmp_reg_imm (&cw, ARM_REG_##reg, imm)
+#define EMIT_BEQ(label) \
+    gum_thumb_writer_put_beq_label (&cw, label)
+#define EMIT_BNE(label) \
+    gum_thumb_writer_put_bne_label (&cw, label)
+#define EMIT_STACK_ADJUSTMENT(delta) \
+    gum_thumb_writer_put_sub_reg_imm (&cw, ARM_REG_SP, delta * 4)
+
+#define ARG_REG(reg) \
+    GUM_ARG_REGISTER, ARM_REG_##reg
 
 static void
 frida_inject_instance_commit_arm_code (GumThumbWriter * cw, FridaCodeChunk * code)
@@ -889,68 +1089,36 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
   GumThumbWriter cw;
   const guint worker_offset = 128;
-  const gchar * skip_unload_label = "skip_unload";
-  GumAddress libc_open;
+  const gchar * skip_dlopen = "skip_dlopen";
+  const gchar * skip_dlclose = "skip_dlclose";
+  const gchar * skip_detach = "skip_detach";
 
   gum_thumb_writer_init (&cw, code->cur);
-
-  gum_thumb_writer_put_ldr_reg_address (&cw, ARM_REG_R7, FRIDA_REMOTE_DATA_FIELD (worker_thread));
+  cw.pc = remote_address + params->code.offset + code->size;
 
 #ifdef HAVE_ANDROID
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "pthread_create"),
-      4,
-      GUM_ARG_REGISTER, ARM_REG_R7,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset + 1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-
-  gum_thumb_writer_put_ldr_reg_reg (&cw, ARM_REG_R0, ARM_REG_R7);
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "pthread_detach"),
-      1,
-      GUM_ARG_REGISTER, ARM_REG_R0);
+  EMIT_LDR_ADDRESS (R5, frida_resolve_libc_function (params->pid, "pthread_create"));
 #else
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"),
+  EMIT_LDR_ADDRESS (R6, remote_address + params->data.offset);
+
+  EMIT_CALL_IMM (params->dlopen_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_so),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
+      ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+  EMIT_STORE_FIELD (pthread_so, R0);
 
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlsym"),
+  EMIT_CALL_IMM (params->dlsym_impl,
       2,
-      GUM_ARG_REGISTER, ARM_REG_R6,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_create));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
-
-  gum_thumb_writer_put_call_reg_with_arguments (&cw,
-      ARM_REG_R5,
-      4,
-      GUM_ARG_REGISTER, ARM_REG_R7,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset + 1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlsym"),
-      2,
-      GUM_ARG_REGISTER, ARM_REG_R6,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_detach));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
-
-  gum_thumb_writer_put_ldr_reg_reg (&cw, ARM_REG_R0, ARM_REG_R7);
-  gum_thumb_writer_put_call_reg_with_arguments (&cw,
-      ARM_REG_R5,
-      1,
-      GUM_ARG_REGISTER, ARM_REG_R0);
-
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlclose"),
-      1,
-      GUM_ARG_REGISTER, ARM_REG_R6);
+      ARG_REG (R0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_create_string)));
+  EMIT_MOVE (R5, R0);
 #endif
+  EMIT_CALL_REG (R5,
+      4,
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      ARG_IMM (0),
+      ARG_IMM (remote_address + worker_offset + 1),
+      ARG_IMM (remote_address + params->data.offset));
 
   gum_thumb_writer_put_breakpoint (&cw);
   gum_thumb_writer_flush (&cw);
@@ -961,108 +1129,155 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_thumb_writer_clear (&cw);
 
   gum_thumb_writer_init (&cw, code->cur);
+  cw.pc = remote_address + params->code.offset + worker_offset;
 
-  gum_thumb_writer_put_push_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
+  gum_thumb_writer_put_push_regs (&cw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
 
-  libc_open = frida_resolve_libc_function (params->pid, "open");
+  EMIT_MOVE (R6, R0);
 
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      libc_open,
+  EMIT_CALL_IMM (params->open_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (fifo_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R7, ARM_REG_R0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      ARG_IMM (O_WRONLY));
+  EMIT_MOVE (R7, R0);
 
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "write"),
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, ARM_REG_R7,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REG (R7),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (hello_byte)),
+      ARG_IMM (1));
 
+  EMIT_LOAD_FIELD (R5, module_handle);
+  EMIT_CBNZ (R5, skip_dlopen);
+  {
 #ifdef HAVE_ANDROID
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_inner_dlopen (params->pid, NULL),
-      3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY),
-      GUM_ARG_ADDRESS, libc_open);
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
-
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlsym),
-      2,
-      GUM_ARG_REGISTER, ARM_REG_R6,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
+    EMIT_CALL_IMM (params->dlopen_impl,
+        3,
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+        ARG_IMM (RTLD_LAZY),
+        ARG_IMM (params->open_impl));
 #else
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlopen_mode"),
-      2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R6, ARM_REG_R0);
-
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlsym"),
-      2,
-      GUM_ARG_REGISTER, ARM_REG_R6,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R5, ARM_REG_R0);
+    EMIT_CALL_IMM (params->dlopen_impl,
+        2,
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+        ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
 #endif
+    EMIT_MOVE (R5, R0);
+    EMIT_STORE_FIELD (module_handle, R5);
+  }
+  EMIT_LABEL (skip_dlopen);
 
-  FRIDA_EMIT_STACK_ADJUSTMENT (3);
+  EMIT_CALL_IMM (
+      params->dlsym_impl,
+      2,
+      ARG_REG (R5),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  EMIT_MOVE (R4, R0);
 
-  gum_thumb_writer_put_ldr_reg_u32 (&cw, ARM_REG_R0, FALSE); /* stay_resident */
+  EMIT_STACK_ADJUSTMENT (3);
+  EMIT_LDR_U32 (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
   gum_thumb_writer_put_push_regs (&cw, 1, ARM_REG_R0);
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R1, ARM_REG_SP);
 
-  gum_thumb_writer_put_call_reg_with_arguments (&cw,
-      ARM_REG_R5,
+  EMIT_MOVE (R1, SP);
+  EMIT_CALL_REG (R4,
       3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_data),
-      GUM_ARG_REGISTER, ARM_REG_R1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
+      ARG_REG (R1),
+      ARG_IMM (0));
 
-  gum_thumb_writer_put_ldr_reg_reg (&cw, ARM_REG_R0, ARM_REG_SP);
-  gum_thumb_writer_put_cbnz_reg_label (&cw, ARM_REG_R0, skip_unload_label);
+  EMIT_LDR (R0, SP);
+  EMIT_CMP (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  EMIT_BNE (skip_dlclose);
+  {
+    EMIT_CALL_IMM (
+        params->dlclose_impl,
+        1,
+        ARG_REG (R5));
+  }
+  EMIT_LABEL (skip_dlclose);
 
+  EMIT_LDR (R0, SP);
+  EMIT_CMP (R0, FRIDA_UNLOAD_POLICY_DEFERRED);
+  EMIT_BEQ (skip_detach);
+  {
 #ifdef HAVE_ANDROID
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlclose),
-      1,
-      GUM_ARG_REGISTER, ARM_REG_R6);
+    EMIT_LDR_ADDRESS (R3, frida_resolve_libc_function (params->pid, "pthread_detach"));
 #else
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "__libc_dlclose"),
+    EMIT_LOAD_FIELD (R0, pthread_so);
+    EMIT_CALL_IMM (params->dlsym_impl,
+        2,
+        ARG_REG (R0),
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
+    EMIT_MOV (R3, R0);
+#endif
+    EMIT_LOAD_FIELD (R0, worker_thread);
+    EMIT_CALL_REG (R3,
+        1,
+        ARG_REG (R0));
+  }
+  EMIT_LABEL (skip_detach);
+
+#ifndef HAVE_ANDROID
+  EMIT_LOAD_FIELD (R0, pthread_so);
+  EMIT_CALL_IMM (params->dlclose_impl,
       1,
-      GUM_ARG_REGISTER, ARM_REG_R6);
+      ARG_REG (R0));
 #endif
 
-  gum_thumb_writer_put_label (&cw, skip_unload_label);
-
-  gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_R1, ARM_REG_SP);
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "write"),
+  EMIT_MOVE (R1, SP);
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, ARM_REG_R7,
-      GUM_ARG_REGISTER, ARM_REG_R1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REG (R7),
+      ARG_REG (R1),
+      ARG_IMM (1));
 
-  FRIDA_EMIT_STACK_ADJUSTMENT (-4);
+  EMIT_STACK_ADJUSTMENT (-4);
 
-  gum_thumb_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "close"),
+  EMIT_CALL_IMM (params->close_impl,
       1,
-      GUM_ARG_REGISTER, ARM_REG_R7);
+      ARG_REG (R7));
 
-  gum_thumb_writer_put_pop_regs (&cw, 4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
+  gum_thumb_writer_put_pop_regs (&cw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   frida_inject_instance_commit_arm_code (&cw, code);
   gum_thumb_writer_clear (&cw);
 }
 
 #elif defined (HAVE_ARM64)
+
+#define EMIT_MOVE(dst, src) \
+    gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_##dst, ARM64_REG_##src)
+#define EMIT_PUSH(a, b) \
+    gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_##a, ARM64_REG_##b)
+#define EMIT_POP(a, b) \
+    gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_##a, ARM64_REG_##b)
+#define EMIT_LOAD_FIELD(reg, field) \
+    gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaTrampolineData, field))
+#define EMIT_STORE_FIELD(field, reg) \
+    gum_arm64_writer_put_str_reg_reg_offset (&cw, ARM64_REG_##reg, ARM64_REG_X20, G_STRUCT_OFFSET (FridaTrampolineData, field))
+#define EMIT_LDR(dst, src, offset) \
+    gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_##dst, ARM64_REG_##src, offset)
+#define EMIT_LDR_ADDRESS(reg, value) \
+    gum_arm64_writer_put_ldr_reg_address (&cw, ARM64_REG_##reg, value)
+#define EMIT_LDR_U64(reg, value) \
+    gum_arm64_writer_put_ldr_reg_u64 (&cw, ARM64_REG_##reg, value)
+#define EMIT_CALL_IMM(func, n_args, ...) \
+    gum_arm64_writer_put_call_address_with_arguments (&cw, func, n_args, __VA_ARGS__)
+#define EMIT_CALL_REG(reg, n_args, ...) \
+    gum_arm64_writer_put_call_reg_with_arguments (&cw, ARM64_REG_##reg, n_args, __VA_ARGS__)
+#define EMIT_RET() \
+    gum_arm64_writer_put_ret (&cw)
+#define EMIT_LABEL(name) \
+    gum_arm64_writer_put_label (&cw, name)
+#define EMIT_CBNZ(reg, label) \
+    gum_arm64_writer_put_cbnz_reg_label (&cw, ARM64_REG_##reg, label)
+#define EMIT_CMP(a, b) \
+    gum_arm64_writer_put_cmp_reg_reg (&cw, ARM64_REG_##a, ARM64_REG_##b)
+#define EMIT_B_COND(cond, label) \
+    gum_arm64_writer_put_b_cond_label (&cw, ARM64_CC_##cond, label)
+
+#define ARG_REG(reg) \
+    GUM_ARG_REGISTER, ARM64_REG_##reg
 
 static void
 frida_inject_instance_commit_arm64_code (GumArm64Writer * cw, FridaCodeChunk * code)
@@ -1075,29 +1290,38 @@ frida_inject_instance_commit_arm64_code (GumArm64Writer * cw, FridaCodeChunk * c
 static void
 frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
-#ifdef HAVE_ANDROID
   GumArm64Writer cw;
   const guint worker_offset = 96;
-  const gchar * skip_unload_label = "skip_unload";
-  GumAddress libc_open;
+  const gchar * skip_dlopen = "skip_dlopen";
+  const gchar * skip_dlclose = "skip_dlclose";
+  const gchar * skip_detach = "skip_detach";
 
   gum_arm64_writer_init (&cw, code->cur);
+  cw.pc = remote_address + params->code.offset + code->size;
 
-  gum_arm64_writer_put_ldr_reg_address (&cw, ARM64_REG_X19, FRIDA_REMOTE_DATA_FIELD (worker_thread));
+#ifdef HAVE_ANDROID
+  EMIT_LDR_ADDRESS (X5, frida_resolve_libc_function (params->pid, "pthread_create"));
+#else
+  EMIT_LDR_ADDRESS (X20, remote_address + params->data.offset);
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "pthread_create"),
+  EMIT_CALL_IMM (params->dlopen_impl,
+      2,
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
+      ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+  EMIT_STORE_FIELD (pthread_so, X0);
+
+  EMIT_CALL_IMM (params->dlsym_impl,
+      2,
+      ARG_REG (X0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_create_string)));
+  EMIT_MOVE (X5, X0);
+#endif
+  EMIT_CALL_REG (X5,
       4,
-      GUM_ARG_REGISTER, ARM64_REG_X19,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-
-  gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_X0, ARM64_REG_X19, 0);
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "pthread_detach"),
-      1,
-      GUM_ARG_REGISTER, ARM64_REG_X0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (worker_thread)),
+      ARG_IMM (0),
+      ARG_IMM (remote_address + worker_offset),
+      ARG_IMM (remote_address + params->data.offset));
 
   gum_arm64_writer_put_brk_imm (&cw, 0);
   gum_arm64_writer_flush (&cw);
@@ -1108,89 +1332,146 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_arm64_writer_clear (&cw);
 
   gum_arm64_writer_init (&cw, code->cur);
+  cw.pc = remote_address + params->code.offset + worker_offset;
 
-  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_LR);
-  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X20);
+  EMIT_PUSH (FP, LR);
+  EMIT_MOVE (FP, SP);
+  EMIT_PUSH (X21, X22);
+  EMIT_PUSH (X19, X20);
 
-  libc_open = frida_resolve_libc_function (params->pid, "open");
+  EMIT_MOVE (X20, X0);
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      libc_open,
+  EMIT_CALL_IMM (params->open_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (fifo_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY));
-  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      ARG_IMM (O_WRONLY));
+  EMIT_MOVE (W21, W0);
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "write"),
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, ARM64_REG_X19,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REG (W21),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (hello_byte)),
+      ARG_IMM (1));
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_inner_dlopen (params->pid, NULL),
-      3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY),
-      GUM_ARG_ADDRESS, libc_open);
-  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X20, ARM64_REG_X0);
+  EMIT_LOAD_FIELD (X19, module_handle);
+  EMIT_CBNZ (X19, skip_dlopen);
+  {
+#ifdef HAVE_ANDROID
+    EMIT_CALL_IMM (params->dlopen_impl,
+        3,
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+        ARG_IMM (RTLD_LAZY),
+        ARG_IMM (params->open_impl));
+#else
+    EMIT_CALL_IMM (params->dlopen_impl,
+        2,
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+        ARG_IMM (FRIDA_RTLD_DLOPEN | RTLD_LAZY));
+#endif
+    EMIT_MOVE (X19, X0);
+    EMIT_STORE_FIELD (module_handle, X19);
+  }
+  EMIT_LABEL (skip_dlopen);
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlsym),
+  EMIT_CALL_IMM (params->dlsym_impl,
       2,
-      GUM_ARG_REGISTER, ARM64_REG_X20,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
-  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X5, ARM64_REG_X0);
+      ARG_REG (X19),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  EMIT_MOVE (X5, X0);
 
-  gum_arm64_writer_put_ldr_reg_u64 (&cw, ARM64_REG_X0, FALSE); /* stay_resident */
-  gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_X0, ARM64_REG_X1);
-  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X1, ARM64_REG_SP);
+  EMIT_LDR_U64 (X0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  EMIT_PUSH (X0, X1);
+  EMIT_MOVE (X1, SP);
 
-  gum_arm64_writer_put_call_reg_with_arguments (&cw,
-      ARM64_REG_X5,
+  EMIT_CALL_REG (X5,
       3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_data),
-      GUM_ARG_REGISTER, ARM64_REG_X1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
+      ARG_REG (X1),
+      ARG_IMM (0));
 
-  gum_arm64_writer_put_ldr_reg_reg_offset (&cw, ARM64_REG_W0, ARM64_REG_SP, 0);
-  gum_arm64_writer_put_cbnz_reg_label (&cw, ARM64_REG_W0, skip_unload_label);
+  EMIT_LDR (W22, SP, 0);
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlclose),
+  EMIT_LDR_U64 (X1, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+  EMIT_CMP (W22, W1);
+  EMIT_B_COND (NE, skip_dlclose);
+  {
+    EMIT_CALL_IMM (params->dlclose_impl,
+        1,
+        ARG_REG (X19));
+  }
+  EMIT_LABEL (skip_dlclose);
+
+  EMIT_LDR_U64 (X1, FRIDA_UNLOAD_POLICY_DEFERRED);
+  EMIT_CMP (W22, W1);
+  EMIT_B_COND (EQ, skip_detach);
+  {
+#ifdef HAVE_ANDROID
+    EMIT_LDR_ADDRESS (X5, frida_resolve_libc_function (params->pid, "pthread_detach"));
+#else
+    EMIT_LOAD_FIELD (X0, pthread_so);
+    EMIT_CALL_IMM (params->dlsym_impl,
+        2,
+        ARG_REG (X0),
+        ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
+    EMIT_MOV (X5, X0);
+#endif
+    EMIT_LOAD_FIELD (X0, worker_thread);
+    EMIT_CALL_REG (X5,
+        1,
+        ARG_REG (X0));
+  }
+  EMIT_LABEL (skip_detach);
+
+#ifndef HAVE_ANDROID
+  EMIT_LOAD_FIELD (X0, pthread_so);
+  EMIT_CALL_IMM (params->dlclose_impl,
       1,
-      GUM_ARG_REGISTER, ARM64_REG_X20);
+      ARG_REG (X0));
+#endif
 
-  gum_arm64_writer_put_label (&cw, skip_unload_label);
-
-  gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_X1, ARM64_REG_SP);
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "write"),
+  EMIT_MOVE (X1, SP);
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, ARM64_REG_X19,
-      GUM_ARG_REGISTER, ARM64_REG_X1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REG (W21),
+      ARG_REG (X1),
+      ARG_IMM (1));
 
-  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_X0, ARM64_REG_X1);
+  EMIT_POP (X0, X1);
 
-  gum_arm64_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "close"),
+  EMIT_CALL_IMM (params->close_impl,
       1,
-      GUM_ARG_REGISTER, ARM64_REG_X19);
+      ARG_REG (W21));
 
-  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_X19, ARM64_REG_X20);
-  gum_arm64_writer_put_pop_reg_reg (&cw, ARM64_REG_FP, ARM64_REG_LR);
-  gum_arm64_writer_put_ret (&cw);
+  EMIT_POP (X19, X20);
+  EMIT_POP (X21, X22);
+  EMIT_POP (FP, LR);
+  EMIT_RET ();
 
   frida_inject_instance_commit_arm64_code (&cw, code);
   gum_arm64_writer_clear (&cw);
-#else
-# error Not yet ported to Linux/ARM64
-#endif
 }
 
 #elif defined (HAVE_MIPS)
+
+#define EMIT_MOVE(dst, src) \
+    gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_##dst, MIPS_REG_##src)
+#define EMIT_PUSH(reg) \
+    gum_mips_writer_put_push_reg (&cw, MIPS_REG_##reg)
+#define EMIT_POP(reg) \
+    gum_mips_writer_put_pop_reg (&cw, MIPS_REG_##reg)
+#define EMIT_LA(reg, value) \
+    gum_mips_writer_put_la_reg_address (&cw, MIPS_REG_##reg, value)
+#define EMIT_LW(dst, src, offset) \
+    gum_mips_writer_put_lw_reg_reg_offset (&cw, MIPS_REG_##dst, MIPS_REG_##src, offset)
+#define EMIT_CALL_IMM(func, n_args, ...) \
+    gum_mips_writer_put_call_address_with_arguments (&cw, func, n_args, __VA_ARGS__)
+#define EMIT_CALL_REG(reg, n_args, ...) \
+    gum_mips_writer_put_call_reg_with_arguments (&cw, MIPS_REG_##reg, n_args, __VA_ARGS__)
+#define EMIT_RET() \
+    gum_mips_writer_put_ret (&cw)
+
+#define ARG_REG(reg) \
+    GUM_ARG_REGISTER, MIPS_REG_##reg
 
 static void
 frida_inject_instance_commit_mips_code (GumMipsWriter * cw, FridaCodeChunk * code)
@@ -1205,53 +1486,45 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
   GumMipsWriter cw;
   const guint worker_offset = 192;
-  GumAddress dlsym_impl;
 
   gum_mips_writer_init (&cw, code->cur);
+  cw.pc = remote_address + params->code.offset + code->size;
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlopen),
+  EMIT_CALL_IMM (params->dlopen_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_so),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
-  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S0, MIPS_REG_V0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_so_string)),
+      ARG_IMM (RTLD_LAZY));
+  EMIT_MOVE (S0, V0);
 
-  dlsym_impl = frida_resolve_linker_address (params->pid, dlsym);
-
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      dlsym_impl,
+  EMIT_CALL_IMM (params->dlsym_impl,
       2,
-      GUM_ARG_REGISTER, MIPS_REG_S0,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_create));
-  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
+      ARG_REG (S0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_create_string)));
+  EMIT_MOVE (T9, V0);
 
-  gum_mips_writer_put_la_reg_address (&cw, MIPS_REG_S1, FRIDA_REMOTE_DATA_FIELD (worker_thread));
+  EMIT_LA (S1, FRIDA_REMOTE_DATA_FIELD (worker_thread));
 
-  gum_mips_writer_put_call_reg_with_arguments (&cw,
-      MIPS_REG_T9,
+  EMIT_CALL_REG (T9,
       4,
-      GUM_ARG_REGISTER, MIPS_REG_S1,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, remote_address + worker_offset,
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+      ARG_REG (S1),
+      ARG_IMM (0),
+      ARG_IMM (remote_address + worker_offset),
+      ARG_IMM (0));
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      dlsym_impl,
+  EMIT_CALL_IMM (params->dlsym_impl,
       2,
-      GUM_ARG_REGISTER, MIPS_REG_S0,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (pthread_detach));
-  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
+      ARG_REG (S0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
+  EMIT_MOVE (T9, V0);
 
-  gum_mips_writer_put_lw_reg_reg_offset (&cw, MIPS_REG_A0, MIPS_REG_S1, 0);
-  gum_mips_writer_put_call_reg_with_arguments (&cw,
-      MIPS_REG_T9,
+  EMIT_LW (A0, S1, 0);
+  EMIT_CALL_REG (T9,
       1,
-      GUM_ARG_REGISTER, MIPS_REG_A0);
+      ARG_REG (A0));
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlclose),
+  EMIT_CALL_IMM (params->dlclose_impl,
       1,
-      GUM_ARG_REGISTER, MIPS_REG_S0);
+      ARG_REG (S0));
 
   gum_mips_writer_put_break (&cw);
   gum_mips_writer_flush (&cw);
@@ -1262,61 +1535,55 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   gum_mips_writer_clear (&cw);
 
   gum_mips_writer_init (&cw, code->cur);
+  cw.pc = remote_address + params->code.offset + worker_offset;
 
-  gum_mips_writer_put_push_reg (&cw, MIPS_REG_RA);
-  gum_mips_writer_put_push_reg (&cw, MIPS_REG_S0);
-  gum_mips_writer_put_push_reg (&cw, MIPS_REG_S1);
+  EMIT_PUSH (RA);
+  EMIT_PUSH (S0);
+  EMIT_PUSH (S1);
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "open"),
+  EMIT_CALL_IMM (params->open_impl,
       3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (fifo_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (O_WRONLY),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
-  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S0, MIPS_REG_V0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
+      ARG_IMM (O_WRONLY),
+      ARG_IMM (0));
+  EMIT_MOVE (S0, V0);
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "write"),
+  EMIT_CALL_IMM (params->write_impl,
       3,
-      GUM_ARG_REGISTER, MIPS_REG_S0,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (1));
+      ARG_REG (S0),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (hello_byte)),
+      ARG_IMM (1));
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlopen),
+  EMIT_CALL_IMM (params->dlopen_impl,
       2,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (so_path),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (RTLD_LAZY));
-  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_S1, MIPS_REG_V0);
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (so_path)),
+      ARG_IMM (RTLD_LAZY));
+  EMIT_MOVE (S1, V0);
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      dlsym_impl,
+  EMIT_CALL_IMM (params->dlsym_impl,
       2,
-      GUM_ARG_REGISTER, MIPS_REG_S1,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_name));
-  gum_mips_writer_put_move_reg_reg (&cw, MIPS_REG_T9, MIPS_REG_V0);
+      ARG_REG (S1),
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
+  EMIT_MOVE (T9, V0);
 
-  gum_mips_writer_put_call_reg_with_arguments (&cw,
-      MIPS_REG_T9,
+  EMIT_CALL_REG (T9,
       3,
-      GUM_ARG_ADDRESS, FRIDA_REMOTE_DATA_FIELD (entrypoint_data),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0),
-      GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+      ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
+      ARG_IMM (0),
+      ARG_IMM (0));
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_linker_address (params->pid, dlclose),
+  EMIT_CALL_IMM (params->dlclose_impl,
       1,
-      GUM_ARG_REGISTER, MIPS_REG_S1);
+      ARG_REG (S1));
 
-  gum_mips_writer_put_call_address_with_arguments (&cw,
-      frida_resolve_libc_function (params->pid, "close"),
+  EMIT_CALL_IMM (params->close_impl,
       1,
-      GUM_ARG_REGISTER, MIPS_REG_S0);
+      ARG_REG (S0));
 
-  gum_mips_writer_put_pop_reg (&cw, MIPS_REG_S1);
-  gum_mips_writer_put_pop_reg (&cw, MIPS_REG_S0);
-  gum_mips_writer_put_pop_reg (&cw, MIPS_REG_RA);
-  gum_mips_writer_put_ret (&cw);
+  EMIT_POP (S1);
+  EMIT_POP (S0);
+  EMIT_POP (RA);
+  EMIT_RET ();
 
   frida_inject_instance_commit_mips_code (&cw, code);
   gum_mips_writer_clear (&cw);
@@ -1584,18 +1851,18 @@ frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
     -1,
     0
   };
-  GumAddress retval = 0;
+  GumAddress retval;
 
   if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "mmap"), args, G_N_ELEMENTS (args), &retval, NULL, error))
     return 0;
 
-  if (retval == G_GUINT64_CONSTANT (0xffffffffffffffff))
+  if (retval == FRIDA_MAP_FAILED)
     return 0;
 
   return retval;
 }
 
-static int
+static gboolean
 frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** error)
 {
   GumAddress args[] = {
@@ -1605,9 +1872,9 @@ frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** erro
   GumAddress retval;
 
   if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "munmap"), args, G_N_ELEMENTS (args), &retval, NULL, error))
-    return -1;
+    return FALSE;
 
-  return retval;
+  return retval == 0;
 }
 
 static gboolean
@@ -1618,10 +1885,10 @@ frida_remote_mprotect (pid_t pid, GumAddress address, size_t size, int prot, GEr
     size,
     prot
   };
-  GumAddress retval = 1;
+  GumAddress retval;
 
   if (!frida_remote_call (pid, frida_resolve_libc_function (pid, "mprotect"), args, G_N_ELEMENTS (args), &retval, NULL, error))
-    return 0;
+    return FALSE;
 
   return retval == 0;
 }
@@ -1872,7 +2139,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
-  *retval = regs.eax;
+  *retval = (guint32) regs.eax;
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   *retval = regs.rax;
 #elif defined (HAVE_ARM)
@@ -1956,7 +2223,7 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
     CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
-    *result = regs.eax;
+    *result = (guint32) regs.eax;
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
     *result = regs.rax;
 #elif defined (HAVE_ARM)
@@ -2044,8 +2311,7 @@ frida_resolve_inner_dlopen (pid_t pid,
   size_t count;
 
   impl = dlopen;
-  if (pic_value != NULL)
-    *pic_value = 0;
+  *pic_value = 0;
 
   if (frida_get_android_api_level () < 26)
   {
@@ -2196,7 +2462,6 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
   {
     gpointer rpnt, rpnt_next, tpnt;
     gboolean success;
-    gint32 ret;
     GumAddress remote_dl_symbol_tables, remote_address;
     const gchar * ldso_file_name = "ld-uClibc";
     gchar * ldso_path;
@@ -2243,8 +2508,8 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
     success = frida_remote_call (pid, frida_resolve_library_function (pid, ldso_path, "_dl_perform_mips_global_got_relocations"), args_perform_mips_global_got_relocations, G_N_ELEMENTS (args_perform_mips_global_got_relocations), &retval, NULL, NULL);
     g_assert (success);
 
-    ret = frida_remote_dealloc (pid, remote_address, gum_query_page_size (), NULL);
-    g_assert (ret == 0);
+    success = frida_remote_dealloc (pid, remote_address, gum_query_page_size (), NULL);
+    g_assert (success);
 
     remote_base = frida_find_library_base (pid, linker_path, NULL);
 

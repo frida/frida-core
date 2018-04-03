@@ -63,11 +63,11 @@ namespace Frida {
 		}
 
 		public async uint demonitor_and_clone_state (uint id) throws Error {
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			return yield helper.demonitor_and_clone_injectee_state (id);
 		}
 
 		public async void recreate_thread (uint pid, uint id) throws Error {
-			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
+			yield helper.recreate_injectee_thread (pid, id);
 		}
 
 		public bool any_still_injected () {
