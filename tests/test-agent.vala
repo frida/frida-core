@@ -372,6 +372,10 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 #else
 			shlib_extension = "so";
 #endif
+#if IOS || ANDROID
+			var deployment_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+			agent_filename = Path.build_filename (deployment_dir, "frida-agent." + shlib_extension);
+#else
 			var frida_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
 			agent_filename = Path.build_filename (frida_root_dir, "lib", "frida", "frida-agent." + shlib_extension);
 			if (!FileUtils.test (agent_filename, FileTest.EXISTS))
