@@ -26,7 +26,8 @@ namespace Frida {
 		public void * context;
 		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
 		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
-		private Gee.HashMap<void *, uint> inject_instance_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
+		private Gee.HashMap<void *, uint> inject_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
+		private Gee.HashMap<uint, uint> inject_expiry_by_id = new Gee.HashMap<uint, uint> ();
 		public uint next_id = 1;
 
 		private PolicySoftener policy_softener;
@@ -56,11 +57,11 @@ namespace Frida {
 		}
 
 		public async void close () {
-			foreach (var entry in inject_instance_cleaner_by_instance.entries) {
+			foreach (var entry in inject_cleaner_by_instance.entries) {
 				_free_inject_instance (entry.key);
 				Source.remove (entry.value);
 			}
-			inject_instance_cleaner_by_instance.clear ();
+			inject_cleaner_by_instance.clear ();
 
 			foreach (var id in expiry_timer_by_pid.values)
 				Source.remove (id);
@@ -268,7 +269,12 @@ namespace Frida {
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
-			return _demonitor_and_clone_injectee_state (instance);
+			var clone_id = _demonitor_and_clone_injectee_state (instance);
+
+			schedule_inject_expiry_for_id (id);
+			schedule_inject_expiry_for_id (clone_id);
+
+			return clone_id;
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
@@ -277,6 +283,8 @@ namespace Frida {
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
 			var task = borrow_task_for_remote_pid (pid);
+
+			cancel_inject_expiry_for_id (id);
 
 			_recreate_injectee_thread (instance, pid, task);
 		}
@@ -402,12 +410,37 @@ namespace Frida {
 			cleanup_source.set_callback (() => {
 				_free_inject_instance (instance);
 
-				var removed = inject_instance_cleaner_by_instance.unset (instance);
+				var removed = inject_cleaner_by_instance.unset (instance);
 				assert (removed);
 
 				return false;
 			});
-			inject_instance_cleaner_by_instance[instance] = cleanup_source.attach (MainContext.get_thread_default ());
+			inject_cleaner_by_instance[instance] = cleanup_source.attach (MainContext.get_thread_default ());
+		}
+
+		private void schedule_inject_expiry_for_id (uint id) {
+			uint previous_timer;
+			if (inject_expiry_by_id.unset (id, out previous_timer))
+				Source.remove (previous_timer);
+
+			var expiry_source = new TimeoutSource.seconds (20);
+			expiry_source.set_callback (() => {
+				var removed = inject_expiry_by_id.unset (id);
+				assert (removed);
+
+				_destroy_inject_instance (id);
+
+				return false;
+			});
+			inject_expiry_by_id[id] = expiry_source.attach (MainContext.get_thread_default ());
+		}
+
+		private void cancel_inject_expiry_for_id (uint id) {
+			uint timer;
+			var found = inject_expiry_by_id.unset (id, out timer);
+			assert (found);
+
+			Source.remove (timer);
 		}
 
 		public uint task_for_pid (uint pid) throws Error {

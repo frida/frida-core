@@ -1482,8 +1482,6 @@ _frida_darwin_helper_backend_demonitor_and_clone_injectee_state (FridaDarwinHelp
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (clone->id), clone);
 
-  /* TODO: timeout logic */
-
   return clone->id;
 }
 
