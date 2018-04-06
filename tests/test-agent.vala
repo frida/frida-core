@@ -382,7 +382,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 				agent_filename = Path.build_filename (frida_root_dir, "lib", "agent", "frida-agent." + shlib_extension);
 #endif
 
-			module = GLib.Module.open (agent_filename, 0);
+			module = GLib.Module.open (agent_filename, BIND_LOCAL | BIND_LAZY);
 			assert (module != null);
 
 			void * main_func_symbol;
