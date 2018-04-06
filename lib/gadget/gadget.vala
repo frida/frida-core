@@ -1657,7 +1657,7 @@ namespace Frida.Gadget {
 			uint generation = gc_generation;
 			gc_mutex.unlock ();
 
-			bool collected_everything = garbage_collect ();
+			bool collected_everything = Thread.garbage_collect ();
 
 			gc_mutex.lock ();
 			bool same_generation = generation == gc_generation;
@@ -1669,7 +1669,4 @@ namespace Frida.Gadget {
 			return repeat;
 		});
 	}
-
-	[CCode (cname = "g_thread_garbage_collect")]
-	private extern bool garbage_collect ();
 }

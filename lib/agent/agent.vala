@@ -877,7 +877,7 @@ namespace Frida.Agent {
 			uint generation = gc_generation;
 			gc_mutex.unlock ();
 
-			bool collected_everything = garbage_collect ();
+			bool collected_everything = Thread.garbage_collect ();
 
 			gc_mutex.lock ();
 			bool same_generation = generation == gc_generation;
@@ -888,22 +888,5 @@ namespace Frida.Agent {
 
 			return repeat;
 		});
-	}
-
-	[CCode (cname = "g_thread_garbage_collect")]
-	private extern bool garbage_collect ();
-
-	[CCode (cheader_filename = "glib.h", lower_case_cprefix = "glib_")]
-	namespace GLibFork {
-		public extern void prepare_to_fork ();
-		public extern void recover_from_fork_in_parent ();
-		public extern void recover_from_fork_in_child ();
-	}
-
-	[CCode (cheader_filename = "gio/gio.h", lower_case_cprefix = "gio_")]
-	namespace GIOFork {
-		public extern void prepare_to_fork ();
-		public extern void recover_from_fork_in_parent ();
-		public extern void recover_from_fork_in_child ();
 	}
 }
