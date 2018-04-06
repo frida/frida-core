@@ -24,11 +24,17 @@ LDFLAGS := \
 
 all: \
 	sleeper-android-arm \
+	forker-android-arm \
 	simple-agent-android-arm.so \
 	resident-agent-android-arm.so \
 	$(NULL)
 
 sleeper-android-arm: sleeper-unix.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
+	$(STRIP) --strip-all $@.tmp
+	mv $@.tmp $@
+
+forker-android-arm: forker.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@

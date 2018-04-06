@@ -23,11 +23,17 @@ LDFLAGS := \
 
 all: \
 	sleeper-android-x86 \
+	forker-android-x86 \
 	simple-agent-android-x86.so \
 	resident-agent-android-x86.so \
 	$(NULL)
 
 sleeper-android-x86: sleeper-unix.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
+	$(STRIP) --strip-all $@.tmp
+	mv $@.tmp $@
+
+forker-android-x86: forker.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
 	$(STRIP) --strip-all $@.tmp
 	mv $@.tmp $@

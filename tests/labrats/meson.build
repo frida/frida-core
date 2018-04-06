@@ -64,6 +64,7 @@ endif
 if host_os == 'android'
   labrat_files += [
     'sleeper-android-' + host_machine.cpu_family(),
+    'forker-android-' + host_machine.cpu_family(),
     'simple-agent-android-' + host_machine.cpu_family() + '.so',
     'resident-agent-android-' + host_machine.cpu_family() + '.so',
   ]
