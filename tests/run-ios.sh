@@ -10,5 +10,5 @@ cd "$core_tests/../../build/tmp-ios-$arch/frida-core" || exit 1
 . ../../frida-meson-env-macos-x86_64.rc
 ninja || exit 1
 cd tests
-rsync -rLz frida-tests labrats "$remote_host:$remote_prefix/" || exit 1
+rsync -rLz frida-tests labrats ../lib/agent/frida-agent.dylib "$remote_host:$remote_prefix/" || exit 1
 ssh "$remote_host" "$remote_prefix/frida-tests" "$@"
