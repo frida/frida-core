@@ -1543,7 +1543,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					waiting = false;
 				}
 				assert (delivered_child.parent_pid == parent_pid);
-				assert (delivered_child.identifier.has_prefix ("forker-"));
+				assert (Path.get_basename (delivered_child.identifier).has_prefix ("forker-"));
 				var child_pid = delivered_child.pid;
 				var child_session = yield device.attach (child_pid);
 				child_session.detached.connect (reason => {

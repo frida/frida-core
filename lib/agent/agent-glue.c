@@ -4,12 +4,12 @@
 # include "frida-interfaces.h"
 #endif
 
-#include <errno.h>
 #ifndef HAVE_WINDOWS
 # include <pthread.h>
 #endif
 #ifdef HAVE_DARWIN
-# include <stdlib.h>
+# include <limits.h>
+# include <mach-o/dyld.h>
 #endif
 #if defined (HAVE_ANDROID) && __ANDROID_API__ < __ANDROID_API_L__
 # include <signal.h>
@@ -58,12 +58,25 @@ _frida_agent_environment_obtain_script_backend (gboolean jit_enabled)
 }
 
 gchar *
-_frida_agent_environment_try_get_program_name (void)
+_frida_agent_environment_try_get_executable_path (void)
 {
-#if defined (HAVE_DARWIN) || (defined (HAVE_ANDROID) && __ANDROID_API__ >= __ANDROID_API_L__)
-  return g_strdup (getprogname ());
-#elif defined (HAVE_GLIBC)
-  return g_strdup (program_invocation_name);
+#ifdef HAVE_DARWIN
+  uint32_t buf_size;
+  gchar * buf;
+
+  buf_size = PATH_MAX;
+
+  do
+  {
+    buf = g_malloc (buf_size);
+    if (_NSGetExecutablePath (buf, &buf_size) == 0)
+      return buf;
+
+    g_free (buf);
+  }
+  while (TRUE);
+#elif HAVE_LINUX
+  return g_file_read_link ("/proc/self/exe", NULL);
 #else
   return NULL;
 #endif
@@ -83,7 +96,10 @@ void
 _frida_agent_environment_join_pthread (gpointer pthread)
 {
 #ifndef HAVE_WINDOWS
-  pthread_join ((pthread_t) pthread, NULL);
+  int join_result;
+
+  join_result = pthread_join ((pthread_t) pthread, NULL);
+  g_assert_cmpint (join_result, ==, 0);
 #endif
 }
 
@@ -134,6 +150,8 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #endif
 
 #ifdef HAVE_LINUX
+
+#include <errno.h>
 
 G_GNUC_INTERNAL long
 frida_set_errno (int n)

@@ -282,7 +282,7 @@ namespace Frida.Agent {
 
 		private async void finish_recovery_from_fork (ForkActor actor) {
 			if (actor == CHILD) {
-				var info = HostChildInfo (fork_child_pid, Environment.get_program_name (), fork_parent_pid);
+				var info = HostChildInfo (fork_child_pid, Environment.get_executable_path (), fork_parent_pid);
 				try {
 					yield controller.wait_for_permission_to_resume (fork_child_id, info);
 				} catch (GLib.Error e) {
@@ -832,21 +832,21 @@ namespace Frida.Agent {
 
 		public extern unowned Gum.ScriptBackend _obtain_script_backend (bool jit_enabled);
 
-		public string get_program_name () {
-			var name = _try_get_program_name ();
-			if (name != null)
-				return name;
+		public string get_executable_path () {
+			var path = _try_get_executable_path ();
+			if (path != null)
+				return path;
 
 			Gum.Process.enumerate_modules ((details) => {
-				name = details.name;
+				path = details.name;
 				return false;
 			});
-			assert (name != null);
+			assert (path != null);
 
-			return name;
+			return path;
 		}
 
-		public extern string? _try_get_program_name ();
+		public extern string? _try_get_executable_path ();
 		public extern void * _get_current_pthread ();
 		public extern void _join_pthread (void * thread);
 	}
