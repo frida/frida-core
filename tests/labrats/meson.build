@@ -32,18 +32,13 @@ if host_os == 'linux'
 
   labrat_files += [
     'sleeper-linux-' + host_arch,
+    'forker-linux-' + host_arch,
     'simple-agent-linux-' + host_arch + '.so',
   ]
 
   if host_arch == 'x86' or host_arch == 'x86_64'
     labrat_files += [
       'resident-agent-linux-' + host_arch + '.so',
-    ]
-  endif
-
-  if host_arch == 'x86_64'
-    labrat_files += [
-      'forker-linux-x86_64',
     ]
   endif
 endif
