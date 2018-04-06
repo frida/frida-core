@@ -149,7 +149,8 @@ if host_os_family == 'linux'
     android_data = custom_target('frida-data-android',
       input: [
         'linux/frida-android.resources',
-        'linux/robo-agent.js',
+        'linux/agent/zygote.js',
+        'linux/agent/systemui.js',
       ],
       output: [
         'frida-data-android.vapi',
@@ -163,6 +164,7 @@ if host_os_family == 'linux'
         '-c', '@INPUT0@',
         '-o', join_paths(meson.current_build_dir(), 'frida-data-android'),
         '@INPUT1@',
+        '@INPUT2@',
       ],
     )
     linux_sources += [android_data]
