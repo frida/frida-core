@@ -894,58 +894,61 @@ namespace Frida.HostSessionTest {
 
 				h.disable_timeout (); /* this is a manual test after all */
 
-				var backend = new LinuxHostSessionBackend ();
-				h.service.add_backend (backend);
-				yield h.service.start ();
-				yield h.process_events ();
-				var prov = h.first_provider ();
-
 				try {
-					var host_session = yield prov.create ();
-					stdout.printf ("spawn(\"com.google.android.gm\")\n");
-					var pid = yield host_session.spawn ("com.google.android.gm", new string[] { "com.google.android.gm" }, new string[] {});
-					stdout.printf ("attach(%u)\n", pid);
-					var id = yield host_session.attach_to (pid);
-					stdout.printf ("obtain_agent_session()\n");
-					var session = yield prov.obtain_agent_session (host_session, id);
+					var device_manager = new DeviceManager ();
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+					var package_name = "com.android.calculator2";
 					string received_message = null;
-					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+					bool waiting = false;
+
+					printerr ("device.spawn(\"%s\")\n", package_name);
+					string[] argv = { package_name };
+					string[] envp = {};
+					var pid = yield device.spawn (package_name, argv, envp);
+
+					printerr ("device.attach(%u)\n", pid);
+					var session = yield device.attach (pid);
+
+					printerr ("session.create_script()\n");
+					var script = yield session.create_script ("test", """'use strict';
+Java.perform(function () {
+  var Activity = Java.use('android.app.Activity');
+  Activity.onResume.implementation = function () {
+    send('onResume');
+    this.onResume();
+  };
+});
+""");
+					script.message.connect ((message, data) => {
 						received_message = message;
-						spawn_android_app.callback ();
+						if (waiting)
+							spawn_android_app.callback ();
 					});
-					stdout.printf ("create_script()\n");
-					var script_id = yield session.create_script ("spawn-android-app",
-						"\"use strict\";" +
-						"Java.perform(() => {" +
-						"  const Activity = Java.use(\"android.app.Activity\");" +
-						"  Activity.onResume.implementation = () => {" +
-						"    send('onResume');" +
-						"    this.onResume();" +
-						"  };" +
-						"});" +
-						"setTimeout(() => { send('ready'); }, 1);");
-					stdout.printf ("load_script()\n");
-					session.load_script.begin (script_id);
-					stdout.printf ("await_message()\n");
-					yield;
-					stdout.printf ("received_message: %s\n", received_message);
-					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
-					stdout.printf ("resume(%u)\n", pid);
-					yield host_session.resume (pid);
-					stdout.printf ("await_message()\n");
-					yield;
-					stdout.printf ("received_message: %s\n", received_message);
-					session.disconnect (message_handler);
+
+					printerr ("script.load()\n");
+					yield script.load ();
+
+					printerr ("device.resume(%u)\n", pid);
+					yield device.resume (pid);
+
+					printerr ("await_message()\n");
+					while (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					printerr ("received_message: %s\n", received_message);
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"onResume\"}");
+					received_message = null;
+
+					yield device_manager.close ();
+
+					h.done ();
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
-
-				yield h.service.stop ();
-				h.service.remove_backend (backend);
-
-				h.done ();
 			}
 
 		}
