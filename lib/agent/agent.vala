@@ -49,6 +49,9 @@ namespace Frida.Agent {
 		private uint child_gating_subscriber_count = 0;
 #if !WINDOWS
 		private ForkListener? fork_listener;
+#if LINUX
+		private ThreadListCloaker? thread_list_cloaker;
+#endif
 		private ThreadIgnoreScope fork_ignore_scope;
 		private uint fork_parent_pid;
 		private uint fork_child_pid;
@@ -418,6 +421,10 @@ namespace Frida.Agent {
 			interceptor.attach_listener ((void *) Posix.fork, fork_listener);
 			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
 
+#if LINUX
+			thread_list_cloaker = new ThreadListCloaker ();
+#endif
+
 			interceptor.end_transaction ();
 #endif
 		}
@@ -429,6 +436,10 @@ namespace Frida.Agent {
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.begin_transaction ();
+
+#if LINUX
+			thread_list_cloaker = null;
+#endif
 
 			interceptor.revert_function ((void *) Posix.vfork);
 			interceptor.detach_listener (fork_listener);
@@ -825,6 +836,197 @@ namespace Frida.Agent {
 		public abstract void recover_from_fork_in_parent ();
 		public abstract void recover_from_fork_in_child ();
 	}
+
+#if LINUX
+	private class ThreadListCloaker : Object {
+		private Gee.HashSet<Gum.InvocationListener> listeners = new Gee.HashSet<Gum.InvocationListener> ();
+		private Gee.HashSet<Posix.Dir> tracked_handles = new Gee.HashSet<unowned Posix.Dir> ();
+
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			var libc_name = detect_libc_name ();
+
+			var open_listener = new OpenDirListener (this);
+			listeners.add (open_listener);
+			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "opendir"), open_listener);
+
+			var close_listener = new CloseDirListener (this);
+			listeners.add (close_listener);
+			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "closedir"), close_listener);
+
+			var readdir64_r = Gum.Module.find_export_by_name (libc_name, "readdir64_r");
+			if (readdir64_r != null) {
+				var listener = new ReadDirRListener (this, ANDROID);
+				listeners.add (listener);
+				interceptor.attach_listener (readdir64_r, listener);
+			}
+		}
+
+		~ThreadListCloaker () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			foreach (var listener in listeners)
+				interceptor.detach_listener (listener);
+		}
+
+		public void start_tracking (Posix.Dir handle) {
+			lock (tracked_handles)
+				tracked_handles.add (handle);
+		}
+
+		public void stop_tracking (Posix.Dir handle) {
+			lock (tracked_handles)
+				tracked_handles.remove (handle);
+		}
+
+		public bool is_tracking (Posix.Dir handle) {
+			lock (tracked_handles)
+				return tracked_handles.contains (handle);
+		}
+
+		private class OpenDirListener : Object, Gum.InvocationListener {
+			public weak ThreadListCloaker parent {
+				get;
+				construct;
+			}
+
+			public OpenDirListener (ThreadListCloaker parent) {
+				Object (parent: parent);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+				var path = (string *) context.get_nth_argument (0);
+				invocation.is_for_our_task = (path == "/proc/self/task") || (path == "/proc/%u/task".printf (Posix.getpid ()));
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				if (!invocation.is_for_our_task)
+					return;
+
+				unowned Posix.Dir? handle = (Posix.Dir?) context.get_return_value ();
+				if (handle != null)
+					parent.start_tracking (handle);
+			}
+
+			private struct Invocation {
+				public bool is_for_our_task;
+			}
+		}
+
+		private class CloseDirListener : Object, Gum.InvocationListener {
+			public weak ThreadListCloaker parent {
+				get;
+				construct;
+			}
+
+			public CloseDirListener (ThreadListCloaker parent) {
+				Object (parent: parent);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				unowned Posix.Dir? handle = (Posix.Dir?) context.get_nth_argument (0);
+				if (handle != null)
+					parent.stop_tracking (handle);
+			}
+		}
+
+		private enum ReadDirRKind {
+			POSIX,
+			ANDROID
+		}
+
+		private class ReadDirRListener : Object, Gum.InvocationListener {
+			public weak ThreadListCloaker parent {
+				get;
+				construct;
+			}
+
+			public ReadDirRKind kind {
+				get;
+				construct;
+			}
+
+			public ReadDirRListener (ThreadListCloaker parent, ReadDirRKind kind) {
+				Object (parent: parent, kind: kind);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				invocation.handle = (Posix.Dir?) context.get_nth_argument (0);
+				invocation.entry = context.get_nth_argument (1);
+				invocation.result = context.get_nth_argument (2);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				var result = (int) context.get_return_value ();
+				if (result != 0)
+					return;
+
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				if (*invocation.result == null)
+					return;
+
+				if (!parent.is_tracking (invocation.handle))
+					return;
+
+				string? name = null;
+				if (kind == POSIX) {
+					unowned Posix.DirEnt ent = (Posix.DirEnt) *invocation.result;
+					name = (string) ent.d_name;
+				} else if (kind == ANDROID) {
+					unowned DirEnt64 ent = (DirEnt64) *invocation.result;
+					name = (string) ent.d_name;
+				}
+
+				if (name == "." || name == "..")
+					return;
+
+				var tid = (Gum.ThreadId) uint64.parse (name);
+				var is_cloaked = Gum.Cloak.has_thread (tid);
+				debug ("tid=%u is_cloaked=%s", (uint) tid, is_cloaked.to_string ());
+			}
+
+			private struct Invocation {
+				public unowned Posix.Dir? handle;
+				public void * entry;
+				public void ** result;
+			}
+		}
+
+		[Compact]
+		private class DirEnt64 {
+			public uint64 d_ino;
+			public int64 d_off;
+			public uint16 d_reclen;
+			public uint8 d_type;
+			public char d_name[256];
+		}
+
+		private static string detect_libc_name () {
+			string? libc_name = null;
+
+			Gum.Address address_in_libc = (Gum.Address) Posix.opendir;
+			Gum.Process.enumerate_modules ((details) => {
+				var range = details.range;
+
+				if (address_in_libc >= range.base_address && address_in_libc < range.base_address + range.size) {
+					libc_name = details.path;
+					return false;
+				}
+
+				return true;
+			});
+
+			assert (libc_name != null);
+
+			return libc_name;
+		}
+	}
+#endif
 
 	namespace Environment {
 		public extern void _init ();
