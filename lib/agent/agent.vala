@@ -855,9 +855,26 @@ namespace Frida.Agent {
 			listeners.add (close_listener);
 			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "closedir"), close_listener);
 
+			var readdir = Gum.Module.find_export_by_name (libc_name, "readdir");
+			var readdir_listener = new ReadDirListener (this, LEGACY);
+			listeners.add (readdir_listener);
+			interceptor.attach_listener (readdir, readdir_listener);
+
+			var readdir64 = Gum.Module.find_export_by_name (libc_name, "readdir64");
+			if (readdir64 != null && readdir64 != readdir) {
+				var listener = new ReadDirListener (this, MODERN);
+				listeners.add (listener);
+				interceptor.attach_listener (readdir64, listener);
+			}
+
+			var readdir_r = Gum.Module.find_export_by_name (libc_name, "readdir_r");
+			var readdir_r_listener = new ReadDirRListener (this, LEGACY);
+			listeners.add (readdir_r_listener);
+			interceptor.attach_listener (readdir_r, readdir_r_listener);
+
 			var readdir64_r = Gum.Module.find_export_by_name (libc_name, "readdir64_r");
-			if (readdir64_r != null) {
-				var listener = new ReadDirRListener (this, ANDROID);
+			if (readdir64_r != null && readdir64_r != readdir_r) {
+				var listener = new ReadDirRListener (this, MODERN);
 				listeners.add (listener);
 				interceptor.attach_listener (readdir64_r, listener);
 			}
@@ -934,9 +951,58 @@ namespace Frida.Agent {
 			}
 		}
 
-		private enum ReadDirRKind {
-			POSIX,
-			ANDROID
+		private class ReadDirListener : Object, Gum.InvocationListener {
+			public weak ThreadListCloaker parent {
+				get;
+				construct;
+			}
+
+			public DirEntKind kind {
+				get;
+				construct;
+			}
+
+			public ReadDirListener (ThreadListCloaker parent, DirEntKind kind) {
+				Object (parent: parent, kind: kind);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				invocation.handle = (Posix.Dir?) context.get_nth_argument (0);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				if (!parent.is_tracking (invocation.handle))
+					return;
+
+				var entry = context.get_return_value ();
+				do {
+					if (entry == null)
+						return;
+
+					var name = parse_dirent_name (entry, kind);
+					if (name == "." || name == "..")
+						return;
+
+					var tid = (Gum.ThreadId) uint64.parse (name);
+					var is_cloaked = Gum.Cloak.has_thread (tid);
+					if (!is_cloaked)
+						return;
+
+					var impl = (ReadDirFunc) context.function;
+					entry = impl (invocation.handle);
+
+					context.replace_return_value (entry);
+				} while (true);
+			}
+
+			private struct Invocation {
+				public unowned Posix.Dir? handle;
+			}
+
+			[CCode (has_target = false)]
+			private delegate void * ReadDirFunc (Posix.Dir dir);
 		}
 
 		private class ReadDirRListener : Object, Gum.InvocationListener {
@@ -945,12 +1011,12 @@ namespace Frida.Agent {
 				construct;
 			}
 
-			public ReadDirRKind kind {
+			public DirEntKind kind {
 				get;
 				construct;
 			}
 
-			public ReadDirRListener (ThreadListCloaker parent, ReadDirRKind kind) {
+			public ReadDirRListener (ThreadListCloaker parent, DirEntKind kind) {
 				Object (parent: parent, kind: kind);
 			}
 
@@ -962,32 +1028,32 @@ namespace Frida.Agent {
 			}
 
 			public void on_leave (Gum.InvocationContext context) {
-				var result = (int) context.get_return_value ();
-				if (result != 0)
-					return;
-
 				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
-				if (*invocation.result == null)
-					return;
-
 				if (!parent.is_tracking (invocation.handle))
 					return;
 
-				string? name = null;
-				if (kind == POSIX) {
-					unowned Posix.DirEnt ent = (Posix.DirEnt) *invocation.result;
-					name = (string) ent.d_name;
-				} else if (kind == ANDROID) {
-					unowned DirEnt64 ent = (DirEnt64) *invocation.result;
-					name = (string) ent.d_name;
-				}
+				var result = (int) context.get_return_value ();
+				do {
+					if (result != 0)
+						return;
 
-				if (name == "." || name == "..")
-					return;
+					if (*invocation.result == null)
+						return;
 
-				var tid = (Gum.ThreadId) uint64.parse (name);
-				var is_cloaked = Gum.Cloak.has_thread (tid);
-				debug ("tid=%u is_cloaked=%s", (uint) tid, is_cloaked.to_string ());
+					var name = parse_dirent_name (*invocation.result, kind);
+					if (name == "." || name == "..")
+						return;
+
+					var tid = (Gum.ThreadId) uint64.parse (name);
+					var is_cloaked = Gum.Cloak.has_thread (tid);
+					if (!is_cloaked)
+						return;
+
+					var impl = (ReadDirRFunc) context.function;
+					result = impl (invocation.handle, invocation.entry, invocation.result);
+
+					context.replace_return_value ((void *) result);
+				} while (true);
 			}
 
 			private struct Invocation {
@@ -995,6 +1061,28 @@ namespace Frida.Agent {
 				public void * entry;
 				public void ** result;
 			}
+
+			[CCode (has_target = false)]
+			private delegate int ReadDirRFunc (Posix.Dir dir, void * entry, void ** result);
+		}
+
+		private static unowned string parse_dirent_name (void * entry, DirEntKind kind) {
+			unowned string? name = null;
+
+			if (kind == LEGACY) {
+				unowned Posix.DirEnt ent = (Posix.DirEnt) entry;
+				name = (string) ent.d_name;
+			} else if (kind == MODERN) {
+				unowned DirEnt64 ent = (DirEnt64) entry;
+				name = (string) ent.d_name;
+			}
+
+			return name;
+		}
+
+		private enum DirEntKind {
+			LEGACY,
+			MODERN
 		}
 
 		[Compact]
