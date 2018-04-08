@@ -838,9 +838,37 @@ namespace Frida.Agent {
 	}
 
 #if LINUX
-	private class ThreadListCloaker : Object {
+	private class ThreadListCloaker : Object, DirListFilter {
+		private string our_task_by_pid;
+		private DirListCloaker cloaker;
+
+		construct {
+			our_task_by_pid = "/proc/%u/task".printf (Posix.getpid ());
+			cloaker = new DirListCloaker (this);
+		}
+
+		private bool matches_directory (string path) {
+			return path == "/proc/self/task" || path == our_task_by_pid;
+		}
+
+		private bool matches_file (string name) {
+			var tid = (Gum.ThreadId) uint64.parse (name);
+			return Gum.Cloak.has_thread (tid);
+		}
+	}
+
+	private class DirListCloaker : Object {
+		public weak DirListFilter filter {
+			get;
+			construct;
+		}
+
 		private Gee.HashSet<Gum.InvocationListener> listeners = new Gee.HashSet<Gum.InvocationListener> ();
 		private Gee.HashSet<Posix.Dir> tracked_handles = new Gee.HashSet<unowned Posix.Dir> ();
+
+		public DirListCloaker (DirListFilter filter) {
+			Object (filter: filter);
+		}
 
 		construct {
 			var interceptor = Gum.Interceptor.obtain ();
@@ -880,7 +908,7 @@ namespace Frida.Agent {
 			}
 		}
 
-		~ThreadListCloaker () {
+		~DirListCloaker () {
 			var interceptor = Gum.Interceptor.obtain ();
 
 			foreach (var listener in listeners)
@@ -903,25 +931,24 @@ namespace Frida.Agent {
 		}
 
 		private class OpenDirListener : Object, Gum.InvocationListener {
-			public weak ThreadListCloaker parent {
+			public weak DirListCloaker parent {
 				get;
 				construct;
 			}
 
-			public OpenDirListener (ThreadListCloaker parent) {
+			public OpenDirListener (DirListCloaker parent) {
 				Object (parent: parent);
 			}
 
 			public void on_enter (Gum.InvocationContext context) {
 				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 
-				var path = (string *) context.get_nth_argument (0);
-				invocation.is_for_our_task = (path == "/proc/self/task") || (path == "/proc/%u/task".printf (Posix.getpid ()));
+				invocation.path = (string *) context.get_nth_argument (0);
 			}
 
 			public void on_leave (Gum.InvocationContext context) {
 				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
-				if (!invocation.is_for_our_task)
+				if (!parent.filter.matches_directory (invocation.path))
 					return;
 
 				unowned Posix.Dir? handle = (Posix.Dir?) context.get_return_value ();
@@ -930,17 +957,17 @@ namespace Frida.Agent {
 			}
 
 			private struct Invocation {
-				public bool is_for_our_task;
+				public string * path;
 			}
 		}
 
 		private class CloseDirListener : Object, Gum.InvocationListener {
-			public weak ThreadListCloaker parent {
+			public weak DirListCloaker parent {
 				get;
 				construct;
 			}
 
-			public CloseDirListener (ThreadListCloaker parent) {
+			public CloseDirListener (DirListCloaker parent) {
 				Object (parent: parent);
 			}
 
@@ -952,7 +979,7 @@ namespace Frida.Agent {
 		}
 
 		private class ReadDirListener : Object, Gum.InvocationListener {
-			public weak ThreadListCloaker parent {
+			public weak DirListCloaker parent {
 				get;
 				construct;
 			}
@@ -962,7 +989,7 @@ namespace Frida.Agent {
 				construct;
 			}
 
-			public ReadDirListener (ThreadListCloaker parent, DirEntKind kind) {
+			public ReadDirListener (DirListCloaker parent, DirEntKind kind) {
 				Object (parent: parent, kind: kind);
 			}
 
@@ -985,9 +1012,7 @@ namespace Frida.Agent {
 					if (name == "." || name == "..")
 						return;
 
-					var tid = (Gum.ThreadId) uint64.parse (name);
-					var is_cloaked = Gum.Cloak.has_thread (tid);
-					if (!is_cloaked)
+					if (!parent.filter.matches_file (name))
 						return;
 
 					var impl = (ReadDirFunc) context.function;
@@ -1006,7 +1031,7 @@ namespace Frida.Agent {
 		}
 
 		private class ReadDirRListener : Object, Gum.InvocationListener {
-			public weak ThreadListCloaker parent {
+			public weak DirListCloaker parent {
 				get;
 				construct;
 			}
@@ -1016,7 +1041,7 @@ namespace Frida.Agent {
 				construct;
 			}
 
-			public ReadDirRListener (ThreadListCloaker parent, DirEntKind kind) {
+			public ReadDirRListener (DirListCloaker parent, DirEntKind kind) {
 				Object (parent: parent, kind: kind);
 			}
 
@@ -1044,9 +1069,7 @@ namespace Frida.Agent {
 					if (name == "." || name == "..")
 						return;
 
-					var tid = (Gum.ThreadId) uint64.parse (name);
-					var is_cloaked = Gum.Cloak.has_thread (tid);
-					if (!is_cloaked)
+					if (!parent.filter.matches_file (name))
 						return;
 
 					var impl = (ReadDirRFunc) context.function;
@@ -1113,6 +1136,11 @@ namespace Frida.Agent {
 
 			return libc_name;
 		}
+	}
+
+	private interface DirListFilter : Object {
+		public abstract bool matches_directory (string path);
+		public abstract bool matches_file (string name);
 	}
 #endif
 
