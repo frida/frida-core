@@ -51,6 +51,7 @@ namespace Frida.Agent {
 		private ForkListener? fork_listener;
 #if LINUX
 		private ThreadListCloaker? thread_list_cloaker;
+		private FDListCloaker? fd_list_cloaker;
 #endif
 		private ThreadIgnoreScope fork_ignore_scope;
 		private uint fork_parent_pid;
@@ -423,6 +424,7 @@ namespace Frida.Agent {
 
 #if LINUX
 			thread_list_cloaker = new ThreadListCloaker ();
+			fd_list_cloaker = new FDListCloaker ();
 #endif
 
 			interceptor.end_transaction ();
@@ -438,6 +440,7 @@ namespace Frida.Agent {
 			interceptor.begin_transaction ();
 
 #if LINUX
+			fd_list_cloaker = null;
 			thread_list_cloaker = null;
 #endif
 
@@ -839,21 +842,40 @@ namespace Frida.Agent {
 
 #if LINUX
 	private class ThreadListCloaker : Object, DirListFilter {
-		private string our_task_by_pid;
+		private string our_dir_by_pid;
 		private DirListCloaker cloaker;
 
 		construct {
-			our_task_by_pid = "/proc/%u/task".printf (Posix.getpid ());
+			our_dir_by_pid = "/proc/%u/task".printf (Posix.getpid ());
 			cloaker = new DirListCloaker (this);
 		}
 
 		private bool matches_directory (string path) {
-			return path == "/proc/self/task" || path == our_task_by_pid;
+			return path == "/proc/self/task" || path == our_dir_by_pid;
 		}
 
 		private bool matches_file (string name) {
 			var tid = (Gum.ThreadId) uint64.parse (name);
 			return Gum.Cloak.has_thread (tid);
+		}
+	}
+
+	private class FDListCloaker : Object, DirListFilter {
+		private string our_dir_by_pid;
+		private DirListCloaker cloaker;
+
+		construct {
+			our_dir_by_pid = "/proc/%u/fd".printf (Posix.getpid ());
+			cloaker = new DirListCloaker (this);
+		}
+
+		private bool matches_directory (string path) {
+			return path == "/proc/self/fd" || path == our_dir_by_pid;
+		}
+
+		private bool matches_file (string name) {
+			var fd = int.parse (name);
+			return Gum.Cloak.has_file_descriptor (fd);
 		}
 	}
 
