@@ -415,7 +415,6 @@ namespace Frida {
 
 			try {
 				yield session.enable_child_gating ();
-				printerr ("enabled child gating\n");
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
