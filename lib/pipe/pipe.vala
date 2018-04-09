@@ -168,7 +168,6 @@ namespace Frida {
 				return request;
 			}
 
-
 			return request;
 		}
 
