@@ -4,7 +4,7 @@ namespace Frida.Agent {
 			Runner.create_and_run (pipe_address, ref unload_policy, injector_state);
 #if !WINDOWS
 		else
-			Runner.resume_after_fork (ref unload_policy);
+			Runner.resume_after_fork (ref unload_policy, injector_state);
 #endif
 	}
 
@@ -48,12 +48,11 @@ namespace Frida.Agent {
 
 		private uint child_gating_subscriber_count = 0;
 #if !WINDOWS
-		private ForkListener? fork_listener;
+		private ForkMonitor? fork_monitor;
 #if LINUX
 		private ThreadListCloaker? thread_list_cloaker;
 		private FDListCloaker? fd_list_cloaker;
 #endif
-		private ThreadIgnoreScope fork_ignore_scope;
 		private uint fork_parent_pid;
 		private uint fork_child_pid;
 		private HostChildId fork_child_id;
@@ -105,6 +104,9 @@ namespace Frida.Agent {
 				}
 
 				if (shared_instance.stop_reason == FORK) {
+#if LINUX
+					Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
+#endif
 					unload_policy = DEFERRED;
 					return;
 				} else {
@@ -118,13 +120,21 @@ namespace Frida.Agent {
 		}
 
 #if !WINDOWS
-		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy) {
+		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
 			{
+#if LINUX
+				var injector_state = (LinuxInjectorState *) opaque_injector_state;
+				Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+#endif
+
 				var ignore_scope = new ThreadIgnoreScope ();
 
 				shared_instance.run_after_fork ();
 
 				if (shared_instance.stop_reason == FORK) {
+#if LINUX
+					Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
+#endif
 					unload_policy = DEFERRED;
 					return;
 				} else {
@@ -190,8 +200,6 @@ namespace Frida.Agent {
 		}
 
 		private void prepare_to_fork () {
-			fork_ignore_scope = new ThreadIgnoreScope ();
-
 			schedule_idle (() => {
 				do_prepare_to_fork.begin ();
 				return false;
@@ -266,8 +274,6 @@ namespace Frida.Agent {
 				fork_cond.wait (fork_mutex);
 
 			fork_mutex.unlock ();
-
-			fork_ignore_scope = null;
 		}
 
 		private async void recreate_agent_thread (ForkActor actor) {
@@ -298,7 +304,7 @@ namespace Frida.Agent {
 
 		private async void finish_recovery_from_fork (ForkActor actor) {
 			if (actor == CHILD) {
-				var info = HostChildInfo (fork_child_pid, Environment.get_executable_path (), fork_parent_pid);
+				var info = HostChildInfo (fork_child_pid, Environment._get_executable_path (), fork_parent_pid);
 				try {
 					yield controller.wait_for_permission_to_resume (fork_child_id, info);
 				} catch (GLib.Error e) {
@@ -423,16 +429,13 @@ namespace Frida.Agent {
 
 		private void enable_child_gating () {
 #if !WINDOWS
-			if (fork_listener != null)
+			if (fork_monitor != null)
 				return;
-
-			fork_listener = new ForkListener (this);
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.begin_transaction ();
 
-			interceptor.attach_listener ((void *) Posix.fork, fork_listener);
-			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
+			fork_monitor = new ForkMonitor (this);
 
 #if LINUX
 			thread_list_cloaker = new ThreadListCloaker ();
@@ -445,7 +448,7 @@ namespace Frida.Agent {
 
 		private void disable_child_gating () {
 #if !WINDOWS
-			if (fork_listener == null)
+			if (fork_monitor == null)
 				return;
 
 			var interceptor = Gum.Interceptor.obtain ();
@@ -456,12 +459,9 @@ namespace Frida.Agent {
 			thread_list_cloaker = null;
 #endif
 
-			interceptor.revert_function ((void *) Posix.vfork);
-			interceptor.detach_listener (fork_listener);
+			fork_monitor = null;
 
 			interceptor.end_transaction ();
-
-			fork_listener = null;
 #endif
 		}
 
@@ -823,28 +823,99 @@ namespace Frida.Agent {
 		}
 	}
 
-	private class ForkListener : Object, Gum.InvocationListener {
+#if !WINDOWS
+	private class ForkMonitor : Object {
 		public weak ForkHandler handler {
 			get;
 			construct;
 		}
 
-		public ForkListener (ForkHandler handler) {
+		private ForkListener fork_listener;
+		private SetConListener setcon_listener;
+
+		public ForkMonitor (ForkHandler handler) {
 			Object (handler: handler);
 		}
 
-		public void on_enter (Gum.InvocationContext context) {
-			handler.prepare_to_fork ();
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			var recover_child_late = false;
+
+#if ANDROID
+			if (Environment._get_executable_path ().has_prefix ("/system/bin/app_process")) {
+				var setcon = Gum.Module.find_export_by_name ("libandroid_runtime.so", "selinux_android_setcontext");
+				if (setcon != null) {
+					setcon_listener = new SetConListener (handler);
+					interceptor.attach_listener (setcon, setcon_listener);
+
+					recover_child_late = true;
+				}
+			}
+#endif
+
+			fork_listener = new ForkListener (handler, recover_child_late);
+			interceptor.attach_listener ((void *) Posix.fork, fork_listener);
+			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
 		}
 
-		public void on_leave (Gum.InvocationContext context) {
-			int result = (int) context.get_return_value ();
-			if (result != 0)
-				handler.recover_from_fork_in_parent ();
-			else
+		~ForkMonitor () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			if (setcon_listener != null)
+				interceptor.detach_listener (setcon_listener);
+
+			interceptor.revert_function ((void *) Posix.vfork);
+			interceptor.detach_listener (fork_listener);
+		}
+
+		private class ForkListener : Object, Gum.InvocationListener {
+			public weak ForkHandler handler {
+				get;
+				construct;
+			}
+
+			public bool recover_child_late {
+				get;
+				construct;
+			}
+
+			public ForkListener (ForkHandler handler, bool recover_child_late) {
+				Object (handler: handler, recover_child_late: recover_child_late);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				handler.prepare_to_fork ();
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				int result = (int) context.get_return_value ();
+				if (result != 0)
+					handler.recover_from_fork_in_parent ();
+				else if (!recover_child_late)
+					handler.recover_from_fork_in_child ();
+			}
+		}
+
+		private class SetConListener : Object, Gum.InvocationListener {
+			public weak ForkHandler handler {
+				get;
+				construct;
+			}
+
+			public SetConListener (ForkHandler handler) {
+				Object (handler: handler);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
 				handler.recover_from_fork_in_child ();
+			}
 		}
 	}
+#endif
 
 	public interface ForkHandler : Object {
 		public abstract void prepare_to_fork ();
@@ -891,7 +962,7 @@ namespace Frida.Agent {
 		}
 	}
 
-	private class DirListCloaker : Object {
+	public class DirListCloaker : Object {
 		public weak DirListFilter filter {
 			get;
 			construct;
@@ -1145,7 +1216,7 @@ namespace Frida.Agent {
 		}
 
 		[Compact]
-		private class DirEnt64 {
+		public class DirEnt64 {
 			public uint64 d_ino;
 			public int64 d_off;
 			public uint16 d_reclen;
@@ -1174,7 +1245,7 @@ namespace Frida.Agent {
 		}
 	}
 
-	private interface DirListFilter : Object {
+	public interface DirListFilter : Object {
 		public abstract bool matches_directory (string path);
 		public abstract bool matches_file (string name);
 	}
@@ -1186,7 +1257,7 @@ namespace Frida.Agent {
 
 		public extern unowned Gum.ScriptBackend _obtain_script_backend (bool jit_enabled);
 
-		public string get_executable_path () {
+		public string _get_executable_path () {
 			var path = _try_get_executable_path ();
 			if (path != null)
 				return path;
@@ -1201,6 +1272,7 @@ namespace Frida.Agent {
 		}
 
 		public extern string? _try_get_executable_path ();
+
 		public extern void * _get_current_pthread ();
 		public extern void _join_pthread (void * thread);
 	}
