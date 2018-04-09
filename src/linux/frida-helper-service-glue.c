@@ -974,12 +974,12 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   EMIT_STORE_IMM (XBP, unload_policy_offset, FRIDA_UNLOAD_POLICY_IMMEDIATE);
   EMIT_LEA (XCX, XBP, unload_policy_offset);
-
+  EMIT_LEA (XDX, XBP, fd_offset);
   EMIT_CALL_REG (XAX,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (XCX),
-      ARG_IMM (0));
+      ARG_REG (XDX));
 
   EMIT_LOAD_REG (EAX, XBP, unload_policy_offset);
   EMIT_CMP (EAX, FRIDA_UNLOAD_POLICY_IMMEDIATE);
@@ -1046,6 +1046,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
 #define EMIT_MOVE(dst, src) \
     gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_##dst, ARM_REG_##src)
+#define EMIT_ADD(dst, src, offset) \
+    gum_thumb_writer_put_add_reg_reg_imm (&cw, ARM_REG_##dst, ARM_REG_##src, offset)
 #define EMIT_LOAD_FIELD(reg, field) \
     gum_thumb_writer_put_ldr_reg_reg_offset (&cw, ARM_REG_##reg, ARM_REG_R6, G_STRUCT_OFFSET (FridaTrampolineData, field))
 #define EMIT_STORE_FIELD(field, reg) \
@@ -1174,16 +1176,16 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
   EMIT_MOVE (R4, R0);
 
-  EMIT_STACK_ADJUSTMENT (3);
+  EMIT_STACK_ADJUSTMENT (2);
   EMIT_LDR_U32 (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
-  gum_thumb_writer_put_push_regs (&cw, 1, ARM_REG_R0);
-
+  gum_thumb_writer_put_push_regs (&cw, 2, ARM_REG_R0, ARM_REG_R7);
   EMIT_MOVE (R1, SP);
+  EMIT_ADD (R2, SP, 4);
   EMIT_CALL_REG (R4,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (R1),
-      ARG_IMM (0));
+      ARG_REG (R2));
 
   EMIT_LDR (R0, SP);
   EMIT_CMP (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
@@ -1247,6 +1249,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
 #define EMIT_MOVE(dst, src) \
     gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_##dst, ARM64_REG_##src)
+#define EMIT_ADD(dst, src, offset) \
+    gum_arm64_writer_put_add_reg_reg_imm (&cw, ARM64_REG_##dst, ARM64_REG_##src, offset)
 #define EMIT_PUSH(a, b) \
     gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_##a, ARM64_REG_##b)
 #define EMIT_POP(a, b) \
@@ -1380,14 +1384,14 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_MOVE (X5, X0);
 
   EMIT_LDR_U64 (X0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
-  EMIT_PUSH (X0, X1);
+  EMIT_PUSH (X0, X21);
   EMIT_MOVE (X1, SP);
-
+  EMIT_ADD (X2, SP, 8);
   EMIT_CALL_REG (X5,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (X1),
-      ARG_IMM (0));
+      ARG_REG (X2));
 
   EMIT_LDR (W22, SP, 0);
 
@@ -1569,8 +1573,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_REG (T9,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
-      ARG_IMM (0),
-      ARG_IMM (0));
+      ARG_IMM (0) /* FIXME: unload_policy */,
+      ARG_IMM (0) /* FIXME: injector_state */);
 
   EMIT_CALL_IMM (params->dlclose_impl,
       1,

@@ -1,7 +1,7 @@
 namespace Frida.Agent {
-	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
+	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
 		if (Runner.shared_instance == null)
-			Runner.create_and_run (pipe_address, ref unload_policy, mapped_range);
+			Runner.create_and_run (pipe_address, ref unload_policy, injector_state);
 #if !WINDOWS
 		else
 			Runner.resume_after_fork (ref unload_policy);
@@ -75,12 +75,24 @@ namespace Frida.Agent {
 			CHILD
 		}
 
-		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
+		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
 			Environment._init ();
 
 			{
+				Gum.MemoryRange? mapped_range = null;
+
+#if DARWIN
+				var injector_state = (DarwinInjectorState *) opaque_injector_state;
+				mapped_range = injector_state.mapped_range;
+#endif
+
 				var agent_range = memory_range (mapped_range);
 				Gum.Cloak.add_range (agent_range);
+
+#if LINUX
+				var injector_state = (LinuxInjectorState *) opaque_injector_state;
+				Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+#endif
 
 				var ignore_scope = new ThreadIgnoreScope ();
 
@@ -1031,6 +1043,7 @@ namespace Frida.Agent {
 						return;
 
 					var name = parse_dirent_name (entry, kind);
+
 					if (name == "." || name == "..")
 						return;
 
@@ -1088,6 +1101,7 @@ namespace Frida.Agent {
 						return;
 
 					var name = parse_dirent_name (*invocation.result, kind);
+
 					if (name == "." || name == "..")
 						return;
 
