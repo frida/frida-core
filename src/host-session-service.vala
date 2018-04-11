@@ -223,6 +223,10 @@ namespace Frida {
 			resume_request.set_value (true);
 			entry.resume_request = null;
 
+			if (entry.sessions.is_empty) {
+				unload_and_destroy.begin (entry, SessionDetachReason.APPLICATION_REQUESTED);
+			}
+
 			return true;
 		}
 
