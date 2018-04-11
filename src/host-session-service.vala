@@ -563,6 +563,7 @@ namespace Frida {
 			promise.set_value (agent_entry);
 
 			connection.on_closed.connect (on_agent_connection_closed);
+			provider.closed.connect (on_agent_session_provider_closed);
 
 			if (!try_handle_child (info)) {
 				pending_children[pid] = info;
