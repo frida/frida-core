@@ -203,9 +203,6 @@ namespace Frida {
 		}
 
 		private bool try_resume_child (uint pid) {
-			if (!pending_children.unset (pid))
-				return false;
-
 			var entry_request = agent_entries[pid];
 			if (entry_request == null)
 				return false;
@@ -219,6 +216,8 @@ namespace Frida {
 			var resume_request = entry.resume_request;
 			if (resume_request == null)
 				return false;
+
+			pending_children.unset (pid);
 
 			resume_request.set_value (true);
 			entry.resume_request = null;
@@ -565,16 +564,20 @@ namespace Frida {
 
 			connection.on_closed.connect (on_agent_connection_closed);
 
-			printerr ("[DELIVERED] pid=%u identifier='%s'\n", info.pid, info.identifier);
-
-			pending_children[pid] = info;
-			delivered (info);
+			if (!try_handle_child (info)) {
+				pending_children[pid] = info;
+				delivered (info);
+			}
 
 			try {
 				yield resume_request.future.wait_async ();
 			} catch (Gee.FutureError e) {
 				assert_not_reached ();
 			}
+		}
+
+		protected virtual bool try_handle_child (HostChildInfo info) {
+			return false;
 		}
 
 		private class AgentEntry : Object {

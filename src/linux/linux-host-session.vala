@@ -206,17 +206,20 @@ namespace Frida {
 #endif
 		}
 
+		protected override bool try_handle_child (HostChildInfo info) {
+#if ANDROID
+			if (robo_launcher != null)
+				return robo_launcher.try_handle_child (info);
+#endif
+
+			return false;
+		}
+
 		public override async void input (uint pid, uint8[] data) throws Error {
 			yield helper.input (pid, data);
 		}
 
 		protected override async void perform_resume (uint pid) throws Error {
-#if ANDROID
-			if (robo_launcher != null) {
-				if (yield robo_launcher.try_resume (pid))
-					return;
-			}
-#endif
 			yield helper.resume (pid);
 		}
 
@@ -297,7 +300,7 @@ namespace Frida {
 
 		private Gee.Promise<bool> ensure_request;
 
-		private Gee.HashSet<ZygoteAgent> zygote_agents = new Gee.HashSet<ZygoteAgent> ();
+		private Gee.HashMap<uint, ZygoteAgent> zygote_agent_by_pid = new Gee.HashMap<uint, ZygoteAgent> ();
 
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_package_name = new Gee.HashMap<string, Gee.Promise<uint>> ();
@@ -362,7 +365,21 @@ namespace Frida {
 			}
 		}
 
-		public async bool try_resume (uint pid) throws Error {
+		public bool try_handle_child (HostChildInfo info) {
+			if (!zygote_agent_by_pid.has_key (info.parent_pid))
+				return false;
+
+			Gee.Promise<uint> spawn_request;
+			if (spawn_request_by_package_name.unset (info.identifier, out spawn_request)) {
+				spawn_request.set_value (info.pid);
+				return true;
+			}
+
+			if (spawn_gating_enabled) {
+				spawned (HostSpawnInfo (info.pid, info.identifier));
+				return true;
+			}
+
 			return false;
 		}
 
@@ -384,8 +401,7 @@ namespace Frida {
 					if (name == "zygote" || name == "zygote64") {
 						var agent = new ZygoteAgent (host_session, info.pid);
 						yield agent.load ();
-						zygote_agents.add (agent);
-						printerr ("NEW ZYGOTE AGENT: PID=%u\n", info.pid);
+						zygote_agent_by_pid[info.pid] = agent;
 					}
 				}
 
