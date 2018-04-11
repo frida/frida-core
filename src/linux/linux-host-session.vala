@@ -310,9 +310,20 @@ namespace Frida {
 		}
 
 		public async void close () {
+			if (ensure_request != null) {
+				try {
+					yield ensure_loaded ();
+				} catch (Error e) {
+				}
+			}
+
 			foreach (var request in spawn_request_by_package_name.values)
 				request.set_exception (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
 			spawn_request_by_package_name.clear ();
+
+			foreach (var agent in zygote_agent_by_pid.values)
+				yield agent.close ();
+			zygote_agent_by_pid.clear ();
 		}
 
 		public async void enable_spawn_gating () throws Error {
