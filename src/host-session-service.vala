@@ -718,7 +718,7 @@ namespace Frida {
 			construct;
 		}
 
-		public string script_source {
+		public string? script_source {
 			get;
 			construct;
 		}
@@ -750,21 +750,7 @@ namespace Frida {
 				}
 			}
 
-			if (script.handle != 0) {
-				try {
-					yield session.destroy_script (script);
-				} catch (GLib.Error e) {
-				}
-				script = AgentScriptId (0);
-			}
-
-			if (session != null) {
-				try {
-					yield session.close ();
-				} catch (GLib.Error e) {
-				}
-				session = null;
-			}
+			yield ensure_unloaded ();
 		}
 
 		protected abstract async uint get_target_pid () throws Error;
@@ -842,25 +828,41 @@ namespace Frida {
 			try {
 				var id = yield host_session.attach_to (target_pid);
 				session = yield host_session.obtain_agent_session (id);
-
-				script = yield session.create_script ("internal-agent", script_source);
 				session.message_from_script.connect (on_message_from_script);
-				yield session.load_script (script);
+
+				if (script_source != null) {
+					script = yield session.create_script ("internal-agent", script_source);
+					yield session.load_script (script);
+				}
 
 				ensure_request.set_value (true);
 			} catch (GLib.Error raw_error) {
-				script = AgentScriptId (0);
-
-				if (session != null) {
-					session.message_from_script.disconnect (on_message_from_script);
-					session = null;
-				}
+				yield ensure_unloaded ();
 
 				var error = Marshal.from_dbus (raw_error);
 				ensure_request.set_exception (error);
 				ensure_request = null;
 
 				throw error;
+			}
+		}
+
+		private async void ensure_unloaded () {
+			if (script.handle != 0) {
+				try {
+					yield session.destroy_script (script);
+				} catch (GLib.Error e) {
+				}
+				script = AgentScriptId (0);
+			}
+
+			if (session != null) {
+				try {
+					yield session.close ();
+				} catch (GLib.Error e) {
+				}
+				session.message_from_script.disconnect (on_message_from_script);
+				session = null;
 			}
 		}
 

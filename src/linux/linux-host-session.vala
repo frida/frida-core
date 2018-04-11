@@ -422,8 +422,7 @@ namespace Frida {
 		}
 
 		public ZygoteAgent (LinuxHostSession host_session, uint pid) {
-			string * source = Frida.Data.Android.get_zygote_js_blob ().data;
-			Object (host_session: host_session, script_source: source, pid: pid);
+			Object (host_session: host_session, script_source: null, pid: pid);
 		}
 
 		public async void load () throws Error {
