@@ -2,7 +2,5 @@ option('enable_diet', type: 'combo', choices: ['auto', 'no', 'yes'], value: 'aut
 option('enable_mapper', type: 'combo', choices: ['auto', 'no', 'yes'], value: 'auto')
 option('with-32bit-helper', type: 'string', description: 'Prebuilt 32-bit frida-helper')
 option('with-64bit-helper', type: 'string', description: 'Prebuilt 64-bit frida-helper')
-option('with-32bit-loader', type: 'string', description: 'Prebuilt loader to use for 32-bit targets')
-option('with-64bit-loader', type: 'string', description: 'Prebuilt loader to use for 64-bit targets')
 option('with-32bit-agent', type: 'string', description: 'Prebuilt agent to use for 32-bit targets')
 option('with-64bit-agent', type: 'string', description: 'Prebuilt agent to use for 64-bit targets')

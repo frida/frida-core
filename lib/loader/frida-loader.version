@@ -1,7 +1,0 @@
-LIBFRIDA_LOADER_1.0 {
-  global:
-    frida_loader_main;
-
-  local:
-    *;
-};
