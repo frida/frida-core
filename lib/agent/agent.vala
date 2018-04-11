@@ -226,14 +226,14 @@ namespace Frida.Agent {
 		}
 
 		private void recover_from_fork_in_parent () {
-			recover_from_fork (ForkActor.PARENT);
+			recover_from_fork (ForkActor.PARENT, null);
 		}
 
-		private void recover_from_fork_in_child () {
-			recover_from_fork (ForkActor.CHILD);
+		private void recover_from_fork_in_child (string? identifier) {
+			recover_from_fork (ForkActor.CHILD, identifier);
 		}
 
-		private void recover_from_fork (ForkActor actor) {
+		private void recover_from_fork (ForkActor actor, string? identifier) {
 			if (actor == PARENT) {
 				GLibFork.recover_from_fork_in_parent ();
 				GIOFork.recover_from_fork_in_parent ();
@@ -266,7 +266,7 @@ namespace Frida.Agent {
 			main_context.pop_thread_default ();
 
 			schedule_idle (() => {
-				finish_recovery_from_fork.begin (actor);
+				finish_recovery_from_fork.begin (actor, identifier);
 				return false;
 			});
 
@@ -302,9 +302,10 @@ namespace Frida.Agent {
 			main_loop.quit ();
 		}
 
-		private async void finish_recovery_from_fork (ForkActor actor) {
+		private async void finish_recovery_from_fork (ForkActor actor, string? identifier) {
 			if (actor == CHILD) {
-				var info = HostChildInfo (fork_child_pid, Environment._get_executable_path (), fork_parent_pid);
+				var child_identifier = (identifier != null) ? identifier : Environment._get_executable_path ();
+				var info = HostChildInfo (fork_child_pid, child_identifier, fork_parent_pid);
 				try {
 					yield controller.wait_for_permission_to_resume (fork_child_id, info);
 				} catch (GLib.Error e) {
@@ -334,7 +335,7 @@ namespace Frida.Agent {
 		private void recover_from_fork_in_parent () {
 		}
 
-		private void recover_from_fork_in_child () {
+		private void recover_from_fork_in_child (string? identifier) {
 		}
 #endif
 
@@ -831,7 +832,7 @@ namespace Frida.Agent {
 		}
 
 		private ForkListener fork_listener;
-		private SetConListener setcon_listener;
+		private SetArgV0Listener set_argv0_listener;
 
 		public ForkMonitor (ForkHandler handler) {
 			Object (handler: handler);
@@ -844,10 +845,10 @@ namespace Frida.Agent {
 
 #if ANDROID
 			if (Environment._get_executable_path ().has_prefix ("/system/bin/app_process")) {
-				var setcon = Gum.Module.find_export_by_name ("libandroid_runtime.so", "selinux_android_setcontext");
-				if (setcon != null) {
-					setcon_listener = new SetConListener (handler);
-					interceptor.attach_listener (setcon, setcon_listener);
+				var set_argv0 = Gum.Module.find_export_by_name ("libandroid_runtime.so", "_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring");
+				if (set_argv0 != null) {
+					set_argv0_listener = new SetArgV0Listener (handler);
+					interceptor.attach_listener (set_argv0, set_argv0_listener);
 
 					recover_child_late = true;
 				}
@@ -862,8 +863,8 @@ namespace Frida.Agent {
 		~ForkMonitor () {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			if (setcon_listener != null)
-				interceptor.detach_listener (setcon_listener);
+			if (set_argv0_listener != null)
+				interceptor.detach_listener (set_argv0_listener);
 
 			interceptor.revert_function ((void *) Posix.vfork);
 			interceptor.detach_listener (fork_listener);
@@ -893,26 +894,54 @@ namespace Frida.Agent {
 				if (result != 0)
 					handler.recover_from_fork_in_parent ();
 				else if (!recover_child_late)
-					handler.recover_from_fork_in_child ();
+					handler.recover_from_fork_in_child (null);
 			}
 		}
 
-		private class SetConListener : Object, Gum.InvocationListener {
+		private class SetArgV0Listener : Object, Gum.InvocationListener {
 			public weak ForkHandler handler {
 				get;
 				construct;
 			}
 
-			public SetConListener (ForkHandler handler) {
+			public SetArgV0Listener (ForkHandler handler) {
 				Object (handler: handler);
 			}
 
 			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				invocation.env = context.get_nth_argument (0);
+				invocation.name_obj = context.get_nth_argument (2);
 			}
 
 			public void on_leave (Gum.InvocationContext context) {
-				handler.recover_from_fork_in_child ();
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+				var env = invocation.env;
+				var env_vtable = *env;
+
+				var get_string_utf_chars = (GetStringUTFCharsFunc) env_vtable[169];
+				var release_string_utf_chars = (ReleaseStringUTFCharsFunc) env_vtable[170];
+
+				var name_obj = invocation.name_obj;
+				var name_utf8 = get_string_utf_chars (env, name_obj);
+
+				handler.recover_from_fork_in_child (name_utf8);
+
+				release_string_utf_chars (env, name_obj, name_utf8);
 			}
+
+			private struct Invocation {
+				public void *** env;
+				public void * name_obj;
+			}
+
+			[CCode (has_target = false)]
+			private delegate string * GetStringUTFCharsFunc (void * env, void * str_obj, out uint8 is_copy = null);
+
+			[CCode (has_target = false)]
+			private delegate string * ReleaseStringUTFCharsFunc (void * env, void * str_obj, string * str_utf8);
+
 		}
 	}
 #endif
@@ -920,7 +949,7 @@ namespace Frida.Agent {
 	public interface ForkHandler : Object {
 		public abstract void prepare_to_fork ();
 		public abstract void recover_from_fork_in_parent ();
-		public abstract void recover_from_fork_in_child ();
+		public abstract void recover_from_fork_in_child (string? identifier);
 	}
 
 #if LINUX
