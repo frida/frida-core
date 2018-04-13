@@ -20,7 +20,6 @@
 #include <dlfcn.h>
 #include <elf.h>
 #include <errno.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #ifdef HAVE_ANDROID
@@ -36,6 +35,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #ifdef HAVE_SYS_USER_H
 # include <sys/user.h>
@@ -202,6 +202,7 @@ struct _FridaInjectParams
   GumAddress open_impl;
   GumAddress close_impl;
   GumAddress write_impl;
+  GumAddress syscall_impl;
 
   GumAddress dlopen_impl;
   GumAddress dlopen_pic_value;
@@ -412,6 +413,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   params.open_impl = frida_resolve_libc_function (pid, "open");
   params.close_impl = frida_resolve_libc_function (pid, "close");
   params.write_impl = frida_resolve_libc_function (pid, "write");
+  params.syscall_impl = frida_resolve_libc_function (pid, "syscall");
 
 #if defined (HAVE_GLIBC)
   params.dlopen_impl = frida_resolve_libc_function (pid, "__libc_dlopen_mode");
@@ -884,7 +886,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 {
   GumX86Writer cw;
   const guint worker_offset = 172;
-  gssize fd_offset, unload_policy_offset;
+  gssize fd_offset, unload_policy_offset, tid_offset;
   const gchar * skip_dlopen = "skip_dlopen";
   const gchar * skip_dlclose = "skip_dlclose";
   const gchar * skip_detach = "skip_detach";
@@ -932,6 +934,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   fd_offset = -4;
   unload_policy_offset = -8;
+  tid_offset = -12;
 
   EMIT_CALL_IMM (params->open_impl,
       2,
@@ -974,12 +977,12 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   EMIT_STORE_IMM (XBP, unload_policy_offset, FRIDA_UNLOAD_POLICY_IMMEDIATE);
   EMIT_LEA (XCX, XBP, unload_policy_offset);
-
+  EMIT_LEA (XDX, XBP, fd_offset);
   EMIT_CALL_REG (XAX,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (XCX),
-      ARG_IMM (0));
+      ARG_REG (XDX));
 
   EMIT_LOAD_REG (EAX, XBP, unload_policy_offset);
   EMIT_CMP (EAX, FRIDA_UNLOAD_POLICY_IMMEDIATE);
@@ -1020,6 +1023,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 #endif
 
   fd_reg = (cw.target_cpu == GUM_CPU_IA32) ? GUM_REG_EDX : GUM_REG_EDI;
+
   EMIT_LOAD_REGV (fd_reg, XBP, fd_offset);
   EMIT_LEA (XCX, XBP, unload_policy_offset);
   EMIT_CALL_IMM (params->write_impl,
@@ -1027,6 +1031,18 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       ARG_REGV (fd_reg),
       ARG_REG (XCX),
       ARG_IMM (1));
+
+  EMIT_CALL_IMM (params->syscall_impl,
+      1,
+      ARG_IMM (__NR_gettid));
+  EMIT_STORE_REG (XBP, tid_offset, EAX);
+  EMIT_LOAD_REGV (fd_reg, XBP, fd_offset);
+  EMIT_LEA (XCX, XBP, tid_offset);
+  EMIT_CALL_IMM (params->write_impl,
+      3,
+      ARG_REGV (fd_reg),
+      ARG_REG (XCX),
+      ARG_IMM (4));
 
   EMIT_LOAD_REG (ECX, XBP, fd_offset);
   EMIT_CALL_IMM (params->close_impl,
@@ -1046,6 +1062,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
 #define EMIT_MOVE(dst, src) \
     gum_thumb_writer_put_mov_reg_reg (&cw, ARM_REG_##dst, ARM_REG_##src)
+#define EMIT_ADD(dst, src, offset) \
+    gum_thumb_writer_put_add_reg_reg_imm (&cw, ARM_REG_##dst, ARM_REG_##src, offset)
 #define EMIT_LOAD_FIELD(reg, field) \
     gum_thumb_writer_put_ldr_reg_reg_offset (&cw, ARM_REG_##reg, ARM_REG_R6, G_STRUCT_OFFSET (FridaTrampolineData, field))
 #define EMIT_STORE_FIELD(field, reg) \
@@ -1174,16 +1192,16 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_name)));
   EMIT_MOVE (R4, R0);
 
-  EMIT_STACK_ADJUSTMENT (3);
+  EMIT_STACK_ADJUSTMENT (2);
   EMIT_LDR_U32 (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
-  gum_thumb_writer_put_push_regs (&cw, 1, ARM_REG_R0);
-
+  gum_thumb_writer_put_push_regs (&cw, 2, ARM_REG_R0, ARM_REG_R7);
   EMIT_MOVE (R1, SP);
+  EMIT_ADD (R2, SP, 4);
   EMIT_CALL_REG (R4,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (R1),
-      ARG_IMM (0));
+      ARG_REG (R2));
 
   EMIT_LDR (R0, SP);
   EMIT_CMP (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
@@ -1233,6 +1251,19 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   EMIT_STACK_ADJUSTMENT (-4);
 
+  EMIT_CALL_IMM (params->syscall_impl,
+      1,
+      ARG_IMM (__NR_gettid));
+  EMIT_STACK_ADJUSTMENT (3);
+  gum_thumb_writer_put_push_regs (&cw, 1, ARM_REG_R0);
+  EMIT_MOVE (R1, SP);
+  EMIT_CALL_IMM (params->write_impl,
+      3,
+      ARG_REG (R7),
+      ARG_REG (R1),
+      ARG_IMM (4));
+  EMIT_STACK_ADJUSTMENT (-4);
+
   EMIT_CALL_IMM (params->close_impl,
       1,
       ARG_REG (R7));
@@ -1247,6 +1278,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
 #define EMIT_MOVE(dst, src) \
     gum_arm64_writer_put_mov_reg_reg (&cw, ARM64_REG_##dst, ARM64_REG_##src)
+#define EMIT_ADD(dst, src, offset) \
+    gum_arm64_writer_put_add_reg_reg_imm (&cw, ARM64_REG_##dst, ARM64_REG_##src, offset)
 #define EMIT_PUSH(a, b) \
     gum_arm64_writer_put_push_reg_reg (&cw, ARM64_REG_##a, ARM64_REG_##b)
 #define EMIT_POP(a, b) \
@@ -1380,14 +1413,14 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_MOVE (X5, X0);
 
   EMIT_LDR_U64 (X0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
-  EMIT_PUSH (X0, X1);
+  EMIT_PUSH (X0, X21);
   EMIT_MOVE (X1, SP);
-
+  EMIT_ADD (X2, SP, 8);
   EMIT_CALL_REG (X5,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (X1),
-      ARG_IMM (0));
+      ARG_REG (X2));
 
   EMIT_LDR (W22, SP, 0);
 
@@ -1436,6 +1469,18 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       ARG_REG (X1),
       ARG_IMM (1));
 
+  EMIT_POP (X0, X1);
+
+  EMIT_CALL_IMM (params->syscall_impl,
+      1,
+      ARG_IMM (__NR_gettid));
+  EMIT_PUSH (X0, X1);
+  EMIT_MOVE (X1, SP);
+  EMIT_CALL_IMM (params->write_impl,
+      3,
+      ARG_REG (W21),
+      ARG_REG (X1),
+      ARG_IMM (4));
   EMIT_POP (X0, X1);
 
   EMIT_CALL_IMM (params->close_impl,
@@ -1569,8 +1614,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_REG (T9,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
-      ARG_IMM (0),
-      ARG_IMM (0));
+      ARG_IMM (0) /* FIXME: unload_policy */,
+      ARG_IMM (0) /* FIXME: injector_state */);
 
   EMIT_CALL_IMM (params->dlclose_impl,
       1,

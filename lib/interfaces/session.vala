@@ -71,6 +71,18 @@ namespace Frida {
 		DEFERRED
 	}
 
+#if DARWIN
+	public struct DarwinInjectorState {
+		public Gum.MemoryRange? mapped_range;
+	}
+#endif
+
+#if LINUX
+	public struct LinuxInjectorState {
+		public int fifo_fd;
+	}
+#endif
+
 	public enum SessionDetachReason {
 		APPLICATION_REQUESTED = 1,
 		PROCESS_TERMINATED,

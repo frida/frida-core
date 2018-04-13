@@ -203,9 +203,6 @@ namespace Frida {
 		}
 
 		private bool try_resume_child (uint pid) {
-			if (!pending_children.unset (pid))
-				return false;
-
 			var entry_request = agent_entries[pid];
 			if (entry_request == null)
 				return false;
@@ -220,8 +217,14 @@ namespace Frida {
 			if (resume_request == null)
 				return false;
 
+			pending_children.unset (pid);
+
 			resume_request.set_value (true);
 			entry.resume_request = null;
+
+			if (entry.sessions.is_empty) {
+				unload_and_destroy.begin (entry, SessionDetachReason.APPLICATION_REQUESTED);
+			}
 
 			return true;
 		}
@@ -560,15 +563,22 @@ namespace Frida {
 			promise.set_value (agent_entry);
 
 			connection.on_closed.connect (on_agent_connection_closed);
+			provider.closed.connect (on_agent_session_provider_closed);
 
-			pending_children[pid] = info;
-			delivered (info);
+			if (!try_handle_child (info)) {
+				pending_children[pid] = info;
+				delivered (info);
+			}
 
 			try {
 				yield resume_request.future.wait_async ();
 			} catch (Gee.FutureError e) {
 				assert_not_reached ();
 			}
+		}
+
+		protected virtual bool try_handle_child (HostChildInfo info) {
+			return false;
 		}
 
 		private class AgentEntry : Object {
@@ -699,6 +709,237 @@ namespace Frida {
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
+			}
+		}
+	}
+
+	public abstract class InternalAgent : Object {
+		public BaseDBusHostSession host_session {
+			get;
+			construct;
+		}
+
+		public string? script_source {
+			get;
+			construct;
+		}
+
+		private Gee.Promise<bool> ensure_request;
+		private Gee.Promise<bool> unloaded;
+
+		protected AgentSession session;
+		private AgentScriptId script;
+
+		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
+		private int64 next_request_id = 1;
+
+		construct {
+			host_session.agent_session_closed.connect (on_agent_session_closed);
+
+			unloaded = new Gee.Promise<bool> ();
+		}
+
+		~InternalAgent () {
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+		}
+
+		public async void close () {
+			if (ensure_request != null) {
+				try {
+					yield ensure_loaded ();
+				} catch (Error e) {
+				}
+			}
+
+			yield ensure_unloaded ();
+		}
+
+		protected abstract async uint get_target_pid () throws Error;
+
+		protected virtual void on_event (string type, Json.Array event) {
+		}
+
+		protected async Json.Node call (string method, Json.Node[] args) throws Error {
+			yield ensure_loaded ();
+
+			var request_id = next_request_id++;
+
+			var builder = new Json.Builder ();
+			builder
+			.begin_array ()
+			.add_string_value ("frida:rpc")
+			.add_int_value (request_id)
+			.add_string_value ("call")
+			.add_string_value (method)
+			.begin_array ();
+			foreach (var arg in args)
+				builder.add_value (arg);
+			builder
+			.end_array ()
+			.end_array ();
+
+			var generator = new Json.Generator ();
+			generator.set_root (builder.get_root ());
+			size_t length;
+			var request = generator.to_data (out length);
+
+			var response = new PendingResponse (() => call.callback ());
+			pending[request_id.to_string ()] = response;
+
+			post_call_request.begin (request, response, session, script);
+
+			yield;
+
+			if (response.error != null)
+				throw response.error;
+
+			return response.result;
+		}
+
+		private async void post_call_request (string request, PendingResponse response, AgentSession session, AgentScriptId script) {
+			try {
+				yield session.post_to_script (script, request, false, new uint8[0]);
+			} catch (GLib.Error e) {
+				response.complete_with_error (Marshal.from_dbus (e));
+			}
+		}
+
+		protected async void ensure_loaded () throws Error {
+			if (ensure_request != null) {
+				var future = ensure_request.future;
+				try {
+					yield future.wait_async ();
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
+				}
+				return;
+			}
+			ensure_request = new Gee.Promise<bool> ();
+
+			uint target_pid;
+			try {
+				target_pid = yield get_target_pid ();
+			} catch (Error e) {
+				ensure_request.set_exception (e);
+				ensure_request = null;
+
+				throw e;
+			}
+
+			try {
+				var id = yield host_session.attach_to (target_pid);
+				session = yield host_session.obtain_agent_session (id);
+				session.message_from_script.connect (on_message_from_script);
+
+				if (script_source != null) {
+					script = yield session.create_script ("internal-agent", script_source);
+					yield session.load_script (script);
+				}
+
+				ensure_request.set_value (true);
+			} catch (GLib.Error raw_error) {
+				yield ensure_unloaded ();
+
+				var error = Marshal.from_dbus (raw_error);
+				ensure_request.set_exception (error);
+				ensure_request = null;
+
+				throw error;
+			}
+		}
+
+		private async void ensure_unloaded () {
+			if (script.handle != 0) {
+				try {
+					yield session.destroy_script (script);
+				} catch (GLib.Error e) {
+				}
+				script = AgentScriptId (0);
+			}
+
+			if (session != null) {
+				try {
+					yield session.close ();
+				} catch (GLib.Error e) {
+				}
+				session.message_from_script.disconnect (on_message_from_script);
+				session = null;
+			}
+		}
+
+		protected async void wait_for_unload () {
+			try {
+				yield unloaded.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
+		}
+
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
+			if (session != this.session)
+				return;
+
+			unloaded.set_value (true);
+		}
+
+		private void on_message_from_script (AgentScriptId sid, string raw_message, bool has_data, uint8[] data) {
+			if (sid != script)
+				return;
+
+			var parser = new Json.Parser ();
+			try {
+				parser.load_from_data (raw_message);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			var message = parser.get_root ().get_object ();
+			var type = message.get_string_member ("type");
+			if (type == "send") {
+				var event = message.get_array_member ("payload");
+				var event_type = event.get_string_element (0);
+				if (event_type == "frida:rpc") {
+					var request_id = event.get_int_element (1);
+					PendingResponse response;
+					pending.unset (request_id.to_string (), out response);
+					var status = event.get_string_element (2);
+					if (status == "ok")
+						response.complete_with_result (event.get_element (3));
+					else
+						response.complete_with_error (new Error.NOT_SUPPORTED (event.get_string_element (3)));
+				} else {
+					on_event (event_type, event);
+				}
+			} else {
+				printerr ("%s\n", raw_message);
+			}
+		}
+
+		private class PendingResponse {
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
+
+			public Json.Node? result {
+				get;
+				private set;
+			}
+
+			public Error? error {
+				get;
+				private set;
+			}
+
+			public PendingResponse (owned CompletionHandler handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete_with_result (Json.Node r) {
+				result = r;
+				handler ();
+			}
+
+			public void complete_with_error (Error e) {
+				error = e;
+				handler ();
 			}
 		}
 	}

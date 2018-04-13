@@ -269,7 +269,7 @@ namespace Frida {
 #if IOS
 		private FruitLauncher get_fruit_launcher () {
 			if (fruit_launcher == null) {
-				fruit_launcher = new FruitLauncher (this, agent);
+				fruit_launcher = new FruitLauncher (this);
 				fruit_launcher.spawned.connect ((info) => { spawned (info); });
 			}
 			return fruit_launcher;
@@ -297,31 +297,37 @@ namespace Frida {
 	}
 
 #if IOS
-	protected class FruitLauncher : Object {
+	private class FruitLauncher : Object {
 		public signal void spawned (HostSpawnInfo info);
 
-		private DarwinHelper helper;
-		private AgentResource agent;
-		protected MainContext main_context;
+		public weak DarwinHostSession host_session {
+			get;
+			construct;
+		}
+
+		public DarwinHelper helper {
+			get;
+			construct;
+		}
 
 		private LaunchdAgent launchd_agent;
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_identifier = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn_by_pid = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		internal FruitLauncher (DarwinHostSession host_session, AgentResource agent) {
-			this.helper = host_session.helper;
-			this.agent = agent;
-			this.main_context = MainContext.ref_thread_default ();
+		public FruitLauncher (DarwinHostSession host_session) {
+			Object (host_session: host_session, helper: host_session.helper);
+		}
 
-			this.launchd_agent = new LaunchdAgent (host_session);
-			this.launchd_agent.app_launch_completed.connect (on_app_launch_completed);
-			this.launchd_agent.spawned.connect (on_spawned);
+		construct {
+			launchd_agent = new LaunchdAgent (host_session);
+			launchd_agent.app_launch_completed.connect (on_app_launch_completed);
+			launchd_agent.spawned.connect (on_spawned);
 		}
 
 		~FruitLauncher () {
-			this.launchd_agent.spawned.disconnect (on_spawned);
-			this.launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
+			launchd_agent.spawned.disconnect (on_spawned);
+			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 		}
 
 		public async void close () {
@@ -387,7 +393,7 @@ namespace Frida {
 				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
 				return false;
 			});
-			timeout.attach (main_context);
+			timeout.attach (MainContext.get_thread_default ());
 
 			try {
 				var future = request.future;
@@ -440,13 +446,13 @@ namespace Frida {
 		}
 	}
 
-	private class LaunchdAgent : DarwinAgent {
+	private class LaunchdAgent : InternalAgent {
 		public signal void app_launch_completed (string identifier, uint pid, Error? error);
 		public signal void spawned (HostSpawnInfo info);
 
 		public LaunchdAgent (DarwinHostSession host_session) {
 			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
-			Object (host_session: host_session, target_pid: 1, script_source: source);
+			Object (host_session: host_session, script_source: source);
 		}
 
 		public async void prepare_for_launch (string identifier) throws Error {
@@ -483,7 +489,7 @@ namespace Frida {
 
 		private async void prepare_app (string identifier, uint pid) {
 			try {
-				var agent = new XpcProxyAgent (host_session, identifier, pid);
+				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
 				app_launch_completed (identifier, pid, null);
 			} catch (Error e) {
@@ -493,259 +499,47 @@ namespace Frida {
 
 		private async void prepare_xpcproxy (string identifier, uint pid) {
 			try {
-				var agent = new XpcProxyAgent (host_session, identifier, pid);
+				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
 				spawned (HostSpawnInfo (pid, identifier));
 			} catch (Error e) {
 			}
 		}
+
+		protected override async uint get_target_pid () throws Error {
+			return 1;
+		}
 	}
 
-	private class XpcProxyAgent : DarwinAgent {
+	private class XpcProxyAgent : InternalAgent {
 		public string identifier {
+			get;
+			construct;
+		}
+
+		public uint pid {
 			get;
 			construct;
 		}
 
 		public XpcProxyAgent (DarwinHostSession host_session, string identifier, uint pid) {
 			string * source = Frida.Data.Darwin.get_xpcproxy_js_blob ().data;
-			Object (host_session: host_session, identifier: identifier, target_pid: pid, script_source: source);
+			Object (host_session: host_session, script_source: source, identifier: identifier, pid: pid);
 		}
 
 		public async void run_until_exec () throws Error {
 			yield ensure_loaded ();
 
-			var helper = host_session.helper;
-			yield host_session.helper.resume (target_pid);
+			var helper = (host_session as DarwinHostSession).helper;
+			yield helper.resume (pid);
 
 			yield wait_for_unload ();
 
-			yield helper.wait_until_suspended (target_pid);
-		}
-	}
-
-	private class DarwinAgent : Object {
-		public DarwinHostSession host_session {
-			get;
-			construct;
+			yield helper.wait_until_suspended (pid);
 		}
 
-		public uint target_pid {
-			get;
-			construct;
-		}
-
-		public string script_source {
-			get;
-			construct;
-		}
-
-		protected MainContext main_context;
-		private Gee.Promise<bool> ensure_request;
-		private Gee.Promise<bool> unloaded;
-
-		private AgentSession session;
-		private AgentScriptId script;
-
-		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
-		private int64 next_request_id = 1;
-
-		construct {
-			main_context = MainContext.ref_thread_default ();
-
-			host_session.agent_session_closed.connect (on_agent_session_closed);
-
-			unloaded = new Gee.Promise<bool> ();
-		}
-
-		~DarwinAgent () {
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
-		}
-
-		public async void close () {
-			if (ensure_request != null) {
-				try {
-					yield ensure_loaded ();
-				} catch (Error e) {
-				}
-			}
-
-			if (script.handle != 0) {
-				try {
-					yield session.destroy_script (script);
-				} catch (GLib.Error e) {
-				}
-				script = AgentScriptId (0);
-			}
-
-			if (session != null) {
-				try {
-					yield session.close ();
-				} catch (GLib.Error e) {
-				}
-				session = null;
-			}
-		}
-
-		protected virtual void on_event (string type, Json.Array event) {
-		}
-
-		protected async Json.Node call (string method, Json.Node[] args) throws Error {
-			yield ensure_loaded ();
-
-			var request_id = next_request_id++;
-
-			var builder = new Json.Builder ();
-			builder
-			.begin_array ()
-			.add_string_value ("frida:rpc")
-			.add_int_value (request_id)
-			.add_string_value ("call")
-			.add_string_value (method)
-			.begin_array ();
-			foreach (var arg in args)
-				builder.add_value (arg);
-			builder
-			.end_array ()
-			.end_array ();
-
-			var generator = new Json.Generator ();
-			generator.set_root (builder.get_root ());
-			size_t length;
-			var request = generator.to_data (out length);
-
-			var response = new PendingResponse (() => call.callback ());
-			pending[request_id.to_string ()] = response;
-
-			post_call_request.begin (request, response, session, script);
-
-			yield;
-
-			if (response.error != null)
-				throw response.error;
-
-			return response.result;
-		}
-
-		private async void post_call_request (string request, PendingResponse response, AgentSession session, AgentScriptId script) {
-			try {
-				yield session.post_to_script (script, request, false, new uint8[0]);
-			} catch (GLib.Error e) {
-				response.complete_with_error (Marshal.from_dbus (e));
-			}
-		}
-
-		protected async void ensure_loaded () throws Error {
-			if (ensure_request != null) {
-				var future = ensure_request.future;
-				try {
-					yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
-				}
-				return;
-			}
-			ensure_request = new Gee.Promise<bool> ();
-
-			try {
-				var id = yield host_session.attach_to (target_pid);
-				session = yield host_session.obtain_agent_session (id);
-
-				script = yield session.create_script ("darwin-agent", script_source);
-				session.message_from_script.connect (on_message_from_script);
-				yield session.load_script (script);
-
-				ensure_request.set_value (true);
-			} catch (GLib.Error raw_error) {
-				script = AgentScriptId (0);
-
-				if (session != null) {
-					session.message_from_script.disconnect (on_message_from_script);
-					session = null;
-				}
-
-				var error = Marshal.from_dbus (raw_error);
-				ensure_request.set_exception (error);
-				ensure_request = null;
-
-				throw error;
-			}
-		}
-
-		protected async void wait_for_unload () {
-			try {
-				yield unloaded.future.wait_async ();
-			} catch (Gee.FutureError e) {
-				assert_not_reached ();
-			}
-		}
-
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
-			if (session != this.session)
-				return;
-
-			unloaded.set_value (true);
-		}
-
-		private void on_message_from_script (AgentScriptId sid, string raw_message, bool has_data, uint8[] data) {
-			if (sid != script)
-				return;
-
-			var parser = new Json.Parser ();
-			try {
-				parser.load_from_data (raw_message);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-			var message = parser.get_root ().get_object ();
-			var type = message.get_string_member ("type");
-			if (type == "send") {
-				var event = message.get_array_member ("payload");
-				var event_type = event.get_string_element (0);
-				if (event_type == "frida:rpc") {
-					var request_id = event.get_int_element (1);
-					PendingResponse response;
-					pending.unset (request_id.to_string (), out response);
-					var status = event.get_string_element (2);
-					if (status == "ok")
-						response.complete_with_result (event.get_element (3));
-					else
-						response.complete_with_error (new Error.NOT_SUPPORTED (event.get_string_element (3)));
-				} else {
-					on_event (event_type, event);
-				}
-			} else {
-				stderr.printf ("%s\n", raw_message);
-			}
-		}
-
-		private class PendingResponse {
-			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
-
-			public Json.Node? result {
-				get;
-				private set;
-			}
-
-			public Error? error {
-				get;
-				private set;
-			}
-
-			public PendingResponse (owned CompletionHandler handler) {
-				this.handler = (owned) handler;
-			}
-
-			public void complete_with_result (Json.Node r) {
-				result = r;
-				handler ();
-			}
-
-			public void complete_with_error (Error e) {
-				error = e;
-				handler ();
-			}
+		protected override async uint get_target_pid () throws Error {
+			return pid;
 		}
 	}
 #endif

@@ -1,10 +1,10 @@
 namespace Frida.Agent {
-	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
+	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
 		if (Runner.shared_instance == null)
-			Runner.create_and_run (pipe_address, ref unload_policy, mapped_range);
+			Runner.create_and_run (pipe_address, ref unload_policy, injector_state);
 #if !WINDOWS
 		else
-			Runner.resume_after_fork (ref unload_policy);
+			Runner.resume_after_fork (ref unload_policy, injector_state);
 #endif
 	}
 
@@ -48,8 +48,11 @@ namespace Frida.Agent {
 
 		private uint child_gating_subscriber_count = 0;
 #if !WINDOWS
-		private ForkListener? fork_listener;
-		private ThreadIgnoreScope fork_ignore_scope;
+		private ForkMonitor? fork_monitor;
+#if LINUX
+		private ThreadListCloaker? thread_list_cloaker;
+		private FDListCloaker? fd_list_cloaker;
+#endif
 		private uint fork_parent_pid;
 		private uint fork_child_pid;
 		private HostChildId fork_child_id;
@@ -71,12 +74,26 @@ namespace Frida.Agent {
 			CHILD
 		}
 
-		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range) {
+		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
 			Environment._init ();
 
 			{
+				Gum.MemoryRange? mapped_range = null;
+
+#if DARWIN
+				var injector_state = (DarwinInjectorState *) opaque_injector_state;
+				if (injector_state != null)
+					mapped_range = injector_state.mapped_range;
+#endif
+
 				var agent_range = memory_range (mapped_range);
 				Gum.Cloak.add_range (agent_range);
+
+#if LINUX
+				var injector_state = (LinuxInjectorState *) opaque_injector_state;
+				if (injector_state != null)
+					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+#endif
 
 				var ignore_scope = new ThreadIgnoreScope ();
 
@@ -89,6 +106,10 @@ namespace Frida.Agent {
 				}
 
 				if (shared_instance.stop_reason == FORK) {
+#if LINUX
+					if (injector_state != null)
+						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
+#endif
 					unload_policy = DEFERRED;
 					return;
 				} else {
@@ -102,13 +123,23 @@ namespace Frida.Agent {
 		}
 
 #if !WINDOWS
-		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy) {
+		public static void resume_after_fork (ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
 			{
+#if LINUX
+				var injector_state = (LinuxInjectorState *) opaque_injector_state;
+				if (injector_state != null)
+					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+#endif
+
 				var ignore_scope = new ThreadIgnoreScope ();
 
 				shared_instance.run_after_fork ();
 
 				if (shared_instance.stop_reason == FORK) {
+#if LINUX
+					if (injector_state != null)
+						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
+#endif
 					unload_policy = DEFERRED;
 					return;
 				} else {
@@ -174,8 +205,6 @@ namespace Frida.Agent {
 		}
 
 		private void prepare_to_fork () {
-			fork_ignore_scope = new ThreadIgnoreScope ();
-
 			schedule_idle (() => {
 				do_prepare_to_fork.begin ();
 				return false;
@@ -202,14 +231,14 @@ namespace Frida.Agent {
 		}
 
 		private void recover_from_fork_in_parent () {
-			recover_from_fork (ForkActor.PARENT);
+			recover_from_fork (ForkActor.PARENT, null);
 		}
 
-		private void recover_from_fork_in_child () {
-			recover_from_fork (ForkActor.CHILD);
+		private void recover_from_fork_in_child (string? identifier) {
+			recover_from_fork (ForkActor.CHILD, identifier);
 		}
 
-		private void recover_from_fork (ForkActor actor) {
+		private void recover_from_fork (ForkActor actor, string? identifier) {
 			if (actor == PARENT) {
 				GLibFork.recover_from_fork_in_parent ();
 				GIOFork.recover_from_fork_in_parent ();
@@ -242,7 +271,7 @@ namespace Frida.Agent {
 			main_context.pop_thread_default ();
 
 			schedule_idle (() => {
-				finish_recovery_from_fork.begin (actor);
+				finish_recovery_from_fork.begin (actor, identifier);
 				return false;
 			});
 
@@ -250,8 +279,6 @@ namespace Frida.Agent {
 				fork_cond.wait (fork_mutex);
 
 			fork_mutex.unlock ();
-
-			fork_ignore_scope = null;
 		}
 
 		private async void recreate_agent_thread (ForkActor actor) {
@@ -280,9 +307,10 @@ namespace Frida.Agent {
 			main_loop.quit ();
 		}
 
-		private async void finish_recovery_from_fork (ForkActor actor) {
+		private async void finish_recovery_from_fork (ForkActor actor, string? identifier) {
 			if (actor == CHILD) {
-				var info = HostChildInfo (fork_child_pid, Environment.get_executable_path (), fork_parent_pid);
+				var child_identifier = (identifier != null) ? identifier : Environment._get_executable_path ();
+				var info = HostChildInfo (fork_child_pid, child_identifier, fork_parent_pid);
 				try {
 					yield controller.wait_for_permission_to_resume (fork_child_id, info);
 				} catch (GLib.Error e) {
@@ -312,7 +340,7 @@ namespace Frida.Agent {
 		private void recover_from_fork_in_parent () {
 		}
 
-		private void recover_from_fork_in_child () {
+		private void recover_from_fork_in_child (string? identifier) {
 		}
 #endif
 
@@ -407,16 +435,18 @@ namespace Frida.Agent {
 
 		private void enable_child_gating () {
 #if !WINDOWS
-			if (fork_listener != null)
+			if (fork_monitor != null)
 				return;
-
-			fork_listener = new ForkListener (this);
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.begin_transaction ();
 
-			interceptor.attach_listener ((void *) Posix.fork, fork_listener);
-			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
+			fork_monitor = new ForkMonitor (this);
+
+#if LINUX
+			thread_list_cloaker = new ThreadListCloaker ();
+			fd_list_cloaker = new FDListCloaker ();
+#endif
 
 			interceptor.end_transaction ();
 #endif
@@ -424,18 +454,20 @@ namespace Frida.Agent {
 
 		private void disable_child_gating () {
 #if !WINDOWS
-			if (fork_listener == null)
+			if (fork_monitor == null)
 				return;
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.begin_transaction ();
 
-			interceptor.revert_function ((void *) Posix.vfork);
-			interceptor.detach_listener (fork_listener);
+#if LINUX
+			fd_list_cloaker = null;
+			thread_list_cloaker = null;
+#endif
+
+			fork_monitor = null;
 
 			interceptor.end_transaction ();
-
-			fork_listener = null;
 #endif
 		}
 
@@ -797,34 +829,461 @@ namespace Frida.Agent {
 		}
 	}
 
-	private class ForkListener : Object, Gum.InvocationListener {
+#if !WINDOWS
+	private class ForkMonitor : Object {
 		public weak ForkHandler handler {
 			get;
 			construct;
 		}
 
-		public ForkListener (ForkHandler handler) {
+		private ForkListener fork_listener;
+		private SetArgV0Listener set_argv0_listener;
+
+		public ForkMonitor (ForkHandler handler) {
 			Object (handler: handler);
 		}
 
-		public void on_enter (Gum.InvocationContext context) {
-			handler.prepare_to_fork ();
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			var recover_child_late = false;
+
+#if ANDROID
+			if (Environment._get_executable_path ().has_prefix ("/system/bin/app_process")) {
+				var set_argv0 = Gum.Module.find_export_by_name ("libandroid_runtime.so", "_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring");
+				if (set_argv0 != null) {
+					set_argv0_listener = new SetArgV0Listener (handler);
+					interceptor.attach_listener (set_argv0, set_argv0_listener);
+
+					recover_child_late = true;
+				}
+			}
+#endif
+
+			fork_listener = new ForkListener (handler, recover_child_late);
+			interceptor.attach_listener ((void *) Posix.fork, fork_listener);
+			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
 		}
 
-		public void on_leave (Gum.InvocationContext context) {
-			int result = (int) context.get_return_value ();
-			if (result != 0)
-				handler.recover_from_fork_in_parent ();
-			else
-				handler.recover_from_fork_in_child ();
+		~ForkMonitor () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			if (set_argv0_listener != null)
+				interceptor.detach_listener (set_argv0_listener);
+
+			interceptor.revert_function ((void *) Posix.vfork);
+			interceptor.detach_listener (fork_listener);
+		}
+
+		private class ForkListener : Object, Gum.InvocationListener {
+			public weak ForkHandler handler {
+				get;
+				construct;
+			}
+
+			public bool recover_child_late {
+				get;
+				construct;
+			}
+
+			public ForkListener (ForkHandler handler, bool recover_child_late) {
+				Object (handler: handler, recover_child_late: recover_child_late);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				handler.prepare_to_fork ();
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				int result = (int) context.get_return_value ();
+				if (result != 0)
+					handler.recover_from_fork_in_parent ();
+				else if (!recover_child_late)
+					handler.recover_from_fork_in_child (null);
+			}
+		}
+
+		private class SetArgV0Listener : Object, Gum.InvocationListener {
+			public weak ForkHandler handler {
+				get;
+				construct;
+			}
+
+			public SetArgV0Listener (ForkHandler handler) {
+				Object (handler: handler);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				invocation.env = context.get_nth_argument (0);
+				invocation.name_obj = context.get_nth_argument (2);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+				var env = invocation.env;
+				var env_vtable = *env;
+
+				var get_string_utf_chars = (GetStringUTFCharsFunc) env_vtable[169];
+				var release_string_utf_chars = (ReleaseStringUTFCharsFunc) env_vtable[170];
+
+				var name_obj = invocation.name_obj;
+				var name_utf8 = get_string_utf_chars (env, name_obj);
+
+				handler.recover_from_fork_in_child (name_utf8);
+
+				release_string_utf_chars (env, name_obj, name_utf8);
+			}
+
+			private struct Invocation {
+				public void *** env;
+				public void * name_obj;
+			}
+
+			[CCode (has_target = false)]
+			private delegate string * GetStringUTFCharsFunc (void * env, void * str_obj, out uint8 is_copy = null);
+
+			[CCode (has_target = false)]
+			private delegate string * ReleaseStringUTFCharsFunc (void * env, void * str_obj, string * str_utf8);
+
 		}
 	}
+#endif
 
 	public interface ForkHandler : Object {
 		public abstract void prepare_to_fork ();
 		public abstract void recover_from_fork_in_parent ();
-		public abstract void recover_from_fork_in_child ();
+		public abstract void recover_from_fork_in_child (string? identifier);
 	}
+
+#if LINUX
+	private class ThreadListCloaker : Object, DirListFilter {
+		private string our_dir_by_pid;
+		private DirListCloaker cloaker;
+
+		construct {
+			our_dir_by_pid = "/proc/%u/task".printf (Posix.getpid ());
+			cloaker = new DirListCloaker (this);
+		}
+
+		private bool matches_directory (string path) {
+			return path == "/proc/self/task" || path == our_dir_by_pid;
+		}
+
+		private bool matches_file (string name) {
+			var tid = (Gum.ThreadId) uint64.parse (name);
+			return Gum.Cloak.has_thread (tid);
+		}
+	}
+
+	private class FDListCloaker : Object, DirListFilter {
+		private string our_dir_by_pid;
+		private DirListCloaker cloaker;
+
+		construct {
+			our_dir_by_pid = "/proc/%u/fd".printf (Posix.getpid ());
+			cloaker = new DirListCloaker (this);
+		}
+
+		private bool matches_directory (string path) {
+			return path == "/proc/self/fd" || path == our_dir_by_pid;
+		}
+
+		private bool matches_file (string name) {
+			var fd = int.parse (name);
+			return Gum.Cloak.has_file_descriptor (fd);
+		}
+	}
+
+	public class DirListCloaker : Object {
+		public weak DirListFilter filter {
+			get;
+			construct;
+		}
+
+		private Gee.HashSet<Gum.InvocationListener> listeners = new Gee.HashSet<Gum.InvocationListener> ();
+		private Gee.HashSet<Posix.Dir> tracked_handles = new Gee.HashSet<unowned Posix.Dir> ();
+
+		public DirListCloaker (DirListFilter filter) {
+			Object (filter: filter);
+		}
+
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			var libc_name = detect_libc_name ();
+
+			var open_listener = new OpenDirListener (this);
+			listeners.add (open_listener);
+			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "opendir"), open_listener);
+
+			var close_listener = new CloseDirListener (this);
+			listeners.add (close_listener);
+			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "closedir"), close_listener);
+
+			var readdir = Gum.Module.find_export_by_name (libc_name, "readdir");
+			var readdir_listener = new ReadDirListener (this, LEGACY);
+			listeners.add (readdir_listener);
+			interceptor.attach_listener (readdir, readdir_listener);
+
+			var readdir64 = Gum.Module.find_export_by_name (libc_name, "readdir64");
+			if (readdir64 != null && readdir64 != readdir) {
+				var listener = new ReadDirListener (this, MODERN);
+				listeners.add (listener);
+				interceptor.attach_listener (readdir64, listener);
+			}
+
+			var readdir_r = Gum.Module.find_export_by_name (libc_name, "readdir_r");
+			var readdir_r_listener = new ReadDirRListener (this, LEGACY);
+			listeners.add (readdir_r_listener);
+			interceptor.attach_listener (readdir_r, readdir_r_listener);
+
+			var readdir64_r = Gum.Module.find_export_by_name (libc_name, "readdir64_r");
+			if (readdir64_r != null && readdir64_r != readdir_r) {
+				var listener = new ReadDirRListener (this, MODERN);
+				listeners.add (listener);
+				interceptor.attach_listener (readdir64_r, listener);
+			}
+		}
+
+		~DirListCloaker () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			foreach (var listener in listeners)
+				interceptor.detach_listener (listener);
+		}
+
+		public void start_tracking (Posix.Dir handle) {
+			lock (tracked_handles)
+				tracked_handles.add (handle);
+		}
+
+		public void stop_tracking (Posix.Dir handle) {
+			lock (tracked_handles)
+				tracked_handles.remove (handle);
+		}
+
+		public bool is_tracking (Posix.Dir handle) {
+			lock (tracked_handles)
+				return tracked_handles.contains (handle);
+		}
+
+		private class OpenDirListener : Object, Gum.InvocationListener {
+			public weak DirListCloaker parent {
+				get;
+				construct;
+			}
+
+			public OpenDirListener (DirListCloaker parent) {
+				Object (parent: parent);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+				invocation.path = (string *) context.get_nth_argument (0);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				if (!parent.filter.matches_directory (invocation.path))
+					return;
+
+				unowned Posix.Dir? handle = (Posix.Dir?) context.get_return_value ();
+				if (handle != null)
+					parent.start_tracking (handle);
+			}
+
+			private struct Invocation {
+				public string * path;
+			}
+		}
+
+		private class CloseDirListener : Object, Gum.InvocationListener {
+			public weak DirListCloaker parent {
+				get;
+				construct;
+			}
+
+			public CloseDirListener (DirListCloaker parent) {
+				Object (parent: parent);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				unowned Posix.Dir? handle = (Posix.Dir?) context.get_nth_argument (0);
+				if (handle != null)
+					parent.stop_tracking (handle);
+			}
+		}
+
+		private class ReadDirListener : Object, Gum.InvocationListener {
+			public weak DirListCloaker parent {
+				get;
+				construct;
+			}
+
+			public DirEntKind kind {
+				get;
+				construct;
+			}
+
+			public ReadDirListener (DirListCloaker parent, DirEntKind kind) {
+				Object (parent: parent, kind: kind);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				invocation.handle = (Posix.Dir?) context.get_nth_argument (0);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				if (!parent.is_tracking (invocation.handle))
+					return;
+
+				var entry = context.get_return_value ();
+				do {
+					if (entry == null)
+						return;
+
+					var name = parse_dirent_name (entry, kind);
+
+					if (name == "." || name == "..")
+						return;
+
+					if (!parent.filter.matches_file (name))
+						return;
+
+					var impl = (ReadDirFunc) context.function;
+					entry = impl (invocation.handle);
+
+					context.replace_return_value (entry);
+				} while (true);
+			}
+
+			private struct Invocation {
+				public unowned Posix.Dir? handle;
+			}
+
+			[CCode (has_target = false)]
+			private delegate void * ReadDirFunc (Posix.Dir dir);
+		}
+
+		private class ReadDirRListener : Object, Gum.InvocationListener {
+			public weak DirListCloaker parent {
+				get;
+				construct;
+			}
+
+			public DirEntKind kind {
+				get;
+				construct;
+			}
+
+			public ReadDirRListener (DirListCloaker parent, DirEntKind kind) {
+				Object (parent: parent, kind: kind);
+			}
+
+			public void on_enter (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				invocation.handle = (Posix.Dir?) context.get_nth_argument (0);
+				invocation.entry = context.get_nth_argument (1);
+				invocation.result = context.get_nth_argument (2);
+			}
+
+			public void on_leave (Gum.InvocationContext context) {
+				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				if (!parent.is_tracking (invocation.handle))
+					return;
+
+				var result = (int) context.get_return_value ();
+				do {
+					if (result != 0)
+						return;
+
+					if (*invocation.result == null)
+						return;
+
+					var name = parse_dirent_name (*invocation.result, kind);
+
+					if (name == "." || name == "..")
+						return;
+
+					if (!parent.filter.matches_file (name))
+						return;
+
+					var impl = (ReadDirRFunc) context.function;
+					result = impl (invocation.handle, invocation.entry, invocation.result);
+
+					context.replace_return_value ((void *) result);
+				} while (true);
+			}
+
+			private struct Invocation {
+				public unowned Posix.Dir? handle;
+				public void * entry;
+				public void ** result;
+			}
+
+			[CCode (has_target = false)]
+			private delegate int ReadDirRFunc (Posix.Dir dir, void * entry, void ** result);
+		}
+
+		private static unowned string parse_dirent_name (void * entry, DirEntKind kind) {
+			unowned string? name = null;
+
+			if (kind == LEGACY) {
+				unowned Posix.DirEnt ent = (Posix.DirEnt) entry;
+				name = (string) ent.d_name;
+			} else if (kind == MODERN) {
+				unowned DirEnt64 ent = (DirEnt64) entry;
+				name = (string) ent.d_name;
+			}
+
+			return name;
+		}
+
+		private enum DirEntKind {
+			LEGACY,
+			MODERN
+		}
+
+		[Compact]
+		public class DirEnt64 {
+			public uint64 d_ino;
+			public int64 d_off;
+			public uint16 d_reclen;
+			public uint8 d_type;
+			public char d_name[256];
+		}
+
+		private static string detect_libc_name () {
+			string? libc_name = null;
+
+			Gum.Address address_in_libc = (Gum.Address) Posix.opendir;
+			Gum.Process.enumerate_modules ((details) => {
+				var range = details.range;
+
+				if (address_in_libc >= range.base_address && address_in_libc < range.base_address + range.size) {
+					libc_name = details.path;
+					return false;
+				}
+
+				return true;
+			});
+
+			assert (libc_name != null);
+
+			return libc_name;
+		}
+	}
+
+	public interface DirListFilter : Object {
+		public abstract bool matches_directory (string path);
+		public abstract bool matches_file (string name);
+	}
+#endif
 
 	namespace Environment {
 		public extern void _init ();
@@ -832,7 +1291,7 @@ namespace Frida.Agent {
 
 		public extern unowned Gum.ScriptBackend _obtain_script_backend (bool jit_enabled);
 
-		public string get_executable_path () {
+		public string _get_executable_path () {
 			var path = _try_get_executable_path ();
 			if (path != null)
 				return path;
@@ -847,6 +1306,7 @@ namespace Frida.Agent {
 		}
 
 		public extern string? _try_get_executable_path ();
+
 		public extern void * _get_current_pthread ();
 		public extern void _join_pthread (void * thread);
 	}
@@ -877,7 +1337,7 @@ namespace Frida.Agent {
 			uint generation = gc_generation;
 			gc_mutex.unlock ();
 
-			bool collected_everything = garbage_collect ();
+			bool collected_everything = Thread.garbage_collect ();
 
 			gc_mutex.lock ();
 			bool same_generation = generation == gc_generation;
@@ -888,22 +1348,5 @@ namespace Frida.Agent {
 
 			return repeat;
 		});
-	}
-
-	[CCode (cname = "g_thread_garbage_collect")]
-	private extern bool garbage_collect ();
-
-	[CCode (cheader_filename = "glib.h", lower_case_cprefix = "glib_")]
-	namespace GLibFork {
-		public extern void prepare_to_fork ();
-		public extern void recover_from_fork_in_parent ();
-		public extern void recover_from_fork_in_child ();
-	}
-
-	[CCode (cheader_filename = "gio/gio.h", lower_case_cprefix = "gio_")]
-	namespace GIOFork {
-		public extern void prepare_to_fork ();
-		public extern void recover_from_fork_in_parent ();
-		public extern void recover_from_fork_in_child ();
 	}
 }

@@ -14,8 +14,6 @@ darwin_sources = []
 linux_sources = []
 qnx_sources = []
 
-loader_data = []
-
 backend_vala_args = []
 backend_libs = []
 backend_deps = []
@@ -149,7 +147,7 @@ if host_os_family == 'linux'
     android_data = custom_target('frida-data-android',
       input: [
         'linux/frida-android.resources',
-        'linux/robo-agent.js',
+        'linux/agent/systemui.js',
       ],
       output: [
         'frida-data-android.vapi',
@@ -226,42 +224,6 @@ if host_os_family == 'linux'
   backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-linux-1.0']
 endif
 
-if need_loader
-  loader32 = get_option('with-32bit-loader')
-  loader64 = get_option('with-64bit-loader')
-  if loader32 == '' and loader64 == ''
-    if host_is_64bit
-      loader64 = loader
-    else
-      loader32 = loader
-    endif
-  endif
-  loader_data = custom_target('frida-data-loader',
-    input: [
-      loader32,
-      loader64,
-      'loader.resources',
-    ],
-    output: [
-      'frida-data-loader.vapi',
-      'frida-data-loader.h',
-      'frida-data-loader.c',
-      'frida-data-loader-blob.S',
-    ],
-    command: [
-      files('embed-loader.sh'),
-      host_os,
-      '@INPUT0@',
-      '@INPUT1@',
-      meson.current_build_dir(),
-      resource_compiler,
-      '@INPUT2@',
-      meson.get_cross_binary('strip', 'strip'),
-      get_option('strip').to_string(),
-    ],
-  )
-endif
-
 if host_os_family == 'qnx'
   qnx_sources = [
     'qnx/qnx-host-session.vala',
@@ -327,7 +289,7 @@ droidy_sources = [
   'droidy/droidy-client.vala',
 ]
 
-local_sources = windows_sources + darwin_sources + linux_sources + qnx_sources + [loader_data] + [agent_data]
+local_sources = windows_sources + darwin_sources + linux_sources + qnx_sources + [agent_data]
 remote_sources = tcp_sources + fruity_sources + droidy_sources
 
 core_sources = base_sources + local_sources + remote_sources
@@ -350,7 +312,7 @@ core_dep = declare_dependency(
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: [core] + backend_libs,
-  dependencies: [gio_dep, gee_dep, gum_dep] + backend_deps + internal_deps,
+  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep] + backend_deps + internal_deps,
 )
 
 core_build_dir = meson.current_build_dir()

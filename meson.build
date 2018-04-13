@@ -123,8 +123,6 @@ endif
 
 resource_compiler = find_program('frida-resource-compiler')
 
-need_loader = host_os == 'android'
-
 enable_diet_value = get_option('enable_diet')
 if enable_diet_value == 'auto'
   cpu = host_machine.cpu_family()
