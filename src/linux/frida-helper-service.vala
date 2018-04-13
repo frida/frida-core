@@ -152,7 +152,7 @@ namespace Frida {
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
 			var id = _do_inject (pid, path, entrypoint, data, temp_path);
 
-			yield establish_session (id);
+			yield establish_session (id, pid);
 
 			return id;
 		}
@@ -185,13 +185,13 @@ namespace Frida {
 
 			_recreate_injectee_thread (instance, pid);
 
-			yield establish_session (id);
+			yield establish_session (id, pid);
 		}
 
-		private async void establish_session (uint id) throws Error {
+		private async void establish_session (uint id, uint pid) throws Error {
 			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
 
-			var session = new RemoteThreadSession (id, fifo);
+			var session = new RemoteThreadSession (id, pid, fifo);
 			try {
 				yield session.establish ();
 			} catch (Error e) {
@@ -209,14 +209,7 @@ namespace Frida {
 			session.ended.disconnect (on_remote_thread_session_ended);
 			inject_session_by_id.unset (id);
 
-			/*
-			 * Give it some time to execute its final instructions before we free the memory being executed
-			 * Should consider to instead signal the remote thread id and poll /proc until it's gone.
-			 */
-			Timeout.add (50, () => {
-				_destroy_inject_instance (id, unload_policy);
-				return false;
-			});
+			_destroy_inject_instance (id, unload_policy);
 		}
 
 		protected void _destroy_inject_instance (uint id, UnloadPolicy unload_policy) {
@@ -280,6 +273,11 @@ namespace Frida {
 			construct;
 		}
 
+		public uint pid {
+			get;
+			construct;
+		}
+
 		public InputStream input {
 			get;
 			construct;
@@ -288,8 +286,8 @@ namespace Frida {
 		private Gee.Promise<bool> cancel_request = new Gee.Promise<bool> ();
 		private Cancellable cancellable = new Cancellable ();
 
-		public RemoteThreadSession (uint id, InputStream input) {
-			Object (id: id, input: input);
+		public RemoteThreadSession (uint id, uint pid, InputStream input) {
+			Object (id: id, pid: pid, input: input);
 		}
 
 		public async void establish () throws Error {
@@ -342,18 +340,29 @@ namespace Frida {
 			try {
 				var unload_policy = UnloadPolicy.IMMEDIATE;
 
-				var running = true;
-				var buf = new uint8[1];
-				do {
-					var size = yield input.read_async (buf, Priority.DEFAULT, cancellable);
-					if (size == 0)
-						running = false;
-					else
-						unload_policy = (UnloadPolicy) buf[0];
-				} while (running);
+				var byte_buf = new uint8[1];
+				var size = yield input.read_async (byte_buf, Priority.DEFAULT, cancellable);
+				if (size == 1) {
+					unload_policy = (UnloadPolicy) byte_buf[0];
+
+					var tid_buf = new uint8[4];
+					yield input.read_all_async (tid_buf, Priority.DEFAULT, cancellable, null);
+					var tid = *((uint *) tid_buf);
+
+					yield input.read_async (byte_buf, Priority.DEFAULT, cancellable);
+
+					var thread_path = "/proc/%u/task/%u".printf (pid, tid);
+					while (FileUtils.test (thread_path, EXISTS)) {
+						Timeout.add (100, () => {
+							monitor.callback ();
+							return false;
+						});
+						yield;
+					}
+				}
 
 				ended (unload_policy);
-			} catch (IOError e) {
+			} catch (GLib.Error e) {
 				if (!(e is IOError.CANCELLED))
 					ended (IMMEDIATE);
 			}
