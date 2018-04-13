@@ -353,7 +353,7 @@ namespace Frida {
 
 					var thread_path = "/proc/%u/task/%u".printf (pid, tid);
 					while (FileUtils.test (thread_path, EXISTS)) {
-						Timeout.add (100, () => {
+						Timeout.add (50, () => {
 							monitor.callback ();
 							return false;
 						});

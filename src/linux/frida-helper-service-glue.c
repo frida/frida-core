@@ -20,7 +20,6 @@
 #include <dlfcn.h>
 #include <elf.h>
 #include <errno.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #ifdef HAVE_ANDROID
