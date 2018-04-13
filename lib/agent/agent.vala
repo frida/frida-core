@@ -82,7 +82,8 @@ namespace Frida.Agent {
 
 #if DARWIN
 				var injector_state = (DarwinInjectorState *) opaque_injector_state;
-				mapped_range = injector_state.mapped_range;
+				if (injector_state != null)
+					mapped_range = injector_state.mapped_range;
 #endif
 
 				var agent_range = memory_range (mapped_range);
@@ -90,7 +91,8 @@ namespace Frida.Agent {
 
 #if LINUX
 				var injector_state = (LinuxInjectorState *) opaque_injector_state;
-				Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+				if (injector_state != null)
+					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
 #endif
 
 				var ignore_scope = new ThreadIgnoreScope ();
@@ -105,7 +107,8 @@ namespace Frida.Agent {
 
 				if (shared_instance.stop_reason == FORK) {
 #if LINUX
-					Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
+					if (injector_state != null)
+						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
 #endif
 					unload_policy = DEFERRED;
 					return;
@@ -124,7 +127,8 @@ namespace Frida.Agent {
 			{
 #if LINUX
 				var injector_state = (LinuxInjectorState *) opaque_injector_state;
-				Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+				if (injector_state != null)
+					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
 #endif
 
 				var ignore_scope = new ThreadIgnoreScope ();
@@ -133,7 +137,8 @@ namespace Frida.Agent {
 
 				if (shared_instance.stop_reason == FORK) {
 #if LINUX
-					Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
+					if (injector_state != null)
+						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
 #endif
 					unload_policy = DEFERRED;
 					return;

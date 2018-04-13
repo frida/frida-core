@@ -342,7 +342,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 	private class Harness : Frida.Test.AsyncHarness, AgentController {
 		private GLib.Module module;
 		[CCode (has_target = false)]
-		private delegate void AgentMainFunc (string data, ref Frida.UnloadPolicy unload_policy, Gum.MemoryRange? mapped_range);
+		private delegate void AgentMainFunc (string data, ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state);
 		private AgentMainFunc main_impl;
 		private PipeTransport transport;
 		private Thread<bool> main_thread;
