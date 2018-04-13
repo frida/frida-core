@@ -1617,7 +1617,9 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 
 			return message.get_string_member ("payload");
 		}
+
 	}
+#endif
 
 #if WINDOWS
 	namespace Windows {

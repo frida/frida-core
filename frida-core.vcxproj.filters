@@ -105,7 +105,9 @@
     <None Include="src\debugger.vala">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="src\agent-container.vala" />
+    <None Include="src\agent-container.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)src\host-session-service.c">
@@ -177,8 +179,8 @@
     <ClCompile Include="src\windows\access-helpers.c">
       <Filter>Source Files\windows</Filter>
     </ClCompile>
-    <ClCompile Include="src\agent-container.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="$(IntDir)src\agent-container.c">
+      <Filter>Source Files\generated\core</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
