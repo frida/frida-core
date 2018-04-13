@@ -489,7 +489,7 @@ namespace Frida {
 
 		private async void prepare_app (string identifier, uint pid) {
 			try {
-				var agent = new XpcProxyAgent (host_session, identifier, pid);
+				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
 				app_launch_completed (identifier, pid, null);
 			} catch (Error e) {
@@ -499,14 +499,14 @@ namespace Frida {
 
 		private async void prepare_xpcproxy (string identifier, uint pid) {
 			try {
-				var agent = new XpcProxyAgent (host_session, identifier, pid);
+				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
 				spawned (HostSpawnInfo (pid, identifier));
 			} catch (Error e) {
 			}
 		}
 
-		protected async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid () throws Error {
 			return 1;
 		}
 	}
@@ -530,15 +530,15 @@ namespace Frida {
 		public async void run_until_exec () throws Error {
 			yield ensure_loaded ();
 
-			var helper = host_session.helper;
-			yield host_session.helper.resume (target_pid);
+			var helper = (host_session as DarwinHostSession).helper;
+			yield helper.resume (pid);
 
 			yield wait_for_unload ();
 
-			yield helper.wait_until_suspended (target_pid);
+			yield helper.wait_until_suspended (pid);
 		}
 
-		protected async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid () throws Error {
 			return pid;
 		}
 	}

@@ -713,7 +713,7 @@ namespace Frida {
 		}
 	}
 
-	internal abstract class InternalAgent : Object {
+	public abstract class InternalAgent : Object {
 		public BaseDBusHostSession host_session {
 			get;
 			construct;
@@ -867,7 +867,6 @@ namespace Frida {
 			}
 		}
 
-#if DARWIN
 		protected async void wait_for_unload () {
 			try {
 				yield unloaded.future.wait_async ();
@@ -875,7 +874,6 @@ namespace Frida {
 				assert_not_reached ();
 			}
 		}
-#endif
 
 		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
 			if (session != this.session)

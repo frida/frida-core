@@ -312,7 +312,7 @@ core_dep = declare_dependency(
   include_directories: include_directories('.'),
   link_args: backend_libs_private,
   link_with: [core] + backend_libs,
-  dependencies: [gio_dep, gee_dep, gum_dep] + backend_deps + internal_deps,
+  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep] + backend_deps + internal_deps,
 )
 
 core_build_dir = meson.current_build_dir()

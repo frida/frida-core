@@ -2395,8 +2395,10 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
       G_STRUCT_OFFSET (FridaAgentContext, entrypoint_data_storage);
   g_assert_cmpint (strlen (details->entrypoint_data), <, sizeof (self->entrypoint_data_storage));
   strcpy (self->entrypoint_data_storage, details->entrypoint_data);
-  self->mapped_range = payload_base + layout->data_offset +
-      G_STRUCT_OFFSET (FridaAgentContext, mapped_range_storage);
+
+  self->mapped_range = (mapper != NULL)
+      ? payload_base + layout->data_offset + G_STRUCT_OFFSET (FridaAgentContext, mapped_range_storage)
+      : 0;
   self->mapped_range_storage.base_address = payload_base;
   self->mapped_range_storage.size = payload_size;
 
@@ -2535,14 +2537,16 @@ frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * c
   gum_x86_writer_clear (&ctx.cw);
 }
 
+#define EMIT_MOVE(dstreg, srcreg) \
+    gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_##dstreg, GUM_REG_##srcreg)
+#define EMIT_LEA(dst, src, offset) \
+    gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_REG_##dst, GUM_REG_##src, offset)
 #define EMIT_LOAD(reg, field) \
     gum_x86_writer_put_mov_reg_reg_offset_ptr (&ctx->cw, GUM_REG_##reg, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_LOAD_ADDRESS_OF(reg, field) \
     gum_x86_writer_put_lea_reg_reg_offset (&ctx->cw, GUM_REG_##reg, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field))
 #define EMIT_STORE(field, reg) \
     gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, field), GUM_REG_##reg)
-#define EMIT_MOVE(dstreg, srcreg) \
-    gum_x86_writer_put_mov_reg_reg (&ctx->cw, GUM_REG_##dstreg, GUM_REG_##srcreg)
 #define EMIT_CALL(fun, ...) \
     gum_x86_writer_put_call_reg_offset_ptr_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XBX, G_STRUCT_OFFSET (FridaAgentContext, fun), __VA_ARGS__)
 
@@ -2597,6 +2601,7 @@ frida_agent_context_emit_mach_stub_body (FridaAgentContext * self, FridaAgentEmi
 static void
 frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
 {
+  gssize pointer_size, injector_state_offset;
   const gchar * skip_construction = "skip_construction";
   const gchar * skip_dlopen = "skip_dlopen";
   const gchar * skip_destruction = "skip_destruction";
@@ -2617,6 +2622,14 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
       1,
       GUM_ARG_REGISTER, GUM_REG_EDI);
 
+  pointer_size = (ctx->cw.target_cpu == GUM_CPU_IA32) ? 4 : 8;
+
+  injector_state_offset = -(3 + 1) * pointer_size;
+  EMIT_LOAD (XDX, mapped_range);
+  gum_x86_writer_put_mov_reg_offset_ptr_reg (&ctx->cw,
+      GUM_REG_XBP, injector_state_offset + G_STRUCT_OFFSET (FridaDarwinInjectorState, mapped_range),
+      GUM_REG_XDX);
+
   if (ctx->mapper != NULL)
   {
     EMIT_LOAD (EAX, constructed);
@@ -2633,7 +2646,7 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
     gum_x86_writer_put_mov_reg_address (&ctx->cw, GUM_REG_XAX, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_LOAD (XDI, entrypoint_data);
     EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
-    EMIT_LOAD (XDX, mapped_range);
+    EMIT_LEA (XDX, XBP, injector_state_offset);
     gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX,
         3,
         GUM_ARG_REGISTER, GUM_REG_XDI,
@@ -2664,11 +2677,12 @@ frida_agent_context_emit_pthread_stub_body (FridaAgentContext * self, FridaAgent
 
     EMIT_LOAD (XDI, entrypoint_data);
     EMIT_LOAD_ADDRESS_OF (XSI, unload_policy);
+    EMIT_LEA (XDX, XBP, injector_state_offset);
     gum_x86_writer_put_call_reg_with_aligned_arguments (&ctx->cw, GUM_CALL_CAPI, GUM_REG_XAX,
         3,
         GUM_ARG_REGISTER, GUM_REG_XDI,
         GUM_ARG_REGISTER, GUM_REG_XSI,
-        GUM_ARG_ADDRESS, GUM_ADDRESS (0));
+        GUM_ARG_REGISTER, GUM_REG_XDX);
   }
 
   EMIT_LOAD (EAX, unload_policy);
@@ -2787,6 +2801,8 @@ frida_agent_context_emit_arm_pthread_stub_code (FridaAgentContext * self, guint8
     gum_thumb_writer_put_mov_reg_reg (&ctx->tw, ARM_REG_##dstreg, ARM_REG_##srcreg)
 #define EMIT_ARM_CALL(reg) \
     gum_thumb_writer_put_blx_reg (&ctx->tw, ARM_REG_##reg)
+#define EMIT_ARM_STACK_ADJUSTMENT(delta) \
+    gum_thumb_writer_put_sub_reg_imm (&ctx->tw, ARM_REG_SP, delta * 4)
 
 static void
 frida_agent_context_emit_arm_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
@@ -2851,6 +2867,10 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
   EMIT_ARM_LOAD (R4, thread_terminate_impl);
   EMIT_ARM_CALL (R4);
 
+  EMIT_ARM_STACK_ADJUSTMENT (3);
+  EMIT_ARM_LOAD (R0, mapped_range);
+  gum_thumb_writer_put_push_regs (&ctx->tw, 1, ARM_REG_R0); /* DarwinInjectorState */
+
   if (ctx->mapper != NULL)
   {
     EMIT_ARM_LOAD (R0, constructed);
@@ -2865,7 +2885,7 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
     EMIT_ARM_LOAD (R0, entrypoint_data);
     EMIT_ARM_LOAD_ADDRESS_OF (R1, unload_policy);
-    EMIT_ARM_LOAD (R2, mapped_range);
+    EMIT_ARM_MOVE (R2, SP);
     gum_thumb_writer_put_ldr_reg_address (&ctx->tw, ARM_REG_R4, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM_CALL (R4);
   }
@@ -2891,9 +2911,11 @@ frida_agent_context_emit_arm_pthread_stub_body (FridaAgentContext * self, FridaA
 
     EMIT_ARM_LOAD (R0, entrypoint_data);
     EMIT_ARM_LOAD_ADDRESS_OF (R1, unload_policy);
-    EMIT_ARM_LOAD_U32 (R2, 0);
+    EMIT_ARM_MOVE (R2, SP);
     EMIT_ARM_CALL (R4);
   }
+
+  EMIT_ARM_STACK_ADJUSTMENT (-4);
 
   EMIT_ARM_LOAD (R0, unload_policy);
   gum_thumb_writer_put_cmp_reg_imm (&ctx->tw, ARM_REG_R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
@@ -3071,6 +3093,9 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
   EMIT_ARM64_LOAD (X8, thread_terminate_impl);
   EMIT_ARM64_CALL (X8);
 
+  EMIT_ARM64_LOAD (X0, mapped_range);
+  gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1); /* DarwinInjectorState */
+
   if (ctx->mapper != NULL)
   {
     EMIT_ARM64_LOAD (W0, constructed);
@@ -3085,7 +3110,7 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 
     EMIT_ARM64_LOAD (X0, entrypoint_data);
     EMIT_ARM64_LOAD_ADDRESS_OF (X1, unload_policy);
-    EMIT_ARM64_LOAD (X2, mapped_range);
+    EMIT_ARM64_MOVE (X2, SP);
     gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
     EMIT_ARM64_CALL (X8);
   }
@@ -3111,9 +3136,11 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 
     EMIT_ARM64_LOAD (X0, entrypoint_data);
     EMIT_ARM64_LOAD_ADDRESS_OF (X1, unload_policy);
-    EMIT_ARM64_LOAD_U64 (X2, 0);
+    EMIT_ARM64_MOVE (X2, SP);
     EMIT_ARM64_CALL (X8);
   }
+
+  gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
 
   EMIT_ARM64_LOAD (W0, unload_policy);
   gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_X1, FRIDA_UNLOAD_POLICY_IMMEDIATE);
