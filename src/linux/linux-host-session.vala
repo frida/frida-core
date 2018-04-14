@@ -194,10 +194,22 @@ namespace Frida {
 		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
 #if ANDROID
 			if (!path.has_prefix ("/")) {
-				string package_name = path;
+				string intent = path;
 				if (argv.length > 1)
-					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected package name only");
-				return yield get_robo_launcher ().spawn (package_name);
+					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected intent only");
+
+				var tokens = intent.split("/");
+
+				string package_name = tokens[0];
+
+				string? class_name = null;
+				if (tokens.length >= 2) {
+					class_name = tokens[1];
+					if (class_name[0] == '.')
+						class_name = package_name + class_name;
+				}
+
+				return yield get_robo_launcher ().spawn (package_name, class_name);
 			} else {
 				return yield helper.spawn (path, argv, envp);
 			}
@@ -339,7 +351,7 @@ namespace Frida {
 			return new HostSpawnInfo[0];
 		}
 
-		public async uint spawn (string package_name) throws Error {
+		public async uint spawn (string package_name, string? class_name) throws Error {
 			yield ensure_loaded ();
 
 			if (spawn_request_by_package_name.has_key (package_name))
@@ -350,7 +362,7 @@ namespace Frida {
 
 			try {
 				yield system_ui_agent.stop_activity (package_name);
-				yield system_ui_agent.start_activity (package_name);
+				yield system_ui_agent.start_activity (package_name, class_name);
 			} catch (Error e) {
 				spawn_request_by_package_name.unset (package_name);
 				throw e;
@@ -491,8 +503,16 @@ namespace Frida {
 			}
 		}
 
-		public async void start_activity (string package_name) throws Error {
-			yield call ("startActivity", new Json.Node[] { new Json.Node.alloc ().init_string (package_name) });
+		public async void start_activity (string package_name, string? class_name) throws Error {
+			var package_name_value = new Json.Node.alloc ().init_string (package_name);
+
+			var class_name_value = new Json.Node.alloc ();
+			if (class_name != null)
+				class_name_value.init_string (class_name);
+			else
+				class_name_value.init_null ();
+
+			yield call ("startActivity", new Json.Node[] { package_name_value, class_name_value });
 		}
 
 		public async void stop_activity (string package_name) throws Error {

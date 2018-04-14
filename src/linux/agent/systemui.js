@@ -35,14 +35,16 @@ rpc.exports = {
       return result;
     });
   },
-  startActivity: function (packageName) {
+  startActivity: function (packageName, className) {
     return performOnJavaVM(function () {
       var launchIntent = packageManager.getLaunchIntentForPackage(packageName);
-      if (launchIntent !== null) {
-        context.startActivity(launchIntent);
-      } else {
+      if (launchIntent === null)
         throw new Error("Unable to find application with identifier '" + packageName + "'");
-      }
+
+      if (className !== null)
+        launchIntent.setClassName(packageName, className);
+
+      context.startActivity(launchIntent);
     });
   },
   getFrontmostApplication: function () {
