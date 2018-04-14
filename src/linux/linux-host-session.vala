@@ -198,7 +198,7 @@ namespace Frida {
 				if (argv.length > 1)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected intent only");
 
-				var tokens = intent.split("/");
+				var tokens = intent.split ("/");
 
 				string package_name = tokens[0];
 
