@@ -356,7 +356,7 @@ namespace Frida {
 				throw e;
 			}
 
-			var timeout = new TimeoutSource.seconds (10);
+			var timeout = new TimeoutSource.seconds (20);
 			timeout.set_callback (() => {
 				spawn_request_by_package_name.unset (package_name);
 				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
