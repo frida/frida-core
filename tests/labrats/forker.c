@@ -31,7 +31,5 @@ main (void)
     } while (n == -1 && errno == EINTR);
   }
 
-  sleep (1);
-
   return 0;
 }
