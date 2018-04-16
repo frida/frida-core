@@ -13,7 +13,7 @@ namespace Frida.Agent {
 		FORK
 	}
 
-	private class Runner : Object, AgentSessionProvider, ForkHandler {
+	private class Runner : Object, AgentSessionProvider, ExitHandler, ForkHandler {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
 
@@ -42,6 +42,7 @@ namespace Frida.Agent {
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 
 		private Gum.ScriptBackend script_backend;
+		private ExitMonitor exit_monitor;
 		private Gum.Exceptor exceptor;
 		private bool jit_enabled = false;
 		protected Gum.MemoryRange agent_range;
@@ -174,11 +175,27 @@ namespace Frida.Agent {
 			main_context = new MainContext ();
 			main_loop = new MainLoop (main_context);
 
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.begin_transaction ();
+
+			exit_monitor = new ExitMonitor (this, main_context);
+
 			exceptor = Gum.Exceptor.obtain ();
+
+			interceptor.end_transaction ();
 		}
 
 		~Runner () {
+			var interceptor = Gum.Interceptor.obtain ();
+			interceptor.begin_transaction ();
+
 			disable_child_gating ();
+
+			exceptor = null;
+
+			exit_monitor = null;
+
+			interceptor.end_transaction ();
 		}
 
 		private void run () throws Error {
@@ -189,6 +206,31 @@ namespace Frida.Agent {
 			main_loop.run ();
 
 			main_context.pop_thread_default ();
+		}
+
+		private async void prepare_to_exit () {
+			var script_backend = this.script_backend;
+			if (script_backend != null) {
+				var main_context = this.main_context;
+				script_backend.get_scheduler ().push_job_on_js_thread (Priority.LOW, () => {
+					var source = new IdleSource ();
+					source.set_priority (Priority.LOW);
+					source.set_callback (() => {
+						prepare_to_exit.callback ();
+						return false;
+					});
+					source.attach (main_context);
+				});
+				yield;
+			}
+
+			var connection = this.connection;
+			if (connection != null) {
+				try {
+					yield connection.flush ();
+				} catch (GLib.Error e) {
+				}
+			}
 		}
 
 #if !WINDOWS
@@ -827,6 +869,91 @@ namespace Frida.Agent {
 
 			interceptor.unignore_current_thread ();
 		}
+	}
+
+	private class ExitMonitor : Object, Gum.InvocationListener {
+		public weak ExitHandler handler {
+			get;
+			construct;
+		}
+
+		public MainContext main_context {
+			get;
+			construct;
+		}
+
+		public ExitMonitor (ExitHandler handler, MainContext main_context) {
+			Object (handler: handler, main_context: main_context);
+		}
+
+		private PreparationState preparation_state = UNPREPARED;
+		private Mutex mutex;
+		private Cond cond;
+
+		private enum PreparationState {
+			UNPREPARED,
+			PREPARING,
+			PREPARED
+		}
+
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			Gum.InvocationListener listener = this;
+
+#if WINDOWS
+			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernel32.dll", "ExitProcess"), listener);
+#else
+			interceptor.attach_listener ((void *) Posix.exit, listener);
+			interceptor.attach_listener ((void *) Posix._exit, listener);
+			interceptor.attach_listener ((void *) Posix.abort, listener);
+#endif
+		}
+
+		~ExitMonitor () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			interceptor.detach_listener (this);
+		}
+
+		private void on_enter (Gum.InvocationContext context) {
+			if (context.get_depth () > 0)
+				return;
+
+			mutex.lock ();
+
+			if (preparation_state == UNPREPARED) {
+				preparation_state = PREPARING;
+
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_prepare.begin ();
+					return false;
+				});
+				source.attach (main_context);
+			}
+
+			while (preparation_state != PREPARED)
+				cond.wait (mutex);
+
+			mutex.unlock ();
+		}
+
+		private void on_leave (Gum.InvocationContext context) {
+		}
+
+		private async void do_prepare () {
+			yield handler.prepare_to_exit ();
+
+			mutex.lock ();
+			preparation_state = PREPARED;
+			cond.broadcast ();
+			mutex.unlock ();
+		}
+	}
+
+	public interface ExitHandler : Object {
+		public abstract async void prepare_to_exit ();
 	}
 
 #if !WINDOWS
