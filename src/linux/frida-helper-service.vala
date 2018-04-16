@@ -297,11 +297,9 @@ namespace Frida {
 			});
 
 			ssize_t size = 0;
+			var byte_buf = new uint8[1];
 			try {
-				var buf = new uint8[1];
-				do {
-					size = yield input.read_async (buf, Priority.DEFAULT, cancellable);
-				} while (size == 1 && buf[0] != ProgressMessageType.HELLO);
+				size = yield input.read_async (byte_buf, Priority.DEFAULT, cancellable);
 			} catch (IOError e) {
 				if (e is IOError.CANCELLED) {
 					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while waiting for FIFO to establish");
@@ -313,6 +311,9 @@ namespace Frida {
 			}
 
 			Source.remove (timeout);
+
+			if (size == 1 && byte_buf[0] != ProgressMessageType.HELLO)
+				throw new Error.PROTOCOL ("Unexpected message received");
 
 			if (size == 0) {
 				cancel_request.set_value (true);

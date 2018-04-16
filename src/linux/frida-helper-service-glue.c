@@ -249,6 +249,7 @@ static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 static void frida_make_pipe (int fds[2]);
 
 static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path);
+static void frida_inject_instance_recreate_fifo (FridaInjectInstance * self);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_init_fifo (FridaInjectInstance * self);
 static void frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy unload_policy);
@@ -473,6 +474,8 @@ _frida_helper_service_demonitor_and_clone_injectee_state (FridaHelperService * s
   FridaInjectInstance * instance = raw_instance;
   FridaInjectInstance * clone;
 
+  frida_inject_instance_recreate_fifo (instance);
+
   clone = frida_inject_instance_clone (instance, frida_helper_service_generate_id (self));
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (clone->id), clone);
@@ -599,6 +602,16 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   instance->service = g_object_ref (service);
 
   return instance;
+}
+
+static void
+frida_inject_instance_recreate_fifo (FridaInjectInstance * self)
+{
+  close (self->fifo);
+  unlink (self->fifo_path);
+  g_free (self->fifo_path);
+
+  frida_inject_instance_init_fifo (self);
 }
 
 static FridaInjectInstance *
