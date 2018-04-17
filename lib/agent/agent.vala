@@ -43,6 +43,7 @@ namespace Frida.Agent {
 
 		private Gum.ScriptBackend script_backend;
 		private ExitMonitor exit_monitor;
+		private Gum.Interceptor interceptor;
 		private Gum.Exceptor exceptor;
 		private bool jit_enabled = false;
 		protected Gum.MemoryRange agent_range;
@@ -180,13 +181,14 @@ namespace Frida.Agent {
 
 			exit_monitor = new ExitMonitor (this, main_context);
 
-			exceptor = Gum.Exceptor.obtain ();
+			this.interceptor = interceptor;
+			this.exceptor = Gum.Exceptor.obtain ();
 
 			interceptor.end_transaction ();
 		}
 
 		~Runner () {
-			var interceptor = Gum.Interceptor.obtain ();
+			var interceptor = this.interceptor;
 			interceptor.begin_transaction ();
 
 			disable_child_gating ();
@@ -910,10 +912,12 @@ namespace Frida.Agent {
 #endif
 		}
 
-		~ExitMonitor () {
+		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
 			interceptor.detach_listener (this);
+
+			base.dispose ();
 		}
 
 		private void on_enter (Gum.InvocationContext context) {
