@@ -5,7 +5,7 @@ MACOS_CFLAGS := -Wall -pipe -Os -isysroot $(shell xcrun --sdk macosx$(MACOS_SDKV
 MACOS_LDFLAGS := -Wl,-dead_strip
 
 IOS_MINVER = 7.0
-IOS_SDKVER = 11.2
+IOS_SDKVER = 11.3
 IOS_CC := $(shell xcrun --sdk iphoneos$(IOS_SDKVER) -f clang)
 IOS_CFLAGS := -Wall -pipe -Os -isysroot $(shell xcrun --sdk iphoneos$(IOS_SDKVER) --show-sdk-path) -miphoneos-version-min=$(IOS_MINVER)
 IOS_LDFLAGS := -Wl,-dead_strip
