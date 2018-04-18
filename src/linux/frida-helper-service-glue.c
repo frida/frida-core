@@ -952,7 +952,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->open_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
-      ARG_IMM (O_WRONLY));
+      ARG_IMM (O_WRONLY | O_CLOEXEC));
   EMIT_STORE_REG (XBP, fd_offset, EAX);
 
   EMIT_CALL_IMM (params->write_impl,
@@ -1169,7 +1169,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->open_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
-      ARG_IMM (O_WRONLY));
+      ARG_IMM (O_WRONLY | O_CLOEXEC));
   EMIT_MOVE (R7, R0);
 
   EMIT_CALL_IMM (params->write_impl,
@@ -1390,7 +1390,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->open_impl,
       2,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
-      ARG_IMM (O_WRONLY));
+      ARG_IMM (O_WRONLY | O_CLOEXEC));
   EMIT_MOVE (W21, W0);
 
   EMIT_CALL_IMM (params->write_impl,
@@ -1602,7 +1602,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CALL_IMM (params->open_impl,
       3,
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (fifo_path)),
-      ARG_IMM (O_WRONLY),
+      ARG_IMM (O_WRONLY | O_CLOEXEC),
       ARG_IMM (0));
   EMIT_MOVE (S0, V0);
 
