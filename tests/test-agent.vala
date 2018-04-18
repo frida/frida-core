@@ -482,6 +482,18 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
+		private async void prepare_to_exec (HostChildInfo info) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
+		private async void cancel_exec (uint pid) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
+		private async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not implemented");
+		}
+
 		public class ScriptMessage {
 			public AgentScriptId sender_id {
 				get;

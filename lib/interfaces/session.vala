@@ -63,6 +63,16 @@ namespace Frida {
 #endif
 		public abstract async void recreate_agent_thread (uint pid, uint injectee_id) throws GLib.Error;
 		public abstract async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws GLib.Error;
+
+		public abstract async void prepare_to_exec (HostChildInfo info) throws GLib.Error;
+		public abstract async void cancel_exec (uint pid) throws GLib.Error;
+
+		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state) throws GLib.Error;
+	}
+
+	public enum SpawnStartState {
+		RUNNING,
+		SUSPENDED,
 	}
 
 	public enum UnloadPolicy {
@@ -85,6 +95,7 @@ namespace Frida {
 
 	public enum SessionDetachReason {
 		APPLICATION_REQUESTED = 1,
+		PROCESS_REPLACED,
 		PROCESS_TERMINATED,
 		SERVER_TERMINATED,
 		DEVICE_LOST

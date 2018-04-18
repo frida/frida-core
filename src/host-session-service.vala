@@ -145,11 +145,16 @@ namespace Frida {
 		private uint next_host_child_id = 1;
 #endif
 		private Gee.HashMap<uint, HostChildInfo?> pending_children = new Gee.HashMap<uint, HostChildInfo?> ();
+		private Gee.HashMap<uint, SpawnAckRequest> pending_acks = new Gee.HashMap<uint, SpawnAckRequest> ();
 
 		protected Injector injector;
 		protected Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		public virtual async void close () {
+			foreach (var ack_request in pending_acks)
+				ack_request.complete ();
+			pending_acks.clear ();
+
 			while (!agent_entries.is_empty) {
 				var iterator = agent_entries.values.iterator ();
 				iterator.next ();
@@ -193,16 +198,44 @@ namespace Frida {
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
 
+		protected virtual bool try_handle_child (HostChildInfo info) {
+			return false;
+		}
+
+		protected virtual async void prepare_exec_transition (uint pid) throws Error {
+		}
+
+		protected virtual async void await_exec_transition (uint pid) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+		}
+
+		protected virtual async void cancel_exec_transition (uint pid) throws Error {
+			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
+		}
+
 		public abstract async void input (uint pid, uint8[] data) throws Error;
 
 		public async void resume (uint pid) throws Error {
-			if (try_resume_child (pid))
+			if (yield try_resume_child (pid))
 				return;
 
 			yield perform_resume (pid);
 		}
 
-		private bool try_resume_child (uint pid) {
+		private async bool try_resume_child (uint pid) throws Error {
+			pending_children.unset (pid);
+
+			SpawnAckRequest ack_request;
+			if (pending_acks.unset (pid, out ack_request)) {
+				try {
+					if (ack_request.start_state == RUNNING)
+						yield perform_resume (pid);
+				} finally {
+					ack_request.complete ();
+				}
+				return true;
+			}
+
 			var entry_request = agent_entries[pid];
 			if (entry_request == null)
 				return false;
@@ -216,8 +249,6 @@ namespace Frida {
 			var resume_request = entry.resume_request;
 			if (resume_request == null)
 				return false;
-
-			pending_children.unset (pid);
 
 			resume_request.set_value (true);
 			entry.resume_request = null;
@@ -366,7 +397,7 @@ namespace Frida {
 			}
 			assert (entry_to_remove != null);
 
-			destroy.begin (entry_to_remove, SessionDetachReason.PROCESS_TERMINATED);
+			destroy.begin (entry_to_remove, entry_to_remove.disconnect_reason);
 		}
 
 		private void on_agent_session_provider_closed (AgentSessionId id) {
@@ -431,8 +462,6 @@ namespace Frida {
 		}
 
 		private async void teardown (AgentEntry entry, SessionDetachReason reason) {
-			yield entry.close ();
-
 			foreach (var raw_id in entry.sessions) {
 				var id = AgentSessionId (raw_id);
 
@@ -442,6 +471,8 @@ namespace Frida {
 					agent_session_destroyed (id, reason);
 				}
 			}
+
+			yield entry.close ();
 		}
 
 		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
@@ -577,8 +608,65 @@ namespace Frida {
 			}
 		}
 
-		protected virtual bool try_handle_child (HostChildInfo info) {
-			return false;
+		public async void prepare_to_exec (HostChildInfo info) throws Error {
+			var pid = info.pid;
+
+			AgentEntry? entry_to_wait_for = null;
+			var entry_promise = agent_entries[pid];
+			if (entry_promise != null) {
+				try {
+					var entry = yield entry_promise.future.wait_async ();
+					entry.disconnect_reason = PROCESS_REPLACED;
+					entry_to_wait_for = entry;
+				} catch (Gee.FutureError e) {
+				}
+			}
+
+			yield prepare_exec_transition (pid);
+
+			wait_for_exec_and_deliver.begin (info, entry_to_wait_for);
+		}
+
+		private async void wait_for_exec_and_deliver (HostChildInfo info, AgentEntry? entry_to_wait_for) {
+			var pid = info.pid;
+
+			try {
+				yield await_exec_transition (pid);
+			} catch (Error e) {
+				return;
+			}
+
+			if (entry_to_wait_for != null)
+				yield entry_to_wait_for.wait_until_closed ();
+
+			pending_children[pid] = info;
+			delivered (info);
+		}
+
+		public async void cancel_exec (uint pid) throws Error {
+			yield cancel_exec_transition (pid);
+
+			var entry_promise = agent_entries[pid];
+			if (entry_promise != null) {
+				try {
+					var entry = yield entry_promise.future.wait_async ();
+					entry.disconnect_reason = PROCESS_TERMINATED;
+				} catch (Gee.FutureError e) {
+				}
+			}
+		}
+
+		public async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state) throws Error {
+			var pid = info.pid;
+
+			var request = new SpawnAckRequest (start_state);
+
+			pending_acks[pid] = request;
+
+			pending_children[pid] = info;
+			delivered (info);
+
+			yield request.await ();
 		}
 
 		private class AgentEntry : Object {
@@ -612,12 +700,19 @@ namespace Frida {
 				construct;
 			}
 
+			public SessionDetachReason disconnect_reason {
+				get;
+				set;
+				default = PROCESS_TERMINATED;
+			}
+
 			public Gee.Promise<bool>? resume_request {
 				get;
 				set;
 			}
 
-			private Gee.Promise<bool> close_request;
+			private bool closing = false;
+			private Gee.Promise<bool> close_request = new Gee.Promise<bool> ();
 
 			public AgentEntry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider, uint controller_registration_id = 0) {
 				Object (
@@ -631,15 +726,11 @@ namespace Frida {
 			}
 
 			public async void close () {
-				if (close_request != null) {
-					try {
-						yield close_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
-						assert_not_reached ();
-					}
+				if (closing) {
+					yield wait_until_closed ();
 					return;
 				}
-				close_request = new Gee.Promise<bool> ();
+				closing = true;
 
 				if (connection != null) {
 					try {
@@ -654,6 +745,14 @@ namespace Frida {
 				}
 
 				close_request.set_value (true);
+			}
+
+			public async void wait_until_closed () {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 			}
 		}
 
@@ -709,6 +808,31 @@ namespace Frida {
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
+			}
+		}
+
+		private class SpawnAckRequest : Object {
+			public SpawnStartState start_state {
+				get;
+				construct;
+			}
+
+			private Gee.Promise<bool> promise = new Gee.Promise<bool> ();
+
+			public SpawnAckRequest (SpawnStartState start_state) {
+				Object (start_state: start_state);
+			}
+
+			public async void await () {
+				try {
+					yield promise.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+			}
+
+			public void complete () {
+				promise.set_value (true);
 			}
 		}
 	}

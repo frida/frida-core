@@ -22,12 +22,24 @@ LDFLAGS := \
 
 all: \
 	sleeper-qnx-arm \
-	simple-agent-qnx-arm.so
+	forker-qnx-arm \
+	spawner-qnx-arm \
+	simple-agent-qnx-arm.so \
+	resident-agent-qnx-arm.so \
+	$(NULL)
 
-sleeper-qnx-arm: sleeper-unix.c
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@.tmp
-	$(STRIP) --strip-all $@.tmp
-	mv $@.tmp $@
+define declare-executable
+$1-qnx-arm: $2
+	$$(CC) $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp
+	$$(STRIP) --strip-all $$@.tmp
+	mv $$@.tmp $$@
+endef
+
+$(eval $(call declare-executable,sleeper,sleeper-unix.c))
+
+$(eval $(call declare-executable,forker,forker.c))
+
+$(eval $(call declare-executable,spawner,spawner-unix.c))
 
 simple-agent-qnx-arm.so: simple-agent.c simple-agent-qnx-arm.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \

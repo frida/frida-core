@@ -6,10 +6,11 @@ if host_os == 'macos'
     'sleeper-macos32',
     'stdio-writer-macos',
     'stdio-writer-macos32',
-    'simple-agent-macos.dylib',
-    'resident-agent-macos.dylib',
     'forker-macos',
     'forker-macos32',
+    'spawner-macos',
+    'simple-agent-macos.dylib',
+    'resident-agent-macos.dylib',
   ]
 endif
 
@@ -33,6 +34,7 @@ if host_os == 'linux'
   labrat_files += [
     'sleeper-linux-' + host_arch,
     'forker-linux-' + host_arch,
+    'spawner-linux-' + host_arch,
     'simple-agent-linux-' + host_arch + '.so',
   ]
 
@@ -49,10 +51,11 @@ if host_os == 'ios'
     'sleeper-ios32',
     'stdio-writer-ios',
     'stdio-writer-ios32',
-    'simple-agent-ios.dylib',
-    'resident-agent-ios.dylib',
     'forker-ios',
     'forker-ios32',
+    'spawner-ios',
+    'simple-agent-ios.dylib',
+    'resident-agent-ios.dylib',
   ]
 endif
 
@@ -60,6 +63,7 @@ if host_os == 'android'
   labrat_files += [
     'sleeper-android-' + host_machine.cpu_family(),
     'forker-android-' + host_machine.cpu_family(),
+    'spawner-android-' + host_machine.cpu_family(),
     'simple-agent-android-' + host_machine.cpu_family() + '.so',
     'resident-agent-android-' + host_machine.cpu_family() + '.so',
   ]
@@ -68,6 +72,8 @@ endif
 if host_os == 'qnx'
   labrat_files += [
     'sleeper-qnx-arm',
+    'forker-qnx-arm',
+    'spawner-qnx-arm',
     'simple-agent-qnx-arm.so',
   ]
 endif

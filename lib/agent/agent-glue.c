@@ -103,6 +103,25 @@ _frida_agent_environment_join_pthread (gpointer pthread)
 #endif
 }
 
+#ifdef HAVE_WINDOWS
+
+# define VC_EXTRALEAN
+# include <windows.h>
+
+guint32
+_frida_agent_spawn_monitor_get_current_process_id (void)
+{
+  return GetCurrentProcessId ();
+}
+
+guint32
+_frida_agent_spawn_monitor_resume_thread (void * thread)
+{
+  return ResumeThread (thread);
+}
+
+#endif
+
 #ifdef HAVE_DARWIN
 
 /*
