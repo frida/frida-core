@@ -448,8 +448,9 @@ namespace Frida.Server {
 					path.scanf ("/re/frida/AgentSession/%u", out session_id);
 					if (member == "Close") {
 						if (type != DBusMessageType.METHOD_CALL) {
+                            var client = this;
 							Idle.add (() => {
-								sessions.remove (session_id);
+								client.sessions.remove (session_id);
 								return false;
 							});
 						}
