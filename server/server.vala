@@ -390,6 +390,17 @@ namespace Frida.Server {
 				connection.unregister_object (registration_id);
 			}
 
+			private void schedule_idle (owned ScheduledFunc func) {
+				var client = this;
+				Idle.add (() => {
+					func ();
+					client = null;
+					return false;
+				});
+			}
+
+			private delegate void ScheduledFunc ();
+
 			private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
 				DBusMessage result = message;
 
@@ -426,21 +437,18 @@ namespace Frida.Server {
 				}
 				if (iface == "re.frida.HostSession10") {
 					if (member == "EnableSpawnGating" && type == DBusMessageType.METHOD_RETURN) {
-						Idle.add (() => {
+						schedule_idle (() => {
 							is_spawn_gating = true;
-							return false;
 						});
 					} else if (member == "DisableSpawnGating" && type == DBusMessageType.METHOD_RETURN) {
-						Idle.add (() => {
+						schedule_idle (() => {
 							is_spawn_gating = false;
-							return false;
 						});
 					} else if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
 						uint32 session_id;
 						message.get_body ().get ("((u))", out session_id);
-						Idle.add (() => {
+						schedule_idle (() => {
 							sessions.add (session_id);
-							return false;
 						});
 					}
 				} else if (iface == "re.frida.AgentSession10") {
@@ -448,9 +456,8 @@ namespace Frida.Server {
 					path.scanf ("/re/frida/AgentSession/%u", out session_id);
 					if (member == "Close") {
 						if (type != DBusMessageType.METHOD_CALL) {
-							Idle.add (() => {
+							schedule_idle (() => {
 								sessions.remove (session_id);
-								return false;
 							});
 						}
 					}
