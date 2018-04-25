@@ -1779,11 +1779,27 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   if (ctx.entry_point == 0)
     goto handle_probe_error;
 
-#ifdef HAVE_ARM
-  entry_point_address = GSIZE_TO_POINTER (ctx.entry_point & ~1);
-#else
-  entry_point_address = GSIZE_TO_POINTER (ctx.entry_point);
+#if defined (HAVE_ARM) || defined (HAVE_ARM64)
+  if (ctx.word_size == 4 && (ctx.entry_point & 1) == 0)
+  {
+    /*
+     * On 32-bit ARM we need start() to initialize r12 with the address of the GOT.
+     *
+     * For now we assume that:
+     * - this will have happened by the first four instructions
+     * - entrypoint is (way) larger than this
+     * - entrypoint is never Thumb
+     */
+    ctx.entry_point += 4 * sizeof (guint32);
+  }
 #endif
+
+#if defined (HAVE_ARM) || defined (HAVE_ARM64)
+  if (ctx.word_size == 4)
+    entry_point_address = GSIZE_TO_POINTER (ctx.entry_point & ~GUM_ADDRESS (1));
+  else
+#endif
+    entry_point_address = GSIZE_TO_POINTER (ctx.entry_point);
 
   original_entry_code = ptrace (PTRACE_PEEKDATA, pid, entry_point_address, NULL);
 
