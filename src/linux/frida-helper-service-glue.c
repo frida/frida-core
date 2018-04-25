@@ -780,7 +780,6 @@ frida_inject_instance_emit_and_transfer_payload (FridaInjectEmitFunc func, const
   gboolean success = FALSE;
   gpointer scratch_buffer;
   FridaCodeChunk code;
-  guint padding = 0;
   GumAddress address_mask = 0;
   FridaTrampolineData * data;
 
@@ -789,20 +788,8 @@ frida_inject_instance_emit_and_transfer_payload (FridaInjectEmitFunc func, const
   code.cur = scratch_buffer + params->code.offset;
   code.size = 0;
 
-#if defined (HAVE_ARM)
-  {
-    GumThumbWriter cw;
-
-    padding = 2;
-    address_mask = 1;
-
-    gum_thumb_writer_init (&cw, code.cur);
-    gum_thumb_writer_put_nop (&cw);
-    gum_thumb_writer_flush (&cw);
-    code.cur = gum_thumb_writer_cur (&cw);
-    code.size += gum_thumb_writer_offset (&cw);
-    gum_thumb_writer_clear (&cw);
-  }
+#ifdef HAVE_ARM
+  address_mask = 1;
 #endif
 
   func (params, params->remote_address, &code);
@@ -827,7 +814,7 @@ frida_inject_instance_emit_and_transfer_payload (FridaInjectEmitFunc func, const
   if (!frida_remote_mprotect (params->pid, params->remote_address + params->guard.offset, params->guard.size, PROT_NONE, error))
     goto beach;
 
-  *entrypoint = (params->remote_address + params->code.offset + padding) | address_mask;
+  *entrypoint = (params->remote_address + params->code.offset) | address_mask;
 
   success = TRUE;
 
@@ -2094,6 +2081,8 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 #elif defined (HAVE_ARM)
   regs.ARM_sp -= (regs.ARM_sp - (MAX (args_length - 4, 0) * 4)) % FRIDA_STACK_ALIGNMENT;
 
+  regs.ARM_ORIG_r0 = -1;
+
   if ((func & 1) != 0)
   {
     regs.ARM_pc = (func & ~1);
@@ -2261,6 +2250,8 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
   regs.rip = remote_address;
   regs.rsp = remote_stack;
 #elif defined (HAVE_ARM)
+  regs.ARM_ORIG_r0 = -1;
+
   if ((remote_address & 1) != 0)
   {
     regs.ARM_pc = (remote_address & ~1);
