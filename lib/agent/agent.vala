@@ -1158,6 +1158,8 @@ namespace Frida.Agent {
 		private PosixSpawnAttrDestroyFunc posix_spawnattr_destroy;
 		private PosixSpawnAttrGetFlagsFunc posix_spawnattr_getflags;
 		private PosixSpawnAttrSetFlagsFunc posix_spawnattr_setflags;
+
+		private void * execve;
 #endif
 
 		public SpawnMonitor (SpawnHandler handler, MainContext main_context) {
@@ -1178,9 +1180,11 @@ namespace Frida.Agent {
 			posix_spawnattr_getflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_getflags");
 			posix_spawnattr_setflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_setflags");
 
+			execve = Gum.Module.find_export_by_name (libc_name, "execve");
+
 			interceptor.attach_listener ((void *) posix_spawn, this);
 
-			interceptor.replace_function (Gum.Module.find_export_by_name (libc_name, "execve"), (void *) replacement_execve, this);
+			interceptor.replace_function (execve, (void *) replacement_execve, this);
 #else
 			var exec_symbol_names = new string[] {
 				"execl",
@@ -1202,6 +1206,10 @@ namespace Frida.Agent {
 
 		~SpawnMonitor () {
 			var interceptor = Gum.Interceptor.obtain ();
+
+#if DARWIN
+			interceptor.revert_function (execve);
+#endif
 
 			interceptor.detach_listener (this);
 		}
