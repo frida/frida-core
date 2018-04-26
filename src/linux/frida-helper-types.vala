@@ -7,6 +7,9 @@ namespace Frida {
 		public abstract async void stop () throws GLib.Error;
 
 		public abstract async uint spawn (string path, string[] argv, string[] envp) throws GLib.Error;
+		public abstract async void prepare_exec_transition (uint pid) throws GLib.Error;
+		public abstract async void await_exec_transition (uint pid) throws GLib.Error;
+		public abstract async void cancel_exec_transition (uint pid) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async void kill (uint pid) throws GLib.Error;

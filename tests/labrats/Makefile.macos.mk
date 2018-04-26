@@ -13,75 +13,71 @@ IOS_LDFLAGS := -Wl,-dead_strip
 all: \
 	sleeper-macos \
 	sleeper-ios \
+	stdio-writer-macos \
+	stdio-writer-ios \
 	forker-macos \
 	forker-ios \
+	spawner-macos \
+	spawner-ios \
 	simple-agent-macos.dylib \
 	simple-agent-ios.dylib \
 	resident-agent-macos.dylib \
-	resident-agent-ios.dylib \
-	stdio-writer-macos \
-	stdio-writer-ios
+	resident-agent-ios.dylib
 
-sleeper-macos: sleeper-unix.c
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m32 $< -o $@.32
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m64 $< -o $@.64
-	strip -Sx $@.32 $@.64
-	lipo $@.32 $@.64 -create -output $@
-	$(RM) $@.32 $@.64
+define declare-executable-macos
+$1-macos: $2
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m32 $$< -o $$@.32
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m64 $$< -o $$@.64
+	strip -Sx $$@.32 $$@.64
+	lipo $$@.32 $$@.64 -create -output $$@
+	$(RM) $$@.32 $$@.64
+endef
 
-sleeper-ios: sleeper-unix.c sleeper.xcent
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch armv7 $< -o $@.armv7
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch arm64 $< -o $@.arm64
-	strip -Sx $@.armv7 $@.arm64
-	lipo $@.armv7 $@.arm64 -create -output $@.unsigned
-	$(RM) $@.armv7 $@.arm64
-	codesign -s "$$IOS_CERTID" --entitlements sleeper.xcent $@.unsigned
-	mv $@.unsigned $@
+define declare-executable-ios
+$1-ios: $2
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch armv7 $$< -o $$@.armv7
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch arm64 $$< -o $$@.arm64
+	strip -Sx $$@.armv7 $$@.arm64
+	lipo $$@.armv7 $$@.arm64 -create -output $$@.unsigned
+	$(RM) $$@.armv7 $$@.arm64
+	codesign -s "$$$$IOS_CERTID" $$@.unsigned
+	mv $$@.unsigned $$@
+endef
 
-%-agent-macos.dylib: %-agent.c
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m32 -dynamiclib $< -o $@.32
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m64 -dynamiclib $< -o $@.64
-	strip -Sx $@.32 $@.64
-	lipo $@.32 $@.64 -create -output $@
-	$(RM) $@.32 $@.64
+define declare-library-macos
+$1-macos.dylib: $2
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m32 -dynamiclib $$< -o $$@.32
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m64 -dynamiclib $$< -o $$@.64
+	strip -Sx $$@.32 $$@.64
+	lipo $$@.32 $$@.64 -create -output $$@
+	$(RM) $$@.32 $$@.64
+endef
 
-%-agent-ios.dylib: %-agent.c
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch armv7 -dynamiclib $< -o $@.armv7
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch arm64 -dynamiclib $< -o $@.arm64
-	strip -Sx $@.armv7 $@.arm64
-	lipo $@.armv7 $@.arm64 -create -output $@
-	$(RM) $@.armv7 $@.arm64
+define declare-library-ios
+$1-ios.dylib: $2
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch armv7 -dynamiclib $$< -o $$@.armv7
+	$$(IOS_CC) $$(IOS_CFLAGS) $$(IOS_LDFLAGS) -arch arm64 -dynamiclib $$< -o $$@.arm64
+	strip -Sx $$@.armv7 $$@.arm64
+	lipo $$@.armv7 $$@.arm64 -create -output $$@
+	$(RM) $$@.armv7 $$@.arm64
+endef
 
-stdio-writer-macos: stdio-writer.c
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m32 $< -o $@.32
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m64 $< -o $@.64
-	strip -Sx $@.32 $@.64
-	lipo $@.32 $@.64 -create -output $@
-	$(RM) $@.32 $@.64
+$(eval $(call declare-executable-macos,sleeper,sleeper-unix.c))
+$(eval $(call declare-executable-ios,sleeper,sleeper-unix.c))
 
-stdio-writer-ios: stdio-writer.c
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch armv7 $< -o $@.armv7
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch arm64 $< -o $@.arm64
-	strip -Sx $@.armv7 $@.arm64
-	lipo $@.armv7 $@.arm64 -create -output $@.unsigned
-	$(RM) $@.armv7 $@.arm64
-	codesign -s "$$IOS_CERTID" $@.unsigned
-	mv $@.unsigned $@
+$(eval $(call declare-executable-macos,stdio-writer,stdio-writer.c))
+$(eval $(call declare-executable-ios,stdio-writer,stdio-writer.c))
 
-forker-macos: forker.c
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m32 $< -o $@.32
-	$(MACOS_CC) $(MACOS_CFLAGS) $(MACOS_LDFLAGS) -m64 $< -o $@.64
-	strip -Sx $@.32 $@.64
-	lipo $@.32 $@.64 -create -output $@
-	$(RM) $@.32 $@.64
+$(eval $(call declare-executable-macos,forker,forker.c))
+$(eval $(call declare-executable-ios,forker,forker.c))
 
-forker-ios: forker.c
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch armv7 $< -o $@.armv7
-	$(IOS_CC) $(IOS_CFLAGS) $(IOS_LDFLAGS) -arch arm64 $< -o $@.arm64
-	strip -Sx $@.armv7 $@.arm64
-	lipo $@.armv7 $@.arm64 -create -output $@.unsigned
-	$(RM) $@.armv7 $@.arm64
-	codesign -s "$$IOS_CERTID" $@.unsigned
-	mv $@.unsigned $@
+$(eval $(call declare-executable-macos,spawner,spawner-unix.c))
+$(eval $(call declare-executable-ios,spawner,spawner-unix.c))
+
+$(eval $(call declare-library-macos,simple-agent,simple-agent.c))
+$(eval $(call declare-library-ios,simple-agent,simple-agent.c))
+
+$(eval $(call declare-library-macos,resident-agent,resident-agent.c))
+$(eval $(call declare-library-ios,resident-agent,resident-agent.c))
 
 .PHONY: all

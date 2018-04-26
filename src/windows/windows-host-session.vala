@@ -203,7 +203,7 @@ namespace Frida {
 		public override async void input (uint pid, uint8[] data) throws Error {
 			var process = process_by_pid[pid];
 			if (process == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid pid");
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 			try {
 				yield process.pipes.input.write_all_async (data, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
@@ -214,7 +214,7 @@ namespace Frida {
 		protected override async void perform_resume (uint pid) throws Error {
 			var process = process_by_pid[pid];
 			if (process == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid pid");
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 			process.resume ();
 		}
 

@@ -69,8 +69,38 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Linux/fork-native", () => {
-			var h = new Harness ((h) => Linux.fork_native.begin (h as Harness));
+		GLib.Test.add_func ("/HostSession/Linux/ChildGating/fork", () => {
+			var h = new Harness ((h) => Linux.fork.begin (h as Harness));
+			h.run ();
+		});
+
+		var fork_symbol_names = new string[] {
+			"fork",
+			"vfork",
+		};
+		var exec_symbol_names = new string[] {
+			"execl",
+			"execlp",
+			"execle",
+			"execv",
+			"execvp",
+			"execve",
+		};
+		if (Gum.Module.find_export_by_name (null, "execvpe") != null) {
+			exec_symbol_names += "execvpe";
+		}
+		foreach (var fork_symbol_name in fork_symbol_names) {
+			foreach (var exec_symbol_name in exec_symbol_names) {
+				var method = "%s+%s".printf (fork_symbol_name, exec_symbol_name);
+				GLib.Test.add_data_func ("/HostSession/Linux/ChildGating/" + method, () => {
+					var h = new Harness ((h) => Linux.fork_plus_exec.begin (h as Harness, method));
+					h.run ();
+				});
+			}
+		}
+
+		GLib.Test.add_func ("/HostSession/Linux/ChildGating/bad-exec", () => {
+			var h = new Harness ((h) => Linux.bad_exec.begin (h as Harness));
 			h.run ();
 		});
 
@@ -111,13 +141,50 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Darwin/fork-native", () => {
+		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-native", () => {
 			var h = new Harness ((h) => Darwin.fork_native.begin (h as Harness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Darwin/fork-other", () => {
+		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-other", () => {
 			var h = new Harness ((h) => Darwin.fork_other.begin (h as Harness));
+			h.run ();
+		});
+
+		var fork_symbol_names = new string[] {
+			"fork",
+			"vfork",
+		};
+		var exec_symbol_names = new string[] {
+			"execl",
+			"execlp",
+			"execle",
+			"execv",
+			"execvp",
+			"execve",
+		};
+		foreach (var fork_symbol_name in fork_symbol_names) {
+			foreach (var exec_symbol_name in exec_symbol_names) {
+				var method = "%s+%s".printf (fork_symbol_name, exec_symbol_name);
+				GLib.Test.add_data_func ("/HostSession/Darwin/ChildGating/" + method, () => {
+					var h = new Harness ((h) => Darwin.fork_plus_exec.begin (h as Harness, method));
+					h.run ();
+				});
+			}
+		}
+
+		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/bad-exec", () => {
+			var h = new Harness ((h) => Darwin.bad_exec.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/posix-spawn", () => {
+			var h = new Harness ((h) => Darwin.posix_spawn.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/posix-spawn+setexec", () => {
+			var h = new Harness ((h) => Darwin.posix_spawn_plus_setexec.begin (h as Harness));
 			h.run ();
 		});
 
@@ -140,6 +207,11 @@ namespace Frida.HostSessionTest {
 
 		GLib.Test.add_func ("/HostSession/Windows/spawn", () => {
 			var h = new Harness ((h) => Windows.spawn.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Windows/ChildGating/create-process", () => {
+			var h = new Harness ((h) => Windows.create_process.begin (h as Harness));
 			h.run ();
 		});
 #endif
@@ -879,8 +951,16 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		private static async void fork_native (Harness h) {
+		private static async void fork (Harness h) {
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_executable ("forker"));
+		}
+
+		private static async void fork_plus_exec (Harness h, string method) {
+			yield Unix.run_fork_plus_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), method);
+		}
+
+		private static async void bad_exec (Harness h) {
+			yield Unix.run_bad_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "execv");
 		}
 
 		namespace Manual {
@@ -1323,6 +1403,22 @@ send(ranges);
 			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name));
 		}
 
+		private static async void fork_plus_exec (Harness h, string method) {
+			yield Unix.run_fork_plus_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), method);
+		}
+
+		private static async void bad_exec (Harness h) {
+			yield Unix.run_bad_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "execv");
+		}
+
+		private static async void posix_spawn (Harness h) {
+			yield Unix.run_posix_spawn_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"));
+		}
+
+		private static async void posix_spawn_plus_setexec (Harness h) {
+			yield Unix.run_posix_spawn_plus_setexec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"));
+		}
+
 		namespace Manual {
 
 			private static async void cross_arch (Harness h) {
@@ -1605,17 +1701,444 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 			}
 		}
 
-		private static string parse_string_message_payload (string raw_message) {
-			Json.Object message;
+		public static async void run_fork_plus_exec_scenario (Harness h, string target_path, string method) {
 			try {
-				message = Json.from_string (raw_message).get_object ();
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				string parent_detach_reason = null;
+				string child_pre_exec_detach_reason = null;
+				string child_post_exec_detach_reason = null;
+				var child_messages = new Gee.ArrayList <string> ();
+				Child delivered_child = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.delivered.connect (child => {
+					delivered_child = child;
+					if (waiting)
+						run_fork_plus_exec_scenario.callback ();
+				});
+
+				string[] argv = { target_path, "spawn", method };
+				string[] envp = {};
+				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_session = yield device.attach (parent_pid);
+				parent_session.detached.connect (reason => {
+					parent_detach_reason = reason.to_string ();
+					if (waiting)
+						run_fork_plus_exec_scenario.callback ();
+				});
+				yield parent_session.enable_child_gating ();
+
+				yield device.resume (parent_pid);
+
+				while (delivered_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				var child = delivered_child;
+				delivered_child = null;
+				assert (child.pid != parent_pid);
+				assert (child.parent_pid == parent_pid);
+				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+
+				var child_session_pre_exec = yield device.attach (child.pid);
+				yield child_session_pre_exec.enable_child_gating ();
+				child_session_pre_exec.detached.connect (reason => {
+					child_pre_exec_detach_reason = reason.to_string ();
+					if (waiting)
+						run_fork_plus_exec_scenario.callback ();
+				});
+
+				yield device.resume (child.pid);
+
+				while (child_pre_exec_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
+
+				while (delivered_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				child = delivered_child;
+				delivered_child = null;
+				assert (child.parent_pid == child.pid);
+				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+
+				var child_session_post_exec = yield device.attach (child.pid);
+				child_session_post_exec.detached.connect (reason => {
+					child_post_exec_detach_reason = reason.to_string ();
+					if (waiting)
+						run_fork_plus_exec_scenario.callback ();
+				});
+				var script = yield child_session_post_exec.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName(null, 'puts'), {
+  onEnter: function (args) {
+    send(Memory.readUtf8String(args[0]));
+  }
+});
+""");
+				script.message.connect ((message, data) => {
+					if (GLib.Test.verbose ())
+						printerr ("Message from child: %s\n", message);
+					child_messages.add (message);
+					if (waiting)
+						run_fork_plus_exec_scenario.callback ();
+				});
+				yield script.load ();
+
+				yield device.resume (child.pid);
+
+				while (child_messages.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_messages.size == 1);
+				assert (parse_string_message_payload (child_messages[0]) == method);
+
+				while (child_post_exec_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_post_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				while (parent_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield h.process_events ();
+				assert (child_messages.size == 1);
+
+				yield device_manager.close ();
+
+				h.done ();
 			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
+		}
 
-			assert (message.get_string_member ("type") == "send");
+		public static async void run_bad_exec_scenario (Harness h, string target_path, string method) {
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
-			return message.get_string_member ("payload");
+				string detach_reason = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.delivered.connect (child => {
+					assert_not_reached ();
+				});
+
+				string[] argv = { target_path, "spawn-bad-path", method };
+				string[] envp = {};
+				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_session = yield device.attach (parent_pid);
+				parent_session.detached.connect (reason => {
+					detach_reason = reason.to_string ();
+					if (waiting)
+						run_bad_exec_scenario.callback ();
+				});
+				yield parent_session.enable_child_gating ();
+
+				yield device.resume (parent_pid);
+
+				while (detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield device_manager.close ();
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+		}
+
+		public static async void run_posix_spawn_scenario (Harness h, string target_path) {
+			var method = "posix_spawn";
+
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				string parent_detach_reason = null;
+				string child_detach_reason = null;
+				var child_messages = new Gee.ArrayList <string> ();
+				Child delivered_child = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.delivered.connect (child => {
+					delivered_child = child;
+					if (waiting)
+						run_posix_spawn_scenario.callback ();
+				});
+
+				string[] argv = { target_path, "spawn", method };
+				string[] envp = {};
+				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_session = yield device.attach (parent_pid);
+				parent_session.detached.connect (reason => {
+					parent_detach_reason = reason.to_string ();
+					if (waiting)
+						run_posix_spawn_scenario.callback ();
+				});
+				yield parent_session.enable_child_gating ();
+
+				yield device.resume (parent_pid);
+
+				while (delivered_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				var child = delivered_child;
+				delivered_child = null;
+				assert (child.pid != parent_pid);
+				assert (child.parent_pid == parent_pid);
+				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+
+				assert (parent_detach_reason == null);
+
+				var child_session = yield device.attach (child.pid);
+				child_session.detached.connect (reason => {
+					child_detach_reason = reason.to_string ();
+					if (waiting)
+						run_posix_spawn_scenario.callback ();
+				});
+				var script = yield child_session.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName(null, 'puts'), {
+  onEnter: function (args) {
+    send(Memory.readUtf8String(args[0]));
+  }
+});
+""");
+				script.message.connect ((message, data) => {
+					if (GLib.Test.verbose ())
+						printerr ("Message from child: %s\n", message);
+					child_messages.add (message);
+					if (waiting)
+						run_posix_spawn_scenario.callback ();
+				});
+				yield script.load ();
+
+				yield device.resume (child.pid);
+
+				while (child_messages.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_messages.size == 1);
+				assert (parse_string_message_payload (child_messages[0]) == method);
+
+				while (child_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				while (parent_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield h.process_events ();
+				assert (child_messages.size == 1);
+
+				yield device_manager.close ();
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
+		}
+
+		public static async void run_posix_spawn_plus_setexec_scenario (Harness h, string target_path) {
+			var method = "posix_spawn+setexec";
+
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				string pre_exec_detach_reason = null;
+				string post_exec_detach_reason = null;
+				var messages = new Gee.ArrayList <string> ();
+				Child delivered_child = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.delivered.connect (child => {
+					delivered_child = child;
+					if (waiting)
+						run_posix_spawn_plus_setexec_scenario.callback ();
+				});
+
+				string[] argv = { target_path, "spawn", method };
+				string[] envp = {};
+				var pre_exec_pid = yield device.spawn (target_path, argv, envp);
+				var pre_exec_session = yield device.attach (pre_exec_pid);
+				pre_exec_session.detached.connect (reason => {
+					pre_exec_detach_reason = reason.to_string ();
+					if (waiting)
+						run_posix_spawn_plus_setexec_scenario.callback ();
+				});
+				yield pre_exec_session.enable_child_gating ();
+
+				yield device.resume (pre_exec_pid);
+
+				while (pre_exec_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
+
+				while (delivered_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				var child = delivered_child;
+				delivered_child = null;
+				assert (child.pid == pre_exec_pid);
+				assert (child.parent_pid == pre_exec_pid);
+				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+
+				var post_exec_session = yield device.attach (child.pid);
+				post_exec_session.detached.connect (reason => {
+					post_exec_detach_reason = reason.to_string ();
+					if (waiting)
+						run_posix_spawn_plus_setexec_scenario.callback ();
+				});
+				var script = yield post_exec_session.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName(null, 'puts'), {
+  onEnter: function (args) {
+    send(Memory.readUtf8String(args[0]));
+  }
+});
+""");
+				script.message.connect ((message, data) => {
+					if (GLib.Test.verbose ())
+						printerr ("Message: %s\n", message);
+					messages.add (message);
+					if (waiting)
+						run_posix_spawn_plus_setexec_scenario.callback ();
+				});
+				yield script.load ();
+
+				yield device.resume (child.pid);
+
+				while (messages.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (messages.size == 1);
+				assert (parse_string_message_payload (messages[0]) == method);
+
+				while (post_exec_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (post_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield h.process_events ();
+				assert (messages.size == 1);
+
+				yield device_manager.close ();
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
 		}
 
 	}
@@ -1747,6 +2270,127 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 			yield h.service.stop ();
 			h.service.remove_backend (backend);
 			h.done ();
+		}
+
+		private static async void create_process (Harness h) {
+			var target_path = Frida.Test.Labrats.path_to_executable ("spawner");
+			var method = "CreateProcess";
+
+			try {
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				string parent_detach_reason = null;
+				string child_detach_reason = null;
+				var child_messages = new Gee.ArrayList <string> ();
+				Child delivered_child = null;
+				bool waiting = false;
+
+				if (GLib.Test.verbose ()) {
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+				}
+				device.delivered.connect (child => {
+					delivered_child = child;
+					if (waiting)
+						create_process.callback ();
+				});
+
+				string[] argv = { target_path, "spawn", method };
+				string[] envp = {};
+				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_session = yield device.attach (parent_pid);
+				parent_session.detached.connect (reason => {
+					parent_detach_reason = reason.to_string ();
+					if (waiting)
+						create_process.callback ();
+				});
+				yield parent_session.enable_child_gating ();
+
+				yield device.resume (parent_pid);
+
+				while (delivered_child == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				var child = delivered_child;
+				delivered_child = null;
+				assert (child.pid != parent_pid);
+				assert (child.parent_pid == parent_pid);
+				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+
+				assert (parent_detach_reason == null);
+
+				var child_session = yield device.attach (child.pid);
+				child_session.detached.connect (reason => {
+					child_detach_reason = reason.to_string ();
+					if (waiting)
+						create_process.callback ();
+				});
+				var script = yield child_session.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW'), {
+  onEnter: function (args) {
+    send(Memory.readUtf16String(args[0]));
+  }
+});
+""");
+				script.message.connect ((message, data) => {
+					if (GLib.Test.verbose ())
+						printerr ("Message from child: %s\n", message);
+					child_messages.add (message);
+					if (waiting)
+						create_process.callback ();
+				});
+				yield script.load ();
+
+				yield device.resume (child.pid);
+
+				while (child_messages.is_empty) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_messages.size == 1);
+				assert (parse_string_message_payload (child_messages[0]) == method);
+
+				while (child_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				while (parent_detach_reason == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+				yield h.process_events ();
+				assert (child_messages.size == 1);
+
+				yield device_manager.close ();
+
+				h.done ();
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
+			}
 		}
 
 	}
@@ -2003,6 +2647,19 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 			h.done ();
 		}
 
+	}
+
+	private static string parse_string_message_payload (string raw_message) {
+		Json.Object message;
+		try {
+			message = Json.from_string (raw_message).get_object ();
+		} catch (GLib.Error e) {
+			assert_not_reached ();
+		}
+
+		assert (message.get_string_member ("type") == "send");
+
+		return message.get_string_member ("payload");
 	}
 
 	public class Harness : Frida.Test.AsyncHarness {

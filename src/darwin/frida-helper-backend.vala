@@ -12,22 +12,26 @@ namespace Frida {
 
 		public bool is_idle {
 			get {
-				return inject_instance_by_id.is_empty;
+				return inject_instances.is_empty;
 			}
 		}
 
 		protected delegate void LaunchCompletionHandler (Error? error);
 
-		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
-		private Gee.HashMap<uint, uint> remote_task_by_pid = new Gee.HashMap<uint, uint> ();
-		private Gee.HashMap<uint, uint> expiry_timer_by_pid = new Gee.HashMap<uint, uint> ();
-
-		/* these should be private, but must be accessible to glue code */
 		public void * context;
-		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
-		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
+
+		public Gee.HashMap<uint, void *> spawn_instances = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
+
+		private Gee.HashMap<uint, Gee.Promise<bool>> suspension_waiters = new Gee.HashMap<uint, Gee.Promise<bool>> ();
+
+		public Gee.HashMap<uint, void *> inject_instances = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<void *, uint> inject_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
-		private Gee.HashMap<uint, uint> inject_expiry_by_id = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> inject_expiry_timers = new Gee.HashMap<uint, uint> ();
+
+		private Gee.HashMap<uint, uint> remote_tasks = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> expiry_timers = new Gee.HashMap<uint, uint> ();
+
 		public uint next_id = 1;
 
 		private PolicySoftener policy_softener;
@@ -49,9 +53,9 @@ namespace Frida {
 		}
 
 		~DarwinHelperBackend () {
-			foreach (var instance in spawn_instance_by_pid.values)
+			foreach (var instance in spawn_instances.values)
 				_free_spawn_instance (instance);
-			foreach (var instance in inject_instance_by_id.values)
+			foreach (var instance in inject_instances.values)
 				_free_inject_instance (instance);
 			_destroy_context ();
 		}
@@ -63,13 +67,13 @@ namespace Frida {
 			}
 			inject_cleaner_by_instance.clear ();
 
-			foreach (var id in expiry_timer_by_pid.values)
+			foreach (var id in expiry_timers.values)
 				Source.remove (id);
-			expiry_timer_by_pid.clear ();
+			expiry_timers.clear ();
 
-			foreach (var task in remote_task_by_pid.values)
+			foreach (var task in remote_tasks.values)
 				deallocate_port (task);
-			remote_task_by_pid.clear ();
+			remote_tasks.clear ();
 
 			if (kernel_agent != null) {
 				kernel_agent.spawned.disconnect (on_kernel_agent_spawned);
@@ -118,7 +122,7 @@ namespace Frida {
 			stdin_streams.unset (child_pid);
 
 			void * instance;
-			if (spawn_instance_by_pid.unset (pid, out instance))
+			if (spawn_instances.unset (pid, out instance))
 				_free_spawn_instance (instance);
 
 			child_dead (pid);
@@ -159,7 +163,7 @@ namespace Frida {
 		public async void input (uint pid, uint8[] data) throws Error {
 			var stream = stdin_streams[pid];
 			if (stream == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid pid");
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 			try {
 				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
@@ -168,32 +172,64 @@ namespace Frida {
 		}
 
 		public async void wait_until_suspended (uint pid) throws Error {
-			var timer = new Timer ();
-
-			do {
-				var task = borrow_task_for_remote_pid (pid);
-
+			var wait_request = suspension_waiters[pid];
+			if (wait_request != null) {
+				var future = wait_request.future;
 				try {
-					if (_is_suspended (task))
-						return;
-				} catch (Error e) {
-					if (e is Error.PROCESS_NOT_FOUND) {
-						deallocate_port (steal_task_for_remote_pid (pid));
-					} else {
-						throw e;
-					}
+					yield future.wait_async ();
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
 				}
+				return;
+			}
 
-				var delay_source = new TimeoutSource (20);
-				delay_source.set_callback (() => {
-					wait_until_suspended.callback ();
-					return false;
-				});
-				delay_source.attach (MainContext.get_thread_default ());
-				yield;
-			} while (timer.elapsed () < 2);
+			wait_request = new Gee.Promise<bool> ();
+			suspension_waiters[pid] = wait_request;
 
-			throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process to suspend");
+			try {
+				var timer = new Timer ();
+
+				do {
+					var task = borrow_task_for_remote_pid (pid);
+
+					try {
+						if (_is_suspended (task)) {
+							wait_request.set_value (true);
+							return;
+						}
+					} catch (Error e) {
+						if (e is Error.PROCESS_NOT_FOUND) {
+							deallocate_port (steal_task_for_remote_pid (pid));
+						} else {
+							throw e;
+						}
+					}
+
+					var delay_source = new TimeoutSource (20);
+					delay_source.set_callback (() => {
+						wait_until_suspended.callback ();
+						return false;
+					});
+					delay_source.attach (MainContext.get_thread_default ());
+
+					yield;
+
+					if (!suspension_waiters.has (pid, wait_request))
+						throw new Error.INVALID_OPERATION ("Cancelled");
+				} while (timer.elapsed () < 2);
+
+				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process to suspend");
+			} catch (Error e) {
+				wait_request.set_exception (e);
+				throw e;
+			} finally {
+				if (suspension_waiters.has (pid, wait_request))
+					suspension_waiters.unset (pid);
+			}
+		}
+
+		public async void cancel_pending_waits (uint pid) throws Error {
+			suspension_waiters.unset (pid);
 		}
 
 		public async void resume (uint pid) throws Error {
@@ -201,7 +237,7 @@ namespace Frida {
 				return;
 
 			void * instance;
-			if (spawn_instance_by_pid.unset (pid, out instance)) {
+			if (spawn_instances.unset (pid, out instance)) {
 				_resume_spawn_instance (instance);
 				_free_spawn_instance (instance);
 			} else {
@@ -230,7 +266,7 @@ namespace Frida {
 
 			var task = borrow_task_for_remote_pid (pid);
 
-			var spawn_instance = spawn_instance_by_pid[pid];
+			var spawn_instance = spawn_instances[pid];
 			if (spawn_instance == null && _is_suspended (task))
 				spawn_instance = _create_spawn_instance (pid);
 			if (spawn_instance != null) {
@@ -265,7 +301,7 @@ namespace Frida {
 		}
 
 		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
-			var instance = inject_instance_by_id[id];
+			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
@@ -278,7 +314,7 @@ namespace Frida {
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
-			var instance = inject_instance_by_id[id];
+			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
@@ -309,14 +345,14 @@ namespace Frida {
 		}
 
 		public uint borrow_task_for_remote_pid (uint pid) throws Error {
-			uint task = remote_task_by_pid[pid];
+			uint task = remote_tasks[pid];
 			if (task != 0) {
 				schedule_task_expiry_for_remote_pid (pid);
 				return task;
 			}
 
 			task = task_for_pid (pid);
-			remote_task_by_pid[pid] = task;
+			remote_tasks[pid] = task;
 			schedule_task_expiry_for_remote_pid (pid);
 
 			return task;
@@ -324,7 +360,7 @@ namespace Frida {
 
 		public uint steal_task_for_remote_pid (uint pid) throws Error {
 			uint task;
-			if (remote_task_by_pid.unset (pid, out task)) {
+			if (remote_tasks.unset (pid, out task)) {
 				cancel_task_expiry_for_remote_pid (pid);
 				return task;
 			}
@@ -334,28 +370,28 @@ namespace Frida {
 
 		private void schedule_task_expiry_for_remote_pid (uint pid) {
 			uint previous_timer;
-			if (expiry_timer_by_pid.unset (pid, out previous_timer))
+			if (expiry_timers.unset (pid, out previous_timer))
 				Source.remove (previous_timer);
 
 			var expiry_source = new TimeoutSource.seconds (2);
 			expiry_source.set_callback (() => {
-				var removed = expiry_timer_by_pid.unset (pid);
+				var removed = expiry_timers.unset (pid);
 				assert (removed);
 
 				uint task;
-				removed = remote_task_by_pid.unset (pid, out task);
+				removed = remote_tasks.unset (pid, out task);
 				assert (removed);
 
 				deallocate_port (task);
 
 				return false;
 			});
-			expiry_timer_by_pid[pid] = expiry_source.attach (MainContext.get_thread_default ());
+			expiry_timers[pid] = expiry_source.attach (MainContext.get_thread_default ());
 		}
 
 		private void cancel_task_expiry_for_remote_pid (uint pid) {
 			uint timer;
-			var found = expiry_timer_by_pid.unset (pid, out timer);
+			var found = expiry_timers.unset (pid, out timer);
 			assert (found);
 
 			Source.remove (timer);
@@ -370,7 +406,7 @@ namespace Frida {
 
 		public void _on_mach_thread_dead (uint id, void * posix_thread) {
 			Idle.add (() => {
-				var instance = inject_instance_by_id[id];
+				var instance = inject_instances[id];
 				assert (instance != null);
 
 				if (posix_thread != null)
@@ -391,7 +427,7 @@ namespace Frida {
 
 		protected void _destroy_inject_instance (uint id) {
 			void * instance;
-			bool instance_id_found = inject_instance_by_id.unset (id, out instance);
+			bool instance_id_found = inject_instances.unset (id, out instance);
 			assert (instance_id_found);
 
 			var is_resident = _is_instance_resident (instance);
@@ -401,7 +437,7 @@ namespace Frida {
 			if (!is_resident)
 				uninjected (id);
 
-			if (inject_instance_by_id.is_empty)
+			if (inject_instances.is_empty)
 				idle ();
 		}
 
@@ -420,24 +456,24 @@ namespace Frida {
 
 		private void schedule_inject_expiry_for_id (uint id) {
 			uint previous_timer;
-			if (inject_expiry_by_id.unset (id, out previous_timer))
+			if (inject_expiry_timers.unset (id, out previous_timer))
 				Source.remove (previous_timer);
 
 			var expiry_source = new TimeoutSource.seconds (20);
 			expiry_source.set_callback (() => {
-				var removed = inject_expiry_by_id.unset (id);
+				var removed = inject_expiry_timers.unset (id);
 				assert (removed);
 
 				_destroy_inject_instance (id);
 
 				return false;
 			});
-			inject_expiry_by_id[id] = expiry_source.attach (MainContext.get_thread_default ());
+			inject_expiry_timers[id] = expiry_source.attach (MainContext.get_thread_default ());
 		}
 
 		private void cancel_inject_expiry_for_id (uint id) {
 			uint timer;
-			var found = inject_expiry_by_id.unset (id, out timer);
+			var found = inject_expiry_timers.unset (id, out timer);
 			assert (found);
 
 			Source.remove (timer);
@@ -494,7 +530,7 @@ namespace Frida {
 		}
 
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn_by_pid = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawns = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		private DataInputStream input;
 		private Cancellable input_cancellable = new Cancellable ();
@@ -549,16 +585,16 @@ namespace Frida {
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () {
-			var result = new HostSpawnInfo[pending_spawn_by_pid.size];
+			var result = new HostSpawnInfo[pending_spawns.size];
 			var index = 0;
-			foreach (var spawn in pending_spawn_by_pid.values)
+			foreach (var spawn in pending_spawns.values)
 				result[index++] = spawn;
 			return result;
 		}
 
 		public bool try_resume (uint pid) throws Error {
 			HostSpawnInfo? info;
-			if (!pending_spawn_by_pid.unset (pid, out info))
+			if (!pending_spawns.unset (pid, out info))
 				return false;
 
 			var status = ioctl (fd, IOCTL_RESUME, ref pid);
@@ -598,7 +634,7 @@ namespace Frida {
 					var executable_path = tokens[1];
 
 					var info = HostSpawnInfo (pid, executable_path);
-					pending_spawn_by_pid[pid] = info;
+					pending_spawns[pid] = info;
 					spawned (info);
 				}
 			} catch (IOError e) {

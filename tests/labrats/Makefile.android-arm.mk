@@ -25,19 +25,23 @@ LDFLAGS := \
 all: \
 	sleeper-android-arm \
 	forker-android-arm \
+	spawner-android-arm \
 	simple-agent-android-arm.so \
 	resident-agent-android-arm.so \
 	$(NULL)
 
-sleeper-android-arm: sleeper-unix.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
-	$(STRIP) --strip-all $@.tmp
-	mv $@.tmp $@
+define declare-executable
+$1-android-arm: $2
+	$$(CC) $$(CFLAGS) $$(LDFLAGS) -pie $$< -o $$@.tmp
+	$$(STRIP) --strip-all $$@.tmp
+	mv $$@.tmp $$@
+endef
 
-forker-android-arm: forker.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -pie $< -o $@.tmp
-	$(STRIP) --strip-all $@.tmp
-	mv $@.tmp $@
+$(eval $(call declare-executable,sleeper,sleeper-unix.c))
+
+$(eval $(call declare-executable,forker,forker.c))
+
+$(eval $(call declare-executable,spawner,spawner-unix.c))
 
 %-agent-android-arm.so: %-agent.c %-agent-android-arm.version
 	$(CC) $(CFLAGS) $(LDFLAGS) \

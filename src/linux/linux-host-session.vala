@@ -227,6 +227,18 @@ namespace Frida {
 			return false;
 		}
 
+		protected override async void prepare_exec_transition (uint pid) throws Error {
+			yield helper.prepare_exec_transition (pid);
+		}
+
+		protected override async void await_exec_transition (uint pid) throws Error {
+			yield helper.await_exec_transition (pid);
+		}
+
+		protected override async void cancel_exec_transition (uint pid) throws Error {
+			yield helper.cancel_exec_transition (pid);
+		}
+
 		public override async void input (uint pid, uint8[] data) throws Error {
 			yield helper.input (pid, data);
 		}

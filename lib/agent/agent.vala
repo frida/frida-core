@@ -13,7 +13,7 @@ namespace Frida.Agent {
 		FORK
 	}
 
-	private class Runner : Object, AgentSessionProvider, ExitHandler, ForkHandler {
+	private class Runner : Object, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
 
@@ -65,6 +65,7 @@ namespace Frida.Agent {
 		private Mutex fork_mutex;
 		private Cond fork_cond;
 #endif
+		private SpawnMonitor spawn_monitor;
 
 		private enum ForkRecoveryState {
 			RECOVERING,
@@ -211,28 +212,7 @@ namespace Frida.Agent {
 		}
 
 		private async void prepare_to_exit () {
-			var script_backend = this.script_backend;
-			if (script_backend != null) {
-				var main_context = this.main_context;
-				script_backend.get_scheduler ().push_job_on_js_thread (Priority.LOW, () => {
-					var source = new IdleSource ();
-					source.set_priority (Priority.LOW);
-					source.set_callback (() => {
-						prepare_to_exit.callback ();
-						return false;
-					});
-					source.attach (main_context);
-				});
-				yield;
-			}
-
-			var connection = this.connection;
-			if (connection != null) {
-				try {
-					yield connection.flush ();
-				} catch (GLib.Error e) {
-				}
-			}
+			yield flush_pending_io ();
 		}
 
 #if !WINDOWS
@@ -388,6 +368,42 @@ namespace Frida.Agent {
 		}
 #endif
 
+		private async void prepare_to_exec (uint pid, string path) {
+			yield flush_pending_io ();
+
+			if (controller == null)
+				return;
+
+			var info = HostChildInfo (pid, path, pid);
+
+			try {
+				yield controller.prepare_to_exec (info);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private async async void cancel_exec (uint pid) {
+			if (controller == null)
+				return;
+
+			try {
+				yield controller.cancel_exec (pid);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private async void acknowledge_spawn (uint pid, string path, uint parent_pid, SpawnStartState start_state) {
+			if (controller == null)
+				return;
+
+			var info = HostChildInfo (pid, path, parent_pid);
+
+			try {
+				yield controller.acknowledge_spawn (info, start_state);
+			} catch (GLib.Error e) {
+			}
+		}
+
 		private async void open (AgentSessionId id) throws Error {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
@@ -478,41 +494,45 @@ namespace Frida.Agent {
 		}
 
 		private void enable_child_gating () {
-#if !WINDOWS
-			if (fork_monitor != null)
+			if (spawn_monitor != null)
 				return;
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.begin_transaction ();
 
+#if !WINDOWS
 			fork_monitor = new ForkMonitor (this);
+#endif
 
 #if LINUX
 			thread_list_cloaker = new ThreadListCloaker ();
 			fd_list_cloaker = new FDListCloaker ();
 #endif
 
+			spawn_monitor = new SpawnMonitor (this, main_context);
+
 			interceptor.end_transaction ();
-#endif
 		}
 
 		private void disable_child_gating () {
-#if !WINDOWS
-			if (fork_monitor == null)
+			if (spawn_monitor == null)
 				return;
 
 			var interceptor = Gum.Interceptor.obtain ();
 			interceptor.begin_transaction ();
+
+			spawn_monitor = null;
 
 #if LINUX
 			fd_list_cloaker = null;
 			thread_list_cloaker = null;
 #endif
 
+#if !WINDOWS
 			fork_monitor = null;
+#endif
 
 			interceptor.end_transaction ();
-#endif
 		}
 
 		public ScriptEngine create_script_engine () {
@@ -681,6 +701,31 @@ namespace Frida.Agent {
 			}
 
 			return message;
+		}
+
+		private async void flush_pending_io () {
+			var script_backend = this.script_backend;
+			if (script_backend != null) {
+				var main_context = this.main_context;
+				script_backend.get_scheduler ().push_job_on_js_thread (Priority.LOW, () => {
+					var source = new IdleSource ();
+					source.set_priority (Priority.LOW);
+					source.set_callback (() => {
+						flush_pending_io.callback ();
+						return false;
+					});
+					source.attach (main_context);
+				});
+				yield;
+			}
+
+			var connection = this.connection;
+			if (connection != null) {
+				try {
+					yield connection.flush ();
+				} catch (GLib.Error e) {
+				}
+			}
 		}
 	}
 
@@ -1088,6 +1133,366 @@ namespace Frida.Agent {
 		public abstract void recover_from_fork_in_child (string? identifier);
 	}
 
+	private class SpawnMonitor : Object, Gum.InvocationListener {
+		public weak SpawnHandler handler {
+			get;
+			construct;
+		}
+
+		public MainContext main_context {
+			get;
+			construct;
+		}
+
+		private Mutex mutex;
+		private Cond cond;
+
+		public enum OperationStatus {
+			QUEUED,
+			COMPLETED
+		}
+
+#if DARWIN
+		private PosixSpawnFunc posix_spawn;
+		private PosixSpawnAttrInitFunc posix_spawnattr_init;
+		private PosixSpawnAttrDestroyFunc posix_spawnattr_destroy;
+		private PosixSpawnAttrGetFlagsFunc posix_spawnattr_getflags;
+		private PosixSpawnAttrSetFlagsFunc posix_spawnattr_setflags;
+#endif
+
+		public SpawnMonitor (SpawnHandler handler, MainContext main_context) {
+			Object (handler: handler, main_context: main_context);
+		}
+
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+#if WINDOWS
+			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessW"), this);
+#else
+			var libc_name = detect_libc_name ();
+#if DARWIN
+			posix_spawn = (PosixSpawnFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawn");
+			posix_spawnattr_init = (PosixSpawnAttrInitFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_init");
+			posix_spawnattr_destroy = (PosixSpawnAttrDestroyFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_destroy");
+			posix_spawnattr_getflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_getflags");
+			posix_spawnattr_setflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_setflags");
+
+			interceptor.attach_listener ((void *) posix_spawn, this);
+
+			interceptor.replace_function (Gum.Module.find_export_by_name (libc_name, "execve"), (void *) replacement_execve, this);
+#else
+			var exec_symbol_names = new string[] {
+				"execl",
+				"execlp",
+				"execle",
+				"execv",
+				"execvp",
+				"execve",
+				"execvpe",
+			};
+			foreach (var symbol_name in exec_symbol_names) {
+				var impl = Gum.Module.find_export_by_name (libc_name, symbol_name);
+				if (impl != null)
+					interceptor.attach_listener (impl, this);
+			}
+#endif
+#endif
+		}
+
+		~SpawnMonitor () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			interceptor.detach_listener (this);
+		}
+
+#if !WINDOWS
+		private void on_exec_imminent (uint pid, string path) {
+			mutex.lock ();
+
+			OperationStatus status = QUEUED;
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				perform_prepare_to_exec.begin (pid, path, &status);
+				return false;
+			});
+			source.attach (main_context);
+
+			while (status != COMPLETED)
+				cond.wait (mutex);
+
+			mutex.unlock ();
+		}
+
+		private async void perform_prepare_to_exec (uint pid, string path, OperationStatus * status) {
+			yield handler.prepare_to_exec (pid, path);
+
+			notify_operation_completed (status);
+		}
+
+		private void on_exec_cancelled (uint pid) {
+			mutex.lock ();
+
+			OperationStatus status = QUEUED;
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				perform_cancel_exec.begin (pid, &status);
+				return false;
+			});
+			source.attach (main_context);
+
+			while (status != COMPLETED)
+				cond.wait (mutex);
+
+			mutex.unlock ();
+		}
+
+		private async void perform_cancel_exec (uint pid, OperationStatus * status) {
+			yield handler.cancel_exec (pid);
+
+			notify_operation_completed (status);
+		}
+#endif
+
+#if WINDOWS || DARWIN
+		private void on_spawn_created (uint pid, string path, uint parent_pid, SpawnStartState start_state) {
+			mutex.lock ();
+
+			OperationStatus status = QUEUED;
+
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				perform_acknowledge_spawn.begin (pid, path, parent_pid, start_state, &status);
+				return false;
+			});
+			source.attach (main_context);
+
+			while (status != COMPLETED)
+				cond.wait (mutex);
+
+			mutex.unlock ();
+		}
+
+		private async void perform_acknowledge_spawn (uint pid, string path, uint parent_pid, SpawnStartState start_state, OperationStatus * status) {
+			yield handler.acknowledge_spawn (pid, path, parent_pid, start_state);
+
+			notify_operation_completed (status);
+		}
+#endif
+
+#if WINDOWS
+		private void on_enter (Gum.InvocationContext context) {
+			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+			invocation.application_name = (string16?) context.get_nth_argument (0);
+			invocation.command_line = (string16?) context.get_nth_argument (1);
+
+			invocation.creation_flags = (uint32) context.get_nth_argument (5);
+			context.replace_nth_argument (5, (void *) (invocation.creation_flags | CreateProcessFlags.CREATE_SUSPENDED));
+
+			invocation.process_info = context.get_nth_argument (9);
+		}
+
+		private void on_leave (Gum.InvocationContext context) {
+			var success = (bool) context.get_return_value ();
+			if (!success)
+				return;
+
+			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+			string path;
+			try {
+				if (invocation.application_name != null) {
+					path = invocation.application_name.to_utf8 ();
+				} else {
+					string[] argv;
+					Shell.parse_argv (invocation.command_line.to_utf8 (), out argv);
+					path = argv[0];
+				}
+			} catch (ConvertError e) {
+				assert_not_reached ();
+			} catch (ShellError e) {
+				assert_not_reached ();
+			}
+
+			on_spawn_created (invocation.process_info.process_id, path, _get_current_process_id (), SpawnStartState.SUSPENDED);
+
+			if ((invocation.creation_flags & CreateProcessFlags.CREATE_SUSPENDED) == 0)
+				_resume_thread (invocation.process_info.thread);
+
+			(void) invocation.process_info.process;
+			(void) invocation.process_info.thread_id;
+		}
+
+		private struct Invocation {
+			public unowned string16? application_name;
+			public unowned string16? command_line;
+
+			public uint32 creation_flags;
+
+			public CreateProcessInfo * process_info;
+		}
+
+		private struct CreateProcessInfo {
+			public void * process;
+			public void * thread;
+			public uint32 process_id;
+			public uint32 thread_id;
+		}
+
+		[Flags]
+		private enum CreateProcessFlags {
+			CREATE_SUSPENDED = 0x00000004,
+		}
+
+		public static extern uint32 _get_current_process_id ();
+		public static extern uint32 _resume_thread (void * thread);
+#elif DARWIN
+		private void on_enter (Gum.InvocationContext context) {
+			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+			invocation.pid = context.get_nth_argument (0);
+			invocation.path = (string) context.get_nth_argument (1);
+
+			posix_spawnattr_init (&invocation.attr_storage);
+
+			posix_spawnattr_t * attr = context.get_nth_argument (3);
+			if (attr == null) {
+				attr = &invocation.attr_storage;
+				context.replace_nth_argument (3, attr);
+			}
+			invocation.attr = attr;
+
+			posix_spawnattr_getflags (attr, out invocation.flags);
+			posix_spawnattr_setflags (attr, invocation.flags | PosixSpawnFlags.START_SUSPENDED);
+
+			if ((invocation.flags & PosixSpawnFlags.SETEXEC) != 0) {
+				on_exec_imminent (Posix.getpid (), invocation.path);
+			}
+		}
+
+		private void on_leave (Gum.InvocationContext context) {
+			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+
+			int result = (int) context.get_return_value ();
+
+			if ((invocation.flags & PosixSpawnFlags.SETEXEC) != 0) {
+				on_exec_cancelled (Posix.getpid ());
+			} else if (result == 0) {
+				SpawnStartState start_state = ((invocation.flags & PosixSpawnFlags.START_SUSPENDED) != 0)
+					? SpawnStartState.SUSPENDED
+					: SpawnStartState.RUNNING;
+				on_spawn_created (*(invocation.pid), invocation.path, Posix.getpid (), start_state);
+			}
+
+			posix_spawnattr_destroy (&invocation.attr_storage);
+		}
+
+		private static int replacement_execve (string path, string ** argv, string ** envp) {
+			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
+			var monitor = (SpawnMonitor) context.get_replacement_function_data ();
+
+			return monitor.handle_execve (path, argv, envp);
+		}
+
+		private int handle_execve (string path, string ** argv, string ** envp) {
+			var pid = Posix.getpid ();
+			on_exec_imminent (pid, path);
+
+			Pid resulting_pid;
+
+			posix_spawnattr_t attr;
+			posix_spawnattr_init (&attr);
+			posix_spawnattr_setflags (&attr, PosixSpawnFlags.SETEXEC | PosixSpawnFlags.START_SUSPENDED);
+
+			var result = posix_spawn (out resulting_pid, path, null, &attr, argv, envp);
+			var spawn_errno = Posix.errno;
+
+			posix_spawnattr_destroy (&attr);
+
+			on_exec_cancelled (pid);
+
+			Posix.errno = spawn_errno;
+
+			return result;
+		}
+
+		private struct Invocation {
+			public Posix.pid_t * pid;
+			public unowned string path;
+			public posix_spawnattr_t * attr;
+			public posix_spawnattr_t attr_storage;
+			public uint16 flags;
+		}
+
+		[CCode (has_target = false)]
+		private delegate int PosixSpawnFunc (out Pid pid, string path, void * file_actions, posix_spawnattr_t * attr, string ** argv, string ** envp);
+
+		[CCode (has_target = false)]
+		private delegate int PosixSpawnAttrInitFunc (posix_spawnattr_t * attr);
+
+		[CCode (has_target = false)]
+		private delegate int PosixSpawnAttrDestroyFunc (posix_spawnattr_t * attr);
+
+		[CCode (has_target = false)]
+		private delegate int PosixSpawnAttrGetFlagsFunc (posix_spawnattr_t * attr, out uint16 flags);
+
+		[CCode (has_target = false)]
+		private delegate int PosixSpawnAttrSetFlagsFunc (posix_spawnattr_t * attr, uint16 flags);
+
+		[SimpleType]
+		[IntegerType (rank = 9)]
+		[CCode (cname = "posix_spawnattr_t", cheader_filename = "spawn.h", has_type_id = false)]
+		private struct posix_spawnattr_t : size_t {
+		}
+
+		[Flags]
+		private enum PosixSpawnFlags {
+			SETEXEC		= 0x0040,
+			START_SUSPENDED	= 0x0080,
+		}
+#else
+		private void on_enter (Gum.InvocationContext context) {
+			if (context.get_depth () > 0)
+				return;
+
+			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			invocation.pid = Posix.getpid ();
+
+			unowned string path = (string) context.get_nth_argument (0);
+
+			on_exec_imminent (invocation.pid, path);
+		}
+
+		private void on_leave (Gum.InvocationContext context) {
+			if (context.get_depth () > 0)
+				return;
+
+			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			on_exec_cancelled (invocation.pid);
+		}
+
+		private struct Invocation {
+			public uint pid;
+		}
+#endif
+
+		private void notify_operation_completed (OperationStatus * status) {
+			mutex.lock ();
+			*status = COMPLETED;
+			cond.broadcast ();
+			mutex.unlock ();
+		}
+	}
+
+	public interface SpawnHandler : Object {
+		public abstract async void prepare_to_exec (uint pid, string path);
+		public abstract async void cancel_exec (uint pid);
+		public abstract async void acknowledge_spawn (uint pid, string path, uint parent_pid, SpawnStartState start_state);
+	}
+
 #if LINUX
 	private class ThreadListCloaker : Object, DirListFilter {
 		private string our_dir_by_pid;
@@ -1388,31 +1793,39 @@ namespace Frida.Agent {
 			public uint8 d_type;
 			public char d_name[256];
 		}
-
-		private static string detect_libc_name () {
-			string? libc_name = null;
-
-			Gum.Address address_in_libc = (Gum.Address) Posix.opendir;
-			Gum.Process.enumerate_modules ((details) => {
-				var range = details.range;
-
-				if (address_in_libc >= range.base_address && address_in_libc < range.base_address + range.size) {
-					libc_name = details.path;
-					return false;
-				}
-
-				return true;
-			});
-
-			assert (libc_name != null);
-
-			return libc_name;
-		}
 	}
 
 	public interface DirListFilter : Object {
 		public abstract bool matches_directory (string path);
 		public abstract bool matches_file (string name);
+	}
+#endif
+
+#if !WINDOWS
+	private static Once<string> libc_name_value;
+
+	private static string detect_libc_name () {
+		return libc_name_value.once (_detect_libc_name);
+	}
+
+	private static string _detect_libc_name () {
+		string? libc_name = null;
+
+		Gum.Address address_in_libc = (Gum.Address) Posix.opendir;
+		Gum.Process.enumerate_modules ((details) => {
+			var range = details.range;
+
+			if (address_in_libc >= range.base_address && address_in_libc < range.base_address + range.size) {
+				libc_name = details.path;
+				return false;
+			}
+
+			return true;
+		});
+
+		assert (libc_name != null);
+
+		return libc_name;
 	}
 #endif
 

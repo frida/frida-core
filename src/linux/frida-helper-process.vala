@@ -55,6 +55,33 @@ namespace Frida {
 			}
 		}
 
+		public async void prepare_exec_transition (uint pid) throws Error {
+			var helper = yield obtain_for_pid (pid);
+			try {
+				yield helper.prepare_exec_transition (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void await_exec_transition (uint pid) throws Error {
+			var helper = yield obtain_for_pid (pid);
+			try {
+				yield helper.await_exec_transition (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void cancel_exec_transition (uint pid) throws Error {
+			var helper = yield obtain_for_pid (pid);
+			try {
+				yield helper.cancel_exec_transition (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
 		public async void input (uint pid, uint8[] data) throws Error {
 			var helper = yield obtain_for_pid (pid);
 			try {

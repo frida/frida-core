@@ -229,6 +229,14 @@ namespace Frida {
 			return yield helper.spawn (path, argv, envp);
 		}
 
+		protected override async void await_exec_transition (uint pid) throws Error {
+			yield helper.wait_until_suspended (pid);
+		}
+
+		protected override async void cancel_exec_transition (uint pid) throws Error {
+			yield helper.cancel_pending_waits (pid);
+		}
+
 		public override async void input (uint pid, uint8[] data) throws Error {
 			yield helper.input (pid, data);
 		}

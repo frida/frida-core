@@ -579,7 +579,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   instance->pid = pid;
 
-  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (pid), instance);
 
   return pid;
 
@@ -935,7 +935,7 @@ _frida_darwin_helper_backend_create_spawn_instance (FridaDarwinHelperBackend * s
   instance = frida_spawn_instance_new (self);
   instance->pid = pid;
 
-  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (pid), instance);
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (pid), instance);
 
   return instance;
 }
@@ -1187,7 +1187,7 @@ error_epilogue:
   {
     kill (instance->pid, SIGKILL);
 
-    gee_abstract_map_unset (GEE_ABSTRACT_MAP (self->spawn_instance_by_pid), GUINT_TO_POINTER (instance->pid), NULL);
+    gee_abstract_map_unset (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (instance->pid), NULL);
     frida_spawn_instance_free (instance);
 
     return;
@@ -1438,7 +1438,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   if (!frida_inject_instance_start_thread (instance, error))
     goto error_epilogue;
 
-  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (instance->id), instance);
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (instance->id), instance);
 
   result = instance->id;
   goto beach;
@@ -1480,7 +1480,7 @@ _frida_darwin_helper_backend_demonitor_and_clone_injectee_state (FridaDarwinHelp
 
   clone = frida_inject_instance_clone (instance, self->next_id++);
 
-  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instance_by_id), GUINT_TO_POINTER (clone->id), clone);
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (clone->id), clone);
 
   return clone->id;
 }

@@ -11,13 +11,18 @@ namespace Frida {
 
 		private DBusConnection connection;
 		private uint registration_id = 0;
+
+		public Gee.HashMap<uint, void *> spawn_instances = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, uint> watch_sources = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 
-		/* these should be private, but must be accessible to glue code */
-		public Gee.HashMap<uint, void *> spawn_instance_by_pid = new Gee.HashMap<uint, void *> ();
-		public Gee.HashMap<uint, void *> inject_instance_by_id = new Gee.HashMap<uint, void *> ();
-		private Gee.HashMap<uint, RemoteThreadSession> inject_session_by_id = new Gee.HashMap<uint, RemoteThreadSession> ();
+		public Gee.HashMap<uint, void *> exec_instances = new Gee.HashMap<uint, void *> ();
+		private Gee.HashSet<uint> exec_waiters = new Gee.HashSet<uint> ();
+
+		public Gee.HashMap<uint, void *> inject_instances = new Gee.HashMap<uint, void *> ();
+		private Gee.HashMap<uint, RemoteThreadSession> inject_sessions = new Gee.HashMap<uint, RemoteThreadSession> ();
 		private Gee.HashMap<uint, uint> inject_expiry_by_id = new Gee.HashMap<uint, uint> ();
+
 		public uint next_id = 0;
 
 		public HelperService (string parent_address) {
@@ -25,9 +30,11 @@ namespace Frida {
 		}
 
 		~HelperService () {
-			foreach (var instance in spawn_instance_by_pid.values)
+			foreach (var instance in spawn_instances.values)
 				_free_spawn_instance (instance);
-			foreach (var instance in inject_instance_by_id.values)
+			foreach (var instance in exec_instances.values)
+				_free_exec_instance (instance);
+			foreach (var instance in inject_instances.values)
 				_free_inject_instance (instance, RESIDENT);
 		}
 
@@ -97,7 +104,7 @@ namespace Frida {
 			StdioPipes pipes;
 			var child_pid = _do_spawn (path, argv, envp, out pipes);
 
-			ChildWatch.add ((Pid) child_pid, on_child_dead);
+			monitor_child (child_pid);
 
 			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
 			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
@@ -106,11 +113,23 @@ namespace Frida {
 			return child_pid;
 		}
 
+		private void monitor_child (uint pid) {
+			watch_sources[pid] = ChildWatch.add ((Pid) pid, on_child_dead);
+		}
+
+		private void demonitor_child (uint pid) {
+			uint watch_id;
+			if (watch_sources.unset (pid, out watch_id))
+				Source.remove (watch_id);
+		}
+
 		private void on_child_dead (Pid pid, int status) {
-			stdin_streams.unset ((uint) pid);
+			watch_sources.unset (pid);
+
+			stdin_streams.unset (pid);
 
 			void * instance;
-			if (spawn_instance_by_pid.unset (pid, out instance))
+			if (spawn_instances.unset (pid, out instance))
 				_free_spawn_instance (instance);
 		}
 
@@ -129,20 +148,123 @@ namespace Frida {
 			}
 		}
 
-		public async void input (uint pid, uint8[] data) throws GLib.Error {
+		public async void prepare_exec_transition (uint pid) throws Error {
+			bool is_child = spawn_instances.has_key (pid);
+			if (is_child)
+				demonitor_child (pid);
+
+			try {
+				_do_prepare_exec_transition (pid);
+			} catch (Error e) {
+				if (is_child)
+					monitor_child (pid);
+				throw e;
+			}
+
+			_notify_exec_pending (pid, true);
+		}
+
+		public async void await_exec_transition (uint pid) throws Error {
+			var instance = exec_instances[pid];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
+
+			Error? pending_error = null;
+
+			if (!_try_transition_exec_instance (instance)) {
+				exec_waiters.add (pid);
+
+				Timeout.add (50, () => {
+					var cancelled = !exec_waiters.contains (pid);
+					if (cancelled) {
+						await_exec_transition.callback ();
+						return false;
+					}
+
+					try {
+						if (_try_transition_exec_instance (instance)) {
+							await_exec_transition.callback ();
+							return false;
+						}
+					} catch (Error e) {
+						pending_error = e;
+						await_exec_transition.callback ();
+						return false;
+					}
+
+					return true;
+				});
+
+				yield;
+
+				var cancelled = !exec_waiters.remove (pid);
+				if (cancelled)
+					throw new Error.INVALID_OPERATION ("Cancelled");
+			}
+
+			if (spawn_instances.has_key (pid))
+				monitor_child (pid);
+
+			if (pending_error != null) {
+				exec_instances.unset (pid);
+
+				_resume_exec_instance (instance);
+				_free_exec_instance (instance);
+
+				_notify_exec_pending (pid, false);
+
+				throw pending_error;
+			}
+		}
+
+		public async void cancel_exec_transition (uint pid) throws Error {
+			void * instance;
+			if (!exec_instances.unset (pid, out instance))
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
+
+			exec_waiters.remove (pid);
+
+			_resume_exec_instance (instance);
+			_free_exec_instance (instance);
+
+			if (spawn_instances.has_key (pid))
+				monitor_child (pid);
+			_notify_exec_pending (pid, false);
+		}
+
+		public async void input (uint pid, uint8[] data) throws Error {
 			var stream = stdin_streams[pid];
 			if (stream == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid pid");
-			yield stream.write_all_async (data, Priority.DEFAULT, null, null);
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
+			try {
+				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT (e.message);
+			}
 		}
 
 		public async void resume (uint pid) throws Error {
 			void * instance;
-			bool instance_found = spawn_instance_by_pid.unset (pid, out instance);
-			if (!instance_found)
-				throw new Error.INVALID_ARGUMENT ("Invalid pid");
-			_resume_spawn_instance (instance);
-			_free_spawn_instance (instance);
+			bool instance_found;
+
+			instance_found = spawn_instances.unset (pid, out instance);
+			if (instance_found) {
+				_resume_spawn_instance (instance);
+				_free_spawn_instance (instance);
+				return;
+			}
+
+			if (exec_waiters.contains (pid))
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			instance_found = exec_instances.unset (pid, out instance);
+			if (instance_found) {
+				_resume_exec_instance (instance);
+				_free_exec_instance (instance);
+				return;
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Invalid PID");
 		}
 
 		public async void kill (uint pid) throws Error {
@@ -158,12 +280,12 @@ namespace Frida {
 		}
 
 		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
-			var instance = inject_instance_by_id[id];
+			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
 			RemoteThreadSession session;
-			if (inject_session_by_id.unset (id, out session)) {
+			if (inject_sessions.unset (id, out session)) {
 				session.ended.disconnect (on_remote_thread_session_ended);
 				yield session.cancel ();
 			}
@@ -177,7 +299,7 @@ namespace Frida {
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
-			var instance = inject_instance_by_id[id];
+			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
@@ -189,7 +311,7 @@ namespace Frida {
 		}
 
 		private async void establish_session (uint id, uint pid) throws Error {
-			var fifo = _get_fifo_for_inject_instance (inject_instance_by_id[id]);
+			var fifo = _get_fifo_for_inject_instance (inject_instances[id]);
 
 			var session = new RemoteThreadSession (id, pid, fifo);
 			try {
@@ -199,7 +321,7 @@ namespace Frida {
 				throw e;
 			}
 
-			inject_session_by_id[id] = session;
+			inject_sessions[id] = session;
 			session.ended.connect (on_remote_thread_session_ended);
 		}
 
@@ -207,14 +329,14 @@ namespace Frida {
 			var id = session.id;
 
 			session.ended.disconnect (on_remote_thread_session_ended);
-			inject_session_by_id.unset (id);
+			inject_sessions.unset (id);
 
 			_destroy_inject_instance (id, unload_policy);
 		}
 
 		protected void _destroy_inject_instance (uint id, UnloadPolicy unload_policy) {
 			void * instance;
-			bool found = inject_instance_by_id.unset (id, out instance);
+			bool found = inject_instances.unset (id, out instance);
 			assert (found);
 
 			_free_inject_instance (instance, unload_policy);
@@ -222,7 +344,7 @@ namespace Frida {
 			if (unload_policy == IMMEDIATE)
 				uninjected (id);
 
-			if (connection.is_closed () && inject_instance_by_id.is_empty)
+			if (connection.is_closed () && inject_instances.is_empty)
 				shutdown.begin ();
 		}
 
@@ -250,13 +372,19 @@ namespace Frida {
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
-			if (inject_instance_by_id.is_empty)
+			if (inject_instances.is_empty)
 				shutdown.begin ();
 		}
 
 		protected extern uint _do_spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
 		protected extern void _free_spawn_instance (void * instance);
+
+		protected extern void _do_prepare_exec_transition (uint pid) throws Error;
+		protected extern void _notify_exec_pending (uint pid, bool pending);
+		protected extern bool _try_transition_exec_instance (void * instance) throws Error;
+		protected extern void _resume_exec_instance (void * instance);
+		protected extern void _free_exec_instance (void * instance);
 
 		protected extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
 		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
