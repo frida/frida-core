@@ -1902,7 +1902,7 @@ namespace Frida {
 		}
 
 		private void check_open () throws Error {
-			if (session == null)
+			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Script is destroyed");
 		}
 
