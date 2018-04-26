@@ -336,12 +336,13 @@ static WCHAR *
 environment_block_from_envp (const gchar ** envp, gint envp_length)
 {
   GString * block;
-  gint i;
 
   block = g_string_new ("");
 
   if (envp_length > 0)
   {
+    gint i;
+
     for (i = 0; i != envp_length; i++)
     {
       gunichar2 * var;
@@ -357,6 +358,8 @@ environment_block_from_envp (const gchar ** envp, gint envp_length)
     g_string_append_c (block, '\0');
     g_string_append_c (block, '\0');
   }
+
+  g_string_append_c (block, '\0');
   g_string_append_c (block, '\0');
 
   return (WCHAR *) g_string_free (block, FALSE);
