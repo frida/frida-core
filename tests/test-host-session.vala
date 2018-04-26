@@ -1642,7 +1642,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					waiting = false;
 				}
 				assert (delivered_child.parent_pid == parent_pid);
-				assert (Path.get_basename (delivered_child.identifier).has_prefix ("forker-"));
+				assert (Path.get_basename (delivered_child.path).has_prefix ("forker-"));
 				var child_pid = delivered_child.pid;
 				var child_session = yield device.attach (child_pid);
 				child_session.detached.connect (reason => {
@@ -1758,7 +1758,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				delivered_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
-				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 
 				var child_session_pre_exec = yield device.attach (child.pid);
 				yield child_session_pre_exec.enable_child_gating ();
@@ -1785,7 +1785,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				child = delivered_child;
 				delivered_child = null;
 				assert (child.parent_pid == child.pid);
-				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 
 				var child_session_post_exec = yield device.attach (child.pid);
 				child_session_post_exec.detached.connect (reason => {
@@ -1961,7 +1961,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				delivered_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
-				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 
 				assert (parent_detach_reason == null);
 
@@ -2088,7 +2088,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				delivered_child = null;
 				assert (child.pid == pre_exec_pid);
 				assert (child.parent_pid == pre_exec_pid);
-				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 
 				var post_exec_session = yield device.attach (child.pid);
 				post_exec_session.detached.connect (reason => {
@@ -2331,7 +2331,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				delivered_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
-				assert (Path.get_basename (child.identifier).has_prefix ("spawner-"));
+				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 
 				assert (parent_detach_reason == null);
 

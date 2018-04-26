@@ -333,8 +333,12 @@ namespace Frida.Agent {
 
 		private async void finish_recovery_from_fork (ForkActor actor, string? identifier) {
 			if (actor == CHILD) {
-				var child_identifier = (identifier != null) ? identifier : Environment._get_executable_path ();
-				var info = HostChildInfo (fork_child_pid, child_identifier, fork_parent_pid);
+				var identifier_value = (identifier != null) ? identifier : "";
+				var path = Environment._get_executable_path ();
+				var argv = new string[0];
+				var envp = new string[0];
+				var info = HostChildInfo (fork_child_pid, fork_parent_pid, identifier_value, path, argv, envp, HostChildOrigin.FORK);
+
 				try {
 					yield controller.wait_for_permission_to_resume (fork_child_id, info);
 				} catch (GLib.Error e) {
@@ -368,16 +372,14 @@ namespace Frida.Agent {
 		}
 #endif
 
-		private async void prepare_to_exec (uint pid, string path) {
+		private async void prepare_to_exec (HostChildInfo * info) {
 			yield flush_pending_io ();
 
 			if (controller == null)
 				return;
 
-			var info = HostChildInfo (pid, path, pid);
-
 			try {
-				yield controller.prepare_to_exec (info);
+				yield controller.prepare_to_exec (*info);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -392,14 +394,12 @@ namespace Frida.Agent {
 			}
 		}
 
-		private async void acknowledge_spawn (uint pid, string path, uint parent_pid, SpawnStartState start_state) {
+		private async void acknowledge_spawn (HostChildInfo * info, SpawnStartState start_state) {
 			if (controller == null)
 				return;
 
-			var info = HostChildInfo (pid, path, parent_pid);
-
 			try {
-				yield controller.acknowledge_spawn (info, start_state);
+				yield controller.acknowledge_spawn (*info, start_state);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -1133,7 +1133,7 @@ namespace Frida.Agent {
 		public abstract void recover_from_fork_in_child (string? identifier);
 	}
 
-	private class SpawnMonitor : Object, Gum.InvocationListener {
+	public class SpawnMonitor : Object, Gum.InvocationListener {
 		public weak SpawnHandler handler {
 			get;
 			construct;
@@ -1160,6 +1160,8 @@ namespace Frida.Agent {
 		private PosixSpawnAttrSetFlagsFunc posix_spawnattr_setflags;
 
 		private void * execve;
+
+		private Private posix_spawn_caller_is_internal = new Private ();
 #endif
 
 		public SpawnMonitor (SpawnHandler handler, MainContext main_context) {
@@ -1186,20 +1188,7 @@ namespace Frida.Agent {
 
 			interceptor.replace_function (execve, (void *) replacement_execve, this);
 #else
-			var exec_symbol_names = new string[] {
-				"execl",
-				"execlp",
-				"execle",
-				"execv",
-				"execvp",
-				"execve",
-				"execvpe",
-			};
-			foreach (var symbol_name in exec_symbol_names) {
-				var impl = Gum.Module.find_export_by_name (libc_name, symbol_name);
-				if (impl != null)
-					interceptor.attach_listener (impl, this);
-			}
+			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "execve"), this);
 #endif
 #endif
 		}
@@ -1215,14 +1204,14 @@ namespace Frida.Agent {
 		}
 
 #if !WINDOWS
-		private void on_exec_imminent (uint pid, string path) {
+		private void on_exec_imminent (HostChildInfo * info) {
 			mutex.lock ();
 
 			OperationStatus status = QUEUED;
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				perform_prepare_to_exec.begin (pid, path, &status);
+				perform_prepare_to_exec.begin (info, &status);
 				return false;
 			});
 			source.attach (main_context);
@@ -1233,8 +1222,8 @@ namespace Frida.Agent {
 			mutex.unlock ();
 		}
 
-		private async void perform_prepare_to_exec (uint pid, string path, OperationStatus * status) {
-			yield handler.prepare_to_exec (pid, path);
+		private async void perform_prepare_to_exec (HostChildInfo * info, OperationStatus * status) {
+			yield handler.prepare_to_exec (info);
 
 			notify_operation_completed (status);
 		}
@@ -1265,14 +1254,14 @@ namespace Frida.Agent {
 #endif
 
 #if WINDOWS || DARWIN
-		private void on_spawn_created (uint pid, string path, uint parent_pid, SpawnStartState start_state) {
+		private void on_spawn_created (HostChildInfo * info, SpawnStartState start_state) {
 			mutex.lock ();
 
 			OperationStatus status = QUEUED;
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
-				perform_acknowledge_spawn.begin (pid, path, parent_pid, start_state, &status);
+				perform_acknowledge_spawn.begin (info, start_state, &status);
 				return false;
 			});
 			source.attach (main_context);
@@ -1283,8 +1272,8 @@ namespace Frida.Agent {
 			mutex.unlock ();
 		}
 
-		private async void perform_acknowledge_spawn (uint pid, string path, uint parent_pid, SpawnStartState start_state, OperationStatus * status) {
-			yield handler.acknowledge_spawn (pid, path, parent_pid, start_state);
+		private async void perform_acknowledge_spawn (HostChildInfo * info, SpawnStartState start_state, OperationStatus * status) {
+			yield handler.acknowledge_spawn (info, start_state);
 
 			notify_operation_completed (status);
 		}
@@ -1300,6 +1289,8 @@ namespace Frida.Agent {
 			invocation.creation_flags = (uint32) context.get_nth_argument (5);
 			context.replace_nth_argument (5, (void *) (invocation.creation_flags | CreateProcessFlags.CREATE_SUSPENDED));
 
+			invocation.environment = context.get_nth_argument (6);
+
 			invocation.process_info = context.get_nth_argument (9);
 		}
 
@@ -1310,14 +1301,18 @@ namespace Frida.Agent {
 
 			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 
-			string path;
+			string path = null;
+			string[] argv;
 			try {
-				if (invocation.application_name != null) {
+				if (invocation.application_name != null)
 					path = invocation.application_name.to_utf8 ();
-				} else {
-					string[] argv;
+
+				if (invocation.command_line != null) {
 					Shell.parse_argv (invocation.command_line.to_utf8 (), out argv);
-					path = argv[0];
+					if (path == null)
+						path = argv[0];
+				} else {
+					argv = new string[0];
 				}
 			} catch (ConvertError e) {
 				assert_not_reached ();
@@ -1325,7 +1320,21 @@ namespace Frida.Agent {
 				assert_not_reached ();
 			}
 
-			on_spawn_created (invocation.process_info.process_id, path, _get_current_process_id (), SpawnStartState.SUSPENDED);
+			string[] envp;
+			if (invocation.environment != null) {
+				if ((invocation.creation_flags & CreateProcessFlags.CREATE_UNICODE_ENVIRONMENT) != 0)
+					envp = _parse_unicode_environment (invocation.environment);
+				else
+					envp = _parse_ansi_environment (invocation.environment);
+			} else {
+				envp = _get_environment ();
+			}
+
+			var pid = invocation.process_info.process_id;
+			var parent_pid = _get_current_process_id ();
+			var no_identifier = "";
+			var info = HostChildInfo (pid, parent_pid, no_identifier, path, argv, envp, HostChildOrigin.SPAWN);
+			on_spawn_created (&info, SpawnStartState.SUSPENDED);
 
 			if ((invocation.creation_flags & CreateProcessFlags.CREATE_SUSPENDED) == 0)
 				_resume_thread (invocation.process_info.thread);
@@ -1340,6 +1349,8 @@ namespace Frida.Agent {
 
 			public uint32 creation_flags;
 
+			public void * environment;
+
 			public CreateProcessInfo * process_info;
 		}
 
@@ -1352,13 +1363,21 @@ namespace Frida.Agent {
 
 		[Flags]
 		private enum CreateProcessFlags {
-			CREATE_SUSPENDED = 0x00000004,
+			CREATE_SUSPENDED		= 0x00000004,
+			CREATE_UNICODE_ENVIRONMENT	= 0x00000400,
 		}
 
 		public static extern uint32 _get_current_process_id ();
 		public static extern uint32 _resume_thread (void * thread);
+		public static extern string[] _get_environment ();
+		public static extern string[] _parse_unicode_environment (void * env);
+		public static extern string[] _parse_ansi_environment (void * env);
 #elif DARWIN
 		private void on_enter (Gum.InvocationContext context) {
+			var caller_is_internal = (bool) posix_spawn_caller_is_internal.get ();
+			if (caller_is_internal)
+				return;
+
 			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 
 			invocation.pid = context.get_nth_argument (0);
@@ -1376,12 +1395,22 @@ namespace Frida.Agent {
 			posix_spawnattr_getflags (attr, out invocation.flags);
 			posix_spawnattr_setflags (attr, invocation.flags | PosixSpawnFlags.START_SUSPENDED);
 
+			invocation.argv = parse_strv ((string **) context.get_nth_argument (4));
+			invocation.envp = parse_strv ((string **) context.get_nth_argument (5));
+
 			if ((invocation.flags & PosixSpawnFlags.SETEXEC) != 0) {
-				on_exec_imminent (Posix.getpid (), invocation.path);
+				var pid = Posix.getpid ();
+				var no_identifier = "";
+				var info = HostChildInfo (pid, pid, no_identifier, invocation.path, invocation.argv, invocation.envp, HostChildOrigin.EXEC);
+				on_exec_imminent (&info);
 			}
 		}
 
 		private void on_leave (Gum.InvocationContext context) {
+			var caller_is_internal = (bool) posix_spawn_caller_is_internal.get ();
+			if (caller_is_internal)
+				return;
+
 			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 
 			int result = (int) context.get_return_value ();
@@ -1389,10 +1418,16 @@ namespace Frida.Agent {
 			if ((invocation.flags & PosixSpawnFlags.SETEXEC) != 0) {
 				on_exec_cancelled (Posix.getpid ());
 			} else if (result == 0) {
+				var pid = *(invocation.pid);
+				var parent_pid = Posix.getpid ();
+				var no_identifier = "";
+				var info = HostChildInfo (pid, parent_pid, no_identifier, invocation.path, invocation.argv, invocation.envp, HostChildOrigin.SPAWN);
+
 				SpawnStartState start_state = ((invocation.flags & PosixSpawnFlags.START_SUSPENDED) != 0)
 					? SpawnStartState.SUSPENDED
 					: SpawnStartState.RUNNING;
-				on_spawn_created (*(invocation.pid), invocation.path, Posix.getpid (), start_state);
+
+				on_spawn_created (&info, start_state);
 			}
 
 			posix_spawnattr_destroy (&invocation.attr_storage);
@@ -1407,7 +1442,9 @@ namespace Frida.Agent {
 
 		private int handle_execve (string path, string ** argv, string ** envp) {
 			var pid = Posix.getpid ();
-			on_exec_imminent (pid, path);
+			var no_identifier = "";
+			var info = HostChildInfo (pid, pid, no_identifier, path, parse_strv (argv), parse_strv (envp), HostChildOrigin.EXEC);
+			on_exec_imminent (&info);
 
 			Pid resulting_pid;
 
@@ -1415,8 +1452,12 @@ namespace Frida.Agent {
 			posix_spawnattr_init (&attr);
 			posix_spawnattr_setflags (&attr, PosixSpawnFlags.SETEXEC | PosixSpawnFlags.START_SUSPENDED);
 
+			posix_spawn_caller_is_internal.set ((void *) true);
+
 			var result = posix_spawn (out resulting_pid, path, null, &attr, argv, envp);
 			var spawn_errno = Posix.errno;
+
+			posix_spawn_caller_is_internal.set ((void *) false);
 
 			posix_spawnattr_destroy (&attr);
 
@@ -1433,6 +1474,8 @@ namespace Frida.Agent {
 			public posix_spawnattr_t * attr;
 			public posix_spawnattr_t attr_storage;
 			public uint16 flags;
+			public unowned string[] argv;
+			public unowned string[] envp;
 		}
 
 		[CCode (has_target = false)]
@@ -1463,27 +1506,36 @@ namespace Frida.Agent {
 		}
 #else
 		private void on_enter (Gum.InvocationContext context) {
-			if (context.get_depth () > 0)
-				return;
-
 			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 			invocation.pid = Posix.getpid ();
 
+			var no_identifier = "";
 			unowned string path = (string) context.get_nth_argument (0);
-
-			on_exec_imminent (invocation.pid, path);
+			var argv = parse_strv ((string **) context.get_nth_argument (1));
+			var envp = parse_strv ((string **) context.get_nth_argument (2));
+			var info = HostChildInfo (invocation.pid, invocation.pid, no_identifier, path, argv, envp, HostChildOrigin.EXEC);
+			on_exec_imminent (&info);
 		}
 
 		private void on_leave (Gum.InvocationContext context) {
-			if (context.get_depth () > 0)
-				return;
-
 			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 			on_exec_cancelled (invocation.pid);
 		}
 
 		private struct Invocation {
 			public uint pid;
+		}
+#endif
+
+#if !WINDOWS
+		private string[] empty_strv = new string[0];
+
+		private unowned string[] parse_strv (string ** strv) {
+			if (strv == null)
+				return empty_strv;
+
+			unowned string[] elements = (string[]) strv;
+			return elements[0:strv_length (elements)];
 		}
 #endif
 
@@ -1496,9 +1548,9 @@ namespace Frida.Agent {
 	}
 
 	public interface SpawnHandler : Object {
-		public abstract async void prepare_to_exec (uint pid, string path);
+		public abstract async void prepare_to_exec (HostChildInfo * info);
 		public abstract async void cancel_exec (uint pid);
-		public abstract async void acknowledge_spawn (uint pid, string path, uint parent_pid, SpawnStartState start_state);
+		public abstract async void acknowledge_spawn (HostChildInfo * info, SpawnStartState start_state);
 	}
 
 #if LINUX

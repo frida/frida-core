@@ -241,21 +241,51 @@ namespace Frida {
 			private set;
 		}
 
-		public string identifier {
-			get;
-			private set;
-		}
-
 		public uint parent_pid {
 			get;
 			private set;
 		}
 
-		public HostChildInfo (uint pid, string identifier, uint parent_pid) {
-			this.pid = pid;
-			this.identifier = identifier;
-			this.parent_pid = parent_pid;
+		public string identifier {
+			get;
+			private set;
 		}
+
+		public string path {
+			get;
+			private set;
+		}
+
+		public string[] argv {
+			get;
+			private set;
+		}
+
+		public string[] envp {
+			get;
+			private set;
+		}
+
+		public HostChildOrigin origin {
+			get;
+			private set;
+		}
+
+		public HostChildInfo (uint pid, uint parent_pid, string identifier, string path, string[] argv, string[] envp, HostChildOrigin origin) {
+			this.pid = pid;
+			this.parent_pid = parent_pid;
+			this.identifier = identifier;
+			this.path = path;
+			this.argv = argv;
+			this.envp = envp;
+			this.origin = origin;
+		}
+	}
+
+	public enum HostChildOrigin {
+		FORK,
+		EXEC,
+		SPAWN
 	}
 
 	public struct AgentSessionId {

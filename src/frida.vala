@@ -808,7 +808,24 @@ namespace Frida {
 
 		private Child child_from_info (HostChildInfo info) {
 			var identifier = info.identifier;
-			return new Child (info.pid, (identifier.length > 0) ? identifier : null, info.parent_pid);
+
+			ChildOrigin origin;
+			switch (info.origin) {
+				case FORK:	origin = FORK;	break;
+				case EXEC:	origin = EXEC;	break;
+				case SPAWN:	origin = SPAWN;	break;
+				default:	assert_not_reached ();
+			}
+
+			return new Child (
+				info.pid,
+				info.parent_pid,
+				(identifier.length > 0) ? identifier : null,
+				info.path,
+				info.argv,
+				info.envp,
+				origin
+			);
 		}
 
 		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
@@ -1374,24 +1391,56 @@ namespace Frida {
 	public class Child : Object {
 		public uint pid {
 			get;
-			private set;
-		}
-
-		public string? identifier {
-			get;
-			private set;
+			construct;
 		}
 
 		public uint parent_pid {
 			get;
-			private set;
+			construct;
 		}
 
-		public Child (uint pid, string? identifier, uint parent_pid) {
-			this.pid = pid;
-			this.identifier = identifier;
-			this.parent_pid = parent_pid;
+		public string? identifier {
+			get;
+			construct;
 		}
+
+		public string path {
+			get;
+			construct;
+		}
+
+		public string[] argv {
+			get;
+			construct;
+		}
+
+		public string[] envp {
+			get;
+			construct;
+		}
+
+		public ChildOrigin origin {
+			get;
+			construct;
+		}
+
+		public Child (uint pid, uint parent_pid, string? identifier, string path, string[] argv, string[] envp, ChildOrigin origin) {
+			Object (
+				pid: pid,
+				parent_pid: parent_pid,
+				identifier: identifier,
+				path: path,
+				argv: argv,
+				envp: envp,
+				origin: origin
+			);
+		}
+	}
+
+	public enum ChildOrigin {
+		FORK,
+		EXEC,
+		SPAWN
 	}
 
 	public class Icon : Object {
