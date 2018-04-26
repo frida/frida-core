@@ -16,7 +16,7 @@ namespace Frida {
 
 		public MainContext main_context {
 			get;
-			private set;
+			construct;
 		}
 
 		public delegate bool Predicate (Device device);
@@ -28,7 +28,7 @@ namespace Frida {
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 
 		public DeviceManager () {
-			this.main_context = get_main_context ();
+			Object (main_context: get_main_context ());
 		}
 
 		public async void close () {
@@ -392,37 +392,41 @@ namespace Frida {
 
 		public string id {
 			get;
-			private set;
+			construct;
 		}
 
 		public string name {
 			get;
-			private set;
+			construct;
 		}
 
 		public Icon? icon {
 			get;
-			private set;
+			construct;
 		}
 
 		public DeviceType dtype {
 			get;
-			private set;
+			construct;
 		}
 
 		public HostSessionProvider provider {
 			get;
-			private set;
+			construct;
+		}
+
+		public weak DeviceManager manager {
+			get;
+			construct;
 		}
 
 		public MainContext main_context {
 			get;
-			private set;
+			construct;
 		}
 
 		public delegate bool ProcessPredicate (Process process);
 
-		private weak DeviceManager manager;
 		private string? location;
 		private Gee.Promise<bool> ensure_request;
 		private Gee.Promise<bool> close_request;
@@ -433,25 +437,35 @@ namespace Frida {
 		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
 
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
-			this.manager = manager;
-			this.id = id;
-			this.name = name;
-			this.icon = icon_from_image (provider.icon);
+			DeviceType dtype;
 			switch (kind) {
 				case HostSessionProviderKind.LOCAL_SYSTEM:
-					this.dtype = DeviceType.LOCAL;
+					dtype = DeviceType.LOCAL;
 					break;
 				case HostSessionProviderKind.LOCAL_TETHER:
-					this.dtype = DeviceType.TETHER;
+					dtype = DeviceType.TETHER;
 					break;
 				case HostSessionProviderKind.REMOTE_SYSTEM:
-					this.dtype = DeviceType.REMOTE;
+					dtype = DeviceType.REMOTE;
 					break;
+				default:
+					assert_not_reached ();
 			}
-			this.provider = provider;
-			this.location = location;
-			this.main_context = manager.main_context;
 
+			Object (
+				id: id,
+				name: name,
+				icon: icon_from_image (provider.icon),
+				dtype: dtype,
+				provider: provider,
+				manager: manager,
+				main_context: manager.main_context
+			);
+
+			this.location = location;
+		}
+
+		construct {
 			provider.host_session_closed.connect (on_host_session_closed);
 			provider.agent_session_closed.connect (on_agent_session_closed);
 		}
@@ -679,13 +693,13 @@ namespace Frida {
 			}
 		}
 
-		private Icon? icon_from_image (Image? image) {
+		private static Icon? icon_from_image (Image? image) {
 			if (image == null)
 				return null;
 			return icon_from_image_data (image.data);
 		}
 
-		private Icon? icon_from_image_data (ImageData image) {
+		private static Icon? icon_from_image_data (ImageData image) {
 			if (image.width == 0)
 				return null;
 			return new Icon (image.width, image.height, image.rowstride, new Bytes.take (Base64.decode (image.pixels)));
@@ -1090,7 +1104,6 @@ namespace Frida {
 			}
 
 			manager._release_device (this);
-			manager = null;
 
 			lost ();
 
@@ -1226,35 +1239,37 @@ namespace Frida {
 	public class Application : Object {
 		public string identifier {
 			get;
-			private set;
+			construct;
 		}
 
 		public string name {
 			get;
-			private set;
+			construct;
 		}
 
 		public uint pid {
 			get;
-			private set;
+			construct;
 		}
 
 		public Icon? small_icon {
 			get;
-			private set;
+			construct;
 		}
 
 		public Icon? large_icon {
 			get;
-			private set;
+			construct;
 		}
 
 		public Application (string identifier, string name, uint pid, Icon? small_icon, Icon? large_icon) {
-			this.identifier = identifier;
-			this.name = name;
-			this.pid = pid;
-			this.small_icon = small_icon;
-			this.large_icon = large_icon;
+			Object (
+				identifier: identifier,
+				name: name,
+				pid: pid,
+				small_icon: small_icon,
+				large_icon: large_icon
+			);
 		}
 	}
 
@@ -1277,29 +1292,31 @@ namespace Frida {
 	public class Process : Object {
 		public uint pid {
 			get;
-			private set;
+			construct;
 		}
 
 		public string name {
 			get;
-			private set;
+			construct;
 		}
 
 		public Icon? small_icon {
 			get;
-			private set;
+			construct;
 		}
 
 		public Icon? large_icon {
 			get;
-			private set;
+			construct;
 		}
 
 		public Process (uint pid, string name, Icon? small_icon, Icon? large_icon) {
-			this.pid = pid;
-			this.name = name;
-			this.small_icon = small_icon;
-			this.large_icon = large_icon;
+			Object (
+				pid: pid,
+				name: name,
+				small_icon: small_icon,
+				large_icon: large_icon
+			);
 		}
 	}
 
@@ -1322,17 +1339,19 @@ namespace Frida {
 	public class Spawn : Object {
 		public uint pid {
 			get;
-			private set;
+			construct;
 		}
 
 		public string? identifier {
 			get;
-			private set;
+			construct;
 		}
 
 		public Spawn (uint pid, string? identifier) {
-			this.pid = pid;
-			this.identifier = identifier;
+			Object (
+				pid: pid,
+				identifier: identifier
+			);
 		}
 	}
 
@@ -1378,29 +1397,31 @@ namespace Frida {
 	public class Icon : Object {
 		public int width {
 			get;
-			private set;
+			construct;
 		}
 
 		public int height {
 			get;
-			private set;
+			construct;
 		}
 
 		public int rowstride {
 			get;
-			private set;
+			construct;
 		}
 
 		public Bytes pixels {
 			get;
-			private set;
+			construct;
 		}
 
 		public Icon (int width, int height, int rowstride, Bytes pixels) {
-			this.width = width;
-			this.height = height;
-			this.rowstride = rowstride;
-			this.pixels = pixels;
+			Object (
+				width: width,
+				height: height,
+				rowstride: rowstride,
+				pixels: pixels
+			);
 		}
 	}
 
@@ -1409,22 +1430,26 @@ namespace Frida {
 
 		public uint pid {
 			get;
-			private set;
+			construct;
 		}
 
 		public AgentSession session {
 			get;
-			private set;
+			construct;
+		}
+
+		public weak Device device {
+			get;
+			construct;
 		}
 
 		public MainContext main_context {
 			get;
-			private set;
+			construct;
 		}
 
 		private const uint16 DEFAULT_DEBUG_PORT = 5858;
 
-		private weak Device device;
 		private Gee.Promise<bool> close_request;
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
@@ -1432,11 +1457,15 @@ namespace Frida {
 		private Debugger debugger;
 
 		public Session (Device device, uint pid, AgentSession agent_session) {
-			this.device = device;
-			this.pid = pid;
-			this.session = agent_session;
-			this.main_context = device.main_context;
+			Object (
+				pid: pid,
+				session: agent_session,
+				device: device,
+				main_context: device.main_context
+			);
+		}
 
+		construct {
 			session.message_from_script.connect (on_message_from_script);
 		}
 
@@ -1706,10 +1735,8 @@ namespace Frida {
 			if (may_block)
 				session.close.begin ();
 			session.message_from_script.disconnect (on_message_from_script);
-			session = null;
 
 			yield device._release_session (this, may_block);
-			device = null;
 
 			detached (reason);
 			close_request.set_value (true);
@@ -1731,18 +1758,29 @@ namespace Frida {
 		public signal void destroyed ();
 		public signal void message (string message, Bytes? data);
 
-		public MainContext main_context {
+		public uint id {
 			get;
-			private set;
+			construct;
 		}
 
-		private weak Session session;
-		private AgentScriptId script_id;
+		public weak Session session {
+			get;
+			construct;
+		}
+
+		public MainContext main_context {
+			get;
+			construct;
+		}
+
+		private Gee.Promise<bool> close_request;
 
 		public Script (Session session, AgentScriptId script_id) {
-			this.session = session;
-			this.script_id = script_id;
-			this.main_context = session.main_context;
+			Object (
+				id: script_id.handle,
+				session: session,
+				main_context: session.main_context
+			);
 		}
 
 		public bool is_destroyed () {
@@ -1753,7 +1791,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.load_script (script_id);
+				yield session.session.load_script (AgentScriptId (id));
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1792,7 +1830,7 @@ namespace Frida {
 			var data_param = has_data ? data.get_data () : new uint8[0];
 
 			try {
-				yield session.session.post_to_script (script_id, message, has_data, data_param);
+				yield session.session.post_to_script (AgentScriptId (id), message, has_data, data_param);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1820,24 +1858,31 @@ namespace Frida {
 		}
 
 		public async void _do_close (bool may_block) {
-			if (session == null) {
+			if (close_request != null) {
+				try {
+					yield close_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
 				return;
 			}
-			var p = session;
-			session = null;
+			close_request = new Gee.Promise<bool> ();
 
-			var sid = script_id;
+			var parent = session;
+			var sid = AgentScriptId (id);
 
-			p._release_script (sid);
+			parent._release_script (sid);
 
 			if (may_block) {
 				try {
-					yield p.session.destroy_script (sid);
+					yield parent.session.destroy_script (sid);
 				} catch (GLib.Error ignored_error) {
 				}
 			}
 
 			destroyed ();
+
+			close_request.set_value (true);
 		}
 
 		private Object create<T> () {
