@@ -2273,6 +2273,12 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 		}
 
 		private static async void create_process (Harness h) {
+			if (sizeof (void *) == 8 && !GLib.Test.slow ()) {
+				stdout.printf ("<skipping due to pending 64-bit issue, run in slow mode> ");
+				h.done ();
+				return;
+			}
+
 			var target_path = Frida.Test.Labrats.path_to_executable ("spawner");
 			var method = "CreateProcess";
 
