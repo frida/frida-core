@@ -146,11 +146,21 @@ namespace Frida {
 #endif
 		private Gee.HashMap<uint, HostChildInfo?> pending_children = new Gee.HashMap<uint, HostChildInfo?> ();
 		private Gee.HashMap<uint, SpawnAckRequest> pending_acks = new Gee.HashMap<uint, SpawnAckRequest> ();
+		private Gee.Promise<bool> pending_children_gc_request;
+		private Source pending_children_gc_timer;
 
 		protected Injector injector;
 		protected Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
 		public virtual async void close () {
+			if (pending_children_gc_timer != null) {
+				pending_children_gc_timer.destroy ();
+				pending_children_gc_timer = null;
+			}
+
+			if (pending_children_gc_request != null)
+				yield garbage_collect_pending_children ();
+
 			foreach (var ack_request in pending_acks)
 				ack_request.complete ();
 			pending_acks.clear ();
@@ -212,6 +222,8 @@ namespace Frida {
 		protected virtual async void cancel_exec_transition (uint pid) throws Error {
 			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
 		}
+
+		protected abstract bool process_is_alive (uint pid);
 
 		public abstract async void input (uint pid, uint8[] data) throws Error;
 
@@ -596,10 +608,8 @@ namespace Frida {
 			connection.on_closed.connect (on_agent_connection_closed);
 			provider.closed.connect (on_agent_session_provider_closed);
 
-			if (!try_handle_child (info)) {
-				pending_children[pid] = info;
-				delivered (info);
-			}
+			if (!try_handle_child (info))
+				add_pending_child (info);
 
 			try {
 				yield resume_request.future.wait_async ();
@@ -639,8 +649,7 @@ namespace Frida {
 			if (entry_to_wait_for != null)
 				yield entry_to_wait_for.wait_until_closed ();
 
-			pending_children[pid] = info;
-			delivered (info);
+			add_pending_child (info);
 		}
 
 		public async void cancel_exec (uint pid) throws Error {
@@ -663,10 +672,57 @@ namespace Frida {
 
 			pending_acks[pid] = request;
 
-			pending_children[pid] = info;
-			delivered (info);
+			add_pending_child (info);
 
 			yield request.await ();
+		}
+
+		private void add_pending_child (HostChildInfo info) {
+			pending_children[info.pid] = info;
+			delivered (info);
+
+			garbage_collect_pending_children_soon ();
+		}
+
+		private void garbage_collect_pending_children_soon () {
+			if (pending_children_gc_timer != null || pending_children_gc_request != null)
+				return;
+
+			var timer = new TimeoutSource.seconds (1);
+			timer.set_callback (() => {
+				pending_children_gc_timer = null;
+				garbage_collect_pending_children.begin ();
+				return false;
+			});
+			timer.attach (MainContext.get_thread_default ());
+			pending_children_gc_timer = timer;
+		}
+
+		private async void garbage_collect_pending_children () {
+			if (pending_children_gc_request != null) {
+				try {
+					yield pending_children_gc_request.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+				return;
+			}
+			pending_children_gc_request = new Gee.Promise<bool> ();
+
+			foreach (var pid in pending_children.keys.to_array ()) {
+				if (!process_is_alive (pid)) {
+					try {
+						yield resume (pid);
+					} catch (GLib.Error e) {
+					}
+				}
+			}
+
+			pending_children_gc_request.set_value (true);
+			pending_children_gc_request = null;
+
+			if (!pending_children.is_empty)
+				garbage_collect_pending_children_soon ();
 		}
 
 		private class AgentEntry : Object {

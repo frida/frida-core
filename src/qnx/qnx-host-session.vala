@@ -144,6 +144,10 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
+		protected override bool process_is_alive (uint pid) {
+			return Posix.kill ((Posix.pid_t) pid, 0) == 0 || Posix.errno == Posix.EPERM;
+		}
+
 		public override async void input (uint pid, uint8[] data) throws Error {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}

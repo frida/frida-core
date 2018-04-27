@@ -210,6 +210,23 @@ handle_create_error:
   }
 }
 
+gboolean
+_frida_windows_host_session_process_is_alive (guint pid)
+{
+  HANDLE process;
+  DWORD res;
+
+  process = OpenProcess (SYNCHRONIZE, FALSE, pid);
+  if (process == NULL)
+    return GetLastError () == ERROR_ACCESS_DENIED;
+
+  res = WaitForSingleObject (process, 0);
+
+  CloseHandle (process);
+
+  return res == WAIT_TIMEOUT;
+}
+
 void
 frida_child_process_close (FridaChildProcess * self)
 {

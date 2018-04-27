@@ -200,6 +200,10 @@ namespace Frida {
 			}
 		}
 
+		protected override bool process_is_alive (uint pid) {
+			return _process_is_alive (pid);
+		}
+
 		public override async void input (uint pid, uint8[] data) throws Error {
 			var process = process_by_pid[pid];
 			if (process == null)
@@ -258,6 +262,7 @@ namespace Frida {
 		}
 
 		public extern ChildProcess _do_spawn (string path, string[] argv, string[] envp) throws Error;
+		public static extern bool _process_is_alive (uint pid);
 	}
 
 	public class ChildProcess : Object {

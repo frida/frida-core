@@ -239,6 +239,10 @@ namespace Frida {
 			yield helper.cancel_exec_transition (pid);
 		}
 
+		protected override bool process_is_alive (uint pid) {
+			return Posix.kill ((Posix.pid_t) pid, 0) == 0 || Posix.errno == Posix.EPERM;
+		}
+
 		public override async void input (uint pid, uint8[] data) throws Error {
 			yield helper.input (pid, data);
 		}
