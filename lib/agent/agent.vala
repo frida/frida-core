@@ -174,7 +174,7 @@ namespace Frida.Agent {
 		construct {
 			agent_pthread = Environment._get_current_pthread ();
 
-			main_context = new MainContext ();
+			main_context = MainContext.default ();
 			main_loop = new MainLoop (main_context);
 
 			var interceptor = Gum.Interceptor.obtain ();
@@ -212,7 +212,7 @@ namespace Frida.Agent {
 		}
 
 		private async void prepare_to_exit () {
-			yield flush_pending_io ();
+			yield prepare_for_termination ();
 		}
 
 #if !WINDOWS
@@ -373,7 +373,7 @@ namespace Frida.Agent {
 #endif
 
 		private async void prepare_to_exec (HostChildInfo * info) {
-			yield flush_pending_io ();
+			yield prepare_for_termination ();
 
 			if (controller == null)
 				return;
@@ -703,21 +703,9 @@ namespace Frida.Agent {
 			return message;
 		}
 
-		private async void flush_pending_io () {
-			var script_backend = this.script_backend;
-			if (script_backend != null) {
-				var main_context = this.main_context;
-				script_backend.get_scheduler ().push_job_on_js_thread (Priority.LOW, () => {
-					var source = new IdleSource ();
-					source.set_priority (Priority.LOW);
-					source.set_callback (() => {
-						flush_pending_io.callback ();
-						return false;
-					});
-					source.attach (main_context);
-				});
-				yield;
-			}
+		private async void prepare_for_termination () {
+			foreach (var client in clients.to_array ())
+				yield client.prepare_for_termination ();
 
 			var connection = this.connection;
 			if (connection != null) {
@@ -781,6 +769,11 @@ namespace Frida.Agent {
 			closed (this);
 
 			close_request.set_value (true);
+		}
+
+		public async void prepare_for_termination () {
+			if (script_engine != null)
+				yield script_engine.prepare_for_termination ();
 		}
 
 		public async void enable_child_gating () throws Error {

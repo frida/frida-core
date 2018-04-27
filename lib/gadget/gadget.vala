@@ -477,7 +477,7 @@ namespace Frida.Gadget {
 	private async void stop () {
 		if (controller != null) {
 			if (config.teardown == TeardownRequirement.MINIMAL) {
-				yield controller.flush ();
+				yield controller.prepare_for_termination ();
 			} else {
 				yield controller.stop ();
 				controller = null;
@@ -564,7 +564,7 @@ namespace Frida.Gadget {
 
 	private interface Controller : Object {
 		public abstract async void start () throws Error;
-		public abstract async void flush ();
+		public abstract async void prepare_for_termination ();
 		public abstract async void stop ();
 	}
 
@@ -598,8 +598,8 @@ namespace Frida.Gadget {
 			yield script.start ();
 		}
 
-		public async void flush () {
-			yield script.flush ();
+		public async void prepare_for_termination () {
+			yield script.prepare_for_termination ();
 		}
 
 		public async void stop () {
@@ -678,9 +678,9 @@ namespace Frida.Gadget {
 			yield scan ();
 		}
 
-		public async void flush () {
+		public async void prepare_for_termination () {
 			foreach (var script in scripts.values.to_array ())
-				yield script.flush ();
+				yield script.prepare_for_termination ();
 		}
 
 		public async void stop () {
@@ -920,10 +920,9 @@ namespace Frida.Gadget {
 			}
 		}
 
-		public async void flush () {
-			if (id.handle != 0) {
+		public async void prepare_for_termination () {
+			if (id.handle != 0)
 				yield call_dispose ();
-			}
 		}
 
 		public async void stop () {
@@ -933,7 +932,7 @@ namespace Frida.Gadget {
 				monitor = null;
 			}
 
-			yield flush ();
+			yield prepare_for_termination ();
 
 			if (id.handle != 0) {
 				try {
@@ -1235,7 +1234,10 @@ namespace Frida.Gadget {
 			server.start ();
 		}
 
-		public async void flush () {
+		public async void prepare_for_termination () {
+			foreach (var client in clients.values.to_array ())
+				yield client.prepare_for_termination ();
+
 			foreach (var connection in clients.keys.to_array ()) {
 				try {
 					yield connection.flush ();
@@ -1327,6 +1329,11 @@ namespace Frida.Gadget {
 					connection.unregister_object (host_registration_id);
 					host_registration_id = 0;
 				}
+			}
+
+			public async void prepare_for_termination () {
+				foreach (var session in sessions.to_array ())
+					yield session.prepare_for_termination ();
 			}
 
 			public async HostApplicationInfo get_frontmost_application () throws Error {
@@ -1472,6 +1479,11 @@ namespace Frida.Gadget {
 				closed (this);
 
 				close_request.set_value (true);
+			}
+
+			public async void prepare_for_termination () {
+				if (script_engine != null)
+					yield script_engine.prepare_for_termination ();
 			}
 
 			public async void enable_child_gating () throws Error {

@@ -1,5 +1,3 @@
-using Gee;
-
 namespace Frida.Gadget {
 	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId sid, string message, Bytes? data);
@@ -7,8 +5,10 @@ namespace Frida.Gadget {
 
 		private Gum.ScriptBackend backend;
 		private Gum.MemoryRange agent_range;
-		private uint last_script_id = 0;
-		private HashMap<uint, ScriptInstance> instance_by_id = new HashMap<uint, ScriptInstance> ();
+
+		private Gee.HashMap<uint, ScriptInstance> instances = new Gee.HashMap<uint, ScriptInstance> ();
+		private uint next_script_id = 1;
+
 		private bool debugger_enabled = false;
 
 		public ScriptEngine (Gum.ScriptBackend backend, Gum.MemoryRange agent_range) {
@@ -16,11 +16,16 @@ namespace Frida.Gadget {
 			this.agent_range = agent_range;
 		}
 
+		public async void prepare_for_termination () {
+			foreach (var instance in instances.values.to_array ())
+				yield instance.ensure_dispose_called ();
+		}
+
 		public async void shutdown () {
-			foreach (var instance in instance_by_id.values) {
+			foreach (var instance in instances.values) {
 				yield instance.destroy ();
 			}
-			instance_by_id.clear ();
+			instances.clear ();
 
 			if (debugger_enabled) {
 				backend.set_debug_message_handler (null);
@@ -29,7 +34,7 @@ namespace Frida.Gadget {
 		}
 
 		public async ScriptInstance create_script (string? name, string? source, Bytes? bytes) throws Error {
-			var sid = AgentScriptId (++last_script_id);
+			var sid = AgentScriptId (next_script_id++);
 
 			Gum.Script script;
 			try {
@@ -47,10 +52,11 @@ namespace Frida.Gadget {
 				throw new Error.INVALID_ARGUMENT (e.message);
 			}
 			script.get_stalker ().exclude (agent_range);
-			script.set_message_handler ((script, message, data) => this.message_from_script (sid, message, data));
 
 			var instance = new ScriptInstance (sid, script);
-			instance_by_id[sid.handle] = instance;
+			instances[sid.handle] = instance;
+
+			instance.message.connect (on_message);
 
 			return instance;
 		}
@@ -65,23 +71,27 @@ namespace Frida.Gadget {
 
 		public async void destroy_script (AgentScriptId sid) throws Error {
 			ScriptInstance instance;
-			if (!instance_by_id.unset (sid.handle, out instance))
+			if (!instances.unset (sid.handle, out instance))
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			yield instance.destroy ();
 		}
 
 		public async void load_script (AgentScriptId sid) throws Error {
-			var instance = instance_by_id[sid.handle];
+			var instance = instances[sid.handle];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			yield instance.script.load ();
 		}
 
 		public void post_to_script (AgentScriptId sid, string message, Bytes? data = null) throws Error {
-			var instance = instance_by_id[sid.handle];
+			var instance = instances[sid.handle];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			instance.script.post (message, data);
+		}
+
+		private void on_message (ScriptInstance instance, string message, GLib.Bytes? data) {
+			message_from_script (instance.sid, message, data);
 		}
 
 		public void enable_debugger () throws Error {
@@ -103,31 +113,188 @@ namespace Frida.Gadget {
 		}
 
 		public class ScriptInstance : Object {
+			public signal void message (string message, Bytes? data);
+
 			public AgentScriptId sid {
 				get;
 				construct;
 			}
 
 			public Gum.Script script {
-				get;
-				set;
+				get {
+					return _script;
+				}
+				set {
+					if (_script != null)
+						_script.set_message_handler (null);
+					_script = value;
+					if (_script != null)
+						_script.set_message_handler (on_message);
+				}
 			}
+			private Gum.Script _script;
+
+			private Gee.Promise<bool> dispose_request;
+
+			private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
+			private int64 next_request_id = -1;
 
 			public ScriptInstance (AgentScriptId sid, Gum.Script script) {
 				Object (sid: sid, script: script);
 			}
 
 			public async void destroy () {
+				var main_context = MainContext.get_thread_default ();
+
+				yield ensure_dispose_called ();
+
 				yield script.unload ();
 
 				script.weak_ref (() => {
-					Idle.add (() => {
+					var source = new IdleSource ();
+					source.set_callback (() => {
 						destroy.callback ();
 						return false;
 					});
+					source.attach (main_context);
 				});
 				script = null;
 				yield;
+			}
+
+			public async void ensure_dispose_called () {
+				if (dispose_request != null) {
+					try {
+						yield dispose_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+					return;
+				}
+				dispose_request = new Gee.Promise<bool> ();
+
+				try {
+					yield call ("dispose", new Json.Node[] {});
+				} catch (Error e) {
+				}
+
+				dispose_request.set_value (true);
+			}
+
+			private async Json.Node call (string method, Json.Node[] args) throws Error {
+				if (script == null)
+					throw new Error.INVALID_OPERATION ("Script is destroyed");
+
+				var request_id = next_request_id;
+				if (next_request_id != int32.MIN)
+					next_request_id--;
+				else
+					next_request_id = -1;
+
+				var builder = new Json.Builder ();
+				builder
+				.begin_array ()
+				.add_string_value ("frida:rpc")
+				.add_int_value (request_id)
+				.add_string_value ("call")
+				.add_string_value (method)
+				.begin_array ();
+				foreach (var arg in args)
+					builder.add_value (arg);
+				builder
+				.end_array ()
+				.end_array ();
+
+				var generator = new Json.Generator ();
+				generator.set_root (builder.get_root ());
+				size_t length;
+				var request = generator.to_data (out length);
+
+				var response = new PendingResponse (() => call.callback ());
+				pending_responses[request_id.to_string ()] = response;
+
+				script.post (request);
+
+				yield;
+
+				if (response.error != null)
+					throw response.error;
+
+				return response.result;
+			}
+
+			private void on_message (Gum.Script script, string raw_message, Bytes? data) {
+				bool handled = false;
+
+				if (raw_message.index_of ("\"frida:rpc\",-") != -1) {
+					var parser = new Json.Parser ();
+					try {
+						parser.load_from_data (raw_message);
+					} catch (GLib.Error e) {
+						assert_not_reached ();
+					}
+					var message = parser.get_root ().get_object ();
+
+					var type = message.get_string_member ("type");
+					if (type == "send")
+						handled = try_handle_rpc_message (message);
+				}
+
+				if (!handled)
+					this.message (raw_message, data);
+			}
+
+			private bool try_handle_rpc_message (Json.Object message) {
+				var payload = message.get_member ("payload");
+				if (payload == null || payload.get_node_type () != Json.NodeType.ARRAY)
+					return false;
+				var rpc_message = payload.get_array ();
+				if (rpc_message.get_length () < 4)
+					return false;
+				else if (rpc_message.get_element (0).get_string () != "frida:rpc")
+					return false;
+
+				var request_id = rpc_message.get_int_element (1);
+				PendingResponse response;
+				if (!pending_responses.unset (request_id.to_string (), out response))
+					return false;
+
+				var status = rpc_message.get_string_element (2);
+				if (status == "ok")
+					response.complete_with_result (rpc_message.get_element (3));
+				else
+					response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
+
+				return true;
+			}
+
+			private class PendingResponse {
+				public delegate void CompletionHandler ();
+				private CompletionHandler handler;
+
+				public Json.Node? result {
+					get;
+					private set;
+				}
+
+				public Error? error {
+					get;
+					private set;
+				}
+
+				public PendingResponse (owned CompletionHandler handler) {
+					this.handler = (owned) handler;
+				}
+
+				public void complete_with_result (Json.Node r) {
+					result = r;
+					handler ();
+				}
+
+				public void complete_with_error (Error e) {
+					error = e;
+					handler ();
+				}
 			}
 		}
 	}
