@@ -1833,7 +1833,7 @@ namespace Frida {
 		}
 
 		public bool is_destroyed () {
-			return session == null;
+			return close_request != null;
 		}
 
 		public async void load () throws Error {
