@@ -912,10 +912,12 @@ frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs
     self->already_attached = FALSE;
 
     success = frida_wait_for_attach_signal (pid);
-    CHECK_OS_RESULT (success, !=, FALSE, "PTRACE_ATTACH wait");
+    if (!success)
+      goto handle_wait_error;
 
     ret = frida_get_regs (pid, saved_regs);
-    CHECK_OS_RESULT (ret, ==, 0, "frida_get_regs");
+    if (ret != 0)
+      goto handle_wait_error;
   }
 
   return TRUE;
@@ -939,6 +941,18 @@ handle_os_error:
           "Unexpected error while attaching to process with pid %u (%s returned '%s')",
           pid, failed_operation, g_strerror (errno));
     }
+
+    return FALSE;
+  }
+handle_wait_error:
+  {
+    ptrace (PTRACE_DETACH, pid, NULL, NULL);
+
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while attaching to process with pid %u",
+        pid);
 
     return FALSE;
   }
