@@ -175,6 +175,7 @@ struct _FridaInjectInstance
   guint id;
 
   pid_t pid;
+  gchar * executable_path;
   gboolean already_attached;
   gboolean exec_pending;
 
@@ -277,6 +278,7 @@ static void frida_inject_instance_recreate_fifo (FridaInjectInstance * self);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_init_fifo (FridaInjectInstance * self);
 static void frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy unload_policy);
+static gboolean frida_inject_instance_did_not_exec (FridaInjectInstance * self);
 static gboolean frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs, GError ** error);
 static gboolean frida_inject_instance_detach (FridaInjectInstance * self, const FridaRegs * saved_regs, GError ** error);
 static gboolean frida_inject_instance_start_remote_thread (FridaInjectInstance * self, gboolean * exited, GError ** error);
@@ -298,6 +300,7 @@ static gboolean frida_remote_write (pid_t pid, GumAddress remote_address, gconst
 static gboolean frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint args_length, GumAddress * retval, gboolean * exited, GError ** error);
 static gboolean frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack, GumAddress * result, gboolean * exited, GError ** error);
 
+static gchar * frida_resolve_executable_path (pid_t pid);
 static GumAddress frida_resolve_libc_function (pid_t pid, const gchar * function_name);
 static GumAddress frida_find_libc_base (pid_t pid);
 #if defined (HAVE_ANDROID) || defined (HAVE_UCLIBC)
@@ -796,6 +799,7 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   instance->id = id;
 
   instance->pid = pid;
+  instance->executable_path = frida_resolve_executable_path (pid);
   instance->already_attached = FALSE;
   instance->exec_pending = FALSE;
 
@@ -827,6 +831,7 @@ frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
   clone->id = id;
 
   clone->pid = 0;
+  clone->executable_path = g_strdup (instance->executable_path);
   clone->already_attached = FALSE;
   clone->exec_pending = FALSE;
 
@@ -868,7 +873,8 @@ frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy un
   {
     FridaRegs saved_regs;
 
-    if (frida_inject_instance_attach (instance, &saved_regs, NULL))
+    if (frida_inject_instance_did_not_exec (instance) &&
+        frida_inject_instance_attach (instance, &saved_regs, NULL))
     {
       frida_remote_dealloc (instance->pid, instance->remote_payload, instance->remote_size, NULL);
       frida_inject_instance_detach (instance, &saved_regs, NULL);
@@ -881,9 +887,24 @@ frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy un
 
   g_free (instance->temp_path);
 
+  g_free (instance->executable_path);
+
   g_object_unref (instance->service);
 
   g_slice_free (FridaInjectInstance, instance);
+}
+
+static gboolean
+frida_inject_instance_did_not_exec (FridaInjectInstance * self)
+{
+  gchar * executable_path;
+  gboolean probably_did_not_exec;
+
+  executable_path = frida_resolve_executable_path (self->pid);
+  probably_did_not_exec = strcmp (executable_path, self->executable_path) == 0;
+  g_free (executable_path);
+
+  return probably_did_not_exec;
 }
 
 static gboolean
@@ -2594,6 +2615,18 @@ handle_os_error:
         failed_operation, errno);
     return FALSE;
   }
+}
+
+static gchar *
+frida_resolve_executable_path (pid_t pid)
+{
+  gchar * result, * proc_path;
+
+  proc_path = g_strdup_printf ("/proc/%u/exe", pid);
+  result = g_file_read_link (proc_path, NULL);
+  g_free (proc_path);
+
+  return result;
 }
 
 static GumAddress

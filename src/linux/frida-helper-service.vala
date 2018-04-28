@@ -331,7 +331,10 @@ namespace Frida {
 			session.ended.disconnect (on_remote_thread_session_ended);
 			inject_sessions.unset (id);
 
-			_destroy_inject_instance (id, unload_policy);
+			Timeout.add (50, () => {
+				_destroy_inject_instance (id, unload_policy);
+				return false;
+			});
 		}
 
 		protected void _destroy_inject_instance (uint id, UnloadPolicy unload_policy) {
