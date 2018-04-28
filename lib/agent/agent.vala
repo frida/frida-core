@@ -1186,7 +1186,7 @@ namespace Frida.Agent {
 #endif
 		}
 
-		~SpawnMonitor () {
+		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
 #if DARWIN
@@ -1194,6 +1194,8 @@ namespace Frida.Agent {
 #endif
 
 			interceptor.detach_listener (this);
+
+			base.dispose ();
 		}
 
 #if !WINDOWS
