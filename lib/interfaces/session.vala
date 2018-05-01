@@ -31,6 +31,7 @@ namespace Frida {
 
 		public signal void opened (AgentSessionId id);
 		public signal void closed (AgentSessionId id);
+		public signal void child_gating_changed (uint subscriber_count);
 	}
 
 	[DBus (name = "re.frida.AgentSession10")]

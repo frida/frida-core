@@ -212,6 +212,9 @@ namespace Frida {
 			return false;
 		}
 
+		protected virtual void notify_child_gating_changed (uint pid, uint subscriber_count) {
+		}
+
 		protected virtual async void prepare_exec_transition (uint pid) throws Error {
 		}
 
@@ -368,6 +371,7 @@ namespace Frida {
 
 				connection.on_closed.connect (on_agent_connection_closed);
 				provider.closed.connect (on_agent_session_provider_closed);
+				entry.child_gating_changed.connect (on_child_gating_changed);
 
 				promise.set_value (entry);
 			} catch (Error e) {
@@ -444,6 +448,12 @@ namespace Frida {
 			}
 		}
 
+		private void on_child_gating_changed (AgentEntry entry, uint subscriber_count) {
+			var pid = entry.pid;
+
+			notify_child_gating_changed (pid, subscriber_count);
+		}
+
 		private async void unload_and_destroy (AgentEntry entry, SessionDetachReason reason) {
 			if (!prepare_teardown (entry))
 				return;
@@ -467,6 +477,7 @@ namespace Frida {
 			if (!agent_entries.unset (entry.pid))
 				return false;
 
+			entry.child_gating_changed.disconnect (on_child_gating_changed);
 			entry.provider.closed.disconnect (on_agent_session_provider_closed);
 			entry.connection.on_closed.disconnect (on_agent_connection_closed);
 
@@ -607,6 +618,7 @@ namespace Frida {
 
 			connection.on_closed.connect (on_agent_connection_closed);
 			provider.closed.connect (on_agent_session_provider_closed);
+			agent_entry.child_gating_changed.connect (on_child_gating_changed);
 
 			if (!try_handle_child (info))
 				add_pending_child (info);
@@ -726,6 +738,8 @@ namespace Frida {
 		}
 
 		private class AgentEntry : Object {
+			public signal void child_gating_changed (uint subscriber_count);
+
 			public uint pid {
 				get;
 				construct;
@@ -781,12 +795,18 @@ namespace Frida {
 				);
 			}
 
+			construct {
+				provider.child_gating_changed.connect (on_child_gating_changed);
+			}
+
 			public async void close () {
 				if (closing) {
 					yield wait_until_closed ();
 					return;
 				}
 				closing = true;
+
+				provider.child_gating_changed.disconnect (on_child_gating_changed);
 
 				if (connection != null) {
 					try {
@@ -809,6 +829,10 @@ namespace Frida {
 				} catch (Gee.FutureError e) {
 					assert_not_reached ();
 				}
+			}
+
+			private void on_child_gating_changed (uint subscriber_count) {
+				child_gating_changed (subscriber_count);
 			}
 		}
 

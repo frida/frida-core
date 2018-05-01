@@ -485,12 +485,14 @@ namespace Frida.Agent {
 			child_gating_subscriber_count++;
 			if (child_gating_subscriber_count == 1)
 				enable_child_gating ();
+			child_gating_changed (child_gating_subscriber_count);
 		}
 
 		public void release_child_gating () {
 			child_gating_subscriber_count--;
 			if (child_gating_subscriber_count == 0)
 				disable_child_gating ();
+			child_gating_changed (child_gating_subscriber_count);
 		}
 
 		private void enable_child_gating () {
