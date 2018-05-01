@@ -248,6 +248,13 @@ namespace Frida {
 		}
 
 		protected override async void perform_resume (uint pid) throws Error {
+#if ANDROID
+			if (robo_launcher != null) {
+				if (yield robo_launcher.try_resume (pid))
+					return;
+			}
+#endif
+
 			yield helper.resume (pid);
 		}
 
@@ -362,10 +369,18 @@ namespace Frida {
 
 		public async void disable_spawn_gating () throws Error {
 			spawn_gating_enabled = false;
+
+			foreach (var entry in pending_spawns.entries)
+				host_session.resume.begin (entry.key);
+			pending_spawns.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			return new HostSpawnInfo[0];
+			var result = new HostSpawnInfo[pending_spawns.size];
+			var index = 0;
+			foreach (var spawn in pending_spawns.values)
+				result[index++] = spawn;
+			return result;
 		}
 
 		public async uint spawn (string package_name, string? class_name) throws Error {
@@ -405,6 +420,15 @@ namespace Frida {
 			}
 		}
 
+		public async bool try_resume (uint pid) throws Error {
+			HostSpawnInfo? info;
+			if (!pending_spawns.unset (pid, out info))
+				return false;
+
+			yield helper.resume (pid);
+			return true;
+		}
+
 		public bool try_handle_child (HostChildInfo info) {
 			var agent = zygote_agents[info.parent_pid];
 			if (agent == null)
@@ -417,7 +441,10 @@ namespace Frida {
 			}
 
 			if (spawn_gating_enabled) {
-				spawned (HostSpawnInfo (info.pid, info.identifier));
+				var pid = info.pid;
+				var spawn_info = HostSpawnInfo (pid, info.identifier);
+				pending_spawns[pid] = spawn_info;
+				spawned (spawn_info);
 				return true;
 			}
 
