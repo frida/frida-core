@@ -529,6 +529,8 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
     goto handle_libc_missing;
 
   instance = frida_inject_instance_new (self, frida_helper_service_generate_id (self), pid, temp_path);
+  if (instance->executable_path == NULL)
+    goto handle_premature_termination;
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
     goto handle_premature_termination;
@@ -901,7 +903,11 @@ frida_inject_instance_did_not_exec (FridaInjectInstance * self)
   gboolean probably_did_not_exec;
 
   executable_path = frida_resolve_executable_path (self->pid);
+  if (executable_path == NULL)
+    return FALSE;
+
   probably_did_not_exec = strcmp (executable_path, self->executable_path) == 0;
+
   g_free (executable_path);
 
   return probably_did_not_exec;
