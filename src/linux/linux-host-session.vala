@@ -328,10 +328,11 @@ namespace Frida {
 
 		private Gee.Promise<bool> ensure_request;
 
-		private Gee.HashMap<uint, ZygoteAgent> zygote_agent_by_pid = new Gee.HashMap<uint, ZygoteAgent> ();
+		private Gee.HashMap<uint, ZygoteAgent> zygote_agents = new Gee.HashMap<uint, ZygoteAgent> ();
 
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_package_name = new Gee.HashMap<string, Gee.Promise<uint>> ();
+		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawns = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		public RoboLauncher (LinuxHostSession host_session, HelperProcess helper, SystemUIAgent system_ui_agent) {
 			Object (host_session: host_session, helper: helper, system_ui_agent: system_ui_agent);
@@ -345,13 +346,13 @@ namespace Frida {
 				}
 			}
 
-			foreach (var request in spawn_request_by_package_name.values)
+			foreach (var request in spawn_requests.values)
 				request.set_exception (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
-			spawn_request_by_package_name.clear ();
+			spawn_requests.clear ();
 
-			foreach (var agent in zygote_agent_by_pid.values)
+			foreach (var agent in zygote_agents.values)
 				yield agent.close ();
-			zygote_agent_by_pid.clear ();
+			zygote_agents.clear ();
 		}
 
 		public async void enable_spawn_gating () throws Error {
@@ -370,23 +371,23 @@ namespace Frida {
 		public async uint spawn (string package_name, string? class_name) throws Error {
 			yield ensure_loaded ();
 
-			if (spawn_request_by_package_name.has_key (package_name))
+			if (spawn_requests.has_key (package_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
 
 			var request = new Gee.Promise<uint> ();
-			spawn_request_by_package_name[package_name] = request;
+			spawn_requests[package_name] = request;
 
 			try {
 				yield system_ui_agent.stop_activity (package_name);
 				yield system_ui_agent.start_activity (package_name, class_name);
 			} catch (Error e) {
-				spawn_request_by_package_name.unset (package_name);
+				spawn_requests.unset (package_name);
 				throw e;
 			}
 
 			var timeout = new TimeoutSource.seconds (20);
 			timeout.set_callback (() => {
-				spawn_request_by_package_name.unset (package_name);
+				spawn_requests.unset (package_name);
 				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
 				return false;
 			});
@@ -405,11 +406,12 @@ namespace Frida {
 		}
 
 		public bool try_handle_child (HostChildInfo info) {
-			if (!zygote_agent_by_pid.has_key (info.parent_pid))
+			var agent = zygote_agents[info.parent_pid];
+			if (agent == null)
 				return false;
 
 			Gee.Promise<uint> spawn_request;
-			if (spawn_request_by_package_name.unset (info.identifier, out spawn_request)) {
+			if (spawn_requests.unset (info.identifier, out spawn_request)) {
 				spawn_request.set_value (info.pid);
 				return true;
 			}
@@ -438,9 +440,10 @@ namespace Frida {
 				foreach (HostProcessInfo info in System.enumerate_processes ()) {
 					var name = info.name;
 					if (name == "zygote" || name == "zygote64") {
+						var pid = info.pid;
 						var agent = new ZygoteAgent (host_session, info.pid);
 						yield agent.load ();
-						zygote_agent_by_pid[info.pid] = agent;
+						zygote_agents[pid] = agent;
 					}
 				}
 

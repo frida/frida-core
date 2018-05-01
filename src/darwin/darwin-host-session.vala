@@ -325,8 +325,8 @@ namespace Frida {
 
 		private LaunchdAgent launchd_agent;
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<string, Gee.Promise<uint>> spawn_request_by_identifier = new Gee.HashMap<string, Gee.Promise<uint>> ();
-		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn_by_pid = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawns = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		public FruitLauncher (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -365,25 +365,25 @@ namespace Frida {
 
 			yield launchd_agent.disable_spawn_gating ();
 
-			foreach (var entry in pending_spawn_by_pid.entries)
+			foreach (var entry in pending_spawns.entries)
 				helper.resume.begin (entry.key);
-			pending_spawn_by_pid.clear ();
+			pending_spawns.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			var result = new HostSpawnInfo[pending_spawn_by_pid.size];
+			var result = new HostSpawnInfo[pending_spawns.size];
 			var index = 0;
-			foreach (var spawn in pending_spawn_by_pid.values)
+			foreach (var spawn in pending_spawns.values)
 				result[index++] = spawn;
 			return result;
 		}
 
 		public async uint spawn (string identifier, string? url) throws Error {
-			if (spawn_request_by_identifier.has_key (identifier))
+			if (spawn_requests.has_key (identifier))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified identifier");
 
 			var request = new Gee.Promise<uint> ();
-			spawn_request_by_identifier[identifier] = request;
+			spawn_requests[identifier] = request;
 
 			yield launchd_agent.prepare_for_launch (identifier);
 
@@ -392,7 +392,7 @@ namespace Frida {
 				yield helper.launch (identifier, url);
 			} catch (Error e) {
 				launchd_agent.cancel_launch.begin (identifier);
-				if (!spawn_request_by_identifier.unset (identifier)) {
+				if (!spawn_requests.unset (identifier)) {
 					var pid = request.future.value;
 					if (pid != 0)
 						helper.resume.begin (pid);
@@ -402,7 +402,7 @@ namespace Frida {
 
 			var timeout = new TimeoutSource.seconds (20);
 			timeout.set_callback (() => {
-				spawn_request_by_identifier.unset (identifier);
+				spawn_requests.unset (identifier);
 				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
 				return false;
 			});
@@ -425,7 +425,7 @@ namespace Frida {
 
 		public async bool try_resume (uint pid) throws Error {
 			HostSpawnInfo? info;
-			if (!pending_spawn_by_pid.unset (pid, out info))
+			if (!pending_spawns.unset (pid, out info))
 				return false;
 
 			yield helper.resume (pid);
@@ -434,7 +434,7 @@ namespace Frida {
 
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
 			Gee.Promise<uint> request;
-			if (spawn_request_by_identifier.unset (identifier, out request)) {
+			if (spawn_requests.unset (identifier, out request)) {
 				if (error == null)
 					request.set_value (pid);
 				else
@@ -453,7 +453,7 @@ namespace Frida {
 				return;
 			}
 
-			pending_spawn_by_pid[pid] = info;
+			pending_spawns[pid] = info;
 
 			spawned (info);
 		}
