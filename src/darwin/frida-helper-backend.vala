@@ -530,7 +530,7 @@ namespace Frida {
 		}
 
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawns = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		private DataInputStream input;
 		private Cancellable input_cancellable = new Cancellable ();
@@ -585,16 +585,16 @@ namespace Frida {
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () {
-			var result = new HostSpawnInfo[pending_spawns.size];
+			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
-			foreach (var spawn in pending_spawns.values)
+			foreach (var spawn in pending_spawn.values)
 				result[index++] = spawn;
 			return result;
 		}
 
 		public bool try_resume (uint pid) throws Error {
 			HostSpawnInfo? info;
-			if (!pending_spawns.unset (pid, out info))
+			if (!pending_spawn.unset (pid, out info))
 				return false;
 
 			var status = ioctl (fd, IOCTL_RESUME, ref pid);
@@ -634,7 +634,7 @@ namespace Frida {
 					var executable_path = tokens[1];
 
 					var info = HostSpawnInfo (pid, executable_path);
-					pending_spawns[pid] = info;
+					pending_spawn[pid] = info;
 					spawned (info);
 				}
 			} catch (IOError e) {

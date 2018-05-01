@@ -346,7 +346,7 @@ namespace Frida {
 
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
-		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawns = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		public RoboLauncher (LinuxHostSession host_session, HelperProcess helper, SystemUIAgent system_ui_agent) {
 			Object (host_session: host_session, helper: helper, system_ui_agent: system_ui_agent);
@@ -377,15 +377,15 @@ namespace Frida {
 		public async void disable_spawn_gating () throws Error {
 			spawn_gating_enabled = false;
 
-			foreach (var entry in pending_spawns.entries)
+			foreach (var entry in pending_spawn.entries)
 				host_session.resume.begin (entry.key);
-			pending_spawns.clear ();
+			pending_spawn.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			var result = new HostSpawnInfo[pending_spawns.size];
+			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
-			foreach (var spawn in pending_spawns.values)
+			foreach (var spawn in pending_spawn.values)
 				result[index++] = spawn;
 			return result;
 		}
@@ -429,7 +429,7 @@ namespace Frida {
 
 		public async bool try_resume (uint pid) throws Error {
 			HostSpawnInfo? info;
-			if (!pending_spawns.unset (pid, out info))
+			if (!pending_spawn.unset (pid, out info))
 				return false;
 
 			yield helper.resume (pid);
@@ -450,7 +450,7 @@ namespace Frida {
 			if (spawn_gating_enabled) {
 				var pid = info.pid;
 				var spawn_info = HostSpawnInfo (pid, info.identifier);
-				pending_spawns[pid] = spawn_info;
+				pending_spawn[pid] = spawn_info;
 				spawned (spawn_info);
 				return true;
 			}

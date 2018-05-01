@@ -750,16 +750,16 @@ namespace Frida {
 		public async SpawnList enumerate_pending_spawns () throws Error {
 			check_open ();
 
-			HostSpawnInfo[] pending_spawns;
+			HostSpawnInfo[] pending_spawn;
 			try {
 				yield ensure_host_session ();
-				pending_spawns = yield host_session.enumerate_pending_spawns ();
+				pending_spawn = yield host_session.enumerate_pending_spawns ();
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 
 			var result = new Gee.ArrayList<Spawn> ();
-			foreach (var p in pending_spawns)
+			foreach (var p in pending_spawn)
 				result.add (spawn_from_info (p));
 			return new SpawnList (result);
 		}

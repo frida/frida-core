@@ -326,7 +326,7 @@ namespace Frida {
 		private LaunchdAgent launchd_agent;
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
-		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawns = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
 		public FruitLauncher (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -365,15 +365,15 @@ namespace Frida {
 
 			yield launchd_agent.disable_spawn_gating ();
 
-			foreach (var entry in pending_spawns.entries)
+			foreach (var entry in pending_spawn.entries)
 				helper.resume.begin (entry.key);
-			pending_spawns.clear ();
+			pending_spawn.clear ();
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			var result = new HostSpawnInfo[pending_spawns.size];
+			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
-			foreach (var spawn in pending_spawns.values)
+			foreach (var spawn in pending_spawn.values)
 				result[index++] = spawn;
 			return result;
 		}
@@ -425,7 +425,7 @@ namespace Frida {
 
 		public async bool try_resume (uint pid) throws Error {
 			HostSpawnInfo? info;
-			if (!pending_spawns.unset (pid, out info))
+			if (!pending_spawn.unset (pid, out info))
 				return false;
 
 			yield helper.resume (pid);
@@ -453,7 +453,7 @@ namespace Frida {
 				return;
 			}
 
-			pending_spawns[pid] = info;
+			pending_spawn[pid] = info;
 
 			spawned (info);
 		}
