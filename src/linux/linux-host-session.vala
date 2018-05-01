@@ -108,6 +108,7 @@ namespace Frida {
 #if ANDROID
 			if (robo_launcher != null) {
 				yield robo_launcher.close ();
+				robo_launcher.spawned.disconnect (on_robo_launcher_spawned);
 				robo_launcher = null;
 			}
 
@@ -299,9 +300,13 @@ namespace Frida {
 		private RoboLauncher get_robo_launcher () {
 			if (robo_launcher == null) {
 				robo_launcher = new RoboLauncher (this, helper, system_ui_agent);
-				robo_launcher.spawned.connect ((info) => { spawned (info); });
+				robo_launcher.spawned.connect (on_robo_launcher_spawned);
 			}
 			return robo_launcher;
+		}
+
+		private void on_robo_launcher_spawned (HostSpawnInfo info) {
+			spawned (info);
 		}
 #endif
 
