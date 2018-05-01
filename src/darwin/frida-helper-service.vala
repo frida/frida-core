@@ -144,8 +144,8 @@ namespace Frida {
 			yield backend.disable_spawn_gating ();
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
-			return yield backend.enumerate_pending_spawns ();
+		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+			return yield backend.enumerate_pending_spawn ();
 		}
 
 		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {

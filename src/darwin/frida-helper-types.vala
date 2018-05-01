@@ -14,7 +14,7 @@ namespace Frida {
 
 		public abstract async void enable_spawn_gating () throws Error;
 		public abstract async void disable_spawn_gating () throws Error;
-		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws Error;
 		public abstract async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error;
 		public abstract async void input (uint pid, uint8[] data) throws Error;
 		public abstract async void launch (string identifier, string? url) throws Error;
@@ -44,7 +44,7 @@ namespace Frida {
 
 		public abstract async void enable_spawn_gating () throws GLib.Error;
 		public abstract async void disable_spawn_gating () throws GLib.Error;
-		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws GLib.Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws GLib.Error;
 		public abstract async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws GLib.Error;
 		public abstract async void launch (string identifier, string url) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;

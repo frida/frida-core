@@ -749,13 +749,13 @@ namespace Frida {
 			}
 		}
 
-		public async SpawnList enumerate_pending_spawns () throws Error {
+		public async SpawnList enumerate_pending_spawn () throws Error {
 			check_open ();
 
 			HostSpawnInfo[] pending_spawn;
 			try {
 				yield ensure_host_session ();
-				pending_spawn = yield host_session.enumerate_pending_spawns ();
+				pending_spawn = yield host_session.enumerate_pending_spawn ();
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -766,13 +766,13 @@ namespace Frida {
 			return new SpawnList (result);
 		}
 
-		public SpawnList enumerate_pending_spawns_sync () throws Error {
-			return (create<EnumeratePendingSpawnsTask> () as EnumeratePendingSpawnsTask).start_and_wait_for_completion ();
+		public SpawnList enumerate_pending_spawn_sync () throws Error {
+			return (create<EnumeratePendingSpawnTask> () as EnumeratePendingSpawnTask).start_and_wait_for_completion ();
 		}
 
-		private class EnumeratePendingSpawnsTask : DeviceTask<SpawnList> {
+		private class EnumeratePendingSpawnTask : DeviceTask<SpawnList> {
 			protected override async SpawnList perform_operation () throws Error {
-				return yield parent.enumerate_pending_spawns ();
+				return yield parent.enumerate_pending_spawn ();
 			}
 		}
 

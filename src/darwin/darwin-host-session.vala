@@ -205,11 +205,11 @@ namespace Frida {
 #endif
 		}
 
-		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 #if IOS
-			return get_fruit_launcher ().enumerate_pending_spawns ();
+			return get_fruit_launcher ().enumerate_pending_spawn ();
 #else
-			return yield helper.enumerate_pending_spawns ();
+			return yield helper.enumerate_pending_spawn ();
 #endif
 		}
 
@@ -370,7 +370,7 @@ namespace Frida {
 			pending_spawn.clear ();
 		}
 
-		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
 			foreach (var spawn in pending_spawn.values)

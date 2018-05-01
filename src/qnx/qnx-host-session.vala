@@ -136,7 +136,7 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 

@@ -196,7 +196,7 @@ namespace Frida {
 
 		public abstract async void disable_spawn_gating () throws Error;
 
-		public abstract async HostSpawnInfo[] enumerate_pending_spawns () throws Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws Error;
 
 		public async HostChildInfo[] enumerate_pending_children () throws Error {
 			var result = new HostChildInfo[pending_children.size];

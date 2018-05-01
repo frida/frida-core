@@ -184,9 +184,9 @@ namespace Frida {
 #endif
 		}
 
-		public override async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 #if ANDROID
-			return get_robo_launcher ().enumerate_pending_spawns ();
+			return get_robo_launcher ().enumerate_pending_spawn ();
 #else
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
@@ -387,7 +387,7 @@ namespace Frida {
 			pending_spawn.clear ();
 		}
 
-		public HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
 			foreach (var spawn in pending_spawn.values)

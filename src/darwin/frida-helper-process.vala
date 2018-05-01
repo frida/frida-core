@@ -92,10 +92,10 @@ namespace Frida {
 			}
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 			var helper = yield obtain ();
 			try {
-				return yield helper.enumerate_pending_spawns ();
+				return yield helper.enumerate_pending_spawn ();
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

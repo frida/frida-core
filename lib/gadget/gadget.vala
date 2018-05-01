@@ -1356,7 +1356,7 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
-			public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+			public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 

@@ -97,10 +97,10 @@ namespace Frida {
 			kernel_agent.disable_spawn_gating ();
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawns () throws Error {
+		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 			if (kernel_agent == null)
 				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
-			return kernel_agent.enumerate_pending_spawns ();
+			return kernel_agent.enumerate_pending_spawn ();
 		}
 
 		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
@@ -584,7 +584,7 @@ namespace Frida {
 			spawn_gating_enabled = false;
 		}
 
-		public HostSpawnInfo[] enumerate_pending_spawns () {
+		public HostSpawnInfo[] enumerate_pending_spawn () {
 			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
 			foreach (var spawn in pending_spawn.values)
