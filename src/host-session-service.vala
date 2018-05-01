@@ -451,6 +451,13 @@ namespace Frida {
 		private void on_child_gating_changed (AgentEntry entry, uint subscriber_count) {
 			var pid = entry.pid;
 
+			if (subscriber_count == 0) {
+				foreach (var child in pending_children.values.to_array ()) {
+					if (child.parent_pid == pid)
+						resume.begin (child.pid);
+				}
+			}
+
 			notify_child_gating_changed (pid, subscriber_count);
 		}
 
