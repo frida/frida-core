@@ -212,6 +212,9 @@ namespace Frida {
 			return false;
 		}
 
+		protected virtual void notify_child_resumed (uint pid) {
+		}
+
 		protected virtual void notify_child_gating_changed (uint pid, uint subscriber_count) {
 		}
 
@@ -248,6 +251,9 @@ namespace Frida {
 				} finally {
 					ack_request.complete ();
 				}
+
+				notify_child_resumed (pid);
+
 				return true;
 			}
 
@@ -271,6 +277,8 @@ namespace Frida {
 			if (entry.sessions.is_empty) {
 				unload_and_destroy.begin (entry, SessionDetachReason.APPLICATION_REQUESTED);
 			}
+
+			notify_child_resumed (pid);
 
 			return true;
 		}
