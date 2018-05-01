@@ -227,6 +227,13 @@ namespace Frida {
 			return false;
 		}
 
+		protected override void notify_child_resumed (uint pid) {
+#if ANDROID
+			if (robo_launcher != null)
+				robo_launcher.notify_child_resumed (pid);
+#endif
+		}
+
 		protected override void notify_child_gating_changed (uint pid, uint subscriber_count) {
 #if ANDROID
 			if (robo_launcher != null)
@@ -255,13 +262,6 @@ namespace Frida {
 		}
 
 		protected override async void perform_resume (uint pid) throws Error {
-#if ANDROID
-			if (robo_launcher != null) {
-				if (yield robo_launcher.try_resume (pid))
-					return;
-			}
-#endif
-
 			yield helper.resume (pid);
 		}
 
@@ -427,28 +427,20 @@ namespace Frida {
 			}
 		}
 
-		public async bool try_resume (uint pid) throws Error {
-			HostSpawnInfo? info;
-			if (!pending_spawn.unset (pid, out info))
-				return false;
-
-			yield helper.resume (pid);
-			return true;
-		}
-
 		public bool try_handle_child (HostChildInfo info) {
 			var agent = zygote_agents[info.parent_pid];
 			if (agent == null)
 				return false;
 
+			var pid = info.pid;
+
 			Gee.Promise<uint> spawn_request;
 			if (spawn_requests.unset (info.identifier, out spawn_request)) {
-				spawn_request.set_value (info.pid);
+				spawn_request.set_value (pid);
 				return true;
 			}
 
 			if (spawn_gating_enabled) {
-				var pid = info.pid;
 				var spawn_info = HostSpawnInfo (pid, info.identifier);
 				pending_spawn[pid] = spawn_info;
 				spawned (spawn_info);
@@ -459,7 +451,7 @@ namespace Frida {
 				var source = new IdleSource ();
 				var host_session = this.host_session;
 				source.set_callback (() => {
-					host_session.resume.begin (info.pid);
+					host_session.resume.begin (pid);
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
@@ -467,6 +459,10 @@ namespace Frida {
 			}
 
 			return false;
+		}
+
+		public void notify_child_resumed (uint pid) {
+			pending_spawn.unset (pid);
 		}
 
 		public void notify_child_gating_changed (uint pid, uint subscriber_count) {
