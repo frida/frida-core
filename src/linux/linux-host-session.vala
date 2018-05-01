@@ -227,6 +227,13 @@ namespace Frida {
 			return false;
 		}
 
+		protected override void notify_child_gating_changed (uint pid, uint subscriber_count) {
+#if ANDROID
+			if (robo_launcher != null)
+				robo_launcher.notify_child_gating_changed (pid, subscriber_count);
+#endif
+		}
+
 		protected override async void prepare_exec_transition (uint pid) throws Error {
 			yield helper.prepare_exec_transition (pid);
 		}
@@ -448,7 +455,24 @@ namespace Frida {
 				return true;
 			}
 
+			if (agent.child_gating_only_used_by_us) {
+				var source = new IdleSource ();
+				var host_session = this.host_session;
+				source.set_callback (() => {
+					host_session.resume.begin (info.pid);
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+				return true;
+			}
+
 			return false;
+		}
+
+		public void notify_child_gating_changed (uint pid, uint subscriber_count) {
+			var agent = zygote_agents[pid];
+			if (agent != null)
+				agent.child_gating_only_used_by_us = subscriber_count == 1;
 		}
 
 		private async void ensure_loaded () throws Error {
@@ -468,9 +492,16 @@ namespace Frida {
 					var name = info.name;
 					if (name == "zygote" || name == "zygote64") {
 						var pid = info.pid;
-						var agent = new ZygoteAgent (host_session, info.pid);
-						yield agent.load ();
+
+						var agent = new ZygoteAgent (host_session, pid);
 						zygote_agents[pid] = agent;
+
+						try {
+							yield agent.load ();
+						} catch (Error e) {
+							zygote_agents.unset (pid);
+							throw e;
+						}
 					}
 				}
 
@@ -488,6 +519,11 @@ namespace Frida {
 		public uint pid {
 			get;
 			construct;
+		}
+
+		public bool child_gating_only_used_by_us {
+			get;
+			set;
 		}
 
 		public ZygoteAgent (LinuxHostSession host_session, uint pid) {
