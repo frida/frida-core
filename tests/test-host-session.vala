@@ -609,7 +609,7 @@ namespace Frida.HostSessionTest {
 					var inexistent_path = stdin.read_line ();
 					try {
 						stdout.printf ("Trying to spawn program at inexistent path '%s'...", inexistent_path);
-						yield device.spawn (inexistent_path, new string[] { inexistent_path }, new string[] {});
+						yield device.spawn (inexistent_path, new string[] { inexistent_path });
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
@@ -622,7 +622,7 @@ namespace Frida.HostSessionTest {
 					var nonexec_path = stdin.read_line ();
 					try {
 						stdout.printf ("Trying to spawn program at non-executable path '%s'...", nonexec_path);
-						yield device.spawn (nonexec_path, new string[] { nonexec_path }, new string[] {});
+						yield device.spawn (nonexec_path, new string[] { nonexec_path });
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
@@ -890,8 +890,9 @@ namespace Frida.HostSessionTest {
 
 				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
 				string[] argv = { target_path };
+				bool has_envp = false;
 				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -984,8 +985,7 @@ namespace Frida.HostSessionTest {
 
 					printerr ("device.spawn(\"%s\")\n", package_name);
 					string[] argv = { package_name };
-					string[] envp = {};
-					var pid = yield device.spawn (package_name, argv, envp);
+					var pid = yield device.spawn (package_name, argv);
 
 					printerr ("device.attach(%u)\n", pid);
 					var session = yield device.attach (pid);
@@ -1121,8 +1121,9 @@ Java.perform(function () {
 
 				var target_path = Frida.Test.Labrats.path_to_file (target_name);
 				string[] argv = { target_path };
+				bool has_envp = false;
 				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -1233,8 +1234,9 @@ Java.perform(function () {
 
 				var target_path = Frida.Test.Labrats.path_to_file (target_name);
 				string[] argv = { target_path };
+				bool has_envp = false;
 				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
 
 				yield host_session.resume (pid);
 
@@ -1494,7 +1496,7 @@ send(ranges);
 				try {
 					var host_session = yield prov.create ();
 
-					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, new string[] {});
+					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, false, new string[] {});
 
 					var id = yield host_session.attach_to (pid);
 					var session = yield prov.obtain_agent_session (host_session, id);
@@ -1603,8 +1605,7 @@ send(ranges);
 				});
 
 				string[] argv = { target_path };
-				string[] envp = {};
-				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_pid = yield device.spawn (target_path, argv);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -1737,8 +1738,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				});
 
 				string[] argv = { target_path, "spawn", method };
-				string[] envp = {};
-				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_pid = yield device.spawn (target_path, argv);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -1875,8 +1875,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				});
 
 				string[] argv = { target_path, "spawn-bad-path", method };
-				string[] envp = {};
-				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_pid = yield device.spawn (target_path, argv);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					detach_reason = reason.to_string ();
@@ -1940,8 +1939,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				});
 
 				string[] argv = { target_path, "spawn", method };
-				string[] envp = {};
-				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_pid = yield device.spawn (target_path, argv);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -2060,8 +2058,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				});
 
 				string[] argv = { target_path, "spawn", method };
-				string[] envp = {};
-				var pre_exec_pid = yield device.spawn (target_path, argv, envp);
+				var pre_exec_pid = yield device.spawn (target_path, argv);
 				var pre_exec_session = yield device.attach (pre_exec_pid);
 				pre_exec_session.detached.connect (reason => {
 					pre_exec_detach_reason = reason.to_string ();
@@ -2214,8 +2211,9 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 
 				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
 				string[] argv = { target_path };
+				bool has_envp = false;
 				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, envp);
+				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -2316,8 +2314,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				});
 
 				string[] argv = { target_path, "spawn", method };
-				string[] envp = {};
-				var parent_pid = yield device.spawn (target_path, argv, envp);
+				var parent_pid = yield device.spawn (target_path, argv);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();

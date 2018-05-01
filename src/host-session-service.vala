@@ -206,7 +206,7 @@ namespace Frida {
 			return result;
 		}
 
-		public abstract async uint spawn (string path, string[] argv, string[] envp) throws Error;
+		public abstract async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error;
 
 		protected virtual bool try_handle_child (HostChildInfo info) {
 			return false;

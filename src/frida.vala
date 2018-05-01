@@ -436,6 +436,8 @@ namespace Frida {
 		private Gee.HashSet<Gee.Promise<Session>> pending_attach_requests = new Gee.HashSet<Gee.Promise<Session>> ();
 		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
 
+		private string[] empty_strv = new string[0];
+
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			DeviceType dtype;
 			switch (kind) {
@@ -828,13 +830,16 @@ namespace Frida {
 			);
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public async uint spawn (string path, string[] argv, string[]? envp = null) throws Error {
 			check_open ();
+
+			var has_envp = envp != null;
+			unowned string[] envp_param = has_envp ? envp : empty_strv;
 
 			uint pid;
 			try {
 				yield ensure_host_session ();
-				pid = yield host_session.spawn (path, argv, envp);
+				pid = yield host_session.spawn (path, argv, has_envp, envp_param);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -842,7 +847,7 @@ namespace Frida {
 			return pid;
 		}
 
-		public uint spawn_sync (string path, string[] argv, string[] envp) throws Error {
+		public uint spawn_sync (string path, string[] argv, string[]? envp = null) throws Error {
 			var task = create<SpawnTask> () as SpawnTask;
 			task.path = path;
 			task.argv = argv;
@@ -853,7 +858,7 @@ namespace Frida {
 		private class SpawnTask : DeviceTask<uint> {
 			public string path;
 			public string[] argv;
-			public string[] envp;
+			public string[]? envp;
 
 			protected override async uint perform_operation () throws Error {
 				return yield parent.spawn (path, argv, envp);

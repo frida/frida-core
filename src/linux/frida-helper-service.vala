@@ -100,9 +100,9 @@ namespace Frida {
 			});
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 			StdioPipes pipes;
-			var child_pid = _do_spawn (path, argv, envp, out pipes);
+			var child_pid = _do_spawn (path, argv, has_envp ? envp : Environ.get (), out pipes);
 
 			monitor_child (child_pid);
 

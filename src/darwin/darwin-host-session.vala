@@ -213,7 +213,7 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 #if IOS
 			if (!path.has_prefix ("/")) {
 				string identifier = path;
@@ -227,7 +227,7 @@ namespace Frida {
 			}
 #endif
 
-			return yield helper.spawn (path, argv, envp);
+			return yield helper.spawn (path, argv, has_envp, envp);
 		}
 
 		protected override async void await_exec_transition (uint pid) throws Error {

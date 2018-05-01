@@ -1364,7 +1364,7 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Not yet implemented");
 			}
 
-			public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+			public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 				if (argv.length < 1 || argv[0] != this_app.identifier)
 					throw new Error.NOT_SUPPORTED ("Unable to spawn other apps when embedded");
 

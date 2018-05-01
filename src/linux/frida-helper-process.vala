@@ -46,10 +46,10 @@ namespace Frida {
 			_resource_store = null;
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 			var helper = yield obtain_for_path (path);
 			try {
-				return yield helper.spawn (path, argv, envp);
+				return yield helper.spawn (path, argv, has_envp, envp);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

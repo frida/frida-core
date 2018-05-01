@@ -192,7 +192,7 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 #if ANDROID
 			if (!path.has_prefix ("/")) {
 				string intent = path;
@@ -212,10 +212,10 @@ namespace Frida {
 
 				return yield get_robo_launcher ().spawn (package_name, class_name);
 			} else {
-				return yield helper.spawn (path, argv, envp);
+				return yield helper.spawn (path, argv, has_envp, envp);
 			}
 #else
-			return yield helper.spawn (path, argv, envp);
+			return yield helper.spawn (path, argv, has_envp, envp);
 #endif
 		}
 

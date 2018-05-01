@@ -168,8 +168,8 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
-			var process = _do_spawn (path, argv, envp);
+		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
+			var process = _do_spawn (path, argv, has_envp ? envp : Environ.get ());
 
 			var pid = process.pid;
 			process_by_pid[pid] = process;

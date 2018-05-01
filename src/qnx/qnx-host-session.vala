@@ -140,7 +140,7 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 

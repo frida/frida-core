@@ -103,9 +103,9 @@ namespace Frida {
 			return kernel_agent.enumerate_pending_spawns ();
 		}
 
-		public async uint spawn (string path, string[] argv, string[] envp) throws Error {
+		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
 			StdioPipes pipes;
-			var child_pid = _spawn (path, argv, envp, out pipes);
+			var child_pid = _spawn (path, argv, has_envp ? envp : Environ.get (), out pipes);
 
 			ChildWatch.add ((Pid) child_pid, on_child_dead);
 
