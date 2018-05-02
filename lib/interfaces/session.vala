@@ -9,7 +9,7 @@ namespace Frida {
 		public abstract async void disable_spawn_gating () throws GLib.Error;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws GLib.Error;
 		public abstract async HostChildInfo[] enumerate_pending_children () throws GLib.Error;
-		public abstract async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws GLib.Error;
+		public abstract async uint spawn (string path, HostSpawnOptions options) throws GLib.Error;
 		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async void kill (uint pid) throws GLib.Error;
@@ -210,6 +210,67 @@ namespace Frida {
 		}
 	}
 
+	public struct HostSpawnOptions {
+		public bool has_argv {
+			get;
+			set;
+		}
+
+		public string[] argv {
+			get;
+			set;
+		}
+
+		public bool has_envp {
+			get;
+			set;
+		}
+
+		public string[] envp {
+			get;
+			set;
+		}
+
+		public string cwd {
+			get;
+			set;
+		}
+
+		public Stdio stdio {
+			get;
+			set;
+		}
+
+		public Aslr aslr {
+			get;
+			set;
+		}
+
+		public uint8[] parameters {
+			get;
+			set;
+		}
+
+		public HostSpawnOptions () {
+			this.argv = {};
+			this.envp = {};
+			this.cwd = "";
+			this.stdio = INHERIT;
+			this.aslr = AUTO;
+			this.parameters = {};
+		}
+	}
+
+	public enum Stdio {
+		INHERIT,
+		PIPE
+	}
+
+	public enum Aslr {
+		AUTO,
+		DISABLED
+	}
+
 	public struct HostSpawnInfo {
 		public uint pid {
 			get;
@@ -249,43 +310,53 @@ namespace Frida {
 			private set;
 		}
 
-		public string identifier {
+		public ChildOrigin origin {
 			get;
 			private set;
+		}
+
+		public string identifier {
+			get;
+			set;
 		}
 
 		public string path {
 			get;
-			private set;
+			set;
+		}
+
+		public bool has_argv {
+			get;
+			set;
 		}
 
 		public string[] argv {
 			get;
-			private set;
+			set;
+		}
+
+		public bool has_envp {
+			get;
+			set;
 		}
 
 		public string[] envp {
 			get;
-			private set;
+			set;
 		}
 
-		public HostChildOrigin origin {
-			get;
-			private set;
-		}
-
-		public HostChildInfo (uint pid, uint parent_pid, string identifier, string path, string[] argv, string[] envp, HostChildOrigin origin) {
+		public HostChildInfo (uint pid, uint parent_pid, ChildOrigin origin) {
 			this.pid = pid;
 			this.parent_pid = parent_pid;
-			this.identifier = identifier;
-			this.path = path;
-			this.argv = argv;
-			this.envp = envp;
 			this.origin = origin;
+			this.identifier = "";
+			this.path = "";
+			this.argv = {};
+			this.envp = {};
 		}
 	}
 
-	public enum HostChildOrigin {
+	public enum ChildOrigin {
 		FORK,
 		EXEC,
 		SPAWN

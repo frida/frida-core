@@ -193,11 +193,12 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
+		public override async uint spawn (string path, HostSpawnOptions options) throws Error {
 #if ANDROID
 			if (!path.has_prefix ("/")) {
 				string intent = path;
-				if (argv.length > 1)
+
+				if (options.argv.length > 1)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected intent only");
 
 				var tokens = intent.split ("/");
@@ -213,10 +214,10 @@ namespace Frida {
 
 				return yield get_robo_launcher ().spawn (package_name, class_name);
 			} else {
-				return yield helper.spawn (path, argv, has_envp, envp);
+				return yield helper.spawn (path, options);
 			}
 #else
-			return yield helper.spawn (path, argv, has_envp, envp);
+			return yield helper.spawn (path, options);
 #endif
 		}
 

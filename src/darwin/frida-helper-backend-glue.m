@@ -23,6 +23,11 @@
 #include <mach/exc.h>
 #include <mach/mach.h>
 #include <sys/sysctl.h>
+#include <unistd.h>
+
+#ifndef _POSIX_SPAWN_DISABLE_ASLR
+# define _POSIX_SPAWN_DISABLE_ASLR 0x0100
+#endif
 
 #define FRIDA_PSR_THUMB                  0x20
 
@@ -530,15 +535,22 @@ _frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
 }
 
 guint
-_frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
+_frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path, FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
 {
+  pid_t pid;
   FridaSpawnInstance * instance = NULL;
-  int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
-  pid_t pid = 0;
   posix_spawn_file_actions_t file_actions;
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
-  int spawn_errno, result;
+  short flags;
+  FridaStdio stdio;
+  int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
+  gchar * const * argv, * const * envp;
+  const gchar * default_argv[] = { path, NULL };
+  gchar ** default_envp = NULL;
+  const gchar * cwd = NULL;
+  char * old_cwd = NULL;
+  int result, spawn_errno;
 
   *pipes = NULL;
 
@@ -547,32 +559,74 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   instance = frida_spawn_instance_new (self);
 
-  frida_make_pipe (stdin_pipe);
-  frida_make_pipe (stdout_pipe);
-  frida_make_pipe (stderr_pipe);
-
-  *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
-
   posix_spawn_file_actions_init (&file_actions);
-  posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
-  posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
-  posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
 
   posix_spawnattr_init (&attributes);
   sigemptyset (&signal_mask_set);
   posix_spawnattr_setsigmask (&attributes, &signal_mask_set);
-  posix_spawnattr_setflags (&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED);
+
+  flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED;
+
+  stdio = frida_host_spawn_options_get_stdio (options);
+  if (stdio == FRIDA_STDIO_PIPE)
+  {
+    frida_make_pipe (stdin_pipe);
+    frida_make_pipe (stdout_pipe);
+    frida_make_pipe (stderr_pipe);
+
+    *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+
+    posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
+    posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
+    posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
+  }
+
+  if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
+  {
+    flags |= _POSIX_SPAWN_DISABLE_ASLR;
+  }
+
+  posix_spawnattr_setflags (&attributes, flags);
+
+  if (frida_host_spawn_options_get_has_argv (options))
+    argv = frida_host_spawn_options_get_argv (options, NULL);
+  else
+    argv = (gchar * const *) default_argv;
+
+  if (frida_host_spawn_options_get_has_envp (options))
+  {
+    envp = frida_host_spawn_options_get_envp (options, NULL);
+  }
+  else
+  {
+    default_envp = g_get_environ ();
+    envp = default_envp;
+  }
+
+  cwd = frida_host_spawn_options_get_cwd (options);
+  if (*cwd != '\0')
+  {
+    old_cwd = getcwd (NULL, 0);
+    if (chdir (cwd) != 0)
+      goto handle_chdir_error;
+  }
 
   result = posix_spawn (&pid, path, &file_actions, &attributes, argv, envp);
   spawn_errno = errno;
 
+  if (old_cwd != NULL)
+    chdir (old_cwd);
+
+  if (stdio == FRIDA_STDIO_PIPE)
+  {
+    close (stdin_pipe[0]);
+    close (stdout_pipe[1]);
+    close (stderr_pipe[1]);
+  }
+
   posix_spawnattr_destroy (&attributes);
 
   posix_spawn_file_actions_destroy (&file_actions);
-
-  close (stdin_pipe[0]);
-  close (stdout_pipe[1]);
-  close (stderr_pipe[1]);
 
   if (result != 0)
     goto handle_spawn_error;
@@ -581,7 +635,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (pid), instance);
 
-  return pid;
+  goto beach;
 
 handle_path_error:
   {
@@ -590,6 +644,19 @@ handle_path_error:
         FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
         "Unable to find executable at '%s'",
         path);
+    goto error_epilogue;
+  }
+handle_chdir_error:
+  {
+    posix_spawnattr_destroy (&attributes);
+    posix_spawn_file_actions_destroy (&file_actions);
+
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to change directory to '%s'",
+        cwd);
+
     goto error_epilogue;
   }
 handle_spawn_error:
@@ -610,6 +677,7 @@ handle_spawn_error:
           "Unable to spawn executable at '%s': %s",
           path, g_strerror (spawn_errno));
     }
+
     goto error_epilogue;
   }
 error_epilogue:
@@ -621,7 +689,16 @@ error_epilogue:
       frida_spawn_instance_free (instance);
     }
 
-    return 0;
+    pid = 0;
+
+    goto beach;
+  }
+beach:
+  {
+    free (old_cwd);
+    g_strfreev (default_envp);
+
+    return pid;
   }
 }
 

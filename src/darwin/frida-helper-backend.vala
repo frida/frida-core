@@ -106,15 +106,17 @@ namespace Frida {
 			return kernel_agent.enumerate_pending_spawn ();
 		}
 
-		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
-			StdioPipes pipes;
-			var child_pid = _spawn (path, argv, has_envp ? envp : Environ.get (), out pipes);
+		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+			StdioPipes? pipes;
+			var child_pid = _spawn (path, options, out pipes);
 
 			ChildWatch.add ((Pid) child_pid, on_child_dead);
 
-			stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
-			process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
-			process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+			if (pipes != null) {
+				stdin_streams[child_pid] = new UnixOutputStream (pipes.input, false);
+				process_next_output_from.begin (new UnixInputStream (pipes.output, false), child_pid, 1, pipes);
+				process_next_output_from.begin (new UnixInputStream (pipes.error, false), child_pid, 2, pipes);
+			}
 
 			return child_pid;
 		}
@@ -508,7 +510,7 @@ namespace Frida {
 		protected extern void _create_context ();
 		protected extern void _destroy_context ();
 
-		protected extern uint _spawn (string path, string[] argv, string[] envp, out StdioPipes pipes) throws Error;
+		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern void _launch (string identifier, string? url, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
 		protected extern void _resume_process (uint task) throws Error;

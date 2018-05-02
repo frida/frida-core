@@ -438,8 +438,6 @@ namespace Frida {
 		private Gee.HashSet<Gee.Promise<Session>> pending_attach_requests = new Gee.HashSet<Gee.Promise<Session>> ();
 		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
 
-		private string[] empty_strv = new string[0];
-
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			DeviceType dtype;
 			switch (kind) {
@@ -812,36 +810,48 @@ namespace Frida {
 
 		private Child child_from_info (HostChildInfo info) {
 			var identifier = info.identifier;
-
-			ChildOrigin origin;
-			switch (info.origin) {
-				case FORK:	origin = FORK;	break;
-				case EXEC:	origin = EXEC;	break;
-				case SPAWN:	origin = SPAWN;	break;
-				default:	assert_not_reached ();
-			}
-
+			var path = info.path;
 			return new Child (
 				info.pid,
 				info.parent_pid,
+				info.origin,
 				(identifier.length > 0) ? identifier : null,
-				info.path,
-				info.argv,
-				info.envp,
-				origin
+				(path.length > 0) ? path : null,
+				info.has_argv ? info.argv : null,
+				info.has_envp ? info.envp : null
 			);
 		}
 
-		public async uint spawn (string path, string[] argv, string[]? envp = null) throws Error {
+		public async uint spawn (string path, SpawnOptions? options = null) throws Error {
 			check_open ();
 
-			var has_envp = envp != null;
-			unowned string[] envp_param = has_envp ? envp : empty_strv;
+			var raw_options = HostSpawnOptions ();
+			if (options != null) {
+				var argv = options.argv;
+				if (argv != null) {
+					raw_options.has_argv = true;
+					raw_options.argv = argv;
+				}
+
+				var envp = options.envp;
+				if (envp != null) {
+					raw_options.has_envp = true;
+					raw_options.envp = envp;
+				}
+
+				var cwd = options.cwd;
+				if (cwd != null)
+					raw_options.cwd = cwd;
+
+				raw_options.stdio = options.stdio;
+
+				raw_options.aslr = options.aslr;
+			}
 
 			uint pid;
 			try {
 				yield ensure_host_session ();
-				pid = yield host_session.spawn (path, argv, has_envp, envp_param);
+				pid = yield host_session.spawn (path, raw_options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -849,21 +859,19 @@ namespace Frida {
 			return pid;
 		}
 
-		public uint spawn_sync (string path, string[] argv, string[]? envp = null) throws Error {
+		public uint spawn_sync (string path, SpawnOptions? options = null) throws Error {
 			var task = create<SpawnTask> () as SpawnTask;
 			task.path = path;
-			task.argv = argv;
-			task.envp = envp;
+			task.options = options;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class SpawnTask : DeviceTask<uint> {
 			public string path;
-			public string[] argv;
-			public string[]? envp;
+			public SpawnOptions? options;
 
 			protected override async uint perform_operation () throws Error {
-				return yield parent.spawn (path, argv, envp);
+				return yield parent.spawn (path, options);
 			}
 		}
 
@@ -1357,6 +1365,35 @@ namespace Frida {
 		}
 	}
 
+	public class SpawnOptions : Object {
+		public string[]? argv {
+			get;
+			set;
+		}
+
+		public string[]? envp {
+			get;
+			set;
+		}
+
+		public string? cwd {
+			get;
+			set;
+		}
+
+		public Stdio stdio {
+			get;
+			set;
+			default = INHERIT;
+		}
+
+		public Aslr aslr {
+			get;
+			set;
+			default = AUTO;
+		}
+	}
+
 	public class SpawnList : Object {
 		private Gee.List<Spawn> items;
 
@@ -1419,48 +1456,42 @@ namespace Frida {
 			construct;
 		}
 
-		public string? identifier {
-			get;
-			construct;
-		}
-
-		public string path {
-			get;
-			construct;
-		}
-
-		public string[] argv {
-			get;
-			construct;
-		}
-
-		public string[] envp {
-			get;
-			construct;
-		}
-
 		public ChildOrigin origin {
 			get;
 			construct;
 		}
 
-		public Child (uint pid, uint parent_pid, string? identifier, string path, string[] argv, string[] envp, ChildOrigin origin) {
+		public string? identifier {
+			get;
+			construct;
+		}
+
+		public string? path {
+			get;
+			construct;
+		}
+
+		public string[]? argv {
+			get;
+			construct;
+		}
+
+		public string[]? envp {
+			get;
+			construct;
+		}
+
+		public Child (uint pid, uint parent_pid, ChildOrigin origin, string? identifier, string? path, string[]? argv, string[]? envp) {
 			Object (
 				pid: pid,
 				parent_pid: parent_pid,
+				origin: origin,
 				identifier: identifier,
 				path: path,
 				argv: argv,
-				envp: envp,
-				origin: origin
+				envp: envp
 			);
 		}
-	}
-
-	public enum ChildOrigin {
-		FORK,
-		EXEC,
-		SPAWN
 	}
 
 	public class Icon : Object {
