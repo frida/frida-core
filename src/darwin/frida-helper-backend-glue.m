@@ -548,11 +548,9 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   gchar * const * argv, * const * envp;
   const gchar * default_argv[] = { path, NULL };
   gchar ** default_envp = NULL;
-  const gchar * cwd = NULL;
+  const gchar * cwd;
   char * old_cwd = NULL;
   int result, spawn_errno;
-
-  *pipes = NULL;
 
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     goto handle_path_error;
@@ -571,6 +569,8 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   switch (stdio)
   {
     case FRIDA_STDIO_INHERIT:
+      *pipes = NULL;
+
       posix_spawn_file_actions_adddup2 (&file_actions, 0, 0);
       posix_spawn_file_actions_adddup2 (&file_actions, 1, 1);
       posix_spawn_file_actions_adddup2 (&file_actions, 2, 2);
