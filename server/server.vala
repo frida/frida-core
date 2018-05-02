@@ -435,7 +435,7 @@ namespace Frida.Server {
 					iface = call.get_interface ();
 					member = call.get_member ();
 				}
-				if (iface == "re.frida.HostSession10") {
+				if (iface == "re.frida.HostSession11") {
 					if (member == "EnableSpawnGating" && type == DBusMessageType.METHOD_RETURN) {
 						schedule_idle (() => {
 							is_spawn_gating = true;
@@ -451,7 +451,7 @@ namespace Frida.Server {
 							sessions.add (session_id);
 						});
 					}
-				} else if (iface == "re.frida.AgentSession10") {
+				} else if (iface == "re.frida.AgentSession11") {
 					uint session_id;
 					path.scanf ("/re/frida/AgentSession/%u", out session_id);
 					if (member == "Close") {
