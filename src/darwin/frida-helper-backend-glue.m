@@ -568,17 +568,30 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED;
 
   stdio = frida_host_spawn_options_get_stdio (options);
-  if (stdio == FRIDA_STDIO_PIPE)
+  switch (stdio)
   {
-    frida_make_pipe (stdin_pipe);
-    frida_make_pipe (stdout_pipe);
-    frida_make_pipe (stderr_pipe);
+    case FRIDA_STDIO_INHERIT:
+      posix_spawn_file_actions_adddup2 (&file_actions, 0, 0);
+      posix_spawn_file_actions_adddup2 (&file_actions, 1, 1);
+      posix_spawn_file_actions_adddup2 (&file_actions, 2, 2);
 
-    *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+      break;
 
-    posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
-    posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
-    posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
+    case FRIDA_STDIO_PIPE:
+      frida_make_pipe (stdin_pipe);
+      frida_make_pipe (stdout_pipe);
+      frida_make_pipe (stderr_pipe);
+
+      *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+
+      posix_spawn_file_actions_adddup2 (&file_actions, stdin_pipe[0], 0);
+      posix_spawn_file_actions_adddup2 (&file_actions, stdout_pipe[1], 1);
+      posix_spawn_file_actions_adddup2 (&file_actions, stderr_pipe[1], 2);
+
+      break;
+
+    default:
+      g_assert_not_reached ();
   }
 
   if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
