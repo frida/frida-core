@@ -45,7 +45,8 @@ namespace Frida {
 		construct {
 			backend.idle.connect (on_backend_idle);
 			backend.output.connect (on_backend_output);
-			backend.spawned.connect (on_backend_spawned);
+			backend.spawn_added.connect (on_backend_spawn_added);
+			backend.spawn_removed.connect (on_backend_spawn_removed);
 			backend.uninjected.connect (on_backend_uninjected);
 		}
 
@@ -86,7 +87,8 @@ namespace Frida {
 			yield backend.close ();
 			backend.idle.disconnect (on_backend_idle);
 			backend.output.disconnect (on_backend_output);
-			backend.spawned.disconnect (on_backend_spawned);
+			backend.spawn_added.disconnect (on_backend_spawn_added);
+			backend.spawn_removed.disconnect (on_backend_spawn_removed);
 			backend.uninjected.disconnect (on_backend_uninjected);
 			backend = null;
 
@@ -206,8 +208,12 @@ namespace Frida {
 			output (pid, fd, data);
 		}
 
-		private void on_backend_spawned (HostSpawnInfo info) {
-			spawned (info);
+		private void on_backend_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_backend_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
 		}
 
 		private void on_backend_uninjected (uint id) {

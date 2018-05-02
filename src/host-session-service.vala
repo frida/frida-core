@@ -241,7 +241,9 @@ namespace Frida {
 		}
 
 		private async bool try_resume_child (uint pid) throws Error {
-			pending_children.unset (pid);
+			HostChildInfo? info;
+			if (pending_children.unset (pid, out info))
+				child_removed (info);
 
 			SpawnAckRequest ack_request;
 			if (pending_acks.unset (pid, out ack_request)) {
@@ -706,7 +708,7 @@ namespace Frida {
 
 		private void add_pending_child (HostChildInfo info) {
 			pending_children[info.pid] = info;
-			delivered (info);
+			child_added (info);
 
 			garbage_collect_pending_children_soon ();
 		}

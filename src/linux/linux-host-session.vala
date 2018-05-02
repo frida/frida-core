@@ -108,7 +108,8 @@ namespace Frida {
 #if ANDROID
 			if (robo_launcher != null) {
 				yield robo_launcher.close ();
-				robo_launcher.spawned.disconnect (on_robo_launcher_spawned);
+				robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
+				robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
 				robo_launcher = null;
 			}
 
@@ -300,13 +301,18 @@ namespace Frida {
 		private RoboLauncher get_robo_launcher () {
 			if (robo_launcher == null) {
 				robo_launcher = new RoboLauncher (this, helper, system_ui_agent);
-				robo_launcher.spawned.connect (on_robo_launcher_spawned);
+				robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
+				robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
 			}
 			return robo_launcher;
 		}
 
-		private void on_robo_launcher_spawned (HostSpawnInfo info) {
-			spawned (info);
+		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_robo_launcher_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
 		}
 #endif
 
@@ -328,7 +334,8 @@ namespace Frida {
 
 #if ANDROID
 	private class RoboLauncher : Object {
-		public signal void spawned (HostSpawnInfo info);
+		public signal void spawn_added (HostSpawnInfo info);
+		public signal void spawn_removed (HostSpawnInfo info);
 
 		public weak LinuxHostSession host_session {
 			get;
@@ -382,9 +389,13 @@ namespace Frida {
 		public async void disable_spawn_gating () throws Error {
 			spawn_gating_enabled = false;
 
-			foreach (var entry in pending_spawn.entries)
-				host_session.resume.begin (entry.key);
+			var pending = pending_spawn.values.to_array ();
 			pending_spawn.clear ();
+			foreach (var spawn in pending) {
+				spawn_removed (spawn);
+
+				host_session.resume.begin (spawn.pid);
+			}
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawn () throws Error {
@@ -448,7 +459,7 @@ namespace Frida {
 			if (spawn_gating_enabled) {
 				var spawn_info = HostSpawnInfo (pid, info.identifier);
 				pending_spawn[pid] = spawn_info;
-				spawned (spawn_info);
+				spawn_added (spawn_info);
 				return true;
 			}
 
@@ -467,7 +478,9 @@ namespace Frida {
 		}
 
 		public void notify_child_resumed (uint pid) {
-			pending_spawn.unset (pid);
+			HostSpawnInfo? info;
+			if (pending_spawn.unset (pid, out info))
+				spawn_removed (info);
 		}
 
 		public void notify_child_gating_changed (uint pid, uint subscriber_count) {

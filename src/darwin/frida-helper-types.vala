@@ -1,7 +1,8 @@
 namespace Frida {
 	public interface DarwinHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void spawned (HostSpawnInfo info);
+		public signal void spawn_added (HostSpawnInfo info);
+		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void uninjected (uint id);
 
 		public abstract uint pid {
@@ -37,7 +38,8 @@ namespace Frida {
 	[DBus (name = "re.frida.Helper")]
 	public interface DarwinRemoteHelper : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void spawned (HostSpawnInfo info);
+		public signal void spawn_added (HostSpawnInfo info);
+		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void uninjected (uint id);
 
 		public abstract async void stop () throws GLib.Error;

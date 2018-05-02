@@ -274,7 +274,8 @@ namespace Frida {
 
 				proxy = pending_proxy;
 				proxy.output.connect (on_output);
-				proxy.spawned.connect (on_spawned);
+				proxy.spawn_added.connect (on_spawn_added);
+				proxy.spawn_removed.connect (on_spawn_removed);
 				proxy.uninjected.connect (on_uninjected);
 
 				obtain_request.set_value (proxy);
@@ -303,7 +304,8 @@ namespace Frida {
 			obtain_request = null;
 
 			proxy.output.disconnect (on_output);
-			proxy.spawned.disconnect (on_spawned);
+			proxy.spawn_added.disconnect (on_spawn_added);
+			proxy.spawn_removed.disconnect (on_spawn_removed);
 			proxy.uninjected.disconnect (on_uninjected);
 			proxy = null;
 
@@ -318,8 +320,12 @@ namespace Frida {
 			output (pid, fd, data);
 		}
 
-		private void on_spawned (HostSpawnInfo info) {
-			spawned (info);
+		private void on_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
 		}
 
 		private void on_uninjected (uint id) {

@@ -17,8 +17,10 @@ namespace Frida {
 		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws GLib.Error;
 
-		public signal void spawned (HostSpawnInfo info);
-		public signal void delivered (HostChildInfo info);
+		public signal void spawn_added (HostSpawnInfo info);
+		public signal void spawn_removed (HostSpawnInfo info);
+		public signal void child_added (HostChildInfo info);
+		public signal void child_removed (HostChildInfo info);
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void agent_session_destroyed (AgentSessionId id, SessionDetachReason reason);
 		public signal void uninjected (InjectorPayloadId id);

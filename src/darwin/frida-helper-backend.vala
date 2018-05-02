@@ -41,8 +41,10 @@ namespace Frida {
 			_create_context ();
 
 			kernel_agent = KernelAgent.try_open ();
-			if (kernel_agent != null)
-				kernel_agent.spawned.connect (on_kernel_agent_spawned);
+			if (kernel_agent != null) {
+				kernel_agent.spawn_added.connect (on_kernel_agent_spawn_added);
+				kernel_agent.spawn_removed.connect (on_kernel_agent_spawn_removed);
+			}
 
 #if IOS
 			if (ElectraPolicySoftener.is_available ())
@@ -76,7 +78,8 @@ namespace Frida {
 			remote_tasks.clear ();
 
 			if (kernel_agent != null) {
-				kernel_agent.spawned.disconnect (on_kernel_agent_spawned);
+				kernel_agent.spawn_added.disconnect (on_kernel_agent_spawn_added);
+				kernel_agent.spawn_removed.disconnect (on_kernel_agent_spawn_removed);
 				kernel_agent.close ();
 				kernel_agent = null;
 			}
@@ -486,8 +489,12 @@ namespace Frida {
 			return task_for_pid_fallback (pid);
 		}
 
-		private void on_kernel_agent_spawned (HostSpawnInfo info) {
-			spawned (info);
+		private void on_kernel_agent_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_kernel_agent_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
 		}
 
 		public static extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
@@ -522,7 +529,8 @@ namespace Frida {
 	}
 
 	public class KernelAgent : Object {
-		public signal void spawned (HostSpawnInfo info);
+		public signal void spawn_added (HostSpawnInfo info);
+		public signal void spawn_removed (HostSpawnInfo info);
 
 		public int fd {
 			get;
@@ -596,6 +604,7 @@ namespace Frida {
 			HostSpawnInfo? info;
 			if (!pending_spawn.unset (pid, out info))
 				return false;
+			spawn_removed (info);
 
 			var status = ioctl (fd, IOCTL_RESUME, ref pid);
 			if (status != 0)
@@ -635,7 +644,7 @@ namespace Frida {
 
 					var info = HostSpawnInfo (pid, executable_path);
 					pending_spawn[pid] = info;
-					spawned (info);
+					spawn_added (info);
 				}
 			} catch (IOError e) {
 			}

@@ -534,8 +534,8 @@ namespace Frida.HostSessionTest {
 					var device_manager = new DeviceManager ();
 
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
-					var spawned_handler = device.spawned.connect ((spawn) => {
-						print ("spawned: pid=%u identifier=%s\n", spawn.pid, spawn.identifier);
+					var spawn_added_handler = device.spawn_added.connect ((spawn) => {
+						print ("spawn-added: pid=%u identifier=%s\n", spawn.pid, spawn.identifier);
 						perform_resume.begin (device, spawn.pid);
 					});
 					var timer = new Timer ();
@@ -546,7 +546,7 @@ namespace Frida.HostSessionTest {
 
 					main_loop.run ();
 
-					device.disconnect (spawned_handler);
+					device.disconnect (spawn_added_handler);
 
 					timer.reset ();
 					yield device.disable_spawn_gating ();
@@ -1578,7 +1578,7 @@ send(ranges);
 				string child_detach_reason = null;
 				var parent_messages = new Gee.ArrayList <string> ();
 				var child_messages = new Gee.ArrayList <string> ();
-				Child delivered_child = null;
+				Child the_child = null;
 				bool waiting = false;
 
 				if (GLib.Test.verbose ()) {
@@ -1598,8 +1598,8 @@ send(ranges);
 						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 				}
-				device.delivered.connect (child => {
-					delivered_child = child;
+				device.child_added.connect (child => {
+					the_child = child;
 					if (waiting)
 						run_fork_scenario.callback ();
 				});
@@ -1637,14 +1637,14 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				assert (parent_messages.size == 1);
 				assert (parse_string_message_payload (parent_messages[0]) == "[PARENT] Parent speaking");
 
-				while (delivered_child == null) {
+				while (the_child == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (delivered_child.parent_pid == parent_pid);
-				assert (Path.get_basename (delivered_child.path).has_prefix ("forker-"));
-				var child_pid = delivered_child.pid;
+				assert (the_child.parent_pid == parent_pid);
+				assert (Path.get_basename (the_child.path).has_prefix ("forker-"));
+				var child_pid = the_child.pid;
 				var child_session = yield device.attach (child_pid);
 				child_session.detached.connect (reason => {
 					child_detach_reason = reason.to_string ();
@@ -1711,7 +1711,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				string child_pre_exec_detach_reason = null;
 				string child_post_exec_detach_reason = null;
 				var child_messages = new Gee.ArrayList <string> ();
-				Child delivered_child = null;
+				Child the_child = null;
 				bool waiting = false;
 
 				if (GLib.Test.verbose ()) {
@@ -1731,8 +1731,8 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 				}
-				device.delivered.connect (child => {
-					delivered_child = child;
+				device.child_added.connect (child => {
+					the_child = child;
 					if (waiting)
 						run_fork_plus_exec_scenario.callback ();
 				});
@@ -1749,13 +1749,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 
 				yield device.resume (parent_pid);
 
-				while (delivered_child == null) {
+				while (the_child == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				var child = delivered_child;
-				delivered_child = null;
+				var child = the_child;
+				the_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
@@ -1777,13 +1777,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				assert (child_pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
 
-				while (delivered_child == null) {
+				while (the_child == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				child = delivered_child;
-				delivered_child = null;
+				child = the_child;
+				the_child = null;
 				assert (child.parent_pid == child.pid);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 
@@ -1870,7 +1870,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 				}
-				device.delivered.connect (child => {
+				device.child_added.connect (child => {
 					assert_not_reached ();
 				});
 
@@ -1912,7 +1912,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				string parent_detach_reason = null;
 				string child_detach_reason = null;
 				var child_messages = new Gee.ArrayList <string> ();
-				Child delivered_child = null;
+				Child the_child = null;
 				bool waiting = false;
 
 				if (GLib.Test.verbose ()) {
@@ -1932,8 +1932,8 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 				}
-				device.delivered.connect (child => {
-					delivered_child = child;
+				device.child_added.connect (child => {
+					the_child = child;
 					if (waiting)
 						run_posix_spawn_scenario.callback ();
 				});
@@ -1950,13 +1950,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 
 				yield device.resume (parent_pid);
 
-				while (delivered_child == null) {
+				while (the_child == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				var child = delivered_child;
-				delivered_child = null;
+				var child = the_child;
+				the_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
@@ -2031,7 +2031,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				string pre_exec_detach_reason = null;
 				string post_exec_detach_reason = null;
 				var messages = new Gee.ArrayList <string> ();
-				Child delivered_child = null;
+				Child the_child = null;
 				bool waiting = false;
 
 				if (GLib.Test.verbose ()) {
@@ -2051,8 +2051,8 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 				}
-				device.delivered.connect (child => {
-					delivered_child = child;
+				device.child_added.connect (child => {
+					the_child = child;
 					if (waiting)
 						run_posix_spawn_plus_setexec_scenario.callback ();
 				});
@@ -2076,13 +2076,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				assert (pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
 
-				while (delivered_child == null) {
+				while (the_child == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				var child = delivered_child;
-				delivered_child = null;
+				var child = the_child;
+				the_child = null;
 				assert (child.pid == pre_exec_pid);
 				assert (child.parent_pid == pre_exec_pid);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
@@ -2287,7 +2287,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				string parent_detach_reason = null;
 				string child_detach_reason = null;
 				var child_messages = new Gee.ArrayList <string> ();
-				Child delivered_child = null;
+				Child the_child = null;
 				bool waiting = false;
 
 				if (GLib.Test.verbose ()) {
@@ -2307,8 +2307,8 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 				}
-				device.delivered.connect (child => {
-					delivered_child = child;
+				device.child_added.connect (child => {
+					the_child = child;
 					if (waiting)
 						create_process.callback ();
 				});
@@ -2325,13 +2325,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 
 				yield device.resume (parent_pid);
 
-				while (delivered_child == null) {
+				while (the_child == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				var child = delivered_child;
-				delivered_child = null;
+				var child = the_child;
+				the_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));

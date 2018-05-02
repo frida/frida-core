@@ -104,7 +104,8 @@ namespace Frida {
 
 		construct {
 			helper.output.connect (on_output);
-			helper.spawned.connect (on_spawned);
+			helper.spawn_added.connect (on_spawn_added);
+			helper.spawn_removed.connect (on_spawn_removed);
 
 			injector = new Fruitjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
@@ -119,6 +120,8 @@ namespace Frida {
 #if IOS
 			if (fruit_launcher != null) {
 				yield fruit_launcher.close ();
+				fruit_launcher.spawn_added.disconnect (on_spawn_added);
+				fruit_launcher.spawn_removed.disconnect (on_spawn_removed);
 				fruit_launcher = null;
 			}
 #endif
@@ -138,7 +141,8 @@ namespace Frida {
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);
-			helper.spawned.disconnect (on_spawned);
+			helper.spawn_added.disconnect (on_spawn_added);
+			helper.spawn_removed.disconnect (on_spawn_removed);
 
 			tempdir.destroy ();
 		}
@@ -283,7 +287,8 @@ namespace Frida {
 		private FruitLauncher get_fruit_launcher () {
 			if (fruit_launcher == null) {
 				fruit_launcher = new FruitLauncher (this);
-				fruit_launcher.spawned.connect ((info) => { spawned (info); });
+				fruit_launcher.spawn_added.connect (on_spawn_added);
+				fruit_launcher.spawn_removed.connect (on_spawn_removed);
 			}
 			return fruit_launcher;
 		}
@@ -293,8 +298,12 @@ namespace Frida {
 			output (pid, fd, data);
 		}
 
-		private void on_spawned (HostSpawnInfo info) {
-			spawned (info);
+		private void on_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
 		}
 
 		private void on_uninjected (uint id) {
@@ -311,7 +320,8 @@ namespace Frida {
 
 #if IOS
 	private class FruitLauncher : Object {
-		public signal void spawned (HostSpawnInfo info);
+		public signal void spawn_added (HostSpawnInfo info);
+		public signal void spawn_removed (HostSpawnInfo info);
 
 		public weak DarwinHostSession host_session {
 			get;
@@ -335,11 +345,11 @@ namespace Frida {
 		construct {
 			launchd_agent = new LaunchdAgent (host_session);
 			launchd_agent.app_launch_completed.connect (on_app_launch_completed);
-			launchd_agent.spawned.connect (on_spawned);
+			launchd_agent.spawn_captured.connect (on_spawn_captured);
 		}
 
 		~FruitLauncher () {
-			launchd_agent.spawned.disconnect (on_spawned);
+			launchd_agent.spawn_captured.disconnect (on_spawn_captured);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 		}
 
@@ -365,9 +375,13 @@ namespace Frida {
 
 			yield launchd_agent.disable_spawn_gating ();
 
-			foreach (var entry in pending_spawn.entries)
-				helper.resume.begin (entry.key);
+			var pending = pending_spawn.values.to_array ();
 			pending_spawn.clear ();
+			foreach (var spawn in pending) {
+				spawn_removed (spawn);
+
+				helper.resume.begin (spawn.pid);
+			}
 		}
 
 		public HostSpawnInfo[] enumerate_pending_spawn () throws Error {
@@ -427,8 +441,10 @@ namespace Frida {
 			HostSpawnInfo? info;
 			if (!pending_spawn.unset (pid, out info))
 				return false;
+			spawn_removed (info);
 
 			yield helper.resume (pid);
+
 			return true;
 		}
 
@@ -445,7 +461,7 @@ namespace Frida {
 			}
 		}
 
-		private void on_spawned (HostSpawnInfo info) {
+		private void on_spawn_captured (HostSpawnInfo info) {
 			var pid = info.pid;
 
 			if (!spawn_gating_enabled) {
@@ -454,14 +470,13 @@ namespace Frida {
 			}
 
 			pending_spawn[pid] = info;
-
-			spawned (info);
+			spawn_added (info);
 		}
 	}
 
 	private class LaunchdAgent : InternalAgent {
 		public signal void app_launch_completed (string identifier, uint pid, Error? error);
-		public signal void spawned (HostSpawnInfo info);
+		public signal void spawn_captured (HostSpawnInfo info);
 
 		public LaunchdAgent (DarwinHostSession host_session) {
 			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
@@ -514,7 +529,7 @@ namespace Frida {
 			try {
 				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
-				spawned (HostSpawnInfo (pid, identifier));
+				spawn_captured (HostSpawnInfo (pid, identifier));
 			} catch (Error e) {
 			}
 		}
