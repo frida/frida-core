@@ -2366,7 +2366,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				assert (child.path != null);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
 				assert (child.argv != null);
-				assert (child.envp != null);
+				assert (child.envp == null);
 
 				assert (parent_detach_reason == null);
 
