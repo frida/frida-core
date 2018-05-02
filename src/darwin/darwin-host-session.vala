@@ -217,21 +217,35 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
+		public override async uint spawn (string path, HostSpawnOptions options) throws Error {
 #if IOS
 			if (!path.has_prefix ("/")) {
 				string identifier = path;
+
 				string? url = null;
+				var argv = options.argv;
 				if (argv.length == 2)
 					url = argv[1];
 				else if (argv.length > 2)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
 
+				if (options.has_envp)
+					throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning iOS apps");
+
+				if (options.cwd.length > 0)
+					throw new Error.NOT_SUPPORTED ("Overriding cwd is not supported when spawning iOS apps");
+
+				if (options.stdio != INHERIT)
+					throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning iOS apps");
+
+				if (options.aslr != AUTO)
+					throw new Error.NOT_SUPPORTED ("Disabling ASLR is not supported when spawning iOS apps");
+
 				return yield get_fruit_launcher ().spawn (identifier, url);
 			}
 #endif
 
-			return yield helper.spawn (path, argv, has_envp, envp);
+			return yield helper.spawn (path, options);
 		}
 
 		protected override async void await_exec_transition (uint pid) throws Error {

@@ -41,6 +41,7 @@
 # include <sys/user.h>
 #endif
 #include <sys/wait.h>
+#include <unistd.h>
 
 #define FRIDA_STACK_ALIGNMENT 16
 #define FRIDA_RED_ZONE_SIZE 128
@@ -316,45 +317,107 @@ static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name
 static gboolean frida_is_regset_supported = TRUE;
 
 guint
-_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, FridaStdioPipes ** pipes, GError ** error)
+_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
 {
-  FridaSpawnInstance * instance;
+  FridaSpawnInstance * instance = NULL;
+  const gchar * cwd;
+  FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
+  gchar * const * argv, * const * envp;
+  const gchar * default_argv[] = { path, NULL };
+  gchar ** default_envp = NULL;
   int status;
   long ret;
   gboolean success;
   const gchar * failed_operation;
 
+  if (!g_file_test (path, G_FILE_TEST_EXISTS))
+    goto handle_path_error;
+
+  cwd = frida_host_spawn_options_get_cwd (options);
+  if (*cwd != '\0')
+  {
+    if (!g_file_test (cwd, G_FILE_TEST_IS_DIR))
+      goto handle_cwd_error;
+  }
+  else
+  {
+    cwd = NULL;
+  }
+
+  if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
+    goto handle_aslr_error;
+
   instance = frida_spawn_instance_new (self);
 
-  frida_make_pipe (stdin_pipe);
-  frida_make_pipe (stdout_pipe);
-  frida_make_pipe (stderr_pipe);
+  stdio = frida_host_spawn_options_get_stdio (options);
+  switch (stdio)
+  {
+    case FRIDA_STDIO_INHERIT:
+      *pipes = NULL;
+      break;
 
-  *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+    case FRIDA_STDIO_PIPE:
+      frida_make_pipe (stdin_pipe);
+      frida_make_pipe (stdout_pipe);
+      frida_make_pipe (stderr_pipe);
+
+      *pipes = frida_stdio_pipes_new (stdin_pipe[1], stdout_pipe[0], stderr_pipe[0]);
+
+      break;
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  if (frida_host_spawn_options_get_has_argv (options))
+    argv = frida_host_spawn_options_get_argv (options, NULL);
+  else
+    argv = (gchar * const *) default_argv;
+
+  if (frida_host_spawn_options_get_has_envp (options))
+  {
+    envp = frida_host_spawn_options_get_envp (options, NULL);
+  }
+  else
+  {
+    default_envp = g_get_environ ();
+    envp = default_envp;
+  }
 
   instance->pid = fork ();
   if (instance->pid == 0)
   {
     setsid ();
 
-    dup2 (stdin_pipe[0], 0);
-    dup2 (stdout_pipe[1], 1);
-    dup2 (stderr_pipe[1], 2);
+    if (stdio == FRIDA_STDIO_PIPE)
+    {
+      dup2 (stdin_pipe[0], 0);
+      dup2 (stdout_pipe[1], 1);
+      dup2 (stderr_pipe[1], 2);
+    }
+
+    if (cwd != NULL)
+    {
+      if (chdir (cwd) != 0)
+        _exit (1);
+    }
 
     ptrace (PTRACE_TRACEME, 0, NULL, NULL);
     kill (getpid (), SIGSTOP);
     if (execve (path, argv, envp) == -1)
     {
-      g_printerr ("Unexpected error while spawning process (execve failed: %s)\n",
-          g_strerror (errno));
-      abort ();
+      g_printerr ("Unexpected error while spawning process (execve failed: %s)\n", g_strerror (errno));
+      _exit (1);
     }
   }
 
-  close (stdin_pipe[0]);
-  close (stdout_pipe[1]);
-  close (stderr_pipe[1]);
+  if (stdio == FRIDA_STDIO_PIPE)
+  {
+    close (stdin_pipe[0]);
+    close (stdout_pipe[1]);
+    close (stderr_pipe[1]);
+  }
 
   waitpid (instance->pid, &status, 0);
 
@@ -369,11 +432,36 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, g
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (instance->pid), instance);
 
-  return instance->pid;
+  goto beach;
 
+handle_path_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
+        "Unable to find executable at '%s'",
+        path);
+    goto error_epilogue;
+  }
+handle_cwd_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "Unable to change directory to '%s'",
+        cwd);
+    goto error_epilogue;
+  }
+handle_aslr_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Disabling ASLR is not supported on this OS");
+    goto error_epilogue;
+  }
 handle_os_error:
   {
-    (void) failed_operation;
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
@@ -383,8 +471,14 @@ handle_os_error:
   }
 error_epilogue:
   {
-    frida_spawn_instance_free (instance);
-    return 0;
+    g_clear_pointer (&instance, frida_spawn_instance_free);
+    goto beach;
+  }
+beach:
+  {
+    g_strfreev (default_envp);
+
+    return (instance != NULL) ? instance->pid : 0;
   }
 }
 

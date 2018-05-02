@@ -150,8 +150,8 @@ namespace Frida {
 			return yield backend.enumerate_pending_spawn ();
 		}
 
-		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
-			return yield backend.spawn (path, argv, has_envp, envp);
+		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+			return yield backend.spawn (path, options);
 		}
 
 		public async void launch (string identifier, string url) throws Error {

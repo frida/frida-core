@@ -168,15 +168,17 @@ namespace Frida {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
-			var process = _do_spawn (path, argv, has_envp ? envp : Environ.get ());
+		public override async uint spawn (string path, HostSpawnOptions options) throws Error {
+			var process = _do_spawn (path, options);
 
 			var pid = process.pid;
 			process_by_pid[pid] = process;
 
 			var pipes = process.pipes;
-			process_next_output_from.begin (pipes.output, pid, 1, pipes);
-			process_next_output_from.begin (pipes.error, pid, 2, pipes);
+			if (pipes != null) {
+				process_next_output_from.begin (pipes.output, pid, 1, pipes);
+				process_next_output_from.begin (pipes.error, pid, 2, pipes);
+			}
 
 			return pid;
 		}
@@ -261,7 +263,7 @@ namespace Frida {
 			uninjected (InjectorPayloadId (id));
 		}
 
-		public extern ChildProcess _do_spawn (string path, string[] argv, string[] envp) throws Error;
+		public extern ChildProcess _do_spawn (string path, HostSpawnOptions options) throws Error;
 		public static extern bool _process_is_alive (uint pid);
 	}
 
@@ -286,7 +288,7 @@ namespace Frida {
 			construct;
 		}
 
-		public StdioPipes pipes {
+		public StdioPipes? pipes {
 			get;
 			construct;
 		}
@@ -299,7 +301,7 @@ namespace Frida {
 		protected bool closed = false;
 		protected bool resumed = false;
 
-		public ChildProcess (Object parent, uint pid, void * handle, void * main_thread, StdioPipes pipes) {
+		public ChildProcess (Object parent, uint pid, void * handle, void * main_thread, StdioPipes? pipes) {
 			Object (parent: parent, pid: pid, handle: handle, main_thread: main_thread, pipes: pipes);
 		}
 

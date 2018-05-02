@@ -76,13 +76,15 @@ beach:
 }
 
 FridaChildProcess *
-_frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, gchar ** argv, int argv_length, gchar ** envp, int envp_length, GError ** error)
+_frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, FridaHostSpawnOptions * options, GError ** error)
 {
-  WCHAR * application_name, * command_line, * environment;
-  HANDLE stdin_read, stdin_write;
-  HANDLE stdout_read, stdout_write;
-  HANDLE stderr_read, stderr_write;
+  WCHAR * application_name, * command_line, * environment, * current_directory;
+  const gchar * cwd;
   STARTUPINFO startup_info;
+  FridaStdio stdio;
+  HANDLE stdin_read = NULL, stdin_write = NULL;
+  HANDLE stdout_read = NULL, stdout_write = NULL;
+  HANDLE stderr_read = NULL, stderr_write = NULL;
   PROCESS_INFORMATION process_info;
   FridaStdioPipes * pipes;
   FridaChildProcess * process;
@@ -92,24 +94,76 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     goto handle_path_error;
 
+  if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
+    goto handle_aslr_error;
+
   application_name = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
-  command_line = command_line_from_argv (argv, argv_length);
-  environment = environment_block_from_envp (envp, envp_length);
 
-  frida_make_pipe (&stdin_read, &stdin_write);
-  frida_make_pipe (&stdout_read, &stdout_write);
-  frida_make_pipe (&stderr_read, &stderr_write);
+  if (frida_host_spawn_options_get_has_argv (options))
+  {
+    gchar ** argv;
+    gint argv_length;
 
-  frida_ensure_not_inherited (stdin_write);
-  frida_ensure_not_inherited (stdout_read);
-  frida_ensure_not_inherited (stderr_read);
+    argv = frida_host_spawn_options_get_argv (options, &argv_length);
+    command_line = command_line_from_argv (argv, argv_length);
+  }
+  else
+  {
+    command_line = NULL;
+  }
+
+  if (frida_host_spawn_options_get_has_envp (options))
+  {
+    gchar ** envp;
+    gint envp_length;
+
+    envp = frida_host_spawn_options_get_envp (options, &envp_length);
+    environment = environment_block_from_envp (envp, envp_length);
+  }
+  else
+  {
+    environment = NULL;
+  }
+
+  cwd = frida_host_spawn_options_get_cwd (options);
+  if (*cwd != '\0')
+    current_directory = (WCHAR *) g_utf8_to_utf16 (cwd, -1, NULL, NULL, NULL);
+  else
+    current_directory = NULL;
 
   ZeroMemory (&startup_info, sizeof (startup_info));
   startup_info.cb = sizeof (startup_info);
-  startup_info.hStdInput = stdin_read;
-  startup_info.hStdOutput = stdout_write;
-  startup_info.hStdError = stderr_write;
-  startup_info.dwFlags = STARTF_USESTDHANDLES;
+
+  stdio = frida_host_spawn_options_get_stdio (options);
+  switch (stdio)
+  {
+    case FRIDA_STDIO_INHERIT:
+      startup_info.hStdInput = GetStdHandle (STD_INPUT_HANDLE);
+      startup_info.hStdOutput = GetStdHandle (STD_OUTPUT_HANDLE);
+      startup_info.hStdError = GetStdHandle (STD_ERROR_HANDLE);
+      startup_info.dwFlags = STARTF_USESTDHANDLES;
+
+      break;
+
+    case FRIDA_STDIO_PIPE:
+      frida_make_pipe (&stdin_read, &stdin_write);
+      frida_make_pipe (&stdout_read, &stdout_write);
+      frida_make_pipe (&stderr_read, &stderr_write);
+
+      frida_ensure_not_inherited (stdin_write);
+      frida_ensure_not_inherited (stdout_read);
+      frida_ensure_not_inherited (stderr_read);
+
+      startup_info.hStdInput = stdin_read;
+      startup_info.hStdOutput = stdout_write;
+      startup_info.hStdError = stderr_write;
+      startup_info.dwFlags = STARTF_USESTDHANDLES;
+
+      break;
+
+    default:
+      g_assert_not_reached ();
+  }
 
   if (!CreateProcessW (
       application_name,
@@ -123,27 +177,35 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
       DEBUG_PROCESS |
       DEBUG_ONLY_THIS_PROCESS,
       environment,
-      NULL,
+      current_directory,
       &startup_info,
       &process_info))
   {
     goto handle_create_error;
   }
 
-  CloseHandle (stdin_read);
-  CloseHandle (stdout_write);
-  CloseHandle (stderr_write);
-
   DebugActiveProcessStop (process_info.dwProcessId);
 
+  g_free (current_directory);
   g_free (environment);
   g_free (command_line);
   g_free (application_name);
 
-  pipes = frida_stdio_pipes_new (
-      g_win32_output_stream_new (stdin_write, TRUE),
-      g_win32_input_stream_new (stdout_read, TRUE),
-      g_win32_input_stream_new (stderr_read, TRUE));
+  if (stdio == FRIDA_STDIO_PIPE)
+  {
+    CloseHandle (stdin_read);
+    CloseHandle (stdout_write);
+    CloseHandle (stderr_write);
+
+    pipes = frida_stdio_pipes_new (
+        g_win32_output_stream_new (stdin_write, TRUE),
+        g_win32_input_stream_new (stdout_read, TRUE),
+        g_win32_input_stream_new (stderr_read, TRUE));
+  }
+  else
+  {
+    pipes = NULL;
+  }
 
   process = frida_child_process_new (
       G_OBJECT (self),
@@ -173,6 +235,14 @@ handle_path_error:
         path);
     return NULL;
   }
+handle_aslr_error:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Disabling ASLR is not supported on this OS");
+    return NULL;
+  }
 handle_create_error:
   {
     DWORD last_error = GetLastError ();
@@ -193,15 +263,19 @@ handle_create_error:
           path, GetLastError ());
     }
 
-    CloseHandle (stdin_read);
-    CloseHandle (stdin_write);
+    if (stdio == FRIDA_STDIO_PIPE)
+    {
+      CloseHandle (stdin_read);
+      CloseHandle (stdin_write);
 
-    CloseHandle (stdout_read);
-    CloseHandle (stdout_write);
+      CloseHandle (stdout_read);
+      CloseHandle (stdout_write);
 
-    CloseHandle (stderr_read);
-    CloseHandle (stderr_write);
+      CloseHandle (stderr_read);
+      CloseHandle (stderr_write);
+    }
 
+    g_free (current_directory);
     g_free (environment);
     g_free (command_line);
     g_free (application_name);

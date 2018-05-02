@@ -193,11 +193,12 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
+		public override async uint spawn (string path, HostSpawnOptions options) throws Error {
 #if ANDROID
 			if (!path.has_prefix ("/")) {
 				string intent = path;
-				if (argv.length > 1)
+
+				if (options.argv.length > 1)
 					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected intent only");
 
 				var tokens = intent.split ("/");
@@ -211,12 +212,24 @@ namespace Frida {
 						class_name = package_name + class_name;
 				}
 
+				if (options.has_envp)
+					throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning Android apps");
+
+				if (options.cwd.length > 0)
+					throw new Error.NOT_SUPPORTED ("Overriding cwd is not supported when spawning Android apps");
+
+				if (options.stdio != INHERIT)
+					throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning Android apps");
+
+				if (options.aslr != AUTO)
+					throw new Error.NOT_SUPPORTED ("Disabling ASLR is not supported on this OS");
+
 				return yield get_robo_launcher ().spawn (package_name, class_name);
 			} else {
-				return yield helper.spawn (path, argv, has_envp, envp);
+				return yield helper.spawn (path, options);
 			}
 #else
-			return yield helper.spawn (path, argv, has_envp, envp);
+			return yield helper.spawn (path, options);
 #endif
 		}
 

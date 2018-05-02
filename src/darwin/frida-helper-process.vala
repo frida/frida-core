@@ -101,10 +101,10 @@ namespace Frida {
 			}
 		}
 
-		public async uint spawn (string path, string[] argv, bool has_envp, string[] envp) throws Error {
+		public async uint spawn (string path, HostSpawnOptions options) throws Error {
 			var helper = yield obtain ();
 			try {
-				return yield helper.spawn (path, argv, has_envp, envp);
+				return yield helper.spawn (path, options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

@@ -609,7 +609,7 @@ namespace Frida.HostSessionTest {
 					var inexistent_path = stdin.read_line ();
 					try {
 						stdout.printf ("Trying to spawn program at inexistent path '%s'...", inexistent_path);
-						yield device.spawn (inexistent_path, new string[] { inexistent_path });
+						yield device.spawn (inexistent_path);
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
@@ -622,7 +622,7 @@ namespace Frida.HostSessionTest {
 					var nonexec_path = stdin.read_line ();
 					try {
 						stdout.printf ("Trying to spawn program at non-executable path '%s'...", nonexec_path);
-						yield device.spawn (nonexec_path, new string[] { nonexec_path });
+						yield device.spawn (nonexec_path);
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
@@ -888,11 +888,9 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
-				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
-				string[] argv = { target_path };
-				bool has_envp = false;
-				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
+				var options = HostSpawnOptions ();
+				options.stdio = PIPE;
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -984,8 +982,7 @@ namespace Frida.HostSessionTest {
 					bool waiting = false;
 
 					printerr ("device.spawn(\"%s\")\n", package_name);
-					string[] argv = { package_name };
-					var pid = yield device.spawn (package_name, argv);
+					var pid = yield device.spawn (package_name);
 
 					printerr ("device.attach(%u)\n", pid);
 					var session = yield device.attach (pid);
@@ -1119,11 +1116,9 @@ Java.perform(function () {
 						run_spawn_scenario.callback ();
 				});
 
-				var target_path = Frida.Test.Labrats.path_to_file (target_name);
-				string[] argv = { target_path };
-				bool has_envp = false;
-				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
+				var options = HostSpawnOptions ();
+				options.stdio = PIPE;
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -1232,11 +1227,9 @@ Java.perform(function () {
 						run_spawn_scenario_with_stdio.callback ();
 				});
 
-				var target_path = Frida.Test.Labrats.path_to_file (target_name);
-				string[] argv = { target_path };
-				bool has_envp = false;
-				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
+				var options = HostSpawnOptions ();
+				options.stdio = PIPE;
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options);
 
 				yield host_session.resume (pid);
 
@@ -1496,7 +1489,7 @@ send(ranges);
 				try {
 					var host_session = yield prov.create ();
 
-					var pid = yield host_session.spawn ("com.atebits.Tweetie2", new string[] { "com.atebits.Tweetie2" }, false, new string[] {});
+					var pid = yield host_session.spawn ("com.atebits.Tweetie2", HostSpawnOptions ());
 
 					var id = yield host_session.attach_to (pid);
 					var session = yield prov.obtain_agent_session (host_session, id);
@@ -1604,8 +1597,9 @@ send(ranges);
 						run_fork_scenario.callback ();
 				});
 
-				string[] argv = { target_path };
-				var parent_pid = yield device.spawn (target_path, argv);
+				var options = new SpawnOptions ();
+				options.stdio = PIPE;
+				var parent_pid = yield device.spawn (target_path, options);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -1642,10 +1636,16 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (the_child.parent_pid == parent_pid);
-				assert (Path.get_basename (the_child.path).has_prefix ("forker-"));
-				var child_pid = the_child.pid;
-				var child_session = yield device.attach (child_pid);
+				var child = the_child;
+				the_child = null;
+				assert (child.pid != parent_pid);
+				assert (child.parent_pid == parent_pid);
+				assert (child.origin == FORK);
+				assert (child.identifier == null);
+				assert (child.path == null);
+				assert (child.argv == null);
+				assert (child.envp == null);
+				var child_session = yield device.attach (child.pid);
 				child_session.detached.connect (reason => {
 					child_detach_reason = reason.to_string ();
 					if (waiting)
@@ -1666,7 +1666,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						run_fork_scenario.callback ();
 				});
 				yield child_script.load ();
-				yield device.resume (child_pid);
+				yield device.resume (child.pid);
 				while (child_messages.is_empty) {
 					waiting = true;
 					yield;
@@ -1737,8 +1737,10 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						run_fork_plus_exec_scenario.callback ();
 				});
 
-				string[] argv = { target_path, "spawn", method };
-				var parent_pid = yield device.spawn (target_path, argv);
+				var options = new SpawnOptions ();
+				options.argv = { target_path, "spawn", method };
+				options.stdio = PIPE;
+				var parent_pid = yield device.spawn (target_path, options);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -1754,13 +1756,17 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				var child = the_child;
+				var child_pre_exec = the_child;
 				the_child = null;
-				assert (child.pid != parent_pid);
-				assert (child.parent_pid == parent_pid);
-				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert (child_pre_exec.pid != parent_pid);
+				assert (child_pre_exec.parent_pid == parent_pid);
+				assert (child_pre_exec.origin == FORK);
+				assert (child_pre_exec.identifier == null);
+				assert (child_pre_exec.path == null);
+				assert (child_pre_exec.argv == null);
+				assert (child_pre_exec.envp == null);
 
-				var child_session_pre_exec = yield device.attach (child.pid);
+				var child_session_pre_exec = yield device.attach (child_pre_exec.pid);
 				yield child_session_pre_exec.enable_child_gating ();
 				child_session_pre_exec.detached.connect (reason => {
 					child_pre_exec_detach_reason = reason.to_string ();
@@ -1768,7 +1774,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						run_fork_plus_exec_scenario.callback ();
 				});
 
-				yield device.resume (child.pid);
+				yield device.resume (child_pre_exec.pid);
 
 				while (child_pre_exec_detach_reason == null) {
 					waiting = true;
@@ -1782,12 +1788,17 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				child = the_child;
+				var child_post_exec = the_child;
 				the_child = null;
-				assert (child.parent_pid == child.pid);
-				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert (child_post_exec.pid == child_pre_exec.pid);
+				assert (child_post_exec.parent_pid == child_post_exec.pid);
+				assert (child_post_exec.origin == EXEC);
+				assert (child_post_exec.identifier == null);
+				assert (child_post_exec.path != null);
+				assert (child_post_exec.argv != null);
+				assert (child_post_exec.envp != null);
 
-				var child_session_post_exec = yield device.attach (child.pid);
+				var child_session_post_exec = yield device.attach (child_post_exec.pid);
 				child_session_post_exec.detached.connect (reason => {
 					child_post_exec_detach_reason = reason.to_string ();
 					if (waiting)
@@ -1809,7 +1820,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				});
 				yield script.load ();
 
-				yield device.resume (child.pid);
+				yield device.resume (child_post_exec.pid);
 
 				while (child_messages.is_empty) {
 					waiting = true;
@@ -1874,8 +1885,10 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					assert_not_reached ();
 				});
 
-				string[] argv = { target_path, "spawn-bad-path", method };
-				var parent_pid = yield device.spawn (target_path, argv);
+				var options = new SpawnOptions ();
+				options.argv = { target_path, "spawn-bad-path", method };
+				options.stdio = PIPE;
+				var parent_pid = yield device.spawn (target_path, options);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					detach_reason = reason.to_string ();
@@ -1938,8 +1951,10 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						run_posix_spawn_scenario.callback ();
 				});
 
-				string[] argv = { target_path, "spawn", method };
-				var parent_pid = yield device.spawn (target_path, argv);
+				var options = new SpawnOptions ();
+				options.argv = { target_path, "spawn", method };
+				options.stdio = PIPE;
+				var parent_pid = yield device.spawn (target_path, options);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -1959,7 +1974,12 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				the_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
+				assert (child.origin == SPAWN);
+				assert (child.identifier == null);
+				assert (child.path != null);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert (child.argv != null);
+				assert (child.envp != null);
 
 				assert (parent_detach_reason == null);
 
@@ -2057,8 +2077,10 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						run_posix_spawn_plus_setexec_scenario.callback ();
 				});
 
-				string[] argv = { target_path, "spawn", method };
-				var pre_exec_pid = yield device.spawn (target_path, argv);
+				var options = new SpawnOptions ();
+				options.argv = { target_path, "spawn", method };
+				options.stdio = PIPE;
+				var pre_exec_pid = yield device.spawn (target_path, options);
 				var pre_exec_session = yield device.attach (pre_exec_pid);
 				pre_exec_session.detached.connect (reason => {
 					pre_exec_detach_reason = reason.to_string ();
@@ -2085,7 +2107,12 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				the_child = null;
 				assert (child.pid == pre_exec_pid);
 				assert (child.parent_pid == pre_exec_pid);
+				assert (child.origin == EXEC);
+				assert (child.identifier == null);
+				assert (child.path != null);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert (child.argv != null);
+				assert (child.envp != null);
 
 				var post_exec_session = yield device.attach (child.pid);
 				post_exec_session.detached.connect (reason => {
@@ -2209,11 +2236,9 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						spawn.callback ();
 				});
 
-				var target_path = Frida.Test.Labrats.path_to_executable ("sleeper");
-				string[] argv = { target_path };
-				bool has_envp = false;
-				string[] envp = {};
-				pid = yield host_session.spawn (target_path, argv, has_envp, envp);
+				var options = HostSpawnOptions ();
+				options.stdio = PIPE;
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options);
 
 				var session_id = yield host_session.attach_to (pid);
 				var session = yield prov.obtain_agent_session (host_session, session_id);
@@ -2313,8 +2338,10 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						create_process.callback ();
 				});
 
-				string[] argv = { target_path, "spawn", method };
-				var parent_pid = yield device.spawn (target_path, argv);
+				var options = new SpawnOptions ();
+				options.argv = { target_path, "spawn", method };
+				options.stdio = PIPE;
+				var parent_pid = yield device.spawn (target_path, options);
 				var parent_session = yield device.attach (parent_pid);
 				parent_session.detached.connect (reason => {
 					parent_detach_reason = reason.to_string ();
@@ -2334,7 +2361,12 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				the_child = null;
 				assert (child.pid != parent_pid);
 				assert (child.parent_pid == parent_pid);
+				assert (child.origin == SPAWN);
+				assert (child.identifier == null);
+				assert (child.path != null);
 				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert (child.argv != null);
+				assert (child.envp == null);
 
 				assert (parent_detach_reason == null);
 
