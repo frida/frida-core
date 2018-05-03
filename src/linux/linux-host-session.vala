@@ -221,9 +221,6 @@ namespace Frida {
 				if (options.stdio != INHERIT)
 					throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning Android apps");
 
-				if (options.aslr != AUTO)
-					throw new Error.NOT_SUPPORTED ("Disabling ASLR is not supported on this OS");
-
 				return yield get_robo_launcher ().spawn (package_name, class_name);
 			} else {
 				return yield helper.spawn (path, options);

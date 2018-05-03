@@ -94,9 +94,6 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     goto handle_path_error;
 
-  if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
-    goto handle_aslr_error;
-
   application_name = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
 
   if (frida_host_spawn_options_get_has_argv (options))
@@ -233,14 +230,6 @@ handle_path_error:
         FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
         "Unable to find executable at '%s'",
         path);
-    return NULL;
-  }
-handle_aslr_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Disabling ASLR is not supported on this OS");
     return NULL;
   }
 handle_create_error:

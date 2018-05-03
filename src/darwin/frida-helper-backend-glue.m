@@ -535,7 +535,8 @@ _frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
 }
 
 guint
-_frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path, FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
+_frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path,
+    FridaHostSpawnOptions * options, GVariantDict * aux_options, FridaStdioPipes ** pipes, GError ** error)
 {
   pid_t pid;
   FridaSpawnInstance * instance = NULL;
@@ -545,6 +546,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   short flags;
   FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
+  gchar * aslr = NULL;
   gchar * const * argv, * const * envp;
   const gchar * default_argv[] = { path, NULL };
   gchar ** default_envp = NULL;
@@ -594,7 +596,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
       g_assert_not_reached ();
   }
 
-  if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
+  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disabled") == 0)
   {
     flags |= _POSIX_SPAWN_DISABLE_ASLR;
   }
@@ -710,6 +712,7 @@ beach:
   {
     free (old_cwd);
     g_strfreev (default_envp);
+    g_free (aslr);
 
     return pid;
   }
@@ -722,8 +725,8 @@ beach:
 static void frida_kill_application (NSString * identifier);
 
 void
-_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url,
-    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+_frida_darwin_helper_backend_launch (const gchar * identifier, const gchar * url, FridaHostSpawnOptions * options,
+    GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
   FridaSpringboardApi * api;
   NSAutoreleasePool * pool;

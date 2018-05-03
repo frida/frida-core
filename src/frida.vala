@@ -845,7 +845,7 @@ namespace Frida {
 
 				raw_options.stdio = options.stdio;
 
-				raw_options.aslr = options.aslr;
+				raw_options.aux = options.get_aux_bytes ().get_data ();
 			}
 
 			uint pid;
@@ -1387,10 +1387,18 @@ namespace Frida {
 			default = INHERIT;
 		}
 
-		public Aslr aslr {
-			get;
-			set;
-			default = AUTO;
+		public VariantDict aux {
+			get {
+				return _aux;
+			}
+		}
+		private VariantDict _aux = new VariantDict ();
+
+		internal Bytes get_aux_bytes () {
+			var variant = _aux.end ();
+			var bytes = variant.get_data_as_bytes ();
+			_aux = new VariantDict (variant);
+			return bytes;
 		}
 	}
 

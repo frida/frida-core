@@ -241,12 +241,7 @@ namespace Frida {
 			set;
 		}
 
-		public Aslr aslr {
-			get;
-			set;
-		}
-
-		public uint8[] parameters {
+		public uint8[] aux {
 			get;
 			set;
 		}
@@ -256,19 +251,17 @@ namespace Frida {
 			this.envp = {};
 			this.cwd = "";
 			this.stdio = INHERIT;
-			this.aslr = AUTO;
-			this.parameters = {};
+			this.aux = {};
+		}
+
+		public VariantDict load_aux () {
+			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (aux), false));
 		}
 	}
 
 	public enum Stdio {
 		INHERIT,
 		PIPE
-	}
-
-	public enum Aslr {
-		AUTO,
-		DISABLED
 	}
 
 	public struct HostSpawnInfo {

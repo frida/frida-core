@@ -345,9 +345,6 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
     cwd = NULL;
   }
 
-  if (frida_host_spawn_options_get_aslr (options) == FRIDA_ASLR_DISABLED)
-    goto handle_aslr_error;
-
   instance = frida_spawn_instance_new (self);
 
   stdio = frida_host_spawn_options_get_stdio (options);
@@ -450,14 +447,6 @@ handle_cwd_error:
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to change directory to '%s'",
         cwd);
-    goto error_epilogue;
-  }
-handle_aslr_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Disabling ASLR is not supported on this OS");
     goto error_epilogue;
   }
 handle_os_error:
