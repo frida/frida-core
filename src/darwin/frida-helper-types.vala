@@ -17,10 +17,11 @@ namespace Frida {
 		public abstract async void disable_spawn_gating () throws Error;
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws Error;
 		public abstract async uint spawn (string path, HostSpawnOptions options) throws Error;
-		public abstract async void input (uint pid, uint8[] data) throws Error;
 		public abstract async void launch (string identifier, HostSpawnOptions options) throws Error;
+		public abstract async void notify_launch_completed (string identifier, uint pid) throws Error;
 		public abstract async void wait_until_suspended (uint pid) throws Error;
 		public abstract async void cancel_pending_waits (uint pid) throws Error;
+		public abstract async void input (uint pid, uint8[] data) throws Error;
 		public abstract async void resume (uint pid) throws Error;
 		public abstract async void kill_process (uint pid) throws Error;
 		public abstract async void kill_application (string identifier) throws Error;
@@ -49,9 +50,10 @@ namespace Frida {
 		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws GLib.Error;
 		public abstract async uint spawn (string path, HostSpawnOptions options) throws GLib.Error;
 		public abstract async void launch (string identifier, HostSpawnOptions options) throws GLib.Error;
-		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
+		public abstract async void notify_launch_completed (string identifier, uint pid) throws GLib.Error;
 		public abstract async void wait_until_suspended (uint pid) throws GLib.Error;
 		public abstract async void cancel_pending_waits (uint pid) throws GLib.Error;
+		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
 		public abstract async void resume (uint pid) throws GLib.Error;
 		public abstract async void kill_process (uint pid) throws GLib.Error;
 		public abstract async void kill_application (string identifier) throws GLib.Error;

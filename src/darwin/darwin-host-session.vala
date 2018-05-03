@@ -413,10 +413,11 @@ namespace Frida {
 			});
 			timeout.attach (MainContext.get_thread_default ());
 
+			uint pid;
 			try {
 				var future = request.future;
 				try {
-					return yield future.wait_async ();
+					pid = yield future.wait_async ();
 				} catch (Gee.FutureError e) {
 					throw (Error) future.exception;
 				}
@@ -426,6 +427,10 @@ namespace Frida {
 			} finally {
 				timeout.destroy ();
 			}
+
+			yield helper.notify_launch_completed (identifier, pid);
+
+			return pid;
 		}
 
 		public async bool try_resume (uint pid) throws Error {

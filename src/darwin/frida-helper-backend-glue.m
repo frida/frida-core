@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #ifdef HAVE_I386
 # include <gum/arch-x86/gumx86writer.h>
 #else
@@ -24,6 +26,7 @@
 #include <mach/mach.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
+#include <util.h>
 
 #ifndef _POSIX_SPAWN_DISABLE_ASLR
 # define _POSIX_SPAWN_DISABLE_ASLR 0x0100
@@ -723,6 +726,8 @@ static void frida_kill_application (NSString * identifier);
 static NSArray * frida_argv_to_arguments_array (gchar * const * strv, gint strv_length);
 static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
 
+static void frida_configure_terminal_attributes (gint fd);
+
 void
 _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
@@ -766,6 +771,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 {
   FridaSpringboardApi * api;
   NSMutableDictionary * debug_options, * open_options;
+  FridaStdioPipes * pipes = NULL;
   GError * error = NULL;
   gchar * aslr = NULL;
   FBSSystemService * service;
@@ -807,8 +813,30 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
     goto handle_cwd_error;
 
-  if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
-    goto handle_stdio_error;
+  if (frida_host_spawn_options_get_stdio (spawn_options) == FRIDA_STDIO_PIPE)
+  {
+    gint stdout_master, stdout_slave, stderr_master, stderr_slave;
+    gchar stdout_name[PATH_MAX], stderr_name[PATH_MAX];
+
+    openpty (&stdout_master, &stdout_slave, stdout_name, NULL, NULL);
+    openpty (&stderr_master, &stderr_slave, stderr_name, NULL, NULL);
+
+    pipes = frida_stdio_pipes_new (-1, stdout_master, stderr_master);
+
+    frida_configure_terminal_attributes (stdout_master);
+    frida_configure_terminal_attributes (stderr_master);
+
+    close (stdout_slave);
+    close (stderr_slave);
+
+    chmod (stdout_name, 0666);
+    chmod (stderr_name, 0666);
+
+    [debug_options setObject:[NSString stringWithUTF8String:stdout_name]
+                      forKey:api->FBSDebugOptionKeyStandardOutPath];
+    [debug_options setObject:[NSString stringWithUTF8String:stderr_name]
+                      forKey:api->FBSDebugOptionKeyStandardErrorPath];
+  }
 
   if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
   {
@@ -830,6 +858,8 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
     }
     else
     {
+      g_clear_object (&pipes);
+
       frida_error = g_error_new (
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
@@ -837,7 +867,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
           [[error localizedDescription] UTF8String]);
     }
 
-    on_complete (frida_error, on_complete_target);
+    on_complete (pipes, frida_error, on_complete_target);
   };
 
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
@@ -871,17 +901,9 @@ handle_cwd_error:
         "Overriding cwd is not supported when spawning iOS apps");
     goto error_epilogue;
   }
-handle_stdio_error:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Redirecting stdio is not yet supported when spawning iOS apps");
-    goto error_epilogue;
-  }
 error_epilogue:
   {
-    on_complete (error, on_complete_target);
+    on_complete (NULL, error, on_complete_target);
     goto beach;
   }
 beach:
@@ -953,7 +975,7 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
           [api->SBSApplicationLaunchingErrorString (res) UTF8String]);
     }
 
-    on_complete (error, on_complete_target);
+    on_complete (NULL, error, on_complete_target);
   });
 
   goto beach;
@@ -1000,7 +1022,7 @@ handle_aslr_error:
   }
 error_epilogue:
   {
-    on_complete (error, on_complete_target);
+    on_complete (NULL, error, on_complete_target);
     goto beach;
   }
 beach:
@@ -1179,10 +1201,24 @@ frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length)
   return result;
 }
 
+static void
+frida_configure_terminal_attributes (gint fd)
+{
+  struct termios tios;
+
+  tcgetattr (fd, &tios);
+
+  tios.c_oflag &= ~ONLCR;
+  tios.c_cflag = (tios.c_cflag & CLOCAL) | CS8 | CREAD | HUPCL;
+  tios.c_lflag &= ~ECHO;
+
+  tcsetattr (fd, 0, &tios);
+}
+
 #else
 
 void
-_frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url,
+_frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
   GError * error;
@@ -1192,7 +1228,7 @@ _frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gcha
       FRIDA_ERROR_NOT_SUPPORTED,
       "Not yet able to launch apps on Mac");
 
-  on_complete (error, on_complete_target);
+  on_complete (NULL, error, on_complete_target);
 }
 
 void

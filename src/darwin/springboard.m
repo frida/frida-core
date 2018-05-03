@@ -56,6 +56,8 @@ _frida_get_springboard_api (void)
 
       FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyArguments);
       FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyEnvironment);
+      FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyStandardOutPath);
+      FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyStandardErrorPath);
       FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyDisableASLR);
     }
 

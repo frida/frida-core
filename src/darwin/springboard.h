@@ -66,6 +66,8 @@ struct _FridaSpringboardApi
 
   NSString * FBSDebugOptionKeyArguments;
   NSString * FBSDebugOptionKeyEnvironment;
+  NSString * FBSDebugOptionKeyStandardOutPath;
+  NSString * FBSDebugOptionKeyStandardErrorPath;
   NSString * FBSDebugOptionKeyDisableASLR;
 
   id FBSSystemService;

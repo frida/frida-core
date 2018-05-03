@@ -110,19 +110,19 @@ namespace Frida {
 			}
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
+		public async void launch (string identifier, HostSpawnOptions options) throws Error {
 			var helper = yield obtain ();
 			try {
-				yield helper.input (pid, data);
+				yield helper.launch (identifier, options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 		}
 
-		public async void launch (string identifier, HostSpawnOptions options) throws Error {
+		public async void notify_launch_completed (string identifier, uint pid) throws Error {
 			var helper = yield obtain ();
 			try {
-				yield helper.launch (identifier, options);
+				yield helper.notify_launch_completed (identifier, pid);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -141,6 +141,15 @@ namespace Frida {
 			var helper = yield obtain ();
 			try {
 				yield helper.cancel_pending_waits (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void input (uint pid, uint8[] data) throws Error {
+			var helper = yield obtain ();
+			try {
+				yield helper.input (pid, data);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}

@@ -158,8 +158,8 @@ namespace Frida {
 			yield backend.launch (identifier, options);
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
-			yield backend.input (pid, data);
+		public async void notify_launch_completed (string identifier, uint pid) throws Error {
+			yield backend.notify_launch_completed (identifier, pid);
 		}
 
 		public async void wait_until_suspended (uint pid) throws Error {
@@ -168,6 +168,10 @@ namespace Frida {
 
 		public async void cancel_pending_waits (uint pid) throws Error {
 			yield backend.cancel_pending_waits (pid);
+		}
+
+		public async void input (uint pid, uint8[] data) throws Error {
+			yield backend.input (pid, data);
 		}
 
 		public async void resume (uint pid) throws Error {

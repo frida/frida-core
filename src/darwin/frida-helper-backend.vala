@@ -16,12 +16,13 @@ namespace Frida {
 			}
 		}
 
-		protected delegate void LaunchCompletionHandler (owned Error? error);
+		protected delegate void LaunchCompletionHandler (owned StdioPipes? pipes, owned Error? error);
 
 		public void * context;
 
 		public Gee.HashMap<uint, void *> spawn_instances = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
+		private Gee.HashMap<string, PendingLaunch> pending_launches = new Gee.HashMap<string, PendingLaunch> ();
 
 		private Gee.HashMap<uint, Gee.Promise<bool>> suspension_waiters = new Gee.HashMap<uint, Gee.Promise<bool>> ();
 
@@ -30,7 +31,7 @@ namespace Frida {
 		private Gee.HashMap<uint, uint> inject_expiry_timers = new Gee.HashMap<uint, uint> ();
 
 		private Gee.HashMap<uint, uint> remote_tasks = new Gee.HashMap<uint, uint> ();
-		private Gee.HashMap<uint, uint> expiry_timers = new Gee.HashMap<uint, uint> ();
+		private Gee.HashMap<uint, uint> task_expiry_timers = new Gee.HashMap<uint, uint> ();
 
 		public uint next_id = 1;
 
@@ -63,15 +64,18 @@ namespace Frida {
 		}
 
 		public async void close () {
+			foreach (var pending in pending_launches.values.to_array ())
+				pending.complete ();
+
 			foreach (var entry in inject_cleaner_by_instance.entries) {
 				_free_inject_instance (entry.key);
 				Source.remove (entry.value);
 			}
 			inject_cleaner_by_instance.clear ();
 
-			foreach (var id in expiry_timers.values)
+			foreach (var id in task_expiry_timers.values)
 				Source.remove (id);
-			expiry_timers.clear ();
+			task_expiry_timers.clear ();
 
 			foreach (var task in remote_tasks.values)
 				deallocate_port (task);
@@ -124,6 +128,52 @@ namespace Frida {
 			return child_pid;
 		}
 
+		public async void launch (string identifier, HostSpawnOptions options) throws Error {
+			var pending = pending_launches[identifier];
+			if (pending != null)
+				pending.complete ();
+
+			StdioPipes? pipes = null;
+			Error error = null;
+
+			_launch (identifier, options, (p, e) => {
+				Idle.add (() => {
+					pipes = p;
+					error = e;
+					launch.callback ();
+					return false;
+				});
+			});
+
+			yield;
+
+			if (error != null)
+				throw error;
+
+			pending = new PendingLaunch (identifier, pipes);
+			pending.completed.connect (on_launch_completed);
+			pending_launches[identifier] = pending;
+		}
+
+		public async void notify_launch_completed (string identifier, uint pid) throws Error {
+			var pending = pending_launches[identifier];
+			if (pending == null)
+				return;
+
+			pending.complete ();
+
+			var pipes = pending.pipes;
+			if (pipes != null) {
+				process_next_output_from.begin (new UnixInputStream (pipes.output, false), pid, 1, pipes);
+				process_next_output_from.begin (new UnixInputStream (pipes.error, false), pid, 2, pipes);
+			}
+		}
+
+		private void on_launch_completed (PendingLaunch pending) {
+			pending_launches.unset (pending.identifier);
+			pending.completed.disconnect (on_launch_completed);
+		}
+
 		private void on_child_dead (Pid pid, int status) {
 			var child_pid = (uint) pid;
 
@@ -134,6 +184,17 @@ namespace Frida {
 				_free_spawn_instance (instance);
 
 			child_dead (pid);
+		}
+
+		public async void input (uint pid, uint8[] data) throws Error {
+			var stream = stdin_streams[pid];
+			if (stream == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid PID");
+			try {
+				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT (e.message);
+			}
 		}
 
 		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
@@ -148,34 +209,6 @@ namespace Frida {
 					process_next_output_from.begin (stream, pid, fd, resource);
 			} catch (GLib.Error e) {
 				output (pid, fd, new uint8[0]);
-			}
-		}
-
-		public async void launch (string identifier, HostSpawnOptions options) throws Error {
-			Error pending_error = null;
-
-			_launch (identifier, options, (error) => {
-				Idle.add (() => {
-					pending_error = error;
-					launch.callback ();
-					return false;
-				});
-			});
-
-			yield;
-
-			if (pending_error != null)
-				throw pending_error;
-		}
-
-		public async void input (uint pid, uint8[] data) throws Error {
-			var stream = stdin_streams[pid];
-			if (stream == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid PID");
-			try {
-				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT (e.message);
 			}
 		}
 
@@ -378,12 +411,12 @@ namespace Frida {
 
 		private void schedule_task_expiry_for_remote_pid (uint pid) {
 			uint previous_timer;
-			if (expiry_timers.unset (pid, out previous_timer))
+			if (task_expiry_timers.unset (pid, out previous_timer))
 				Source.remove (previous_timer);
 
 			var expiry_source = new TimeoutSource.seconds (2);
 			expiry_source.set_callback (() => {
-				var removed = expiry_timers.unset (pid);
+				var removed = task_expiry_timers.unset (pid);
 				assert (removed);
 
 				uint task;
@@ -394,12 +427,12 @@ namespace Frida {
 
 				return false;
 			});
-			expiry_timers[pid] = expiry_source.attach (MainContext.get_thread_default ());
+			task_expiry_timers[pid] = expiry_source.attach (MainContext.get_thread_default ());
 		}
 
 		private void cancel_task_expiry_for_remote_pid (uint pid) {
 			uint timer;
-			var found = expiry_timers.unset (pid, out timer);
+			var found = task_expiry_timers.unset (pid, out timer);
 			assert (found);
 
 			Source.remove (timer);
@@ -659,6 +692,50 @@ namespace Frida {
 		private extern static int ioctl (int fildes, ulong request, ...);
 	}
 
+	private class PendingLaunch : Object {
+		public signal void completed ();
+
+		public string identifier {
+			get;
+			construct;
+		}
+
+		public StdioPipes? pipes {
+			get;
+			construct;
+		}
+
+		private Source expiry_timer;
+
+		public PendingLaunch (string identifier, StdioPipes? pipes) {
+			Object (identifier: identifier, pipes: pipes);
+		}
+
+		construct {
+			var source = new TimeoutSource.seconds (20);
+			source.set_callback (on_timeout);
+			source.attach (MainContext.get_thread_default ());
+			expiry_timer = source;
+		}
+
+		public void complete () {
+			if (expiry_timer != null) {
+				expiry_timer.destroy ();
+				expiry_timer = null;
+			}
+
+			completed ();
+		}
+
+		private bool on_timeout () {
+			expiry_timer = null;
+
+			complete ();
+
+			return false;
+		}
+	}
+
 	public class StdioPipes : Object {
 		public int input {
 			get;
@@ -681,7 +758,8 @@ namespace Frida {
 
 		construct {
 			try {
-				Unix.set_fd_nonblocking (input, true);
+				if (input != -1)
+					Unix.set_fd_nonblocking (input, true);
 				Unix.set_fd_nonblocking (output, true);
 				Unix.set_fd_nonblocking (error, true);
 			} catch (GLib.Error e) {
@@ -690,7 +768,8 @@ namespace Frida {
 		}
 
 		~StdioPipes () {
-			Posix.close (input);
+			if (input != -1)
+				Posix.close (input);
 			Posix.close (output);
 			Posix.close (error);
 		}
