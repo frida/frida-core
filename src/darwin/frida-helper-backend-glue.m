@@ -717,7 +717,10 @@ static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier,
 static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url,
     FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
+
 static void frida_kill_application (NSString * identifier);
+
+static NSDictionary * frida_envp_to_dictionary (gchar * const * envp, gint envp_length);
 
 void
 _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
@@ -761,7 +764,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
     GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
   FridaSpringboardApi * api;
-  NSMutableDictionary * open_options;
+  NSMutableDictionary * debug_options, * open_options;
   GError * error = NULL;
   gchar * aslr = NULL;
   FBSSystemService * service;
@@ -770,14 +773,27 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
   api = _frida_get_springboard_api ();
 
+  debug_options = [NSMutableDictionary dictionary];
+
   open_options = [NSMutableDictionary dictionary];
-  [open_options setObject:@YES forKey: api->FBSOpenApplicationOptionKeyUnlockDevice];
+  [open_options setObject:@YES
+                   forKey:api->FBSOpenApplicationOptionKeyUnlockDevice];
+  [open_options setObject:debug_options
+                   forKey:api->FBSOpenApplicationOptionKeyDebuggingOptions];
 
   if (frida_host_spawn_options_get_has_argv (spawn_options))
     goto handle_argv_error;
 
   if (frida_host_spawn_options_get_has_envp (spawn_options))
-    goto handle_envp_error;
+  {
+    gchar ** envp;
+    gint envp_length;
+
+    envp = frida_host_spawn_options_get_envp (spawn_options, &envp_length);
+
+    [debug_options setObject:frida_envp_to_dictionary (envp, envp_length)
+                      forKey:api->FBSDebugOptionKeyEnvironment];
+  }
 
   if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
     goto handle_cwd_error;
@@ -843,14 +859,6 @@ handle_argv_error:
         "Overriding argv is not yet supported when spawning iOS apps");
     goto error_epilogue;
   }
-handle_envp_error:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding envp is not yet supported when spawning iOS apps");
-    goto error_epilogue;
-  }
 handle_cwd_error:
   {
     error = g_error_new_literal (
@@ -898,7 +906,8 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
   api = _frida_get_springboard_api ();
 
   params = [NSDictionary dictionary];
-  launch_options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
+  launch_options = [NSDictionary dictionaryWithObject:@YES
+                                               forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
   if (frida_host_spawn_options_get_has_argv (spawn_options))
     goto handle_argv_error;
@@ -1118,6 +1127,47 @@ frida_kill_application (NSString * identifier)
 
     g_free (entries);
   }
+}
+
+static NSDictionary *
+frida_envp_to_dictionary (gchar * const * envp, gint envp_length)
+{
+  NSMutableDictionary * result;
+  gint i;
+
+  result = [NSMutableDictionary dictionaryWithCapacity:envp_length];
+  for (i = 0; i != envp_length; i++)
+  {
+    const gchar * pair, * equals_sign, * name_start, * value_start;
+    NSUInteger name_size, value_size;
+    NSString * name, * value;
+
+    pair = envp[i];
+
+    equals_sign = strchr (pair, '=');
+    if (equals_sign == NULL)
+      continue;
+
+    name_start = pair;
+    name_size = equals_sign - name_start;
+
+    value_start = equals_sign + 1;
+    value_size = pair + strlen (pair) - value_start;
+
+    name = [[NSString alloc] initWithBytes:name_start
+                                    length:name_size
+                                  encoding:NSUTF8StringEncoding];
+    value = [[NSString alloc] initWithBytes:value_start
+                                     length:value_size
+                                   encoding:NSUTF8StringEncoding];
+
+    [result setObject:value forKey:name];
+
+    [value release];
+    [name release];
+  }
+
+  return result;
 }
 
 #else

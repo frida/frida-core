@@ -52,6 +52,9 @@ _frida_get_springboard_api (void)
       g_assert (api->FBSSystemService != nil);
 
       FRIDA_ASSIGN_FBS_CONSTANT (FBSOpenApplicationOptionKeyUnlockDevice);
+      FRIDA_ASSIGN_FBS_CONSTANT (FBSOpenApplicationOptionKeyDebuggingOptions);
+
+      FRIDA_ASSIGN_FBS_CONSTANT (FBSDebugOptionKeyEnvironment);
     }
 
     frida_springboard_api = api;

@@ -62,6 +62,9 @@ struct _FridaSpringboardApi
   NSString * SBSApplicationLaunchOptionUnlockDeviceKey;
 
   NSString * FBSOpenApplicationOptionKeyUnlockDevice;
+  NSString * FBSOpenApplicationOptionKeyDebuggingOptions;
+
+  NSString * FBSDebugOptionKeyEnvironment;
 
   id FBSSystemService;
 };
