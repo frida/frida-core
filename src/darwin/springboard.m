@@ -2,6 +2,18 @@
 
 #include <dlfcn.h>
 
+#define FRIDA_ASSIGN_SBS_FUNC(N) \
+    api->N = dlsym (api->sbs, G_STRINGIFY (N)); \
+    g_assert (api->N != NULL)
+#define FRIDA_ASSIGN_SBS_CONSTANT(N) \
+    str = dlsym (api->sbs, G_STRINGIFY (N)); \
+    g_assert (str != NULL); \
+    api->N = *str
+#define FRIDA_ASSIGN_FBS_CONSTANT(N) \
+    str = dlsym (api->fbs, G_STRINGIFY (N)); \
+    g_assert (str != NULL); \
+    api->N = *str
+
 static FridaSpringboardApi * frida_springboard_api = NULL;
 
 FridaSpringboardApi *
@@ -13,40 +25,23 @@ _frida_get_springboard_api (void)
     NSString ** str;
     id (* objc_get_class_impl) (const gchar * name);
 
-    api = g_new (FridaSpringboardApi, 1);
+    api = g_new0 (FridaSpringboardApi, 1);
 
     api->sbs = dlopen ("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_GLOBAL | RTLD_LAZY);
     g_assert (api->sbs != NULL);
 
     api->fbs = dlopen ("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_GLOBAL | RTLD_LAZY);
 
-    api->SBSCopyFrontmostApplicationDisplayIdentifier = dlsym (api->sbs, "SBSCopyFrontmostApplicationDisplayIdentifier");
-    g_assert (api->SBSCopyFrontmostApplicationDisplayIdentifier != NULL);
+    FRIDA_ASSIGN_SBS_FUNC (SBSCopyFrontmostApplicationDisplayIdentifier);
+    FRIDA_ASSIGN_SBS_FUNC (SBSCopyApplicationDisplayIdentifiers);
+    FRIDA_ASSIGN_SBS_FUNC (SBSCopyDisplayIdentifierForProcessID);
+    FRIDA_ASSIGN_SBS_FUNC (SBSCopyLocalizedApplicationNameForDisplayIdentifier);
+    FRIDA_ASSIGN_SBS_FUNC (SBSCopyIconImagePNGDataForDisplayIdentifier);
+    FRIDA_ASSIGN_SBS_FUNC (SBSLaunchApplicationWithIdentifierAndLaunchOptions);
+    FRIDA_ASSIGN_SBS_FUNC (SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions);
+    FRIDA_ASSIGN_SBS_FUNC (SBSApplicationLaunchingErrorString);
 
-    api->SBSCopyApplicationDisplayIdentifiers = dlsym (api->sbs, "SBSCopyApplicationDisplayIdentifiers");
-    g_assert (api->SBSCopyApplicationDisplayIdentifiers != NULL);
-
-    api->SBSCopyDisplayIdentifierForProcessID = dlsym (api->sbs, "SBSCopyDisplayIdentifierForProcessID");
-    g_assert (api->SBSCopyDisplayIdentifierForProcessID != NULL);
-
-    api->SBSCopyLocalizedApplicationNameForDisplayIdentifier = dlsym (api->sbs, "SBSCopyLocalizedApplicationNameForDisplayIdentifier");
-    g_assert (api->SBSCopyLocalizedApplicationNameForDisplayIdentifier != NULL);
-
-    api->SBSCopyIconImagePNGDataForDisplayIdentifier = dlsym (api->sbs, "SBSCopyIconImagePNGDataForDisplayIdentifier");
-    g_assert (api->SBSCopyIconImagePNGDataForDisplayIdentifier != NULL);
-
-    api->SBSLaunchApplicationWithIdentifierAndLaunchOptions = dlsym (api->sbs, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
-    g_assert (api->SBSLaunchApplicationWithIdentifierAndLaunchOptions != NULL);
-
-    api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions = dlsym (api->sbs, "SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions");
-    g_assert (api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions != NULL);
-
-    api->SBSApplicationLaunchingErrorString = dlsym (api->sbs, "SBSApplicationLaunchingErrorString");
-    g_assert (api->SBSApplicationLaunchingErrorString != NULL);
-
-    str = dlsym (api->sbs, "SBSApplicationLaunchOptionUnlockDeviceKey");
-    g_assert (str != NULL);
-    api->SBSApplicationLaunchOptionUnlockDeviceKey = *str;
+    FRIDA_ASSIGN_SBS_CONSTANT (SBSApplicationLaunchOptionUnlockDeviceKey);
 
     if (api->fbs != NULL)
     {
@@ -55,10 +50,8 @@ _frida_get_springboard_api (void)
 
       api->FBSSystemService = objc_get_class_impl ("FBSSystemService");
       g_assert (api->FBSSystemService != nil);
-    }
-    else
-    {
-      api->FBSSystemService = nil;
+
+      FRIDA_ASSIGN_FBS_CONSTANT (FBSOpenApplicationOptionKeyUnlockDevice);
     }
 
     frida_springboard_api = api;

@@ -1486,7 +1486,7 @@ send(ranges);
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 					var app_id = "com.apple.mobilesafari";
-					var url = "https://www.frida.re/docs/ios/";
+					string? url = "https://www.frida.re/docs/ios/";
 					string received_message = null;
 					bool waiting = false;
 

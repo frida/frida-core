@@ -711,6 +711,9 @@ beach:
 
 #import "springboard.h"
 
+static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url,
+    FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url,
     FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
@@ -720,40 +723,55 @@ void
 _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
-  GVariantDict * aux_options;
-  FridaSpringboardApi * api;
   NSAutoreleasePool * pool;
   NSString * identifier_value;
+  GVariantDict * aux_options;
   gchar * url = NULL;
   NSURL * url_value = nil;
-
-  aux_options = frida_host_spawn_options_load_aux (options);
-
-  api = _frida_get_springboard_api ();
 
   pool = [[NSAutoreleasePool alloc] init];
 
   identifier_value = [NSString stringWithUTF8String:identifier];
 
+  aux_options = frida_host_spawn_options_load_aux (options);
+
   if (g_variant_dict_lookup (aux_options, "url", "s", &url))
     url_value = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
 
-  frida_darwin_helper_backend_launch_using_sbs (identifier_value, url_value, options, aux_options, on_complete, on_complete_target);
-
-  [pool release];
+  if (_frida_get_springboard_api ()->fbs != NULL)
+  {
+    frida_darwin_helper_backend_launch_using_fbs (identifier_value, url_value, options, aux_options, on_complete,
+        on_complete_target);
+  }
+  else
+  {
+    frida_darwin_helper_backend_launch_using_sbs (identifier_value, url_value, options, aux_options, on_complete,
+        on_complete_target);
+  }
 
   g_free (url);
 
   g_variant_dict_unref (aux_options);
+
+  [pool release];
 }
+
 static void
-frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
+  FridaSpringboardApi * api;
+  NSMutableDictionary * open_options;
   GError * error = NULL;
   gchar * aslr = NULL;
-  FridaSpringboardApi * api;
-  NSDictionary * params, * launch_options;
+  FBSSystemService * service;
+  mach_port_t client_port;
+  FBSOpenResultCallback result_callback;
+
+  api = _frida_get_springboard_api ();
+
+  open_options = [NSMutableDictionary dictionary];
+  [open_options setObject:@YES forKey: api->FBSOpenApplicationOptionKeyUnlockDevice];
 
   if (frida_host_spawn_options_get_has_argv (spawn_options))
     goto handle_argv_error;
@@ -770,12 +788,135 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
   if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "auto") != 0)
     goto handle_aslr_error;
 
+  service = [api->FBSSystemService sharedService];
+
+  client_port = [service createClientPort];
+
+  result_callback = ^(NSError * error)
+  {
+    GError * frida_error = NULL;
+
+    if (error == nil)
+    {
+      [service cleanupClientPort:client_port];
+    }
+    else
+    {
+      frida_error = g_error_new (
+          FRIDA_ERROR,
+          FRIDA_ERROR_NOT_SUPPORTED,
+          "Unable to launch iOS app: %s",
+          [[error localizedDescription] UTF8String]);
+    }
+
+    on_complete (frida_error, on_complete_target);
+  };
+
+  dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
+  {
+    frida_kill_application (identifier);
+
+    if (url != nil)
+    {
+      [service openURL:url
+           application:identifier
+               options:open_options
+            clientPort:client_port
+            withResult:result_callback];
+    }
+    else
+    {
+      [service openApplication:identifier
+                       options:open_options
+                    clientPort:client_port
+                    withResult:result_callback];
+    }
+  });
+
+  goto beach;
+
+handle_argv_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding argv is not yet supported when spawning iOS apps");
+    goto error_epilogue;
+  }
+handle_envp_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding envp is not yet supported when spawning iOS apps");
+    goto error_epilogue;
+  }
+handle_cwd_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding cwd is not supported when spawning iOS apps");
+    goto error_epilogue;
+  }
+handle_stdio_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Redirecting stdio is not yet supported when spawning iOS apps");
+    goto error_epilogue;
+  }
+handle_aslr_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Disabling ASLR is not yet supported when spawning iOS apps");
+    goto error_epilogue;
+  }
+error_epilogue:
+  {
+    on_complete (error, on_complete_target);
+    goto beach;
+  }
+beach:
+  {
+    g_free (aslr);
+  }
+}
+
+static void
+frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+{
+  FridaSpringboardApi * api;
+  NSDictionary * params, * launch_options;
+  GError * error = NULL;
+  gchar * aslr = NULL;
+
   api = _frida_get_springboard_api ();
 
   params = [NSDictionary dictionary];
   launch_options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
-  dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+  if (frida_host_spawn_options_get_has_argv (spawn_options))
+    goto handle_argv_error;
+
+  if (frida_host_spawn_options_get_has_envp (spawn_options))
+    goto handle_envp_error;
+
+  if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
+    goto handle_cwd_error;
+
+  if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
+    goto handle_stdio_error;
+
+  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "auto") != 0)
+    goto handle_aslr_error;
+
+  dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
+  {
     UInt32 res;
     GError * error = NULL;
 
@@ -833,7 +974,7 @@ handle_cwd_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding cwd is not supported when spawning iOS apps on this version of iOS");
+        "Overriding cwd is not supported when spawning iOS apps");
     goto error_epilogue;
   }
 handle_stdio_error:
@@ -985,16 +1126,14 @@ void
 _frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gchar * identifier, const gchar * url,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
-  dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    GError * error;
+  GError * error;
 
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Not yet able to launch apps on Mac");
+  error = g_error_new_literal (
+      FRIDA_ERROR,
+      FRIDA_ERROR_NOT_SUPPORTED,
+      "Not yet able to launch apps on Mac");
 
-    on_complete (error, on_complete_target);
-  });
+  on_complete (error, on_complete_target);
 }
 
 void

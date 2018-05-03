@@ -5,6 +5,7 @@
 #import <UIKit/UIKit.h>
 
 typedef struct _FridaSpringboardApi FridaSpringboardApi;
+typedef void (^ FBSOpenResultCallback) (NSError * error);
 typedef enum _FBProcessKillReason FBProcessKillReason;
 
 enum _FBProcessKillReason
@@ -25,10 +26,22 @@ enum _FBProcessKillReason
 + (FBSSystemService *)sharedService;
 
 - (pid_t)pidForApplication:(NSString *)identifier;
+- (void)openApplication:(NSString *)identifier
+                options:(NSDictionary *)options
+             clientPort:(mach_port_t)port
+             withResult:(FBSOpenResultCallback)result;
+- (void)openURL:(NSURL *)url
+    application:(NSString *)identifier
+        options:(NSDictionary *)options
+     clientPort:(mach_port_t)port
+     withResult:(FBSOpenResultCallback)result;
 - (void)terminateApplication:(NSString *)identifier
                    forReason:(FBProcessKillReason)reason
                    andReport:(BOOL)report
              withDescription:(NSString *)description;
+
+- (mach_port_t)createClientPort;
+- (void)cleanupClientPort:(mach_port_t)port;
 
 @end
 
@@ -47,6 +60,8 @@ struct _FridaSpringboardApi
   NSString * (* SBSApplicationLaunchingErrorString) (UInt32 error);
 
   NSString * SBSApplicationLaunchOptionUnlockDeviceKey;
+
+  NSString * FBSOpenApplicationOptionKeyUnlockDevice;
 
   id FBSSystemService;
 };
