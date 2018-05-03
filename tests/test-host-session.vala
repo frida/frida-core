@@ -1492,7 +1492,7 @@ send(ranges);
 
 					var options = new SpawnOptions ();
 					if (url != null)
-						options.argv = { app_id, url };
+						options.aux.insert ("url", "s", url);
 
 					printerr ("device.spawn(\"%s\")\n", app_id);
 					var pid = yield device.spawn (app_id, options);

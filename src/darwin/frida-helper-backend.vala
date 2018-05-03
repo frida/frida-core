@@ -16,7 +16,7 @@ namespace Frida {
 			}
 		}
 
-		protected delegate void LaunchCompletionHandler (Error? error);
+		protected delegate void LaunchCompletionHandler (owned Error? error);
 
 		public void * context;
 
@@ -107,10 +107,11 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, HostSpawnOptions options) throws Error {
-			var aux_options = options.load_aux ();
+			if (!FileUtils.test (path, EXISTS))
+				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
 
 			StdioPipes? pipes;
-			var child_pid = _spawn (path, options, aux_options, out pipes);
+			var child_pid = _spawn (path, options, out pipes);
 
 			ChildWatch.add ((Pid) child_pid, on_child_dead);
 
@@ -151,33 +152,9 @@ namespace Frida {
 		}
 
 		public async void launch (string identifier, HostSpawnOptions options) throws Error {
-			var aux_options = options.load_aux ();
-
-			string? url = null;
-			var argv = options.argv;
-			if (argv.length == 2)
-				url = argv[1];
-			else if (argv.length > 2)
-				throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
-
-			if (options.has_envp)
-				throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning iOS apps");
-
-			if (options.cwd.length > 0)
-				throw new Error.NOT_SUPPORTED ("Overriding cwd is not supported when spawning iOS apps");
-
-			if (options.stdio != INHERIT)
-				throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning iOS apps");
-
-			string? aslr;
-			if (aux_options.lookup ("aslr", "s", out aslr) && aslr != "auto")
-				throw new Error.NOT_SUPPORTED ("Disabling ASLR is not supported when spawning iOS apps");
-
-			_kill_application (identifier);
-
 			Error pending_error = null;
 
-			_launch (identifier, url, options, aux_options, (error) => {
+			_launch (identifier, options, (error) => {
 				Idle.add (() => {
 					pending_error = error;
 					launch.callback ();
@@ -536,13 +513,13 @@ namespace Frida {
 		protected extern void _create_context ();
 		protected extern void _destroy_context ();
 
-		protected extern uint _spawn (string path, HostSpawnOptions options, VariantDict aux_options, out StdioPipes? pipes) throws Error;
-		protected static extern void _launch (string identifier, string? url, HostSpawnOptions options, VariantDict aux_options, LaunchCompletionHandler on_complete);
+		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
+		protected static extern void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
 		protected extern void _resume_process (uint task) throws Error;
 		protected extern void _resume_process_fast (uint task) throws Error;
-		protected extern void _kill_process (uint pid);
-		protected extern void _kill_application (string identifier);
+		protected static extern void _kill_process (uint pid);
+		protected static extern void _kill_application (string identifier);
 		protected extern void * _create_spawn_instance (uint pid);
 		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);

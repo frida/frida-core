@@ -536,10 +536,11 @@ _frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
 
 guint
 _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path,
-    FridaHostSpawnOptions * options, GVariantDict * aux_options, FridaStdioPipes ** pipes, GError ** error)
+    FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
 {
   pid_t pid;
-  FridaSpawnInstance * instance = NULL;
+  FridaSpawnInstance * instance;
+  GVariantDict * aux_options;
   posix_spawn_file_actions_t file_actions;
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
@@ -554,10 +555,9 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   char * old_cwd = NULL;
   int result, spawn_errno;
 
-  if (!g_file_test (path, G_FILE_TEST_EXISTS))
-    goto handle_path_error;
-
   instance = frida_spawn_instance_new (self);
+
+  aux_options = frida_host_spawn_options_load_aux (options);
 
   posix_spawn_file_actions_init (&file_actions);
 
@@ -652,15 +652,6 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   goto beach;
 
-handle_path_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
-        "Unable to find executable at '%s'",
-        path);
-    goto error_epilogue;
-  }
 handle_chdir_error:
   {
     posix_spawnattr_destroy (&attributes);
@@ -697,12 +688,9 @@ handle_spawn_error:
   }
 error_epilogue:
   {
-    if (instance != NULL)
-    {
-      if (instance->pid != 0)
-        kill (instance->pid, SIGKILL);
-      frida_spawn_instance_free (instance);
-    }
+    if (instance->pid != 0)
+      kill (instance->pid, SIGKILL);
+    frida_spawn_instance_free (instance);
 
     pid = 0;
 
@@ -713,6 +701,7 @@ beach:
     free (old_cwd);
     g_strfreev (default_envp);
     g_free (aslr);
+    g_variant_dict_unref (aux_options);
 
     return pid;
   }
@@ -722,45 +711,90 @@ beach:
 
 #import "springboard.h"
 
+static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url,
+    FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 static void frida_kill_application (NSString * identifier);
 
 void
-_frida_darwin_helper_backend_launch (const gchar * identifier, const gchar * url, FridaHostSpawnOptions * options,
-    GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+_frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
+  GVariantDict * aux_options;
   FridaSpringboardApi * api;
   NSAutoreleasePool * pool;
   NSString * identifier_value;
-  NSURL * url_value;
-  NSDictionary * params, * options;
+  gchar * url = NULL;
+  NSURL * url_value = nil;
+
+  aux_options = frida_host_spawn_options_load_aux (options);
 
   api = _frida_get_springboard_api ();
 
   pool = [[NSAutoreleasePool alloc] init];
 
   identifier_value = [NSString stringWithUTF8String:identifier];
-  url_value = (url != NULL) ? [NSURL URLWithString:[NSString stringWithUTF8String:url]] : nil;
+
+  if (g_variant_dict_lookup (aux_options, "url", "s", &url))
+    url_value = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
+
+  frida_darwin_helper_backend_launch_using_sbs (identifier_value, url_value, options, aux_options, on_complete, on_complete_target);
+
+  [pool release];
+
+  g_free (url);
+
+  g_variant_dict_unref (aux_options);
+}
+static void
+frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
+    GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+{
+  GError * error = NULL;
+  gchar * aslr = NULL;
+  FridaSpringboardApi * api;
+  NSDictionary * params, * launch_options;
+
+  if (frida_host_spawn_options_get_has_argv (spawn_options))
+    goto handle_argv_error;
+
+  if (frida_host_spawn_options_get_has_envp (spawn_options))
+    goto handle_envp_error;
+
+  if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
+    goto handle_cwd_error;
+
+  if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
+    goto handle_stdio_error;
+
+  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "auto") != 0)
+    goto handle_aslr_error;
+
+  api = _frida_get_springboard_api ();
+
   params = [NSDictionary dictionary];
-  options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
+  launch_options = [NSDictionary dictionaryWithObject:@YES forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     UInt32 res;
     GError * error = NULL;
 
-    if (url_value != nil)
+    frida_kill_application (identifier);
+
+    if (url != nil)
     {
       res = api->SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions (
-          identifier_value,
-          url_value,
+          identifier,
+          url,
           params,
-          options,
+          launch_options,
           NO);
     }
     else
     {
       res = api->SBSLaunchApplicationWithIdentifierAndLaunchOptions (
-          identifier_value,
-          options,
+          identifier,
+          launch_options,
           NO);
     }
 
@@ -774,15 +808,63 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, const gchar * url
     }
 
     on_complete (error, on_complete_target);
-
-    g_clear_error (&error);
   });
 
-  [pool release];
+  goto beach;
+
+handle_argv_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding argv is not supported when spawning iOS apps on this version of iOS");
+    goto error_epilogue;
+  }
+handle_envp_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding envp is not supported when spawning iOS apps on this version of iOS");
+    goto error_epilogue;
+  }
+handle_cwd_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding cwd is not supported when spawning iOS apps on this version of iOS");
+    goto error_epilogue;
+  }
+handle_stdio_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Redirecting stdio is not supported when spawning iOS apps on this version of iOS");
+    goto error_epilogue;
+  }
+handle_aslr_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Disabling ASLR is not supported when spawning iOS apps on this version of iOS");
+    goto error_epilogue;
+  }
+error_epilogue:
+  {
+    on_complete (error, on_complete_target);
+    goto beach;
+  }
+beach:
+  {
+    g_free (aslr);
+  }
 }
 
 void
-_frida_darwin_helper_backend_kill_process (FridaDarwinHelperBackend * self, guint pid)
+_frida_darwin_helper_backend_kill_process (guint pid)
 {
   NSAutoreleasePool * pool;
   NSString * identifier;
@@ -805,7 +887,7 @@ _frida_darwin_helper_backend_kill_process (FridaDarwinHelperBackend * self, guin
 }
 
 void
-_frida_darwin_helper_backend_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
+_frida_darwin_helper_backend_kill_application (const gchar * identifier)
 {
   NSAutoreleasePool * pool;
 
@@ -906,25 +988,23 @@ _frida_darwin_helper_backend_launch (FridaDarwinHelperBackend * self, const gcha
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     GError * error;
 
-    error = g_error_new (
+    error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Not yet able to launch apps on Mac");
 
     on_complete (error, on_complete_target);
-
-    g_error_free (error);
   });
 }
 
 void
-_frida_darwin_helper_backend_kill_process (FridaDarwinHelperBackend * self, guint pid)
+_frida_darwin_helper_backend_kill_process (guint pid)
 {
   kill (pid, SIGKILL);
 }
 
 void
-_frida_darwin_helper_backend_kill_application (FridaDarwinHelperBackend * self, const gchar * identifier)
+_frida_darwin_helper_backend_kill_application (const gchar * identifier)
 {
 }
 
