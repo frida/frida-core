@@ -596,7 +596,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
       g_assert_not_reached ();
   }
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disabled") == 0)
+  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
   {
     flags |= _POSIX_SPAWN_DISABLE_ASLR;
   }
@@ -801,8 +801,11 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
     goto handle_stdio_error;
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "auto") != 0)
-    goto handle_aslr_error;
+  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
+  {
+    [debug_options setObject:@YES
+                      forKey:api->FBSDebugOptionKeyDisableASLR];
+  }
 
   service = [api->FBSSystemService sharedService];
 
@@ -873,14 +876,6 @@ handle_stdio_error:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Redirecting stdio is not yet supported when spawning iOS apps");
-    goto error_epilogue;
-  }
-handle_aslr_error:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Disabling ASLR is not yet supported when spawning iOS apps");
     goto error_epilogue;
   }
 error_epilogue:
