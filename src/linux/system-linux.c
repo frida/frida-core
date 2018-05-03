@@ -158,10 +158,11 @@ gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
 #ifdef HAVE_ANDROID
-  return g_strdup ("/data/local/tmp");
-#else
-  return g_strdup (g_get_tmp_dir ());
+  if (getuid () == 0)
+    return g_strdup ("/data/local/tmp");
 #endif
+
+  return g_strdup (g_get_tmp_dir ());
 }
 
 static gchar *
