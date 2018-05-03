@@ -720,7 +720,8 @@ static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier,
 
 static void frida_kill_application (NSString * identifier);
 
-static NSDictionary * frida_envp_to_dictionary (gchar * const * envp, gint envp_length);
+static NSArray * frida_argv_to_arguments_array (gchar * const * strv, gint strv_length);
+static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
 
 void
 _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
@@ -782,7 +783,15 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
                    forKey:api->FBSOpenApplicationOptionKeyDebuggingOptions];
 
   if (frida_host_spawn_options_get_has_argv (spawn_options))
-    goto handle_argv_error;
+  {
+    gchar ** argv;
+    gint argv_length;
+
+    argv = frida_host_spawn_options_get_argv (spawn_options, &argv_length);
+
+    [debug_options setObject:frida_argv_to_arguments_array (argv, argv_length)
+                      forKey:api->FBSDebugOptionKeyArguments];
+  }
 
   if (frida_host_spawn_options_get_has_envp (spawn_options))
   {
@@ -791,7 +800,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
     envp = frida_host_spawn_options_get_envp (spawn_options, &envp_length);
 
-    [debug_options setObject:frida_envp_to_dictionary (envp, envp_length)
+    [debug_options setObject:frida_envp_to_environment_dictionary (envp, envp_length)
                       forKey:api->FBSDebugOptionKeyEnvironment];
   }
 
@@ -854,14 +863,6 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
   goto beach;
 
-handle_argv_error:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding argv is not yet supported when spawning iOS apps");
-    goto error_epilogue;
-  }
 handle_cwd_error:
   {
     error = g_error_new_literal (
@@ -1124,8 +1125,21 @@ frida_kill_application (NSString * identifier)
   }
 }
 
+static NSArray *
+frida_argv_to_arguments_array (gchar * const * strv, gint strv_length)
+{
+  NSMutableArray * result;
+  gint i;
+
+  result = [NSMutableArray arrayWithCapacity:strv_length];
+  for (i = 1; i < strv_length; i++)
+    [result addObject:[NSString stringWithUTF8String:strv[i]]];
+
+  return result;
+}
+
 static NSDictionary *
-frida_envp_to_dictionary (gchar * const * envp, gint envp_length)
+frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length)
 {
   NSMutableDictionary * result;
   gint i;
