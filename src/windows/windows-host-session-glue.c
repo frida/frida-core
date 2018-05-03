@@ -10,6 +10,7 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
+#include <string.h>
 #include <unknwn.h>
 
 #define PARSE_STRING_MAX_LENGTH   (40 + 1)
@@ -123,7 +124,7 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
   }
 
   cwd = frida_host_spawn_options_get_cwd (options);
-  if (*cwd != '\0')
+  if (strlen (cwd) > 0)
     current_directory = (WCHAR *) g_utf8_to_utf16 (cwd, -1, NULL, NULL, NULL);
   else
     current_directory = NULL;

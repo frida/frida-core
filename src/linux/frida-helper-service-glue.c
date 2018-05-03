@@ -27,6 +27,7 @@
 # include <sys/system_properties.h>
 #endif
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #ifdef HAVE_ARM
@@ -335,7 +336,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
     goto handle_path_error;
 
   cwd = frida_host_spawn_options_get_cwd (options);
-  if (*cwd != '\0')
+  if (strlen (cwd) > 0)
   {
     if (!g_file_test (cwd, G_FILE_TEST_IS_DIR))
       goto handle_cwd_error;

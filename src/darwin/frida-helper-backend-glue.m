@@ -619,7 +619,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   }
 
   cwd = frida_host_spawn_options_get_cwd (options);
-  if (*cwd != '\0')
+  if (strlen (cwd) > 0)
   {
     old_cwd = getcwd (NULL, 0);
     if (chdir (cwd) != 0)
