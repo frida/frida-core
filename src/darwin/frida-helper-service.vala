@@ -154,8 +154,8 @@ namespace Frida {
 			return yield backend.spawn (path, options);
 		}
 
-		public async void launch (string identifier, string url) throws Error {
-			yield backend.launch (identifier, (url != "") ? url : null);
+		public async void launch (string identifier, HostSpawnOptions options) throws Error {
+			yield backend.launch (identifier, options);
 		}
 
 		public async void input (uint pid, uint8[] data) throws Error {

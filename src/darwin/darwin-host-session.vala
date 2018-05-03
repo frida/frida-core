@@ -219,30 +219,8 @@ namespace Frida {
 
 		public override async uint spawn (string path, HostSpawnOptions options) throws Error {
 #if IOS
-			if (!path.has_prefix ("/")) {
-				string identifier = path;
-
-				string? url = null;
-				var argv = options.argv;
-				if (argv.length == 2)
-					url = argv[1];
-				else if (argv.length > 2)
-					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected identifier and optionally a URL to open");
-
-				if (options.has_envp)
-					throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning iOS apps");
-
-				if (options.cwd.length > 0)
-					throw new Error.NOT_SUPPORTED ("Overriding cwd is not supported when spawning iOS apps");
-
-				if (options.stdio != INHERIT)
-					throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning iOS apps");
-
-				if (options.aslr != AUTO)
-					throw new Error.NOT_SUPPORTED ("Disabling ASLR is not supported when spawning iOS apps");
-
-				return yield get_fruit_launcher ().spawn (identifier, url);
-			}
+			if (!path.has_prefix ("/"))
+				return yield get_fruit_launcher ().spawn (path, options);
 #endif
 
 			return yield helper.spawn (path, options);
@@ -406,7 +384,7 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string identifier, string? url) throws Error {
+		public async uint spawn (string identifier, HostSpawnOptions options) throws Error {
 			if (spawn_requests.has_key (identifier))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified identifier");
 
@@ -416,8 +394,7 @@ namespace Frida {
 			yield launchd_agent.prepare_for_launch (identifier);
 
 			try {
-				yield helper.kill_application (identifier);
-				yield helper.launch (identifier, url);
+				yield helper.launch (identifier, options);
 			} catch (Error e) {
 				launchd_agent.cancel_launch.begin (identifier);
 				if (!spawn_requests.unset (identifier)) {
