@@ -270,8 +270,8 @@ namespace Frida {
 				uninjected (id);
 			}
 
-			private static extern bool is_process_still_running (void * handle);
-			private static extern void close_process_handle (void * handle);
+			private extern static bool is_process_still_running (void * handle);
+			private extern static void close_process_handle (void * handle);
 		}
 
 		protected enum PrivilegeLevel {
@@ -405,11 +405,11 @@ namespace Frida {
 				}
 			}
 
-			private static extern void * spawn (string path, string parameters, PrivilegeLevel level) throws Error;
+			private extern static void * spawn (string path, string parameters, PrivilegeLevel level) throws Error;
 		}
 
 		public class ResourceStore {
-			private static extern void set_acls_as_needed (string path) throws Error;
+			private extern static void set_acls_as_needed (string path) throws Error;
 
 			public TemporaryDirectory tempdir {
 				get;

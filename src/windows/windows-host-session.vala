@@ -75,7 +75,7 @@ namespace Frida {
 			agent_session_closed (id, reason);
 		}
 
-		public static extern ImageData? _try_extract_icon ();
+		public extern static ImageData? _try_extract_icon ();
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
@@ -264,7 +264,7 @@ namespace Frida {
 		}
 
 		public extern ChildProcess _do_spawn (string path, HostSpawnOptions options) throws Error;
-		public static extern bool _process_is_alive (uint pid);
+		public extern static bool _process_is_alive (uint pid);
 	}
 
 	public class ChildProcess : Object {

@@ -1,9 +1,9 @@
 namespace Frida {
 	namespace System {
-		public static extern Frida.HostApplicationInfo get_frontmost_application () throws Error;
-		public static extern Frida.HostApplicationInfo[] enumerate_applications ();
-		public static extern Frida.HostProcessInfo[] enumerate_processes ();
-		public static extern void kill (uint pid);
+		public extern static Frida.HostApplicationInfo get_frontmost_application () throws Error;
+		public extern static Frida.HostApplicationInfo[] enumerate_applications ();
+		public extern static Frida.HostProcessInfo[] enumerate_processes ();
+		public extern static void kill (uint pid);
 	}
 
 	public class ApplicationEnumerator {
@@ -197,7 +197,7 @@ namespace Frida {
 			return builder.str;
 		}
 
-		private static extern string get_system_tmp ();
+		private extern static string get_system_tmp ();
 	}
 
 	public class TemporaryFile {

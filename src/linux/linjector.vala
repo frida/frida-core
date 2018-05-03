@@ -207,6 +207,6 @@ namespace Frida {
 			}
 		}
 
-		public static extern InputStream _clone_so (InputStream dylib);
+		public extern static InputStream _clone_so (InputStream dylib);
 	}
 }

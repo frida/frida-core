@@ -1385,11 +1385,11 @@ namespace Frida.Agent {
 			CREATE_UNICODE_ENVIRONMENT	= 0x00000400,
 		}
 
-		public static extern uint32 _get_current_process_id ();
-		public static extern uint32 _resume_thread (void * thread);
-		public static extern string[] _get_environment ();
-		public static extern string[] _parse_unicode_environment (void * env);
-		public static extern string[] _parse_ansi_environment (void * env);
+		public extern static uint32 _get_current_process_id ();
+		public extern static uint32 _resume_thread (void * thread);
+		public extern static string[] _get_environment ();
+		public extern static string[] _parse_unicode_environment (void * env);
+		public extern static string[] _parse_ansi_environment (void * env);
 #elif DARWIN
 		private void on_enter (Gum.InvocationContext context) {
 			var caller_is_internal = (bool) posix_spawn_caller_is_internal.get ();

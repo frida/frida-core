@@ -277,7 +277,7 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		public static extern void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon) throws Error;
+		public extern static void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon) throws Error;
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);

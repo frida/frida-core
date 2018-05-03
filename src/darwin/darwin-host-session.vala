@@ -76,7 +76,7 @@ namespace Frida {
 			agent_session_closed (id, reason);
 		}
 
-		public static extern ImageData? _try_extract_icon ();
+		public extern static ImageData? _try_extract_icon ();
 	}
 
 	public class DarwinHostSession : BaseDBusHostSession {

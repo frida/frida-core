@@ -23,10 +23,10 @@ namespace Frida {
 			_destroy_backend (_backend);
 		}
 
-		public static extern void set_temp_directory (string path);
+		public extern static void set_temp_directory (string path);
 
-		public static extern void * _create_backend (out string local_address, out string remote_address) throws IOError;
-		public static extern void _destroy_backend (void * backend);
+		public extern static void * _create_backend (out string local_address, out string remote_address) throws IOError;
+		public extern static void _destroy_backend (void * backend);
 	}
 
 	namespace Pipe {
@@ -109,12 +109,12 @@ namespace Frida {
 			return _close_backend (backend);
 		}
 
-		protected static extern void * _create_backend (string address) throws IOError;
-		protected static extern void _destroy_backend (void * backend);
-		protected static extern bool _close_backend (void * backend) throws IOError;
+		protected extern static void * _create_backend (string address) throws IOError;
+		protected extern static void _destroy_backend (void * backend);
+		protected extern static bool _close_backend (void * backend) throws IOError;
 
-		protected static extern InputStream _make_input_stream (void * backend);
-		protected static extern OutputStream _make_output_stream (void * backend);
+		protected extern static InputStream _make_input_stream (void * backend);
+		protected extern static OutputStream _make_output_stream (void * backend);
 	}
 #elif DARWIN
 	namespace DarwinPipe {

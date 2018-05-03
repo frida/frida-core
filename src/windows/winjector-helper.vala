@@ -205,8 +205,8 @@ namespace Winjector {
 			}
 		}
 
-		private static extern void * start_services (string service_basename, PrivilegeLevel level);
-		private static extern void stop_services (void * context);
+		private extern static void * start_services (string service_basename, PrivilegeLevel level);
+		private extern static void stop_services (void * context);
 	}
 
 	public abstract class Service : Object, WinjectorHelper {
@@ -301,10 +301,10 @@ namespace Winjector {
 				shutdown ();
 		}
 
-		public static extern string derive_basename ();
-		public static extern string derive_filename_for_suffix (string suffix);
-		public static extern string derive_svcname_for_self ();
-		public static extern string derive_svcname_for_suffix (string suffix);
+		public extern static string derive_basename ();
+		public extern static string derive_filename_for_suffix (string suffix);
+		public extern static string derive_svcname_for_self ();
+		public extern static string derive_svcname_for_suffix (string suffix);
 	}
 
 	public class StandaloneService : Service {
@@ -331,17 +331,17 @@ namespace Winjector {
 		public override void shutdown () {
 		}
 
-		private static extern void enter_dispatcher_and_main_loop ();
+		private extern static void enter_dispatcher_and_main_loop ();
 	}
 
 	namespace System {
-		public static extern bool is_x64 ();
+		public extern static bool is_x64 ();
 	}
 
 	namespace Process {
-		public static extern bool is_x64 (uint32 pid);
-		public static extern void inject_library_file (uint32 pid, string path, string entrypoint, string data, out void * inject_instance, out void * waitable_thread_handle) throws Frida.Error;
-		public static extern void free_inject_instance (void * inject_instance, out bool is_resident);
+		public extern static bool is_x64 (uint32 pid);
+		public extern static void inject_library_file (uint32 pid, string path, string entrypoint, string data, out void * inject_instance, out void * waitable_thread_handle) throws Frida.Error;
+		public extern static void free_inject_instance (void * inject_instance, out bool is_resident);
 	}
 
 	namespace WaitHandleSource {

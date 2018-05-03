@@ -502,24 +502,24 @@ namespace Frida {
 			spawn_removed (info);
 		}
 
-		public static extern PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
+		public extern static PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
 
-		public static extern uint task_for_pid_fallback (uint pid) throws Error;
-		public static extern void deallocate_port (uint port);
+		public extern static uint task_for_pid_fallback (uint pid) throws Error;
+		public extern static void deallocate_port (uint port);
 
-		public static extern bool is_mmap_available ();
-		public static extern MappedLibraryBlob mmap (uint task, Bytes blob) throws Error;
+		public extern static bool is_mmap_available ();
+		public extern static MappedLibraryBlob mmap (uint task, Bytes blob) throws Error;
 
 		protected extern void _create_context ();
 		protected extern void _destroy_context ();
 
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
-		protected static extern void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
+		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
 		protected extern void _resume_process (uint task) throws Error;
 		protected extern void _resume_process_fast (uint task) throws Error;
-		protected static extern void _kill_process (uint pid);
-		protected static extern void _kill_application (string identifier);
+		protected extern static void _kill_process (uint pid);
+		protected extern static void _kill_application (string identifier);
 		protected extern void * _create_spawn_instance (uint pid);
 		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
@@ -656,7 +656,7 @@ namespace Frida {
 		}
 
 		[CCode (cheader_filename = "sys/ioctl.h", cname = "ioctl", sentinel = "")]
-		private static extern int ioctl (int fildes, ulong request, ...);
+		private extern static int ioctl (int fildes, ulong request, ...);
 	}
 
 	public class StdioPipes : Object {
