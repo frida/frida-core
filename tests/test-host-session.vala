@@ -1480,53 +1480,53 @@ send(ranges);
 
 				h.disable_timeout (); /* this is a manual test after all */
 
-				var backend = new DarwinHostSessionBackend ();
-				h.service.add_backend (backend);
-				yield h.service.start ();
-				yield h.process_events ();
-				var prov = h.first_provider ();
+				var device_manager = new DeviceManager ();
 
 				try {
-					var host_session = yield prov.create ();
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
-					var pid = yield host_session.spawn ("com.atebits.Tweetie2", HostSpawnOptions ());
-
-					var id = yield host_session.attach_to (pid);
-					var session = yield prov.obtain_agent_session (host_session, id);
-
-					bool waiting = false;
+					var app_id = "com.apple.mobilesafari";
+					var url = "https://www.frida.re/docs/ios/";
 					string received_message = null;
-					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+					bool waiting = false;
+
+					var options = new SpawnOptions ();
+					if (url != null)
+						options.argv = { app_id, url };
+
+					printerr ("device.spawn(\"%s\")\n", app_id);
+					var pid = yield device.spawn (app_id, options);
+
+					printerr ("device.attach(%u)\n", pid);
+					var session = yield device.attach (pid);
+
+					printerr ("session.create_script()\n");
+					var script = yield session.create_script ("test", """'use strict';
+Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), function () {
+  send('UIApplicationMain');
+});
+""");
+					script.message.connect ((message, data) => {
 						received_message = message;
 						if (waiting)
 							spawn_ios_app.callback ();
 					});
 
-					var script_id = yield session.create_script ("spawn-ios-app",
-						"Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), function () {" +
-						"  send('UIApplicationMain');" +
-						"});" +
-						"setTimeout(function () { send('ready'); }, 1);");
+					printerr ("script.load()\n");
+					yield script.load ();
 
-					yield session.load_script (script_id);
-					if (received_message == null) {
+					printerr ("device.resume(%u)\n", pid);
+					yield device.resume (pid);
+
+					printerr ("await_message()\n");
+					while (received_message == null) {
 						waiting = true;
 						yield;
 						waiting = false;
 					}
-					assert (received_message == "{\"type\":\"send\",\"payload\":\"ready\"}");
-					received_message = null;
-
-					yield host_session.resume (pid);
-					if (received_message == null) {
-						waiting = true;
-						yield;
-						waiting = false;
-					}
-
-					session.disconnect (message_handler);
-
+					printerr ("received_message: %s\n", received_message);
 					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
+					received_message = null;
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 				}
@@ -1548,8 +1548,7 @@ send(ranges);
 				while (!done)
 					yield h.process_events ();
 
-				yield h.service.stop ();
-				h.service.remove_backend (backend);
+				yield device_manager.close ();
 
 				h.done ();
 			}
