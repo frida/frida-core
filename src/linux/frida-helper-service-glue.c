@@ -462,6 +462,7 @@ handle_aslr_error:
   }
 handle_os_error:
   {
+    (void) failed_operation;
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
