@@ -200,12 +200,10 @@ namespace Frida {
 
 				var aux_options = options.load_aux ();
 
-				string? class_name = null;
-				if (aux_options.lookup ("class", "s", out class_name) && class_name[0] == '.') {
-					class_name = package_name + class_name;
+				string? activity_name = null;
+				if (aux_options.lookup ("activity", "s", out activity_name) && activity_name[0] == '.') {
+					activity_name = package_name + activity_name;
 				}
-
-				printerr ("package_name='%s' class_name='%s'\n", package_name, class_name);
 
 				if (options.has_argv)
 					throw new Error.NOT_SUPPORTED ("Overriding argv is not supported when spawning Android apps");
@@ -222,7 +220,7 @@ namespace Frida {
 				if (options.stdio != INHERIT)
 					throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning Android apps");
 
-				return yield get_robo_launcher ().spawn (package_name, class_name);
+				return yield get_robo_launcher ().spawn (package_name, activity_name);
 			} else {
 				return yield helper.spawn (program, options);
 			}
@@ -417,7 +415,7 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string package_name, string? class_name) throws Error {
+		public async uint spawn (string package_name, string? activity_name) throws Error {
 			yield ensure_loaded ();
 
 			if (spawn_requests.has_key (package_name))
@@ -428,7 +426,7 @@ namespace Frida {
 
 			try {
 				yield system_ui_agent.stop_activity (package_name);
-				yield system_ui_agent.start_activity (package_name, class_name);
+				yield system_ui_agent.start_activity (package_name, activity_name);
 			} catch (Error e) {
 				spawn_requests.unset (package_name);
 				throw e;
@@ -610,16 +608,16 @@ namespace Frida {
 			}
 		}
 
-		public async void start_activity (string package_name, string? class_name) throws Error {
+		public async void start_activity (string package_name, string? activity_name) throws Error {
 			var package_name_value = new Json.Node.alloc ().init_string (package_name);
 
-			var class_name_value = new Json.Node.alloc ();
-			if (class_name != null)
-				class_name_value.init_string (class_name);
+			var activity_name_value = new Json.Node.alloc ();
+			if (activity_name != null)
+				activity_name_value.init_string (activity_name);
 			else
-				class_name_value.init_null ();
+				activity_name_value.init_null ();
 
-			yield call ("startActivity", new Json.Node[] { package_name_value, class_name_value });
+			yield call ("startActivity", new Json.Node[] { package_name_value, activity_name_value });
 		}
 
 		public async void stop_activity (string package_name) throws Error {

@@ -35,14 +35,14 @@ rpc.exports = {
       return result;
     });
   },
-  startActivity: function (packageName, className) {
+  startActivity: function (packageName, activityName) {
     return performOnJavaVM(function () {
       var launchIntent = packageManager.getLaunchIntentForPackage(packageName);
       if (launchIntent === null)
         throw new Error("Unable to find application with identifier '" + packageName + "'");
 
-      if (className !== null)
-        launchIntent.setClassName(packageName, className);
+      if (activityName !== null)
+        launchIntent.setClassName(packageName, activityName);
 
       context.startActivity(launchIntent);
     });

@@ -978,13 +978,13 @@ namespace Frida.HostSessionTest {
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 					string package_name = "com.android.settings";
-					string? class_name = ".SecuritySettings";
+					string? activity_name = ".SecuritySettings";
 					string received_message = null;
 					bool waiting = false;
 
 					var options = new SpawnOptions ();
-					if (class_name != null)
-						options.aux.insert ("class", "s", class_name);
+					if (activity_name != null)
+						options.aux.insert ("activity", "s", activity_name);
 
 					printerr ("device.spawn(\"%s\")\n", package_name);
 					var pid = yield device.spawn (package_name, options);
