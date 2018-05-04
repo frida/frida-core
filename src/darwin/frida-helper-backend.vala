@@ -164,6 +164,8 @@ namespace Frida {
 
 			var pipes = pending.pipes;
 			if (pipes != null) {
+				pipes.clear_retained ();
+
 				process_next_output_from.begin (new UnixInputStream (pipes.output, false), pid, 1, pipes);
 				process_next_output_from.begin (new UnixInputStream (pipes.error, false), pid, 2, pipes);
 			}
@@ -752,6 +754,8 @@ namespace Frida {
 			construct;
 		}
 
+		private int[] retained = {};
+
 		public StdioPipes (int input, int output, int error) {
 			Object (input: input, output: output, error: error);
 		}
@@ -768,10 +772,22 @@ namespace Frida {
 		}
 
 		~StdioPipes () {
+			clear_retained ();
+
 			if (input != -1)
 				Posix.close (input);
 			Posix.close (output);
 			Posix.close (error);
+		}
+
+		public void clear_retained () {
+			foreach (var fd in retained)
+				Posix.close (fd);
+			retained = {};
+		}
+
+		public void retain (int fd) {
+			retained += fd;
 		}
 	}
 }

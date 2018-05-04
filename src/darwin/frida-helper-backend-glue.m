@@ -826,8 +826,8 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
     frida_configure_terminal_attributes (stdout_master);
     frida_configure_terminal_attributes (stderr_master);
 
-    close (stdout_slave);
-    close (stderr_slave);
+    frida_stdio_pipes_retain (pipes, stdout_slave);
+    frida_stdio_pipes_retain (pipes, stderr_slave);
 
     chmod (stdout_name, 0666);
     chmod (stderr_name, 0666);
