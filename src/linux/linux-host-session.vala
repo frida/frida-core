@@ -196,21 +196,19 @@ namespace Frida {
 		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
 #if ANDROID
 			if (!program.has_prefix ("/")) {
-				string intent = program;
+				string package_name = program;
 
-				if (options.argv.length > 1)
-					throw new Error.INVALID_ARGUMENT ("Too many arguments: expected intent only");
-
-				var tokens = intent.split ("/");
-
-				string package_name = tokens[0];
+				var aux_options = options.load_aux ();
 
 				string? class_name = null;
-				if (tokens.length >= 2) {
-					class_name = tokens[1];
-					if (class_name[0] == '.')
-						class_name = package_name + class_name;
+				if (aux_options.lookup ("class", "s", out class_name) && class_name[0] == '.') {
+					class_name = package_name + class_name;
 				}
+
+				printerr ("package_name='%s' class_name='%s'\n", package_name, class_name);
+
+				if (options.has_argv)
+					throw new Error.NOT_SUPPORTED ("Overriding argv is not supported when spawning Android apps");
 
 				if (options.has_envp)
 					throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning Android apps");

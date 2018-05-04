@@ -977,12 +977,17 @@ namespace Frida.HostSessionTest {
 					var device_manager = new DeviceManager ();
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
-					var package_name = "com.android.calculator2";
+					string package_name = "com.android.settings";
+					string? class_name = ".SecuritySettings";
 					string received_message = null;
 					bool waiting = false;
 
+					var options = new SpawnOptions ();
+					if (class_name != null)
+						options.aux.insert ("class", "s", class_name);
+
 					printerr ("device.spawn(\"%s\")\n", package_name);
-					var pid = yield device.spawn (package_name);
+					var pid = yield device.spawn (package_name, options);
 
 					printerr ("device.attach(%u)\n", pid);
 					var session = yield device.attach (pid);
