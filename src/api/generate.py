@@ -120,6 +120,7 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
     internal_type_prefixes = [
         "Fruity",
         "HostSession",
+        "SpawnStartState",
         "MessageType",
         "ResultCode",
         "Winjector"
@@ -173,7 +174,7 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
                         if method_name == 'new':
                             if not object_type.name.endswith("List") and (method_cprototype.endswith("(void);") or method_cprototype.startswith("FridaFileMonitor")):
                                 object_type.c_constructor = method_cprototype
-                        elif method_name.startswith('get_') and ', ' not in method_cprototype:
+                        elif method_name.startswith('get_') and not any(arg in method_cprototype for arg in ['GAsyncReadyCallback', 'GError ** error']):
                             object_type.property_names.append(method_name[4:])
                             object_type.c_getter_prototypes.append(method_cprototype)
                         else:
