@@ -1497,7 +1497,7 @@ send(ranges);
 						buf[len] = '\0';
 						string message = (string) buf;
 
-						printerr ("[pid=%u fd=%d OUTPUT] '%s'", pid, fd, message);
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
 					});
 
 					/*
