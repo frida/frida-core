@@ -1484,15 +1484,40 @@ send(ranges);
 
 				try {
 					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
 
-					var app_id = "com.apple.mobilesafari";
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] '%s'", pid, fd, message);
+					});
+
+					/*
+					string app_id = "com.apple.mobilesafari";
 					string? url = "https://www.frida.re/docs/ios/";
+					*/
+
+					string app_id = "com.atebits.Tweetie2";
+					string? url = null;
+
 					string received_message = null;
 					bool waiting = false;
 
 					var options = new SpawnOptions ();
+					// options.argv = { app_id, "hey", "you" };
+					options.envp = { "OS_ACTIVITY_DT_MODE=YES", "NSUnbufferedIO=YES" };
+					options.stdio = PIPE;
 					if (url != null)
 						options.aux.insert ("url", "s", url);
+					// options.aux.insert ("aslr", "s", "disable");
 
 					printerr ("device.spawn(\"%s\")\n", app_id);
 					var pid = yield device.spawn (app_id, options);
