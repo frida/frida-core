@@ -217,13 +217,13 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string path, HostSpawnOptions options) throws Error {
+		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
 #if IOS
-			if (!path.has_prefix ("/"))
-				return yield get_fruit_launcher ().spawn (path, options);
+			if (!program.has_prefix ("/"))
+				return yield get_fruit_launcher ().spawn (program, options);
 #endif
 
-			return yield helper.spawn (path, options);
+			return yield helper.spawn (program, options);
 		}
 
 		protected override async void await_exec_transition (uint pid) throws Error {

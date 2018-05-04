@@ -206,7 +206,7 @@ namespace Frida {
 			return result;
 		}
 
-		public abstract async uint spawn (string path, HostSpawnOptions options) throws Error;
+		public abstract async uint spawn (string program, HostSpawnOptions options) throws Error;
 
 		protected virtual bool try_handle_child (HostChildInfo info) {
 			return false;

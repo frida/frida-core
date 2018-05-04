@@ -822,7 +822,7 @@ namespace Frida {
 			);
 		}
 
-		public async uint spawn (string path, SpawnOptions? options = null) throws Error {
+		public async uint spawn (string program, SpawnOptions? options = null) throws Error {
 			check_open ();
 
 			var raw_options = HostSpawnOptions ();
@@ -851,7 +851,7 @@ namespace Frida {
 			uint pid;
 			try {
 				yield ensure_host_session ();
-				pid = yield host_session.spawn (path, raw_options);
+				pid = yield host_session.spawn (program, raw_options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -859,19 +859,19 @@ namespace Frida {
 			return pid;
 		}
 
-		public uint spawn_sync (string path, SpawnOptions? options = null) throws Error {
+		public uint spawn_sync (string program, SpawnOptions? options = null) throws Error {
 			var task = create<SpawnTask> () as SpawnTask;
-			task.path = path;
+			task.program = program;
 			task.options = options;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class SpawnTask : DeviceTask<uint> {
-			public string path;
+			public string program;
 			public SpawnOptions? options;
 
 			protected override async uint perform_operation () throws Error {
-				return yield parent.spawn (path, options);
+				return yield parent.spawn (program, options);
 			}
 		}
 
