@@ -231,6 +231,16 @@ namespace Frida {
 			set;
 		}
 
+		public bool has_env {
+			get;
+			set;
+		}
+
+		public string[] env {
+			get;
+			set;
+		}
+
 		public string cwd {
 			get;
 			set;
@@ -249,6 +259,7 @@ namespace Frida {
 		public HostSpawnOptions () {
 			this.argv = {};
 			this.envp = {};
+			this.env = {};
 			this.cwd = "";
 			this.stdio = INHERIT;
 			this.aux = {};
@@ -256,6 +267,50 @@ namespace Frida {
 
 		public VariantDict load_aux () {
 			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (aux), false));
+		}
+
+		public string[] compute_argv (string path) {
+			return has_argv ? argv : new string[] { path };
+		}
+
+		public string[] compute_envp () {
+			var base_env = has_envp ? envp : Environ.get ();
+			if (!has_env)
+				return base_env;
+
+			var names = new Gee.ArrayList<string> ();
+			var values = new Gee.HashMap<string, string> ();
+			parse_envp (base_env, names, values);
+
+			var overridden_names = new Gee.ArrayList<string> ();
+			var overridden_values = new Gee.HashMap<string, string> ();
+			parse_envp (env, overridden_names, overridden_values);
+
+			foreach (var name in overridden_names) {
+				if (!values.has_key (name))
+					names.add (name);
+				values[name] = overridden_values[name];
+			}
+
+			var result = new string[names.size];
+			var i = 0;
+			foreach (var name in names) {
+				result[i] = name.concat ("=", values[name]);
+				i++;
+			}
+			return result;
+		}
+
+		private static void parse_envp (string[] envp, Gee.ArrayList<string> names, Gee.HashMap<string, string> values) {
+			foreach (var pair in envp) {
+				var tokens = pair.split ("=", 2);
+				if (tokens.length == 1)
+					continue;
+				var name = tokens[0];
+				var val = tokens[1];
+				names.add (name);
+				values[name] = val;
+			}
 		}
 	}
 

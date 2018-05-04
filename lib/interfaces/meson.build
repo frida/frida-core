@@ -9,7 +9,7 @@ endif
 
 interfaces = static_library('frida-interfaces', interfaces_sources,
   vala_header: 'frida-interfaces.h',
-  dependencies: [glib_dep, gobject_dep, gio_dep, gum_dep] + extra_deps,
+  dependencies: [glib_dep, gobject_dep, gio_dep, gee_dep, gum_dep] + extra_deps,
 )
 
 interfaces_dep = declare_dependency(

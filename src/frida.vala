@@ -839,6 +839,12 @@ namespace Frida {
 					raw_options.envp = envp;
 				}
 
+				var env = options.env;
+				if (env != null) {
+					raw_options.has_env = true;
+					raw_options.env = env;
+				}
+
 				var cwd = options.cwd;
 				if (cwd != null)
 					raw_options.cwd = cwd;
@@ -1372,6 +1378,11 @@ namespace Frida {
 		}
 
 		public string[]? envp {
+			get;
+			set;
+		}
+
+		public string[]? env {
 			get;
 			set;
 		}

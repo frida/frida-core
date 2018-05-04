@@ -169,7 +169,12 @@ namespace Frida {
 		}
 
 		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
-			var process = _do_spawn (program, options);
+			var path = program;
+
+			if (!FileUtils.test (path, EXISTS))
+				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
+
+			var process = _spawn (path, options);
 
 			var pid = process.pid;
 			process_by_pid[pid] = process;
@@ -263,7 +268,7 @@ namespace Frida {
 			uninjected (InjectorPayloadId (id));
 		}
 
-		public extern ChildProcess _do_spawn (string path, HostSpawnOptions options) throws Error;
+		public extern ChildProcess _spawn (string path, HostSpawnOptions options) throws Error;
 		public extern static bool _process_is_alive (uint pid);
 	}
 

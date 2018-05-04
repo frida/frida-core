@@ -543,6 +543,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 {
   pid_t pid;
   FridaSpawnInstance * instance;
+  gchar ** argv, ** envp;
   GVariantDict * aux_options;
   posix_spawn_file_actions_t file_actions;
   posix_spawnattr_t attributes;
@@ -551,14 +552,14 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
   gchar * aslr = NULL;
-  gchar * const * argv, * const * envp;
-  const gchar * default_argv[] = { path, NULL };
-  gchar ** default_envp = NULL;
   const gchar * cwd;
-  char * old_cwd = NULL;
+  gchar * old_cwd = NULL;
   int result, spawn_errno;
 
   instance = frida_spawn_instance_new (self);
+
+  argv = frida_host_spawn_options_compute_argv (options, path, NULL);
+  envp = frida_host_spawn_options_compute_envp (options, NULL);
 
   aux_options = frida_host_spawn_options_load_aux (options);
 
@@ -606,25 +607,10 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   posix_spawnattr_setflags (&attributes, flags);
 
-  if (frida_host_spawn_options_get_has_argv (options))
-    argv = frida_host_spawn_options_get_argv (options, NULL);
-  else
-    argv = (gchar * const *) default_argv;
-
-  if (frida_host_spawn_options_get_has_envp (options))
-  {
-    envp = frida_host_spawn_options_get_envp (options, NULL);
-  }
-  else
-  {
-    default_envp = g_get_environ ();
-    envp = default_envp;
-  }
-
   cwd = frida_host_spawn_options_get_cwd (options);
   if (strlen (cwd) > 0)
   {
-    old_cwd = getcwd (NULL, 0);
+    old_cwd = g_get_current_dir ();
     if (chdir (cwd) != 0)
       goto handle_chdir_error;
   }
@@ -701,8 +687,9 @@ error_epilogue:
   }
 beach:
   {
-    free (old_cwd);
-    g_strfreev (default_envp);
+    g_free (old_cwd);
+    g_strfreev (envp);
+    g_strfreev (argv);
     g_free (aslr);
     g_variant_dict_unref (aux_options);
 
@@ -723,7 +710,7 @@ static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier,
 
 static void frida_kill_application (NSString * identifier);
 
-static NSArray * frida_argv_to_arguments_array (gchar * const * strv, gint strv_length);
+static NSArray * frida_argv_to_arguments_array (gchar * const * argv, gint argv_length);
 static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
 
 static void frida_configure_terminal_attributes (gint fd);
@@ -800,13 +787,16 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   }
 
   if (frida_host_spawn_options_get_has_envp (spawn_options))
+    goto handle_envp_error;
+
+  if (frida_host_spawn_options_get_has_env (spawn_options))
   {
-    gchar ** envp;
-    gint envp_length;
+    gchar ** env;
+    gint env_length;
 
-    envp = frida_host_spawn_options_get_envp (spawn_options, &envp_length);
+    env = frida_host_spawn_options_get_env (spawn_options, &env_length);
 
-    [debug_options setObject:frida_envp_to_environment_dictionary (envp, envp_length)
+    [debug_options setObject:frida_envp_to_environment_dictionary (env, envp_length)
                       forKey:api->FBSDebugOptionKeyEnvironment];
   }
 
@@ -893,6 +883,14 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
   goto beach;
 
+handle_envp_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Overriding envp is not possible when spawning iOS apps, use env instead");
+    goto error_epilogue;
+  }
 handle_cwd_error:
   {
     error = g_error_new_literal (
@@ -993,7 +991,7 @@ handle_envp_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding envp is not supported when spawning iOS apps on this version of iOS");
+        "Overriding envp is not possible when spawning iOS apps, use env instead");
     goto error_epilogue;
   }
 handle_cwd_error:
@@ -1148,14 +1146,14 @@ frida_kill_application (NSString * identifier)
 }
 
 static NSArray *
-frida_argv_to_arguments_array (gchar * const * strv, gint strv_length)
+frida_argv_to_arguments_array (gchar * const * argv, gint argv_length)
 {
   NSMutableArray * result;
   gint i;
 
-  result = [NSMutableArray arrayWithCapacity:strv_length];
-  for (i = 1; i < strv_length; i++)
-    [result addObject:[NSString stringWithUTF8String:strv[i]]];
+  result = [NSMutableArray arrayWithCapacity:argv_length];
+  for (i = 1; i < argv_length; i++)
+    [result addObject:[NSString stringWithUTF8String:argv[i]]];
 
   return result;
 }

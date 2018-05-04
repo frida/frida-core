@@ -101,6 +101,9 @@ namespace Frida {
 		}
 
 		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+			if (!FileUtils.test (path, EXISTS))
+				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
+
 			StdioPipes? pipes;
 			var child_pid = _do_spawn (path, options, out pipes);
 

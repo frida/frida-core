@@ -215,6 +215,9 @@ namespace Frida {
 				if (options.has_envp)
 					throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning Android apps");
 
+				if (options.has_env)
+					throw new Error.NOT_SUPPORTED ("Overriding env is not supported when spawning Android apps");
+
 				if (options.cwd.length > 0)
 					throw new Error.NOT_SUPPORTED ("Overriding cwd is not supported when spawning Android apps");
 

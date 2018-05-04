@@ -17,10 +17,10 @@
 
 static void frida_child_process_on_death (GPid pid, gint status, gpointer user_data);
 
-static WCHAR * command_line_from_argv (const gchar ** argv, gint argv_length);
-static WCHAR * environment_block_from_envp (const gchar ** envp, gint envp_length);
+static WCHAR * frida_argv_to_command_line (const gchar ** argv, gint argv_length);
+static WCHAR * frida_envp_to_environment_block (const gchar ** envp, gint envp_length);
 
-static void append_n_backslashes (GString * str, guint n);
+static void frida_append_n_backslashes (GString * str, guint n);
 
 static void frida_make_pipe (HANDLE * read, HANDLE * write);
 static void frida_ensure_not_inherited (HANDLE handle);
@@ -79,6 +79,7 @@ beach:
 FridaChildProcess *
 _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, FridaHostSpawnOptions * options, GError ** error)
 {
+  FridaChildProcess * process = NULL;
   WCHAR * application_name, * command_line, * environment, * current_directory;
   const gchar * cwd;
   STARTUPINFO startup_info;
@@ -88,12 +89,8 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
   HANDLE stderr_read = NULL, stderr_write = NULL;
   PROCESS_INFORMATION process_info;
   FridaStdioPipes * pipes;
-  FridaChildProcess * process;
   guint watch_id;
   GSource * watch;
-
-  if (!g_file_test (path, G_FILE_TEST_EXISTS))
-    goto handle_path_error;
 
   application_name = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
 
@@ -103,20 +100,21 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
     gint argv_length;
 
     argv = frida_host_spawn_options_get_argv (options, &argv_length);
-    command_line = command_line_from_argv (argv, argv_length);
+    command_line = frida_argv_to_command_line (argv, argv_length);
   }
   else
   {
     command_line = NULL;
   }
 
-  if (frida_host_spawn_options_get_has_envp (options))
+  if (frida_host_spawn_options_get_has_envp (options) || frida_host_spawn_options_get_has_env (options))
   {
     gchar ** envp;
     gint envp_length;
 
-    envp = frida_host_spawn_options_get_envp (options, &envp_length);
-    environment = environment_block_from_envp (envp, envp_length);
+    envp = frida_host_spawn_options_compute_envp (options, &envp_length);
+    environment = frida_envp_to_environment_block (envp, envp_length);
+    g_strfreev (envp);
   }
   else
   {
@@ -184,11 +182,6 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
 
   DebugActiveProcessStop (process_info.dwProcessId);
 
-  g_free (current_directory);
-  g_free (environment);
-  g_free (command_line);
-  g_free (application_name);
-
   if (stdio == FRIDA_STDIO_PIPE)
   {
     CloseHandle (stdin_read);
@@ -222,20 +215,13 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
   g_assert (watch != NULL);
   frida_child_process_set_watch (process, watch);
 
-  return process;
+  goto beach;
 
-handle_path_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
-        "Unable to find executable at '%s'",
-        path);
-    return NULL;
-  }
 handle_create_error:
   {
-    DWORD last_error = GetLastError ();
+    DWORD last_error;
+
+    last_error = GetLastError ();
     if (last_error == ERROR_BAD_EXE_FORMAT)
     {
       g_set_error (error,
@@ -250,7 +236,7 @@ handle_create_error:
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
           "Unable to spawn executable at '%s': 0x%08lx",
-          path, GetLastError ());
+          path, last_error);
     }
 
     if (stdio == FRIDA_STDIO_PIPE)
@@ -265,12 +251,16 @@ handle_create_error:
       CloseHandle (stderr_write);
     }
 
+    goto beach;
+  }
+beach:
+  {
     g_free (current_directory);
     g_free (environment);
     g_free (command_line);
     g_free (application_name);
 
-    return NULL;
+    return process;
   }
 }
 
@@ -343,7 +333,7 @@ frida_child_process_on_death (GPid pid, gint status, gpointer user_data)
 }
 
 static WCHAR *
-command_line_from_argv (const gchar ** argv, gint argv_length)
+frida_argv_to_command_line (const gchar ** argv, gint argv_length)
 {
   GString * line;
   WCHAR * line_utf16;
@@ -387,17 +377,17 @@ command_line_from_argv (const gchar ** argv, gint argv_length)
 
         if (*c == '\0')
         {
-          append_n_backslashes (line, num_backslashes * 2);
+          frida_append_n_backslashes (line, num_backslashes * 2);
           break;
         }
         else if (*c == '"')
         {
-          append_n_backslashes (line, (num_backslashes * 2) + 1);
+          frida_append_n_backslashes (line, (num_backslashes * 2) + 1);
           g_string_append_c (line, *c);
         }
         else
         {
-          append_n_backslashes (line, num_backslashes);
+          frida_append_n_backslashes (line, num_backslashes);
           g_string_append_unichar (line, g_utf8_get_char (c));
         }
       }
@@ -414,7 +404,7 @@ command_line_from_argv (const gchar ** argv, gint argv_length)
 }
 
 static WCHAR *
-environment_block_from_envp (const gchar ** envp, gint envp_length)
+frida_envp_to_environment_block (const gchar ** envp, gint envp_length)
 {
   GString * block;
 
@@ -447,7 +437,7 @@ environment_block_from_envp (const gchar ** envp, gint envp_length)
 }
 
 static void
-append_n_backslashes (GString * str, guint n)
+frida_append_n_backslashes (GString * str, guint n)
 {
   guint i;
 

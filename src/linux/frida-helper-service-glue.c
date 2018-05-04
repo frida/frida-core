@@ -320,33 +320,21 @@ static gboolean frida_is_regset_supported = TRUE;
 guint
 _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
 {
-  FridaSpawnInstance * instance = NULL;
-  const gchar * cwd;
+  FridaSpawnInstance * instance;
+  gchar ** argv, ** envp;
   FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
-  gchar * const * argv, * const * envp;
-  const gchar * default_argv[] = { path, NULL };
-  gchar ** default_envp = NULL;
+  const gchar * cwd;
+  gchar * old_cwd = NULL;
   int status;
   long ret;
   gboolean success;
   const gchar * failed_operation;
 
-  if (!g_file_test (path, G_FILE_TEST_EXISTS))
-    goto handle_path_error;
-
-  cwd = frida_host_spawn_options_get_cwd (options);
-  if (strlen (cwd) > 0)
-  {
-    if (!g_file_test (cwd, G_FILE_TEST_IS_DIR))
-      goto handle_cwd_error;
-  }
-  else
-  {
-    cwd = NULL;
-  }
-
   instance = frida_spawn_instance_new (self);
+
+  argv = frida_host_spawn_options_compute_argv (options, path, NULL);
+  envp = frida_host_spawn_options_compute_envp (options, NULL);
 
   stdio = frida_host_spawn_options_get_stdio (options);
   switch (stdio)
@@ -368,19 +356,12 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
       g_assert_not_reached ();
   }
 
-  if (frida_host_spawn_options_get_has_argv (options))
-    argv = frida_host_spawn_options_get_argv (options, NULL);
-  else
-    argv = (gchar * const *) default_argv;
-
-  if (frida_host_spawn_options_get_has_envp (options))
+  cwd = frida_host_spawn_options_get_cwd (options);
+  if (strlen (cwd) > 0)
   {
-    envp = frida_host_spawn_options_get_envp (options, NULL);
-  }
-  else
-  {
-    default_envp = g_get_environ ();
-    envp = default_envp;
+    old_cwd = g_get_current_dir ();
+    if (chdir (cwd) != 0)
+      goto handle_chdir_error;
   }
 
   instance->pid = fork ();
@@ -395,12 +376,6 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
       dup2 (stderr_pipe[1], 2);
     }
 
-    if (cwd != NULL)
-    {
-      if (chdir (cwd) != 0)
-        _exit (1);
-    }
-
     ptrace (PTRACE_TRACEME, 0, NULL, NULL);
     kill (getpid (), SIGSTOP);
     if (execve (path, argv, envp) == -1)
@@ -409,6 +384,9 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
       _exit (1);
     }
   }
+
+  if (old_cwd != NULL)
+    chdir (old_cwd);
 
   if (stdio == FRIDA_STDIO_PIPE)
   {
@@ -432,16 +410,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
 
   goto beach;
 
-handle_path_error:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_EXECUTABLE_NOT_FOUND,
-        "Unable to find executable at '%s'",
-        path);
-    goto error_epilogue;
-  }
-handle_cwd_error:
+handle_chdir_error:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -467,7 +436,9 @@ error_epilogue:
   }
 beach:
   {
-    g_strfreev (default_envp);
+    g_free (old_cwd);
+    g_strfreev (envp);
+    g_strfreev (argv);
 
     return (instance != NULL) ? instance->pid : 0;
   }
