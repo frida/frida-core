@@ -688,10 +688,10 @@ error_epilogue:
 beach:
   {
     g_free (old_cwd);
-    g_strfreev (envp);
-    g_strfreev (argv);
     g_free (aslr);
     g_variant_dict_unref (aux_options);
+    g_strfreev (envp);
+    g_strfreev (argv);
 
     return pid;
   }
@@ -724,6 +724,8 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
   GVariantDict * aux_options;
   gchar * url = NULL;
   NSURL * url_value = nil;
+  gchar * aslr = NULL;
+  GError * error = NULL;
 
   pool = [[NSAutoreleasePool alloc] init];
 
@@ -731,8 +733,20 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
 
   aux_options = frida_host_spawn_options_load_aux (options);
 
-  if (g_variant_dict_lookup (aux_options, "url", "s", &url))
+  if (g_variant_dict_contains (aux_options, "url"))
+  {
+    if (!g_variant_dict_lookup (aux_options, "url", "s", &url))
+      goto handle_url_error;
     url_value = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
+  }
+
+  if (g_variant_dict_contains (aux_options, "aslr"))
+  {
+    if (!g_variant_dict_lookup (aux_options, "aslr", "s", &aslr))
+      goto handle_aslr_error;
+    if (strcmp (aslr, "auto") != 0 && strcmp (aslr, "disable") != 0)
+      goto handle_aslr_error;
+  }
 
   if (_frida_get_springboard_api ()->fbs != NULL)
   {
@@ -745,11 +759,38 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
         on_complete_target);
   }
 
-  g_free (url);
+  goto beach;
 
-  g_variant_dict_unref (aux_options);
+handle_url_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "The 'url' option must be a string");
+    goto error_epilogue;
+  }
+handle_aslr_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "The 'aslr' option must be a string set to either 'auto' or 'disable'");
+    goto error_epilogue;
+  }
+error_epilogue:
+  {
+    on_complete (NULL, error, on_complete_target);
+    goto beach;
+  }
+beach:
+  {
+    g_free (aslr);
+    g_free (url);
 
-  [pool release];
+    g_variant_dict_unref (aux_options);
+
+    [pool release];
+  }
 }
 
 static void
@@ -796,7 +837,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
     env = frida_host_spawn_options_get_env (spawn_options, &env_length);
 
-    [debug_options setObject:frida_envp_to_environment_dictionary (env, envp_length)
+    [debug_options setObject:frida_envp_to_environment_dictionary (env, env_length)
                       forKey:api->FBSDebugOptionKeyEnvironment];
   }
 
@@ -888,7 +929,7 @@ handle_envp_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding envp is not possible when spawning iOS apps, use env instead");
+        "The 'envp' option is not supported when spawning iOS apps, use the 'env' option instead");
     goto error_epilogue;
   }
 handle_cwd_error:
@@ -896,7 +937,7 @@ handle_cwd_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding cwd is not supported when spawning iOS apps");
+        "The 'cwd' option is not supported when spawning iOS apps");
     goto error_epilogue;
   }
 error_epilogue:
@@ -931,13 +972,16 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
   if (frida_host_spawn_options_get_has_envp (spawn_options))
     goto handle_envp_error;
 
+  if (frida_host_spawn_options_get_has_env (spawn_options))
+    goto handle_env_error;
+
   if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
     goto handle_cwd_error;
 
   if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
     goto handle_stdio_error;
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "auto") != 0)
+  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
     goto handle_aslr_error;
 
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
@@ -983,7 +1027,7 @@ handle_argv_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding argv is not supported when spawning iOS apps on this version of iOS");
+        "The 'argv' option is not supported when spawning apps on this version of iOS");
     goto error_epilogue;
   }
 handle_envp_error:
@@ -991,7 +1035,15 @@ handle_envp_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding envp is not possible when spawning iOS apps, use env instead");
+        "The 'envp' option is not supported when spawning iOS apps, use the 'env' option instead");
+    goto error_epilogue;
+  }
+handle_env_error:
+  {
+    error = g_error_new_literal (
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "The 'env' option is not supported when spawning apps on this version of iOS");
     goto error_epilogue;
   }
 handle_cwd_error:
@@ -999,7 +1051,7 @@ handle_cwd_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Overriding cwd is not supported when spawning iOS apps");
+        "The 'cwd' option is not supported when spawning iOS apps");
     goto error_epilogue;
   }
 handle_stdio_error:
@@ -1007,7 +1059,7 @@ handle_stdio_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Redirecting stdio is not supported when spawning iOS apps on this version of iOS");
+        "Redirected stdio is not supported when spawning apps on this version of iOS");
     goto error_epilogue;
   }
 handle_aslr_error:
@@ -1015,7 +1067,7 @@ handle_aslr_error:
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "Disabling ASLR is not supported when spawning iOS apps on this version of iOS");
+        "Disabling ASLR is not supported when spawning apps on this version of iOS");
     goto error_epilogue;
   }
 error_epilogue:

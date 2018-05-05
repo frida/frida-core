@@ -201,24 +201,28 @@ namespace Frida {
 				var aux_options = options.load_aux ();
 
 				string? activity_name = null;
-				if (aux_options.lookup ("activity", "s", out activity_name) && activity_name[0] == '.') {
-					activity_name = package_name + activity_name;
+				if (aux_options.contains ("activity")) {
+					if (!aux_options.lookup ("activity", "s", out activity_name))
+						throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
+
+					if (activity_name[0] == '.')
+						activity_name = package_name + activity_name;
 				}
 
 				if (options.has_argv)
-					throw new Error.NOT_SUPPORTED ("Overriding argv is not supported when spawning Android apps");
+					throw new Error.NOT_SUPPORTED ("The 'argv' option is not supported when spawning Android apps");
 
 				if (options.has_envp)
-					throw new Error.NOT_SUPPORTED ("Overriding envp is not supported when spawning Android apps");
+					throw new Error.NOT_SUPPORTED ("The 'envp' option is not supported when spawning Android apps");
 
 				if (options.has_env)
-					throw new Error.NOT_SUPPORTED ("Overriding env is not supported when spawning Android apps");
+					throw new Error.NOT_SUPPORTED ("The 'env' option is not supported when spawning Android apps");
 
 				if (options.cwd.length > 0)
-					throw new Error.NOT_SUPPORTED ("Overriding cwd is not supported when spawning Android apps");
+					throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning Android apps");
 
 				if (options.stdio != INHERIT)
-					throw new Error.NOT_SUPPORTED ("Redirecting stdio is not supported when spawning Android apps");
+					throw new Error.NOT_SUPPORTED ("Redirected stdio is not supported when spawning Android apps");
 
 				return yield get_robo_launcher ().spawn (package_name, activity_name);
 			} else {
