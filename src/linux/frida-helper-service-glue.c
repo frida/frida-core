@@ -58,7 +58,7 @@
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_os_error; \
+    goto os_failure; \
   }
 
 #ifndef PTRACE_GETREGS
@@ -361,7 +361,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
   {
     old_cwd = g_get_current_dir ();
     if (chdir (cwd) != 0)
-      goto handle_chdir_error;
+      goto chdir_failed;
   }
 
   instance->pid = fork ();
@@ -404,22 +404,22 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
   CHECK_OS_RESULT (success, !=, FALSE, "wait(SIGTRAP)");
 
   if (!frida_run_to_entry_point (instance->pid, error))
-    goto error_epilogue;
+    goto failure;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->spawn_instances), GUINT_TO_POINTER (instance->pid), instance);
 
   goto beach;
 
-handle_chdir_error:
+chdir_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to change directory to '%s'",
         cwd);
-    goto error_epilogue;
+    goto failure;
   }
-handle_os_error:
+os_failure:
   {
     (void) failed_operation;
     g_set_error (error,
@@ -427,9 +427,9 @@ handle_os_error:
         FRIDA_ERROR_PERMISSION_DENIED,
         "Unable to spawn executable at '%s'",
         path);
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     g_clear_pointer (&instance, frida_spawn_instance_free);
     goto beach;
@@ -464,13 +464,13 @@ _frida_helper_service_do_prepare_exec_transition (FridaHelperService * self, gui
   instance = frida_exec_instance_new (self, pid);
 
   if (!frida_exec_instance_prepare_transition (instance, error))
-    goto handle_error;
+    goto failure;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->exec_instances), GUINT_TO_POINTER (pid), instance);
 
   return;
 
-handle_error:
+failure:
   {
     frida_exec_instance_free (instance);
     return;
@@ -564,7 +564,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   params.write_impl = frida_resolve_libc_function (pid, "write");
   params.syscall_impl = frida_resolve_libc_function (pid, "syscall");
   if (params.open_impl == 0 || params.close_impl == 0 || params.write_impl == 0 || params.syscall_impl == 0)
-    goto handle_libc_missing;
+    goto no_libc;
 
 #if defined (HAVE_GLIBC)
   params.dlopen_impl = frida_resolve_libc_function (pid, "__libc_dlopen_mode");
@@ -582,29 +582,29 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   params.dlsym_impl = frida_resolve_linker_address (pid, dlsym);
 #endif
   if (params.dlopen_impl == 0 || params.dlclose_impl == 0 || params.dlsym_impl == 0)
-    goto handle_libc_missing;
+    goto no_libc;
 
   instance = frida_inject_instance_new (self, frida_helper_service_generate_id (self), pid, temp_path);
   if (instance->executable_path == NULL)
-    goto handle_premature_termination;
+    goto premature_termination;
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
-    goto handle_premature_termination;
+    goto premature_termination;
 
   params.fifo_path = instance->fifo_path;
   params.remote_address = frida_remote_alloc (pid, params.remote_size, PROT_READ | PROT_WRITE, error);
   if (params.remote_address == 0)
-    goto handle_premature_termination;
+    goto premature_termination;
   instance->remote_payload = params.remote_address;
   instance->remote_size = params.remote_size;
 
   if (!frida_inject_instance_emit_and_transfer_payload (frida_inject_instance_emit_payload_code, &params, &instance->entrypoint, error))
-    goto handle_premature_termination;
+    goto premature_termination;
   instance->stack_top = params.remote_address + params.stack.offset + params.stack.size;
   instance->trampoline_data = params.remote_address + params.data.offset;
 
   if (!frida_inject_instance_start_remote_thread (instance, &exited, error) && !exited)
-    goto handle_premature_termination;
+    goto premature_termination;
 
   if (!exited)
     frida_inject_instance_detach (instance, &saved_regs, NULL);
@@ -615,7 +615,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
   return instance->id;
 
-handle_libc_missing:
+no_libc:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -623,7 +623,7 @@ handle_libc_missing:
         "Unable to inject library into process without libc");
     return 0;
   }
-handle_premature_termination:
+premature_termination:
   {
     frida_inject_instance_free (instance, FRIDA_UNLOAD_POLICY_IMMEDIATE);
     return 0;
@@ -658,17 +658,17 @@ _frida_helper_service_recreate_injectee_thread (FridaHelperService * self, void 
   instance->pid = pid;
 
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
-    goto handle_error;
+    goto failure;
 
   if (is_uninitialized_clone)
   {
     if (!frida_remote_write (instance->pid, instance->trampoline_data + G_STRUCT_OFFSET (FridaTrampolineData, fifo_path),
         instance->fifo_path, strlen (instance->fifo_path) + 1, error))
-      goto handle_error;
+      goto failure;
   }
 
   if (!frida_inject_instance_start_remote_thread (instance, &exited, error) && !exited)
-    goto handle_error;
+    goto failure;
 
   if (!exited)
     frida_inject_instance_detach (instance, &saved_regs, NULL);
@@ -677,7 +677,7 @@ _frida_helper_service_recreate_injectee_thread (FridaHelperService * self, void 
 
   return;
 
-handle_error:
+failure:
   {
     _frida_helper_service_destroy_inject_instance (self, instance->id, FRIDA_UNLOAD_POLICY_IMMEDIATE);
     return;
@@ -772,30 +772,30 @@ frida_exec_instance_prepare_transition (FridaExecInstance * self, GError ** erro
   status = 0;
   wait_result = waitpid (self->pid, &status, 0);
   if (wait_result != self->pid || !WIFSTOPPED (status) || WSTOPSIG (status) != SIGSTOP)
-    goto handle_wait_error;
+    goto wait_failed;
 
   pt_result = ptrace (PTRACE_CONT, self->pid, NULL, NULL);
   CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_CONT");
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
         "Unable to prepare for exec transition: %s failed", failed_operation);
-    goto error_epilogue;
+    goto failure;
   }
-handle_wait_error:
+wait_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
         "Unable to prepare for exec transition: waitpid() failed");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     return FALSE;
   }
@@ -812,22 +812,22 @@ frida_exec_instance_try_perform_transition (FridaExecInstance * self, GError ** 
   if (wait_result != self->pid)
     return FALSE;
   if (!WIFSTOPPED (status) || WSTOPSIG (status) != SIGTRAP)
-    goto handle_wait_error;
+    goto wait_failed;
 
   if (!frida_run_to_entry_point (self->pid, error))
-    goto error_epilogue;
+    goto failure;
 
   return TRUE;
 
-handle_wait_error:
+wait_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_PERMISSION_DENIED,
         "Unable to wait for exec transition: waitpid() failed");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     return FALSE;
   }
@@ -996,16 +996,16 @@ frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs
 
     success = frida_wait_for_attach_signal (pid);
     if (!success)
-      goto handle_wait_error;
+      goto wait_failed;
 
     ret = frida_get_regs (pid, saved_regs);
     if (ret != 0)
-      goto handle_wait_error;
+      goto wait_failed;
   }
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     if (attach_errno == EPERM)
     {
@@ -1027,7 +1027,7 @@ handle_os_error:
 
     return FALSE;
   }
-handle_wait_error:
+wait_failed:
   {
     ptrace (PTRACE_DETACH, pid, NULL, NULL);
 
@@ -1059,7 +1059,7 @@ frida_inject_instance_detach (FridaInjectInstance * self, const FridaRegs * save
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -2061,12 +2061,12 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
   length = readlink (exe_link, ctx.path, sizeof (ctx.path) - 1);
   g_free (exe_link);
   if (length == -1)
-    goto handle_probe_error;
+    goto probe_failed;
   ctx.path[length] = '\0';
   ctx.entry_point = 0;
   gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_elf_header, &ctx);
   if (ctx.entry_point == 0)
-    goto handle_probe_error;
+    goto probe_failed;
 
 #if defined (HAVE_ARM) || defined (HAVE_ARM64)
   if (ctx.word_size == 4 && (ctx.entry_point & 1) == 0)
@@ -2153,15 +2153,15 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
 
   return TRUE;
 
-handle_probe_error:
+probe_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
-        "failed to probe process");
+        "Failed to probe process");
     return FALSE;
   }
-handle_os_error:
+os_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -2219,33 +2219,33 @@ frida_remote_alloc (pid_t pid, size_t size, int prot, GError ** error)
 
   mmap_impl = frida_resolve_libc_function (pid, "mmap");
   if (mmap_impl == 0)
-    goto handle_libc_missing;
+    goto no_libc;
 
   if (!frida_remote_call (pid, mmap_impl, args, G_N_ELEMENTS (args), &retval, NULL, error))
     return 0;
 
   if (retval == FRIDA_MAP_FAILED)
-    goto handle_mmap_failure;
+    goto mmap_failed;
 
   return retval;
 
-handle_libc_missing:
+no_libc:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to allocate memory in process without libc");
-    goto error_epilogue;
+    goto failure;
   }
-handle_mmap_failure:
+mmap_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to allocate memory in the specified process");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     return 0;
   }
@@ -2263,22 +2263,22 @@ frida_remote_dealloc (pid_t pid, GumAddress address, size_t size, GError ** erro
 
   munmap_impl = frida_resolve_libc_function (pid, "munmap");
   if (munmap_impl == 0)
-    goto handle_libc_missing;
+    goto no_libc;
 
   if (!frida_remote_call (pid, munmap_impl, args, G_N_ELEMENTS (args), &retval, NULL, error))
     return FALSE;
 
   return retval == 0;
 
-handle_libc_missing:
+no_libc:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to deallocate memory in process without libc");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     return FALSE;
   }
@@ -2297,22 +2297,22 @@ frida_remote_mprotect (pid_t pid, GumAddress address, size_t size, int prot, GEr
 
   mprotect_impl = frida_resolve_libc_function (pid, "mprotect");
   if (mprotect_impl == 0)
-    goto handle_libc_missing;
+    goto no_libc;
 
   if (!frida_remote_call (pid, mprotect_impl, args, G_N_ELEMENTS (args), &retval, NULL, error))
     return FALSE;
 
   return retval == 0;
 
-handle_libc_missing:
+no_libc:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to change memory protection in process without libc");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     return FALSE;
   }
@@ -2355,7 +2355,7 @@ frida_remote_write (pid_t pid, GumAddress remote_address, gconstpointer data, gs
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -2581,7 +2581,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -2668,7 +2668,7 @@ frida_remote_exec (pid_t pid, GumAddress remote_address, GumAddress remote_stack
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,

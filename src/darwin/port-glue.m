@@ -51,11 +51,11 @@ _frida_handshake_port_create_local (FridaHandshakePort * self, const gchar * nam
 
   kr = bootstrap_register2 (bootstrap, name, local_rx, 0);
   if (kr != KERN_SUCCESS)
-    goto handle_register_error;
+    goto register_failed;
 
   return local_rx;
 
-handle_register_error:
+register_failed:
   {
     mach_port_mod_refs (self_task, local_rx, MACH_PORT_RIGHT_RECEIVE, -1);
 
@@ -78,11 +78,11 @@ _frida_handshake_port_create_remote (FridaHandshakePort * self, const gchar * na
 
   kr = bootstrap_look_up2 (bootstrap, name, &local_tx, 0, 0);
   if (kr != KERN_SUCCESS)
-    goto handle_lookup_error;
+    goto lookup_failed;
 
   return local_tx;
 
-handle_lookup_error:
+lookup_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -148,7 +148,7 @@ _frida_handshake_port_perform_exchange_as_sender (FridaHandshakePort * self, gui
 
   kr = mach_msg_send (header_out);
   if (kr != KERN_SUCCESS)
-    goto handle_mach_error;
+    goto mach_failure;
 
   remote_wrapper = MACH_PORT_NULL;
 
@@ -157,7 +157,7 @@ _frida_handshake_port_perform_exchange_as_sender (FridaHandshakePort * self, gui
 
   kr = mach_msg_receive (header_in);
   if (kr != KERN_SUCCESS)
-    goto handle_mach_error;
+    goto mach_failure;
 
   *task_port = msg_in.task.name;
   msg_in.task.name = MACH_PORT_NULL;
@@ -167,7 +167,7 @@ _frida_handshake_port_perform_exchange_as_sender (FridaHandshakePort * self, gui
 
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -224,12 +224,12 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
       MACH_MSG_TIMEOUT_NONE,
       MACH_PORT_NULL);
   if (kr != KERN_SUCCESS)
-    goto handle_mach_error;
+    goto mach_failure;
 
   if (header_in->msgh_size != sizeof (FridaHandshakeMessageOut))
-    goto handle_security_error;
+    goto handshake_failed;
   if (frida_audit_token_to_pid (msg_in.trailer.msgh_audit) != peer_pid)
-    goto handle_security_error;
+    goto handshake_failed;
 
   header_out->msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND) | MACH_MSGH_BITS_COMPLEX;
   header_out->msgh_size = sizeof (msg_out);
@@ -246,7 +246,7 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
 
   kr = mach_msg_send (header_out);
   if (kr != KERN_SUCCESS)
-    goto handle_mach_error;
+    goto mach_failure;
 
   *task_port = msg_in.task.name;
   msg_in.task.name = MACH_PORT_NULL;
@@ -255,7 +255,7 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
 
   goto beach;
 
-handle_security_error:
+handshake_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -263,7 +263,7 @@ handle_security_error:
         "Unable to perform handshake due to an unexpected message");
     goto beach;
   }
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,

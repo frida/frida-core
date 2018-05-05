@@ -14,7 +14,7 @@
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_winapi_error; \
+    goto winapi_failure; \
   }
 
 gboolean
@@ -116,7 +116,7 @@ frida_winjector_resource_store_set_acls_as_needed (const gchar * path, GError **
 
   goto beach;
 
-handle_winapi_error:
+winapi_failure:
   {
     DWORD last_error = GetLastError ();
     g_set_error (error,

@@ -12,14 +12,14 @@
   if (!((n1) cmp (n2))) \
   { \
     failed_operation = op; \
-    goto handle_os_error; \
+    goto os_failure; \
   }
 
 #define CHECK_NT_RESULT(n1, cmp, n2, op) \
   if (!((n1) cmp (n2))) \
   { \
     failed_operation = op; \
-    goto handle_nt_error; \
+    goto nt_failure; \
   }
 
 typedef struct _InjectInstance InjectInstance;
@@ -141,7 +141,7 @@ winjector_process_inject_library_file (guint32 pid, const gchar * path, const gc
   details.process_handle = NULL;
 
   if (!file_exists_and_is_readable (details.dll_path))
-    goto handle_path_error;
+    goto invalid_path;
 
   enable_debug_privilege ();
 
@@ -186,7 +186,7 @@ winjector_process_inject_library_file (guint32 pid, const gchar * path, const gc
   goto beach;
 
   /* ERRORS */
-handle_path_error:
+invalid_path:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -195,7 +195,7 @@ handle_path_error:
         path);
     goto beach;
   }
-handle_os_error:
+os_failure:
   {
     DWORD os_error;
 
@@ -220,7 +220,7 @@ handle_os_error:
 
     goto beach;
   }
-handle_nt_error:
+nt_failure:
   {
     gint code;
 

@@ -177,7 +177,7 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
       &startup_info,
       &process_info))
   {
-    goto handle_create_error;
+    goto create_process_failed;
   }
 
   DebugActiveProcessStop (process_info.dwProcessId);
@@ -217,7 +217,7 @@ _frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gcha
 
   goto beach;
 
-handle_create_error:
+create_process_failed:
   {
     DWORD last_error;
 

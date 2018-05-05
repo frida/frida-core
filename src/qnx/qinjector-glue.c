@@ -55,7 +55,7 @@ enum {
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_os_error; \
+    goto os_failure; \
   }
 
 #define FRIDA_REMOTE_PAYLOAD_SIZE (8192)
@@ -479,7 +479,7 @@ frida_remote_write_fd (gint fd, GumAddress remote_address, gconstpointer data, g
 
   return TRUE;
 
-handle_os_error:
+os_failure:
   {
     g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "remote_write %s failed: %d", failed_operation, errno);
     return FALSE;
@@ -654,7 +654,7 @@ beach:
 
   return success;
 
-handle_os_error:
+os_failure:
   {
     if (fd != -1)
       close (fd);

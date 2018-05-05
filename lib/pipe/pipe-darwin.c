@@ -10,13 +10,13 @@
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_mach_error; \
+    goto mach_failure; \
   }
 #define CHECK_BSD_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_bsd_error; \
+    goto bsd_failure; \
   }
 
 typedef struct _FridaInitMessage FridaInitMessage;
@@ -101,7 +101,7 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
 
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         G_IO_ERROR,
@@ -110,7 +110,7 @@ handle_mach_error:
         failed_operation, mach_error_string (kr));
     goto beach;
   }
-handle_bsd_error:
+bsd_failure:
   {
     g_set_error (error,
         G_IO_ERROR,
@@ -177,7 +177,7 @@ _frida_darwin_pipe_consume_stashed_file_descriptor (const gchar * address, GErro
 
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         G_IO_ERROR,
@@ -186,7 +186,7 @@ handle_mach_error:
         failed_operation, mach_error_string (kr));
     goto beach;
   }
-handle_bsd_error:
+bsd_failure:
   {
     g_set_error (error,
         G_IO_ERROR,

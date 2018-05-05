@@ -38,13 +38,13 @@
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_mach_error; \
+    goto mach_failure; \
   }
 #define CHECK_BSD_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_bsd_error; \
+    goto bsd_failure; \
   }
 
 typedef struct _FridaHelperContext FridaHelperContext;
@@ -370,7 +370,7 @@ frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_
 
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -379,7 +379,7 @@ handle_mach_error:
         remote_pid, failed_operation, mach_error_string (kr));
     goto beach;
   }
-handle_bsd_error:
+bsd_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -427,15 +427,15 @@ frida_darwin_helper_backend_task_for_pid_fallback (guint pid, GError ** error)
 
   remote_pid_exists = kill (pid, 0) == 0 || errno == EPERM;
   if (!remote_pid_exists)
-    goto handle_pid_error;
+    goto invalid_pid;
 
   kr = task_for_pid (mach_task_self (), pid, &task);
   if (kr != KERN_SUCCESS)
-    goto handle_task_for_pid_error;
+    goto permission_denied;
 
   return task;
 
-handle_pid_error:
+invalid_pid:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -444,7 +444,7 @@ handle_pid_error:
         pid);
     return 0;
   }
-handle_task_for_pid_error:
+permission_denied:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -493,20 +493,20 @@ frida_darwin_helper_backend_mmap (guint task, GBytes * blob, FridaMappedLibraryB
       mach_task_self (), GPOINTER_TO_SIZE (data), TRUE, &cur_protection, &max_protection,
       VM_INHERIT_COPY);
   if (kr != KERN_SUCCESS)
-    goto handle_error;
+    goto permission_denied;
 
   kr = mach_vm_protect (task, mapped_address, aligned_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
   if (kr != KERN_SUCCESS)
   {
     mach_vm_deallocate (task, mapped_address, aligned_size);
-    goto handle_error;
+    goto permission_denied;
   }
 
   frida_mapped_library_blob_init (result, mapped_address, size, aligned_size);
 
   return;
 
-handle_error:
+permission_denied:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -612,7 +612,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   {
     old_cwd = g_get_current_dir ();
     if (chdir (cwd) != 0)
-      goto handle_chdir_error;
+      goto chdir_failed;
   }
 
   result = posix_spawn (&pid, path, &file_actions, &attributes, argv, envp);
@@ -633,7 +633,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   posix_spawn_file_actions_destroy (&file_actions);
 
   if (result != 0)
-    goto handle_spawn_error;
+    goto spawn_failed;
 
   instance->pid = pid;
 
@@ -641,7 +641,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   goto beach;
 
-handle_chdir_error:
+chdir_failed:
   {
     posix_spawnattr_destroy (&attributes);
     posix_spawn_file_actions_destroy (&file_actions);
@@ -652,9 +652,9 @@ handle_chdir_error:
         "Unable to change directory to '%s'",
         cwd);
 
-    goto error_epilogue;
+    goto failure;
   }
-handle_spawn_error:
+spawn_failed:
   {
     if (spawn_errno == EAGAIN)
     {
@@ -673,9 +673,9 @@ handle_spawn_error:
           path, g_strerror (spawn_errno));
     }
 
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     if (instance->pid != 0)
       kill (instance->pid, SIGKILL);
@@ -736,16 +736,16 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
   if (g_variant_dict_contains (aux_options, "url"))
   {
     if (!g_variant_dict_lookup (aux_options, "url", "s", &url))
-      goto handle_url_error;
+      goto invalid_url;
     url_value = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
   }
 
   if (g_variant_dict_contains (aux_options, "aslr"))
   {
     if (!g_variant_dict_lookup (aux_options, "aslr", "s", &aslr))
-      goto handle_aslr_error;
+      goto aslr_not_supported;
     if (strcmp (aslr, "auto") != 0 && strcmp (aslr, "disable") != 0)
-      goto handle_aslr_error;
+      goto aslr_not_supported;
   }
 
   if (_frida_get_springboard_api ()->fbs != NULL)
@@ -761,23 +761,23 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
 
   goto beach;
 
-handle_url_error:
+invalid_url:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "The 'url' option must be a string");
-    goto error_epilogue;
+    goto failure;
   }
-handle_aslr_error:
+aslr_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "The 'aslr' option must be a string set to either 'auto' or 'disable'");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     on_complete (NULL, error, on_complete_target);
     goto beach;
@@ -828,7 +828,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   }
 
   if (frida_host_spawn_options_get_has_envp (spawn_options))
-    goto handle_envp_error;
+    goto envp_not_supported;
 
   if (frida_host_spawn_options_get_has_env (spawn_options))
   {
@@ -842,7 +842,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   }
 
   if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
-    goto handle_cwd_error;
+    goto cwd_not_supported;
 
   if (frida_host_spawn_options_get_stdio (spawn_options) == FRIDA_STDIO_PIPE)
   {
@@ -924,23 +924,23 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
   goto beach;
 
-handle_envp_error:
+envp_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "The 'envp' option is not supported when spawning iOS apps, use the 'env' option instead");
-    goto error_epilogue;
+    goto failure;
   }
-handle_cwd_error:
+cwd_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "The 'cwd' option is not supported when spawning iOS apps");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     on_complete (NULL, error, on_complete_target);
     goto beach;
@@ -967,22 +967,22 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
                                                forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
   if (frida_host_spawn_options_get_has_argv (spawn_options))
-    goto handle_argv_error;
+    goto argv_not_supported;
 
   if (frida_host_spawn_options_get_has_envp (spawn_options))
-    goto handle_envp_error;
+    goto envp_not_supported;
 
   if (frida_host_spawn_options_get_has_env (spawn_options))
-    goto handle_env_error;
+    goto env_not_supported;
 
   if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
-    goto handle_cwd_error;
+    goto cwd_not_supported;
 
   if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
-    goto handle_stdio_error;
+    goto stdio_not_supported;
 
   if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
-    goto handle_aslr_error;
+    goto aslr_not_supported;
 
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
   {
@@ -1022,55 +1022,55 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
 
   goto beach;
 
-handle_argv_error:
+argv_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "The 'argv' option is not supported when spawning apps on this version of iOS");
-    goto error_epilogue;
+    goto failure;
   }
-handle_envp_error:
+envp_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "The 'envp' option is not supported when spawning iOS apps, use the 'env' option instead");
-    goto error_epilogue;
+    goto failure;
   }
-handle_env_error:
+env_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "The 'env' option is not supported when spawning apps on this version of iOS");
-    goto error_epilogue;
+    goto failure;
   }
-handle_cwd_error:
+cwd_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "The 'cwd' option is not supported when spawning iOS apps");
-    goto error_epilogue;
+    goto failure;
   }
-handle_stdio_error:
+stdio_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Redirected stdio is not supported when spawning apps on this version of iOS");
-    goto error_epilogue;
+    goto failure;
   }
-handle_aslr_error:
+aslr_not_supported:
   {
     error = g_error_new_literal (
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Disabling ASLR is not supported when spawning apps on this version of iOS");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     on_complete (NULL, error, on_complete_target);
     goto beach;
@@ -1307,7 +1307,7 @@ _frida_darwin_helper_backend_is_suspended (FridaDarwinHelperBackend * self, guin
 
   return info.suspend_count >= 1;
 
-handle_mach_error:
+mach_failure:
   {
     if (kr == MACH_SEND_INVALID_DEST)
     {
@@ -1335,16 +1335,16 @@ _frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, gu
   mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
 
   if (task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count) != KERN_SUCCESS)
-    goto handle_process_not_found;
+    goto process_not_found;
 
   if (info.suspend_count <= 0)
-    goto handle_process_not_suspended;
+    goto process_not_suspended;
 
   task_resume (task);
 
   return;
 
-handle_process_not_found:
+process_not_found:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -1352,7 +1352,7 @@ handle_process_not_found:
         "No such process");
     return;
   }
-handle_process_not_suspended:
+process_not_suspended:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -1478,10 +1478,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   self_task = mach_task_self ();
 
   if (!gum_darwin_cpu_type_from_pid (instance->pid, &instance->cpu_type))
-    goto handle_cpu_type_error;
+    goto cpu_probe_failed;
 
   if (!gum_darwin_query_page_size (task, &page_size))
-    goto handle_page_size_error;
+    goto page_size_probe_failed;
 
   kr = task_threads (task, &threads, &thread_count);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_threads");
@@ -1514,7 +1514,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
     magic = (guint32 *) gum_darwin_read (task, dyld_chunk, sizeof (magic), NULL);
     if (magic == NULL)
-      goto handle_probe_dyld_error;
+      goto dyld_probe_failed;
 
     if (*magic == MH_MAGIC || *magic == MH_MAGIC_64)
       dyld_header = dyld_chunk;
@@ -1544,7 +1544,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   if (legacy_entry_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0
       || dlerror_clear_address == 0 || instance->info_address == 0)
-    goto handle_probe_dyld_error;
+    goto dyld_probe_failed;
 
   if (instance->cpu_type == GUM_CPU_ARM)
   {
@@ -1554,7 +1554,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   instance->ret_gadget = frida_find_function_end (task, instance->cpu_type, instance->register_helpers_address, 128);
   if (instance->ret_gadget == 0)
-    goto handle_probe_dyld_error;
+    goto dyld_probe_failed;
 
   if (instance->cpu_type == GUM_CPU_ARM)
     instance->ret_gadget |= 1;
@@ -1607,40 +1607,40 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   return;
 
-handle_cpu_type_error:
+cpu_probe_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing CPU type of target process");
-    goto error_epilogue;
+    goto failure;
   }
-handle_page_size_error:
+page_size_probe_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing page size of target process");
-    goto error_epilogue;
+    goto failure;
   }
-handle_probe_dyld_error:
+dyld_probe_failed:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing dyld of target process");
-    goto error_epilogue;
+    goto failure;
   }
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while preparing target process for injection (%s returned '%s')",
         failed_operation, mach_error_string (kr));
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     kill (instance->pid, SIGKILL);
 
@@ -1762,7 +1762,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
   if (!frida_agent_context_init (&agent_ctx, &details, &layout, payload_address, instance->payload_size, resolver, mapper, error))
-    goto error_epilogue;
+    goto failure;
 
   frida_agent_context_emit_mach_stub_code (&agent_ctx, mach_stub_code, details.cpu_type, mapper);
 
@@ -1893,23 +1893,23 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 #endif
 
   if (!frida_inject_instance_start_thread (instance, error))
-    goto error_epilogue;
+    goto failure;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (instance->id), instance);
 
   result = instance->id;
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while attaching to process with pid %u (%s returned '%s')",
         pid, failed_operation, mach_error_string (kr));
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     frida_inject_instance_free (instance);
     goto beach;
@@ -1976,20 +1976,20 @@ _frida_darwin_helper_backend_recreate_injectee_thread (FridaDarwinHelperBackend 
   }
 
   if (!frida_inject_instance_start_thread (instance, error))
-    goto error_epilogue;
+    goto failure;
 
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while recreating thread in process with pid %u (%s returned '%s')",
         pid, failed_operation, mach_error_string (kr));
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     _frida_darwin_helper_backend_destroy_inject_instance (self, instance->id);
     goto beach;
@@ -2028,7 +2028,7 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
 
   goto beach;
 
-handle_mach_error:
+mach_failure:
   {
     g_set_error (error,
         FRIDA_ERROR,
@@ -2867,7 +2867,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   { \
     FRIDA_AGENT_CONTEXT_TRY_RESOLVE (field); \
     if (self->field##_impl == 0) \
-      goto handle_resolve_error; \
+      goto missing_symbol; \
   } \
   G_STMT_END
 #define FRIDA_AGENT_CONTEXT_TRY_RESOLVE(field) \
@@ -2880,7 +2880,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
 
   module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libsystem_kernel.dylib");
   if (module == NULL)
-    goto handle_libc_error;
+    goto no_libc;
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_task_self);
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_thread_self);
   FRIDA_AGENT_CONTEXT_RESOLVE (mach_port_allocate);
@@ -2892,7 +2892,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
   if (module == NULL)
     module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/introspection/libsystem_pthread.dylib");
   if (module == NULL)
-    goto handle_libc_error;
+    goto no_libc;
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
   if (self->pthread_create_from_mach_thread_impl != 0)
     self->pthread_create_impl = self->pthread_create_from_mach_thread_impl;
@@ -2905,7 +2905,7 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
   {
     module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libdyld.dylib");
     if (module == NULL)
-      goto handle_libc_error;
+      goto no_libc;
     FRIDA_AGENT_CONTEXT_RESOLVE (dlopen);
     FRIDA_AGENT_CONTEXT_RESOLVE (dlsym);
     FRIDA_AGENT_CONTEXT_RESOLVE (dlclose);
@@ -2913,23 +2913,23 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
 
   return TRUE;
 
-handle_libc_error:
+no_libc:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to attach to processes without Apple's libc (for now)");
-    goto error_epilogue;
+    goto failure;
   }
-handle_resolve_error:
+missing_symbol:
   {
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while resolving functions");
-    goto error_epilogue;
+    goto failure;
   }
-error_epilogue:
+failure:
   {
     return FALSE;
   }

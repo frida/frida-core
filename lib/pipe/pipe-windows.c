@@ -11,7 +11,7 @@
   if (!(n1 cmp n2)) \
   { \
     failed_operation = op; \
-    goto handle_winapi_error; \
+    goto winapi_failed; \
   }
 
 typedef struct _FridaPipeBackend FridaPipeBackend;
@@ -187,7 +187,7 @@ frida_windows_pipe_open_named_pipe (const gchar * name, FridaWindowsPipeRole rol
 
   goto beach;
 
-handle_winapi_error:
+winapi_failed:
   {
     DWORD last_error = GetLastError ();
     g_set_error (error,
@@ -235,7 +235,7 @@ frida_windows_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * c
   ret = ConnectNamedPipe (backend->pipe, &overlapped);
   last_error = GetLastError ();
   if (!ret && last_error != ERROR_IO_PENDING && last_error != ERROR_PIPE_CONNECTED)
-    goto handle_error;
+    goto failure;
 
   if (last_error == ERROR_IO_PENDING)
   {
@@ -243,14 +243,14 @@ frida_windows_pipe_backend_connect (FridaPipeBackend * backend, GCancellable * c
       goto beach;
 
     if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
-      goto handle_error;
+      goto failure;
   }
 
   backend->connected = TRUE;
   success = TRUE;
   goto beach;
 
-handle_error:
+failure:
   {
     g_set_error (error,
         G_IO_ERROR,
@@ -308,11 +308,11 @@ _frida_windows_pipe_close_backend (void * opaque_backend, GError ** error)
   FridaPipeBackend * backend = opaque_backend;
 
   if (!CloseHandle (backend->pipe))
-    goto handle_error;
+    goto failure;
   backend->pipe = INVALID_HANDLE_VALUE;
   return TRUE;
 
-handle_error:
+failure:
   {
     g_set_error (error,
         G_IO_ERROR,
@@ -374,18 +374,18 @@ frida_windows_pipe_input_stream_read (GInputStream * base, void * buffer, gsize 
   overlapped.hEvent = backend->read_complete;
   ret = ReadFile (backend->pipe, buffer, count, NULL, &overlapped);
   if (!ret && GetLastError () != ERROR_IO_PENDING)
-    goto handle_error;
+    goto failure;
 
   if (!frida_windows_pipe_backend_await (backend, backend->read_complete, backend->read_cancel, cancellable, error))
     goto beach;
 
   if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
-    goto handle_error;
+    goto failure;
 
   result = bytes_transferred;
   goto beach;
 
-handle_error:
+failure:
   {
     g_set_error (error,
         G_IO_ERROR,
@@ -435,18 +435,18 @@ frida_windows_pipe_output_stream_write (GOutputStream * base, const void * buffe
   overlapped.hEvent = backend->write_complete;
   ret = WriteFile (backend->pipe, buffer, count, NULL, &overlapped);
   if (!ret && GetLastError () != ERROR_IO_PENDING)
-    goto handle_error;
+    goto failure;
 
   if (!frida_windows_pipe_backend_await (backend, backend->write_complete, backend->write_cancel, cancellable, error))
     goto beach;
 
   if (!GetOverlappedResult (backend->pipe, &overlapped, &bytes_transferred, FALSE))
-    goto handle_error;
+    goto failure;
 
   result = bytes_transferred;
   goto beach;
 
-handle_error:
+failure:
   {
     g_set_error (error,
         G_IO_ERROR,
