@@ -77,7 +77,7 @@ beach:
 }
 
 FridaChildProcess *
-_frida_windows_host_session_do_spawn (FridaWindowsHostSession * self, const gchar * path, FridaHostSpawnOptions * options, GError ** error)
+_frida_windows_host_session_spawn (FridaWindowsHostSession * self, const gchar * path, FridaHostSpawnOptions * options, GError ** error)
 {
   FridaChildProcess * process = NULL;
   WCHAR * application_name, * command_line, * environment, * current_directory;
