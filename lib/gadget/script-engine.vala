@@ -7,6 +7,7 @@ namespace Frida.Gadget {
 		private Gum.MemoryRange agent_range;
 
 		private Gee.HashMap<uint, ScriptInstance> instances = new Gee.HashMap<uint, ScriptInstance> ();
+		private Gee.HashSet<ScriptInstance> dying_instances = new Gee.HashSet<ScriptInstance> ();
 		private uint next_script_id = 1;
 
 		private bool debugger_enabled = false;
@@ -22,10 +23,25 @@ namespace Frida.Gadget {
 		}
 
 		public async void shutdown () {
-			foreach (var instance in instances.values) {
-				yield instance.destroy ();
-			}
-			instances.clear ();
+			do {
+				while (!instances.is_empty) {
+					var iterator = instances.keys.iterator ();
+					iterator.next ();
+					var id = iterator.get ();
+					try {
+						yield destroy_script (AgentScriptId (id));
+					} catch (Error e) {
+						assert_not_reached ();
+					}
+				}
+
+				while (!dying_instances.is_empty) {
+					var iterator = dying_instances.iterator ();
+					iterator.next ();
+					var instance = iterator.get ();
+					yield instance.destroy ();
+				}
+			} while (!instances.is_empty || !dying_instances.is_empty);
 
 			if (debugger_enabled) {
 				backend.set_debug_message_handler (null);
@@ -73,7 +89,9 @@ namespace Frida.Gadget {
 			ScriptInstance instance;
 			if (!instances.unset (sid.handle, out instance))
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			dying_instances.add (instance);
 			yield instance.destroy ();
+			dying_instances.remove (instance);
 		}
 
 		public async void load_script (AgentScriptId sid) throws Error {
@@ -134,6 +152,7 @@ namespace Frida.Gadget {
 			}
 			private Gum.Script _script;
 
+			private Gee.Promise<bool> destroy_request;
 			private Gee.Promise<bool> dispose_request;
 
 			private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
@@ -144,6 +163,16 @@ namespace Frida.Gadget {
 			}
 
 			public async void destroy () {
+				if (destroy_request != null) {
+					try {
+						yield destroy_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+					return;
+				}
+				destroy_request = new Gee.Promise<bool> ();
+
 				var main_context = MainContext.get_thread_default ();
 
 				yield ensure_dispose_called ();
@@ -160,6 +189,8 @@ namespace Frida.Gadget {
 				});
 				script = null;
 				yield;
+
+				destroy_request.set_value (true);
 			}
 
 			public async void ensure_dispose_called () {
