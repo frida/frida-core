@@ -250,8 +250,9 @@ namespace Frida.Agent {
 			} catch (GLib.Error e) {
 #if ANDROID
 				error ("Oops, SELinux rule probably missing for your system. Symptom: %s", e.message);
+#else
+				error ("%s", e.message);
 #endif
-				assert_not_reached ();
 			}
 
 			main_loop.quit ();
