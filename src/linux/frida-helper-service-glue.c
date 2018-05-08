@@ -1452,6 +1452,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   cw.pc = remote_address + params->code.offset + worker_offset;
 
   gum_thumb_writer_put_push_regs (&cw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_LR);
+  EMIT_STACK_ADJUSTMENT (3);
 
   EMIT_MOVE (R6, R0);
 
@@ -1570,6 +1571,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       1,
       ARG_REG (R7));
 
+  EMIT_STACK_ADJUSTMENT (-3);
   gum_thumb_writer_put_pop_regs (&cw, 5, ARM_REG_R4, ARM_REG_R5, ARM_REG_R6, ARM_REG_R7, ARM_REG_PC);
 
   frida_inject_instance_commit_arm_code (&cw, code);
