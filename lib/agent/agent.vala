@@ -248,6 +248,9 @@ namespace Frida.Agent {
 				fork_parent_pid = Posix.getpid ();
 				fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
 			} catch (GLib.Error e) {
+#if ANDROID
+				error ("Oops, SELinux rule probably missing for your system. Symptom: %s", e.message);
+#endif
 				assert_not_reached ();
 			}
 
