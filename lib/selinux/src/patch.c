@@ -50,7 +50,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
   { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
   { { "domain", NULL }, "zygote_exec", "file", { "execute", NULL } },
-  { { "domain", NULL }, "su", "unix_stream_socket", { "connectto", "read", "write", "getattr", "getopt", NULL } },
+  { { "domain", NULL }, "$self", "unix_stream_socket", { "connectto", "read", "write", "getattr", "getopt", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
   { { "zygote", NULL }, "shell", "process", { "sigchld", NULL } },
 };
@@ -308,6 +308,7 @@ static avtab_datum_t *
 frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gchar * c, const gchar * p, GError ** error)
 {
   type_datum_t * source, * target;
+  gchar * self_type = NULL;
   class_datum_t * klass;
   perm_datum_t * perm;
   avtab_key_t key;
@@ -321,7 +322,27 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
     return NULL;
   }
 
+  if (strcmp (t, "$self") == 0)
+  {
+    char * self_context;
+    gchar ** tokens;
+
+    getcon (&self_context);
+
+    tokens = g_strsplit (self_context, ":", 4);
+
+    self_type = g_strdup (tokens[2]);
+    t = self_type;
+
+    g_strfreev (tokens);
+
+    freecon (self_context);
+  }
+
   target = hashtab_search (db->p_types.table, (char *) t);
+
+  g_free (self_type);
+
   if (target == NULL)
   {
     g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "target type %s does not exist", t);
