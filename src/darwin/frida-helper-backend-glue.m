@@ -2130,21 +2130,12 @@ static void
 frida_spawn_instance_free (FridaSpawnInstance * instance)
 {
   task_t self_task;
-  mach_port_t port;
   FridaExceptionPortSet * previous_ports;
   mach_msg_type_number_t port_index;
 
   self_task = mach_task_self ();
 
-  port = instance->pending_request.Head.msgh_remote_port;
-  if (port != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, port);
-  port = instance->pending_request.thread.name;
-  if (port != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, port);
-  port = instance->pending_request.task.name;
-  if (port != MACH_PORT_NULL)
-    mach_port_deallocate (self_task, port);
+  mach_msg_destroy (&instance->pending_request.Head);
 
   previous_ports = &instance->previous_ports;
   for (port_index = 0; port_index != previous_ports->count; port_index++)
@@ -2177,6 +2168,8 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
     if (error == NULL)
     {
       _frida_darwin_helper_backend_resume_process (self->backend, task, &error);
+
+      mach_port_deallocate (mach_task_self (), task);
     }
 
     g_clear_error (&error);
@@ -2191,11 +2184,12 @@ static void
 frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
 {
   __Request__exception_raise_state_identity_t * request = &self->pending_request;
-  mach_msg_header_t * header;
+  mach_msg_header_t * header = &request->Head;
   kern_return_t kr;
 
+  mach_msg_destroy (header);
+
   bzero (request, sizeof (*request));
-  header = &request->Head;
   header->msgh_size = sizeof (*request);
   header->msgh_local_port = self->server_port;
   kr = mach_msg_receive (header);
