@@ -40,11 +40,8 @@ frida_test_environment_init (int * args_length1, char *** args)
 #if DEBUG_HEAP_LEAKS
   g_setenv ("G_SLICE", "always-malloc", TRUE);
 #endif
-  glib_init ();
-  gio_init ();
+  frida_init_with_runtime (FRIDA_RUNTIME_GLIB);
   g_test_init (args_length1, args, NULL);
-  gum_init ();
-  frida_error_quark (); /* Initialize early so GDBus will pick it up */
 
 #ifdef HAVE_ANDROID
   frida_selinux_patch_policy ();

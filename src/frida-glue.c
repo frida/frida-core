@@ -2,6 +2,7 @@
 
 #include <gum/gum.h>
 
+static FridaRuntime runtime;
 static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
@@ -10,10 +11,25 @@ static gpointer run_main_loop (gpointer data);
 static gboolean dummy_callback (gpointer data);
 static gboolean stop_main_loop (gpointer data);
 
+#ifdef HAVE_GLIB_SCHANNEL_STATIC
+extern void g_io_module_schannel_register (void);
+#endif
+#ifdef HAVE_GLIB_OPENSSL_STATIC
+extern void g_io_module_openssl_register (void);
+#endif
+
 void
 frida_init (void)
 {
+  frida_init_with_runtime (FRIDA_RUNTIME_OTHER);
+}
+
+void
+frida_init_with_runtime (FridaRuntime rt)
+{
   static gsize frida_initialized = FALSE;
+
+  runtime = rt;
 
   g_thread_set_garbage_handler (frida_on_pending_garbage, NULL);
   glib_init ();
@@ -25,9 +41,19 @@ frida_init (void)
   {
     g_set_prgname ("frida");
 
-    main_context = g_main_context_ref (g_main_context_default ());
-    main_loop = g_main_loop_new (main_context, FALSE);
-    main_thread = g_thread_new ("frida-main-loop", run_main_loop, NULL);
+#ifdef HAVE_GLIB_SCHANNEL_STATIC
+    g_io_module_schannel_register ();
+#endif
+#ifdef HAVE_GLIB_OPENSSL_STATIC
+    g_io_module_openssl_register ();
+#endif
+
+    if (runtime == FRIDA_RUNTIME_OTHER)
+    {
+      main_context = g_main_context_ref (g_main_context_default ());
+      main_loop = g_main_loop_new (main_context, FALSE);
+      main_thread = g_thread_new ("frida-main-loop", run_main_loop, NULL);
+    }
 
     g_once_init_leave (&frida_initialized, TRUE);
   }
@@ -36,44 +62,57 @@ frida_init (void)
 void
 frida_unref (gpointer obj)
 {
-  GSource * source;
+  if (runtime == FRIDA_RUNTIME_GLIB)
+  {
+    g_object_unref (obj);
+  }
+  else if (runtime == FRIDA_RUNTIME_OTHER)
+  {
+    GSource * source;
 
-  source = g_idle_source_new ();
-  g_source_set_priority (source, G_PRIORITY_HIGH);
-  g_source_set_callback (source, dummy_callback, obj, g_object_unref);
-  g_source_attach (source, main_context);
-  g_source_unref (source);
+    source = g_idle_source_new ();
+    g_source_set_priority (source, G_PRIORITY_HIGH);
+    g_source_set_callback (source, dummy_callback, obj, g_object_unref);
+    g_source_attach (source, main_context);
+    g_source_unref (source);
+  }
 }
 
 void
 frida_shutdown (void)
 {
-  GSource * source;
+  if (runtime == FRIDA_RUNTIME_OTHER)
+  {
+    GSource * source;
 
-  g_assert (main_loop != NULL);
+    g_assert (main_loop != NULL);
 
-  source = g_idle_source_new ();
-  g_source_set_priority (source, G_PRIORITY_LOW);
-  g_source_set_callback (source, stop_main_loop, NULL, NULL);
-  g_source_attach (source, main_context);
-  g_source_unref (source);
+    source = g_idle_source_new ();
+    g_source_set_priority (source, G_PRIORITY_LOW);
+    g_source_set_callback (source, stop_main_loop, NULL, NULL);
+    g_source_attach (source, main_context);
+    g_source_unref (source);
 
-  g_thread_join (main_thread);
-  main_thread = NULL;
+    g_thread_join (main_thread);
+    main_thread = NULL;
+  }
 }
 
 void
 frida_deinit (void)
 {
-  g_assert (main_loop != NULL);
+  if (runtime == FRIDA_RUNTIME_OTHER)
+  {
+    g_assert (main_loop != NULL);
 
-  if (main_thread != NULL)
-    frida_shutdown ();
+    if (main_thread != NULL)
+      frida_shutdown ();
 
-  g_main_loop_unref (main_loop);
-  main_loop = NULL;
-  g_main_context_unref (main_context);
-  main_context = NULL;
+    g_main_loop_unref (main_loop);
+    main_loop = NULL;
+    g_main_context_unref (main_context);
+    main_context = NULL;
+  }
 
   gio_shutdown ();
   glib_shutdown ();
@@ -84,7 +123,12 @@ frida_deinit (void)
 GMainContext *
 frida_get_main_context (void)
 {
-  return main_context;
+  if (runtime == FRIDA_RUNTIME_GLIB)
+    return g_main_context_get_thread_default ();
+  else if (runtime == FRIDA_RUNTIME_OTHER)
+    return main_context;
+  else
+    g_assert_not_reached ();
 }
 
 void

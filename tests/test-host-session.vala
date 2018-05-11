@@ -35,12 +35,12 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/can-construct-from-xml-document", () => {
-			Fruity.PropertyList.can_construct_from_xml_document ();
+		GLib.Test.add_func ("/HostSession/Fruity/Plist/can-construct-from-xml-document", () => {
+			Fruity.Plist.can_construct_from_xml_document ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Fruity/PropertyList/to-xml-yields-complete-document", () => {
-			Fruity.PropertyList.to_xml_yields_complete_document ();
+		GLib.Test.add_func ("/HostSession/Fruity/Plist/to-xml-yields-complete-document", () => {
+			Fruity.Plist.to_xml_yields_complete_document ();
 		});
 
 		GLib.Test.add_func ("/HostSession/Fruity/backend", () => {
@@ -50,6 +50,11 @@ namespace Frida.HostSessionTest {
 
 		GLib.Test.add_func ("/HostSession/Fruity/large-messages", () => {
 			var h = new Harness ((h) => Fruity.large_messages.begin (h as Harness));
+			h.run ();
+		});
+
+		GLib.Test.add_func ("/HostSession/Fruity/Manual/lockdown", () => {
+			var h = new Harness ((h) => Fruity.Manual.lockdown.begin (h as Harness));
 			h.run ();
 		});
 
@@ -1648,22 +1653,7 @@ namespace Frida.HostSessionTest {
 					printerr ("ERROR: %s\n", e.message);
 				}
 
-				var done = false;
-
-				new Thread<bool> ("input-worker", () => {
-					print ("Hit a key to exit\n");
-					stdin.getc ();
-
-					Idle.add (() => {
-						done = true;
-						return false;
-					});
-
-					return true;
-				});
-
-				while (!done)
-					yield h.process_events ();
+				yield h.prompt_for_key ("Hit a key to exit: ");
 
 				yield device_manager.close ();
 
@@ -2668,7 +2658,76 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
-		namespace PropertyList {
+		namespace Manual {
+
+			private static async void lockdown (Harness h) {
+				if (!GLib.Test.slow ()) {
+					stdout.printf ("<skipping, run in slow mode with iOS device connected> ");
+					h.done ();
+					return;
+				}
+
+				h.disable_timeout ();
+
+				var device_id = "<device-id>";
+				var app_id = "<app-id>";
+
+				var device_manager = new DeviceManager ();
+
+				try {
+					var device = yield device_manager.get_device_by_id (device_id + ":lockdown");
+
+					device.output.connect ((pid, fd, data) => {
+						var chars = data.get_data ();
+						var len = chars.length;
+						if (len == 0) {
+							printerr ("[pid=%u fd=%d EOF]\n", pid, fd);
+							return;
+						}
+
+						var buf = new uint8[len + 1];
+						Memory.copy (buf, chars, len);
+						buf[len] = '\0';
+						string message = (string) buf;
+
+						printerr ("[pid=%u fd=%d OUTPUT] %s", pid, fd, message);
+					});
+
+					var timer = new Timer ();
+
+					printerr ("enumerate_applications()");
+					timer.reset ();
+					var apps = yield device.enumerate_applications ();
+					printerr (" => got %d apps, took %u ms\n", apps.size (), (uint) (timer.elapsed () * 1000.0));
+					if (GLib.Test.verbose ()) {
+						var length = apps.size ();
+						for (int i = 0; i != length; i++) {
+							var app = apps.get (i);
+							printerr ("\t%s\n", app.identifier);
+						}
+					}
+
+					printerr ("spawn()");
+					timer.reset ();
+					var pid = yield device.spawn (app_id);
+					printerr (" => pid=%u, took %u ms\n", pid, (uint) (timer.elapsed () * 1000.0));
+
+					printerr ("resume(pid=%u)", pid);
+					timer.reset ();
+					yield device.resume (pid);
+					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					yield h.prompt_for_key ("Hit a key to exit: ");
+				} catch (GLib.Error e) {
+					printerr ("\nFAIL: %s\n\n", e.message);
+				}
+
+				h.done ();
+			}
+
+		}
+
+		namespace Plist {
 
 			private static void can_construct_from_xml_document () {
 				var xml =
@@ -2692,38 +2751,69 @@ namespace Frida.HostSessionTest {
 					"		<integer>4759</integer>\n" +
 					"		<key>SerialNumber</key>\n" +
 					"		<string>220f889780dda462091a65df48b9b6aedb05490f</string>\n" +
+					"		<key>ExtraBoolTrue</key>\n" +
+					"		<true/>\n" +
+					"		<key>ExtraBoolFalse</key>\n" +
+					"		<false/>\n" +
+					"		<key>ExtraData</key>\n" +
+					"		<data>AQID</data>\n" +
+					"		<key>ExtraStrings</key>\n" +
+					"		<array>\n" +
+					"			<string>A</string>\n" +
+					"			<string>B</string>\n" +
+					"		</array>\n" +
 					"	</dict>\n" +
 					"</dict>\n" +
 					"</plist>\n";
 				try {
-					var plist = new Frida.Fruity.PropertyList.from_xml (xml);
-					var plist_keys = plist.get_keys ();
-					assert_true (plist_keys.length == 3);
-					assert_true (plist.get_int ("DeviceID") == 2);
+					var plist = new Frida.Fruity.Plist.from_xml (xml);
+					assert_true (plist.size == 3);
+					assert_true (plist.get_integer ("DeviceID") == 2);
 					assert_true (plist.get_string ("MessageType") == "Attached");
 
-					var proplist = plist.get_plist ("Properties");
-					var proplist_keys = proplist.get_keys ();
-					assert_true (proplist_keys.length == 5);
-					assert_true (proplist.get_string ("ConnectionType") == "USB");
-					assert_true (proplist.get_int ("DeviceID") == 2);
-					assert_true (proplist.get_int ("LocationID") == 0);
-					assert_true (proplist.get_int ("ProductID") == 4759);
-					assert_true (proplist.get_string ("SerialNumber") == "220f889780dda462091a65df48b9b6aedb05490f");
-				} catch (IOError e) {
+					var properties = plist.get_dict ("Properties");
+					assert_true (properties.size == 9);
+					assert_true (properties.get_string ("ConnectionType") == "USB");
+					assert_true (properties.get_integer ("DeviceID") == 2);
+					assert_true (properties.get_integer ("LocationID") == 0);
+					assert_true (properties.get_integer ("ProductID") == 4759);
+					assert_true (properties.get_string ("SerialNumber") == "220f889780dda462091a65df48b9b6aedb05490f");
+
+					assert_true (properties.get_boolean ("ExtraBoolTrue") == true);
+					assert_true (properties.get_boolean ("ExtraBoolFalse") == false);
+
+					var extra_data = properties.get_bytes ("ExtraData");
+					assert_true (extra_data.length == 3);
+					assert_true (extra_data[0] == 0x01);
+					assert_true (extra_data[1] == 0x02);
+					assert_true (extra_data[2] == 0x03);
+
+					var extra_strings = properties.get_array ("ExtraStrings");
+					assert_true (extra_strings.length == 2);
+					assert_true (extra_strings.get_string (0) == "A");
+					assert_true (extra_strings.get_string (1) == "B");
+				} catch (Frida.Fruity.PlistError e) {
+					printerr ("%s\n", e.message);
 					assert_not_reached ();
 				}
 			}
 
 			private static void to_xml_yields_complete_document () {
-				var plist = new Frida.Fruity.PropertyList ();
+				var plist = new Frida.Fruity.Plist ();
 				plist.set_string ("MessageType", "Detached");
-				plist.set_int ("DeviceID", 2);
+				plist.set_integer ("DeviceID", 2);
 
-				var proplist = new Frida.Fruity.PropertyList ();
-				proplist.set_string ("ConnectionType", "USB");
-				proplist.set_int ("DeviceID", 2);
-				plist.set_plist ("Properties", proplist);
+				var properties = new Frida.Fruity.PlistDict ();
+				properties.set_string ("ConnectionType", "USB");
+				properties.set_integer ("DeviceID", 2);
+				properties.set_boolean ("ExtraBoolTrue", true);
+				properties.set_boolean ("ExtraBoolFalse", false);
+				properties.set_bytes ("ExtraData", new Bytes ({ 0x01, 0x02, 0x03 }));
+				var extra_strings = new Frida.Fruity.PlistArray ();
+				extra_strings.add_string ("A");
+				extra_strings.add_string ("B");
+				properties.set_array ("ExtraStrings", extra_strings);
+				plist.set_dict ("Properties", properties);
 
 				var actual_xml = plist.to_xml ();
 				var expected_xml =
@@ -2741,6 +2831,17 @@ namespace Frida.HostSessionTest {
 					"		<string>USB</string>\n" +
 					"		<key>DeviceID</key>\n" +
 					"		<integer>2</integer>\n" +
+					"		<key>ExtraBoolFalse</key>\n" +
+					"		<false/>\n" +
+					"		<key>ExtraBoolTrue</key>\n" +
+					"		<true/>\n" +
+					"		<key>ExtraData</key>\n" +
+					"		<data>AQID</data>\n" +
+					"		<key>ExtraStrings</key>\n" +
+					"		<array>\n" +
+					"			<string>A</string>\n" +
+					"			<string>B</string>\n" +
+					"		</array>\n" +
 					"	</dict>\n" +
 					"</dict>\n" +
 					"</plist>\n";
@@ -2861,6 +2962,31 @@ namespace Frida.HostSessionTest {
 		public HostSessionProvider first_provider () {
 			assert_true (available_providers.size >= 1);
 			return available_providers[0];
+		}
+
+		public async char prompt_for_key (string message) {
+			char key = 0;
+
+			var done = false;
+
+			new Thread<bool> ("input-worker", () => {
+				stdout.printf ("%s", message);
+				stdout.flush ();
+
+				key = (char) stdin.getc ();
+
+				Idle.add (() => {
+					done = true;
+					return false;
+				});
+
+				return true;
+			});
+
+			while (!done)
+				yield process_events ();
+
+			return key;
 		}
 	}
 }

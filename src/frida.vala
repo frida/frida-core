@@ -1,5 +1,6 @@
 namespace Frida {
 	public extern void init ();
+	public extern void init_with_runtime (Runtime runtime);
 	public extern void shutdown ();
 	public extern void deinit ();
 	public extern unowned MainContext get_main_context ();
@@ -8,6 +9,11 @@ namespace Frida {
 
 	public extern void version (out uint major, out uint minor, out uint micro, out uint nano);
 	public extern unowned string version_string ();
+
+	public enum Runtime {
+		GLIB,
+		OTHER
+	}
 
 	public class DeviceManager : Object {
 		public signal void added (Device device);

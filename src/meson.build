@@ -275,9 +275,15 @@ tcp_sources = [
 ]
 
 fruity_sources = [
-  'fruity/fruity-client.vala',
   'fruity/fruity-host-session.vala',
-  'fruity/fruity-property-list.vala',
+  'fruity/fruity-remote-provider.vala',
+  'fruity/fruity-lockdown-provider.vala',
+  'fruity/lockdown.vala',
+  'fruity/installation-proxy.vala',
+  'fruity/lldb.vala',
+  'fruity/usbmux.vala',
+  'fruity/plist.vala',
+  'fruity/plist-service.vala',
 ]
 if host_os_family == 'windows'
   fruity_sources += ['fruity/fruity-host-session-windows.c']
@@ -309,7 +315,7 @@ core = library('frida-core', core_sources,
   vala_args: backend_vala_args,
   link_args: backend_libs_private,
   link_with: backend_libs,
-  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep] + backend_deps + internal_deps,
+  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, tls_provider_dep] + backend_deps + internal_deps,
 )
 
 core_dep = declare_dependency(

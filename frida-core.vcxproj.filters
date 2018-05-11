@@ -15,9 +15,8 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
     </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
+    <Filter Include="Header Files\generated">
+      <UniqueIdentifier>{0ddd771d-c7e1-405b-a3e6-a4433e9094db}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\windows">
       <UniqueIdentifier>{28f8e0ab-f994-4a5b-b62b-edcdcb9d0c34}</UniqueIdentifier>
@@ -25,11 +24,11 @@
     <Filter Include="Source Files\generated\windows">
       <UniqueIdentifier>{21f538e1-a14f-441b-9e2e-7303c1465c5b}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\droidy">
-      <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25618}</UniqueIdentifier>
+    <Filter Include="Source Files\tcp">
+      <UniqueIdentifier>{d4552ab5-00ec-4394-bf75-666ac4f869a1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\droidy">
-      <UniqueIdentifier>{2d5a13f8-9bcb-4d70-9f8a-9597707fc770}</UniqueIdentifier>
+    <Filter Include="Source Files\generated\tcp">
+      <UniqueIdentifier>{620f3726-c7dd-4d6f-8f54-ad08f2ff594a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\fruity">
       <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25619}</UniqueIdentifier>
@@ -37,166 +36,187 @@
     <Filter Include="Source Files\generated\fruity">
       <UniqueIdentifier>{2d5a13f8-9bcb-4d70-9f8a-9597707fc771}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\lib">
-      <UniqueIdentifier>{0913e432-8baa-452f-a325-f5ae232acab1}</UniqueIdentifier>
+    <Filter Include="Source Files\droidy">
+      <UniqueIdentifier>{7c397a46-f5dd-401d-b3c8-423615a25618}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\lib\interfaces">
-      <UniqueIdentifier>{9729c4b0-4b37-4674-8f1b-8ff9601ef6f3}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\lib\agent">
-      <UniqueIdentifier>{9729c4b0-4b37-4674-8f1b-8ff9601ef6f4}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\generated\lib">
-      <UniqueIdentifier>{a0a6f4ce-c998-4406-81db-1b78adc3ab04}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\generated\lib\interfaces">
-      <UniqueIdentifier>{e0ca1c8c-d387-4bef-b6a6-d6c571db2eee}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\generated\lib\agent">
-      <UniqueIdentifier>{e0ca1c8c-d387-4bef-b6a6-d6c571db2eef}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\generated">
-      <UniqueIdentifier>{0ddd771d-c7e1-405b-a3e6-a4433e9094db}</UniqueIdentifier>
+    <Filter Include="Source Files\generated\droidy">
+      <UniqueIdentifier>{2d5a13f8-9bcb-4d70-9f8a-9597707fc770}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\generated\data">
       <UniqueIdentifier>{e441c3c0-5949-44e4-8617-0483732946e8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\tcp">
-      <UniqueIdentifier>{620f3726-c7dd-4d6f-8f54-ad08f2ff594a}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\tcp">
-      <UniqueIdentifier>{d4552ab5-00ec-4394-bf75-666ac4f869a1}</UniqueIdentifier>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
     <Filter Include="Resource Files\windows">
       <UniqueIdentifier>{c619adbc-c722-4220-8c57-9d40ce4e94ee}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="src\windows\winjector.vala">
-      <Filter>Source Files\windows</Filter>
-    </None>
-    <None Include="src\droidy\droidy-host-session.vala">
-      <Filter>Source Files\droidy</Filter>
-    </None>
-    <None Include="src\fruity\fruity-host-session.vala">
-      <Filter>Source Files\fruity</Filter>
-    </None>
-    <None Include="src\windows\windows-host-session.vala">
-      <Filter>Source Files\windows</Filter>
-    </None>
-    <None Include="src\tcp\tcp-host-session.vala">
-      <Filter>Source Files\tcp</Filter>
-    </None>
-    <None Include="src\droidy\droidy-client.vala">
-      <Filter>Source Files\droidy</Filter>
-    </None>
-    <None Include="src\fruity\fruity-client.vala">
-      <Filter>Source Files\fruity</Filter>
-    </None>
-    <None Include="src\fruity\fruity-property-list.vala">
-      <Filter>Source Files\fruity</Filter>
-    </None>
-    <None Include="src\host-session-service.vala">
+    <CustomBuild Include="src\windows\winjector.resources">
+      <Filter>Resource Files\windows</Filter>
+    </CustomBuild>
+    <CustomBuild Include="src\agent.resources">
+      <Filter>Resource Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="src\frida.vala">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+    <None Include="src\debugger.vala">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="src\debugger.vala">
+    <None Include="src\host-session-service.vala">
       <Filter>Source Files</Filter>
     </None>
     <None Include="src\agent-container.vala">
       <Filter>Source Files</Filter>
     </None>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="$(IntDir)src\host-session-service.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\windows\winjector.c">
-      <Filter>Source Files\generated\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="src\windows\windows-host-session-glue.c">
+    <None Include="src\system.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\windows\windows-host-session.vala">
       <Filter>Source Files\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\droidy\droidy-host-session.c">
-      <Filter>Source Files\generated\droidy</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\fruity\fruity-host-session.c">
-      <Filter>Source Files\generated\fruity</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\windows\windows-host-session.c">
-      <Filter>Source Files\generated\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\system.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)data\frida-data-agent.c">
-      <Filter>Source Files\generated\data</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)data\frida-data-winjector.c">
-      <Filter>Source Files\generated\data</Filter>
-    </ClCompile>
-    <ClCompile Include="src\fruity\fruity-host-session-windows.c">
+    </None>
+    <None Include="src\windows\winjector.vala">
+      <Filter>Source Files\windows</Filter>
+    </None>
+    <None Include="src\windows\winjector-types.vala">
+      <Filter>Source Files\windows</Filter>
+    </None>
+    <None Include="src\tcp\tcp-host-session.vala">
+      <Filter>Source Files\tcp</Filter>
+    </None>
+    <None Include="src\fruity\fruity-host-session.vala">
       <Filter>Source Files\fruity</Filter>
-    </ClCompile>
-    <ClCompile Include="src\windows\winjector-glue.c">
-      <Filter>Source Files\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\tcp\tcp-host-session.c">
-      <Filter>Source Files\generated\tcp</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\droidy\droidy-client.c">
-      <Filter>Source Files\generated\droidy</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\fruity\fruity-client.c">
-      <Filter>Source Files\generated\fruity</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\fruity\fruity-property-list.c">
-      <Filter>Source Files\generated\fruity</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\frida.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\debugger.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\windows\winjector-types.c">
-      <Filter>Source Files\generated\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="src\windows\system-windows.c">
-      <Filter>Source Files\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="src\windows\icon-helpers.c">
-      <Filter>Source Files\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="src\frida-glue.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\windows\access-helpers.c">
-      <Filter>Source Files\windows</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\agent-container.c">
-      <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="src\windows\winjector.resources">
-      <Filter>Resource Files\windows</Filter>
-    </CustomBuild>
-    <CustomBuild Include="src\frida.vala">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
-    <CustomBuild Include="src\agent.resources">
-      <Filter>Resource Files</Filter>
-    </CustomBuild>
+    </None>
+    <None Include="src\fruity\fruity-remote-provider.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\fruity-lockdown-provider.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\lockdown.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\installation-proxy.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\lldb.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\usbmux.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\plist.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\plist-service.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\droidy\droidy-host-session.vala">
+      <Filter>Source Files\droidy</Filter>
+    </None>
+    <None Include="src\droidy\droidy-client.vala">
+      <Filter>Source Files\droidy</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(IntDir)frida-core.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
-    <ClInclude Include="src\windows\icon-helpers.h">
+    <ClCompile Include="$(IntDir)src\frida.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\frida-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\debugger.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\host-session-service.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\agent-container.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\system.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\windows\windows-host-session.c">
+      <Filter>Source Files\generated\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\windows\windows-host-session-glue.c">
       <Filter>Source Files\windows</Filter>
-    </ClInclude>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\windows\winjector.c">
+      <Filter>Source Files\generated\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\windows\winjector-glue.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\windows\winjector-types.c">
+      <Filter>Source Files\generated\windows</Filter>
+    </ClCompile>
     <ClInclude Include="src\windows\access-helpers.h">
       <Filter>Source Files\windows</Filter>
     </ClInclude>
+    <ClCompile Include="src\windows\access-helpers.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClInclude Include="src\windows\icon-helpers.h">
+      <Filter>Source Files\windows</Filter>
+    </ClInclude>
+    <ClCompile Include="src\windows\icon-helpers.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\windows\system-windows.c">
+      <Filter>Source Files\windows</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\tcp\tcp-host-session.c">
+      <Filter>Source Files\generated\tcp</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\fruity-host-session.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\fruity\fruity-host-session-windows.c">
+      <Filter>Source Files\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\fruity-remote-provider.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\fruity-lockdown-provider.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\lockdown.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\installation-proxy.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\lldb.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\usbmux.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\plist.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\plist-service.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\droidy-host-session.c">
+      <Filter>Source Files\generated\droidy</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\droidy-client.c">
+      <Filter>Source Files\generated\droidy</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\frida-data-winjector.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)data\frida-data-agent.c">
+      <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
