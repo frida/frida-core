@@ -23,6 +23,12 @@ static void extract_icons_from_image (NSImage * image, FridaImageData * small_ic
 
 static void extract_icons_from_identifier (NSString * identifier, FridaImageData * small_icon, FridaImageData * large_icon);
 
+extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
+
+#endif
+
+#ifndef PROC_PIDPATHINFO_MAXSIZE
+# define PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN)
 #endif
 
 typedef struct _FridaIconPair FridaIconPair;
@@ -239,14 +245,10 @@ frida_system_enumerate_processes (int * result_length)
       else
 #endif
       {
-#ifdef HAVE_MACOS
         gchar path[PROC_PIDPATHINFO_MAXSIZE];
 
         proc_pidpath (info->_pid, path, sizeof (path));
         info->_name = g_path_get_basename (path);
-#else
-        info->_name = g_strdup (e->kp_proc.p_comm);
-#endif
 
         frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
         frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
