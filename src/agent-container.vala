@@ -32,12 +32,14 @@ namespace Frida {
 			}
 			container.transport = transport;
 
+			var stream_request = Pipe.open (transport.local_address);
+
 			container.start_worker_thread ();
 
 			DBusConnection connection;
 			AgentSessionProvider provider;
 			try {
-				var stream = yield Pipe.open (transport.local_address).future.wait_async ();
+				var stream = yield stream_request.future.wait_async ();
 
 				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS);
 
