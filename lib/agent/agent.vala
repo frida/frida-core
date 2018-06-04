@@ -1189,7 +1189,7 @@ namespace Frida.Agent {
 			var interceptor = Gum.Interceptor.obtain ();
 
 #if WINDOWS
-			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessW"), this);
+			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW"), this);
 #else
 			var libc_name = detect_libc_name ();
 #if DARWIN
@@ -1302,15 +1302,15 @@ namespace Frida.Agent {
 		private void on_enter (Gum.InvocationContext context) {
 			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
 
-			invocation.application_name = (string16?) context.get_nth_argument (0);
-			invocation.command_line = (string16?) context.get_nth_argument (1);
+			invocation.application_name = (string16?) context.get_nth_argument (1);
+			invocation.command_line = (string16?) context.get_nth_argument (2);
 
-			invocation.creation_flags = (uint32) context.get_nth_argument (5);
-			context.replace_nth_argument (5, (void *) (invocation.creation_flags | CreateProcessFlags.CREATE_SUSPENDED));
+			invocation.creation_flags = (uint32) context.get_nth_argument (6);
+			context.replace_nth_argument (6, (void *) (invocation.creation_flags | CreateProcessFlags.CREATE_SUSPENDED));
 
-			invocation.environment = context.get_nth_argument (6);
+			invocation.environment = context.get_nth_argument (7);
 
-			invocation.process_info = context.get_nth_argument (9);
+			invocation.process_info = context.get_nth_argument (10);
 		}
 
 		private void on_leave (Gum.InvocationContext context) {
