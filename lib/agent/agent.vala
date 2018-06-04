@@ -1189,7 +1189,7 @@ namespace Frida.Agent {
 			var interceptor = Gum.Interceptor.obtain ();
 
 #if WINDOWS
-			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessW"), this);
+			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW"), this);
 #else
 			var libc_name = detect_libc_name ();
 #if DARWIN
