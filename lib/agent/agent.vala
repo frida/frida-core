@@ -1331,7 +1331,7 @@ namespace Frida.Agent {
 					path = invocation.application_name.to_utf8 ();
 
 				if (invocation.command_line != null) {
-					Shell.parse_argv (invocation.command_line.to_utf8 (), out argv);
+					Shell.parse_argv (invocation.command_line.to_utf8 ().replace ("\\", "\\\\"), out argv);
 					if (path == null)
 						path = argv[0];
 				} else {
