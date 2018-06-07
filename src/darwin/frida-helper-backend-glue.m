@@ -105,10 +105,12 @@ struct _FridaSpawnInstance
   mach_vm_address_t lib_name;
   mach_vm_address_t fake_helpers;
   mach_vm_address_t dyld_data;
+  gboolean need_helpers;
   GumAddress modern_entry_address;
   GumAddress dlopen_address;
   GumAddress info_address;
   GumAddress register_helpers_address;
+  GumAddress dlerror_clear_address;
   GumAddress helpers_ptr_address;
   GumAddress ret_gadget;
   mach_port_t task;
@@ -1413,7 +1415,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  GumAddress legacy_entry_address, modern_entry_address, launch_with_closure_address, dlerror_clear_address;
+  gboolean need_helpers;
+  GumAddress legacy_entry_address, modern_entry_address, launch_with_closure_address;
   GumDarwinModule * dyld;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
@@ -1470,6 +1473,9 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    * - At the end of dlopen() we finally deallocate our fake helpers (because now they've
    *   been replaced by real libSystem ones) and the string we used as a parameter for dlopen.
    *
+   * Also, starting with Mojave and iOS 12 the dlopen() symbol is gone and we have to use
+   * dlopen_internal(). There is also no need to registerThreadHelpers() anymore.
+   *
    * Then later when resume() is called:
    * - Send a response to the message we got on our exception port, so the
    *   kernel considers it handled and resumes the main thread for us.
@@ -1524,26 +1530,41 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header);
 
+  need_helpers = TRUE;
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
-
   modern_entry_address = 0;
+
   launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_");
+  if (launch_with_closure_address == 0)
+  {
+    gboolean system_is_at_least_mojave_or_ios12;
+
+    launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_");
+
+    system_is_at_least_mojave_or_ios12 = launch_with_closure_address != 0;
+    if (system_is_at_least_mojave_or_ios12)
+      need_helpers = FALSE;
+  }
+
   if (launch_with_closure_address != 0)
   {
     modern_entry_address = frida_find_run_initializers_call (task, instance->cpu_type, launch_with_closure_address);
   }
+
+  instance->need_helpers = need_helpers;
   instance->modern_entry_address = modern_entry_address;
 
   instance->dlopen_address = gum_darwin_module_resolve_symbol_address (dyld, "_dlopen");
+  if (instance->dlopen_address == 0)
+    instance->dlopen_address = gum_darwin_module_resolve_symbol_address (dyld, "_dlopen_internal");
   instance->register_helpers_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE");
-  dlerror_clear_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12dlerrorClearv");
+  instance->dlerror_clear_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZL12dlerrorClearv");
   instance->info_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld12gProcessInfoE");
   instance->helpers_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld17gLibSystemHelpersE");
 
   g_object_unref (dyld);
 
-  if (legacy_entry_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0
-      || dlerror_clear_address == 0 || instance->info_address == 0)
+  if (legacy_entry_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0 || instance->info_address == 0)
     goto dyld_probe_failed;
 
   if (instance->cpu_type == GUM_CPU_ARM)
@@ -1571,8 +1592,11 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     frida_set_nth_hardware_breakpoint (&instance->breakpoint_debug_state, 1, modern_entry_address, instance->cpu_type);
   }
 
-  memcpy (&instance->dlerror_clear_debug_state, &instance->previous_debug_state, sizeof (instance->previous_debug_state));
-  frida_set_nth_hardware_breakpoint (&instance->dlerror_clear_debug_state, 0, dlerror_clear_address, instance->cpu_type);
+  if (instance->dlerror_clear_address != 0)
+  {
+    memcpy (&instance->dlerror_clear_debug_state, &instance->previous_debug_state, sizeof (instance->previous_debug_state));
+    frida_set_nth_hardware_breakpoint (&instance->dlerror_clear_debug_state, 0, instance->dlerror_clear_address, instance->cpu_type);
+  }
 
   memcpy (&instance->ret_gadget_debug_state, &instance->previous_debug_state, sizeof (instance->previous_debug_state));
   frida_set_nth_hardware_breakpoint (&instance->ret_gadget_debug_state, 0, instance->ret_gadget & ~1, instance->cpu_type);
@@ -2441,7 +2465,10 @@ frida_spawn_instance_on_server_recv (void * context)
       pc = state.ts_32.__pc;
 #endif
 
-    self->breakpoint_phase = (pc == self->modern_entry_address) ? FRIDA_BREAKPOINT_CLEANUP : FRIDA_BREAKPOINT_SET_HELPERS;
+    if (pc == self->modern_entry_address)
+      self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+    else
+      self->breakpoint_phase = self->need_helpers ? FRIDA_BREAKPOINT_SET_HELPERS : FRIDA_BREAKPOINT_DLOPEN_LIBC;
   }
 
   switch (self->breakpoint_phase)
@@ -2462,8 +2489,16 @@ frida_spawn_instance_on_server_recv (void * context)
 
       frida_spawn_instance_call_dlopen (self, state, self->lib_name, RTLD_GLOBAL | RTLD_LAZY);
 
-      frida_set_debug_state (self->thread, &self->dlerror_clear_debug_state, self->cpu_type);
-      self->breakpoint_phase = FRIDA_BREAKPOINT_SKIP_CLEAR;
+      if (self->dlerror_clear_address != 0)
+      {
+        frida_set_debug_state (self->thread, &self->dlerror_clear_debug_state, self->cpu_type);
+        self->breakpoint_phase = FRIDA_BREAKPOINT_SKIP_CLEAR;
+      }
+      else
+      {
+        frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
+        self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+      }
 
       frida_spawn_instance_send_breakpoint_response (self);
 
@@ -2618,6 +2653,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     state.uts.ts64.__rip = self->dlopen_address;
     state.uts.ts64.__rdi = lib_name;
     state.uts.ts64.__rsi = mode;
+    state.uts.ts64.__rdx = 0;
 
     state.uts.ts64.__rsp -= 16;
     write_succeeded = gum_darwin_write (self->task, state.uts.ts64.__rsp, (const guint8 *) &current_pc, sizeof (current_pc));
@@ -2625,7 +2661,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
   }
   else
   {
-    guint32 temp[3];
+    guint32 temp[4];
     gboolean write_succeeded;
 
     current_pc = state.uts.ts32.__eip;
@@ -2634,6 +2670,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     temp[0] = current_pc;
     temp[1] = lib_name;
     temp[2] = mode;
+    temp[3] = 0;
     state.uts.ts32.__esp -= 16;
     write_succeeded = gum_darwin_write (self->task, state.uts.ts32.__esp, (const guint8 *) &temp, sizeof (temp));
     g_assert (write_succeeded);
@@ -2646,6 +2683,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     state.ts_64.__lr = current_pc;
     state.ts_64.__x[0] = lib_name;
     state.ts_64.__x[1] = mode;
+    state.ts_64.__x[2] = 0;
   }
   else
   {
@@ -2654,6 +2692,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     state.ts_32.__lr = current_pc | 1;
     state.ts_32.__r[0] = lib_name;
     state.ts_32.__r[1] = mode;
+    state.ts_32.__r[2] = 0;
   }
 #endif
 
