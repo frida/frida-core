@@ -157,6 +157,7 @@ namespace Frida.Gadget {
 			private enum State {
 				CREATED,
 				LOADED,
+				DISPOSED,
 				UNLOADED,
 				DESTROYED
 			}
@@ -205,7 +206,11 @@ namespace Frida.Gadget {
 
 				yield ensure_dispose_called ();
 
-				yield script.unload ();
+				if (state == DISPOSED) {
+					yield script.unload ();
+
+					state = UNLOADED;
+				}
 
 				script.weak_ref (() => {
 					var source = new IdleSource ();
@@ -243,7 +248,7 @@ namespace Frida.Gadget {
 					} catch (Error e) {
 					}
 
-					state = UNLOADED;
+					state = DISPOSED;
 				}
 
 				dispose_request.set_value (true);
