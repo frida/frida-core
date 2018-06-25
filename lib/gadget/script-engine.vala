@@ -98,7 +98,7 @@ namespace Frida.Gadget {
 			var instance = instances[sid.handle];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			yield instance.script.load ();
+			yield instance.load ();
 		}
 
 		public void post_to_script (AgentScriptId sid, string message, Bytes? data = null) throws Error {
@@ -152,6 +152,16 @@ namespace Frida.Gadget {
 			}
 			private Gum.Script _script;
 
+			private State state = CREATED;
+
+			private enum State {
+				CREATED,
+				LOADED,
+				UNLOADED,
+				DESTROYED
+			}
+
+			private Gee.Promise<bool> load_request;
 			private Gee.Promise<bool> destroy_request;
 			private Gee.Promise<bool> dispose_request;
 
@@ -160,6 +170,24 @@ namespace Frida.Gadget {
 
 			public ScriptInstance (AgentScriptId sid, Gum.Script script) {
 				Object (sid: sid, script: script);
+			}
+
+			public async void load () {
+				if (load_request != null) {
+					try {
+						yield load_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+					return;
+				}
+				load_request = new Gee.Promise<bool> ();
+
+				yield script.load ();
+
+				state = LOADED;
+
+				load_request.set_value (true);
 			}
 
 			public async void destroy () {
@@ -190,6 +218,8 @@ namespace Frida.Gadget {
 				script = null;
 				yield;
 
+				state = DESTROYED;
+
 				destroy_request.set_value (true);
 			}
 
@@ -204,9 +234,16 @@ namespace Frida.Gadget {
 				}
 				dispose_request = new Gee.Promise<bool> ();
 
-				try {
-					yield call ("dispose", new Json.Node[] {});
-				} catch (Error e) {
+				if (load_request != null)
+					yield load ();
+
+				if (state == LOADED) {
+					try {
+						yield call ("dispose", new Json.Node[] {});
+					} catch (Error e) {
+					}
+
+					state = UNLOADED;
 				}
 
 				dispose_request.set_value (true);
