@@ -30,7 +30,7 @@ namespace Frida {
 		}
 
 		public HostSessionProviderKind kind {
-			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
+			get { return HostSessionProviderKind.LOCAL; }
 		}
 
 		private QnxHostSession host_session;

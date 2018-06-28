@@ -118,9 +118,9 @@ namespace Frida {
 	}
 
 	public enum HostSessionProviderKind {
-		LOCAL_SYSTEM,
-		LOCAL_TETHER,
-		REMOTE_SYSTEM
+		LOCAL,
+		REMOTE,
+		USB
 	}
 
 	public interface HostSessionBackend : Object {

@@ -31,7 +31,7 @@ namespace Frida {
 		private Image? _icon;
 
 		public HostSessionProviderKind kind {
-			get { return HostSessionProviderKind.LOCAL_SYSTEM; }
+			get { return HostSessionProviderKind.LOCAL; }
 		}
 
 		private WindowsHostSession host_session;

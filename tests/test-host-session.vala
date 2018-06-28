@@ -293,7 +293,7 @@ namespace Frida.HostSessionTest {
 			}
 
 			public HostSessionProviderKind kind {
-				get { return HostSessionProviderKind.LOCAL_SYSTEM; }
+				get { return HostSessionProviderKind.LOCAL; }
 			}
 
 			public async HostSession create (string? location = null) throws Error {

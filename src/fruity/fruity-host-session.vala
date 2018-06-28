@@ -151,7 +151,7 @@ namespace Frida {
 		private Image? _icon = null;
 
 		public HostSessionProviderKind kind {
-			get { return HostSessionProviderKind.LOCAL_TETHER; }
+			get { return HostSessionProviderKind.USB; }
 		}
 
 		public FruityHostSessionBackend backend {

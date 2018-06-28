@@ -211,7 +211,7 @@ namespace Frida {
 			if (tcp_provider == null)
 				throw new Error.NOT_SUPPORTED ("TCP backend not available");
 
-			var device = new Device (this, id, host, HostSessionProviderKind.REMOTE_SYSTEM, tcp_provider, host);
+			var device = new Device (this, id, host, HostSessionProviderKind.REMOTE, tcp_provider, host);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -441,14 +441,14 @@ namespace Frida {
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			DeviceType dtype;
 			switch (kind) {
-				case HostSessionProviderKind.LOCAL_SYSTEM:
+				case HostSessionProviderKind.LOCAL:
 					dtype = DeviceType.LOCAL;
 					break;
-				case HostSessionProviderKind.LOCAL_TETHER:
-					dtype = DeviceType.TETHER;
-					break;
-				case HostSessionProviderKind.REMOTE_SYSTEM:
+				case HostSessionProviderKind.REMOTE:
 					dtype = DeviceType.REMOTE;
+					break;
+				case HostSessionProviderKind.USB:
+					dtype = DeviceType.USB;
 					break;
 				default:
 					assert_not_reached ();
@@ -1267,8 +1267,8 @@ namespace Frida {
 
 	public enum DeviceType {
 		LOCAL,
-		TETHER,
-		REMOTE
+		REMOTE,
+		USB
 	}
 
 	public class ApplicationList : Object {
