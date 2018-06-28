@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession11")]
+	[DBus (name = "re.frida.HostSession12")]
 	public interface HostSession : Object {
 		public abstract async HostApplicationInfo get_frontmost_application () throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
@@ -26,7 +26,7 @@ namespace Frida {
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
-	[DBus (name = "re.frida.AgentSessionProvider11")]
+	[DBus (name = "re.frida.AgentSessionProvider12")]
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id) throws GLib.Error;
 		public abstract async void unload () throws GLib.Error;
@@ -36,7 +36,7 @@ namespace Frida {
 		public signal void child_gating_changed (uint subscriber_count);
 	}
 
-	[DBus (name = "re.frida.AgentSession11")]
+	[DBus (name = "re.frida.AgentSession12")]
 	public interface AgentSession : Object {
 		public abstract async void close () throws GLib.Error;
 
@@ -59,7 +59,7 @@ namespace Frida {
 		public abstract async void enable_jit () throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.AgentController11")]
+	[DBus (name = "re.frida.AgentController12")]
 	public interface AgentController : Object {
 #if !WINDOWS
 		public abstract async HostChildId prepare_to_fork (uint parent_pid, out uint parent_injectee_id, out uint child_injectee_id, out GLib.Socket child_socket) throws GLib.Error;
