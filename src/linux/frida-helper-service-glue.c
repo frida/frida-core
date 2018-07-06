@@ -1529,7 +1529,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
         2,
         ARG_REG (R0),
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
-    EMIT_MOV (R3, R0);
+    EMIT_MOVE (R3, R0);
 #endif
     EMIT_LOAD_FIELD (R0, worker_thread);
     EMIT_CALL_REG (R3,
@@ -1750,7 +1750,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
         2,
         ARG_REG (X0),
         ARG_IMM (FRIDA_REMOTE_DATA_FIELD (pthread_detach_string)));
-    EMIT_MOV (X5, X0);
+    EMIT_MOVE (X5, X0);
 #endif
     EMIT_LOAD_FIELD (X0, worker_thread);
     EMIT_CALL_REG (X5,
