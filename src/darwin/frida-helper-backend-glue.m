@@ -1,6 +1,6 @@
 #include "frida-helper-backend.h"
 
-#include <capstone.h>
+#include <capstone/capstone.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <errno.h>
