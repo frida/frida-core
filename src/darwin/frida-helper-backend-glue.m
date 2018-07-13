@@ -2505,7 +2505,8 @@ frida_spawn_instance_on_server_recv (void * context)
   }
 
 #ifndef HAVE_I386
-  if (pc == (self->ret_gadget & ~1)) {
+  if (pc == (self->ret_gadget & ~1))
+  {
     if (self->cpu_type == GUM_CPU_ARM64)
       state.ts_64.__pc = state.ts_64.__lr;
     else
@@ -4104,7 +4105,6 @@ frida_find_next_instruction (mach_port_t task, GumCpuType cpu_type, GumAddress s
 
   return address;
 }
-
 
 static csh
 frida_create_capstone (GumCpuType cpu_type, GumAddress start)
