@@ -572,10 +572,10 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   params.dlclose_impl = frida_resolve_libc_function (pid, "__libc_dlclose");
   params.dlsym_impl = frida_resolve_libc_function (pid, "__libc_dlsym");
 #elif defined (HAVE_UCLIBC)
-  params.dlopen_impl = frida_resolve_linker_address (params->pid, dlopen);
+  params.dlopen_impl = frida_resolve_linker_address (params.pid, dlopen);
   params.dlopen_pic_value = 0;
-  params.dlclose_impl = frida_resolve_linker_address (params->pid, dlclose);
-  params.dlsym_impl = frida_resolve_linker_address (params->pid, dlsym);
+  params.dlclose_impl = frida_resolve_linker_address (params.pid, dlclose);
+  params.dlsym_impl = frida_resolve_linker_address (params.pid, dlsym);
 #elif defined (HAVE_ANDROID)
   params.dlopen_impl = frida_resolve_inner_dlopen (pid, &params.dlopen_pic_value);
   params.dlclose_impl = frida_resolve_linker_address (pid, dlclose);
