@@ -1139,11 +1139,13 @@ Java.perform(function () {
 					"'use strict';" +
 					"var write = new NativeFunction(Module.findExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);" +
 					"var message = Memory.allocUtf8String('Hello stdout');" +
+					"var cout = Memory.readPointer(Module.findExportByName('libc++.1.dylib', '_ZNSt3__14coutE'));" +
+					"var properlyInitialized = !cout.isNull();" +
 					"write(1, message, 12);" +
 					"var sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';" +
 					"Interceptor.attach(Module.findExportByName('libSystem.B.dylib', sleepFuncName), {" +
 					"  onEnter: function (args) {" +
-					"    send({ seconds: args[0].toInt32() });" +
+					"    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });" +
 					"  }" +
 					"});");
 				yield session.load_script (script_id);
@@ -1163,7 +1165,7 @@ Java.perform(function () {
 					yield;
 					waiting = false;
 				}
-				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
+				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60,\"initialized\":true}}");
 				session.disconnect (message_handler);
 
 				yield host_session.kill (pid);
