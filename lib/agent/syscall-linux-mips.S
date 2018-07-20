@@ -42,7 +42,7 @@
 
 ENTRY_PRIVATE(syscall)
   .set noreorder
-  .cpload t9
+  .cpload $t9
   move    $v0, $a0
   move    $a0, $a1
   move    $a1, $a2
