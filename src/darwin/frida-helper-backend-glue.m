@@ -35,6 +35,7 @@
 
 #define FRIDA_PSR_THUMB                  0x20
 #define FRIDA_MAX_BREAKPOINTS 4
+#define FRIDA_MAX_PAGE_POOL 8
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
@@ -55,6 +56,7 @@ typedef struct _FridaSpawnInstanceDyldData FridaSpawnInstanceDyldData;
 typedef guint FridaBreakpointPhase;
 typedef guint FridaBreakpointRepeat;
 typedef struct _FridaBreakpoint FridaBreakpoint;
+typedef struct _FridaPagePoolEntry FridaPagePoolEntry;
 typedef struct _FridaInjectInstance FridaInjectInstance;
 typedef struct _FridaInjectPayloadLayout FridaInjectPayloadLayout;
 typedef struct _FridaAgentDetails FridaAgentDetails;
@@ -103,6 +105,12 @@ struct _FridaBreakpoint
   guint32 original;
 };
 
+struct _FridaPagePoolEntry
+{
+  GumAddress page_start;
+  GumAddress scratch_page;
+};
+
 struct _FridaSpawnInstance
 {
   FridaDarwinHelperBackend * backend;
@@ -120,8 +128,8 @@ struct _FridaSpawnInstance
 
   FridaBreakpointPhase breakpoint_phase;
   FridaBreakpoint breakpoints[FRIDA_MAX_BREAKPOINTS];
+  FridaPagePoolEntry page_pool[FRIDA_MAX_PAGE_POOL];
   gint single_stepping;
-  GHashTable * page_pool;
   mach_vm_address_t lib_name;
   mach_vm_address_t fake_helpers;
   mach_vm_address_t fake_error_buf;
@@ -2243,8 +2251,11 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
     instance->breakpoints[i].repeat = FRIDA_BREAKPOINT_REPEAT_NEVER;
   }
 
-  if (_frida_darwin_no_hardware_breakpoints ())
-    instance->page_pool = g_hash_table_new (NULL, NULL);
+  for (i = 0; i != FRIDA_MAX_PAGE_POOL; i++)
+  {
+    instance->page_pool[i].page_start = 0;
+    instance->page_pool[i].scratch_page = 0;
+  }
 
   return instance;
 }
@@ -2275,9 +2286,6 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
-
-  if (instance->page_pool != NULL)
-    g_hash_table_unref (instance->page_pool);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -2770,10 +2778,12 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     case FRIDA_BREAKPOINT_CLEANUP:
     {
       task_t self_task;
+      gsize page_size;
       FridaExceptionPortSet * previous_ports;
       mach_msg_type_number_t port_index;
       guint i;
 
+      page_size = getpagesize ();
       self_task = mach_task_self ();
 
       previous_ports = &self->previous_ports;
@@ -2799,21 +2809,10 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       for (i = 0; i != FRIDA_MAX_BREAKPOINTS; i++)
         frida_spawn_instance_unset_nth_breakpoint (self, i);
 
-      if (self->page_pool != NULL)
+      for (i = 0; i != FRIDA_MAX_PAGE_POOL; i++)
       {
-        GHashTableIter iter;
-        gpointer page_start;
-        gpointer item;
-        gsize page_size;
-
-        page_size = getpagesize ();
-
-        g_hash_table_iter_init (&iter, self->page_pool);
-        while (g_hash_table_iter_next (&iter, &page_start, &item))
-        {
-          GumAddress scratch_page = item;
-          mach_vm_deallocate (self->task, scratch_page, page_size);
-        }
+        if (self->page_pool[i].scratch_page != 0)
+          mach_vm_deallocate (self->task, self->page_pool[i].scratch_page, page_size);
       }
 
       frida_set_debug_state (self->thread, &self->previous_debug_state, self->cpu_type);
@@ -3087,6 +3086,7 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   gsize page_offset;
   kern_return_t kr;
   GumAddress scratch_page, target_address;
+  guint i;
   gboolean write_succeeded;
   guint32 * original_instruction_ptr;
   vm_prot_t cur_protection, max_protection;
@@ -3096,7 +3096,17 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   page_start = address & ~(page_size - 1);
   page_offset = address - page_start;
 
-  scratch_page = (GumAddress) g_hash_table_lookup (self->page_pool, page_start);
+  scratch_page = 0;
+
+  for (i = 0; i != FRIDA_MAX_PAGE_POOL; i++)
+  {
+    if (self->page_pool[i].page_start == page_start)
+    {
+      scratch_page = self->page_pool[i].scratch_page;
+      break;
+    }
+  }
+
   if (scratch_page == 0)
   {
     kr = mach_vm_allocate (self->task, (mach_vm_address_t *) &scratch_page, page_size, VM_FLAGS_ANYWHERE);
@@ -3105,7 +3115,15 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
     kr = mach_vm_copy (self->task, page_start, page_size, scratch_page);
     g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
-    g_hash_table_insert (self->page_pool, GSIZE_TO_POINTER (page_start), (gpointer) scratch_page);
+    for (i = 0; i != FRIDA_MAX_PAGE_POOL; i++)
+    {
+      if (self->page_pool[i].page_start == 0)
+      {
+        self->page_pool[i].page_start = page_start;
+        self->page_pool[i].scratch_page = scratch_page;
+        break;
+      }
+    }
   }
   else
   {
