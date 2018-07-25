@@ -120,8 +120,8 @@ struct _FridaSpawnInstance
 
   FridaBreakpointPhase breakpoint_phase;
   FridaBreakpoint breakpoints[FRIDA_MAX_BREAKPOINTS];
-  GumAddress scratch_page;
   gint single_stepping;
+  GHashTable * page_pool;
   mach_vm_address_t lib_name;
   mach_vm_address_t fake_helpers;
   mach_vm_address_t fake_error_buf;
@@ -2235,7 +2235,6 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
   instance->pending_request.task.name = MACH_PORT_NULL;
 
   instance->breakpoint_phase = FRIDA_BREAKPOINT_DETECT_FLAVOR;
-  instance->scratch_page = 0;
   instance->single_stepping = -1;
   for (i = 0; i != FRIDA_MAX_BREAKPOINTS; i++)
   {
@@ -2243,6 +2242,9 @@ frida_spawn_instance_new (FridaDarwinHelperBackend * backend)
     instance->breakpoints[i].next = 0;
     instance->breakpoints[i].repeat = FRIDA_BREAKPOINT_REPEAT_NEVER;
   }
+
+  if (_frida_darwin_no_hardware_breakpoints ())
+    instance->page_pool = g_hash_table_new (NULL, NULL);
 
   return instance;
 }
@@ -2273,6 +2275,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
+
+  if (instance->page_pool != NULL)
+    g_hash_table_unref (instance->page_pool);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -2554,9 +2559,6 @@ frida_spawn_instance_on_server_recv (void * context)
   kr = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
-  kr = frida_get_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
-
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
     pc = state.uts.ts64.__rip;
@@ -2572,7 +2574,6 @@ frida_spawn_instance_on_server_recv (void * context)
   if (self->single_stepping >= 0)
   {
     gboolean exit_single_stepping = FALSE;
-
     FridaBreakpoint * bp = &self->breakpoints[self->single_stepping];
 
     if (bp->next == 0)
@@ -2627,7 +2628,6 @@ frida_spawn_instance_on_server_recv (void * context)
   }
 
   g_assert (breakpoint != NULL);
-
 
   go_on = frida_spawn_instance_handle_breakpoint (self, breakpoint, &state);
 
@@ -2799,8 +2799,22 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       for (i = 0; i != FRIDA_MAX_BREAKPOINTS; i++)
         frida_spawn_instance_unset_nth_breakpoint (self, i);
 
-      if (self->scratch_page != 0)
-        mach_vm_deallocate (self->task, self->scratch_page, getpagesize ());
+      if (self->page_pool != NULL)
+      {
+        GHashTableIter iter;
+        gpointer page_start;
+        gpointer item;
+        gsize page_size;
+
+        page_size = getpagesize ();
+
+        g_hash_table_iter_init (&iter, self->page_pool);
+        while (g_hash_table_iter_next (&iter, &page_start, &item))
+        {
+          GumAddress scratch_page = item;
+          mach_vm_deallocate (self->task, scratch_page, page_size);
+        }
+      }
 
       frida_set_debug_state (self->thread, &self->previous_debug_state, self->cpu_type);
 
@@ -3071,10 +3085,10 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   gsize page_size;
   GumAddress page_start;
   gsize page_offset;
-  guint8 * original;
   kern_return_t kr;
-  GumAddress target_address;
+  GumAddress scratch_page, target_address;
   gboolean write_succeeded;
+  guint32 * original_instruction_ptr;
   vm_prot_t cur_protection, max_protection;
 
   page_size = getpagesize ();
@@ -3082,37 +3096,37 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   page_start = address & ~(page_size - 1);
   page_offset = address - page_start;
 
-  original = gum_darwin_read (self->task, page_start, page_size, NULL);
-  g_assert (original != NULL);
-
-  if (self->scratch_page == 0)
+  scratch_page = (GumAddress) g_hash_table_lookup (self->page_pool, page_start);
+  if (scratch_page == 0)
   {
-    kr = mach_vm_allocate (self->task, &self->scratch_page, page_size, VM_FLAGS_ANYWHERE);
+    kr = mach_vm_allocate (self->task, (mach_vm_address_t *) &scratch_page, page_size, VM_FLAGS_ANYWHERE);
     g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
+    kr = mach_vm_copy (self->task, page_start, page_size, scratch_page);
+    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
+    g_hash_table_insert (self->page_pool, GSIZE_TO_POINTER (page_start), (gpointer) scratch_page);
   }
   else
   {
-    kr = mach_vm_protect (self->task, self->scratch_page, page_size, FALSE, PROT_READ | PROT_WRITE);
+    kr = mach_vm_protect (self->task, scratch_page, page_size, FALSE, PROT_READ | PROT_WRITE);
     g_assert_cmpint (kr, ==, KERN_SUCCESS);
   }
 
-  write_succeeded = gum_darwin_write (self->task, self->scratch_page, original, page_size);
+  original_instruction_ptr = (guint32*) gum_darwin_read (self->task, address, 4, NULL);
+  original_instruction = *original_instruction_ptr;
+  g_free (original_instruction_ptr);
+
+  write_succeeded = gum_darwin_write (self->task, scratch_page + page_offset, (const guint8 *) &new_instruction, 4);
   g_assert (write_succeeded);
 
-  original_instruction = * (guint32 *) (original + page_offset);
-
-  g_free (original);
-
-  write_succeeded = gum_darwin_write (self->task, self->scratch_page + page_offset, (const guint8 *) &new_instruction, 4);
-  g_assert (write_succeeded);
-
-  kr = mach_vm_protect (self->task, self->scratch_page, page_size, FALSE, PROT_READ | PROT_EXEC);
+  kr = mach_vm_protect (self->task, scratch_page, page_size, FALSE, PROT_READ | PROT_EXEC);
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
   target_address = address - page_offset;
 
-  kr = mach_vm_remap (self->task, &target_address, page_size, 0,
-      VM_FLAGS_OVERWRITE | VM_FLAGS_FIXED, self->task, self->scratch_page, TRUE,
+  kr = mach_vm_remap (self->task, (mach_vm_address_t *) &target_address, page_size, 0,
+      VM_FLAGS_OVERWRITE | VM_FLAGS_FIXED, self->task, scratch_page, TRUE,
       &cur_protection, &max_protection, VM_INHERIT_COPY);
   g_assert_cmpint (kr, ==, KERN_SUCCESS);
 
