@@ -57,13 +57,13 @@ $1-linux-armhf: $2
 	mv $$@.tmp $$@
 
 $1-linux-mips: $2
-	mips-linux-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
-	mips-linux-strip --strip-all $$@.tmp
+	mips-unknown-linux-uclibc-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	mips-unknown-linux-uclibc-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 
 $1-linux-mipsel: $2
-	mipsel-linux-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
-	mipsel-linux-strip --strip-all $$@.tmp
+	mipsel-unknown-linux-uclibc-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	mipsel-unknown-linux-uclibc-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 endef
 
@@ -94,13 +94,13 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 	mv $@.tmp $@
 
 %-agent-linux-mips.so: %-agent.c
-	mips-linux-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
-	mips-linux-strip --strip-all $@.tmp
+	mips-unknown-linux-uclibc-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mips-unknown-linux-uclibc-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 %-agent-linux-mipsel.so: %-agent.c
-	mipsel-linux-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
-	mipsel-linux-strip --strip-all $@.tmp
+	mipsel-unknown-linux-uclibc-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	mipsel-unknown-linux-uclibc-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 .PHONY: all
