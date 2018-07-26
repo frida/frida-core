@@ -1728,36 +1728,6 @@ failure:
   }
 }
 
-static gboolean
-frida_is_hardware_breakpoint_support_working (void)
-{
-#ifdef HAVE_IOS
-  static gsize cached_result = 0;
-
-  if (g_once_init_enter (&cached_result))
-  {
-    char buf[256];
-    size_t size;
-    int res;
-    float version;
-    gboolean buggy_kernel;
-
-    size = sizeof (buf);
-    res = sysctlbyname ("kern.osrelease", buf, &size, NULL, 0);
-    g_assert_cmpint (res, ==, 0);
-
-    version = atof (buf);
-    buggy_kernel = version >= 17.5f && version < 18.0f;
-
-    g_once_init_leave (&cached_result, !buggy_kernel + 1);
-  }
-
-  return cached_result - 1;
-#else
-  return TRUE;
-#endif
-}
-
 void
 _frida_darwin_helper_backend_resume_spawn_instance (FridaDarwinHelperBackend * self, void * instance)
 {
@@ -4229,6 +4199,36 @@ frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadStat
     else
       s->__mdscr_el1 = 0;
   }
+#endif
+}
+
+static gboolean
+frida_is_hardware_breakpoint_support_working (void)
+{
+#ifdef HAVE_IOS
+  static gsize cached_result = 0;
+
+  if (g_once_init_enter (&cached_result))
+  {
+    char buf[256];
+    size_t size;
+    int res;
+    float version;
+    gboolean buggy_kernel;
+
+    size = sizeof (buf);
+    res = sysctlbyname ("kern.osrelease", buf, &size, NULL, 0);
+    g_assert_cmpint (res, ==, 0);
+
+    version = atof (buf);
+    buggy_kernel = version >= 17.5f && version < 18.0f;
+
+    g_once_init_leave (&cached_result, !buggy_kernel + 1);
+  }
+
+  return cached_result - 1;
+#else
+  return TRUE;
 #endif
 }
 
