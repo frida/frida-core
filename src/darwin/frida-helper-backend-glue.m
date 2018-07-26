@@ -288,6 +288,7 @@ static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend *
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
+static void frida_spawn_instance_on_server_recv (void * context);
 static gboolean frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoint * breakpoint, GumDarwinUnifiedThreadState * state);
 static void frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self);
 static void frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self);
@@ -295,7 +296,6 @@ static void frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self);
-static void frida_spawn_instance_on_server_recv (void * context);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
 static gboolean frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, GumAddress pc);
 static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t lib_name, int mode);
@@ -2516,7 +2516,7 @@ frida_spawn_instance_on_server_recv (void * context)
   GumDarwinUnifiedThreadState state;
   guint i, current_bp_index;
   FridaBreakpoint * breakpoint = NULL;
-  gboolean go_on, pc_changed;
+  gboolean carry_on, pc_changed;
 
   frida_spawn_instance_receive_breakpoint_request (self);
 
@@ -2574,9 +2574,8 @@ frida_spawn_instance_on_server_recv (void * context)
 
   g_assert (breakpoint != NULL);
 
-  go_on = frida_spawn_instance_handle_breakpoint (self, breakpoint, &state);
-
-  if (!go_on)
+  carry_on = frida_spawn_instance_handle_breakpoint (self, breakpoint, &state);
+  if (!carry_on)
     return;
 
 #ifdef HAVE_I386
@@ -2626,7 +2625,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
 
   if (self->breakpoint_phase == FRIDA_BREAKPOINT_DETECT_FLAVOR)
   {
-    memcpy (&self->previous_thread_state, state, sizeof (*state));
+    memcpy (&self->previous_thread_state, state, sizeof (GumDarwinUnifiedThreadState));
 
     if (pc == self->modern_entry_address)
       self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
@@ -2673,7 +2672,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       else
         frida_spawn_instance_set_nth_breakpoint (self, 1, self->strcmp_address, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
 
-      memcpy (state, &self->previous_thread_state, sizeof (*state));
+      memcpy (state, &self->previous_thread_state, sizeof (GumDarwinUnifiedThreadState));
 
       frida_spawn_instance_call_dlopen (self, state, self->lib_name, RTLD_GLOBAL | RTLD_LAZY);
 
@@ -2717,8 +2716,8 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       mach_msg_type_number_t port_index;
       guint i;
 
-      page_size = getpagesize ();
       self_task = mach_task_self ();
+      page_size = getpagesize ();
 
       previous_ports = &self->previous_ports;
       for (port_index = 0; port_index != previous_ports->count; port_index++)
@@ -3017,11 +3016,12 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   gsize page_size;
   GumAddress page_start;
   gsize page_offset;
-  kern_return_t kr;
-  GumAddress scratch_page, target_address;
+  GumAddress scratch_page;
   guint i;
-  gboolean write_succeeded;
+  kern_return_t kr;
   guint32 * original_instruction_ptr;
+  gboolean write_succeeded;
+  GumAddress target_address;
   vm_prot_t cur_protection, max_protection;
 
   page_size = getpagesize ();
@@ -3064,7 +3064,7 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
     g_assert_cmpint (kr, ==, KERN_SUCCESS);
   }
 
-  original_instruction_ptr = (guint32*) gum_darwin_read (self->task, address, 4, NULL);
+  original_instruction_ptr = (guint32 *) gum_darwin_read (self->task, address, 4, NULL);
   original_instruction = *original_instruction_ptr;
   g_free (original_instruction_ptr);
 
