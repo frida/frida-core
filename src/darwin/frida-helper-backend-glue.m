@@ -290,14 +290,15 @@ static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
 static void frida_spawn_instance_on_server_recv (void * context);
 static gboolean frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoint * breakpoint, GumDarwinUnifiedThreadState * state);
+static gboolean frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, GumAddress pc);
 static void frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self);
 static void frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self);
+static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self);
+static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self);
 static void frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
-static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
-static gboolean frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, GumAddress pc);
 static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t lib_name, int mode);
 static void frida_spawn_instance_set_nth_breakpoint (FridaSpawnInstance * self, guint n, GumAddress break_at, FridaBreakpointRepeat repeat);
 static void frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n);
@@ -2271,241 +2272,6 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
 }
 
 static void
-frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
-{
-  __Request__exception_raise_state_identity_t * request = &self->pending_request;
-  mach_msg_header_t * header = &request->Head;
-  kern_return_t kr;
-
-  mach_msg_destroy (header);
-
-  bzero (request, sizeof (*request));
-  header->msgh_size = sizeof (*request);
-  header->msgh_local_port = self->server_port;
-  kr = mach_msg_receive (header);
-  g_assert_cmpint (kr, ==, 0);
-}
-
-static void
-frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
-{
-  __Request__exception_raise_state_identity_t * request = &self->pending_request;
-  __Reply__exception_raise_t response;
-  mach_msg_header_t * header;
-  kern_return_t kr;
-
-  bzero (&response, sizeof (response));
-  header = &response.Head;
-  header->msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
-  header->msgh_size = sizeof (response);
-  header->msgh_remote_port = request->Head.msgh_remote_port;
-  header->msgh_local_port = MACH_PORT_NULL;
-  header->msgh_reserved = 0;
-  header->msgh_id = request->Head.msgh_id + 100;
-  response.NDR = NDR_record;
-  response.RetCode = KERN_SUCCESS;
-  kr = mach_msg_send (header);
-  if (kr == KERN_SUCCESS)
-    request->Head.msgh_remote_port = MACH_PORT_NULL;
-}
-
-static void
-frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
-{
-  kern_return_t kr;
-  gboolean write_succeeded;
-  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, }, { 0, } };
-
-  switch (self->cpu_type)
-  {
-    case GUM_CPU_ARM:
-    case GUM_CPU_IA32:
-    {
-      guint32 * helpers32 = (guint32 *) &data.helpers[0];
-
-      /* version */
-      helpers32[0] = 1;
-      /* acquireGlobalDyldLock (unused) */
-      helpers32[1] = 0;
-      /* releaseGlobalDyldLock */
-      helpers32[2] = (guint32) self->ret_gadget;
-      /* getThreadBufferFor_dlerror (unused) */
-      helpers32[3] = 0;
-
-      break;
-    }
-
-    case GUM_CPU_ARM64:
-    case GUM_CPU_AMD64:
-    {
-      guint64 * helpers64 = (guint64 *) &data.helpers[0];
-
-      /* version */
-      helpers64[0] = 1;
-      /* acquireGlobalDyldLock (unused) */
-      helpers64[1] = 0;
-      /* releaseGlobalDyldLock */
-      helpers64[2] = (guint64) self->ret_gadget;
-      /* getThreadBufferFor_dlerror (unused) */
-      if (self->cpu_type == GUM_CPU_ARM64)
-        helpers64[3] = (guint64) self->ret_gadget;
-      else
-        helpers64[3] = 0;
-
-      break;
-    }
-
-    default:
-      g_assert_not_reached ();
-  }
-
-  kr = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
-
-  write_succeeded = gum_darwin_write (self->task, self->dyld_data, (const guint8 *) &data, sizeof (data));
-  g_assert (write_succeeded);
-
-  self->fake_helpers = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, helpers);
-  self->lib_name = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, libc);
-  self->fake_error_buf = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, error_buf);
-}
-
-static void
-frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
-{
-  kern_return_t kr;
-
-  if (self->dyld_data == 0)
-    return;
-
-  kr = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
-
-  self->dyld_data = 0;
-}
-
-static void
-frida_spawn_instance_unset_helpers (FridaSpawnInstance * self)
-{
-  gboolean write_succeeded;
-
-  switch (self->cpu_type)
-  {
-    case GUM_CPU_ARM:
-    case GUM_CPU_IA32:
-    {
-      guint32 null_ptr = 0;
-
-      write_succeeded = gum_darwin_write (self->task, self->helpers_ptr_address, (const guint8 *) &null_ptr, sizeof (null_ptr));
-
-      break;
-    }
-
-    case GUM_CPU_ARM64:
-    case GUM_CPU_AMD64:
-    {
-      guint64 null_ptr = 0;
-
-      write_succeeded = gum_darwin_write (self->task, self->helpers_ptr_address, (const guint8 *) &null_ptr, sizeof (null_ptr));
-
-      break;
-    }
-
-    default:
-      g_assert_not_reached ();
-  }
-
-  g_assert (write_succeeded);
-
-  self->helpers_unset = TRUE;
-}
-
-static void
-frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self)
-{
-  GumAddress initialized_address;
-  gboolean write_succeeded;
-  guint8 yes = 1;
-
-  switch (self->cpu_type)
-  {
-    case GUM_CPU_ARM:
-    case GUM_CPU_IA32:
-    {
-      guint32 * info_ptr;
-
-      info_ptr = (guint32 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
-      initialized_address = (*info_ptr) + 17;
-      g_free (info_ptr);
-
-      break;
-    }
-
-    case GUM_CPU_ARM64:
-    case GUM_CPU_AMD64:
-    {
-      guint64 * info_ptr;
-
-      info_ptr = (guint64 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
-      initialized_address = (*info_ptr) + 25;
-      g_free (info_ptr);
-
-      break;
-    }
-
-    default:
-      g_assert_not_reached ();
-  }
-
-  write_succeeded = gum_darwin_write (self->task, initialized_address, &yes, 1);
-  g_assert (write_succeeded);
-}
-
-static gboolean
-frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self)
-{
-  gboolean initialized;
-  GumAddress initialized_address;
-  guint8 * yes;
-
-  switch (self->cpu_type)
-  {
-    case GUM_CPU_ARM:
-    case GUM_CPU_IA32:
-    {
-      guint32 * info_ptr;
-
-      info_ptr = (guint32 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
-      initialized_address = (*info_ptr) + 17;
-      g_free (info_ptr);
-
-      break;
-    }
-
-    case GUM_CPU_ARM64:
-    case GUM_CPU_AMD64:
-    {
-      guint64 * info_ptr;
-
-      info_ptr = (guint64 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
-      initialized_address = (*info_ptr) + 25;
-      g_free (info_ptr);
-
-      break;
-    }
-
-    default:
-      g_assert_not_reached ();
-  }
-
-  yes = (guint8 *) gum_darwin_read (self->task, initialized_address, sizeof (yes), NULL);
-  initialized = *yes;
-  g_free (yes);
-
-  return initialized;
-}
-
-static void
 frida_spawn_instance_on_server_recv (void * context)
 {
   FridaSpawnInstance * self = context;
@@ -2813,7 +2579,7 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
     else
     {
       ret_address = state->ts_32.__lr;
-      if(ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
+      if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
       {
         /* Make both args point to a NUL byte. */
         state->ts_32.__r[0] = self->lib_name + 26;
@@ -2826,6 +2592,241 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
   }
 
   return FALSE;
+}
+
+static void
+frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
+{
+  __Request__exception_raise_state_identity_t * request = &self->pending_request;
+  mach_msg_header_t * header = &request->Head;
+  kern_return_t kr;
+
+  mach_msg_destroy (header);
+
+  bzero (request, sizeof (*request));
+  header->msgh_size = sizeof (*request);
+  header->msgh_local_port = self->server_port;
+  kr = mach_msg_receive (header);
+  g_assert_cmpint (kr, ==, 0);
+}
+
+static void
+frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self)
+{
+  __Request__exception_raise_state_identity_t * request = &self->pending_request;
+  __Reply__exception_raise_t response;
+  mach_msg_header_t * header;
+  kern_return_t kr;
+
+  bzero (&response, sizeof (response));
+  header = &response.Head;
+  header->msgh_bits = MACH_MSGH_BITS (MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+  header->msgh_size = sizeof (response);
+  header->msgh_remote_port = request->Head.msgh_remote_port;
+  header->msgh_local_port = MACH_PORT_NULL;
+  header->msgh_reserved = 0;
+  header->msgh_id = request->Head.msgh_id + 100;
+  response.NDR = NDR_record;
+  response.RetCode = KERN_SUCCESS;
+  kr = mach_msg_send (header);
+  if (kr == KERN_SUCCESS)
+    request->Head.msgh_remote_port = MACH_PORT_NULL;
+}
+
+static gboolean
+frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self)
+{
+  gboolean initialized;
+  GumAddress initialized_address;
+  guint8 * yes;
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 * info_ptr;
+
+      info_ptr = (guint32 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 17;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 * info_ptr;
+
+      info_ptr = (guint64 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 25;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  yes = (guint8 *) gum_darwin_read (self->task, initialized_address, sizeof (yes), NULL);
+  initialized = *yes;
+  g_free (yes);
+
+  return initialized;
+}
+
+static void
+frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self)
+{
+  GumAddress initialized_address;
+  gboolean write_succeeded;
+  guint8 yes = 1;
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 * info_ptr;
+
+      info_ptr = (guint32 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 17;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 * info_ptr;
+
+      info_ptr = (guint64 *) gum_darwin_read (self->task, self->info_address, sizeof (info_ptr), NULL);
+      initialized_address = (*info_ptr) + 25;
+      g_free (info_ptr);
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  write_succeeded = gum_darwin_write (self->task, initialized_address, &yes, 1);
+  g_assert (write_succeeded);
+}
+
+static void
+frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
+{
+  kern_return_t kr;
+  gboolean write_succeeded;
+  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, }, { 0, } };
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 * helpers32 = (guint32 *) &data.helpers[0];
+
+      /* version */
+      helpers32[0] = 1;
+      /* acquireGlobalDyldLock (unused) */
+      helpers32[1] = 0;
+      /* releaseGlobalDyldLock */
+      helpers32[2] = (guint32) self->ret_gadget;
+      /* getThreadBufferFor_dlerror (unused) */
+      helpers32[3] = 0;
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 * helpers64 = (guint64 *) &data.helpers[0];
+
+      /* version */
+      helpers64[0] = 1;
+      /* acquireGlobalDyldLock (unused) */
+      helpers64[1] = 0;
+      /* releaseGlobalDyldLock */
+      helpers64[2] = (guint64) self->ret_gadget;
+      /* getThreadBufferFor_dlerror (unused) */
+      if (self->cpu_type == GUM_CPU_ARM64)
+        helpers64[3] = (guint64) self->ret_gadget;
+      else
+        helpers64[3] = 0;
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  kr = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
+  write_succeeded = gum_darwin_write (self->task, self->dyld_data, (const guint8 *) &data, sizeof (data));
+  g_assert (write_succeeded);
+
+  self->fake_helpers = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, helpers);
+  self->lib_name = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, libc);
+  self->fake_error_buf = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, error_buf);
+}
+
+static void
+frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
+{
+  kern_return_t kr;
+
+  if (self->dyld_data == 0)
+    return;
+
+  kr = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
+  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+
+  self->dyld_data = 0;
+}
+
+static void
+frida_spawn_instance_unset_helpers (FridaSpawnInstance * self)
+{
+  gboolean write_succeeded;
+
+  switch (self->cpu_type)
+  {
+    case GUM_CPU_ARM:
+    case GUM_CPU_IA32:
+    {
+      guint32 null_ptr = 0;
+
+      write_succeeded = gum_darwin_write (self->task, self->helpers_ptr_address, (const guint8 *) &null_ptr, sizeof (null_ptr));
+
+      break;
+    }
+
+    case GUM_CPU_ARM64:
+    case GUM_CPU_AMD64:
+    {
+      guint64 null_ptr = 0;
+
+      write_succeeded = gum_darwin_write (self->task, self->helpers_ptr_address, (const guint8 *) &null_ptr, sizeof (null_ptr));
+
+      break;
+    }
+
+    default:
+      g_assert_not_reached ();
+  }
+
+  g_assert (write_succeeded);
+
+  self->helpers_unset = TRUE;
 }
 
 static void
