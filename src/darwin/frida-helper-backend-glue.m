@@ -331,7 +331,7 @@ static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, 
 static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
 static void frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddress break_at, GumCpuType cpu_type);
 static void frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadState * thread_state, gboolean enabled, GumCpuType cpu_type);
-static gboolean _frida_darwin_no_hardware_breakpoints (void);
+static gboolean frida_is_hardware_breakpoint_support_working (void);
 
 static GumAddress frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddress start);
 static GumAddress frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start, gsize max_size);
@@ -1729,7 +1729,7 @@ failure:
 }
 
 static gboolean
-_frida_darwin_no_hardware_breakpoints (void)
+frida_is_hardware_breakpoint_support_working (void)
 {
 #ifdef HAVE_IOS
   static gsize cached_result = 0;
@@ -1740,21 +1740,21 @@ _frida_darwin_no_hardware_breakpoints (void)
     size_t size;
     int res;
     float version;
-    gboolean no_hardware_breakpoints;
+    gboolean buggy_kernel;
 
     size = sizeof (buf);
     res = sysctlbyname ("kern.osrelease", buf, &size, NULL, 0);
     g_assert_cmpint (res, ==, 0);
 
     version = atof (buf);
-    no_hardware_breakpoints = version >= 17.5f && version < 18.0f;
+    buggy_kernel = version >= 17.5f && version < 18.0f;
 
-    g_once_init_leave (&cached_result, no_hardware_breakpoints + 1);
+    g_once_init_leave (&cached_result, !buggy_kernel + 1);
   }
 
   return cached_result - 1;
 #else
-  return FALSE;
+  return TRUE;
 #endif
 }
 
@@ -2993,10 +2993,10 @@ frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n)
   if (breakpoint->address == 0)
     return;
 
-  if (_frida_darwin_no_hardware_breakpoints ())
-    breakpoint->original = frida_spawn_instance_put_software_breakpoint (self, breakpoint->address, n);
-  else
+  if (frida_is_hardware_breakpoint_support_working ())
     frida_set_nth_hardware_breakpoint (&self->breakpoint_debug_state, n, breakpoint->address, self->cpu_type);
+  else
+    breakpoint->original = frida_spawn_instance_put_software_breakpoint (self, breakpoint->address, n);
 }
 
 static void
@@ -3015,16 +3015,16 @@ frida_spawn_instance_disable_nth_breakpoint (FridaSpawnInstance * self, guint n)
 {
   g_assert_cmpint (n, <, FRIDA_MAX_BREAKPOINTS);
 
-  if (_frida_darwin_no_hardware_breakpoints ())
+  if (frida_is_hardware_breakpoint_support_working ())
+  {
+    frida_set_nth_hardware_breakpoint (&self->breakpoint_debug_state, n, 0, self->cpu_type);
+  }
+  else
   {
     FridaBreakpoint * breakpoint = &self->breakpoints[n];
 
     if (breakpoint->address != 0)
       frida_spawn_instance_overwrite_arm64_instruction (self, breakpoint->address, breakpoint->original);
-  }
-  else
-  {
-    frida_set_nth_hardware_breakpoint (&self->breakpoint_debug_state, n, 0, self->cpu_type);
   }
 }
 
