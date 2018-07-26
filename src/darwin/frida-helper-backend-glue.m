@@ -34,8 +34,8 @@
 #endif
 
 #define FRIDA_PSR_THUMB                  0x20
-#define FRIDA_MAX_BREAKPOINTS 4
-#define FRIDA_MAX_PAGE_POOL 8
+#define FRIDA_MAX_BREAKPOINTS            4
+#define FRIDA_MAX_PAGE_POOL              8
 
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
