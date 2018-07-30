@@ -35,6 +35,15 @@ rpc.exports = {
       return result;
     });
   },
+  getProcessName: function (packageName) {
+    return performOnJavaVM(function () {
+      try {
+        return packageManager.getApplicationInfo(packageName, GET_META_DATA).processName.value;
+      } catch (e) {
+        throw new Error("Unable to find application with identifier '" + packageName + "'");
+      }
+    });
+  },
   startActivity: function (packageName, activityName) {
     return performOnJavaVM(function () {
       var launchIntent = packageManager.getLaunchIntentForPackage(packageName);

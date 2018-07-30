@@ -422,23 +422,24 @@ namespace Frida {
 		public async uint spawn (string package_name, string? activity_name) throws Error {
 			yield ensure_loaded ();
 
-			if (spawn_requests.has_key (package_name))
+			var process_name = yield system_ui_agent.get_process_name (package_name);
+			if (spawn_requests.has_key (process_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
 
 			var request = new Gee.Promise<uint> ();
-			spawn_requests[package_name] = request;
+			spawn_requests[process_name] = request;
 
 			try {
 				yield system_ui_agent.stop_activity (package_name);
 				yield system_ui_agent.start_activity (package_name, activity_name);
 			} catch (Error e) {
-				spawn_requests.unset (package_name);
+				spawn_requests.unset (process_name);
 				throw e;
 			}
 
 			var timeout = new TimeoutSource.seconds (20);
 			timeout.set_callback (() => {
-				spawn_requests.unset (package_name);
+				spawn_requests.unset (process_name);
 				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
 				return false;
 			});
@@ -610,6 +611,14 @@ namespace Frida {
 			} else {
 				return HostApplicationInfo ("", "", 0, no_icon, no_icon);
 			}
+		}
+
+		public async string get_process_name (string package_name) throws Error {
+			var package_name_value = new Json.Node.alloc ().init_string (package_name);
+
+			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value });
+
+			return process_name.get_string ();
 		}
 
 		public async void start_activity (string package_name, string? activity_name) throws Error {
