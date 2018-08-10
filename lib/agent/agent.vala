@@ -66,6 +66,9 @@ namespace Frida.Agent {
 		private Cond fork_cond;
 #endif
 		private SpawnMonitor spawn_monitor;
+#if DARWIN
+		private ThreadSuspendMonitor thread_suspend_monitor;
+#endif
 
 		private enum ForkRecoveryState {
 			RECOVERING,
@@ -181,6 +184,9 @@ namespace Frida.Agent {
 			interceptor.begin_transaction ();
 
 			exit_monitor = new ExitMonitor (this, main_context);
+#if DARWIN
+			thread_suspend_monitor = new ThreadSuspendMonitor();
+#endif
 
 			this.interceptor = interceptor;
 			this.exceptor = Gum.Exceptor.obtain ();
@@ -193,6 +199,10 @@ namespace Frida.Agent {
 			interceptor.begin_transaction ();
 
 			disable_child_gating ();
+
+#if DARWIN
+			thread_suspend_monitor = null;
+#endif
 
 			exceptor = null;
 
@@ -537,6 +547,10 @@ namespace Frida.Agent {
 #endif
 
 			interceptor.end_transaction ();
+		}
+
+		public Gum.ScriptBackend? try_get_script_backend () {
+			return script_backend;
 		}
 
 		public ScriptEngine create_script_engine () {
@@ -2001,4 +2015,63 @@ namespace Frida.Agent {
 			return repeat;
 		});
 	}
+
+#if DARWIN
+	public class ThreadSuspendMonitor : Object {
+		private delegate int ThreadSuspendFunc (uint thread_id);
+		private delegate int ThreadResumeFunc (uint thread_id);
+		private void * thread_resume;
+		private void * thread_suspend;
+
+		construct {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			thread_suspend = Gum.Module.find_export_by_name ("libsystem_kernel.dylib", "thread_suspend");
+			thread_resume = Gum.Module.find_export_by_name ("libsystem_kernel.dylib", "thread_resume");
+
+			interceptor.replace_function (thread_suspend, (void *) replacement_thread_suspend, this);
+		}
+
+		private static int replacement_thread_suspend (uint thread_id) {
+			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
+			var monitor = (ThreadSuspendMonitor) context.get_replacement_function_data ();
+
+			return monitor.handle_thread_suspend ((ThreadSuspendFunc) context.function, thread_id);
+		}
+
+		private int handle_thread_suspend (ThreadSuspendFunc impl, uint thread_id) {
+			if (Gum.Cloak.has_thread (thread_id)) {
+				return 0;
+			}
+
+			var script_backend = Runner.shared_instance.try_get_script_backend ();
+			if (script_backend == null)
+				return impl (thread_id);
+
+			int result = 0;
+
+			while (true) {
+				script_backend.run_locked_func(() => {
+					result = impl (thread_id);
+				});
+
+				if (result != 0 || !script_backend.is_locked ())
+					break;
+
+				if (((ThreadResumeFunc) thread_resume) (thread_id) != 0)
+					break;
+			}
+
+			return result;
+		}
+
+		public override void dispose () {
+			var interceptor = Gum.Interceptor.obtain ();
+
+			interceptor.revert_function (thread_suspend);
+
+			base.dispose ();
+		}
+	}
+#endif
 }
