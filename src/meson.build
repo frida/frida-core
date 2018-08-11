@@ -305,7 +305,7 @@ core = library('frida-core', core_sources,
   vala_args: backend_vala_args,
   link_args: backend_libs_private,
   link_with: backend_libs,
-  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep] + backend_deps + internal_deps,
+  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep] + backend_deps + internal_deps,
 )
 
 core_dep = declare_dependency(

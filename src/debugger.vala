@@ -56,7 +56,7 @@ namespace Frida {
 	}
 
 	private class V8DebugServer : Object, DebugServer {
-		public uint port {
+		public Gum.InspectorServer server {
 			get;
 			construct;
 		}
@@ -66,239 +66,37 @@ namespace Frida {
 			construct;
 		}
 
-		private SocketService service = new SocketService ();
-		private Gee.HashSet<Session> sessions = new Gee.HashSet<Session> ();
-
 		public V8DebugServer (uint port, AgentSession agent_session) {
-			Object (port: port, agent_session: agent_session);
+			Object (
+				server: (port != 0) ? new Gum.InspectorServer.with_port (port) : new Gum.InspectorServer (),
+				agent_session: agent_session
+			);
 		}
 
 		public void start (string? sync_message) throws Error {
 			try {
-				service.add_inet_port ((uint16) port, null);
-			} catch (GLib.Error e) {
+				server.start ();
+			} catch (GLib.IOError e) {
 				throw new Error.ADDRESS_IN_USE (e.message);
 			}
 
-			service.incoming.connect (on_incoming_connection);
-
-			service.start ();
-
-			agent_session.message_from_debugger.connect (on_message_from_debugger);
+			server.message.connect (on_message_from_frontend);
+			agent_session.message_from_debugger.connect (on_message_from_backend);
 		}
 
 		public void stop () {
-			foreach (var session in sessions)
-				session.close ();
+			agent_session.message_from_debugger.disconnect (on_message_from_backend);
+			server.message.disconnect (on_message_from_frontend);
 
-			agent_session.message_from_debugger.disconnect (on_message_from_debugger);
-
-			service.stop ();
-
-			service.incoming.disconnect (on_incoming_connection);
+			server.stop ();
 		}
 
-		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
-			var session = new Session (connection);
-			session.end.connect (on_session_end);
-			session.receive.connect (on_session_receive);
-			sessions.add (session);
-
-			session.open ();
-
-			return true;
-		}
-
-		private void on_session_end (Session session) {
-			sessions.remove (session);
-			session.end.disconnect (on_session_end);
-			session.receive.disconnect (on_session_receive);
-		}
-
-		private void on_session_receive (string message) {
+		private void on_message_from_frontend (string message) {
 			agent_session.post_message_to_debugger.begin (message);
 		}
 
-		private void on_message_from_debugger (string message) {
-			var headers = new string[] {};
-			foreach (var session in sessions)
-				session.send (headers, message);
-		}
-
-		private class Session : Object {
-			public signal void end ();
-			public signal void receive (string message);
-
-			public IOStream stream {
-				get;
-				construct;
-			}
-
-			private const size_t CHUNK_SIZE = 512;
-			private const size_t MAX_MESSAGE_SIZE = 2048;
-
-			private InputStream input;
-			private char * buffer;
-			private size_t length;
-			private size_t capacity;
-
-			private OutputStream output;
-			private Queue<string> outgoing = new Queue<string> ();
-
-			private Cancellable cancellable = new Cancellable ();
-
-			public Session (IOStream stream) {
-				Object (stream: stream);
-			}
-
-			construct {
-				this.input = stream.get_input_stream ();
-				this.output = stream.get_output_stream ();
-			}
-
-			~Session () {
-				stream.close_async.begin ();
-
-				free (buffer);
-			}
-
-			public void open () {
-				var headers = new string[] {
-					"Type", "connect",
-					"V8-Version", "5.4.401", // FIXME
-					"Protocol-Version", "1",
-					"Embedding-Host", "Frida " + Frida.version_string ()
-				};
-				var body = "";
-				send (headers, body);
-
-				process_incoming_messages.begin ();
-			}
-
-			public void close () {
-				cancellable.cancel ();
-			}
-
-			public void send (string[] headers, string content) {
-				assert (headers.length % 2 == 0);
-
-				var message = new StringBuilder ("");
-				for (var i = 0; i != headers.length; i += 2) {
-					var key = headers[i];
-					var val = headers[i + 1];
-					message.append_printf ("%s: %s\r\n", key, val);
-				}
-				message.append_printf ("Content-Length: %ld\r\n\r\n%s", content.length, content);
-
-				bool write_now = outgoing.is_empty ();
-				outgoing.push_tail (message.str);
-				if (write_now)
-					process_outgoing_messages.begin ();
-			}
-
-			private async void process_incoming_messages () {
-				try {
-					while (true) {
-						var message = yield read_message ();
-						receive (message);
-					}
-				} catch (GLib.Error e) {
-				}
-
-				close ();
-
-				end ();
-			}
-
-			private async void process_outgoing_messages () {
-				try {
-					do {
-						var m = outgoing.peek_head ();
-						unowned uint8[] buf = (uint8[]) m;
-						yield output.write_all_async (buf[0:m.length], Priority.DEFAULT, cancellable, null);
-						outgoing.pop_head ();
-					} while (!outgoing.is_empty ());
-				} catch (GLib.Error e) {
-				}
-			}
-
-			private async string read_message () throws IOError {
-				long message_length = 0;
-				long header_length = 0;
-				long content_length = 0;
-
-				while (true) {
-					if (length > 0) {
-						unowned string message = (string) buffer;
-
-						if (message_length == 0) {
-							int header_end = message.index_of ("\r\n\r\n");
-							if (header_end != -1) {
-								header_length = header_end + 4;
-								var headers = message[0:header_end];
-								parse_headers (headers, out content_length);
-								message_length = header_length + content_length;
-							}
-						}
-
-						if (message_length != 0 && length >= message_length) {
-							var content = message[header_length:message_length];
-							consume_buffer (message_length);
-							return content;
-						}
-					}
-
-					yield fill_buffer ();
-				}
-			}
-
-			private async void fill_buffer () throws IOError {
-				var available = capacity - length;
-				if (available < CHUNK_SIZE) {
-					capacity = size_t.min (capacity + (CHUNK_SIZE - available), MAX_MESSAGE_SIZE);
-					buffer = realloc (buffer, capacity + 1);
-
-					available = capacity - length;
-				}
-
-				if (available == 0)
-					throw new IOError.FAILED ("Maximum message size exceeded");
-
-				buffer[length + available] = 0;
-				unowned uint8[] buf = (uint8[]) buffer;
-				var n = yield input.read_async (buf[length:length + available], Priority.DEFAULT, cancellable);
-				if (n == 0)
-					throw new IOError.CLOSED ("Connection is closed");
-				length += n;
-			}
-
-			private void consume_buffer (long n) {
-				length -= n;
-				if (length > 0) {
-					Memory.move (buffer, buffer + n, length);
-					buffer[length] = 0;
-				}
-			}
-
-			private void parse_headers (string headers, out long content_length) throws IOError {
-				var lines = headers.split ("\r\n");
-				foreach (var line in lines) {
-					var tokens = line.split (": ", 2);
-					if (tokens.length != 2)
-						throw new IOError.FAILED ("Malformed header");
-					var key = tokens[0];
-					var val = tokens[1];
-					if (key == "Content-Length") {
-						uint64 l;
-						if (uint64.try_parse (val, out l)) {
-							content_length = (long) l;
-							return;
-						}
-					}
-				}
-
-				throw new IOError.FAILED ("Missing content length");
-			}
+		private void on_message_from_backend (string message) {
+			server.post_message (message);
 		}
 	}
 
@@ -317,7 +115,10 @@ namespace Frida {
 		private uint next_port;
 
 		public DuktapeDebugServer (uint port, AgentSession agent_session) {
-			Object (port: port, agent_session: agent_session);
+			Object (
+				port: (port != 0) ? port : 5858,
+				agent_session: agent_session
+			);
 		}
 
 		construct {

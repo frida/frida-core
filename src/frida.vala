@@ -1567,8 +1567,6 @@ namespace Frida {
 			construct;
 		}
 
-		private const uint16 DEFAULT_DEBUG_PORT = 5858;
-
 		private Gee.Promise<bool> close_request;
 
 		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
@@ -1751,7 +1749,7 @@ namespace Frida {
 			if (debugger != null)
 				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
 
-			debugger = new Debugger ((port != 0) ? port : DEFAULT_DEBUG_PORT, session);
+			debugger = new Debugger (port, session);
 			var enabled = false;
 			try {
 				yield debugger.enable ();
