@@ -8,6 +8,7 @@ if host_os_family != 'windows'
 endif
 
 interfaces = static_library('frida-interfaces', interfaces_sources,
+  c_args: frida_component_cflags,
   vala_header: 'frida-interfaces.h',
   dependencies: [glib_dep, gobject_dep, gio_dep, gee_dep, gum_dep] + extra_deps,
 )

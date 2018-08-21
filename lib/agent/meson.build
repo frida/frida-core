@@ -26,6 +26,7 @@ endif
 
 agent = shared_library('frida-agent', agent_sources,
   name_prefix: '',
+  c_args: frida_component_cflags,
   vala_args: extra_vala_args,
   link_args: extra_link_args,
   vs_module_defs: 'frida-agent.def',

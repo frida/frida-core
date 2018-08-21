@@ -22,6 +22,7 @@ endif
 
 gadget = shared_library('frida-gadget', gadget_sources,
   name_prefix: '',
+  c_args: frida_component_cflags,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-gadget.def',

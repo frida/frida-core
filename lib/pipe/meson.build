@@ -25,6 +25,7 @@ if host_os == 'android'
 endif
 
 pipe = static_library('frida-pipe', pipe_sources,
+  c_args: frida_component_cflags,
   vala_args: vala_args,
   vala_header: 'frida-pipe.h',
   dependencies: [glib_dep, gobject_dep, gio_dep, gee_dep] + system_deps,

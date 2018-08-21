@@ -67,6 +67,7 @@ if host_os_family == 'darwin'
   endif
   helper_types_sources = ['darwin/frida-helper-types.vala']
   helper_backend = static_library('frida-helper-backend', helper_backend_sources + helper_types_sources,
+    c_args: frida_component_cflags,
     vala_args: ['--pkg=posix'],
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
   )
@@ -178,6 +179,7 @@ if host_os_family == 'linux'
     helper_service_extra_deps += [frida_selinux_dep]
   endif
   helper_service = static_library('frida-helper-service', helper_service_sources + helper_types_sources,
+    c_args: frida_component_cflags,
     vala_args: ['--pkg=posix'],
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep] + helper_service_extra_deps,
   )
@@ -302,6 +304,7 @@ internal_libs = [interfaces, pipe] + backend_libs
 internal_deps = [interfaces_dep, pipe_dep]
 
 core = library('frida-core', core_sources,
+  c_args: frida_component_cflags,
   vala_args: backend_vala_args,
   link_args: backend_libs_private,
   link_with: backend_libs,

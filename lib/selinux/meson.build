@@ -127,14 +127,14 @@ sepol_legacy = static_library('sepol-legacy', sepol_legacy_sources,
 )
 
 frida_selinux_modern = static_library('frida-selinux-modern', 'src/patch.c',
-  c_args: ['-DFRIDA_SELINUX_MODERN'],
+  c_args: ['-DFRIDA_SELINUX_MODERN'] + frida_component_cflags,
   include_directories: [frida_selinux_incdir, include_directories('src/sepol-modern/include')],
   link_with: sepol_modern,
   dependencies: [glib_dep],
 )
 
 frida_selinux_legacy = static_library('frida-selinux-legacy', 'src/patch.c',
-  c_args: ['-DFRIDA_SELINUX_LEGACY', '-include', 'sepol-legacy-renames.h'],
+  c_args: ['-DFRIDA_SELINUX_LEGACY', '-include', 'sepol-legacy-renames.h'] + frida_component_cflags,
   include_directories: [frida_selinux_incdir, include_directories('src/sepol-legacy/include')],
   link_with: sepol_legacy,
   dependencies: [glib_dep],
@@ -146,6 +146,7 @@ frida_selinux_sources = [
   'src/dispatch.c',
 ]
 frida_selinux = static_library('frida-selinux', 'src/dispatch.c',
+  c_args: frida_component_cflags,
   include_directories: frida_selinux_incdir,
   link_with: [selinux, frida_selinux_modern, frida_selinux_legacy],
   dependencies: [glib_dep],
