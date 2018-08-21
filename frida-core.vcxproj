@@ -89,6 +89,7 @@
     <ClCompile>
       <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;gumjs-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -99,6 +100,7 @@
     <ClCompile>
       <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-32.lib;gum-32.lib;gumjs-32.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -109,6 +111,7 @@
     <ClCompile>
       <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;gumjs-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -119,6 +122,7 @@
     <ClCompile>
       <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)src;$(IntDir)data;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
       <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-pipe-64.lib;gum-64.lib;gumjs-64.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
