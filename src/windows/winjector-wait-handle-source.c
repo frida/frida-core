@@ -87,9 +87,7 @@ static gboolean
 winjector_wait_handle_source_dispatch (GSource * source, GSourceFunc callback,
     gpointer user_data)
 {
-  WinjectorWaitHandleSource * self = WINJECTOR_WAIT_HANDLE_SOURCE (source);
-
-  g_assert (WaitForSingleObject (self->handle, 0) == WAIT_OBJECT_0);
+  g_assert (WaitForSingleObject (WINJECTOR_WAIT_HANDLE_SOURCE (source)->handle, 0) == WAIT_OBJECT_0);
 
   return callback (user_data);
 }
