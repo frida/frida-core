@@ -31,7 +31,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="gadget\gadget.vala">
+    <CustomBuild Include="lib\gadget\gadget.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>
