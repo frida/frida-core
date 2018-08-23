@@ -386,7 +386,10 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
   }
 
   if (old_cwd != NULL)
-    chdir (old_cwd);
+  {
+    if (chdir (old_cwd) != 0)
+      g_warning ("Failed to restore working directory");
+  }
 
   if (stdio == FRIDA_STDIO_PIPE)
   {
