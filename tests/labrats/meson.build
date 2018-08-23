@@ -15,32 +15,16 @@ if host_os == 'macos'
 endif
 
 if host_os == 'linux'
-  if host_machine.cpu_family() == 'arm'
-    if host_machine.cpu().endswith('hf')
-      host_arch = 'armhf'
-    else
-      host_arch = 'arm'
-    endif
-  elif host_machine.cpu_family() == 'mips'
-    if host_machine.endian() == 'little'
-      host_arch = 'mipsel'
-    else
-      host_arch = 'mips'
-    endif
-  else
-    host_arch = host_machine.cpu_family()
-  endif
-
   labrat_files += [
-    'sleeper-linux-' + host_arch,
-    'forker-linux-' + host_arch,
-    'spawner-linux-' + host_arch,
-    'simple-agent-linux-' + host_arch + '.so',
+    'sleeper-linux-' + host_abi,
+    'forker-linux-' + host_abi,
+    'spawner-linux-' + host_abi,
+    'simple-agent-linux-' + host_abi + '.so',
   ]
 
-  if host_arch == 'x86' or host_arch == 'x86_64'
+  if host_abi == 'x86' or host_abi == 'x86_64'
     labrat_files += [
-      'resident-agent-linux-' + host_arch + '.so',
+      'resident-agent-linux-' + host_abi + '.so',
     ]
   endif
 endif
@@ -61,11 +45,11 @@ endif
 
 if host_os == 'android'
   labrat_files += [
-    'sleeper-android-' + host_machine.cpu_family(),
-    'forker-android-' + host_machine.cpu_family(),
-    'spawner-android-' + host_machine.cpu_family(),
-    'simple-agent-android-' + host_machine.cpu_family() + '.so',
-    'resident-agent-android-' + host_machine.cpu_family() + '.so',
+    'sleeper-android-' + host_abi,
+    'forker-android-' + host_abi,
+    'spawner-android-' + host_abi,
+    'simple-agent-android-' + host_abi + '.so',
+    'resident-agent-android-' + host_abi + '.so',
   ]
 endif
 

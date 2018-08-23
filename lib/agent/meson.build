@@ -5,7 +5,7 @@ agent_sources = [
 ]
 
 if host_os_family == 'linux'
-  agent_sources += ['syscall-linux-@0@.S'.format(host_machine.cpu_family())]
+  agent_sources += ['syscall-linux-@0@.S'.format(host_arch)]
 endif
 
 if not enable_diet
