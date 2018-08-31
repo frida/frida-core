@@ -2066,7 +2066,7 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
     goto probe_failed;
   ctx.path[length] = '\0';
   ctx.entry_point = 0;
-  gum_linux_enumerate_ranges (pid, GUM_PAGE_RX, frida_examine_range_for_elf_header, &ctx);
+  gum_linux_enumerate_ranges (pid, GUM_PAGE_READ, frida_examine_range_for_elf_header, &ctx);
   if (ctx.entry_point == 0)
     goto probe_failed;
 
