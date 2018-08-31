@@ -2040,9 +2040,8 @@ namespace Frida.Agent {
 		}
 
 		private int handle_thread_suspend (ThreadSuspendFunc impl, uint thread_id) {
-			if (Gum.Cloak.has_thread (thread_id)) {
+			if (Gum.Cloak.has_thread (thread_id))
 				return 0;
-			}
 
 			var script_backend = Runner.shared_instance.try_get_script_backend ();
 			if (script_backend == null)
