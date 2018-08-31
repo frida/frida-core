@@ -556,7 +556,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   offset += params.guard.size;
 
   params.stack.offset = offset;
-  params.stack.size = page_size;
+  params.stack.size = page_size * 2;
   offset += params.stack.size;
 
   params.remote_address = 0;
