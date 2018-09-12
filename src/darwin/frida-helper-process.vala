@@ -44,8 +44,6 @@ namespace Frida {
 		}
 
 		public async void close () {
-			var proc = process;
-
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
@@ -60,12 +58,7 @@ namespace Frida {
 				}
 			}
 
-			if (proc != null) {
-				try {
-					yield proc.wait_async ();
-				} catch (GLib.Error e) {
-				}
-			}
+			process = null;
 
 			_resource_store = null;
 		}

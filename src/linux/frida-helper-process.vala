@@ -264,8 +264,6 @@ namespace Frida {
 		}
 
 		public async void close () {
-			var proc = process as Subprocess;
-
 			if (proxy != null) {
 				try {
 					yield proxy.stop ();
@@ -280,12 +278,7 @@ namespace Frida {
 				}
 			}
 
-			if (proc != null) {
-				try {
-					yield proc.wait_async ();
-				} catch (GLib.Error e) {
-				}
-			}
+			process = null;
 		}
 
 		public async Helper obtain () throws Error {
