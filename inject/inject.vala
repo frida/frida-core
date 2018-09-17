@@ -1,20 +1,22 @@
 namespace Frida.Inject {
 	private static Application application;
 
-	private static bool output_version;
+	private static int target_pid = -1;
+	private static string? target_name;
+	private static string script_path;
 	private static bool eternalize;
 	private static bool enable_jit;
 	private static bool enable_development;
-	private static int pid;
-	private static string script_file;
+	private static bool output_version;
 
 	const OptionEntry[] options = {
-		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
+		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, null, "PID" },
+		{ "name", 'n', 0, OptionArg.STRING, ref target_name, null, "PID" },
+		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
 		{ "enable-jit", 0, 0, OptionArg.NONE, ref enable_jit, "Enable the JIT runtime", null },
 		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
-		{ "pid", 'p', 0, OptionArg.INT, ref pid, null, "PID" },
-		{ "script", 's', 0, OptionArg.FILENAME, ref script_file, null, "JAVASCRIPT_FILENAME" },
+		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ null }
 	};
 
@@ -25,8 +27,7 @@ namespace Frida.Inject {
 
 		Environment.init ();
 
-		pid = -1;
-		script_file = "";
+		script_path = "";
 
 		try {
 			var ctx = new OptionContext ();
@@ -44,17 +45,17 @@ namespace Frida.Inject {
 			return 1;
 		}
 
-		if (pid == -1) {
-			printerr ("PID must be specified\n");
-			return 1;
+		if (target_pid == -1 && target_name == null) {
+			printerr ("PID or name must be specified\n");
+			return 2;
 		}
 
-		if (script_file == "") {
+		if (script_path == "") {
 			printerr ("Path to JavaScript file must be specified\n");
-			return 1;
+			return 3;
 		}
 
-		application = new Application ();
+		application = new Application (target_pid, target_name, script_path, enable_jit, enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -65,17 +66,13 @@ namespace Frida.Inject {
 		});
 #endif
 
-		try {
-			application.run (pid, script_file, enable_jit, enable_development);
-		} catch (Error e) {
-			printerr ("Unable to start: %s\n", e.message);
-			return 1;
-		}
+		int exit_code = application.run ();
 
 		application = null;
 
-        Environment.deinit ();
-		return 0;
+		Environment.deinit ();
+
+		return exit_code;
 	}
 
 	namespace Environment {
@@ -84,50 +81,90 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
+		public int target_pid {
+			get;
+			construct;
+		}
+
+		public string? target_name {
+			get;
+			construct;
+		}
+
+		public string script_path {
+			get;
+			construct;
+		}
+
+		public bool enable_jit {
+			get;
+			construct;
+		}
+
+		public bool enable_development {
+			get;
+			construct;
+		}
+
 		private DeviceManager device_manager;
-		private int pid;
-		private string script_file;
-		private bool enable_jit;
-		private bool enable_development;
 		private ScriptRunner script_runner;
 
+		private int exit_code;
 		private MainLoop loop;
 		private bool stopping;
 
-		public void run (int pid, string script_file, bool enable_jit, bool enable_development) throws Error {
-			this.pid = pid;
-			this.script_file = script_file;
-			this.enable_jit = enable_jit;
-			this.enable_development = enable_development;
+		public Application (int target_pid, string? target_name, string script_path, bool enable_jit, bool enable_development) {
+			Object (
+				target_pid: target_pid,
+				target_name: target_name,
+				script_path: script_path,
+				enable_jit: enable_jit,
+				enable_development: enable_development
+			);
+		}
 
+		public int run () {
 			Idle.add (() => {
 				start.begin ();
 				return false;
 			});
 
+			exit_code = 0;
+
 			loop = new MainLoop ();
 			loop.run ();
+
+			return exit_code;
 		}
 
-		private async void start () throws Error {
+		private async void start () {
 			device_manager = new DeviceManager ();
 
-			var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
-
-			var session = yield device.attach (pid);
-
-			var r = new ScriptRunner (session, script_file, enable_jit, enable_development);
 			try {
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+
+				uint pid;
+				if (target_name != null) {
+					var proc = yield device.get_process_by_name (target_name);
+					pid = proc.pid;
+				} else {
+					pid = (uint) target_pid;
+				}
+
+				var session = yield device.attach (pid);
+
+				var r = new ScriptRunner (session, script_path, enable_jit, enable_development);
 				yield r.start ();
 				script_runner = r;
+
+				if (eternalize)
+					stop.begin ();
 			} catch (Error e) {
-				printerr ("Failed to load script: " + e.message + "\n");
+				printerr ("%s\n", e.message);
+				exit_code = 4;
 				stop.begin ();
 				return;
 			}
-
-			if (eternalize)
-				stop.begin ();
 		}
 
 		public void shutdown () {
@@ -159,7 +196,7 @@ namespace Frida.Inject {
 
 	private class ScriptRunner : Object {
 		private Script script;
-		private string script_file;
+		private string script_path;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private Session session;
@@ -169,9 +206,9 @@ namespace Frida.Inject {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (Session session, string script_file, bool enable_jit, bool enable_development) {
+		public ScriptRunner (Session session, string script_path, bool enable_jit, bool enable_development) {
 			this.session = session;
-			this.script_file = script_file;
+			this.script_path = script_path;
 			this.enable_development = enable_development;
 
 			if (enable_jit)
@@ -183,7 +220,7 @@ namespace Frida.Inject {
 
 			if (enable_development) {
 				try {
-					script_monitor = File.new_for_path (script_file).monitor_file (FileMonitorFlags.NONE);
+					script_monitor = File.new_for_path (script_path).monitor_file (FileMonitorFlags.NONE);
 					script_monitor.changed.connect (on_script_file_changed);
 				} catch (GLib.Error e) {
 					printerr (e.message + "\n");
@@ -224,11 +261,11 @@ namespace Frida.Inject {
 			load_in_progress = true;
 
 			try {
-				var name = Path.get_basename (script_file).split (".", 2)[0];
+				var name = Path.get_basename (script_path).split (".", 2)[0];
 
 				string source;
 				try {
-					FileUtils.get_contents (script_file, out source);
+					FileUtils.get_contents (script_path, out source);
 				} catch (FileError e) {
 					throw new Error.INVALID_ARGUMENT (e.message);
 				}
