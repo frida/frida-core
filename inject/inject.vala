@@ -120,6 +120,8 @@ namespace Frida.Inject {
 				script_runner = r;
 			} catch (Error e) {
 				printerr ("Failed to load script: " + e.message + "\n");
+				stop.begin ();
+				return;
 			}
 		}
 
