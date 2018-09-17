@@ -92,20 +92,14 @@ namespace Frida.InjectorTest {
 		var rat = new Labrat ("sleeper", envp, arch);
 
 		rat.inject ("resident-agent", "", arch);
-		assert (!rat.try_wait_for_uninject (500));
+		rat.wait_for_uninject ();
 		assert (content_of (logfile) == ">m");
 
 		try {
 			rat.process.kill ();
-		} catch (Error e) {
-			assert_not_reached ();
-		}
 
-		assert (!rat.try_wait_for_uninject (500));
-
-		try {
 			logfile.delete ();
-		} catch (GLib.Error delete_error) {
+		} catch (GLib.Error e) {
 			assert_not_reached ();
 		}
 	}
