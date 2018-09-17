@@ -2,6 +2,7 @@ namespace Frida.Inject {
 	private static Application application;
 
 	private static bool output_version;
+	private static bool eternalize;
 	private static bool enable_jit;
 	private static bool enable_development;
 	private static int pid;
@@ -9,6 +10,7 @@ namespace Frida.Inject {
 
 	const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
+		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
 		{ "enable-jit", 0, 0, OptionArg.NONE, ref enable_jit, "Enable the JIT runtime", null },
 		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
 		{ "pid", 'p', 0, OptionArg.INT, ref pid, null, "PID" },
@@ -123,6 +125,9 @@ namespace Frida.Inject {
 				stop.begin ();
 				return;
 			}
+
+			if (eternalize)
+				stop.begin ();
 		}
 
 		public void shutdown () {
@@ -187,7 +192,7 @@ namespace Frida.Inject {
 		}
 
 		public async void flush () {
-			if (script != null) {
+			if (script != null && !eternalize) {
 				try {
 					yield call ("dispose", new Json.Node[] {});
 				} catch (Error e) {
@@ -248,6 +253,9 @@ namespace Frida.Inject {
 					yield call ("init", new Json.Node[] {});
 				} catch (Error e) {
 				}
+
+				if (eternalize)
+					yield script.eternalize ();
 			} finally {
 				load_in_progress = false;
 			}
