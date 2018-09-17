@@ -281,8 +281,7 @@ namespace Winjector {
 					bool is_resident;
 					Process.free_inject_instance (instance, out is_resident);
 
-					if (!is_resident)
-						uninjected (id);
+					uninjected (id);
 
 					pending--;
 					if (connection.is_closed () && pending == 0)
