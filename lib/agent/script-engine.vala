@@ -101,6 +101,15 @@ namespace Frida.Agent {
 			yield instance.load ();
 		}
 
+		public Gum.Script eternalize_script (AgentScriptId sid) throws Error {
+			var instance = instances[sid.handle];
+			if (instance == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+			var script = instance.eternalize ();
+			instances.unset (sid.handle);
+			return script;
+		}
+
 		public void post_to_script (AgentScriptId sid, string message, Bytes? data = null) throws Error {
 			var instance = instances[sid.handle];
 			if (instance == null)
@@ -157,6 +166,7 @@ namespace Frida.Agent {
 			private enum State {
 				CREATED,
 				LOADED,
+				ETERNALIZED,
 				DISPOSED,
 				UNLOADED,
 				DESTROYED
@@ -226,6 +236,17 @@ namespace Frida.Agent {
 				state = DESTROYED;
 
 				destroy_request.set_value (true);
+			}
+
+			public Gum.Script eternalize () throws Error {
+				if (state != LOADED)
+					throw new Error.INVALID_OPERATION ("Only loaded scripts may be eternalized");
+
+				state = ETERNALIZED;
+
+				var result = script;
+				script = null;
+				return result;
 			}
 
 			public async void ensure_dispose_called () {

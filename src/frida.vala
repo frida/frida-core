@@ -1940,6 +1940,27 @@ namespace Frida {
 			}
 		}
 
+		public async void eternalize () throws Error {
+			check_open ();
+
+			try {
+				yield session.session.eternalize_script (AgentScriptId (id));
+				yield _do_close (false);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public void eternalize_sync () throws Error {
+			(create<EternalizeTask> () as EternalizeTask).start_and_wait_for_completion ();
+		}
+
+		private class EternalizeTask : ScriptTask<void> {
+			protected override async void perform_operation () throws Error {
+				yield parent.eternalize ();
+			}
+		}
+
 		public async void post (string message, Bytes? data = null) throws Error {
 			check_open ();
 

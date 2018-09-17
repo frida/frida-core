@@ -28,7 +28,14 @@ namespace Frida.Agent {
 			set;
 		}
 
+		public bool has_eternalized_scripts {
+			get {
+				return !eternalized_scripts.is_empty;
+			}
+		}
+
 		private void * agent_pthread;
+		private Thread<bool> agent_gthread;
 
 		private MainContext main_context;
 		private MainLoop main_loop;
@@ -40,6 +47,7 @@ namespace Frida.Agent {
 		private uint pending_calls = 0;
 		private Gee.Promise<bool> pending_close;
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
+		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
 		private Gum.ScriptBackend script_backend;
 		private ExitMonitor exit_monitor;
@@ -115,6 +123,10 @@ namespace Frida.Agent {
 #endif
 					unload_policy = DEFERRED;
 					return;
+				} else if (shared_instance.has_eternalized_scripts) {
+					unload_policy = RESIDENT;
+					shared_instance.keep_running_eternalized_scripts ();
+					return;
 				} else {
 					release_shared_instance ();
 				}
@@ -144,6 +156,10 @@ namespace Frida.Agent {
 						Gum.Cloak.remove_file_descriptor (injector_state.fifo_fd);
 #endif
 					unload_policy = DEFERRED;
+					return;
+				} else if (shared_instance.has_eternalized_scripts) {
+					unload_policy = RESIDENT;
+					shared_instance.keep_running_eternalized_scripts ();
 					return;
 				} else {
 					release_shared_instance ();
@@ -211,6 +227,20 @@ namespace Frida.Agent {
 			main_context.pop_thread_default ();
 		}
 
+		private void keep_running_eternalized_scripts () {
+			agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
+				var ignore_scope = new ThreadIgnoreScope ();
+
+				main_context.push_thread_default ();
+				main_loop.run ();
+				main_context.pop_thread_default ();
+
+				ignore_scope = null;
+
+				return true;
+			});
+		}
+
 		private async void prepare_to_exit () {
 			yield prepare_for_termination ();
 		}
@@ -233,7 +263,13 @@ namespace Frida.Agent {
 				do_prepare_to_fork.begin ();
 				return false;
 			});
-			Environment._join_pthread (agent_pthread);
+			if (agent_gthread != null) {
+				agent_gthread.join ();
+				agent_gthread = null;
+			} else {
+				Environment._join_pthread (agent_pthread);
+			}
+			agent_pthread = null;
 
 			GumJS.prepare_to_fork ();
 			Gum.prepare_to_fork ();
@@ -244,15 +280,17 @@ namespace Frida.Agent {
 		private async void do_prepare_to_fork () {
 			stop_reason = FORK;
 
-			try {
-				fork_parent_pid = Posix.getpid ();
-				fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
-			} catch (GLib.Error e) {
+			if (controller != null) {
+				try {
+					fork_parent_pid = Posix.getpid ();
+					fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
+				} catch (GLib.Error e) {
 #if ANDROID
-				error ("Oops, SELinux rule probably missing for your system. Symptom: %s", e.message);
+					error ("Oops, SELinux rule probably missing for your system. Symptom: %s", e.message);
 #else
-				error ("%s", e.message);
+					error ("%s", e.message);
 #endif
+				}
 			}
 
 			main_loop.quit ();
@@ -310,33 +348,43 @@ namespace Frida.Agent {
 		}
 
 		private async void recreate_agent_thread (ForkActor actor) {
-			uint pid, injectee_id;
-			if (actor == PARENT) {
-				pid = fork_parent_pid;
-				injectee_id = fork_parent_injectee_id;
-			} else if (actor == CHILD) {
-				yield close_all_clients ();
+			if (controller != null) {
+				uint pid, injectee_id;
+				if (actor == PARENT) {
+					pid = fork_parent_pid;
+					injectee_id = fork_parent_injectee_id;
+				} else if (actor == CHILD) {
+					yield close_all_clients ();
 
-				var stream = SocketConnection.factory_create_connection (fork_child_socket);
-				yield setup_connection_with_stream (stream);
+					var stream = SocketConnection.factory_create_connection (fork_child_socket);
+					yield setup_connection_with_stream (stream);
 
-				pid = fork_child_pid;
-				injectee_id = fork_child_injectee_id;
+					pid = fork_child_pid;
+					injectee_id = fork_child_injectee_id;
+				} else {
+					assert_not_reached ();
+				}
+
+				try {
+					yield controller.recreate_agent_thread (pid, injectee_id);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
 			} else {
-				assert_not_reached ();
-			}
+				agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
+					var ignore_scope = new ThreadIgnoreScope ();
+					run_after_fork ();
+					ignore_scope = null;
 
-			try {
-				yield controller.recreate_agent_thread (pid, injectee_id);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
+					return true;
+				});
 			}
 
 			main_loop.quit ();
 		}
 
 		private async void finish_recovery_from_fork (ForkActor actor, string? identifier) {
-			if (actor == CHILD) {
+			if (actor == CHILD && controller != null) {
 				var info = HostChildInfo (fork_child_pid, fork_parent_pid, ChildOrigin.FORK);
 				if (identifier != null)
 					info.identifier = identifier;
@@ -413,6 +461,7 @@ namespace Frida.Agent {
 			var client = new AgentClient (this, id);
 			clients.add (client);
 			client.closed.connect (on_client_closed);
+			client.script_eternalized.connect (on_script_eternalized);
 
 			try {
 				AgentSession session = client;
@@ -444,8 +493,13 @@ namespace Frida.Agent {
 				client.registration_id = 0;
 			}
 
+			client.script_eternalized.disconnect (on_script_eternalized);
 			client.closed.disconnect (on_client_closed);
 			clients.remove (client);
+		}
+
+		private void on_script_eternalized (Gum.Script script) {
+			eternalized_scripts.add (script);
 		}
 
 		private async void unload () throws Error {
@@ -723,6 +777,7 @@ namespace Frida.Agent {
 
 	private class AgentClient : Object, AgentSession {
 		public signal void closed (AgentClient client);
+		public signal void script_eternalized (Gum.Script script);
 
 		public weak Runner runner {
 			get;
@@ -824,6 +879,12 @@ namespace Frida.Agent {
 		public async void load_script (AgentScriptId sid) throws Error {
 			var engine = get_script_engine ();
 			yield engine.load_script (sid);
+		}
+
+		public async void eternalize_script (AgentScriptId sid) throws Error {
+			var engine = get_script_engine ();
+			var script = engine.eternalize_script (sid);
+			script_eternalized (script);
 		}
 
 		public async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws Error {

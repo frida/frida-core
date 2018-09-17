@@ -1205,6 +1205,7 @@ namespace Frida.Gadget {
 		private unowned Gum.ScriptBackend script_backend = null;
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
 		public Server (Config config, Location location) throws Error {
 			Object (
@@ -1225,9 +1226,7 @@ namespace Frida.Gadget {
 				if (server == null)
 					return false;
 
-				clients[connection] = new Client (this, connection);
-				connection.on_closed.connect (on_connection_closed);
-
+				attach_client (connection);
 				return true;
 			});
 
@@ -1261,6 +1260,8 @@ namespace Frida.Gadget {
 				Client client;
 				clients.unset (connection, out client);
 				yield client.shutdown ();
+
+				detach_client (client);
 			}
 		}
 
@@ -1281,13 +1282,33 @@ namespace Frida.Gadget {
 			config.runtime = RuntimeFlavor.JIT;
 		}
 
+		private void attach_client (DBusConnection connection) {
+			var client = new Client (this, connection);
+			clients[connection] = client;
+			connection.on_closed.connect (on_connection_closed);
+
+			client.script_eternalized.connect (on_script_eternalized);
+		}
+
+		private void detach_client (Client client) {
+			client.script_eternalized.disconnect (on_script_eternalized);
+		}
+
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			Client client;
-			if (clients.unset (connection, out client))
+			if (clients.unset (connection, out client)) {
 				client.shutdown.begin ();
+				detach_client (client);
+			}
+		}
+
+		private void on_script_eternalized (Gum.Script script) {
+			eternalized_scripts.add (script);
 		}
 
 		private class Client : Object, HostSession {
+			public signal void script_eternalized (Gum.Script script);
+
 			private unowned Server server;
 			private DBusConnection connection;
 			private uint host_registration_id;
@@ -1400,6 +1421,7 @@ namespace Frida.Gadget {
 				var session = new ClientSession (server, id);
 				sessions.add (session);
 				session.closed.connect (on_session_closed);
+				session.script_eternalized.connect (on_script_eternalized);
 
 				try {
 					AgentSession s = session;
@@ -1422,10 +1444,15 @@ namespace Frida.Gadget {
 			private void on_session_closed (ClientSession session) {
 				connection.unregister_object (session.registration_id);
 
+				session.script_eternalized.disconnect (on_script_eternalized);
 				session.closed.disconnect (on_session_closed);
 				sessions.remove (session);
 
 				agent_session_destroyed (session.id, SessionDetachReason.APPLICATION_REQUESTED);
+			}
+
+			private void on_script_eternalized (Gum.Script script) {
+				script_eternalized (script);
 			}
 
 			private void validate_pid (uint pid) throws Error {
@@ -1436,6 +1463,7 @@ namespace Frida.Gadget {
 
 		private class ClientSession : Object, AgentSession {
 			public signal void closed (ClientSession session);
+			public signal void script_eternalized (Gum.Script script);
 
 			public weak Server server {
 				get;
@@ -1520,6 +1548,12 @@ namespace Frida.Gadget {
 			public async void load_script (AgentScriptId sid) throws Error {
 				var engine = get_script_engine ();
 				yield engine.load_script (sid);
+			}
+
+			public async void eternalize_script (AgentScriptId sid) throws Error {
+				var engine = get_script_engine ();
+				var script = engine.eternalize_script (sid);
+				script_eternalized (script);
 			}
 
 			public async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws Error {
