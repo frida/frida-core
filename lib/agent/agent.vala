@@ -348,23 +348,25 @@ namespace Frida.Agent {
 		}
 
 		private async void recreate_agent_thread (ForkActor actor) {
-			if (controller != null) {
-				uint pid, injectee_id;
-				if (actor == PARENT) {
-					pid = fork_parent_pid;
-					injectee_id = fork_parent_injectee_id;
-				} else if (actor == CHILD) {
-					yield close_all_clients ();
+			uint pid, injectee_id;
+			if (actor == PARENT) {
+				pid = fork_parent_pid;
+				injectee_id = fork_parent_injectee_id;
+			} else if (actor == CHILD) {
+				yield close_all_clients ();
 
+				if (fork_child_socket != null) {
 					var stream = SocketConnection.factory_create_connection (fork_child_socket);
 					yield setup_connection_with_stream (stream);
-
-					pid = fork_child_pid;
-					injectee_id = fork_child_injectee_id;
-				} else {
-					assert_not_reached ();
 				}
 
+				pid = fork_child_pid;
+				injectee_id = fork_child_injectee_id;
+			} else {
+				assert_not_reached ();
+			}
+
+			if (controller != null) {
 				try {
 					yield controller.recreate_agent_thread (pid, injectee_id);
 				} catch (GLib.Error e) {
