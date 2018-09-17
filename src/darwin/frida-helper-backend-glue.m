@@ -313,7 +313,6 @@ static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance);
-static gboolean frida_inject_instance_is_resident (FridaInjectInstance * instance);
 
 static gboolean frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error);
 static void frida_inject_instance_on_mach_thread_dead (void * context);
@@ -2172,12 +2171,6 @@ frida_inject_instance_on_posix_thread_dead (void * context)
   _frida_darwin_helper_backend_on_posix_thread_dead (self->backend, self->id);
 }
 
-gboolean
-_frida_darwin_helper_backend_is_instance_resident (FridaDarwinHelperBackend * self, void * instance)
-{
-  return frida_inject_instance_is_resident (instance);
-}
-
 void
 _frida_darwin_helper_backend_free_inject_instance (FridaDarwinHelperBackend * self, void * instance)
 {
@@ -3219,12 +3212,6 @@ frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance)
   g_free (local_cookie);
 
   return shared_memory_still_mapped;
-}
-
-static gboolean
-frida_inject_instance_is_resident (FridaInjectInstance * instance)
-{
-  return instance->agent_context->unload_policy != FRIDA_UNLOAD_POLICY_IMMEDIATE;
 }
 
 static gboolean

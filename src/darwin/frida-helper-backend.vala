@@ -473,12 +473,9 @@ namespace Frida {
 			bool instance_id_found = inject_instances.unset (id, out instance);
 			assert (instance_id_found);
 
-			var is_resident = _is_instance_resident (instance);
-
 			schedule_inject_instance_cleanup (instance);
 
-			if (!is_resident)
-				uninjected (id);
+			uninjected (id);
 
 			if (inject_instances.is_empty)
 				idle ();
@@ -564,7 +561,6 @@ namespace Frida {
 		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
 		protected extern void _recreate_injectee_thread (void * instance, uint pid, uint task) throws Error;
 		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
-		protected extern bool _is_instance_resident (void * instance);
 		protected extern void _free_inject_instance (void * instance);
 	}
 

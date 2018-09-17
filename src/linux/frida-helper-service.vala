@@ -349,8 +349,7 @@ namespace Frida {
 
 			_free_inject_instance (instance, unload_policy);
 
-			if (unload_policy == IMMEDIATE)
-				uninjected (id);
+			uninjected (id);
 
 			if (connection.is_closed () && inject_instances.is_empty)
 				shutdown.begin ();
