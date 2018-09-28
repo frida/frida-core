@@ -731,7 +731,7 @@ frida_find_private_api (FridaPrivateApi * api)
   symbols = details.linkedit + symtab->symoff;
   strings = details.linkedit + symtab->stroff;
 
-  remaining = 10;
+  remaining = 11;
   for (sym_index = 0; sym_index != symtab->nsyms && remaining > 0; sym_index++)
   {
     const struct nlist_64 * symbol = &symbols[sym_index];
