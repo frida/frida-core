@@ -72,6 +72,8 @@ struct _FridaPrivateApi
       uint32_t buffer_size, int32_t * retval);
 
   void (** dtrace_proc_waitfor_exec_ptr) (proc_t proc);
+
+  int (* cdevsw_setkqueueok) (int maj, struct cdevsw * csw, int extra_flags);
 };
 
 struct _FridaMachODetails
@@ -132,6 +134,8 @@ static struct cdevsw frida_device =
   .d_select = frida_device_select,
   .d_mmap = eno_mmap,
   .d_strategy = eno_strat,
+  .d_reserved_1 = eno_getc,
+  .d_reserved_2 = eno_putc,
   .d_type = 0
 };
 
@@ -141,7 +145,7 @@ static bool frida_is_open = false;
 static bool frida_is_gating = false;
 static bool frida_is_nonblocking = false;
 static struct selinfo * frida_selinfo = NULL;
-static void * frida_selinfo_storage[128];
+static void * frida_selinfo_storage[512];
 static STAILQ_HEAD (, _FridaSpawnEntry) frida_pending =
     STAILQ_HEAD_INITIALIZER (frida_pending);
 static STAILQ_HEAD (, _FridaSpawnNotification) frida_notifications =
@@ -179,6 +183,7 @@ frida_kernel_agent_start (kmod_info_t * ki,
   frida_tag = OSMalloc_Tagalloc (FRIDA_TAG_NAME, OSMT_DEFAULT);
 
   frida_device_major = cdevsw_add (-1, &frida_device);
+  frida_private_api.cdevsw_setkqueueok (frida_device_major, &frida_device, 0);
   dev = makedev (frida_device_major, 0);
   frida_device_node = devfs_make_node (dev, DEVFS_CHAR, UID_ROOT, GID_WHEEL,
       0666, FRIDA_DEVICE_NAME);
@@ -207,7 +212,10 @@ frida_kernel_agent_stop (kmod_info_t * ki,
   while (frida_num_operations > 0)
   {
     if (frida_selinfo != NULL)
+    {
       selwakeup (frida_selinfo);
+      frida_selinfo = NULL;
+    }
     wakeup_one ((caddr_t) &frida_notifications_length);
 
     FRIDA_UNLOCK ();
@@ -341,7 +349,7 @@ frida_device_read (dev_t dev,
 
 would_block:
   {
-    error = EAGAIN;
+    error = EWOULDBLOCK;
 
     goto propagate_error;
   }
@@ -445,25 +453,26 @@ frida_device_select (dev_t dev,
                      void * wql,
                      struct proc * p)
 {
-  int revents;
-
-  revents = 0;
+  int res = 0;
 
   if ((which & (POLLIN | POLLRDNORM)) != 0)
   {
     FRIDA_LOCK ();
 
-    frida_selinfo = (struct selinfo *) &frida_selinfo_storage;
-
-    if (frida_notifications_length != 0)
-      revents |= which & (POLLIN | POLLRDNORM);
-    else
+    if (frida_notifications_length == 0)
+    {
+      frida_selinfo = (struct selinfo *) &frida_selinfo_storage;
       selrecord (p, frida_selinfo, wql);
+    }
+    else
+    {
+      res = 1;
+    }
 
     FRIDA_UNLOCK ();
   }
 
-  return revents;
+  return res;
 }
 
 static void
@@ -562,7 +571,10 @@ frida_emit_notification (const FridaSpawnEntry * entry)
   frida_notifications_length += notification->length;
 
   if (frida_selinfo != NULL)
+  {
     selwakeup (frida_selinfo);
+    frida_selinfo = NULL;
+  }
   wakeup_one ((caddr_t) &frida_notifications_length);
 }
 
@@ -745,6 +757,8 @@ frida_find_private_api (FridaPrivateApi * api)
     FRIDA_TRY_RESOLVE (proc_pidpathinfo_internal)
 
     FRIDA_TRY_RESOLVE (dtrace_proc_waitfor_exec_ptr)
+
+    FRIDA_TRY_RESOLVE (cdevsw_setkqueueok)
   }
 
   return remaining == 0;
