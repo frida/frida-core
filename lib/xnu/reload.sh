@@ -15,7 +15,7 @@ cleanup () {
 trap cleanup EXIT
 
 # cd to sources
-cd "$(dirname "$(realpath "$0")")"
+cd "$(dirname "$0")"
 
 xcodebuild build \
   CONFIGURATION_BUILD_DIR="$BUILD_DIR" \
