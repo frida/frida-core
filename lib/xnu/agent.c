@@ -4,6 +4,7 @@
  * - Fix unload while /dev/frida is open.
  */
 
+#include <kern/clock.h>
 #include <kern/task.h>
 #include <libkern/OSAtomic.h>
 #include <libkern/OSMalloc.h>
@@ -43,6 +44,7 @@ struct _FridaSpawnEntry
   pid_t pid;
   task_t task;
   char executable_path[MAXPATHLEN];
+  uint64_t deadline;
 
   STAILQ_ENTRY (_FridaSpawnEntry) entries;
 };
@@ -63,6 +65,12 @@ struct _FridaPrivateApi
   ipc_port_t (* convert_task_to_port) (task_t task);
   boolean_t (* is_corpsetask) (task_t task);
   ipc_space_t (* get_task_ipcspace) (task_t task);
+
+  void (* thread_set_thread_name) (thread_t th, const char * name);
+  kern_return_t (* thread_policy_get) (thread_t thread,
+      thread_policy_flavor_t flavor, thread_policy_t policy_info,
+      mach_msg_type_number_t * count, boolean_t * get_default);
+
   mach_port_name_t (* ipc_port_copyout_send) (ipc_port_t send_right,
       ipc_space_t space);
   void (* ipc_port_release_send) (ipc_port_t port);
@@ -85,6 +93,10 @@ struct _FridaMachODetails
 
 kern_return_t frida_kernel_agent_start (kmod_info_t * ki, void * d);
 kern_return_t frida_kernel_agent_stop (kmod_info_t * ki, void * d);
+static void frida_kernel_agent_start_watchdog (void);
+static void frida_kernel_agent_stop_watchdog (void);
+static void frida_kernel_agent_watchdog (void * parameter,
+    wait_result_t wait_result);
 
 static int frida_device_open (dev_t dev, int flags, int devtype,
     struct proc * p);
@@ -114,6 +126,7 @@ static bool frida_try_enable_exec_hook (void);
 static void frida_disable_exec_hook (void);
 static void frida_enable_spawn_gating (void);
 static void frida_disable_spawn_gating (void);
+static void frida_disable_spawn_gating_unlocked (void);
 static int frida_resume (pid_t pid);
 static int frida_task_for_pid (pid_t pid, mach_port_name_t * port);
 
@@ -152,6 +165,8 @@ static STAILQ_HEAD (, _FridaSpawnNotification) frida_notifications =
     STAILQ_HEAD_INITIALIZER (frida_notifications);
 static int frida_notifications_length = 0;
 
+static thread_t frida_watchdog_thread;
+
 static FridaPrivateApi frida_private_api;
 
 static int frida_device_major;
@@ -188,6 +203,8 @@ frida_kernel_agent_start (kmod_info_t * ki,
   frida_device_node = devfs_make_node (dev, DEVFS_CHAR, UID_ROOT, GID_WHEEL,
       0666, FRIDA_DEVICE_NAME);
 
+  frida_kernel_agent_start_watchdog ();
+
   return KERN_SUCCESS;
 }
 
@@ -198,7 +215,10 @@ frida_kernel_agent_stop (kmod_info_t * ki,
   FRIDA_LOCK ();
   frida_is_stopping = true;
   frida_disable_exec_hook ();
+  wakeup_one ((caddr_t) &frida_is_stopping);
   FRIDA_UNLOCK ();
+
+  frida_kernel_agent_stop_watchdog ();
 
   devfs_remove (frida_device_node);
   cdevsw_remove (frida_device_major, &frida_device);
@@ -236,6 +256,90 @@ frida_kernel_agent_stop (kmod_info_t * ki,
   lck_grp_attr_free (frida_lock_group_attr);
 
   return KERN_SUCCESS;
+}
+
+static void
+frida_kernel_agent_start_watchdog (void)
+{
+  kernel_thread_start (frida_kernel_agent_watchdog, NULL,
+      &frida_watchdog_thread);
+  frida_private_api.thread_set_thread_name (frida_watchdog_thread,
+      "FridaWatchdogThread");
+}
+
+static void
+frida_kernel_agent_stop_watchdog (void)
+{
+  kern_return_t kr;
+
+  do
+  {
+    thread_affinity_policy_data_t policy;
+    mach_msg_type_number_t count;
+    boolean_t get_default;
+
+    count = THREAD_AFFINITY_POLICY_COUNT;
+    get_default = FALSE;
+
+    kr = frida_private_api.thread_policy_get (frida_watchdog_thread,
+        THREAD_AFFINITY_POLICY, (thread_policy_t) &policy, &count,
+        &get_default);
+    if (kr == KERN_SUCCESS)
+    {
+      struct timespec delay = { 0, 50000000 };
+
+      FRIDA_LOCK ();
+      msleep (&frida_watchdog_thread, frida_lock, PRIBIO | PCATCH, "frida",
+          &delay);
+      FRIDA_UNLOCK ();
+    }
+  }
+  while (kr != KERN_TERMINATED);
+
+  thread_deallocate (frida_watchdog_thread);
+  frida_watchdog_thread = NULL;
+}
+
+static void
+frida_kernel_agent_watchdog (void * parameter,
+                             wait_result_t wait_result)
+{
+  struct timespec check_interval = { 5, 0 };
+
+  FRIDA_LOCK ();
+
+  while (!frida_is_stopping)
+  {
+    int status;
+    uint64_t now;
+    boolean_t have_stale_entry;
+    FridaSpawnEntry * entry;
+
+    status = msleep (&frida_is_stopping, frida_lock, PRIBIO | PCATCH, "frida",
+        &check_interval);
+    if (status == 0)
+      continue;
+
+    clock_get_uptime (&now);
+
+    have_stale_entry = FALSE;
+
+    STAILQ_FOREACH (entry, &frida_pending, entries)
+    {
+      if (now > entry->deadline)
+      {
+        have_stale_entry = TRUE;
+        break;
+      }
+    }
+
+    if (have_stale_entry)
+    {
+      frida_disable_spawn_gating_unlocked ();
+    }
+  }
+
+  FRIDA_UNLOCK ();
 }
 
 static int
@@ -306,7 +410,7 @@ frida_device_read (dev_t dev,
       goto would_block;
 
     error = msleep (&frida_notifications_length, frida_lock, PRIBIO | PCATCH,
-        "frida", 0);
+        "frida", NULL);
     if (error != 0)
       goto propagate_error;
   }
@@ -504,6 +608,9 @@ frida_on_exec (proc_t proc)
   frida_private_api.proc_pidpathinfo_internal (proc, 0, entry->executable_path,
       sizeof (entry->executable_path), NULL);
 
+  clock_interval_to_deadline (20, 1000 * 1000 * 1000 /* seconds */,
+      &entry->deadline);
+
   frida_emit_notification (entry);
 
   if (frida_is_gating)
@@ -639,10 +746,16 @@ frida_disable_spawn_gating (void)
 {
   FRIDA_LOCK ();
 
-  frida_is_gating = false;
-  frida_clear_pending ();
+  frida_disable_spawn_gating_unlocked ();
 
   FRIDA_UNLOCK ();
+}
+
+static void
+frida_disable_spawn_gating_unlocked (void)
+{
+  frida_is_gating = false;
+  frida_clear_pending ();
 }
 
 static int
@@ -731,7 +844,7 @@ frida_find_private_api (FridaPrivateApi * api)
   symbols = details.linkedit + symtab->symoff;
   strings = details.linkedit + symtab->stroff;
 
-  remaining = 11;
+  remaining = 13;
   for (sym_index = 0; sym_index != symtab->nsyms && remaining > 0; sym_index++)
   {
     const struct nlist_64 * symbol = &symbols[sym_index];
@@ -750,6 +863,10 @@ frida_find_private_api (FridaPrivateApi * api)
     FRIDA_TRY_RESOLVE (convert_task_to_port)
     FRIDA_TRY_RESOLVE (is_corpsetask)
     FRIDA_TRY_RESOLVE (get_task_ipcspace)
+
+    FRIDA_TRY_RESOLVE (thread_set_thread_name)
+    FRIDA_TRY_RESOLVE (thread_policy_get)
+
     FRIDA_TRY_RESOLVE (ipc_port_copyout_send)
     FRIDA_TRY_RESOLVE (ipc_port_release_send)
 
