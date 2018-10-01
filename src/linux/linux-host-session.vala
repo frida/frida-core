@@ -1,4 +1,5 @@
 namespace Frida {
+
 	public class LinuxHostSessionBackend : Object, HostSessionBackend {
 		private LinuxHostSessionProvider local_provider;
 
@@ -196,18 +197,6 @@ namespace Frida {
 		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
 #if ANDROID
 			if (!program.has_prefix ("/")) {
-				string package_name = program;
-
-				var aux_options = options.load_aux ();
-
-				string? activity_name = null;
-				if (aux_options.contains ("activity")) {
-					if (!aux_options.lookup ("activity", "s", out activity_name))
-						throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
-
-					if (activity_name[0] == '.')
-						activity_name = package_name + activity_name;
-				}
 
 				if (options.has_argv)
 					throw new Error.NOT_SUPPORTED ("The 'argv' option is not supported when spawning Android apps");
@@ -224,7 +213,7 @@ namespace Frida {
 				if (options.stdio != INHERIT)
 					throw new Error.NOT_SUPPORTED ("Redirected stdio is not supported when spawning Android apps");
 
-				return yield get_robo_launcher ().spawn (package_name, activity_name);
+				return yield get_robo_launcher ().spawn (program, options);
 			} else {
 				return yield helper.spawn (program, options);
 			}
@@ -419,7 +408,47 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string package_name, string? activity_name) throws Error {
+		public async uint spawn (string program, HostSpawnOptions options) throws Error {
+
+			string package_name = program;
+
+			var aux_options = options.load_aux ();
+
+			string  method = "activity";
+			string? entry_point = null;
+			if (aux_options.contains ("activity")) {
+
+				string? activity_name = null;
+
+				if (!aux_options.lookup ("activity", "s", out activity_name))
+					throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
+
+				if (activity_name[0] == '.')
+					activity_name = package_name + activity_name;
+
+				entry_point = activity_name;
+			}
+			if (aux_options.contains ("receiver")) {
+
+				string? receiver_name = null;
+
+				if (!aux_options.lookup ("receiver", "s", out receiver_name))
+					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
+
+				if (receiver_name[0] == '.')
+					receiver_name = package_name + receiver_name;
+
+				entry_point = receiver_name;
+				method = "receiver";
+			}
+
+			string? action = null;
+			if (aux_options.contains ("action")) {
+
+				if (!aux_options.lookup ("action", "s", out action))
+					throw new Error.INVALID_ARGUMENT ("The 'action' option must be a string");
+			}
+
 			yield ensure_loaded ();
 
 			var process_name = yield system_ui_agent.get_process_name (package_name);
@@ -430,8 +459,8 @@ namespace Frida {
 			spawn_requests[process_name] = request;
 
 			try {
-				yield system_ui_agent.stop_activity (package_name);
-				yield system_ui_agent.start_activity (package_name, activity_name);
+				yield system_ui_agent.stop_package (package_name);
+				yield system_ui_agent.start_package (package_name, method, entry_point, action);
 			} catch (Error e) {
 				spawn_requests.unset (process_name);
 				throw e;
@@ -621,19 +650,43 @@ namespace Frida {
 			return process_name.get_string ();
 		}
 
-		public async void start_activity (string package_name, string? activity_name) throws Error {
+		public async void start_package (string package_name, string method, string? entry_point, string? action) throws Error {
+
 			var package_name_value = new Json.Node.alloc ().init_string (package_name);
 
-			var activity_name_value = new Json.Node.alloc ();
-			if (activity_name != null)
-				activity_name_value.init_string (activity_name);
-			else
-				activity_name_value.init_null ();
+			if (method == "activity") {
 
-			yield call ("startActivity", new Json.Node[] { package_name_value, activity_name_value });
+				var activity_name_value = new Json.Node.alloc ();
+				if (entry_point != null)
+					activity_name_value.init_string (entry_point);
+				else
+					activity_name_value.init_null ();
+
+				yield call ("startActivity", new Json.Node[] { package_name_value, activity_name_value });
+			}
+			else if (method == "receiver") {
+
+				var receiver_name_value = new Json.Node.alloc ();
+				if (entry_point != null)
+					receiver_name_value.init_string (entry_point);
+				else
+					throw new Error.INVALID_ARGUMENT ("The entry_point is mandatory for broadcast receiver");
+
+				var action_value = new Json.Node.alloc ();
+				if (action != null)
+					action_value.init_string (action);
+				else
+					throw new Error.INVALID_ARGUMENT ("The action is mandatory for broadcast receiver");
+
+				yield call ("broadcastAction", new Json.Node[] { package_name_value, receiver_name_value, action_value });
+			}
+			else {
+
+				throw new Error.INVALID_ARGUMENT ("The provided method is unsupported");
+			}
 		}
 
-		public async void stop_activity (string package_name) throws Error {
+		public async void stop_package (string package_name) throws Error {
 			bool existing_app_killed = false;
 			do {
 				existing_app_killed = false;
@@ -648,7 +701,7 @@ namespace Frida {
 
 							var source = new TimeoutSource (100);
 							source.set_callback (() => {
-								stop_activity.callback ();
+								stop_package.callback ();
 								return false;
 							});
 							source.attach (MainContext.get_thread_default ());

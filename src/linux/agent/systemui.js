@@ -1,7 +1,7 @@
 'use strict';
 
 var ApplicationInfo, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
-var context, packageManager, activityManager;
+var context, packageManager, activityManager, Intent, ComponentName;
 
 rpc.exports = {
   enumerateApplications: function () {
@@ -54,6 +54,24 @@ rpc.exports = {
         launchIntent.setClassName(packageName, activityName);
 
       context.startActivity(launchIntent);
+    });
+  },
+  broadcastAction: function (packageName, receiverName, action) {
+    return performOnJavaVM(function () {
+
+      if (receiverName === null)
+        throw new Error("Please provide receiver name for '"+ packageName + "'");
+
+      if (action === null)
+        throw new Error("Please provide intent action for '" + packageName + "'");
+
+      var intent = Intent.$new();
+      intent.setAction(action);
+
+      var cmp = ComponentName.$new(packageName, receiverName)
+      intent.setComponent(cmp);
+
+      context.sendBroadcast(intent);
     });
   },
   getFrontmostApplication: function () {
@@ -114,6 +132,8 @@ Java.perform(function () {
   RunningTaskInfo = Java.use('android.app.ActivityManager$RunningTaskInfo');
   var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
   GET_META_DATA = PackageManager.GET_META_DATA.value;
+  Intent = Java.use('android.content.Intent');
+  ComponentName = Java.use('android.content.ComponentName');
 
   context = ActivityThread.currentApplication();
 
