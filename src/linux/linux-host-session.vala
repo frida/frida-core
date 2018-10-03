@@ -712,9 +712,10 @@ namespace Frida {
 	private static string canonicalize_class_name (string klass, string package) {
 		var result = new StringBuilder (klass);
 
-		if (!klass.has_prefix (package)) {
-			if (klass[0] != '.')
-				result.prepend_c ('.');
+		if (klass.has_prefix (".")) {
+			result.prepend (package);
+		} else if (klass.index_of (".") == -1) {
+			result.prepend_c ('.');
 			result.prepend (package);
 		}
 
