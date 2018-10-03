@@ -196,35 +196,7 @@ namespace Frida {
 		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
 #if ANDROID
 			if (!program.has_prefix ("/")) {
-				string package_name = program;
-
-				var aux_options = options.load_aux ();
-
-				string? activity_name = null;
-				if (aux_options.contains ("activity")) {
-					if (!aux_options.lookup ("activity", "s", out activity_name))
-						throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
-
-					if (activity_name[0] == '.')
-						activity_name = package_name + activity_name;
-				}
-
-				if (options.has_argv)
-					throw new Error.NOT_SUPPORTED ("The 'argv' option is not supported when spawning Android apps");
-
-				if (options.has_envp)
-					throw new Error.NOT_SUPPORTED ("The 'envp' option is not supported when spawning Android apps");
-
-				if (options.has_env)
-					throw new Error.NOT_SUPPORTED ("The 'env' option is not supported when spawning Android apps");
-
-				if (options.cwd.length > 0)
-					throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning Android apps");
-
-				if (options.stdio != INHERIT)
-					throw new Error.NOT_SUPPORTED ("Redirected stdio is not supported when spawning Android apps");
-
-				return yield get_robo_launcher ().spawn (package_name, activity_name);
+				return yield get_robo_launcher ().spawn (program, options);
 			} else {
 				return yield helper.spawn (program, options);
 			}
@@ -419,10 +391,64 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string package_name, string? activity_name) throws Error {
+		public async uint spawn (string program, HostSpawnOptions options) throws Error {
+			string package = program;
+
+			if (options.has_argv)
+				throw new Error.NOT_SUPPORTED ("The 'argv' option is not supported when spawning Android apps");
+
+			if (options.has_envp)
+				throw new Error.NOT_SUPPORTED ("The 'envp' option is not supported when spawning Android apps");
+
+			if (options.has_env)
+				throw new Error.NOT_SUPPORTED ("The 'env' option is not supported when spawning Android apps");
+
+			if (options.cwd.length > 0)
+				throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning Android apps");
+
+			if (options.stdio != INHERIT)
+				throw new Error.NOT_SUPPORTED ("Redirected stdio is not supported when spawning Android apps");
+
+			PackageEntrypoint? entrypoint = null;
+
+			var aux_options = options.load_aux ();
+
+			if (aux_options.contains ("activity")) {
+				string? activity = null;
+				if (!aux_options.lookup ("activity", "s", out activity))
+					throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
+				activity = canonicalize_class_name (activity, package);
+
+				if (aux_options.contains ("action"))
+					throw new Error.INVALID_ARGUMENT ("The 'action' option should only be specified when a 'receiver' is specified");
+
+				entrypoint = new ActivityEntrypoint (activity);
+			}
+
+			if (aux_options.contains ("receiver")) {
+				if (entrypoint != null)
+					throw new Error.INVALID_ARGUMENT ("Only one of 'activity' or 'receiver' (with 'action') may be specified");
+
+				string? receiver = null;
+				if (!aux_options.lookup ("receiver", "s", out receiver))
+					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
+				receiver = canonicalize_class_name (receiver, package);
+
+				string? action = null;
+				if (!aux_options.contains ("action"))
+					throw new Error.INVALID_ARGUMENT ("The 'action' option is required when 'receiver' is specified");
+				if (!aux_options.lookup ("action", "s", out action))
+					throw new Error.INVALID_ARGUMENT ("The 'action' option must be a string");
+
+				entrypoint = new BroadcastReceiverEntrypoint (receiver, action);
+			}
+
+			if (entrypoint == null)
+				entrypoint = new DefaultActivityEntrypoint ();
+
 			yield ensure_loaded ();
 
-			var process_name = yield system_ui_agent.get_process_name (package_name);
+			var process_name = yield system_ui_agent.get_process_name (package);
 			if (spawn_requests.has_key (process_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
 
@@ -430,8 +456,8 @@ namespace Frida {
 			spawn_requests[process_name] = request;
 
 			try {
-				yield system_ui_agent.stop_activity (package_name);
-				yield system_ui_agent.start_activity (package_name, activity_name);
+				yield system_ui_agent.stop_package (package);
+				yield system_ui_agent.start_package (package, entrypoint);
 			} catch (Error e) {
 				spawn_requests.unset (process_name);
 				throw e;
@@ -613,33 +639,51 @@ namespace Frida {
 			}
 		}
 
-		public async string get_process_name (string package_name) throws Error {
-			var package_name_value = new Json.Node.alloc ().init_string (package_name);
+		public async string get_process_name (string package) throws Error {
+			var package_name_value = new Json.Node.alloc ().init_string (package);
 
 			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value });
 
 			return process_name.get_string ();
 		}
 
-		public async void start_activity (string package_name, string? activity_name) throws Error {
-			var package_name_value = new Json.Node.alloc ().init_string (package_name);
+		public async void start_package (string package, PackageEntrypoint entrypoint) throws Error {
+			var package_value = new Json.Node.alloc ().init_string (package);
 
-			var activity_name_value = new Json.Node.alloc ();
-			if (activity_name != null)
-				activity_name_value.init_string (activity_name);
-			else
-				activity_name_value.init_null ();
+			if (entrypoint is DefaultActivityEntrypoint) {
+				var activity_value = new Json.Node.alloc ();
+				activity_value.init_null ();
 
-			yield call ("startActivity", new Json.Node[] { package_name_value, activity_name_value });
+				yield call ("startActivity", new Json.Node[] { package_value, activity_value });
+			} else if (entrypoint is ActivityEntrypoint) {
+				var e = entrypoint as ActivityEntrypoint;
+
+				var activity_value = new Json.Node.alloc ();
+				activity_value.init_string (e.activity);
+
+				yield call ("startActivity", new Json.Node[] { package_value, activity_value });
+			} else if (entrypoint is BroadcastReceiverEntrypoint) {
+				var e = entrypoint as BroadcastReceiverEntrypoint;
+
+				var receiver_value = new Json.Node.alloc ();
+				receiver_value.init_string (e.receiver);
+
+				var action_value = new Json.Node.alloc ();
+				action_value.init_string (e.action);
+
+				yield call ("sendBroadcast", new Json.Node[] { package_value, receiver_value, action_value });
+			} else {
+				assert_not_reached ();
+			}
 		}
 
-		public async void stop_activity (string package_name) throws Error {
+		public async void stop_package (string package) throws Error {
 			bool existing_app_killed = false;
 			do {
 				existing_app_killed = false;
 				var installed_apps = yield enumerate_applications ();
 				foreach (var installed_app in installed_apps) {
-					if (installed_app.identifier == package_name) {
+					if (installed_app.identifier == package) {
 						var running_pid = installed_app.pid;
 						if (running_pid != 0) {
 							System.kill (running_pid);
@@ -648,7 +692,7 @@ namespace Frida {
 
 							var source = new TimeoutSource (100);
 							source.set_callback (() => {
-								stop_activity.callback ();
+								stop_package.callback ();
 								return false;
 							});
 							source.attach (MainContext.get_thread_default ());
@@ -662,6 +706,54 @@ namespace Frida {
 
 		protected override async uint get_target_pid () throws Error {
 			return LocalProcesses.get_pid ("com.android.systemui");
+		}
+	}
+
+	private static string canonicalize_class_name (string klass, string package) {
+		var result = new StringBuilder (klass);
+
+		if (!klass.has_prefix (package)) {
+			if (klass[0] != '.')
+				result.prepend_c ('.');
+			result.prepend (package);
+		}
+
+		return result.str;
+	}
+
+	private class PackageEntrypoint : Object {
+	}
+
+	private class DefaultActivityEntrypoint : PackageEntrypoint {
+		public DefaultActivityEntrypoint () {
+			Object ();
+		}
+	}
+
+	private class ActivityEntrypoint : PackageEntrypoint {
+		public string activity {
+			get;
+			construct;
+		}
+
+		public ActivityEntrypoint (string activity) {
+			Object (activity: activity);
+		}
+	}
+
+	private class BroadcastReceiverEntrypoint : PackageEntrypoint {
+		public string receiver {
+			get;
+			construct;
+		}
+
+		public string action {
+			get;
+			construct;
+		}
+
+		public BroadcastReceiverEntrypoint (string receiver, string action) {
+			Object (receiver: receiver, action: action);
 		}
 	}
 
