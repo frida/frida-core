@@ -26,7 +26,7 @@ gadget = shared_library('frida-gadget', gadget_sources,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-gadget.def',
-  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep],
+  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep, tls_provider_dep],
   install: host_os_family != 'darwin',
 )
 

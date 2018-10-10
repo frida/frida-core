@@ -30,7 +30,7 @@ agent = shared_library('frida-agent', agent_sources,
   vala_args: extra_vala_args,
   link_args: extra_link_args,
   vs_module_defs: 'frida-agent.def',
-  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep],
+  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep, tls_provider_dep],
 )
 
 agent_dep = declare_dependency(link_with: agent)

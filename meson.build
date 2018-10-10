@@ -137,8 +137,18 @@ json_glib_dep = dependency('json-glib-1.0')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
 
-if host_os_family != 'windows'
+if host_os_family == 'windows'
+  tls_provider_dep = dependency('glib-schannel-static', required: false)
+  if tls_provider_dep.found()
+    cdata.set('HAVE_GLIB_SCHANNEL_STATIC', 1)
+  endif
+else
   gio_unix_dep = dependency('gio-unix-2.0')
+
+  tls_provider_dep = dependency('glib-openssl-static', required: false)
+  if tls_provider_dep.found()
+    cdata.set('HAVE_GLIB_OPENSSL_STATIC', 1)
+  endif
 endif
 
 backend_libs_private = []
