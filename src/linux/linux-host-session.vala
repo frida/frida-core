@@ -602,7 +602,11 @@ namespace Frida {
 	private class SystemUIAgent : InternalAgent {
 		public SystemUIAgent (LinuxHostSession host_session) {
 			string * source = Frida.Data.Android.get_systemui_js_blob ().data;
-			Object (host_session: host_session, script_source: source);
+			Object (
+				host_session: host_session,
+				script_source: source,
+				enable_jit: true
+			);
 		}
 
 		public async HostApplicationInfo[] enumerate_applications () throws Error {

@@ -945,6 +945,12 @@ namespace Frida {
 			construct;
 		}
 
+		public bool enable_jit {
+			get;
+			construct;
+			default = false;
+		}
+
 		private Gee.Promise<bool> ensure_request;
 		private Gee.Promise<bool> unloaded;
 
@@ -1049,8 +1055,13 @@ namespace Frida {
 
 			try {
 				var id = yield host_session.attach_to (target_pid);
+
 				session = yield host_session.obtain_agent_session (id);
 				session.message_from_script.connect (on_message_from_script);
+
+				if (enable_jit) {
+					yield session.enable_jit ();
+				}
 
 				if (script_source != null) {
 					script = yield session.create_script ("internal-agent", script_source);
