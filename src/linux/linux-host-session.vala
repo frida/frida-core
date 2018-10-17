@@ -609,6 +609,10 @@ namespace Frida {
 			);
 		}
 
+		construct {
+			ensure_loaded.begin ();
+		}
+
 		public async HostApplicationInfo[] enumerate_applications () throws Error {
 			var apps = yield call ("enumerateApplications", new Json.Node[] {});
 
