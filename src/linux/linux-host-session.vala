@@ -253,6 +253,11 @@ namespace Frida {
 		}
 
 		public override async void kill (uint pid) throws Error {
+#if ANDROID
+			if (yield system_server_agent.try_stop_package_by_pid (pid))
+				return;
+#endif
+
 			yield helper.kill (pid);
 		}
 
@@ -710,6 +715,14 @@ namespace Frida {
 					}
 				}
 			} while (existing_app_killed);
+		}
+
+		public async bool try_stop_package_by_pid (uint pid) throws Error {
+			var pid_value = new Json.Node.alloc ().init_int (pid);
+
+			var success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_value });
+
+			return success.get_boolean ();
 		}
 
 		protected override async uint get_target_pid () throws Error {

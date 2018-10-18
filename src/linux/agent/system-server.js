@@ -83,6 +83,24 @@ rpc.exports = {
       context.sendBroadcast(intent);
     });
   },
+  tryStopPackageByPid: function (pid) {
+    return performOnJavaVM(function () {
+      var processes = activityManager.getRunningAppProcesses();
+
+      var numProcesses = processes.size();
+      for (var i = 0; i !== numProcesses; i++) {
+        var process = Java.cast(processes.get(i), RunningAppProcessInfo);
+        if (process.pid.value === pid) {
+          process.pkgList.value.forEach(function (pkg) {
+            activityManager.forceStopPackage(pkg);
+          });
+          return true;
+        }
+      }
+
+      return false;
+    });
+  },
   getFrontmostApplication: function () {
     return performOnJavaVM(function () {
       var result = null;
