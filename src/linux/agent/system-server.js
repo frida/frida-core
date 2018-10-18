@@ -16,9 +16,17 @@ rpc.exports = {
       for (i = 0; i !== numProcesses; i++) {
         var process = Java.cast(processes.get(i), RunningAppProcessInfo);
         pid = process.pid.value;
+
+        var importance = process.importance.value;
+
         var pkgList = process.pkgList.value;
         pkgList.forEach(function (pkg) {
-          appPids[pkg] = pid;
+          var entries = appPids[pkg];
+          if (entries === undefined) {
+            entries = [];
+            appPids[pkg] = entries;
+          }
+          entries.push([ pid, importance ]);
         });
       }
 
@@ -27,8 +35,18 @@ rpc.exports = {
       for (i = 0; i !== numApps; i++) {
         var app = Java.cast(apps.get(i), ApplicationInfo);
         var pkg = app.packageName.value;
+
         var name = app.loadLabel(packageManager).toString();
-        pid = appPids[pkg] || 0;
+
+        var pid;
+        var pids = appPids[pkg];
+        if (pids !== undefined) {
+          pids.sort(function (a, b) { return a[1] - b[1]; });
+          pid = pids[0][0];
+        } else {
+          pid = 0;
+        }
+
         result.push([pkg, name, pid]);
       }
 
