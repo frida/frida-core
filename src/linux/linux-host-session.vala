@@ -691,30 +691,9 @@ namespace Frida {
 		}
 
 		public async void stop_package (string package) throws Error {
-			bool existing_app_killed = false;
-			do {
-				existing_app_killed = false;
-				var installed_apps = yield enumerate_applications ();
-				foreach (var installed_app in installed_apps) {
-					if (installed_app.identifier == package) {
-						var running_pid = installed_app.pid;
-						if (running_pid != 0) {
-							System.kill (running_pid);
+			var package_value = new Json.Node.alloc ().init_string (package);
 
-							existing_app_killed = true;
-
-							var source = new TimeoutSource (100);
-							source.set_callback (() => {
-								stop_package.callback ();
-								return false;
-							});
-							source.attach (MainContext.get_thread_default ());
-							yield;
-						}
-						break;
-					}
-				}
-			} while (existing_app_killed);
+			yield call ("stopPackage", new Json.Node[] { package_value });
 		}
 
 		public async bool try_stop_package_by_pid (uint pid) throws Error {

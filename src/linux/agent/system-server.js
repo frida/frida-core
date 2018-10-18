@@ -83,6 +83,11 @@ rpc.exports = {
       context.sendBroadcast(intent);
     });
   },
+  stopPackage: function (pkg) {
+    return performOnJavaVM(function () {
+      activityManager.forceStopPackage(pkg);
+    });
+  },
   tryStopPackageByPid: function (pid) {
     return performOnJavaVM(function () {
       var processes = activityManager.getRunningAppProcesses();
