@@ -148,7 +148,7 @@ if host_os_family == 'linux'
     android_data = custom_target('frida-data-android',
       input: [
         'linux/frida-android.resources',
-        'linux/agent/systemui.js',
+        'linux/agent/system-server.js',
       ],
       output: [
         'frida-data-android.vapi',

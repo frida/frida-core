@@ -79,7 +79,7 @@ namespace Frida {
 
 #if ANDROID
 		private RoboLauncher robo_launcher;
-		private SystemUIAgent system_ui_agent;
+		private SystemServerAgent system_server_agent;
 #endif
 
 		construct {
@@ -98,7 +98,7 @@ namespace Frida {
 				helper.tempdir);
 
 #if ANDROID
-			system_ui_agent = new SystemUIAgent (this);
+			system_server_agent = new SystemServerAgent (this);
 #endif
 		}
 
@@ -113,8 +113,8 @@ namespace Frida {
 				robo_launcher = null;
 			}
 
-			yield system_ui_agent.close ();
-			system_ui_agent = null;
+			yield system_server_agent.close ();
+			system_server_agent = null;
 #endif
 
 			var linjector = injector as Linjector;
@@ -151,7 +151,7 @@ namespace Frida {
 
 		public override async HostApplicationInfo get_frontmost_application () throws Error {
 #if ANDROID
-			return yield system_ui_agent.get_frontmost_application ();
+			return yield system_server_agent.get_frontmost_application ();
 #else
 			return System.get_frontmost_application ();
 #endif
@@ -159,7 +159,7 @@ namespace Frida {
 
 		public override async HostApplicationInfo[] enumerate_applications () throws Error {
 #if ANDROID
-			return yield system_ui_agent.enumerate_applications ();
+			return yield system_server_agent.enumerate_applications ();
 #else
 			return System.enumerate_applications ();
 #endif
@@ -285,7 +285,7 @@ namespace Frida {
 #if ANDROID
 		private RoboLauncher get_robo_launcher () {
 			if (robo_launcher == null) {
-				robo_launcher = new RoboLauncher (this, helper, system_ui_agent);
+				robo_launcher = new RoboLauncher (this, helper, system_server_agent);
 				robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
 				robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
 			}
@@ -332,7 +332,7 @@ namespace Frida {
 			construct;
 		}
 
-		public SystemUIAgent system_ui_agent {
+		public SystemServerAgent system_server_agent {
 			get;
 			construct;
 		}
@@ -345,8 +345,8 @@ namespace Frida {
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		public RoboLauncher (LinuxHostSession host_session, HelperProcess helper, SystemUIAgent system_ui_agent) {
-			Object (host_session: host_session, helper: helper, system_ui_agent: system_ui_agent);
+		public RoboLauncher (LinuxHostSession host_session, HelperProcess helper, SystemServerAgent system_server_agent) {
+			Object (host_session: host_session, helper: helper, system_server_agent: system_server_agent);
 		}
 
 		public async void close () {
@@ -448,7 +448,7 @@ namespace Frida {
 
 			yield ensure_loaded ();
 
-			var process_name = yield system_ui_agent.get_process_name (package);
+			var process_name = yield system_server_agent.get_process_name (package);
 			if (spawn_requests.has_key (process_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
 
@@ -456,8 +456,8 @@ namespace Frida {
 			spawn_requests[process_name] = request;
 
 			try {
-				yield system_ui_agent.stop_package (package);
-				yield system_ui_agent.start_package (package, entrypoint);
+				yield system_server_agent.stop_package (package);
+				yield system_server_agent.start_package (package, entrypoint);
 			} catch (Error e) {
 				spawn_requests.unset (process_name);
 				throw e;
@@ -599,9 +599,9 @@ namespace Frida {
 		}
 	}
 
-	private class SystemUIAgent : InternalAgent {
-		public SystemUIAgent (LinuxHostSession host_session) {
-			string * source = Frida.Data.Android.get_systemui_js_blob ().data;
+	private class SystemServerAgent : InternalAgent {
+		public SystemServerAgent (LinuxHostSession host_session) {
+			string * source = Frida.Data.Android.get_system_server_js_blob ().data;
 			Object (
 				host_session: host_session,
 				script_source: source,
@@ -713,7 +713,7 @@ namespace Frida {
 		}
 
 		protected override async uint get_target_pid () throws Error {
-			return LocalProcesses.get_pid ("com.android.systemui");
+			return LocalProcesses.get_pid ("system_server");
 		}
 	}
 
