@@ -3,6 +3,8 @@
 var ApplicationInfo, ComponentName, Intent, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
 var context, packageManager, activityManager;
 
+var pendingLaunches = {};
+
 rpc.exports = {
   enumerateApplications: function () {
     return performOnJavaVM(function () {
@@ -71,7 +73,9 @@ rpc.exports = {
       if (activity !== null)
         intent.setClassName(pkg, activity);
 
-      context.startActivity(intent);
+      performLaunchOperation(pkg, function () {
+        context.startActivity(intent);
+      });
     });
   },
   sendBroadcast: function (pkg, receiver, action) {
@@ -80,7 +84,9 @@ rpc.exports = {
       intent.setComponent(ComponentName.$new(pkg, receiver));
       intent.setAction(action);
 
-      context.sendBroadcast(intent);
+      performLaunchOperation(pkg, function () {
+        context.sendBroadcast(intent);
+      });
     });
   },
   stopPackage: function (pkg) {
@@ -140,6 +146,65 @@ rpc.exports = {
   }
 };
 
+function installLaunchTimeoutRemovalInstrumentation() {
+  var Handler = Java.use('android.os.Handler');
+  var OSProcess = Java.use('android.os.Process');
+
+  var pendingStartRequests = {};
+
+  var start = OSProcess.start;
+  start.implementation = function (processClass, niceName) {
+    var result = start.apply(this, arguments);
+
+    if (tryFinishLaunch(niceName)) {
+      pendingStartRequests[Process.getCurrentThreadId()] = true;
+    }
+
+    return result;
+  };
+
+  var sendMessageDelayed = Handler.sendMessageDelayed;
+  sendMessageDelayed.implementation = function (msg, delayMillis) {
+    var tid = Process.getCurrentThreadId();
+    if (pendingStartRequests[tid] === true) {
+      delete pendingStartRequests[tid];
+      msg.recycle();
+      return true;
+    }
+
+    return sendMessageDelayed.call(this, msg, delayMillis);
+  };
+}
+
+function performLaunchOperation(pkg, operation) {
+  var processName = packageManager.getApplicationInfo(pkg, GET_META_DATA).processName.value;
+
+  tryFinishLaunch(processName);
+
+  var timer = setTimeout(function () {
+    if (pendingLaunches[processName] === timer)
+      tryFinishLaunch(processName);
+  }, 10000);
+  pendingLaunches[processName] = timer;
+
+  try {
+    return operation();
+  } catch (e) {
+    tryFinishLaunch(processName);
+    throw e;
+  }
+}
+
+function tryFinishLaunch(processName) {
+  var timer = pendingLaunches[processName];
+  if (timer === undefined)
+    return false;
+
+  delete pendingLaunches[processName];
+  clearTimeout(timer);
+  return true;
+}
+
 function performOnJavaVM(task) {
   return new Promise(function (resolve, reject) {
     Java.perform(function () {
@@ -171,4 +236,6 @@ Java.perform(function () {
 
   packageManager = context.getPackageManager();
   activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
+
+  installLaunchTimeoutRemovalInstrumentation();
 });
