@@ -5,6 +5,27 @@ var context, packageManager, activityManager;
 
 var pendingLaunches = {};
 
+function init() {
+  var ActivityManager = Java.use('android.app.ActivityManager');
+  var ActivityThread = Java.use('android.app.ActivityThread');
+  ApplicationInfo = Java.use('android.content.pm.ApplicationInfo');
+  ComponentName = Java.use('android.content.ComponentName');
+  Intent = Java.use('android.content.Intent');
+  var Context = Java.use('android.content.Context');
+  var PackageManager = Java.use('android.content.pm.PackageManager');
+  RunningAppProcessInfo = Java.use('android.app.ActivityManager$RunningAppProcessInfo');
+  RunningTaskInfo = Java.use('android.app.ActivityManager$RunningTaskInfo');
+  var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
+  GET_META_DATA = PackageManager.GET_META_DATA.value;
+
+  context = ActivityThread.currentApplication();
+
+  packageManager = context.getPackageManager();
+  activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
+
+  installLaunchTimeoutRemovalInstrumentation();
+}
+
 rpc.exports = {
   enumerateApplications: function () {
     return performOnJavaVM(function () {
@@ -219,23 +240,4 @@ function performOnJavaVM(task) {
   });
 }
 
-Java.perform(function () {
-  var ActivityManager = Java.use('android.app.ActivityManager');
-  var ActivityThread = Java.use('android.app.ActivityThread');
-  ApplicationInfo = Java.use('android.content.pm.ApplicationInfo');
-  ComponentName = Java.use('android.content.ComponentName');
-  Intent = Java.use('android.content.Intent');
-  var Context = Java.use('android.content.Context');
-  var PackageManager = Java.use('android.content.pm.PackageManager');
-  RunningAppProcessInfo = Java.use('android.app.ActivityManager$RunningAppProcessInfo');
-  RunningTaskInfo = Java.use('android.app.ActivityManager$RunningTaskInfo');
-  var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
-  GET_META_DATA = PackageManager.GET_META_DATA.value;
-
-  context = ActivityThread.currentApplication();
-
-  packageManager = context.getPackageManager();
-  activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
-
-  installLaunchTimeoutRemovalInstrumentation();
-});
+Java.perform(init);
