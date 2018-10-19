@@ -225,7 +225,7 @@ namespace Frida {
 			try {
 				var ostream = file.create (FileCreateFlags.REPLACE_DESTINATION, null);
 
-				var buf_size = 128 * 1024;
+				var buf_size = 4 * 1024 * 1024;
 				var buf = new uint8[buf_size];
 
 				while (true) {

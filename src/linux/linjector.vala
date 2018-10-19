@@ -177,7 +177,20 @@ namespace Frida {
 
 				var temp_agent = new TemporaryFile (file, tempdir);
 
-				yield output.splice_async (input, CLOSE_TARGET);
+				var buf_size = 4 * 1024 * 1024;
+				var buf = new uint8[buf_size];
+
+				while (true) {
+					var bytes_read = yield input.read_async (buf);
+					if (bytes_read == 0)
+						break;
+					buf.resize ((int) bytes_read);
+
+					size_t bytes_written;
+					yield output.write_all_async (buf, Priority.DEFAULT, null, out bytes_written);
+				}
+
+				yield output.close_async ();
 
 				FileUtils.chmod (temp_agent.path, 0755);
 #if ANDROID
