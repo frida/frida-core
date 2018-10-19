@@ -156,8 +156,12 @@ namespace Frida {
 			ensure_request = new Gee.Promise<bool> ();
 
 			try {
+				var timer = new Timer ();
+
 				file32 = yield write_agent (name_template.printf (32), so32);
 				file64 = yield write_agent (name_template.printf (64), so64);
+
+				printerr ("Agents written out in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 				ensure_request.set_value (true);
 			} catch (Error e) {

@@ -412,6 +412,8 @@ namespace Frida {
 			SELinux.setfilecon (tempdir.path, "u:object_r:frida_file:s0");
 #endif
 
+			var timer = new Timer ();
+
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
 			if (blob32.data.length > 0) {
 				helper32 = new TemporaryFile.from_stream ("frida-helper-32",
@@ -427,6 +429,8 @@ namespace Frida {
 					tempdir);
 				FileUtils.chmod (helper64.path, 0700);
 			}
+
+			printerr ("Helpers written out in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 		}
 
 		~ResourceStore () {
