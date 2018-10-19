@@ -134,7 +134,6 @@ if host_os_family == 'linux'
   linux_sources = [
     'linux/linux-host-session.vala',
     'linux/linjector.vala',
-    'linux/linjector-glue.c',
     'linux/frida-helper-process.vala',
     'linux/supersu.vala',
     'linux/system-linux.c',

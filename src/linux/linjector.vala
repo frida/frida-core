@@ -59,6 +59,7 @@ namespace Frida {
 		}
 
 		public async uint inject_library_resource (uint pid, AgentResource resource, string entrypoint, string data) throws Error {
+			yield resource.ensure_written_to_disk ();
 			return yield inject_library_file (pid, resource.path_template, entrypoint, data);
 		}
 
@@ -97,29 +98,15 @@ namespace Frida {
 			construct;
 		}
 
-		public InputStream? so32 {
-			get {
-				if (_so32 != null)
-					reset_stream (_so32);
-				return _so32;
-			}
-			construct {
-				_so32 = value;
-			}
+		public InputStream so32 {
+			get;
+			construct;
 		}
-		private InputStream? _so32;
 
-		public InputStream? so64 {
-			get {
-				if (_so64 != null)
-					reset_stream (_so64);
-				return _so64;
-			}
-			construct {
-				_so64 = value;
-			}
+		public InputStream so64 {
+			get;
+			construct;
 		}
-		private InputStream? _so64;
 
 		public AgentMode mode {
 			get;
@@ -134,33 +121,6 @@ namespace Frida {
 		public string path_template {
 			get {
 				if (_path_template == null) {
-					try {
-						var name32 = name_template.printf (32);
-						var name64 = name_template.printf (64);
-
-						if (so32 != null) {
-							var so = (mode == AgentMode.INSTANCED) ? _clone_so (so32) : so32;
-							var temp_agent = new TemporaryFile.from_stream (name32, so, tempdir);
-							FileUtils.chmod (temp_agent.path, 0755);
-#if ANDROID
-							SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
-#endif
-							_file32 = temp_agent;
-						}
-
-						if (so64 != null) {
-							var so = (mode == AgentMode.INSTANCED) ? _clone_so (so64) : so64;
-							var temp_agent = new TemporaryFile.from_stream (name64, so, tempdir);
-							FileUtils.chmod (temp_agent.path, 0755);
-#if ANDROID
-							SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
-#endif
-							_file64 = temp_agent;
-						}
-					} catch (Error e) {
-						assert_not_reached ();
-					}
-
 					_path_template = Path.build_filename (tempdir.path, name_template);
 				}
 
@@ -168,45 +128,85 @@ namespace Frida {
 			}
 		}
 		private string _path_template;
-		private TemporaryFile _file32;
-		private TemporaryFile _file64;
+
+		private Gee.Promise<bool> ensure_request;
+		private TemporaryFile file32;
+		private TemporaryFile file64;
 
 		public AgentResource (string name_template, InputStream stream32, InputStream stream64, AgentMode mode = AgentMode.INSTANCED, TemporaryDirectory? tempdir = null) {
 			Object (
 				name_template: name_template,
-				so32: byte_size (stream32) > 0 ? stream32 : null,
-				so64: byte_size (stream64) > 0 ? stream64 : null,
+				so32: stream32,
+				so64: stream64,
 				mode: mode,
 				tempdir: (tempdir != null) ? tempdir : new TemporaryDirectory ()
 			);
 		}
 
-		public void ensure_written_to_disk () {
-			(void) path_template;
+		public async void ensure_written_to_disk () throws Error {
+			if (ensure_request != null) {
+				var future = ensure_request.future;
+				try {
+					yield future.wait_async ();
+				} catch (Gee.FutureError e) {
+					throw (Error) future.exception;
+				}
+				return;
+			}
+			ensure_request = new Gee.Promise<bool> ();
+
+			try {
+				file32 = yield write_agent (name_template.printf (32), so32);
+				file64 = yield write_agent (name_template.printf (64), so64);
+
+				ensure_request.set_value (true);
+			} catch (Error e) {
+				file32 = null;
+				file64 = null;
+
+				ensure_request.set_exception (e);
+				ensure_request = null;
+				throw e;
+			}
 		}
 
-		private void reset_stream (InputStream stream) {
+		private async TemporaryFile write_agent (string name, InputStream input) throws Error {
 			try {
-				(stream as Seekable).seek (0, SeekType.SET);
+				var file = File.new_for_path (Path.build_filename (tempdir.path, name));
+				var output = yield file.create_async (FileCreateFlags.REPLACE_DESTINATION);
+
+				var temp_agent = new TemporaryFile (file, tempdir);
+
+				yield output.splice_async (input, CLOSE_TARGET);
+
+				FileUtils.chmod (temp_agent.path, 0755);
+#if ANDROID
+				SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
+#endif
+
+				return temp_agent;
+			} catch (GLib.Error e) {
+				reset_input_stream (input);
+
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
+			}
+		}
+
+		private void reset_input_stream (InputStream stream) {
+			Seekable seekable = null;
+			if (stream is Seekable) {
+				seekable = stream as Seekable;
+			} else if (stream is FilterInputStream) {
+				seekable = (stream as FilterInputStream).base_stream as Seekable;
+			} else {
+				assert_not_reached ();
+			}
+
+			try {
+				seekable.seek (0, SeekType.SET);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}
-
-		private static int64 byte_size (InputStream stream) {
-			assert (stream is Seekable);
-			var seekable = stream as Seekable;
-			try {
-				var previous_offset = seekable.tell ();
-				seekable.seek (0, SeekType.END);
-				var size = seekable.tell ();
-				seekable.seek (previous_offset, SeekType.SET);
-				return size;
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-		}
-
-		public extern static InputStream _clone_so (InputStream dylib);
 	}
 }
