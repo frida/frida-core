@@ -99,6 +99,9 @@ case $host_os in
       if [ "$strip_enabled" = "true" ]; then
         "$strip_binary" "$embedded_agent" || exit 1
       fi
+
+      gzip -9 "$embedded_agent" || exit 1
+      mv "$embedded_agent.gz" "$embedded_agent"
     else
       touch "$embedded_agent"
     fi
@@ -112,6 +115,9 @@ case $host_os in
       if [ "$strip_enabled" = "true" ]; then
         "$strip_binary" "$embedded_agent" || exit 1
       fi
+
+      gzip -9 "$embedded_agent" || exit 1
+      mv "$embedded_agent.gz" "$embedded_agent"
     else
       touch "$embedded_agent"
     fi

@@ -17,18 +17,26 @@ mkdir -p "$priv_dir"
 
 if [ -f "$helper32" ]; then
   cp "$helper32" "$embedded_helper32" || exit 1
+
   if [ "$strip_enabled" = "true" ]; then
     "$strip_binary" "$embedded_helper32" || exit 1
   fi
+
+  gzip -9 "$embedded_helper32" || exit 1
+  mv "$embedded_helper32.gz" "$embedded_helper32"
 else
   touch "$embedded_helper32"
 fi
 
 if [ -f "$helper64" ]; then
   cp "$helper64" "$embedded_helper64" || exit 1
+
   if [ "$strip_enabled" = "true" ]; then
     "$strip_binary" "$embedded_helper64" || exit 1
   fi
+
+  gzip -9 "$embedded_helper64" || exit 1
+  mv "$embedded_helper64.gz" "$embedded_helper64"
 else
   touch "$embedded_helper64"
 fi
