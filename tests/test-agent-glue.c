@@ -19,3 +19,27 @@ frida_agent_test_script_target_function (gint level, const gchar * message)
 
   return bogus_result;
 }
+
+#ifdef HAVE_DARWIN
+
+#include <gum/gumdarwin.h>
+
+guint
+frida_agent_test_script_get_current_thread_port (void)
+{
+  return pthread_mach_thread_np (pthread_self ());
+}
+
+void
+frida_agent_test_script_thread_suspend (guint port)
+{
+  thread_suspend (port);
+}
+
+void
+frida_agent_test_script_thread_resume (guint port)
+{
+  thread_resume (port);
+}
+
+#endif
