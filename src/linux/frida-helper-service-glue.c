@@ -44,7 +44,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define FRIDA_STACK_ALIGNMENT 16
+#ifdef HAVE_ARM
+# define FRIDA_STACK_ALIGNMENT 8
+#else
+# define FRIDA_STACK_ALIGNMENT 16
+#endif
 #define FRIDA_STACK_ALIGNMENT_ARM 8
 #define FRIDA_RED_ZONE_SIZE 128
 #define FRIDA_OFFSET_E_ENTRY 0x18
