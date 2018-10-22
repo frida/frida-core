@@ -45,6 +45,7 @@
 #include <unistd.h>
 
 #define FRIDA_STACK_ALIGNMENT 16
+#define FRIDA_STACK_ALIGNMENT_ARM 8
 #define FRIDA_RED_ZONE_SIZE 128
 #define FRIDA_OFFSET_E_ENTRY 0x18
 #define FRIDA_RTLD_DLOPEN (0x80000000)
@@ -2445,7 +2446,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
   ret = ptrace (PTRACE_POKEDATA, pid, GSIZE_TO_POINTER (regs.rsp), GSIZE_TO_POINTER (FRIDA_DUMMY_RETURN_ADDRESS));
   CHECK_OS_RESULT (ret, ==, 0, "PTRACE_POKEDATA");
 #elif defined (HAVE_ARM)
-  regs.ARM_sp -= (regs.ARM_sp - (MAX (args_length - 4, 0) * 4)) % FRIDA_STACK_ALIGNMENT;
+  regs.ARM_sp -= (regs.ARM_sp - (MAX (args_length - 4, 0) * 4)) % FRIDA_STACK_ALIGNMENT_ARM;
 
   regs.ARM_ORIG_r0 = -1;
 
