@@ -15,6 +15,11 @@ namespace Frida.AgentTest {
 			var h = new Harness ((h) => Script.launch_scenario.begin (h as Harness));
 			h.run ();
 		});
+
+		GLib.Test.add_func ("/Agent/Script/Darwin/thread-suspend-awareness", () => {
+			var h = new Harness ((h) => Script.thread_suspend_awareness.begin (h as Harness));
+			h.run ();
+		});
 #endif
 	}
 
@@ -331,6 +336,62 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 
 			h.done ();
 		}
+
+		private static async void thread_suspend_awareness (Harness h) {
+			var session = yield h.load_agent ();
+
+			AgentScriptId sid;
+			try {
+				sid = yield session.create_script ("thread-suspend-scenario", """
+'use strict';
+
+Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), function () {
+});
+""");
+				yield session.load_script (sid);
+
+				var thread_port = get_current_thread_port ();
+
+				var worker_thread = new Thread<bool> ("thread-suspend-worker", () => {
+					for (int i = 0; i != 1000; i++) {
+						sleep_for_a_random_duration ();
+						thread_suspend (thread_port);
+						call_hooked_function ();
+						thread_resume (thread_port);
+					}
+
+					return true;
+				});
+
+				for (int i = 0; i != 1000; i++) {
+					sleep_for_a_random_duration ();
+					call_hooked_function ();
+				}
+
+				worker_thread.join ();
+			} catch (GLib.Error e) {
+				printerr ("\n\nERROR: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			yield h.unload_agent ();
+
+			h.done ();
+		}
+
+		private static void call_hooked_function () {
+			var fd = Posix.open ("/etc/hosts", Posix.O_RDONLY);
+			assert (fd != -1);
+			Posix.close (fd);
+		}
+
+		private static void sleep_for_a_random_duration () {
+			Thread.usleep (Random.int_range (0, 300));
+		}
+
+		public extern static uint get_current_thread_port ();
+		public extern static void thread_suspend (uint port);
+		public extern static void thread_resume (uint port);
 #endif
 
 		[CCode (has_target=false)]
