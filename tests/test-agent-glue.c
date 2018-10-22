@@ -25,21 +25,21 @@ frida_agent_test_script_target_function (gint level, const gchar * message)
 #include <gum/gumdarwin.h>
 
 guint
-frida_agent_test_script_get_current_thread_port (void)
+frida_agent_test_script_get_current_thread_id (void)
 {
   return pthread_mach_thread_np (pthread_self ());
 }
 
 void
-frida_agent_test_script_thread_suspend (guint port)
+frida_agent_test_script_thread_suspend (guint thread_id)
 {
-  thread_suspend (port);
+  thread_suspend (thread_id);
 }
 
 void
-frida_agent_test_script_thread_resume (guint port)
+frida_agent_test_script_thread_resume (guint thread_id)
 {
-  thread_resume (port);
+  thread_resume (thread_id);
 }
 
 #endif

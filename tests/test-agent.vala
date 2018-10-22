@@ -340,32 +340,37 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 		private static async void thread_suspend_awareness (Harness h) {
 			var session = yield h.load_agent ();
 
-			AgentScriptId sid;
 			try {
-				sid = yield session.create_script ("thread-suspend-scenario", """
+				// yield session.enable_jit ();
+
+				var sid = yield session.create_script ("thread-suspend-scenario", """
 'use strict';
+
+console.log('Script runtime is: ' + Script.runtime);
 
 Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), function () {
 });
 """);
 				yield session.load_script (sid);
 
-				var thread_port = get_current_thread_port ();
+				var thread_id = get_current_thread_id ();
 
 				var worker_thread = new Thread<bool> ("thread-suspend-worker", () => {
 					for (int i = 0; i != 1000; i++) {
-						sleep_for_a_random_duration ();
-						thread_suspend (thread_port);
+						thread_suspend (thread_id);
 						call_hooked_function ();
-						thread_resume (thread_port);
+						thread_resume (thread_id);
+
+						sleep_for_a_random_duration ();
 					}
 
 					return true;
 				});
 
 				for (int i = 0; i != 1000; i++) {
-					sleep_for_a_random_duration ();
 					call_hooked_function ();
+
+					sleep_for_a_random_duration ();
 				}
 
 				worker_thread.join ();
@@ -389,12 +394,12 @@ Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), fu
 			Thread.usleep (Random.int_range (0, 300));
 		}
 
-		public extern static uint get_current_thread_port ();
-		public extern static void thread_suspend (uint port);
-		public extern static void thread_resume (uint port);
+		public extern static uint get_current_thread_id ();
+		public extern static void thread_suspend (uint thread_id);
+		public extern static void thread_resume (uint thread_id);
 #endif
 
-		[CCode (has_target=false)]
+		[CCode (has_target = false)]
 		private delegate void TargetFunc (int level, string message);
 
 		public extern static uint target_function (int level, string message);
