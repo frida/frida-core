@@ -1342,11 +1342,18 @@ gboolean
 _frida_darwin_helper_backend_is_suspended (FridaDarwinHelperBackend * self, guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
-  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
+  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO_COUNT;
   const gchar * failed_operation;
+  int retries = 3;
   kern_return_t kr;
 
-  kr = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
+  while (retries-- != 0)
+  {
+    kr = task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count);
+    if (kr == KERN_SUCCESS || kr == MACH_SEND_INVALID_DEST)
+      break;
+  }
+
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "task_info");
 
   return info.suspend_count >= 1;
@@ -1376,7 +1383,7 @@ void
 _frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint task, GError ** error)
 {
   mach_task_basic_info_data_t info;
-  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO;
+  mach_msg_type_number_t info_count = MACH_TASK_BASIC_INFO_COUNT;
 
   if (task_info (task, MACH_TASK_BASIC_INFO, (task_info_t) &info, &info_count) != KERN_SUCCESS)
     goto process_not_found;
