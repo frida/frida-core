@@ -3051,7 +3051,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
         *library_path = g_strdup (path);
     }
 #ifdef HAVE_ANDROID
-    else if (g_str_has_prefix (path, "/system_root") && strcmp (&path[strlen("/system_root")], library_name) == 0)
+    else if (g_str_has_prefix (path, "/system_root") && strcmp (path + strlen ("/system_root"), library_name) == 0)
     {
       result = start;
       if (library_path != NULL)
