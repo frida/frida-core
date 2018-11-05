@@ -3033,7 +3033,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
 
   while (result == 0 && fgets (line, line_size, fp) != NULL)
   {
-    guint64 start;
+    GumAddress start;
     gint n;
 
     n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
@@ -3050,6 +3050,14 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
       if (library_path != NULL)
         *library_path = g_strdup (path);
     }
+#ifdef HAVE_ANDROID
+    else if (g_str_has_prefix (path, "/system_root") && strcmp (path + strlen ("/system_root"), library_name) == 0)
+    {
+      result = start;
+      if (library_path != NULL)
+        *library_path = g_strdup (path);
+    }
+#endif
     else
     {
       gchar * p = strrchr (path, '/');
