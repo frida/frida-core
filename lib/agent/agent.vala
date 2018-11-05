@@ -34,6 +34,12 @@ namespace Frida.Agent {
 			}
 		}
 
+		public Gum.ScriptBackend? script_backend {
+			get {
+				return _script_backend;
+			}
+		}
+
 		private void * agent_pthread;
 		private Thread<bool> agent_gthread;
 
@@ -49,7 +55,7 @@ namespace Frida.Agent {
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
-		private Gum.ScriptBackend script_backend;
+		private Gum.ScriptBackend? _script_backend;
 		private ExitMonitor exit_monitor;
 		private Gum.Interceptor interceptor;
 		private Gum.Exceptor exceptor;
@@ -605,22 +611,18 @@ namespace Frida.Agent {
 			interceptor.end_transaction ();
 		}
 
-		public Gum.ScriptBackend? try_get_script_backend () {
-			return script_backend;
-		}
-
 		public ScriptEngine create_script_engine () {
-			if (script_backend == null)
-				script_backend = Environment._obtain_script_backend (jit_enabled);
+			if (_script_backend == null)
+				_script_backend = Environment._obtain_script_backend (jit_enabled);
 
-			return new ScriptEngine (script_backend, agent_range);
+			return new ScriptEngine (_script_backend, agent_range);
 		}
 
 		public void enable_jit () throws Error {
 			if (jit_enabled)
 				return;
 
-			if (script_backend != null)
+			if (_script_backend != null)
 				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
 
 			jit_enabled = true;
@@ -1718,7 +1720,7 @@ namespace Frida.Agent {
 			if (Gum.Cloak.has_thread (thread_id))
 				return 0;
 
-			var script_backend = Runner.shared_instance.try_get_script_backend ();
+			var script_backend = Runner.shared_instance.script_backend;
 			if (script_backend == null)
 				return thread_suspend (thread_id);
 
