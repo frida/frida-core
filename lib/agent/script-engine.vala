@@ -19,7 +19,7 @@ namespace Frida.Agent {
 
 		public async void prepare_for_termination () {
 			foreach (var instance in instances.values.to_array ())
-				yield instance.ensure_dispose_called ();
+				yield instance.prepare_for_termination ();
 		}
 
 		public async void shutdown () {
@@ -249,7 +249,14 @@ namespace Frida.Agent {
 				return result;
 			}
 
-			public async void ensure_dispose_called () {
+			public async void prepare_for_termination () {
+				if (state == LOADED)
+					script.get_stalker ().flush ();
+
+				yield ensure_dispose_called ();
+			}
+
+			private async void ensure_dispose_called () {
 				if (dispose_request != null) {
 					try {
 						yield dispose_request.future.wait_async ();
