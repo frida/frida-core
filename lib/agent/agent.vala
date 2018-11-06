@@ -207,7 +207,7 @@ namespace Frida.Agent {
 
 			exit_monitor = new ExitMonitor (this, main_context);
 #if DARWIN
-			thread_suspend_monitor = new ThreadSuspendMonitor();
+			thread_suspend_monitor = new ThreadSuspendMonitor ();
 #endif
 
 			this.interceptor = interceptor;
