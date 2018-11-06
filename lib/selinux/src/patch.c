@@ -50,9 +50,9 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
   { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
   { { "domain", NULL }, "zygote_exec", "file", { "execute", NULL } },
+  { { "domain", NULL }, "$self", "process", { "sigchld", NULL } },
   { { "domain", NULL }, "$self", "unix_stream_socket", { "connectto", "read", "write", "getattr", "getopt", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
-  { { "zygote", NULL }, "shell", "process", { "sigchld", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
