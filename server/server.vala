@@ -180,8 +180,12 @@ namespace Frida.Server {
 	public class Application : Object {
 		private BaseDBusHostSession host_session;
 		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
+
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+
+		private Soup.Server web_server = Object.new (typeof (Soup.Server)) as Soup.Server;
+		private HashTable<string, string> json_content_params = new HashTable<string, string> (str_hash, str_equal);
 
 		private MainLoop loop;
 		private bool stopping;
@@ -203,6 +207,10 @@ namespace Frida.Server {
 #endif
 			host_session.agent_session_opened.connect (on_agent_session_opened);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
+
+			web_server.add_handler ("/processes", on_request_processes);
+			web_server.add_handler ("/applications", on_request_applications);
+			json_content_params.insert ("charset", "UTF-8");
 		}
 
 		public void run (string listen_uri) throws Error {
@@ -213,6 +221,12 @@ namespace Frida.Server {
 			}
 			server.new_connection.connect (on_connection_opened);
 			server.start ();
+
+			try {
+				web_server.listen_all (27043, 0); // TODO: pass in details instead of URI and use here
+			} catch (GLib.Error listen_error) {
+				throw new Error.ADDRESS_IN_USE (listen_error.message);
+			}
 
 			loop = new MainLoop ();
 			loop.run ();
@@ -324,6 +338,124 @@ namespace Frida.Server {
 				yield session.close ();
 			} catch (GLib.Error e) {
 			}
+		}
+
+		private void on_request_processes (Soup.Server server, Soup.Message msg, string path, HashTable<string, string>? query, Soup.ClientContext client) {
+			if (path != "/processes") {
+				msg.set_status (Soup.Status.NOT_FOUND);
+				return;
+			}
+
+			if (msg.method != "GET") {
+				msg.set_status (Soup.Status.METHOD_NOT_ALLOWED);
+				return;
+			}
+
+			web_server.pause_message (msg);
+			handle_get_processes.begin (msg);
+		}
+
+		private async void handle_get_processes (Soup.Message msg) {
+			try {
+				HostProcessInfo[] processes;
+				try {
+					processes = yield host_session.enumerate_processes ();
+				} catch (Error e) {
+					respond_with_error (msg, INTERNAL_SERVER_ERROR, e);
+					return;
+				}
+
+				var builder = new Json.Builder ();
+
+				builder.begin_array ();
+				foreach (var process in processes) {
+					builder
+						.begin_object ()
+							.set_member_name ("pid")
+							.add_int_value (process.pid)
+							.set_member_name ("name")
+							.add_string_value (process.name)
+						.end_object ();
+				}
+				builder.end_array ();
+
+				respond_with_json (msg, OK, builder);
+			} finally {
+				web_server.unpause_message (msg);
+			}
+		}
+
+		private void on_request_applications (Soup.Server server, Soup.Message msg, string path, HashTable<string, string>? query, Soup.ClientContext client) {
+			if (path != "/applications") {
+				msg.set_status (Soup.Status.NOT_FOUND);
+				return;
+			}
+
+			if (msg.method != "GET") {
+				msg.set_status (Soup.Status.METHOD_NOT_ALLOWED);
+				return;
+			}
+
+			web_server.pause_message (msg);
+			handle_get_applications.begin (msg);
+		}
+
+		private async void handle_get_applications (Soup.Message msg) {
+			try {
+				HostApplicationInfo[] applications;
+				try {
+					applications = yield host_session.enumerate_applications ();
+				} catch (Error e) {
+					respond_with_error (msg, INTERNAL_SERVER_ERROR, e);
+					return;
+				}
+
+				var builder = new Json.Builder ();
+
+				builder.begin_array ();
+				foreach (var application in applications) {
+					builder.begin_object ();
+
+					builder
+						.set_member_name ("identifier")
+						.add_string_value (application.identifier)
+						.set_member_name ("name")
+						.add_string_value (application.name);
+
+					var pid = application.pid;
+					if (pid != 0) {
+						builder
+							.set_member_name ("pid")
+							.add_int_value (pid);
+					}
+
+					builder.end_object ();
+				}
+				builder.end_array ();
+
+				respond_with_json (msg, OK, builder);
+			} finally {
+				web_server.unpause_message (msg);
+			}
+		}
+
+		private void respond_with_json (Soup.Message msg, Soup.Status status, Json.Builder builder) {
+			msg.set_status (status);
+
+			msg.response_headers.set_content_type ("application/json", json_content_params);
+			msg.response_headers.replace ("Cache-Control", "no-cache");
+
+			msg.response_body.append_take (Json.to_string (builder.get_root (), false).data);
+		}
+
+		private void respond_with_error (Soup.Message msg, Soup.Status status, GLib.Error error) {
+			var builder = new Json.Builder ();
+			builder
+				.begin_object ()
+					.set_member_name ("error")
+					.add_string_value (error.message)
+				.end_object ();
+			respond_with_json (msg, status, builder);
 		}
 
 		private class Client : Object {

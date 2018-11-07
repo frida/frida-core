@@ -36,7 +36,7 @@ server = executable(server_name, server_sources,
   vala_args: system_vala_args,
   link_args: server_link_args,
   link_depends: server_link_depends,
-  dependencies: [core_dep],
+  dependencies: [core_dep, libsoup_dep],
   install: host_os_family != 'darwin',
 )
 
