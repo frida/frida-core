@@ -1720,8 +1720,8 @@ namespace Frida.Agent {
 			if (Gum.Cloak.has_thread (thread_id))
 				return 0;
 
-			uint caller_thread_id = (uint) Gum.Process.get_current_thread_id ();
 			var script_backend = Runner.shared_instance.script_backend;
+			uint caller_thread_id = (uint) Gum.Process.get_current_thread_id ();
 			if (script_backend == null || thread_id == caller_thread_id)
 				return thread_suspend (thread_id);
 
