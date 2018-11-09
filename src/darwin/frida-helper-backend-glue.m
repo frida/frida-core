@@ -1588,7 +1588,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     g_free (magic);
   }
 
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header);
+  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, NULL);
 
   need_helpers = TRUE;
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
