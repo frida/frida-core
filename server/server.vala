@@ -3,8 +3,10 @@ namespace Frida.Server {
 
 	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
 	private const uint16 DEFAULT_LISTEN_PORT = 27042;
+	private const string DEFAULT_DIRECTORY = "re.frida.server";
 	private static bool output_version = false;
 	private static string listen_address = null;
+	private static string directory = null;
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
@@ -14,6 +16,7 @@ namespace Frida.Server {
 	const OptionEntry[] options = {
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ "listen", 'l', 0, OptionArg.STRING, ref listen_address, "Listen on ADDRESS", "ADDRESS" },
+		{ "directory", 'd', 0, OptionArg.STRING, ref directory, "Store binaries in DIRECTORY", "DIRECTORY" },
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
@@ -187,7 +190,7 @@ namespace Frida.Server {
 		private bool stopping;
 
 		construct {
-			TemporaryDirectory.always_use ("re.frida.server");
+			TemporaryDirectory.always_use ((directory != null) ? directory : DEFAULT_DIRECTORY);
 
 #if WINDOWS
 			host_session = new WindowsHostSession ();
