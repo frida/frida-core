@@ -93,21 +93,21 @@ namespace Frida {
 		}
 
 		public async void enable_spawn_gating () throws Error {
-			if (kernel_agent == null)
-				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
-			kernel_agent.enable_spawn_gating ();
+			get_kernel_agent ().enable_spawn_gating ();
 		}
 
 		public async void disable_spawn_gating () throws Error {
-			if (kernel_agent == null)
-				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
-			kernel_agent.disable_spawn_gating ();
+			get_kernel_agent ().disable_spawn_gating ();
 		}
 
 		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+			return get_kernel_agent ().enumerate_pending_spawn ();
+		}
+
+		private KernelAgent get_kernel_agent () throws Error {
 			if (kernel_agent == null)
 				throw new Error.NOT_SUPPORTED ("Kernel driver not loaded");
-			return kernel_agent.enumerate_pending_spawn ();
+			return kernel_agent;
 		}
 
 		public async uint spawn (string path, HostSpawnOptions options) throws Error {
