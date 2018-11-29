@@ -8,6 +8,7 @@ namespace Frida {
 		}
 	}
 
+#if IOS
 	public class ElectraPolicySoftener : Object, PolicySoftener {
 		private const string LIBJAILBREAK_PATH = "/usr/lib/libjailbreak.dylib";
 
@@ -66,4 +67,5 @@ namespace Frida {
 		private class DaemonConnection {
 		}
 	}
+#endif
 }
