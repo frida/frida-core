@@ -305,7 +305,7 @@ namespace Frida {
 		}
 
 		private async uint _inject (uint pid, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error {
-			yield policy_softener.soften (pid);
+			policy_softener.soften (pid);
 
 			var task = borrow_task_for_remote_pid (pid);
 
@@ -369,7 +369,7 @@ namespace Frida {
 		}
 
 		public async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error {
-			yield policy_softener.soften (remote_pid);
+			policy_softener.soften (remote_pid);
 
 			var remote_task = borrow_task_for_remote_pid (remote_pid);
 

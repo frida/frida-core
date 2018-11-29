@@ -1,66 +1,69 @@
 namespace Frida {
 	public interface PolicySoftener : Object {
-		public abstract async void soften (uint pid) throws Error;
+		public abstract void soften (uint pid) throws Error;
 	}
 
 	public class NullPolicySoftener : Object, PolicySoftener {
-		public async void soften (uint pid) throws Error {
+		public void soften (uint pid) throws Error {
 		}
 	}
 
 	public class ElectraPolicySoftener : Object, PolicySoftener {
-		private const string JAILBREAKD_CLIENT_PATH = "/electra/jailbreakd_client";
+		private const string LIBJAILBREAK_PATH = "/usr/lib/libjailbreak.dylib";
 
-		private enum Operation {
-			ENTITLE_AND_PLATFORMIZE = 1,
+		private Module libjailbreak;
+		private ConnectFunc jb_connect;
+		private DisconnectFunc jb_disconnect;
+		private EntitleNowFunc jb_entitle_now;
+
+		private DaemonConnection connection;
+
+		construct {
+			libjailbreak = Module.open (LIBJAILBREAK_PATH, BIND_LAZY);
+			assert (libjailbreak != null);
+
+			jb_connect = (ConnectFunc) resolve_symbol ("jb_connect");
+			jb_disconnect = (DisconnectFunc) resolve_symbol ("jb_disconnect");
+			jb_entitle_now = (EntitleNowFunc) resolve_symbol ("jb_entitle_now");
+
+			connection = jb_connect ();
+
+			entitle_and_platformize (Posix.getpid ());
 		}
 
-		private Gee.Promise<bool> ensure_request;
+		~ElectraPolicySoftener () {
+			jb_disconnect (connection);
+		}
 
 		public static bool is_available () {
-			return FileUtils.test (JAILBREAKD_CLIENT_PATH, FileTest.IS_EXECUTABLE);
+			return FileUtils.test (LIBJAILBREAK_PATH, FileTest.EXISTS);
 		}
 
-		public async void soften (uint pid) throws Error {
-			yield ensure_self_softened ();
-			yield do_soften (pid);
+		public void soften (uint pid) throws Error {
+			entitle_and_platformize (pid);
 		}
 
-		private async void do_soften (uint pid) throws Error {
-			try {
-				var argv = new string[] {
-					JAILBREAKD_CLIENT_PATH,
-					pid.to_string (),
-					((int) Operation.ENTITLE_AND_PLATFORMIZE).to_string ()
-				};
-				var client = new Subprocess.newv (argv, SubprocessFlags.INHERIT_FDS);
-				yield client.wait_async ();
-			} catch (GLib.Error e) {
-				throw new Error.NOT_SUPPORTED (e.message);
-			}
+		private void entitle_and_platformize (uint pid) {
+			jb_entitle_now (connection, (Posix.pid_t) pid);
 		}
 
-		private async void ensure_self_softened () throws Error {
-			if (ensure_request != null) {
-				var future = ensure_request.future;
-				try {
-					yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
-				}
-				return;
-			}
-			ensure_request = new Gee.Promise<bool> ();
+		private void * resolve_symbol (string name) {
+			void * symbol;
+			bool found = libjailbreak.symbol (name, out symbol);
+			assert (found);
+			return symbol;
+		}
 
-			try {
-				yield do_soften (Posix.getpid ());
+		[CCode (has_target = false)]
+		private delegate DaemonConnection ConnectFunc ();
+		[CCode (has_target = false)]
+		private delegate void DisconnectFunc (DaemonConnection connection);
+		[CCode (has_target = false)]
+		private delegate Gum.Darwin.Status EntitleNowFunc (DaemonConnection connection, Posix.pid_t pid);
 
-				ensure_request.set_value (true);
-			} catch (Error e) {
-				ensure_request.set_exception (e);
-				ensure_request = null;
-				throw e;
-			}
+		[Compact]
+		[CCode (free_function = "")]
+		private class DaemonConnection {
 		}
 	}
 }

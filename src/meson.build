@@ -68,8 +68,8 @@ if host_os_family == 'darwin'
   helper_types_sources = ['darwin/frida-helper-types.vala']
   helper_backend = static_library('frida-helper-backend', helper_backend_sources + helper_types_sources,
     c_args: frida_component_cflags,
-    vala_args: ['--pkg=posix'],
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
+    vala_args: ['--pkg=frida-gum-darwin-1.0', '--pkg=posix'],
+    dependencies: [gmodule_dep, gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
   )
   backend_libs += [helper_backend]
 
