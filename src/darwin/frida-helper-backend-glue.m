@@ -170,6 +170,7 @@ struct _FridaInjectInstance
 {
   guint id;
 
+  guint pid;
   mach_port_t task;
 
   mach_vm_address_t payload_address;
@@ -309,7 +310,7 @@ static guint32 frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInsta
 
 static void frida_make_pipe (int fds[2]);
 
-static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id);
+static FridaInjectInstance * frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint pid);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_free (FridaInjectInstance * instance);
 static gboolean frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance);
@@ -1309,6 +1310,28 @@ frida_configure_terminal_attributes (gint fd)
   tcsetattr (fd, 0, &tios);
 }
 
+gboolean
+frida_darwin_helper_backend_is_application_process (guint pid)
+{
+  gboolean result = FALSE;
+  NSAutoreleasePool * pool;
+  NSString * identifier;
+
+  pool = [[NSAutoreleasePool alloc] init];
+
+  identifier = _frida_get_springboard_api ()->SBSCopyDisplayIdentifierForProcessID (pid);
+  if (identifier != nil)
+  {
+    result = TRUE;
+
+    [identifier release];
+  }
+
+  [pool release];
+
+  return result;
+}
+
 #else
 
 void
@@ -1334,6 +1357,12 @@ _frida_darwin_helper_backend_kill_process (guint pid)
 void
 _frida_darwin_helper_backend_kill_application (const gchar * identifier)
 {
+}
+
+gboolean
+frida_darwin_helper_backend_is_application_process (guint pid)
+{
+  return FALSE;
 }
 
 #endif
@@ -1772,7 +1801,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   self_task = mach_task_self ();
 
-  instance = frida_inject_instance_new (self, self->next_id++);
+  instance = frida_inject_instance_new (self, self->next_id++, pid);
   mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
@@ -1980,6 +2009,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     goto failure;
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (instance->id), instance);
+
+  _frida_darwin_helper_backend_on_inject_instance_loaded (self, instance->pid);
 
   result = instance->id;
   goto beach;
@@ -3102,13 +3133,14 @@ frida_make_pipe (int fds[2])
 }
 
 static FridaInjectInstance *
-frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id)
+frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint pid)
 {
   FridaInjectInstance * instance;
 
   instance = g_slice_new (FridaInjectInstance);
   instance->id = id;
 
+  instance->pid = pid;
   instance->task = MACH_PORT_NULL;
 
   instance->payload_address = 0;
@@ -3174,6 +3206,11 @@ frida_inject_instance_free (FridaInjectInstance * instance)
       frida_inject_instance_task_did_not_exec (instance))
   {
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
+    _frida_darwin_helper_backend_on_inject_instance_unloaded (instance->backend, instance->pid);
+  }
+  else
+  {
+    _frida_darwin_helper_backend_on_inject_instance_detached (instance->backend, instance->pid);
   }
 
   if (agent_context != NULL)

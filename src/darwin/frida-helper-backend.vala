@@ -51,8 +51,10 @@ namespace Frida {
 			if (ElectraPolicySoftener.is_available ())
 				policy_softener = new ElectraPolicySoftener ();
 			else
+				policy_softener = new IOSPolicySoftener ();
+#else
+			policy_softener = new NullPolicySoftener ();
 #endif
-				policy_softener = new NullPolicySoftener ();
 		}
 
 		~DarwinHelperBackend () {
@@ -519,6 +521,18 @@ namespace Frida {
 			Source.remove (timer);
 		}
 
+		public void _on_inject_instance_loaded (uint pid) {
+			policy_softener.retain (pid);
+		}
+
+		public void _on_inject_instance_unloaded (uint pid) {
+			policy_softener.release (pid);
+		}
+
+		public void _on_inject_instance_detached (uint pid) {
+			policy_softener.forget (pid);
+		}
+
 		public uint task_for_pid (uint pid) throws Error {
 			if (kernel_agent != null)
 				return kernel_agent.task_for_pid (pid);
@@ -552,6 +566,7 @@ namespace Frida {
 		protected extern void _resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);
 		protected extern static void _kill_application (string identifier);
+		public extern static bool is_application_process (uint pid);
 		protected extern void * _create_spawn_instance (uint pid);
 		protected extern void _prepare_spawn_instance_for_injection (void * instance, uint task) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
