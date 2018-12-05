@@ -92,7 +92,7 @@ namespace Frida {
 
 		private AgentResource agent;
 #if IOS
-		private FruitLauncher fruit_launcher;
+		private FruitController fruit_controller;
 #endif
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
@@ -112,18 +112,22 @@ namespace Frida {
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
 			agent = new AgentResource (blob.name, new Bytes.static (blob.data), tempdir);
+
+#if IOS
+			fruit_controller = new FruitController (this);
+			fruit_controller.spawn_added.connect (on_spawn_added);
+			fruit_controller.spawn_removed.connect (on_spawn_removed);
+#endif
 		}
 
 		public override async void close () {
 			yield base.close ();
 
 #if IOS
-			if (fruit_launcher != null) {
-				yield fruit_launcher.close ();
-				fruit_launcher.spawn_added.disconnect (on_spawn_added);
-				fruit_launcher.spawn_removed.disconnect (on_spawn_removed);
-				fruit_launcher = null;
-			}
+			yield fruit_controller.close ();
+			fruit_controller.spawn_added.disconnect (on_spawn_added);
+			fruit_controller.spawn_removed.disconnect (on_spawn_removed);
+			fruit_controller = null;
 #endif
 
 			var fruitjector = injector as Fruitjector;
@@ -195,7 +199,7 @@ namespace Frida {
 
 		public override async void enable_spawn_gating () throws Error {
 #if IOS
-			yield get_fruit_launcher ().enable_spawn_gating ();
+			yield fruit_controller.enable_spawn_gating ();
 #else
 			yield helper.enable_spawn_gating ();
 #endif
@@ -203,7 +207,7 @@ namespace Frida {
 
 		public override async void disable_spawn_gating () throws Error {
 #if IOS
-			yield get_fruit_launcher ().disable_spawn_gating ();
+			yield fruit_controller.disable_spawn_gating ();
 #else
 			yield helper.disable_spawn_gating ();
 #endif
@@ -211,7 +215,7 @@ namespace Frida {
 
 		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 #if IOS
-			return get_fruit_launcher ().enumerate_pending_spawn ();
+			return fruit_controller.enumerate_pending_spawn ();
 #else
 			return yield helper.enumerate_pending_spawn ();
 #endif
@@ -220,7 +224,7 @@ namespace Frida {
 		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
 #if IOS
 			if (!program.has_prefix ("/"))
-				return yield get_fruit_launcher ().spawn (program, options);
+				return yield fruit_controller.spawn (program, options);
 #endif
 
 			return yield helper.spawn (program, options);
@@ -245,10 +249,8 @@ namespace Frida {
 
 		protected override async void perform_resume (uint pid) throws Error {
 #if IOS
-			if (fruit_launcher != null) {
-				if (yield fruit_launcher.try_resume (pid))
-					return;
-			}
+			if (yield fruit_controller.try_resume (pid))
+				return;
 #endif
 
 			yield helper.resume (pid);
@@ -276,17 +278,6 @@ namespace Frida {
 			return stream_request;
 		}
 
-#if IOS
-		private FruitLauncher get_fruit_launcher () {
-			if (fruit_launcher == null) {
-				fruit_launcher = new FruitLauncher (this);
-				fruit_launcher.spawn_added.connect (on_spawn_added);
-				fruit_launcher.spawn_removed.connect (on_spawn_removed);
-			}
-			return fruit_launcher;
-		}
-#endif
-
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
 		}
@@ -312,7 +303,7 @@ namespace Frida {
 	}
 
 #if IOS
-	private class FruitLauncher : Object {
+	private class FruitController : Object {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 
@@ -330,8 +321,9 @@ namespace Frida {
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
+		private Gee.HashSet<ReportCrashAgent> crash_agents = new Gee.HashSet<ReportCrashAgent> ();
 
-		public FruitLauncher (DarwinHostSession host_session) {
+		public FruitController (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
 		}
 
@@ -341,7 +333,7 @@ namespace Frida {
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
 		}
 
-		~FruitLauncher () {
+		~FruitController () {
 			launchd_agent.spawn_captured.disconnect (on_spawn_captured);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 		}
@@ -459,15 +451,31 @@ namespace Frida {
 		}
 
 		private void on_spawn_captured (HostSpawnInfo info) {
+			handle_spawn.begin (info);
+		}
+
+		private async void handle_spawn (HostSpawnInfo info) throws Error {
 			var pid = info.pid;
 
+			if (info.identifier == "com.apple.ReportCrash") {
+				var agent = new ReportCrashAgent (host_session, pid);
+				agent.unloaded.connect (on_crash_agent_unloaded);
+				crash_agents.add (agent);
+
+				yield agent.start ();
+			}
+
 			if (!spawn_gating_enabled) {
-				helper.resume.begin (pid);
+				yield helper.resume (pid);
 				return;
 			}
 
 			pending_spawn[pid] = info;
 			spawn_added (info);
+		}
+
+		private void on_crash_agent_unloaded (InternalAgent agent) {
+			crash_agents.remove (agent as ReportCrashAgent);
 		}
 	}
 
@@ -478,6 +486,10 @@ namespace Frida {
 		public LaunchdAgent (DarwinHostSession host_session) {
 			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
 			Object (host_session: host_session, script_source: source);
+		}
+
+		construct {
+			ensure_loaded.begin ();
 		}
 
 		public async void prepare_for_launch (string identifier) throws Error {
@@ -562,6 +574,30 @@ namespace Frida {
 
 			yield helper.wait_until_suspended (pid);
 			yield helper.notify_exec_completed (pid);
+		}
+
+		protected override async uint get_target_pid () throws Error {
+			return pid;
+		}
+	}
+
+	private class ReportCrashAgent : InternalAgent {
+		public uint pid {
+			get;
+			construct;
+		}
+
+		public ReportCrashAgent (DarwinHostSession host_session, uint pid) {
+			string * source = Frida.Data.Darwin.get_reportcrash_js_blob ().data;
+			Object (
+				host_session: host_session,
+				script_source: source,
+				pid: pid
+			);
+		}
+
+		public async void start () throws Error {
+			yield call ("start", new Json.Node[] {});
 		}
 
 		protected override async uint get_target_pid () throws Error {

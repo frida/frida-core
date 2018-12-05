@@ -935,6 +935,8 @@ namespace Frida {
 	}
 
 	public abstract class InternalAgent : Object {
+		public signal void unloaded ();
+
 		public BaseDBusHostSession host_session {
 			get;
 			construct;
@@ -952,7 +954,7 @@ namespace Frida {
 		}
 
 		private Gee.Promise<bool> ensure_request;
-		private Gee.Promise<bool> unloaded;
+		private Gee.Promise<bool> _unloaded = new Gee.Promise<bool> ();
 
 		protected AgentSession session;
 		private AgentScriptId script;
@@ -962,8 +964,6 @@ namespace Frida {
 
 		construct {
 			host_session.agent_session_closed.connect (on_agent_session_closed);
-
-			unloaded = new Gee.Promise<bool> ();
 		}
 
 		~InternalAgent () {
@@ -1101,7 +1101,7 @@ namespace Frida {
 
 		protected async void wait_for_unload () {
 			try {
-				yield unloaded.future.wait_async ();
+				yield _unloaded.future.wait_async ();
 			} catch (Gee.FutureError e) {
 				assert_not_reached ();
 			}
@@ -1111,7 +1111,8 @@ namespace Frida {
 			if (session != this.session)
 				return;
 
-			unloaded.set_value (true);
+			_unloaded.set_value (true);
+			unloaded ();
 		}
 
 		private void on_message_from_script (AgentScriptId sid, string raw_message, bool has_data, uint8[] data) {
