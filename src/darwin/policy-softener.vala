@@ -70,20 +70,8 @@ namespace Frida {
 
 		protected virtual ProcessEntry perform_softening (uint pid) {
 			MemlimitProperties? saved_memory_limits = null;
-
-			var props = MemlimitProperties ();
-			int status = memorystatus_control (GET_MEMLIMIT_PROPERTIES, (int32) pid, 0, &props, sizeof (MemlimitProperties));
-			if (status == 0) {
-				bool is_app_process = DarwinHelperBackend.is_application_process (pid);
-				if (!is_app_process) {
-					saved_memory_limits = props;
-
-					props.active = int32.MAX;
-					props.active_attr = 0;
-					props.inactive = int32.MAX;
-					props.inactive_attr = 0;
-					status = memorystatus_control (SET_MEMLIMIT_PROPERTIES, (int32) pid, 0, &props, sizeof (MemlimitProperties));
-				}
+			if (!DarwinHelperBackend.is_application_process (pid)) {
+				saved_memory_limits = try_commit_memlimit_properties (pid, MemlimitProperties.without_limits ());
 			}
 
 			var entry = new ProcessEntry (pid, saved_memory_limits);
@@ -93,9 +81,28 @@ namespace Frida {
 		}
 
 		protected virtual void revert_softening (ProcessEntry entry) {
-			if (entry.saved_memory_limits != null) {
-				memorystatus_control (SET_MEMLIMIT_PROPERTIES, (int32) entry.pid, 0, (void *) entry.saved_memory_limits, sizeof (MemlimitProperties));
-			}
+			if (entry.saved_memory_limits != null)
+				try_set_memlimit_properties (entry.pid, entry.saved_memory_limits);
+		}
+
+		private static MemlimitProperties? try_commit_memlimit_properties (uint pid, MemlimitProperties props) {
+			var previous_props = MemlimitProperties ();
+			if (!try_get_memlimit_properties (pid, out previous_props))
+				return null;
+
+			if (!try_set_memlimit_properties (pid, props))
+				return null;
+
+			return previous_props;
+		}
+
+		private static bool try_get_memlimit_properties (uint pid, out MemlimitProperties props) {
+			props = MemlimitProperties.with_system_defaults ();
+			return memorystatus_control (GET_MEMLIMIT_PROPERTIES, (int32) pid, 0, &props, sizeof (MemlimitProperties)) == 0;
+		}
+
+		private static bool try_set_memlimit_properties (uint pid, MemlimitProperties props) {
+			return memorystatus_control (SET_MEMLIMIT_PROPERTIES, (int32) pid, 0, &props, sizeof (MemlimitProperties)) == 0;
 		}
 
 		protected class ProcessEntry {
@@ -135,6 +142,20 @@ namespace Frida {
 			public MemlimitAttributes active_attr;
 			public int32 inactive;
 			public MemlimitAttributes inactive_attr;
+
+			public MemlimitProperties.with_system_defaults () {
+				active = 0;
+				active_attr = 0;
+				inactive = 0;
+				inactive_attr = 0;
+			}
+
+			public MemlimitProperties.without_limits () {
+				active = int32.MAX;
+				active_attr = 0;
+				inactive = int32.MAX;
+				inactive_attr = 0;
+			}
 		}
 
 		[Flags]
