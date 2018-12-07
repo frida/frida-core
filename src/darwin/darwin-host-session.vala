@@ -454,27 +454,34 @@ namespace Frida {
 			handle_spawn.begin (info);
 		}
 
-		private async void handle_spawn (HostSpawnInfo info) throws Error {
-			var pid = info.pid;
+		private async void handle_spawn (HostSpawnInfo info) {
+			try {
+				var pid = info.pid;
 
-			if (info.identifier == "com.apple.ReportCrash") {
-				var agent = new ReportCrashAgent (host_session, pid);
-				agent.unloaded.connect (on_crash_agent_unloaded);
-				crash_agents.add (agent);
+				if (info.identifier == "com.apple.ReportCrash") {
+					log_event ("ReportCrash started");
 
-				yield agent.start ();
+					var agent = new ReportCrashAgent (host_session, pid);
+					agent.unloaded.connect (on_crash_agent_unloaded);
+					crash_agents.add (agent);
+
+					yield agent.start ();
+				}
+
+				if (!spawn_gating_enabled) {
+					yield helper.resume (pid);
+					return;
+				}
+
+				pending_spawn[pid] = info;
+				spawn_added (info);
+			} catch (GLib.Error e) {
+				log_event ("Oops: %s", e.message);
 			}
-
-			if (!spawn_gating_enabled) {
-				yield helper.resume (pid);
-				return;
-			}
-
-			pending_spawn[pid] = info;
-			spawn_added (info);
 		}
 
 		private void on_crash_agent_unloaded (InternalAgent agent) {
+			log_event ("ReportCrash finished");
 			crash_agents.remove (agent as ReportCrashAgent);
 		}
 	}
@@ -536,6 +543,7 @@ namespace Frida {
 
 		private async void prepare_xpcproxy (string identifier, uint pid) {
 			try {
+				log_event ("prepare_xpcproxy(identifier='%s', pid=%u)", identifier, pid);
 				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
 				spawn_captured (HostSpawnInfo (pid, identifier));

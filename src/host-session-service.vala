@@ -507,6 +507,7 @@ namespace Frida {
 
 				AgentSession session;
 				if (agent_sessions.unset (raw_id, out session)) {
+					log_event ("agent_session_closed(id=%u, reason=%s)", raw_id, reason.to_string ());
 					agent_session_closed (id, session, reason);
 					agent_session_destroyed (id, reason);
 				}
@@ -1142,8 +1143,11 @@ namespace Frida {
 				} else {
 					on_event (event_type, event);
 				}
+			} else if (type == "log") {
+				var text = message.get_string_member ("payload");
+				log_event ("%s", text);
 			} else {
-				printerr ("%s\n", raw_message);
+				log_event ("%s", raw_message);
 			}
 		}
 
@@ -1175,5 +1179,24 @@ namespace Frida {
 				handler ();
 			}
 		}
+	}
+
+	private static Timer last_event_timer = null;
+
+	public void log_event (string format, ...) {
+		var builder = new StringBuilder ();
+
+		if (last_event_timer == null) {
+			last_event_timer = new Timer ();
+		}
+
+		builder.append_printf ("[+%u ms] ", (uint) (last_event_timer.elapsed () * 1000.0));
+
+		var args = va_list ();
+		builder.append_vprintf (format, args);
+
+		builder.append_c ('\n');
+
+		stderr.write (builder.str.data);
 	}
 }
