@@ -278,10 +278,11 @@ namespace Frida {
 			return stream_request;
 		}
 
+#if IOS
 		protected override async string? try_collect_crash_report (uint pid) {
-			// TODO: implement
-			return null;
+			return yield fruit_controller.try_collect_crash_report (pid);
 		}
+#endif
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
@@ -326,7 +327,8 @@ namespace Frida {
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
-		private Gee.HashSet<ReportCrashAgent> crash_agents = new Gee.HashSet<ReportCrashAgent> ();
+		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
+		private Gee.HashMap<uint, CrashReportDelivery> crash_report_deliveries = new Gee.HashMap<uint, CrashReportDelivery> ();
 
 		public FruitController (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -335,11 +337,15 @@ namespace Frida {
 		construct {
 			launchd_agent = new LaunchdAgent (host_session);
 			launchd_agent.app_launch_completed.connect (on_app_launch_completed);
+			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
+			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
 		}
 
 		~FruitController () {
 			launchd_agent.spawn_captured.disconnect (on_spawn_captured);
+			launchd_agent.spawn_preparation_aborted.disconnect (on_spawn_preparation_aborted);
+			launchd_agent.spawn_preparation_started.disconnect (on_spawn_preparation_started);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 		}
 
@@ -442,6 +448,16 @@ namespace Frida {
 			return true;
 		}
 
+		public async string? try_collect_crash_report (uint pid) {
+			if (crash_agents.has_key (pid)) {
+				log_event ("try_collect_crash_report(): skipping crash reporter PID");
+				return null;
+			}
+
+			log_event ("try_collect_crash_report(): okay let's do this");
+			return null;
+		}
+
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
 			Gee.Promise<uint> request;
 			if (spawn_requests.unset (identifier, out request)) {
@@ -455,6 +471,19 @@ namespace Frida {
 			}
 		}
 
+		private void on_spawn_preparation_started (HostSpawnInfo info) {
+			if (is_crash_reporter (info)) {
+				var pid = info.pid;
+
+				var agent = new ReportCrashAgent (host_session, pid);
+				crash_agents[pid] = agent;
+			}
+		}
+
+		private void on_spawn_preparation_aborted (HostSpawnInfo info) {
+			crash_agents.unset (info.pid);
+		}
+
 		private void on_spawn_captured (HostSpawnInfo info) {
 			handle_spawn.begin (info);
 		}
@@ -463,14 +492,13 @@ namespace Frida {
 			try {
 				var pid = info.pid;
 
-				if (info.identifier == "com.apple.ReportCrash") {
+				var crash_agent = crash_agents[pid];
+				if (crash_agent != null) {
 					log_event ("ReportCrash started");
 
-					var agent = new ReportCrashAgent (host_session, pid);
-					agent.unloaded.connect (on_crash_agent_unloaded);
-					crash_agents.add (agent);
+					crash_agent.unloaded.connect (on_crash_agent_unloaded);
 
-					yield agent.start ();
+					yield crash_agent.start ();
 				}
 
 				if (!spawn_gating_enabled) {
@@ -487,12 +515,22 @@ namespace Frida {
 
 		private void on_crash_agent_unloaded (InternalAgent agent) {
 			log_event ("ReportCrash finished");
-			crash_agents.remove (agent as ReportCrashAgent);
+			var crash_agent = agent as ReportCrashAgent;
+			crash_agents.unset (crash_agent.pid);
+		}
+
+		private static bool is_crash_reporter (HostSpawnInfo info) {
+			return info.identifier == "com.apple.ReportCrash";
+		}
+
+		private class CrashReportDelivery {
 		}
 	}
 
 	private class LaunchdAgent : InternalAgent {
 		public signal void app_launch_completed (string identifier, uint pid, Error? error);
+		public signal void spawn_preparation_started (HostSpawnInfo info);
+		public signal void spawn_preparation_aborted (HostSpawnInfo info);
 		public signal void spawn_captured (HostSpawnInfo info);
 
 		public LaunchdAgent (DarwinHostSession host_session) {
@@ -547,12 +585,17 @@ namespace Frida {
 		}
 
 		private async void prepare_xpcproxy (string identifier, uint pid) {
+			log_event ("prepare_xpcproxy(identifier='%s', pid=%u)", identifier, pid);
+
+			var info = HostSpawnInfo (pid, identifier);
+			spawn_preparation_started (info);
+
 			try {
-				log_event ("prepare_xpcproxy(identifier='%s', pid=%u)", identifier, pid);
 				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
-				spawn_captured (HostSpawnInfo (pid, identifier));
+				spawn_captured (info);
 			} catch (Error e) {
+				spawn_preparation_aborted (info);
 			}
 		}
 
