@@ -1,150 +1,86 @@
 'use strict';
 
-console.log('ReportCrash agent speaking from PID:', Process.id);
+var LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
+
+var pidForTask = new NativeFunction(
+    Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
+    'int',
+    ['uint', 'pointer']
+);
+
+var crashLogFd = null;
+var crashLogChunks = [];
 
 rpc.exports = {
   start: function () {
   },
 };
 
-var total = 0;
-var addresses = {};
+var CrashReport = ObjC.classes.CrashReport;
+if (CrashReport !== undefined) {
+  var initMethod = CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'];
+  if (initMethod !== undefined) {
+    Interceptor.attach(initMethod.implementation, function (args) {
+      var task = args[2].toUInt32();
 
-var manualHookNames = {
-  '/usr/lib/system/libsystem_kernel.dylib!open': true,
-  '/usr/lib/system/libsystem_kernel.dylib!open$NOCANCEL': true,
-  '/usr/lib/system/libsystem_kernel.dylib!openat': true,
-  '/usr/lib/system/libsystem_kernel.dylib!open_dprotected_np': true,
-  '/usr/lib/system/libsystem_kernel.dylib!shm_open': true,
-};
+      var pidBuf = Memory.alloc(4);
+      pidForTask(task, pidBuf);
+      var pid = Memory.readU32(pidBuf);
 
-Interceptor.attach(Module.findExportByName(null, 'open'), {
-  onEnter: function (args) {
-    var path = Memory.readUtf8String(args[0]);
-    onOpen('open', path, this);
-  },
-});
-
-Interceptor.attach(Module.findExportByName(null, 'open$NOCANCEL'), {
-  onEnter: function (args) {
-    var path = Memory.readUtf8String(args[0]);
-    onOpen('open$NOCANCEL', path, this);
-  },
-});
-
-Interceptor.attach(Module.findExportByName(null, 'openat'), {
-  onEnter: function (args) {
-    var path = Memory.readUtf8String(args[1]);
-    onOpen('openat', path, this);
-  },
-});
-
-Interceptor.attach(Module.findExportByName(null, 'open_dprotected_np'), {
-  onEnter: function (args) {
-    var path = Memory.readUtf8String(args[0]);
-    onOpen('open_dprotected_np', path, this);
-  },
-});
-
-Interceptor.attach(Module.findExportByName(null, 'shm_open'), {
-  onEnter: function (args) {
-    var name = Memory.readUtf8String(args[0]);
-    onOpen('shm_open', name, this);
-  },
-});
-
-function onOpen(name, path, invocation) {
-  var depth = invocation.depth;
-
-  var isInteresting = path.indexOf('/var/mobile/Library/Logs/CrashReporter') === 0;
-
-  var backtrace = '';
-  if (isInteresting) {
-    var indent = makeIndent(depth + 2);
-    backtrace = ' called from:\n' + indent + Thread.backtrace(invocation.context).map(DebugSymbol.fromAddress).join('\n' + indent);
+      console.log('w00t, PID=' + pid);
+    });
   }
-
-  console.log(makeIndent(depth) + name + '() path="' + path + '"' + backtrace);
 }
 
-var moduleResolver = new ApiResolver('module');
-moduleResolver.enumerateMatchesSync('exports:libsystem_kernel.dylib!*open*').forEach(function (match) {
-  var name = match.name;
-  if (manualHookNames[name] === undefined) {
-    hook(name, match.address, true);
+Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
+  onEnter: function (args) {
+    var path = Memory.readUtf8String(args[0]);
+    this.isCrashLog = /\.ips$/.test(path);
+  },
+  onLeave: function (retval) {
+    if (this.isCrashLog)
+      crashLogFd = retval.toInt32();
   }
 });
 
+Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
+  onEnter: function (args) {
+    var fd = args[0].toInt32();
+    if (fd === crashLogFd) {
+      send(['report', crashLogChunks.join('')]);
+      crashLogFd = null;
+      crashLogChunks = [];
+    }
+  },
+});
+
+Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
+  onEnter: function (args) {
+    var fd = args[0].toInt32();
+    this.isCrashLog = (fd === crashLogFd);
+    this.buf = args[1];
+  },
+  onLeave: function (retval) {
+    if (!this.isCrashLog)
+      return;
+
+    var n = retval.toInt32();
+    if (n === -1)
+      return;
+    var chunk = Memory.readUtf8String(this.buf, n);
+    crashLogChunks.push(chunk);
+  }
+});
+
+
+var addresses = {};
+
 var objcResolver = new ApiResolver('objc');
-['AppleErrorReport', 'CrashReport', 'NSFileHandle'].forEach(function (className) {
+['AppleErrorReport', 'CrashReport'].forEach(function (className) {
   objcResolver.enumerateMatchesSync('*[' + className + ' *]').forEach(function (match) {
     hook(match.name, match.address, false);
   });
 });
-
-Interceptor.attach(Module.findExportByName(null, 'OSACreateTempSubmittableLogInternal'), {
-  onEnter: function () {
-    console.log(makeIndent(this.depth) + '>>> OSACreateTempSubmittableLogInternal');
-    this.listener = Interceptor.attach(Module.findExportByName(null, 'objc_msgSend'), {
-      onEnter: function (args) {
-        var indent = makeIndent(this.depth);
-
-        var receiver = new ObjC.Object(args[0]);
-        var kind = ((receiver.$kind === 'instance') ? '- ' : '+ ');
-        var className = receiver.$className;
-        var selector = ObjC.selectorAsString(args[1]);
-        console.log(indent + kind + '[' + className + ' ' + selector + ']');
-
-        if (className === '__NSCFDictionary' && selector === 'objectForKey:') {
-          var key = new ObjC.Object(args[2]);
-          console.log(indent + '\tkey="' + key + '"');
-          return;
-        }
-
-        if (className === '__NSDictionaryM' && selector === 'objectForKeyedSubscript:') {
-          var subscript = new ObjC.Object(args[2]);
-          console.log(indent + '\tsubscript="' + subscript + '"');
-          return;
-        }
-
-        if (className === '__NSCFConstantString' && selector === 'isEqual:') {
-          var other = new ObjC.Object(args[2]);
-          console.log(indent + '\tother="' + other + '"');
-          return;
-        }
-
-        this.className = className;
-        this.selector = selector;
-      },
-      onLeave: function (retval) {
-        var className = this.className;
-        var selector = this.selector;
-
-        if (className === 'NSJSONSerialization' && selector === 'dataWithJSONObject:options:error:') {
-          var data = new ObjC.Object(retval);
-          logData(data, makeIndent(this.depth));
-
-          return;
-        }
-      }
-    });
-  },
-  onLeave: function (retval) {
-    this.listener.detach();
-    console.log(makeIndent(this.depth) + '<<< OSACreateTempSubmittableLogInternal');
-  },
-});
-
-Interceptor.attach(ObjC.classes.NSConcreteFileHandle['- writeData:'].implementation, {
-  onEnter: function (args) {
-    var data = new ObjC.Object(args[2]);
-    logData(data, makeIndent(this.depth));
-  },
-});
-
-console.log('Hooked', total, 'methods');
-
-// -[AppleErrorReport saveToDir:]
 
 function hook(name, address, skipNested) {
   var id = address.toString();
@@ -160,13 +96,6 @@ function hook(name, address, skipNested) {
       console.log(makeIndent(this.depth) + name);
     }
   });
-
-  total++;
-}
-
-function logData(data, indent) {
-  console.log(indent + '\tdata:');
-  console.log(indent + '\t' + hexdump(data.bytes(), { length: data.length(), ansi: true }).replace(/\n/g, '\n\t\t' + indent));
 }
 
 function makeIndent(level) {

@@ -613,6 +613,21 @@ namespace Frida {
 			yield call ("start", new Json.Node[] {});
 		}
 
+		protected override void on_event (string type, Json.Array event) {
+			switch (type) {
+				case "report":
+					var report = event.get_string_element (1);
+					handle_report.begin (report);
+					break;
+				default:
+					assert_not_reached ();
+			}
+		}
+
+		private async void handle_report (string report) {
+			log_event ("handle_report:\n\n%s", report);
+		}
+
 		protected override async uint get_target_pid () throws Error {
 			return pid;
 		}
