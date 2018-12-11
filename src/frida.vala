@@ -1120,7 +1120,7 @@ namespace Frida {
 			}
 
 			foreach (var session in session_by_handle.values.to_array ()) {
-				yield session._do_close (reason, may_block);
+				yield session._do_close (reason, null, may_block);
 			}
 			session_by_handle.clear ();
 
@@ -1241,12 +1241,12 @@ namespace Frida {
 			ensure_request = null;
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason) {
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report) {
 			var handle = id.handle;
 
 			var session = session_by_handle[handle];
 			if (session != null)
-				session._do_close.begin (reason, false);
+				session._do_close.begin (reason, crash_report, false);
 
 			Gee.Promise<bool> detach_request;
 			if (pending_detach_requests.unset (handle, out detach_request))
@@ -1545,7 +1545,7 @@ namespace Frida {
 	}
 
 	public class Session : Object {
-		public signal void detached (SessionDetachReason reason);
+		public signal void detached (SessionDetachReason reason, string? crash_report);
 
 		public uint pid {
 			get;
@@ -1591,7 +1591,7 @@ namespace Frida {
 		}
 
 		public async void detach () {
-			yield _do_close (SessionDetachReason.APPLICATION_REQUESTED, true);
+			yield _do_close (SessionDetachReason.APPLICATION_REQUESTED, null, true);
 		}
 
 		public void detach_sync () {
@@ -1830,7 +1830,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Session is detached");
 		}
 
-		public async void _do_close (SessionDetachReason reason, bool may_block) {
+		public async void _do_close (SessionDetachReason reason, string? crash_report, bool may_block) {
 			if (close_request != null) {
 				try {
 					yield close_request.future.wait_async ();
@@ -1855,7 +1855,7 @@ namespace Frida {
 
 			yield device._release_session (this, may_block);
 
-			detached (reason);
+			detached (reason, crash_report);
 			close_request.set_value (true);
 		}
 

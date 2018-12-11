@@ -114,7 +114,7 @@ namespace Frida {
 		public signal void host_session_closed (HostSession session);
 
 		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error;
-		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason);
+		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report);
 	}
 
 	public enum HostSessionProviderKind {
@@ -133,7 +133,7 @@ namespace Frida {
 
 	public abstract class BaseDBusHostSession : Object, HostSession, AgentController {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
-		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason);
+		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, string? crash_report);
 
 		private Gee.HashMap<uint, Gee.Promise<AgentEntry>> agent_entries = new Gee.HashMap<uint, Gee.Promise<AgentEntry>> ();
 
@@ -311,6 +311,7 @@ namespace Frida {
 			agent_sessions[raw_id] = session;
 
 			agent_session_opened (id, session);
+			log_event ("agent_session_opened(id=%u, pid=%u)", raw_id, pid);
 
 			return id;
 		}
@@ -434,7 +435,8 @@ namespace Frida {
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
-			agent_session_closed (id, session, reason);
+			string? crash_report = null;
+			agent_session_closed (id, session, reason, crash_report);
 			agent_session_destroyed (id, reason);
 
 			foreach (var promise in agent_entries.values) {
@@ -502,18 +504,28 @@ namespace Frida {
 		}
 
 		private async void teardown (AgentEntry entry, SessionDetachReason reason) {
+			string? crash_report = null;
+			if (reason == PROCESS_TERMINATED)
+				crash_report = yield try_collect_crash_report (entry.pid);
+
 			foreach (var raw_id in entry.sessions) {
 				var id = AgentSessionId (raw_id);
 
 				AgentSession session;
 				if (agent_sessions.unset (raw_id, out session)) {
 					log_event ("agent_session_closed(id=%u, reason=%s)", raw_id, reason.to_string ());
-					agent_session_closed (id, session, reason);
+					agent_session_closed (id, session, reason, crash_report);
+					if (crash_report != null)
+						agent_session_crashed (id, crash_report);
 					agent_session_destroyed (id, reason);
 				}
 			}
 
 			yield entry.close ();
+		}
+
+		protected virtual async string? try_collect_crash_report (uint pid) {
+			return null;
 		}
 
 		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {

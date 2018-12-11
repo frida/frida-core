@@ -23,6 +23,7 @@ namespace Frida {
 		public signal void child_removed (HostChildInfo info);
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void agent_session_destroyed (AgentSessionId id, SessionDetachReason reason);
+		public signal void agent_session_crashed (AgentSessionId id, string crash_report);
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
