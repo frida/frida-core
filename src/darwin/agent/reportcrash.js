@@ -8,13 +8,9 @@ var pidForTask = new NativeFunction(
     ['uint', 'pointer']
 );
 
-var crashLogFd = null;
-var crashLogChunks = [];
-
-rpc.exports = {
-  start: function () {
-  },
-};
+var pid = -1;
+var logFd = null;
+var logChunks = [];
 
 var CrashReport = ObjC.classes.CrashReport;
 if (CrashReport !== undefined) {
@@ -25,9 +21,8 @@ if (CrashReport !== undefined) {
 
       var pidBuf = Memory.alloc(4);
       pidForTask(task, pidBuf);
-      var pid = Memory.readU32(pidBuf);
-
-      console.log('w00t, PID=' + pid);
+      pid = Memory.readU32(pidBuf);
+      send(['report-imminent', pid]);
     });
   }
 }
@@ -39,17 +34,18 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotect
   },
   onLeave: function (retval) {
     if (this.isCrashLog)
-      crashLogFd = retval.toInt32();
+      logFd = retval.toInt32();
   }
 });
 
 Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
-    if (fd === crashLogFd) {
-      send(['report', crashLogChunks.join('')]);
-      crashLogFd = null;
-      crashLogChunks = [];
+    if (fd === logFd) {
+      send(['report-received', pid, logChunks.join('')]);
+      pid = -1;
+      logFd = null;
+      logChunks = [];
     }
   },
 });
@@ -57,7 +53,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
 Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
-    this.isCrashLog = (fd === crashLogFd);
+    this.isCrashLog = (fd === logFd);
     this.buf = args[1];
   },
   onLeave: function (retval) {
@@ -68,40 +64,6 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
     if (n === -1)
       return;
     var chunk = Memory.readUtf8String(this.buf, n);
-    crashLogChunks.push(chunk);
+    logChunks.push(chunk);
   }
 });
-
-
-var addresses = {};
-
-var objcResolver = new ApiResolver('objc');
-['AppleErrorReport', 'CrashReport'].forEach(function (className) {
-  objcResolver.enumerateMatchesSync('*[' + className + ' *]').forEach(function (match) {
-    hook(match.name, match.address, false);
-  });
-});
-
-function hook(name, address, skipNested) {
-  var id = address.toString();
-  if (addresses[id] !== undefined)
-    return;
-  addresses[id] = id;
-
-  Interceptor.attach(address, {
-    onEnter: function () {
-      if (skipNested && this.depth > 0)
-        return;
-
-      console.log(makeIndent(this.depth) + name);
-    }
-  });
-}
-
-function makeIndent(level) {
-  var indent = [];
-  var n = level;
-  while (n-- > 0)
-    indent.push('\t');
-  return indent.join('');
-}

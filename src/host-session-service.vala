@@ -311,7 +311,7 @@ namespace Frida {
 			agent_sessions[raw_id] = session;
 
 			agent_session_opened (id, session);
-			log_event ("agent_session_opened(id=%u, pid=%u)", raw_id, pid);
+			// log_event ("agent_session_opened(id=%u, pid=%u)", raw_id, pid);
 
 			return id;
 		}
@@ -513,7 +513,7 @@ namespace Frida {
 
 				AgentSession session;
 				if (agent_sessions.unset (raw_id, out session)) {
-					log_event ("agent_session_closed(id=%u, reason=%s)", raw_id, reason.to_string ());
+					// log_event ("agent_session_closed(id=%u, reason=%s)", raw_id, reason.to_string ());
 					agent_session_closed (id, session, reason, crash_report);
 					if (crash_report != null)
 						agent_session_crashed (id, crash_report);

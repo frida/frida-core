@@ -449,13 +449,19 @@ namespace Frida {
 		}
 
 		public async string? try_collect_crash_report (uint pid) {
-			if (crash_agents.has_key (pid)) {
-				log_event ("try_collect_crash_report(): skipping crash reporter PID");
+			if (crash_agents.has_key (pid))
+				return null;
+
+			log_event ("try_collect_crash_report(): starting");
+			var delivery = get_crash_report_delivery_for_pid (pid);
+			try {
+				var report = yield delivery.future.wait_async ();
+				log_event ("try_collect_crash_report(): SUCCESS! report.length=%u", report.length);
+				return report;
+			} catch (Gee.FutureError e) {
+				log_event ("try_collect_crash_report(): FAILED (%s)", e.message);
 				return null;
 			}
-
-			log_event ("try_collect_crash_report(): okay let's do this");
-			return null;
 		}
 
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
@@ -494,9 +500,9 @@ namespace Frida {
 
 				var crash_agent = crash_agents[pid];
 				if (crash_agent != null) {
-					log_event ("ReportCrash started");
-
 					crash_agent.unloaded.connect (on_crash_agent_unloaded);
+					crash_agent.report_imminent.connect (on_crash_agent_report_imminent);
+					crash_agent.report_received.connect (on_crash_agent_report_received);
 
 					yield crash_agent.start ();
 				}
@@ -519,11 +525,94 @@ namespace Frida {
 			crash_agents.unset (crash_agent.pid);
 		}
 
+		private void on_crash_agent_report_imminent (uint pid) {
+			log_event ("Report imminent (pid=%u)", pid);
+			var delivery = get_crash_report_delivery_for_pid (pid);
+			delivery.extend_timeout ();
+		}
+
+		private void on_crash_agent_report_received (uint pid, string report) {
+			log_event ("Report received (pid=%u)", pid);
+			var delivery = get_crash_report_delivery_for_pid (pid);
+			delivery.complete (report);
+		}
+
 		private static bool is_crash_reporter (HostSpawnInfo info) {
 			return info.identifier == "com.apple.ReportCrash";
 		}
 
-		private class CrashReportDelivery {
+		private CrashReportDelivery get_crash_report_delivery_for_pid (uint pid) {
+			var delivery = crash_report_deliveries[pid];
+			if (delivery == null) {
+				delivery = new CrashReportDelivery (pid);
+				delivery.expired.connect (on_crash_report_delivery_expired);
+				crash_report_deliveries[pid] = delivery;
+			}
+			return delivery;
+		}
+
+		private void on_crash_report_delivery_expired (CrashReportDelivery delivery) {
+			crash_report_deliveries.unset (delivery.pid);
+		}
+
+		private class CrashReportDelivery : Object {
+			public signal void expired ();
+
+			public uint pid {
+				get;
+				construct;
+			}
+
+			public Gee.Future<string> future {
+				get {
+					return promise.future;
+				}
+			}
+
+			private Gee.Promise<string> promise = new Gee.Promise <string> ();
+			private TimeoutSource expiry_source;
+
+			public CrashReportDelivery (uint pid) {
+				Object (pid: pid);
+			}
+
+			construct {
+				expiry_source = make_expiry_source (500);
+			}
+
+			private TimeoutSource make_expiry_source (uint timeout) {
+				var source = new TimeoutSource (timeout);
+				source.set_callback (on_timeout);
+				source.attach (MainContext.get_thread_default ());
+				return source;
+			}
+
+			public void extend_timeout () {
+				if (future.ready)
+					return;
+
+				expiry_source.destroy ();
+				expiry_source = make_expiry_source (20000);
+			}
+
+			public void complete (string report) {
+				if (future.ready)
+					return;
+
+				promise.set_value (report);
+
+				expiry_source.destroy ();
+				expiry_source = make_expiry_source (500);
+			}
+
+			private bool on_timeout () {
+				if (!future.ready)
+					promise.set_exception (new Error.TIMED_OUT ("Report delivery timed out"));
+
+				expired ();
+
+				return false;
+			}
 		}
 	}
 
@@ -585,8 +674,6 @@ namespace Frida {
 		}
 
 		private async void prepare_xpcproxy (string identifier, uint pid) {
-			log_event ("prepare_xpcproxy(identifier='%s', pid=%u)", identifier, pid);
-
 			var info = HostSpawnInfo (pid, identifier);
 			spawn_preparation_started (info);
 
@@ -638,6 +725,9 @@ namespace Frida {
 	}
 
 	private class ReportCrashAgent : InternalAgent {
+		public signal void report_imminent (uint pid);
+		public signal void report_received (uint pid, string report);
+
 		public uint pid {
 			get;
 			construct;
@@ -653,22 +743,23 @@ namespace Frida {
 		}
 
 		public async void start () throws Error {
-			yield call ("start", new Json.Node[] {});
+			yield ensure_loaded ();
 		}
 
 		protected override void on_event (string type, Json.Array event) {
 			switch (type) {
-				case "report":
-					var report = event.get_string_element (1);
-					handle_report.begin (report);
+				case "report-imminent":
+					var pid = (uint) event.get_int_element (1);
+					report_imminent (pid);
+					break;
+				case "report-received":
+					var pid = (uint) event.get_int_element (1);
+					var report = event.get_string_element (2);
+					report_received (pid, report);
 					break;
 				default:
 					assert_not_reached ();
 			}
-		}
-
-		private async void handle_report (string report) {
-			log_event ("handle_report:\n\n%s", report);
 		}
 
 		protected override async uint get_target_pid () throws Error {
