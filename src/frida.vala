@@ -434,9 +434,11 @@ namespace Frida {
 		private Gee.Promise<bool> close_request;
 
 		protected HostSession host_session;
-		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
+		private Gee.HashMap<AgentSessionId?, Session> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, Session> (AgentSessionId.hash, AgentSessionId.equal);
 		private Gee.HashSet<Gee.Promise<Session>> pending_attach_requests = new Gee.HashSet<Gee.Promise<Session>> ();
-		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
+		private Gee.HashMap<AgentSessionId?, Gee.Promise<bool>> pending_detach_requests =
+			new Gee.HashMap<AgentSessionId?, Gee.Promise<bool>> (AgentSessionId.hash, AgentSessionId.equal);
 
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			DeviceType dtype;
@@ -978,7 +980,7 @@ namespace Frida {
 				var agent_session_id = yield host_session.attach_to (pid);
 				var agent_session = yield provider.obtain_agent_session (host_session, agent_session_id);
 				session = new Session (this, pid, agent_session);
-				session_by_handle[agent_session_id.handle] = session;
+				agent_sessions[agent_session_id] = session;
 
 				attach_request.set_value (session);
 				pending_attach_requests.remove (attach_request);
@@ -1096,10 +1098,10 @@ namespace Frida {
 				var iterator = pending_detach_requests.entries.iterator ();
 				iterator.next ();
 				var entry = iterator.get ();
-				var handle = entry.key;
+				var session_id = entry.key;
 				var detach_request = entry.value;
 				detach_request.set_value (true);
-				pending_detach_requests.unset (handle);
+				pending_detach_requests.unset (session_id);
 			}
 
 			while (!pending_attach_requests.is_empty) {
@@ -1119,10 +1121,10 @@ namespace Frida {
 				}
 			}
 
-			foreach (var session in session_by_handle.values.to_array ()) {
+			foreach (var session in agent_sessions.values.to_array ()) {
 				yield session._do_close (reason, null, may_block);
 			}
-			session_by_handle.clear ();
+			agent_sessions.clear ();
 
 			provider.host_session_closed.disconnect (on_host_session_closed);
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
@@ -1151,22 +1153,20 @@ namespace Frida {
 		}
 
 		public async void _release_session (Session session, bool may_block) {
-			bool session_exists = false;
-			uint handle = 0;
-			foreach (var entry in session_by_handle.entries) {
+			AgentSessionId? session_id = null;
+			foreach (var entry in agent_sessions.entries) {
 				if (entry.value == session) {
-					session_exists = true;
-					handle = entry.key;
+					session_id = entry.key;
 					break;
 				}
 			}
-			assert (session_exists);
-			session_by_handle.unset (handle);
+			assert (session_id != null);
+			agent_sessions.unset (session_id);
 
 			if (may_block) {
 				var detach_request = new Gee.Promise<bool> ();
 
-				pending_detach_requests[handle] = detach_request;
+				pending_detach_requests[session_id] = detach_request;
 
 				try {
 					yield detach_request.future.wait_async ();
@@ -1242,14 +1242,12 @@ namespace Frida {
 		}
 
 		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report) {
-			var handle = id.handle;
-
-			var session = session_by_handle[handle];
+			var session = agent_sessions[id];
 			if (session != null)
 				session._do_close.begin (reason, crash_report, false);
 
 			Gee.Promise<bool> detach_request;
-			if (pending_detach_requests.unset (handle, out detach_request))
+			if (pending_detach_requests.unset (id, out detach_request))
 				detach_request.set_value (true);
 		}
 
@@ -1569,7 +1567,8 @@ namespace Frida {
 
 		private Gee.Promise<bool> close_request;
 
-		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
+		private Gee.HashMap<AgentScriptId?, Script> scripts =
+			new Gee.HashMap<AgentScriptId?, Script> (AgentScriptId.hash, AgentScriptId.equal);
 
 		private Debugger debugger;
 
@@ -1651,17 +1650,17 @@ namespace Frida {
 		public async Script create_script (string? name, string source) throws Error {
 			check_open ();
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script ((name == null) ? "" : name, source);
+				script_id = yield session.create_script ((name == null) ? "" : name, source);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 
 			check_open ();
 
-			var script = new Script (this, sid);
-			script_by_id[sid.handle] = script;
+			var script = new Script (this, script_id);
+			scripts[script_id] = script;
 
 			return script;
 		}
@@ -1685,17 +1684,17 @@ namespace Frida {
 		public async Script create_script_from_bytes (Bytes bytes) throws Error {
 			check_open ();
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script_from_bytes (bytes.get_data ());
+				script_id = yield session.create_script_from_bytes (bytes.get_data ());
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 
 			check_open ();
 
-			var script = new Script (this, sid);
-			script_by_id[sid.handle] = script;
+			var script = new Script (this, script_id);
+			scripts[script_id] = script;
 
 			return script;
 		}
@@ -1814,14 +1813,14 @@ namespace Frida {
 			}
 		}
 
-		private void on_message_from_script (AgentScriptId sid, string message, bool has_data, uint8[] data) {
-			var script = script_by_id[sid.handle];
+		private void on_message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) {
+			var script = scripts[script_id];
 			if (script != null)
 				script.message (message, has_data ? new Bytes (data) : null);
 		}
 
-		public void _release_script (AgentScriptId sid) {
-			var script_did_exist = script_by_id.unset (sid.handle);
+		public void _release_script (AgentScriptId script_id) {
+			var script_did_exist = scripts.unset (script_id);
 			assert (script_did_exist);
 		}
 
@@ -1846,7 +1845,7 @@ namespace Frida {
 				debugger = null;
 			}
 
-			foreach (var script in script_by_id.values.to_array ())
+			foreach (var script in scripts.values.to_array ())
 				yield script._do_close (may_block);
 
 			if (may_block)
@@ -2007,13 +2006,13 @@ namespace Frida {
 			close_request = new Gee.Promise<bool> ();
 
 			var parent = session;
-			var sid = AgentScriptId (id);
+			var script_id = AgentScriptId (id);
 
-			parent._release_script (sid);
+			parent._release_script (script_id);
 
 			if (may_block) {
 				try {
-					yield parent.session.destroy_script (sid);
+					yield parent.session.destroy_script (script_id);
 				} catch (GLib.Error ignored_error) {
 				}
 			}

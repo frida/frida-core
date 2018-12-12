@@ -47,11 +47,11 @@ namespace Frida {
 		public abstract async AgentScriptId create_script (string name, string source) throws GLib.Error;
 		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes) throws GLib.Error;
 		public abstract async uint8[] compile_script (string name, string source) throws GLib.Error;
-		public abstract async void destroy_script (AgentScriptId sid) throws GLib.Error;
-		public abstract async void load_script (AgentScriptId sid) throws GLib.Error;
-		public abstract async void eternalize_script (AgentScriptId sid) throws GLib.Error;
-		public abstract async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws GLib.Error;
-		public signal void message_from_script (AgentScriptId sid, string message, bool has_data, uint8[] data);
+		public abstract async void destroy_script (AgentScriptId script_id) throws GLib.Error;
+		public abstract async void load_script (AgentScriptId script_id) throws GLib.Error;
+		public abstract async void eternalize_script (AgentScriptId script_id) throws GLib.Error;
+		public abstract async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) throws GLib.Error;
+		public signal void message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data);
 
 		public abstract async void enable_debugger () throws GLib.Error;
 		public abstract async void disable_debugger () throws GLib.Error;
@@ -347,6 +347,14 @@ namespace Frida {
 		public HostChildId (uint handle) {
 			this.handle = handle;
 		}
+
+		public static uint hash (HostChildId? id) {
+			return direct_hash ((void *) id.handle);
+		}
+
+		public static bool equal (HostChildId? a, HostChildId? b) {
+			return a.handle == b.handle;
+		}
 	}
 
 	public struct HostChildInfo {
@@ -421,6 +429,14 @@ namespace Frida {
 		public AgentSessionId (uint handle) {
 			this.handle = handle;
 		}
+
+		public static uint hash (AgentSessionId? id) {
+			return direct_hash ((void *) id.handle);
+		}
+
+		public static bool equal (AgentSessionId? a, AgentSessionId? b) {
+			return a.handle == b.handle;
+		}
 	}
 
 	public struct AgentScriptId {
@@ -432,6 +448,14 @@ namespace Frida {
 		public AgentScriptId (uint handle) {
 			this.handle = handle;
 		}
+
+		public static uint hash (AgentScriptId? id) {
+			return direct_hash ((void *) id.handle);
+		}
+
+		public static bool equal (AgentScriptId? a, AgentScriptId? b) {
+			return a.handle == b.handle;
+		}
 	}
 
 	public struct InjectorPayloadId {
@@ -442,6 +466,14 @@ namespace Frida {
 
 		public InjectorPayloadId (uint handle) {
 			this.handle = handle;
+		}
+
+		public static uint hash (InjectorPayloadId? id) {
+			return direct_hash ((void *) id.handle);
+		}
+
+		public static bool equal (InjectorPayloadId? a, InjectorPayloadId? b) {
+			return a.handle == b.handle;
 		}
 	}
 

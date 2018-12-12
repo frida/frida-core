@@ -137,10 +137,12 @@ namespace Frida {
 
 		private Gee.HashMap<uint, Gee.Promise<AgentEntry>> agent_entries = new Gee.HashMap<uint, Gee.Promise<AgentEntry>> ();
 
-		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
+		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 		private uint next_agent_session_id = 1;
 
-		private Gee.HashMap<uint, ChildEntry> child_entries = new Gee.HashMap<uint, ChildEntry> ();
+		private Gee.HashMap<HostChildId?, ChildEntry> child_entries =
+			new Gee.HashMap<HostChildId?, ChildEntry> (HostChildId.hash, HostChildId.equal);
 #if !WINDOWS
 		private uint next_host_child_id = 1;
 #endif
@@ -293,22 +295,21 @@ namespace Frida {
 			var entry = yield establish (pid);
 
 			var id = AgentSessionId (next_agent_session_id++);
-			var raw_id = id.handle;
 			AgentSession session;
 
-			entry.sessions.add (raw_id);
+			entry.sessions.add (id);
 
 			try {
 				yield entry.provider.open (id);
 
 				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id), DBusProxyFlags.NONE, null);
 			} catch (GLib.Error e) {
-				entry.sessions.remove (raw_id);
+				entry.sessions.remove (id);
 
 				throw new Error.PROTOCOL (e.message);
 			}
 
-			agent_sessions[raw_id] = session;
+			agent_sessions[id] = session;
 
 			agent_session_opened (id, session);
 
@@ -397,7 +398,7 @@ namespace Frida {
 		protected abstract async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error;
 
 		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			var session = agent_sessions[id.handle];
+			var session = agent_sessions[id];
 			if (session == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 			return session;
@@ -427,10 +428,8 @@ namespace Frida {
 		}
 
 		private void on_agent_session_provider_closed (AgentSessionId id) {
-			var raw_id = id.handle;
-
 			AgentSession session;
-			var closed_after_opening = agent_sessions.unset (raw_id, out session);
+			var closed_after_opening = agent_sessions.unset (id, out session);
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
@@ -447,7 +446,7 @@ namespace Frida {
 				var entry = future.value;
 
 				var sessions = entry.sessions;
-				if (sessions.remove (raw_id)) {
+				if (sessions.remove (id)) {
 					if (sessions.is_empty) {
 						var is_system_session = entry.pid == 0;
 						if (!is_system_session)
@@ -507,11 +506,9 @@ namespace Frida {
 			if (reason == PROCESS_TERMINATED)
 				crash_report = yield try_collect_crash_report (entry.pid);
 
-			foreach (var raw_id in entry.sessions) {
-				var id = AgentSessionId (raw_id);
-
+			foreach (var id in entry.sessions) {
 				AgentSession session;
-				if (agent_sessions.unset (raw_id, out session)) {
+				if (agent_sessions.unset (id, out session)) {
 					agent_session_closed (id, session, reason, crash_report);
 					if (crash_report != null)
 						agent_session_crashed (id, crash_report);
@@ -580,14 +577,14 @@ namespace Frida {
 			}
 
 			var entry = new ChildEntry (connection, controller_registration_id);
-			child_entries[id.handle] = entry;
+			child_entries[id] = entry;
 			connection.on_closed.connect (on_child_connection_closed);
 		}
 #endif
 
 		private void on_child_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			ChildEntry entry_to_remove = null;
-			uint child_id = 0;
+			HostChildId? child_id = null;
 			foreach (var e in child_entries.entries) {
 				var entry = e.value;
 				if (entry.connection == connection) {
@@ -611,9 +608,7 @@ namespace Frida {
 		}
 
 		public async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws Error {
-			var raw_id = id.handle;
-
-			var child_entry = child_entries[raw_id];
+			var child_entry = child_entries[id];
 			if (child_entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
 
@@ -636,7 +631,7 @@ namespace Frida {
 			}
 
 			connection.on_closed.disconnect (on_child_connection_closed);
-			child_entries.unset (raw_id);
+			child_entries.unset (id);
 
 			var resume_request = new Gee.Promise<bool> ();
 
@@ -793,9 +788,9 @@ namespace Frida {
 				construct;
 			}
 
-			public Gee.HashSet<uint> sessions {
+			public Gee.HashSet<AgentSessionId?> sessions {
 				get;
-				construct;
+				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 			}
 
 			public SessionDetachReason disconnect_reason {
@@ -818,8 +813,7 @@ namespace Frida {
 					transport: transport,
 					connection: connection,
 					provider: provider,
-					controller_registration_id: controller_registration_id,
-					sessions: new Gee.HashSet<uint> ()
+					controller_registration_id: controller_registration_id
 				);
 			}
 
@@ -1126,8 +1120,8 @@ namespace Frida {
 			unloaded ();
 		}
 
-		private void on_message_from_script (AgentScriptId sid, string raw_message, bool has_data, uint8[] data) {
-			if (sid != script)
+		private void on_message_from_script (AgentScriptId script_id, string raw_message, bool has_data, uint8[] data) {
+			if (script_id != script)
 				return;
 
 			var parser = new Json.Parser ();

@@ -1,12 +1,13 @@
 namespace Frida.Agent {
 	internal class ScriptEngine : Object {
-		public signal void message_from_script (AgentScriptId sid, string message, Bytes? data);
+		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
 		public signal void message_from_debugger (string message);
 
 		private Gum.ScriptBackend backend;
 		private Gum.MemoryRange agent_range;
 
-		private Gee.HashMap<uint, ScriptInstance> instances = new Gee.HashMap<uint, ScriptInstance> ();
+		private Gee.HashMap<AgentScriptId?, ScriptInstance> instances =
+			new Gee.HashMap<AgentScriptId?, ScriptInstance> (AgentScriptId.hash, AgentScriptId.equal);
 		private Gee.HashSet<ScriptInstance> dying_instances = new Gee.HashSet<ScriptInstance> ();
 		private uint next_script_id = 1;
 
@@ -29,7 +30,7 @@ namespace Frida.Agent {
 					iterator.next ();
 					var id = iterator.get ();
 					try {
-						yield destroy_script (AgentScriptId (id));
+						yield destroy_script (id);
 					} catch (Error e) {
 						assert_not_reached ();
 					}
@@ -50,7 +51,7 @@ namespace Frida.Agent {
 		}
 
 		public async ScriptInstance create_script (string? name, string? source, Bytes? bytes) throws Error {
-			var sid = AgentScriptId (next_script_id++);
+			var script_id = AgentScriptId (next_script_id++);
 
 			Gum.Script script;
 			try {
@@ -59,7 +60,7 @@ namespace Frida.Agent {
 					if (name != null)
 						script_name = name;
 					else
-						script_name = "script%u".printf (sid.handle);
+						script_name = "script%u".printf (script_id.handle);
 					script = yield backend.create (script_name, source);
 				} else {
 					script = yield backend.create_from_bytes (bytes);
@@ -69,8 +70,8 @@ namespace Frida.Agent {
 			}
 			script.get_stalker ().exclude (agent_range);
 
-			var instance = new ScriptInstance (sid, script);
-			instances[sid.handle] = instance;
+			var instance = new ScriptInstance (script_id, script);
+			instances[script_id] = instance;
 
 			instance.message.connect (on_message);
 
@@ -85,40 +86,40 @@ namespace Frida.Agent {
 			}
 		}
 
-		public async void destroy_script (AgentScriptId sid) throws Error {
+		public async void destroy_script (AgentScriptId script_id) throws Error {
 			ScriptInstance instance;
-			if (!instances.unset (sid.handle, out instance))
+			if (!instances.unset (script_id, out instance))
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			dying_instances.add (instance);
 			yield instance.destroy ();
 			dying_instances.remove (instance);
 		}
 
-		public async void load_script (AgentScriptId sid) throws Error {
-			var instance = instances[sid.handle];
+		public async void load_script (AgentScriptId script_id) throws Error {
+			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			yield instance.load ();
 		}
 
-		public Gum.Script eternalize_script (AgentScriptId sid) throws Error {
-			var instance = instances[sid.handle];
+		public Gum.Script eternalize_script (AgentScriptId script_id) throws Error {
+			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			var script = instance.eternalize ();
-			instances.unset (sid.handle);
+			instances.unset (script_id);
 			return script;
 		}
 
-		public void post_to_script (AgentScriptId sid, string message, Bytes? data = null) throws Error {
-			var instance = instances[sid.handle];
+		public void post_to_script (AgentScriptId script_id, string message, Bytes? data = null) throws Error {
+			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
 			instance.script.post (message, data);
 		}
 
 		private void on_message (ScriptInstance instance, string message, GLib.Bytes? data) {
-			message_from_script (instance.sid, message, data);
+			message_from_script (instance.script_id, message, data);
 		}
 
 		public void enable_debugger () throws Error {
@@ -142,7 +143,7 @@ namespace Frida.Agent {
 		public class ScriptInstance : Object {
 			public signal void message (string message, Bytes? data);
 
-			public AgentScriptId sid {
+			public AgentScriptId script_id {
 				get;
 				construct;
 			}
@@ -179,8 +180,8 @@ namespace Frida.Agent {
 			private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
 			private int64 next_request_id = -1;
 
-			public ScriptInstance (AgentScriptId sid, Gum.Script script) {
-				Object (sid: sid, script: script);
+			public ScriptInstance (AgentScriptId script_id, Gum.Script script) {
+				Object (script_id: script_id, script: script);
 			}
 
 			public async void load () {

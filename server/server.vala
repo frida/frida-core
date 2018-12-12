@@ -182,7 +182,8 @@ namespace Frida.Server {
 
 	public class Application : Object {
 		private BaseDBusHostSession host_session;
-		private Gee.HashMap<uint, AgentSession> agent_sessions = new Gee.HashMap<uint, AgentSession> ();
+		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
@@ -279,7 +280,7 @@ namespace Frida.Server {
 		}
 
 		private void on_agent_session_opened (AgentSessionId id, AgentSession session) {
-			agent_sessions.set (id.handle, session);
+			agent_sessions.set (id, session);
 
 			foreach (var entry in clients.entries)
 				entry.value.register_agent_session (id, session);
@@ -289,8 +290,7 @@ namespace Frida.Server {
 			foreach (var entry in clients.entries)
 				entry.value.unregister_agent_session (id, session);
 
-			var raw_id = id.handle;
-			agent_sessions.unset (raw_id);
+			agent_sessions.unset (id);
 		}
 
 		private bool on_connection_opened (DBusConnection connection) {
@@ -299,7 +299,7 @@ namespace Frida.Server {
 			var client = new Client (connection);
 			client.register_host_session (host_session);
 			foreach (var entry in agent_sessions.entries)
-				client.register_agent_session (AgentSessionId (entry.key), entry.value);
+				client.register_agent_session (entry.key, entry.value);
 			clients.set (connection, client);
 
 			return true;
@@ -317,8 +317,8 @@ namespace Frida.Server {
 			if (client.is_spawn_gating)
 				host_session.disable_spawn_gating.begin ();
 
-			foreach (var raw_session_id in client.sessions)
-				close_session.begin (AgentSessionId (raw_session_id));
+			foreach (var session_id in client.sessions)
+				close_session.begin (session_id);
 		}
 
 		private async void close_session (AgentSessionId id) {
@@ -340,18 +340,19 @@ namespace Frida.Server {
 				private set;
 			}
 
-			public Gee.HashSet<uint> sessions {
+			public Gee.HashSet<AgentSessionId?> sessions {
 				get;
-				construct;
+				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 			}
 
 			private uint filter_id;
 			private Gee.HashSet<uint> registrations = new Gee.HashSet<uint> ();
-			private Gee.HashMap<uint, uint> agent_registration_by_id = new Gee.HashMap<uint, uint> ();
+			private Gee.HashMap<AgentSessionId?, uint> agent_registrations =
+				new Gee.HashMap<AgentSessionId?, uint> (AgentSessionId.hash, AgentSessionId.equal);
 			private Gee.HashMap<uint32, DBusMessage> method_calls = new Gee.HashMap<uint32, DBusMessage> ();
 
 			public Client (DBusConnection connection) {
-				Object (connection: connection, sessions: new Gee.HashSet<uint> ());
+				Object (connection: connection);
 			}
 
 			construct {
@@ -359,7 +360,7 @@ namespace Frida.Server {
 			}
 
 			public void close () {
-				agent_registration_by_id.clear ();
+				agent_registrations.clear ();
 
 				foreach (var registration_id in registrations)
 					connection.unregister_object (registration_id);
@@ -380,7 +381,7 @@ namespace Frida.Server {
 				try {
 					var registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
 					registrations.add (registration_id);
-					agent_registration_by_id.set (id.handle, registration_id);
+					agent_registrations.set (id, registration_id);
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -388,7 +389,7 @@ namespace Frida.Server {
 
 			public void unregister_agent_session (AgentSessionId id, AgentSession session) {
 				uint registration_id;
-				agent_registration_by_id.unset (id.handle, out registration_id);
+				agent_registrations.unset (id, out registration_id);
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
 			}
@@ -448,19 +449,19 @@ namespace Frida.Server {
 							is_spawn_gating = false;
 						});
 					} else if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
-						uint32 session_id;
-						message.get_body ().get ("((u))", out session_id);
+						uint32 raw_id;
+						message.get_body ().get ("((u))", out raw_id);
 						schedule_idle (() => {
-							sessions.add (session_id);
+							sessions.add (AgentSessionId (raw_id));
 						});
 					}
 				} else if (iface == "re.frida.AgentSession12") {
-					uint session_id;
-					path.scanf ("/re/frida/AgentSession/%u", out session_id);
+					uint raw_id;
+					path.scanf ("/re/frida/AgentSession/%u", out raw_id);
 					if (member == "Close") {
 						if (type != DBusMessageType.METHOD_CALL) {
 							schedule_idle (() => {
-								sessions.remove (session_id);
+								sessions.remove (AgentSessionId (raw_id));
 							});
 						}
 					}

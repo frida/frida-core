@@ -331,7 +331,8 @@ namespace Frida {
 				construct;
 			}
 
-			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id = new Gee.HashMap<AgentSessionId?, AgentSession> ();
+			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id =
+				new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
 			public Entry (uint port, Fruity.Client client, DBusConnection connection, HostSession host_session) {
 				Object (port: port, client: client, connection: connection, host_session: host_session);
