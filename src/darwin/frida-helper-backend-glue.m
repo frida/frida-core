@@ -1583,6 +1583,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   child_thread = threads[0];
   instance->thread = child_thread;
+  mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
   for (thread_index = 1; thread_index < thread_count; thread_index++)
