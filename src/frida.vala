@@ -388,6 +388,7 @@ namespace Frida {
 		public signal void spawn_removed (Spawn spawn);
 		public signal void child_added (Child child);
 		public signal void child_removed (Child child);
+		public signal void process_crashed (Crash crash);
 		public signal void output (uint pid, int fd, Bytes data);
 		public signal void uninjected (uint id);
 		public signal void lost ();
@@ -764,7 +765,7 @@ namespace Frida {
 
 			var result = new Gee.ArrayList<Spawn> ();
 			foreach (var p in pending_spawn)
-				result.add (spawn_from_info (p));
+				result.add (Spawn.from_info (p));
 			return new SpawnList (result);
 		}
 
@@ -776,11 +777,6 @@ namespace Frida {
 			protected override async SpawnList perform_operation () throws Error {
 				return yield parent.enumerate_pending_spawn ();
 			}
-		}
-
-		private Spawn spawn_from_info (HostSpawnInfo info) {
-			var identifier = info.identifier;
-			return new Spawn (info.pid, (identifier.length > 0) ? identifier : null);
 		}
 
 		public async ChildList enumerate_pending_children () throws Error {
@@ -796,7 +792,7 @@ namespace Frida {
 
 			var result = new Gee.ArrayList<Child> ();
 			foreach (var p in pending_children)
-				result.add (child_from_info (p));
+				result.add (Child.from_info (p));
 			return new ChildList (result);
 		}
 
@@ -808,20 +804,6 @@ namespace Frida {
 			protected override async ChildList perform_operation () throws Error {
 				return yield parent.enumerate_pending_children ();
 			}
-		}
-
-		private Child child_from_info (HostChildInfo info) {
-			var identifier = info.identifier;
-			var path = info.path;
-			return new Child (
-				info.pid,
-				info.parent_pid,
-				info.origin,
-				(identifier.length > 0) ? identifier : null,
-				(path.length > 0) ? path : null,
-				info.has_argv ? info.argv : null,
-				info.has_envp ? info.envp : null
-			);
 		}
 
 		public async uint spawn (string program, SpawnOptions? options = null) throws Error {
@@ -1134,6 +1116,7 @@ namespace Frida {
 				host_session.spawn_removed.disconnect (on_spawn_removed);
 				host_session.child_added.disconnect (on_child_added);
 				host_session.child_removed.disconnect (on_child_removed);
+				host_session.process_crashed.disconnect (on_process_crashed);
 				host_session.output.disconnect (on_output);
 				host_session.uninjected.disconnect (on_uninjected);
 				if (may_block) {
@@ -1194,6 +1177,7 @@ namespace Frida {
 				host_session.spawn_removed.connect (on_spawn_removed);
 				host_session.child_added.connect (on_child_added);
 				host_session.child_removed.connect (on_child_removed);
+				host_session.process_crashed.connect (on_process_crashed);
 				host_session.output.connect (on_output);
 				host_session.uninjected.connect (on_uninjected);
 				ensure_request.set_value (true);
@@ -1205,19 +1189,23 @@ namespace Frida {
 		}
 
 		private void on_spawn_added (HostSpawnInfo info) {
-			spawn_added (spawn_from_info (info));
+			spawn_added (Spawn.from_info (info));
 		}
 
 		private void on_spawn_removed (HostSpawnInfo info) {
-			spawn_removed (spawn_from_info (info));
+			spawn_removed (Spawn.from_info (info));
 		}
 
 		private void on_child_added (HostChildInfo info) {
-			child_added (child_from_info (info));
+			child_added (Child.from_info (info));
 		}
 
 		private void on_child_removed (HostChildInfo info) {
-			child_removed (child_from_info (info));
+			child_removed (Child.from_info (info));
+		}
+
+		private void on_process_crashed (CrashInfo info) {
+			process_crashed (Crash.from_info (info));
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
@@ -1241,10 +1229,10 @@ namespace Frida {
 			ensure_request = null;
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report) {
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
 			var session = agent_sessions[id];
 			if (session != null)
-				session._do_close.begin (reason, crash_report, false);
+				session._do_close.begin (reason, crash, false);
 
 			Gee.Promise<bool> detach_request;
 			if (pending_detach_requests.unset (id, out detach_request))
@@ -1444,6 +1432,11 @@ namespace Frida {
 				identifier: identifier
 			);
 		}
+
+		internal static Spawn from_info (HostSpawnInfo info) {
+			var identifier = info.identifier;
+			return new Spawn (info.pid, (identifier.length > 0) ? identifier : null);
+		}
 	}
 
 	public class ChildList : Object {
@@ -1509,6 +1502,53 @@ namespace Frida {
 				envp: envp
 			);
 		}
+
+		internal static Child from_info (HostChildInfo info) {
+			var identifier = info.identifier;
+			var path = info.path;
+			return new Child (
+				info.pid,
+				info.parent_pid,
+				info.origin,
+				(identifier.length > 0) ? identifier : null,
+				(path.length > 0) ? path : null,
+				info.has_argv ? info.argv : null,
+				info.has_envp ? info.envp : null
+			);
+		}
+	}
+
+	public class Crash : Object {
+		public uint pid {
+			get;
+			construct;
+		}
+
+		public string report {
+			get;
+			construct;
+		}
+
+		public VariantDict parameters {
+			get;
+			construct;
+		}
+
+		public Crash (uint pid, string report, VariantDict parameters) {
+			Object (
+				pid: pid,
+				report: report,
+				parameters: parameters
+			);
+		}
+
+		internal static Crash from_info (CrashInfo info) {
+			return new Crash (
+				info.pid,
+				info.report,
+				info.load_parameters ()
+			);
+		}
 	}
 
 	public class Icon : Object {
@@ -1543,7 +1583,7 @@ namespace Frida {
 	}
 
 	public class Session : Object {
-		public signal void detached (SessionDetachReason reason, string? crash_report);
+		public signal void detached (SessionDetachReason reason, Crash? crash);
 
 		public uint pid {
 			get;
@@ -1829,7 +1869,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Session is detached");
 		}
 
-		public async void _do_close (SessionDetachReason reason, string? crash_report, bool may_block) {
+		public async void _do_close (SessionDetachReason reason, CrashInfo? crash, bool may_block) {
 			if (close_request != null) {
 				try {
 					yield close_request.future.wait_async ();
@@ -1854,7 +1894,7 @@ namespace Frida {
 
 			yield device._release_session (this, may_block);
 
-			detached (reason, crash_report);
+			detached (reason, (crash != null) ? Crash.from_info (crash) : null);
 			close_request.set_value (true);
 		}
 

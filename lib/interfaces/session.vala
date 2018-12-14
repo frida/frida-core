@@ -21,9 +21,10 @@ namespace Frida {
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void child_added (HostChildInfo info);
 		public signal void child_removed (HostChildInfo info);
+		public signal void process_crashed (CrashInfo crash);
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void agent_session_destroyed (AgentSessionId id, SessionDetachReason reason);
-		public signal void agent_session_crashed (AgentSessionId id, string crash_report);
+		public signal void agent_session_crashed (AgentSessionId id, CrashInfo crash);
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
@@ -418,6 +419,33 @@ namespace Frida {
 		FORK,
 		EXEC,
 		SPAWN
+	}
+
+	public struct CrashInfo {
+		public uint pid {
+			get;
+			set;
+		}
+
+		public string report {
+			get;
+			set;
+		}
+
+		public uint8[] parameters {
+			get;
+			set;
+		}
+
+		public CrashInfo (uint pid, string report) {
+			this.pid = pid;
+			this.report = report;
+			this.parameters = {};
+		}
+
+		public VariantDict load_parameters () {
+			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (parameters), false));
+		}
 	}
 
 	public struct AgentSessionId {

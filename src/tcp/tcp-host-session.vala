@@ -130,8 +130,8 @@ namespace Frida {
 			destroy_entry.begin (entry_to_remove, SessionDetachReason.SERVER_TERMINATED);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report) {
-			agent_session_closed (id, reason, crash_report);
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
+			agent_session_closed (id, reason, crash);
 		}
 
 		private async void destroy_entry (Entry entry, SessionDetachReason reason) {
@@ -142,7 +142,7 @@ namespace Frida {
 		}
 
 		private class Entry : Object {
-			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report);
+			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
 
 			public string address {
 				get;
@@ -201,9 +201,9 @@ namespace Frida {
 					agent_session_closed (id, reason, null);
 			}
 
-			private void on_agent_session_crashed (AgentSessionId id, string crash_report) {
+			private void on_agent_session_crashed (AgentSessionId id, CrashInfo crash) {
 				agent_session_by_id.unset (id);
-				agent_session_closed (id, PROCESS_TERMINATED, crash_report);
+				agent_session_closed (id, PROCESS_TERMINATED, crash);
 			}
 		}
 	}

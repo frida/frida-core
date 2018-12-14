@@ -71,8 +71,8 @@ namespace Frida {
 			return yield this.host_session.obtain_agent_session (agent_session_id);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, string? crash_report) {
-			agent_session_closed (id, reason, crash_report);
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash) {
+			agent_session_closed (id, reason, crash);
 		}
 
 		public extern static ImageData? _try_extract_icon ();

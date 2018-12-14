@@ -114,7 +114,7 @@ namespace Frida {
 		public signal void host_session_closed (HostSession session);
 
 		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error;
-		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, string? crash_report);
+		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
 	}
 
 	public enum HostSessionProviderKind {
@@ -133,7 +133,7 @@ namespace Frida {
 
 	public abstract class BaseDBusHostSession : Object, HostSession, AgentController {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
-		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, string? crash_report);
+		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash);
 
 		private Gee.HashMap<uint, Gee.Promise<AgentEntry>> agent_entries = new Gee.HashMap<uint, Gee.Promise<AgentEntry>> ();
 
@@ -433,8 +433,7 @@ namespace Frida {
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
-			string? crash_report = null;
-			agent_session_closed (id, session, reason, crash_report);
+			agent_session_closed (id, session, reason, null);
 			agent_session_destroyed (id, reason);
 
 			foreach (var promise in agent_entries.values) {
@@ -502,16 +501,16 @@ namespace Frida {
 		}
 
 		private async void teardown (AgentEntry entry, SessionDetachReason reason) {
-			string? crash_report = null;
+			CrashInfo? crash = null;
 			if (reason == PROCESS_TERMINATED)
-				crash_report = yield try_collect_crash_report (entry.pid);
+				crash = yield try_collect_crash (entry.pid);
 
 			foreach (var id in entry.sessions) {
 				AgentSession session;
 				if (agent_sessions.unset (id, out session)) {
-					agent_session_closed (id, session, reason, crash_report);
-					if (crash_report != null)
-						agent_session_crashed (id, crash_report);
+					agent_session_closed (id, session, reason, crash);
+					if (crash != null)
+						agent_session_crashed (id, crash);
 					agent_session_destroyed (id, reason);
 				}
 			}
@@ -519,7 +518,7 @@ namespace Frida {
 			yield entry.close ();
 		}
 
-		protected virtual async string? try_collect_crash_report (uint pid) {
+		protected virtual async CrashInfo? try_collect_crash (uint pid) {
 			return null;
 		}
 

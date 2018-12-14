@@ -72,8 +72,8 @@ namespace Frida {
 			return yield this.host_session.obtain_agent_session (agent_session_id);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, string? crash_report) {
-			agent_session_closed (id, reason, crash_report);
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash) {
+			agent_session_closed (id, reason, crash);
 		}
 
 		public extern static ImageData? _try_extract_icon ();
@@ -117,6 +117,7 @@ namespace Frida {
 			fruit_controller = new FruitController (this);
 			fruit_controller.spawn_added.connect (on_spawn_added);
 			fruit_controller.spawn_removed.connect (on_spawn_removed);
+			fruit_controller.process_crashed.connect (on_process_crashed);
 #endif
 		}
 
@@ -127,6 +128,7 @@ namespace Frida {
 			yield fruit_controller.close ();
 			fruit_controller.spawn_added.disconnect (on_spawn_added);
 			fruit_controller.spawn_removed.disconnect (on_spawn_removed);
+			fruit_controller.process_crashed.disconnect (on_process_crashed);
 			fruit_controller = null;
 #endif
 
@@ -279,8 +281,8 @@ namespace Frida {
 		}
 
 #if IOS
-		protected override async string? try_collect_crash_report (uint pid) {
-			return yield fruit_controller.try_collect_crash_report (pid);
+		protected override async CrashInfo? try_collect_crash (uint pid) {
+			return yield fruit_controller.try_collect_crash (pid);
 		}
 #endif
 
@@ -295,6 +297,12 @@ namespace Frida {
 		private void on_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
 		}
+
+#if IOS
+		private void on_process_crashed (CrashInfo info) {
+			process_crashed (info);
+		}
+#endif
 
 		private void on_uninjected (uint id) {
 			foreach (var entry in injectee_by_pid.entries) {
@@ -312,6 +320,7 @@ namespace Frida {
 	private class FruitController : Object {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
+		public signal void process_crashed (CrashInfo crash);
 
 		public weak DarwinHostSession host_session {
 			get;
@@ -328,7 +337,7 @@ namespace Frida {
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
-		private Gee.HashMap<uint, CrashReportDelivery> crash_report_deliveries = new Gee.HashMap<uint, CrashReportDelivery> ();
+		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
 
 		public FruitController (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -448,18 +457,19 @@ namespace Frida {
 			return true;
 		}
 
-		public async string? try_collect_crash_report (uint pid) {
+		public async CrashInfo? try_collect_crash (uint pid) {
 			if (crash_agents.has_key (pid))
 				return null;
 
-			log_event ("try_collect_crash_report(): starting");
-			var delivery = get_crash_report_delivery_for_pid (pid);
+			log_event ("try_collect_crash(): starting");
+			var delivery = get_crash_delivery_for_pid (pid);
 			try {
-				var report = yield delivery.future.wait_async ();
-				log_event ("try_collect_crash_report(): SUCCESS! report.length=%u", report.length);
-				return report;
-			} catch (Gee.FutureError e) {
-				log_event ("try_collect_crash_report(): FAILED (%s)", e.message);
+				var crash = yield delivery.future.wait_async ();
+				log_event ("try_collect_crash(): SUCCESS! report.length=%u", crash.report.length);
+				return crash;
+			} catch (Gee.FutureError future_error) {
+				var e = (Error) delivery.future.exception;
+				log_event ("try_collect_crash(): FAILED (%s)", e.message);
 				return null;
 			}
 		}
@@ -501,8 +511,8 @@ namespace Frida {
 				var crash_agent = crash_agents[pid];
 				if (crash_agent != null) {
 					crash_agent.unloaded.connect (on_crash_agent_unloaded);
-					crash_agent.report_imminent.connect (on_crash_agent_report_imminent);
-					crash_agent.report_received.connect (on_crash_agent_report_received);
+					crash_agent.crash_detected.connect (on_crash_detected);
+					crash_agent.crash_received.connect (on_crash_received);
 
 					yield crash_agent.start ();
 				}
@@ -521,41 +531,45 @@ namespace Frida {
 
 		private void on_crash_agent_unloaded (InternalAgent agent) {
 			log_event ("ReportCrash finished");
+
 			var crash_agent = agent as ReportCrashAgent;
 			crash_agents.unset (crash_agent.pid);
 		}
 
-		private void on_crash_agent_report_imminent (uint pid) {
-			log_event ("Report imminent (pid=%u)", pid);
-			var delivery = get_crash_report_delivery_for_pid (pid);
+		private void on_crash_detected (uint pid) {
+			log_event ("Crash detected (pid=%u)", pid);
+			var delivery = get_crash_delivery_for_pid (pid);
 			delivery.extend_timeout ();
 		}
 
-		private void on_crash_agent_report_received (uint pid, string report) {
-			log_event ("Report received (pid=%u)", pid);
-			var delivery = get_crash_report_delivery_for_pid (pid);
-			delivery.complete (report);
+		private void on_crash_received (CrashInfo crash) {
+			log_event ("Crash received (pid=%u)", crash.pid);
+
+			var delivery = get_crash_delivery_for_pid (crash.pid);
+			delivery.complete (crash);
+
+			process_crashed (crash);
 		}
 
 		private static bool is_crash_reporter (HostSpawnInfo info) {
 			return info.identifier == "com.apple.ReportCrash";
 		}
 
-		private CrashReportDelivery get_crash_report_delivery_for_pid (uint pid) {
-			var delivery = crash_report_deliveries[pid];
+		private CrashDelivery get_crash_delivery_for_pid (uint pid) {
+			var delivery = crash_deliveries[pid];
 			if (delivery == null) {
-				delivery = new CrashReportDelivery (pid);
-				delivery.expired.connect (on_crash_report_delivery_expired);
-				crash_report_deliveries[pid] = delivery;
+				delivery = new CrashDelivery (pid);
+				delivery.expired.connect (on_crash_delivery_expired);
+				crash_deliveries[pid] = delivery;
 			}
 			return delivery;
 		}
 
-		private void on_crash_report_delivery_expired (CrashReportDelivery delivery) {
-			crash_report_deliveries.unset (delivery.pid);
+		private void on_crash_delivery_expired (CrashDelivery delivery) {
+			crash_deliveries.unset (delivery.pid);
 		}
 
-		private class CrashReportDelivery : Object {
+		private class CrashDelivery : Object {
 			public signal void expired ();
 
 			public uint pid {
@@ -563,16 +577,16 @@ namespace Frida {
 				construct;
 			}
 
-			public Gee.Future<string> future {
+			public Gee.Future<CrashInfo?> future {
 				get {
 					return promise.future;
 				}
 			}
 
-			private Gee.Promise<string> promise = new Gee.Promise <string> ();
+			private Gee.Promise<CrashInfo?> promise = new Gee.Promise <CrashInfo?> ();
 			private TimeoutSource expiry_source;
 
-			public CrashReportDelivery (uint pid) {
+			public CrashDelivery (uint pid) {
 				Object (pid: pid);
 			}
 
@@ -595,19 +609,19 @@ namespace Frida {
 				expiry_source = make_expiry_source (20000);
 			}
 
-			public void complete (string report) {
+			public void complete (CrashInfo? crash) {
 				if (future.ready)
 					return;
 
-				promise.set_value (report);
+				promise.set_value (crash);
 
 				expiry_source.destroy ();
-				expiry_source = make_expiry_source (500);
+				expiry_source = make_expiry_source (1000);
 			}
 
 			private bool on_timeout () {
 				if (!future.ready)
-					promise.set_exception (new Error.TIMED_OUT ("Report delivery timed out"));
+					promise.set_exception (new Error.TIMED_OUT ("Crash delivery timed out"));
 
 				expired ();
 
@@ -725,8 +739,8 @@ namespace Frida {
 	}
 
 	private class ReportCrashAgent : InternalAgent {
-		public signal void report_imminent (uint pid);
-		public signal void report_received (uint pid, string report);
+		public signal void crash_detected (uint pid);
+		public signal void crash_received (CrashInfo crash);
 
 		public uint pid {
 			get;
@@ -748,14 +762,14 @@ namespace Frida {
 
 		protected override void on_event (string type, Json.Array event) {
 			switch (type) {
-				case "report-imminent":
+				case "crash-detected":
 					var pid = (uint) event.get_int_element (1);
-					report_imminent (pid);
+					crash_detected (pid);
 					break;
-				case "report-received":
+				case "crash-received":
 					var pid = (uint) event.get_int_element (1);
 					var report = event.get_string_element (2);
-					report_received (pid, report);
+					crash_received (CrashInfo (pid, report));
 					break;
 				default:
 					assert_not_reached ();

@@ -22,7 +22,7 @@ if (CrashReport !== undefined) {
       var pidBuf = Memory.alloc(4);
       pidForTask(task, pidBuf);
       pid = Memory.readU32(pidBuf);
-      send(['report-imminent', pid]);
+      send(['crash-detected', pid]);
     });
   }
 }
@@ -42,7 +42,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
     if (fd === logFd) {
-      send(['report-received', pid, logChunks.join('')]);
+      send(['crash-received', pid, logChunks.join('')]);
       pid = -1;
       logFd = null;
       logChunks = [];
