@@ -2276,6 +2276,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
 
+  if (instance->task != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->task);
+
   g_slice_free (FridaSpawnInstance, instance);
 }
 
