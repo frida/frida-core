@@ -1583,6 +1583,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   child_thread = threads[0];
   instance->thread = child_thread;
+  mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
   for (thread_index = 1; thread_index < thread_count; thread_index++)
@@ -2274,6 +2275,9 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
 
   if (instance->thread != MACH_PORT_NULL)
     mach_port_deallocate (self_task, instance->thread);
+
+  if (instance->task != MACH_PORT_NULL)
+    mach_port_deallocate (self_task, instance->task);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
