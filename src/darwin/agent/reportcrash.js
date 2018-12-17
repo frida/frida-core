@@ -41,12 +41,15 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotect
 Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
-    if (fd === logFd) {
+    if (fd !== logFd)
+      return;
+
+    if (pid !== -1) {
       send(['crash-received', pid, logChunks.join('')]);
       pid = -1;
-      logFd = null;
-      logChunks = [];
     }
+    logFd = null;
+    logChunks = [];
   },
 });
 

@@ -349,6 +349,8 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
+
+			attach_to_crash_reporters ();
 		}
 
 		~FruitController () {
@@ -474,6 +476,35 @@ namespace Frida {
 			}
 		}
 
+		private void attach_to_crash_reporters () {
+			foreach (var process in System.enumerate_processes ()) {
+				if (process.name == "ReportCrash")
+					attach_to_crash_reporter.begin (process.pid);
+			}
+		}
+
+		private async void attach_to_crash_reporter (uint pid) {
+			var agent = add_crash_reporter_agent (pid);
+			try {
+				yield agent.start ();
+			} catch (Error e) {
+				crash_agents.unset (pid);
+			}
+		}
+
+		private ReportCrashAgent add_crash_reporter_agent (uint pid) {
+			log_event ("add_crash_reporter_agent(pid=%u)", pid);
+
+			var agent = new ReportCrashAgent (host_session, pid);
+			crash_agents[pid] = agent;
+
+			agent.unloaded.connect (on_crash_agent_unloaded);
+			agent.crash_detected.connect (on_crash_detected);
+			agent.crash_received.connect (on_crash_received);
+
+			return agent;
+		}
+
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
 			Gee.Promise<uint> request;
 			if (spawn_requests.unset (identifier, out request)) {
@@ -488,12 +519,8 @@ namespace Frida {
 		}
 
 		private void on_spawn_preparation_started (HostSpawnInfo info) {
-			if (is_crash_reporter (info)) {
-				var pid = info.pid;
-
-				var agent = new ReportCrashAgent (host_session, pid);
-				crash_agents[pid] = agent;
-			}
+			if (is_crash_reporter (info))
+				add_crash_reporter_agent (info.pid);
 		}
 
 		private void on_spawn_preparation_aborted (HostSpawnInfo info) {
@@ -510,11 +537,11 @@ namespace Frida {
 
 				var crash_agent = crash_agents[pid];
 				if (crash_agent != null) {
-					crash_agent.unloaded.connect (on_crash_agent_unloaded);
-					crash_agent.crash_detected.connect (on_crash_detected);
-					crash_agent.crash_received.connect (on_crash_received);
-
-					yield crash_agent.start ();
+					try {
+						yield crash_agent.start ();
+					} catch (Error e) {
+						crash_agents.unset (pid);
+					}
 				}
 
 				if (!spawn_gating_enabled) {
@@ -536,14 +563,14 @@ namespace Frida {
 			crash_agents.unset (crash_agent.pid);
 		}
 
-		private void on_crash_detected (uint pid) {
-			log_event ("Crash detected (pid=%u)", pid);
+		private void on_crash_detected (ReportCrashAgent agent, uint pid) {
+			log_event ("Crash detected (pid=%u) from agent with PID: %u", pid, agent.pid);
 			var delivery = get_crash_delivery_for_pid (pid);
 			delivery.extend_timeout ();
 		}
 
-		private void on_crash_received (CrashInfo crash) {
-			log_event ("Crash received (pid=%u)", crash.pid);
+		private void on_crash_received (ReportCrashAgent agent, CrashInfo crash) {
+			log_event ("Crash received (pid=%u) from agent with PID: %u", crash.pid, agent.pid);
 
 			var delivery = get_crash_delivery_for_pid (crash.pid);
 			delivery.complete (crash);
