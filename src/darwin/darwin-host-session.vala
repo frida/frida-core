@@ -228,6 +228,7 @@ namespace Frida {
 
 		protected override async void await_exec_transition (uint pid) throws Error {
 			yield helper.wait_until_suspended (pid);
+			yield helper.notify_exec_completed (pid);
 		}
 
 		protected override async void cancel_exec_transition (uint pid) throws Error {
@@ -560,6 +561,7 @@ namespace Frida {
 			yield wait_for_unload ();
 
 			yield helper.wait_until_suspended (pid);
+			yield helper.notify_exec_completed (pid);
 		}
 
 		protected override async uint get_target_pid () throws Error {

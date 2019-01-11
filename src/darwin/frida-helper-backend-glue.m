@@ -582,6 +582,17 @@ _frida_darwin_helper_backend_destroy_context (FridaDarwinHelperBackend * self)
   g_slice_free (FridaHelperContext, ctx);
 }
 
+void
+_frida_darwin_helper_backend_schedule_on_dispatch_queue (FridaDarwinHelperBackend * self, FridaDarwinHelperBackendDispatchWorker worker, gpointer user_data)
+{
+  FridaHelperContext * ctx = self->context;
+
+  dispatch_async (ctx->dispatch_queue, ^
+  {
+    worker (user_data);
+  });
+}
+
 guint
 _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar * path,
     FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
@@ -2208,6 +2219,12 @@ frida_inject_instance_on_posix_thread_dead (void * context)
   FridaInjectInstance * self = context;
 
   _frida_darwin_helper_backend_on_posix_thread_dead (self->backend, self->id);
+}
+
+guint
+_frida_darwin_helper_backend_get_pid_of_inject_instance (FridaDarwinHelperBackend * self, void * instance)
+{
+  return ((FridaInjectInstance *) instance)->pid;
 }
 
 void

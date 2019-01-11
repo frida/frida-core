@@ -162,6 +162,10 @@ namespace Frida {
 			yield backend.notify_launch_completed (identifier, pid);
 		}
 
+		public async void notify_exec_completed (uint pid) throws Error {
+			yield backend.notify_exec_completed (pid);
+		}
+
 		public async void wait_until_suspended (uint pid) throws Error {
 			yield backend.wait_until_suspended (pid);
 		}

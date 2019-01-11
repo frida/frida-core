@@ -16,6 +16,7 @@ namespace Frida {
 			}
 		}
 
+		protected delegate void DispatchWorker ();
 		protected delegate void LaunchCompletionHandler (owned StdioPipes? pipes, owned Error? error);
 
 		public void * context;
@@ -171,6 +172,26 @@ namespace Frida {
 				process_next_output_from.begin (new UnixInputStream (pipes.output, false), pid, 1, pipes);
 				process_next_output_from.begin (new UnixInputStream (pipes.error, false), pid, 2, pipes);
 			}
+		}
+
+		public async void notify_exec_completed (uint pid) throws Error {
+			yield flush_dispatch_queue ();
+
+			var dead_instances = new Gee.ArrayList<void *> ();
+			foreach (var instance in inject_cleaner_by_instance.keys) {
+				if (_get_pid_of_inject_instance (instance) == pid)
+					dead_instances.add (instance);
+			}
+
+			foreach (var instance in dead_instances) {
+				uint source_id;
+				inject_cleaner_by_instance.unset (instance, out source_id);
+				Source.remove (source_id);
+
+				_free_inject_instance (instance);
+			}
+
+			policy_softener.forget (pid);
 		}
 
 		private void on_launch_completed (PendingLaunch pending) {
@@ -548,6 +569,16 @@ namespace Frida {
 			spawn_removed (info);
 		}
 
+		private async void flush_dispatch_queue () {
+			_schedule_on_dispatch_queue (() => {
+				Idle.add (() => {
+					flush_dispatch_queue.callback ();
+					return false;
+				});
+			});
+			yield;
+		}
+
 		public extern static PipeEndpoints make_pipe_endpoints (uint local_task, uint remote_pid, uint remote_task) throws Error;
 
 		public extern static uint task_for_pid_fallback (uint pid) throws Error;
@@ -558,6 +589,7 @@ namespace Frida {
 
 		protected extern void _create_context ();
 		protected extern void _destroy_context ();
+		protected extern void _schedule_on_dispatch_queue (DispatchWorker worker);
 
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
@@ -576,6 +608,7 @@ namespace Frida {
 		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
 		protected extern void _recreate_injectee_thread (void * instance, uint pid, uint task) throws Error;
 		protected extern void _join_inject_instance_posix_thread (void * instance, void * posix_thread);
+		protected extern uint _get_pid_of_inject_instance (void * instance);
 		protected extern void _free_inject_instance (void * instance);
 	}
 
