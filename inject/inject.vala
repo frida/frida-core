@@ -54,7 +54,7 @@ namespace Frida.Inject {
 			printerr ("Path to JavaScript file must be specified\n");
 			return 3;
 		} else if (script_path == "-") {
-		    script_path = null;
+			script_path = null;
 			script_source = read_stdin ();
 		}
 
