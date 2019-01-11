@@ -48,12 +48,13 @@ namespace Frida.Inject {
 			return 2;
 		}
 
-		string? script_source = null;
-
 		if (script_path == null || script_path == "") {
 			printerr ("Path to JavaScript file must be specified\n");
 			return 3;
-		} else if (script_path == "-") {
+		}
+
+		string? script_source = null;
+		if (script_path == "-") {
 			script_path = null;
 			script_source = read_stdin ();
 		}
@@ -286,7 +287,6 @@ namespace Frida.Inject {
 			try {
 				string name;
 				string source;
-
 				if (script_source == null) {
 					name = Path.get_basename (script_path).split (".", 2)[0];
 					try {
