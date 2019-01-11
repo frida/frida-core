@@ -4,6 +4,7 @@ namespace Frida.Inject {
 	private static int target_pid = -1;
 	private static string? target_name;
 	private static string script_path;
+	private static string script_source;
 	private static bool eternalize;
 	private static bool enable_jit;
 	private static bool enable_development;
@@ -20,6 +21,21 @@ namespace Frida.Inject {
 		{ null }
 	};
 
+	private static string read_stdin () {
+		var input = new StringBuilder ();
+		while (!stdin.eof ()) {
+			var buffer = new char[1024];
+			string read_chunk = stdin.gets (buffer);
+			if (read_chunk != null) {
+				input.append (read_chunk);
+			} else {
+				break;
+			}
+		}
+		return input.str;
+	}
+
+
 	private static int main (string[] args) {
 #if !WINDOWS
 		Posix.setsid ();
@@ -28,6 +44,7 @@ namespace Frida.Inject {
 		Environment.init ();
 
 		script_path = "";
+		script_source = "";
 
 		try {
 			var ctx = new OptionContext ();
@@ -53,9 +70,11 @@ namespace Frida.Inject {
 		if (script_path == "") {
 			printerr ("Path to JavaScript file must be specified\n");
 			return 3;
+		} else if (script_path == "-") {
+			script_source = read_stdin();
 		}
 
-		application = new Application (target_pid, target_name, script_path, enable_jit, enable_development);
+		application = new Application (target_pid, target_name, script_path, script_source, enable_jit, enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -96,6 +115,11 @@ namespace Frida.Inject {
 			construct;
 		}
 
+		public string script_source {
+			get;
+			construct;
+		}
+
 		public bool enable_jit {
 			get;
 			construct;
@@ -113,11 +137,12 @@ namespace Frida.Inject {
 		private MainLoop loop;
 		private bool stopping;
 
-		public Application (int target_pid, string? target_name, string script_path, bool enable_jit, bool enable_development) {
+		public Application (int target_pid, string? target_name, string script_path, string script_source, bool enable_jit, bool enable_development) {
 			Object (
 				target_pid: target_pid,
 				target_name: target_name,
 				script_path: script_path,
+				script_source: script_source,
 				enable_jit: enable_jit,
 				enable_development: enable_development
 			);
@@ -153,7 +178,7 @@ namespace Frida.Inject {
 
 				var session = yield device.attach (pid);
 
-				var r = new ScriptRunner (session, script_path, enable_jit, enable_development);
+				var r = new ScriptRunner (session, script_path, script_source, enable_jit, enable_development);
 				yield r.start ();
 				script_runner = r;
 
@@ -197,6 +222,7 @@ namespace Frida.Inject {
 	private class ScriptRunner : Object {
 		private Script script;
 		private string script_path;
+		private string script_source;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private Session session;
@@ -206,9 +232,10 @@ namespace Frida.Inject {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (Session session, string script_path, bool enable_jit, bool enable_development) {
+		public ScriptRunner (Session session, string script_path, string script_source, bool enable_jit, bool enable_development) {
 			this.session = session;
 			this.script_path = script_path;
+			this.script_source = script_source;
 			this.enable_development = enable_development;
 
 			if (enable_jit)
@@ -261,13 +288,18 @@ namespace Frida.Inject {
 			load_in_progress = true;
 
 			try {
-				var name = Path.get_basename (script_path).split (".", 2)[0];
-
 				string source;
-				try {
-					FileUtils.get_contents (script_path, out source);
-				} catch (FileError e) {
-					throw new Error.INVALID_ARGUMENT (e.message);
+				string name;
+				if (script_source == null) {
+					name = Path.get_basename (script_path).split (".", 2)[0];
+					try {
+						FileUtils.get_contents (script_path, out source);
+					} catch (FileError e) {
+						throw new Error.INVALID_ARGUMENT (e.message);
+					}
+				} else {
+					name = "frida";
+					source = script_source;
 				}
 
 				var s = yield session.create_script (name, source);
