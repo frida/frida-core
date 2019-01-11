@@ -3243,8 +3243,8 @@ frida_inject_instance_task_did_not_exec (FridaInjectInstance * instance)
   {
     /*
      * This is racy and the only way to avoid this TOCTOU issue is to perform the mach_vm_deallocate() from
-     * the remote process. That would however be very tricky to implement, so we mitigate this by deferring
-     * cleanup a couple of seconds.
+     * the remote process. That would however be very tricky to implement, so we mitigate it by delaying
+     * cleanup a little.
      *
      * Note that this is not an issue on newer kernels like on iOS 10, where the task port gets invalidated
      * by exec transitions.
