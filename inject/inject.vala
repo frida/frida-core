@@ -242,7 +242,7 @@ namespace Frida.Inject {
 		public async void start () throws Error {
 			yield load ();
 
-			if (enable_development) {
+			if (enable_development && script_path != null) {
 				try {
 					script_monitor = File.new_for_path (script_path).monitor_file (FileMonitorFlags.NONE);
 					script_monitor.changed.connect (on_script_file_changed);
@@ -287,7 +287,7 @@ namespace Frida.Inject {
 			try {
 				string name;
 				string source;
-				if (script_source == null) {
+				if (script_path != null) {
 					name = Path.get_basename (script_path).split (".", 2)[0];
 					try {
 						FileUtils.get_contents (script_path, out source);
