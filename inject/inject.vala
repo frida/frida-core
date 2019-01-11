@@ -3,8 +3,7 @@ namespace Frida.Inject {
 
 	private static int target_pid = -1;
 	private static string? target_name;
-	private static string script_path;
-	private static string script_source;
+	private static string? script_path;
 	private static bool eternalize;
 	private static bool enable_jit;
 	private static bool enable_development;
@@ -21,30 +20,12 @@ namespace Frida.Inject {
 		{ null }
 	};
 
-	private static string read_stdin () {
-		var input = new StringBuilder ();
-		while (!stdin.eof ()) {
-			var buffer = new char[1024];
-			string read_chunk = stdin.gets (buffer);
-			if (read_chunk != null) {
-				input.append (read_chunk);
-			} else {
-				break;
-			}
-		}
-		return input.str;
-	}
-
-
 	private static int main (string[] args) {
 #if !WINDOWS
 		Posix.setsid ();
 #endif
 
 		Environment.init ();
-
-		script_path = "";
-		script_source = "";
 
 		try {
 			var ctx = new OptionContext ();
@@ -67,11 +48,14 @@ namespace Frida.Inject {
 			return 2;
 		}
 
-		if (script_path == "") {
+		string? script_source = null;
+
+		if (script_path == null || script_path == "") {
 			printerr ("Path to JavaScript file must be specified\n");
 			return 3;
 		} else if (script_path == "-") {
-			script_source = read_stdin();
+		    script_path = null;
+			script_source = read_stdin ();
 		}
 
 		application = new Application (target_pid, target_name, script_path, script_source, enable_jit, enable_development);
@@ -94,6 +78,18 @@ namespace Frida.Inject {
 		return exit_code;
 	}
 
+	private static string read_stdin () {
+		var input = new StringBuilder ();
+		var buffer = new char[1024];
+		while (!stdin.eof ()) {
+			string read_chunk = stdin.gets (buffer);
+			if (read_chunk == null)
+				break;
+			input.append (read_chunk);
+		}
+		return input.str;
+	}
+
 	namespace Environment {
 		public extern void init ();
 		public extern void deinit ();
@@ -110,12 +106,12 @@ namespace Frida.Inject {
 			construct;
 		}
 
-		public string script_path {
+		public string? script_path {
 			get;
 			construct;
 		}
 
-		public string script_source {
+		public string? script_source {
 			get;
 			construct;
 		}
@@ -137,7 +133,7 @@ namespace Frida.Inject {
 		private MainLoop loop;
 		private bool stopping;
 
-		public Application (int target_pid, string? target_name, string script_path, string script_source, bool enable_jit, bool enable_development) {
+		public Application (int target_pid, string? target_name, string? script_path, string? script_source, bool enable_jit, bool enable_development) {
 			Object (
 				target_pid: target_pid,
 				target_name: target_name,
@@ -221,8 +217,8 @@ namespace Frida.Inject {
 
 	private class ScriptRunner : Object {
 		private Script script;
-		private string script_path;
-		private string script_source;
+		private string? script_path;
+		private string? script_source;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private Session session;
@@ -232,7 +228,7 @@ namespace Frida.Inject {
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;
 
-		public ScriptRunner (Session session, string script_path, string script_source, bool enable_jit, bool enable_development) {
+		public ScriptRunner (Session session, string? script_path, string? script_source, bool enable_jit, bool enable_development) {
 			this.session = session;
 			this.script_path = script_path;
 			this.script_source = script_source;
@@ -288,8 +284,9 @@ namespace Frida.Inject {
 			load_in_progress = true;
 
 			try {
-				string source;
 				string name;
+				string source;
+
 				if (script_source == null) {
 					name = Path.get_basename (script_path).split (".", 2)[0];
 					try {
