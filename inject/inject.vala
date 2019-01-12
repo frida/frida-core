@@ -166,9 +166,15 @@ namespace Frida.Inject {
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 				uint pid;
+				bool spawned = false;
 				if (target_name != null) {
-					var proc = yield device.get_process_by_name (target_name);
-					pid = proc.pid;
+					var proc = yield device.find_process_by_name (target_name);
+					if (proc != null) {
+						pid = proc.pid;
+					} else {
+						pid = yield device.spawn (target_name);
+						spawned = true;
+					}
 				} else {
 					pid = (uint) target_pid;
 				}
@@ -179,6 +185,9 @@ namespace Frida.Inject {
 				yield r.start ();
 				script_runner = r;
 
+				if (spawned)
+					yield device.resume (pid);
+				
 				if (eternalize)
 					stop.begin ();
 			} catch (Error e) {
