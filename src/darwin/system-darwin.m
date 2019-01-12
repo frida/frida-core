@@ -192,10 +192,10 @@ frida_system_enumerate_applications (int * result_length)
 FridaHostProcessInfo *
 frida_system_enumerate_processes (int * result_length)
 {
+  GArray * result;
   NSAutoreleasePool * pool;
   struct kinfo_proc * entries;
   guint count, i;
-  FridaHostProcessInfo * result;
 
   frida_system_init ();
 
@@ -203,8 +203,7 @@ frida_system_enumerate_processes (int * result_length)
 
   entries = frida_system_query_kinfo_procs (&count);
 
-  result = g_new0 (FridaHostProcessInfo, count);
-  *result_length = count;
+  result = g_array_sized_new (FALSE, TRUE, sizeof (FridaHostProcessInfo), count);
 
 #ifdef HAVE_IOS
   FridaSpringboardApi * api = _frida_get_springboard_api ();
@@ -213,21 +212,22 @@ frida_system_enumerate_processes (int * result_length)
   for (i = 0; i != count; i++)
   {
     struct kinfo_proc * e = &entries[i];
-    FridaHostProcessInfo * info = &result[i];
+    FridaHostProcessInfo info = { 0, };
+    gboolean still_alive = TRUE;
 
-    info->_pid = e->kp_proc.p_pid;
+    info._pid = e->kp_proc.p_pid;
 
 #ifdef HAVE_IOS
-    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info->_pid);
+    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info._pid);
     if (identifier != nil)
     {
       NSString * app_name;
 
       app_name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-      info->_name = g_strdup ([app_name UTF8String]);
+      info._name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
-      extract_icons_from_identifier (identifier, &info->_small_icon, &info->_large_icon);
+      extract_icons_from_identifier (identifier, &info._small_icon, &info._large_icon);
 
       [identifier release];
     }
@@ -235,32 +235,42 @@ frida_system_enumerate_processes (int * result_length)
 #endif
     {
 #ifdef HAVE_MACOS
-      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info->_pid];
+      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info._pid];
       if (app.icon != nil)
       {
-        info->_name = g_strdup ([app.localizedName UTF8String]);
+        info._name = g_strdup ([app.localizedName UTF8String]);
 
-        extract_icons_from_image (app.icon, &info->_small_icon, &info->_large_icon);
+        extract_icons_from_image (app.icon, &info._small_icon, &info._large_icon);
       }
       else
 #endif
       {
         gchar path[PROC_PIDPATHINFO_MAXSIZE];
 
-        proc_pidpath (info->_pid, path, sizeof (path));
-        info->_name = g_path_get_basename (path);
+        still_alive = proc_pidpath (info._pid, path, sizeof (path)) > 0;
+        if (still_alive)
+        {
+          info._name = g_path_get_basename (path);
+        }
 
-        frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
-        frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
+        frida_image_data_init (&info._small_icon, 0, 0, 0, "");
+        frida_image_data_init (&info._large_icon, 0, 0, 0, "");
       }
     }
+
+    if (still_alive)
+      g_array_append_val (result, info);
+    else
+      frida_host_process_info_destroy (&info);
   }
 
   g_free (entries);
 
   [pool release];
 
-  return result;
+  *result_length = result->len;
+
+  return (FridaHostProcessInfo *) g_array_free (result, FALSE);
 }
 
 static struct kinfo_proc *
