@@ -14,26 +14,63 @@ var unlink = new NativeFunction(
     ['pointer']
 );
 
+var AppleErrorReport = ObjC.classes.AppleErrorReport;
+var CrashReport = ObjC.classes.CrashReport;
+var NSMutableDictionary = ObjC.classes.NSMutableDictionary;
+
 var pid = -1;
+var forcedByUs = false;
 var logPath = null;
 var logFd = null;
 var logChunks = [];
-var forcedByUs = false;
 
-var CrashReport = ObjC.classes.CrashReport;
-if (CrashReport !== undefined) {
-  var initMethod = CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'];
-  if (initMethod !== undefined) {
-    Interceptor.attach(initMethod.implementation, function (args) {
-      var task = args[2].toUInt32();
+Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'].implementation, function (args) {
+  var task = args[2].toUInt32();
 
-      var pidBuf = Memory.alloc(4);
-      pidForTask(task, pidBuf);
-      pid = Memory.readU32(pidBuf);
-      send(['crash-detected', pid]);
-    });
+  var pidBuf = Memory.alloc(4);
+  pidForTask(task, pidBuf);
+  pid = Memory.readU32(pidBuf);
+  send(['crash-detected', pid]);
+});
+
+Interceptor.attach(CrashReport['- isActionable'].implementation, {
+  onLeave: function (retval) {
+    var isActionable = !!retval.toInt32();
+    if (!isActionable) {
+      retval.replace(ptr(1));
+      forcedByUs = true;
+    }
   }
-}
+});
+
+Interceptor.attach(NSMutableDictionary['- logCounter_isLog:byKey:count:withinLimit:withOptions:'].implementation, {
+  onLeave: function (retval) {
+    var isLogWithinLimit = !!retval.toInt32();
+    if (!isLogWithinLimit) {
+      retval.replace(ptr(1));
+      forcedByUs = true;
+    }
+  },
+});
+
+Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
+  onEnter: function (args) {
+    var newPath = Memory.readUtf8String(args[1]);
+    if (/\.ips$/.test(newPath)) {
+      logPath = newPath;
+    }
+  },
+});
+
+Interceptor.attach(AppleErrorReport['- saveToDir:'].implementation, {
+  onLeave: function (retval) {
+    if (forcedByUs) {
+      unlink(Memory.allocUtf8String(logPath));
+      logPath = null;
+      forcedByUs = false;
+    }
+  }
+});
 
 Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
   onEnter: function (args) {
@@ -77,45 +114,6 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
     var chunk = Memory.readUtf8String(this.buf, n);
     logChunks.push(chunk);
   }
-});
-
-Interceptor.attach(ObjC.classes.CrashReport['- isActionable'].implementation, {
-  onLeave: function (retval) {
-    var isActionable = !!retval.toInt32();
-    if (!isActionable) {
-      retval.replace(ptr(1));
-      forcedByUs = true;
-    }
-  }
-});
-
-Interceptor.attach(ObjC.classes.NSMutableDictionary['- logCounter_isLog:byKey:count:withinLimit:withOptions:'].implementation, {
-  onLeave: function (retval) {
-    var isLogWithinLimit = !!retval.toInt32();
-    if (!isLogWithinLimit) {
-      retval.replace(ptr(1));
-      forcedByUs = true;
-    }
-  },
-});
-
-Interceptor.attach(ObjC.classes.AppleErrorReport['- saveToDir:'].implementation, {
-  onLeave: function (retval) {
-    if (forcedByUs) {
-      unlink(Memory.allocUtf8String(logPath));
-      logPath = null;
-      forcedByUs = false;
-    }
-  }
-});
-
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
-  onEnter: function (args) {
-    var newPath = Memory.readUtf8String(args[1]);
-    if (/\.ips$/.test(newPath)) {
-      logPath = newPath;
-    }
-  },
 });
 
 Interceptor.attach(Module.findExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
