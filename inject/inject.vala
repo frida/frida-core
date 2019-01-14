@@ -4,6 +4,7 @@ namespace Frida.Inject {
 	private static int target_pid = -1;
 	private static string? target_name;
 	private static string? script_path;
+	private static bool spawn;
 	private static bool eternalize;
 	private static bool enable_jit;
 	private static bool enable_development;
@@ -13,6 +14,7 @@ namespace Frida.Inject {
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, null, "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, null, "PID" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
+		{ "spawn", 'f', 0, OptionArg.NONE, ref spawn, "Spawn target application", null },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
 		{ "enable-jit", 0, 0, OptionArg.NONE, ref enable_jit, "Enable the JIT runtime", null },
 		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
@@ -59,7 +61,7 @@ namespace Frida.Inject {
 			script_source = read_stdin ();
 		}
 
-		application = new Application (target_pid, target_name, script_path, script_source, enable_jit, enable_development);
+		application = new Application (target_pid, target_name, script_path, script_source, spawn, enable_jit, enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -117,6 +119,11 @@ namespace Frida.Inject {
 			construct;
 		}
 
+		public bool spawn {
+			get;
+			construct;
+		}
+
 		public bool enable_jit {
 			get;
 			construct;
@@ -134,12 +141,13 @@ namespace Frida.Inject {
 		private MainLoop loop;
 		private bool stopping;
 
-		public Application (int target_pid, string? target_name, string? script_path, string? script_source, bool enable_jit, bool enable_development) {
+		public Application (int target_pid, string? target_name, string? script_path, string? script_source, bool spawn, bool enable_jit, bool enable_development) {
 			Object (
 				target_pid: target_pid,
 				target_name: target_name,
 				script_path: script_path,
 				script_source: script_source,
+				spawn: spawn,
 				enable_jit: enable_jit,
 				enable_development: enable_development
 			);
@@ -166,14 +174,12 @@ namespace Frida.Inject {
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
 
 				uint pid;
-				bool spawned = false;
 				if (target_name != null) {
-					var proc = yield device.find_process_by_name (target_name);
-					if (proc != null) {
-						pid = proc.pid;
-					} else {
+					if (spawn) {
 						pid = yield device.spawn (target_name);
-						spawned = true;
+					} else {
+						var proc = yield device.get_process_by_name (target_name);
+						pid = proc.pid;	
 					}
 				} else {
 					pid = (uint) target_pid;
@@ -185,9 +191,9 @@ namespace Frida.Inject {
 				yield r.start ();
 				script_runner = r;
 
-				if (spawned)
+				if (spawn)
 					yield device.resume (pid);
-				
+					
 				if (eternalize)
 					stop.begin ();
 			} catch (Error e) {
