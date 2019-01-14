@@ -1077,6 +1077,7 @@ namespace Frida {
 				yield ensure_unloaded ();
 
 				var error = Marshal.from_dbus (raw_error);
+				log_event ("oops: %s", error.message);
 				ensure_request.set_exception (error);
 				ensure_request = null;
 
@@ -1182,24 +1183,5 @@ namespace Frida {
 				handler ();
 			}
 		}
-	}
-
-	private static Timer last_event_timer = null;
-
-	public void log_event (string format, ...) {
-		var builder = new StringBuilder ();
-
-		if (last_event_timer == null) {
-			last_event_timer = new Timer ();
-		}
-
-		builder.append_printf ("[+%u ms] ", (uint) (last_event_timer.elapsed () * 1000.0));
-
-		var args = va_list ();
-		builder.append_vprintf (format, args);
-
-		builder.append_c ('\n');
-
-		stderr.write (builder.str.data);
 	}
 }
