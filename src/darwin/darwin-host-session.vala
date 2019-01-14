@@ -350,7 +350,7 @@ namespace Frida {
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
 
-			attach_to_crash_reporters ();
+			// attach_to_crash_reporters ();
 		}
 
 		~FruitController () {
