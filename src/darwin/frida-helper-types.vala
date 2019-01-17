@@ -3,6 +3,7 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
+		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
 		public signal void uninjected (uint id);
 
 		public abstract uint pid {
@@ -42,6 +43,7 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
+		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
 		public signal void uninjected (uint id);
 
 		public abstract async void stop () throws GLib.Error;
@@ -82,6 +84,29 @@ namespace Frida {
 		public PipeEndpoints (string local_address, string remote_address) {
 			this.local_address = local_address;
 			this.remote_address = remote_address;
+		}
+	}
+
+	public struct DarwinModuleDetails {
+		public uint64 mach_header_address {
+			get;
+			private set;
+		}
+
+		public string uuid {
+			get;
+			private set;
+		}
+
+		public string path {
+			get;
+			private set;
+		}
+
+		public DarwinModuleDetails (uint64 mach_header_address, string uuid, string path) {
+			this.mach_header_address = mach_header_address;
+			this.uuid = uuid;
+			this.path = path;
 		}
 	}
 

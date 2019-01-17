@@ -1,9 +1,11 @@
 'use strict';
 
+var LIBDYLD_PATH = '/usr/lib/system/libdyld.dylib';
 var LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
 var CRASH_REPORTER_SUPPORT_PATH = '/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport';
+var OBJC_BLOCK_INVOKE_OFFSET = (Process.pointerSize === 8) ? 16 : 12;
 
-var pidForTask = new NativeFunction(
+var _pidForTask = new NativeFunction(
     Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
     'int',
     ['uint', 'pointer']
@@ -18,19 +20,24 @@ var AppleErrorReport = ObjC.classes.AppleErrorReport;
 var CrashReport = ObjC.classes.CrashReport;
 var NSMutableDictionary = ObjC.classes.NSMutableDictionary;
 
-var pid = -1;
+var crashedPid = -1;
 var forcedByUs = false;
 var logPath = null;
 var logFd = null;
 var logChunks = [];
+var mappedAgents = [];
+var procInfoInstances = {};
 
 Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'].implementation, function (args) {
   var task = args[2].toUInt32();
 
-  var pidBuf = Memory.alloc(4);
-  pidForTask(task, pidBuf);
-  pid = Memory.readU32(pidBuf);
-  send(['crash-detected', pid]);
+  crashedPid = pidForTask(task);
+  send(['crash-detected', crashedPid]);
+
+  var op = recv('mapped-agents', function (message) {
+    mappedAgents = message.payload;
+  });
+  op.wait();
 });
 
 Interceptor.attach(CrashReport['- isActionable'].implementation, {
@@ -89,9 +96,9 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
     if (fd !== logFd)
       return;
 
-    if (pid !== -1) {
-      send(['crash-received', pid, logChunks.join('')]);
-      pid = -1;
+    if (crashedPid !== -1) {
+      send(['crash-received', crashedPid, logChunks.join('')]);
+      crashedPid = -1;
     }
     logFd = null;
     logChunks = [];
@@ -130,3 +137,54 @@ Interceptor.attach(Module.findExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPref
     }
   }
 });
+
+Interceptor.attach(Module.findExportByName(LIBDYLD_PATH, '_dyld_process_info_create'), {
+  onEnter: function (args) {
+    this.task = args[0].toUInt32();
+  },
+  onLeave: function (instance) {
+    if (instance.isNull())
+      return;
+
+    var targetPid = pidForTask(this.task);
+    if (targetPid === crashedPid)
+      procInfoInstances[instance.toString()] = true;
+  }
+});
+
+Interceptor.attach(Module.findExportByName(LIBDYLD_PATH, '_dyld_process_info_for_each_image'), {
+  onEnter: function (args) {
+    var instance = args[0];
+    if (procInfoInstances[instance.toString()] === undefined)
+      return;
+
+    var block = args[1];
+    var invoke = new NativeFunction(Memory.readPointer(block.add(OBJC_BLOCK_INVOKE_OFFSET)), 'void', ['pointer', 'uint64', 'pointer', 'pointer']);
+
+    mappedAgents.forEach(function (agent) {
+      var machHeaderAddress = uint64(agent.machHeaderAddress);
+      var uuid = parseUUID(agent.uuid);
+      var path = Memory.allocUtf8String(agent.path);
+
+      invoke(block, machHeaderAddress, uuid, path);
+    });
+  }
+});
+
+function pidForTask(task) {
+  var pidBuf = Memory.alloc(4);
+  _pidForTask(task, pidBuf);
+  return Memory.readU32(pidBuf);
+}
+
+function parseUUID(str) {
+  var result = Memory.alloc(16);
+
+  var bareStr = str.replace(/-/g, '');
+  for (var offset = 0; offset !== 16; offset++) {
+    var hexByte = bareStr.substr(offset * 2, 2);
+    Memory.writeU8(result.add(offset), parseInt(hexByte, 16));
+  }
+
+  return result;
+}

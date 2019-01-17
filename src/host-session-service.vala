@@ -961,7 +961,7 @@ namespace Frida {
 		private Gee.Promise<bool> _unloaded = new Gee.Promise<bool> ();
 
 		protected AgentSession session;
-		private AgentScriptId script;
+		protected AgentScriptId script;
 
 		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
 		private int64 next_request_id = 1;

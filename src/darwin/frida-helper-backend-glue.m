@@ -1797,6 +1797,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   FridaInjectInstance * instance;
   GumDarwinModuleResolver * resolver = NULL;
   GumDarwinMapper * mapper = NULL;
+  FridaDarwinModuleDetails mapped_module;
   FridaAgentDetails details = { 0, };
   guint page_size;
   FridaInjectPayloadLayout layout;
@@ -1878,7 +1879,18 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   if (mapper != NULL)
   {
-    gum_darwin_mapper_map (mapper, payload_address + base_payload_size);
+    GumAddress mapped_base_address;
+    GumDarwinModule * module;
+
+    mapped_base_address = payload_address + base_payload_size;
+
+    g_object_get (mapper, "module", &module, NULL);
+    mapped_module._mach_header_address = mapped_base_address;
+    mapped_module._uuid = module->uuid;
+    mapped_module._path = module->name;
+    g_object_unref (module);
+
+    gum_darwin_mapper_map (mapper, mapped_base_address);
 
     instance->is_mapped = TRUE;
   }
@@ -2022,7 +2034,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (instance->id), instance);
 
-  _frida_darwin_helper_backend_on_inject_instance_loaded (self, instance->pid);
+  _frida_darwin_helper_backend_on_inject_instance_loaded (self, instance->id, instance->pid, (mapper != NULL) ? &mapped_module : NULL);
 
   result = instance->id;
   goto beach;
@@ -3227,11 +3239,11 @@ frida_inject_instance_free (FridaInjectInstance * instance)
       frida_inject_instance_task_did_not_exec (instance))
   {
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
-    _frida_darwin_helper_backend_on_inject_instance_unloaded (instance->backend, instance->pid);
+    _frida_darwin_helper_backend_on_inject_instance_unloaded (instance->backend, instance->id, instance->pid);
   }
   else
   {
-    _frida_darwin_helper_backend_on_inject_instance_detached (instance->backend, instance->pid);
+    _frida_darwin_helper_backend_on_inject_instance_detached (instance->backend, instance->id, instance->pid);
   }
 
   if (agent_context != NULL)

@@ -90,6 +90,7 @@ namespace Frida {
 			construct;
 		}
 
+		private Fruitjector fruitjector;
 		private AgentResource agent;
 #if IOS
 		private FruitController fruit_controller;
@@ -107,7 +108,9 @@ namespace Frida {
 			helper.spawn_added.connect (on_spawn_added);
 			helper.spawn_removed.connect (on_spawn_removed);
 
-			injector = new Fruitjector (helper, false, tempdir);
+			fruitjector = new Fruitjector (helper, false, tempdir);
+			injector = fruitjector;
+			fruitjector.injected.connect (on_injected);
 			injector.uninjected.connect (on_uninjected);
 
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
@@ -129,7 +132,6 @@ namespace Frida {
 			fruit_controller.spawn_added.disconnect (on_spawn_added);
 			fruit_controller.spawn_removed.disconnect (on_spawn_removed);
 			fruit_controller.process_crashed.disconnect (on_process_crashed);
-			fruit_controller = null;
 #endif
 
 			var fruitjector = injector as Fruitjector;
@@ -141,9 +143,15 @@ namespace Frida {
 
 			agent = null;
 
+			fruitjector.injected.disconnect (on_injected);
 			injector.uninjected.disconnect (on_uninjected);
 			yield fruitjector.close ();
+			fruitjector = null;
 			injector = null;
+
+#if IOS
+			fruit_controller = null;
+#endif
 
 			yield helper.close ();
 			helper.output.disconnect (on_output);
@@ -304,7 +312,26 @@ namespace Frida {
 		}
 #endif
 
+		private void on_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
+			log_event ("on_injected() id=%u pid=%u, has_mapped_module=%s, mapped_module=(%p, \"%s\", \"%s\")",
+				id,
+				pid,
+				has_mapped_module.to_string (),
+				(void *) mapped_module.mach_header_address, mapped_module.uuid, mapped_module.path);
+
+#if IOS
+			DarwinModuleDetails? mapped_module_value = null;
+			if (has_mapped_module)
+				mapped_module_value = mapped_module;
+			fruit_controller.on_agent_injected (id, pid, mapped_module_value);
+#endif
+		}
+
 		private void on_uninjected (uint id) {
+#if IOS
+			fruit_controller.on_agent_uninjected (id);
+#endif
+
 			foreach (var entry in injectee_by_pid.entries) {
 				if (entry.value == id) {
 					injectee_by_pid.unset (entry.key);
@@ -317,7 +344,7 @@ namespace Frida {
 	}
 
 #if IOS
-	private class FruitController : Object {
+	private class FruitController : Object, MappedAgentContainer {
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void process_crashed (CrashInfo crash);
@@ -338,6 +365,7 @@ namespace Frida {
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
+		private Gee.HashMap<uint, MappedAgent> mapped_agents = new Gee.HashMap<uint, MappedAgent> ();
 
 		public FruitController (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -459,6 +487,26 @@ namespace Frida {
 			return true;
 		}
 
+		public void on_agent_injected (uint id, uint pid, DarwinModuleDetails? mapped_module) {
+			if (mapped_module == null)
+				return;
+			mapped_agents[id] = new MappedAgent (pid, mapped_module);
+		}
+
+		public void on_agent_uninjected (uint id) {
+			var timeout = new TimeoutSource.seconds (20);
+			timeout.set_callback (() => {
+				mapped_agents.unset (id);
+				return false;
+			});
+			timeout.attach (MainContext.get_thread_default ());
+		}
+
+		public void enumerate_mapped_agents (FoundMappedAgentFunc func) {
+			foreach (var mapped_agent in mapped_agents.values)
+				func (mapped_agent);
+		}
+
 		public async CrashInfo? try_collect_crash (uint pid) {
 			if (crash_agents.has_key (pid))
 				return null;
@@ -495,7 +543,7 @@ namespace Frida {
 		private ReportCrashAgent add_crash_reporter_agent (uint pid) {
 			log_event ("add_crash_reporter_agent(pid=%u)", pid);
 
-			var agent = new ReportCrashAgent (host_session, pid);
+			var agent = new ReportCrashAgent (host_session, pid, this);
 			crash_agents[pid] = agent;
 
 			agent.unloaded.connect (on_crash_agent_unloaded);
@@ -657,6 +705,29 @@ namespace Frida {
 		}
 	}
 
+	private interface MappedAgentContainer : Object {
+		public abstract void enumerate_mapped_agents (FoundMappedAgentFunc func);
+	}
+
+	private delegate void FoundMappedAgentFunc (MappedAgent agent);
+
+	private class MappedAgent {
+		public uint pid {
+			get;
+			private set;
+		}
+
+		public DarwinModuleDetails module {
+			get;
+			private set;
+		}
+
+		public MappedAgent (uint pid, DarwinModuleDetails module) {
+			this.pid = pid;
+			this.module = module;
+		}
+	}
+
 	private class LaunchdAgent : InternalAgent {
 		public signal void app_launch_completed (string identifier, uint pid, Error? error);
 		public signal void spawn_preparation_started (HostSpawnInfo info);
@@ -774,12 +845,18 @@ namespace Frida {
 			construct;
 		}
 
-		public ReportCrashAgent (DarwinHostSession host_session, uint pid) {
+		public MappedAgentContainer mapped_agent_container {
+			get;
+			construct;
+		}
+
+		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container) {
 			string * source = Frida.Data.Darwin.get_reportcrash_js_blob ().data;
 			Object (
 				host_session: host_session,
 				script_source: source,
-				pid: pid
+				pid: pid,
+				mapped_agent_container: mapped_agent_container
 			);
 		}
 
@@ -791,7 +868,36 @@ namespace Frida {
 			switch (type) {
 				case "crash-detected":
 					var pid = (uint) event.get_int_element (1);
+
+					var builder = new Json.Builder ();
+					builder
+						.begin_object ()
+						.set_member_name ("type")
+						.add_string_value ("mapped-agents")
+						.set_member_name ("payload")
+						.begin_array ();
+					mapped_agent_container.enumerate_mapped_agents (agent => {
+						if (agent.pid == pid) {
+							DarwinModuleDetails details = agent.module;
+
+							builder
+								.begin_object ()
+								.set_member_name ("machHeaderAddress")
+								.add_string_value (details.mach_header_address.to_string ())
+								.set_member_name ("uuid")
+								.add_string_value (details.uuid)
+								.set_member_name ("path")
+								.add_string_value (details.path)
+								.end_object ();
+						}
+					});
+					builder
+						.end_array ()
+						.end_object ();
+					session.post_to_script.begin (script, Json.to_string (builder.get_root (), false), false, new uint8[0]);
+
 					crash_detected (pid);
+
 					break;
 				case "crash-received":
 					var pid = (uint) event.get_int_element (1);
