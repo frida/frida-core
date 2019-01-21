@@ -1730,7 +1730,7 @@ namespace Frida.Agent {
 			return result;
 		}
 
-		public extern void _remove_cloaked_threads (uint task_id, uint ** threads, uint * count);
+		public extern static void _remove_cloaked_threads (uint task_id, uint ** threads, uint * count);
 
 		private static int replacement_thread_suspend (uint thread_id) {
 			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
