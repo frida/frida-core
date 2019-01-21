@@ -223,15 +223,14 @@ frida_ansi_string_to_utf8 (const gchar * str_ansi, gint length)
 void
 _frida_agent_thread_suspend_monitor_task_threads_filter (FridaAgentThreadSuspendMonitor * self, task_inspect_t task, thread_act_array_t * threads, mach_msg_type_number_t * count)
 {
-  guint i, o = 0;
+  guint i, o;
   thread_act_array_t old_threads = *threads;
-  gsize page_size, old_size, new_size;
-  guint pages_before, pages_after;
+  gsize page_size, old_size, new_size, pages_before, pages_after;
 
   if (task != mach_task_self () || *count == 0)
     return;
 
-  for (i = 0; i != *count; i++)
+  for (i = 0, o = 0; i != *count; i++)
   {
     thread_t thread = old_threads[i];
 
@@ -240,14 +239,13 @@ _frida_agent_thread_suspend_monitor_task_threads_filter (FridaAgentThreadSuspend
     else
       old_threads[o++] = thread;
   }
-
   g_assert_cmpuint (o, >, 0);
 
   page_size = getpagesize ();
   old_size = *count * sizeof (thread_t);
   new_size = o * sizeof (thread_t);
-  pages_before = ((old_size + page_size - 1) & ~(page_size - 1)) / page_size;
-  pages_after = ((new_size + page_size - 1) & ~(page_size - 1)) / page_size;
+  pages_before = GUM_ALIGN_SIZE (old_size, page_size) / page_size;
+  pages_after = GUM_ALIGN_SIZE (new_size, page_size) / page_size;
 
   if (pages_before != pages_after)
   {

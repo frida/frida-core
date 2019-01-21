@@ -1701,7 +1701,6 @@ namespace Frida.Agent {
 			thread_suspend = (ThreadSuspendFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "thread_suspend");
 			thread_resume = (ThreadResumeFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "thread_resume");
 			task_threads = (ThreadResumeFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "task_threads");
-			
 
 			interceptor.replace_function ((void *) thread_suspend, (void *) replacement_thread_suspend, this);
 			interceptor.replace_function ((void *) thread_resume, (void *) replacement_thread_resume, this);
