@@ -371,8 +371,6 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
-
-			// attach_to_crash_reporters ();
 		}
 
 		~FruitController () {
@@ -510,22 +508,6 @@ namespace Frida {
 				return yield delivery.future.wait_async ();
 			} catch (Gee.FutureError future_error) {
 				return null;
-			}
-		}
-
-		private void attach_to_crash_reporters () {
-			foreach (var process in System.enumerate_processes ()) {
-				if (process.name == "ReportCrash")
-					attach_to_crash_reporter.begin (process.pid);
-			}
-		}
-
-		private async void attach_to_crash_reporter (uint pid) {
-			var agent = add_crash_reporter_agent (pid);
-			try {
-				yield agent.start ();
-			} catch (Error e) {
-				crash_agents.unset (pid);
 			}
 		}
 
