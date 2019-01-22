@@ -1,10 +1,8 @@
 'use strict';
 
-var LIBDYLD_PATH = '/usr/lib/system/libdyld.dylib';
 var LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
 var CORESYMBOLICATION_PATH = '/System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication';
 var CRASH_REPORTER_SUPPORT_PATH = '/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport';
-var OBJC_BLOCK_INVOKE_OFFSET = (Process.pointerSize === 8) ? 16 : 12;
 var TASK_DYLD_INFO = 17;
 
 var _pidForTask = new NativeFunction(
@@ -187,25 +185,17 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
     this.count = args[3];
   },
   onLeave: function (retval) {
-    if (retval.toUInt32() !== 0 || this.pid !== crashedPid || this.flavor !== TASK_DYLD_INFO)
+    if (this.pid !== crashedPid || this.flavor !== TASK_DYLD_INFO || retval.toUInt32() !== 0)
       return;
 
     var info = this.info;
-    var allImageInfoSize = null;
-    var allImageInfoFormat = null;
     switch (Memory.readUInt(this.count)) {
       case 1:
-        allImageInfoAddr = uint64(Memory.readU32(info));
-        break;
       case 3:
         allImageInfoAddr = uint64(Memory.readU32(info));
-        allImageInfoSize = Memory.readU32(info.add(4));
-        allImageInfoFormat = Memory.readS32(info.add(8));
         break;
       case 5:
         allImageInfoAddr = Memory.readU64(info);
-        allImageInfoSize = Memory.readU64(info.add(8));
-        allImageInfoFormat = Memory.readS32(info.add(16));
         break;
       default:
         throw new Error('Unexpected TASK_DYLD_INFO count');
@@ -214,11 +204,12 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
 });
 
 [
-  ['mach_vm_read', 32],
-  ['mach_vm_read_overwrite', 64],
+  ['mach_vm_read', false, 32],
+  ['mach_vm_read_overwrite', true, 64],
 ].forEach(function (entry) {
   var name = entry[0];
-  var sizeWidth = entry[1];
+  var inplace = entry[1];
+  var sizeWidth = entry[2];
 
   var readSize = (sizeWidth !== 32) ? Memory['readU' + sizeWidth].bind(Memory) : readSizeFromU32;
   var writeSize = Memory['writeU' + sizeWidth].bind(Memory);
@@ -242,23 +233,13 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
       }
     },
     onLeave: function (retval) {
-      var invocationContext = this;
-      if (this.instrumented && retval.toInt32() !== 0) {
-        log(invocationContext, 'failed to read: 0x' + this.address.toString(16) + ' size=' + this.size + ' kr=' + retval.toInt32() + ' called from:\n\t' + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join('\n\t'));
-        return;
-      }
-
       if (!this.instrumented || retval.toUInt32() !== 0)
         return;
-
-      if (this.size.equals(32)) {
-        log(invocationContext, 'the 32 bytes read from 0x' + this.address.toString(16) + ':\n' + hexdump(this.data, { length: readSize(this.dataSize), ansi: true }));
-      }
 
       var startAddress = this.address;
 
       if (allImageInfoAddr !== null && startAddress.equals(allImageInfoAddr)) {
-        var allImageInfos = this.data;
+        var allImageInfos = getData(this);
 
         imageArrayAddress = readRemotePointer(allImageInfos.add(8));
 
@@ -271,7 +252,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
         imageElementSize = 3 * (is64Bit ? 8 : 4);
         imageTrailerSize = extraImageCount * imageElementSize;
       } else if (imageArrayAddress !== null && startAddress.equals(imageArrayAddress)) {
-        var imageTrailerStart = this.data.add(this.size).sub(imageTrailerSize);
+        var imageTrailerStart = getData(this).add(this.size).sub(imageTrailerSize);
         mappedAgents.forEach(function (agent, index) {
           var element = imageTrailerStart.add(index * imageElementSize);
 
@@ -289,8 +270,6 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
             Memory.writeU32(element.add(8), modDate);
           }
 
-          log(invocationContext, 'Added fake entry: loadAddress=0x' + loadAddress.toString(16) + ' filePath=0x' + filePath.toString(16));
-
           imageTrailerPaths[filePath.toString()] = agent;
         });
 
@@ -299,10 +278,14 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
       } else {
         var agent = imageTrailerPaths[startAddress.toString()];
         if (agent !== undefined)
-          Memory.writeUtf8String(this.data, agent.path);
+          Memory.writeUtf8String(getData(this), agent.path);
       }
     }
   });
+
+  function getData(invocationContext) {
+    return inplace ? invocationContext.data : Memory.readPointer(invocationContext.data);
+  }
 });
 
 function pidForTask(task) {
@@ -317,86 +300,4 @@ function readRemotePointer(address) {
 
 function readSizeFromU32(address) {
   return uint64(Memory.readU32(address));
-}
-
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'mach_vm_remap'), {
-  onEnter: function (args) {
-    this.targetAddress = args[1];
-    var size = args[2];
-    log(this, 'mach_vm_remap() sourceAddress=' + args[6] + ' size=' + size + ' called from:\n\t' + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join('\n\t'));
-  },
-  onLeave: function (retval) {
-    log(this, '=> target_address=0x' + Memory.readU64(this.targetAddress).toString(16));
-  }
-});
-
-/*
-var manualHookNames = {
-  'dyld_process_info_base::addImage(unsigned int, bool, unsigned long long, unsigned long long, char const*)': true,
-  'dyld_process_info_base::copyPath(unsigned int, unsigned long long, int*)': true,
-};
-
-var matches = DebugSymbol.findFunctionsMatching('*dyld_process_info_base*')
-console.log('matches.length=' + matches.length);
-matches.forEach(function (address) {
-  var sym = DebugSymbol.fromAddress(address);
-  var name = sym.name;
-  if (manualHookNames[name] !== undefined)
-    return;
-
-  var useFastLog = name.indexOf('dyld_process_info_base::') === 0;
-
-  Interceptor.attach(address, {
-    onEnter: function (args) {
-      if (useFastLog)
-        fastLog(this, name);
-      else
-        log(this, name);
-    }
-  });
-});
-
-Interceptor.attach(DebugSymbol.getFunctionByName('dyld_process_info_base::addImage(unsigned int, bool, unsigned long long, unsigned long long, char const*)'), {
-  onEnter: function (args) {
-    fastLog(this, 'dyld_process_info_base::addImage()');
-  },
-  onLeave: function (retval) {
-    fastLog(this, '=> ' + retval);
-  }
-});
-
-Interceptor.attach(DebugSymbol.getFunctionByName('dyld_process_info_base::copyPath(unsigned int, unsigned long long, int*)'), {
-  onEnter: function (args) {
-    fastLog(this, 'dyld_process_info_base::copyPath()');
-  },
-  onLeave: function (retval) {
-    var val = !retval.isNull() ? Memory.readUtf8String(retval) : null;
-    fastLog(this, '=> ' + JSON.stringify(val));
-  }
-});
-*/
-
-Interceptor.attach(ObjC.classes._NSInlineData['- initWithBytes:length:'].implementation, {
-  onEnter: function (args) {
-    var bytes = args[2];
-    var length = args[3];
-    log(this, '-[_NSInlineData initWithBytes:' + bytes + ' length:' + length.toString(10) + '] called from:\n\t' + Thread.backtrace(this.context).map(DebugSymbol.fromAddress).join('\n\t'));
-  },
-});
-
-function log(context, message) {
-  fastLog(context, message);
-  Thread.sleep(0.05);
-}
-
-function fastLog(context, message) {
-  console.log(makeIndent(context.depth) + message);
-}
-
-function makeIndent(level) {
-  var indent = [];
-  var n = level;
-  while (n-- > 0)
-    indent.push('\t');
-  return indent.join('');
 }
