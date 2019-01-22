@@ -289,6 +289,10 @@ namespace Frida {
 		}
 
 #if IOS
+		public void activate_crash_reporter_integration () {
+			fruit_controller.activate_crash_reporter_integration ();
+		}
+
 		protected override async CrashInfo? try_collect_crash (uint pid) {
 			return yield fruit_controller.try_collect_crash (pid);
 		}
@@ -499,6 +503,10 @@ namespace Frida {
 				func (mapped_agent);
 		}
 
+		public void activate_crash_reporter_integration () {
+			launchd_agent.activate_crash_reporter_integration ();
+		}
+
 		public async CrashInfo? try_collect_crash (uint pid) {
 			if (crash_agents.has_key (pid))
 				return null;
@@ -702,7 +710,7 @@ namespace Frida {
 			Object (host_session: host_session, script_source: source);
 		}
 
-		construct {
+		public void activate_crash_reporter_integration () {
 			ensure_loaded.begin ();
 		}
 

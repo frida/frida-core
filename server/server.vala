@@ -294,6 +294,14 @@ namespace Frida.Server {
 		}
 
 		private bool on_connection_opened (DBusConnection connection) {
+#if IOS
+			/*
+			 * We defer the launchd injection until the first connection is established in order
+			 * to avoid bootloops on unsupported jailbreaks.
+			 */
+			(host_session as DarwinHostSession).activate_crash_reporter_integration ();
+#endif
+
 			connection.on_closed.connect (on_connection_closed);
 
 			var client = new Client (connection);
