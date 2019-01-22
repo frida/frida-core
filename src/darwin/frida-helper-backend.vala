@@ -549,7 +549,6 @@ namespace Frida {
 				injected (id, pid, true, mapped_module);
 			else
 				injected (id, pid, false, DarwinModuleDetails (0, "", ""));
-
 		}
 
 		public void _on_inject_instance_unloaded (uint id, uint pid) {

@@ -1879,18 +1879,15 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   if (mapper != NULL)
   {
-    GumAddress mapped_base_address;
     GumDarwinModule * module;
 
-    mapped_base_address = payload_address + base_payload_size;
+    gum_darwin_mapper_map (mapper, payload_address + base_payload_size);
 
     g_object_get (mapper, "module", &module, NULL);
-    mapped_module._mach_header_address = mapped_base_address;
+    mapped_module._mach_header_address = module->base_address;
     mapped_module._uuid = module->uuid;
     mapped_module._path = module->name;
     g_object_unref (module);
-
-    gum_darwin_mapper_map (mapper, mapped_base_address);
 
     instance->is_mapped = TRUE;
   }
