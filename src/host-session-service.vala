@@ -1077,7 +1077,6 @@ namespace Frida {
 				yield ensure_unloaded ();
 
 				var error = Marshal.from_dbus (raw_error);
-				log_event ("oops: %s", error.message);
 				ensure_request.set_exception (error);
 				ensure_request = null;
 
@@ -1149,9 +1148,9 @@ namespace Frida {
 				}
 			} else if (type == "log") {
 				var text = message.get_string_member ("payload");
-				log_event ("%s", text);
+				printerr ("%s\n", text);
 			} else {
-				log_event ("%s", raw_message);
+				printerr ("%s\n", raw_message);
 			}
 		}
 

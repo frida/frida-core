@@ -313,12 +313,6 @@ namespace Frida {
 #endif
 
 		private void on_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
-			log_event ("on_injected() id=%u pid=%u, has_mapped_module=%s, mapped_module=(%p, \"%s\", \"%s\")",
-				id,
-				pid,
-				has_mapped_module.to_string (),
-				(void *) mapped_module.mach_header_address, mapped_module.uuid, mapped_module.path);
-
 #if IOS
 			DarwinModuleDetails? mapped_module_value = null;
 			if (has_mapped_module)
@@ -511,15 +505,10 @@ namespace Frida {
 			if (crash_agents.has_key (pid))
 				return null;
 
-			log_event ("try_collect_crash(): starting");
 			var delivery = get_crash_delivery_for_pid (pid);
 			try {
-				var crash = yield delivery.future.wait_async ();
-				log_event ("try_collect_crash(): SUCCESS! report.length=%u", crash.report.length);
-				return crash;
+				return yield delivery.future.wait_async ();
 			} catch (Gee.FutureError future_error) {
-				var e = (Error) delivery.future.exception;
-				log_event ("try_collect_crash(): FAILED (%s)", e.message);
 				return null;
 			}
 		}
@@ -541,8 +530,6 @@ namespace Frida {
 		}
 
 		private ReportCrashAgent add_crash_reporter_agent (uint pid) {
-			log_event ("add_crash_reporter_agent(pid=%u)", pid);
-
 			var agent = new ReportCrashAgent (host_session, pid, this);
 			crash_agents[pid] = agent;
 
@@ -600,26 +587,20 @@ namespace Frida {
 				pending_spawn[pid] = info;
 				spawn_added (info);
 			} catch (GLib.Error e) {
-				log_event ("Oops: %s", e.message);
 			}
 		}
 
 		private void on_crash_agent_unloaded (InternalAgent agent) {
-			log_event ("ReportCrash finished");
-
 			var crash_agent = agent as ReportCrashAgent;
 			crash_agents.unset (crash_agent.pid);
 		}
 
 		private void on_crash_detected (ReportCrashAgent agent, uint pid) {
-			log_event ("Crash detected (pid=%u) from agent with PID: %u", pid, agent.pid);
 			var delivery = get_crash_delivery_for_pid (pid);
 			delivery.extend_timeout ();
 		}
 
 		private void on_crash_received (ReportCrashAgent agent, CrashInfo crash) {
-			log_event ("Crash received (pid=%u) from agent with PID: %u", crash.pid, agent.pid);
-
 			var delivery = get_crash_delivery_for_pid (crash.pid);
 			delivery.complete (crash);
 
