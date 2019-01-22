@@ -364,6 +364,7 @@ namespace Frida {
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
 		private Gee.HashMap<uint, MappedAgent> mapped_agents = new Gee.HashMap<uint, MappedAgent> ();
+		private Gee.HashMap<MappedAgent, Source> mapped_agents_dying = new Gee.HashMap<MappedAgent, Source> ();
 
 		public FruitController (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -486,16 +487,35 @@ namespace Frida {
 		public void on_agent_injected (uint id, uint pid, DarwinModuleDetails? mapped_module) {
 			if (mapped_module == null)
 				return;
-			mapped_agents[id] = new MappedAgent (pid, mapped_module);
+
+			var dead_agents = new Gee.ArrayList<MappedAgent> ();
+			foreach (var agent in mapped_agents_dying.keys) {
+				if (agent.pid == pid)
+					dead_agents.add (agent);
+			}
+			foreach (var agent in dead_agents) {
+				Source source;
+				mapped_agents_dying.unset (agent, out source);
+				source.destroy ();
+
+				mapped_agents.unset (agent.id);
+			}
+
+			mapped_agents[id] = new MappedAgent (id, pid, mapped_module);
 		}
 
 		public void on_agent_uninjected (uint id) {
+			var agent = mapped_agents[id];
+			if (agent == null)
+				return;
+
 			var timeout = new TimeoutSource.seconds (20);
 			timeout.set_callback (() => {
 				mapped_agents.unset (id);
 				return false;
 			});
 			timeout.attach (MainContext.get_thread_default ());
+			mapped_agents_dying[agent] = timeout;
 		}
 
 		public void enumerate_mapped_agents (FoundMappedAgentFunc func) {
@@ -683,6 +703,11 @@ namespace Frida {
 	private delegate void FoundMappedAgentFunc (MappedAgent agent);
 
 	private class MappedAgent {
+		public uint id {
+			get;
+			private set;
+		}
+
 		public uint pid {
 			get;
 			private set;
@@ -693,7 +718,8 @@ namespace Frida {
 			private set;
 		}
 
-		public MappedAgent (uint pid, DarwinModuleDetails module) {
+		public MappedAgent (uint id, uint pid, DarwinModuleDetails module) {
+			this.id = id;
 			this.pid = pid;
 			this.module = module;
 		}
