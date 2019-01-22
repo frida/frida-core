@@ -484,6 +484,27 @@ namespace Frida {
 			return true;
 		}
 
+		public void activate_crash_reporter_integration () {
+			launchd_agent.activate_crash_reporter_integration ();
+		}
+
+		public async CrashInfo? try_collect_crash (uint pid) {
+			if (crash_agents.has_key (pid))
+				return null;
+
+			var delivery = get_crash_delivery_for_pid (pid);
+			try {
+				return yield delivery.future.wait_async ();
+			} catch (Gee.FutureError future_error) {
+				return null;
+			}
+		}
+
+		public void enumerate_mapped_agents (FoundMappedAgentFunc func) {
+			foreach (var mapped_agent in mapped_agents.values)
+				func (mapped_agent);
+		}
+
 		public void on_agent_injected (uint id, uint pid, DarwinModuleDetails? mapped_module) {
 			if (mapped_module == null)
 				return;
@@ -516,38 +537,6 @@ namespace Frida {
 			});
 			timeout.attach (MainContext.get_thread_default ());
 			mapped_agents_dying[agent] = timeout;
-		}
-
-		public void enumerate_mapped_agents (FoundMappedAgentFunc func) {
-			foreach (var mapped_agent in mapped_agents.values)
-				func (mapped_agent);
-		}
-
-		public void activate_crash_reporter_integration () {
-			launchd_agent.activate_crash_reporter_integration ();
-		}
-
-		public async CrashInfo? try_collect_crash (uint pid) {
-			if (crash_agents.has_key (pid))
-				return null;
-
-			var delivery = get_crash_delivery_for_pid (pid);
-			try {
-				return yield delivery.future.wait_async ();
-			} catch (Gee.FutureError future_error) {
-				return null;
-			}
-		}
-
-		private ReportCrashAgent add_crash_reporter_agent (uint pid) {
-			var agent = new ReportCrashAgent (host_session, pid, this);
-			crash_agents[pid] = agent;
-
-			agent.unloaded.connect (on_crash_agent_unloaded);
-			agent.crash_detected.connect (on_crash_detected);
-			agent.crash_received.connect (on_crash_received);
-
-			return agent;
 		}
 
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
@@ -598,6 +587,17 @@ namespace Frida {
 				spawn_added (info);
 			} catch (GLib.Error e) {
 			}
+		}
+
+		private ReportCrashAgent add_crash_reporter_agent (uint pid) {
+			var agent = new ReportCrashAgent (host_session, pid, this);
+			crash_agents[pid] = agent;
+
+			agent.unloaded.connect (on_crash_agent_unloaded);
+			agent.crash_detected.connect (on_crash_detected);
+			agent.crash_received.connect (on_crash_received);
+
+			return agent;
 		}
 
 		private void on_crash_agent_unloaded (InternalAgent agent) {
