@@ -4,16 +4,50 @@ var LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
 var CORESYMBOLICATION_PATH = '/System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication';
 var CRASH_REPORTER_SUPPORT_PATH = '/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport';
 var TASK_DYLD_INFO = 17;
+var YES = ptr(1);
 
+var CSTypeRef = ['pointer', 'pointer'];
+var kCSNow = uint64('0x8000000000000000');
+
+var nativeOptions = {
+  scheduling: 'exclusive',
+  exceptions: 'propagate'
+};
 var _pidForTask = new NativeFunction(
     Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
     'int',
-    ['uint', 'pointer']
+    ['uint', 'pointer'],
+    nativeOptions
 );
 var unlink = new NativeFunction(
     Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'unlink'),
     'int',
-    ['pointer']
+    ['pointer'],
+    nativeOptions
+);
+var CSSymbolicatorGetSymbolWithAddressAtTime = new NativeFunction(
+    Module.findExportByName(CORESYMBOLICATION_PATH, 'CSSymbolicatorGetSymbolWithAddressAtTime'),
+    CSTypeRef,
+    [CSTypeRef, 'uint64', 'uint64'],
+    nativeOptions
+);
+var CSIsNull = new NativeFunction(
+    Module.findExportByName(CORESYMBOLICATION_PATH, 'CSIsNull'),
+    'int',
+    [CSTypeRef],
+    nativeOptions
+);
+var mappedMemoryRead = new NativeFunction(
+    Module.findExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read'),
+    'uint',
+    ['pointer', 'uint64', 'uint64', 'pointer'],
+    nativeOptions
+);
+var mappedMemoryReadPointer = new NativeFunction(
+    Module.findExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read_pointer'),
+    'uint',
+    ['pointer', 'uint64', 'pointer'],
+    nativeOptions
 );
 
 var AppleErrorReport = ObjC.classes.AppleErrorReport;
@@ -300,4 +334,83 @@ function readRemotePointer(address) {
 
 function readSizeFromU32(address) {
   return uint64(Memory.readU32(address));
+}
+
+if (Process.arch === 'arm64') {
+  Interceptor.attach(ObjC.classes.VMUSampler['- sampleAllThreadsOnceWithFramePointers:'].implementation, {
+    onEnter: function (args) {
+      args[2] = YES;
+    }
+  });
+
+  Interceptor.attach(ObjC.classes.VMUBacktrace['- fixupStackWithSamplingContext:symbolicator:'].implementation, {
+    onEnter: function (args) {
+      this.self = new ObjC.Object(args[0]);
+      this.samplingContext = args[2];
+      this.symbolicator = [args[3], args[4]];
+    },
+    onLeave: function () {
+      if (!is64Bit)
+        return;
+
+      var callstack = this.self.$ivars._callstack;
+      var samplingContext = this.samplingContext;
+      var mappedMemory = new MappedMemory(Memory.readPointer(samplingContext.add(8)));
+      var symbolicator = this.symbolicator;
+
+      var frames = callstack[1];
+      var framePtrs = callstack[2];
+      var length = callstack[3];
+
+      for (var i = 0; i !== length; i++) {
+        var frame = Memory.readU64(frames.add(i * 8));
+        // var framePtr = Memory.readU64(framePtrs.add(i * 8));
+
+        var symbol = CSSymbolicatorGetSymbolWithAddressAtTime(symbolicator, frame, kCSNow);
+        if (CSIsNull(symbol)) {
+          var instructions = parseInstructions(mappedMemory.read(frame, 12), 3);
+          if (/^ldr x17, #/.test(instructions[0].toString()) &&
+              /^ldr x16, #/.test(instructions[1].toString()) &&
+              instructions[2].toString() === 'br x16') {
+            var functionContext = mappedMemory.readPointer(uint64(instructions[0].operands[1].value.toString()));
+            var functionAddress = mappedMemory.readPointer(functionContext);
+          }
+        }
+      }
+    },
+  });
+}
+
+function MappedMemory(handle) {
+  this.handle = handle;
+}
+
+var pointerBuf = Memory.alloc(8);
+
+MappedMemory.prototype.read = function (address, size) {
+  var kr = mappedMemoryRead(this.handle, address, size, pointerBuf);
+  if (kr !== 0)
+    throw new Error('Invalid address: 0x' + address.toString(16));
+  return Memory.readPointer(pointerBuf);
+};
+
+MappedMemory.prototype.readPointer = function (address) {
+  var kr = mappedMemoryReadPointer(this.handle, address, pointerBuf);
+  if (kr !== 0)
+    throw new Error('Invalid address: 0x' + address.toString(16));
+  return Memory.readU64(pointerBuf);
+};
+
+function parseInstructions(address, count) {
+  var result = [];
+
+  var cur = address;
+  for (var i = 0; i !== count; i++) {
+    var insn = Instruction.parse(cur);
+    result.push(insn);
+
+    cur = insn.next;
+  }
+
+  return result;
 }
