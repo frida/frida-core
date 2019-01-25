@@ -359,23 +359,21 @@ if (Process.arch === 'arm64') {
       var symbolicator = this.symbolicator;
 
       var frames = callstack[1];
-      var framePtrs = callstack[2];
+      // var framePtrs = callstack[2];
       var length = callstack[3];
 
       for (var i = 0; i !== length; i++) {
-        var frame = Memory.readU64(frames.add(i * 8));
+        var frameSlot = frames.add(i * 8);
+        var frame = Memory.readU64(frameSlot);
         // var framePtr = Memory.readU64(framePtrs.add(i * 8));
 
         var symbol = CSSymbolicatorGetSymbolWithAddressAtTime(symbolicator, frame, kCSNow);
-        if (CSIsNull(symbol)) {
-          var instructions = parseInstructions(mappedMemory.read(frame, 12), 3);
-          if (/^ldr x17, #/.test(instructions[0].toString()) &&
-              /^ldr x16, #/.test(instructions[1].toString()) &&
-              instructions[2].toString() === 'br x16') {
-            var functionContext = mappedMemory.readPointer(uint64(instructions[0].operands[1].value.toString()));
-            var functionAddress = mappedMemory.readPointer(functionContext);
-          }
-        }
+        if (!CSIsNull(symbol))
+          continue;
+
+        var functionAddress = tryParseInterceptorOnLeaveTrampoline(frame, mappedMemory);
+        if (functionAddress !== null)
+          Memory.writeU64(frameSlot, functionAddress);
       }
     },
   });
@@ -391,7 +389,7 @@ MappedMemory.prototype.read = function (address, size) {
   var kr = mappedMemoryRead(this.handle, address, size, pointerBuf);
   if (kr !== 0)
     throw new Error('Invalid address: 0x' + address.toString(16));
-  return Memory.readPointer(pointerBuf);
+  return Memory.readByteArray(Memory.readPointer(pointerBuf), size);
 };
 
 MappedMemory.prototype.readPointer = function (address) {
@@ -401,16 +399,41 @@ MappedMemory.prototype.readPointer = function (address) {
   return Memory.readU64(pointerBuf);
 };
 
-function parseInstructions(address, count) {
-  var result = [];
+function tryParseInterceptorOnLeaveTrampoline(location, mappedMemory) {
+  var instructions = new Uint32Array(mappedMemory.read(location, 12));
 
-  var cur = address;
-  for (var i = 0; i !== count; i++) {
-    var insn = Instruction.parse(cur);
-    result.push(insn);
+  var ldr;
 
-    cur = insn.next;
-  }
+  ldr = tryParseLdrRegAddress(instructions[0], location);
+  if (ldr === null)
+    return null;
+  if (ldr[0] !== 'x17')
+    return null;
+  var functionContextPtr = ldr[1];
 
-  return result;
+  ldr = tryParseLdrRegAddress(instructions[1], location.add(4));
+  if (ldr === null)
+    return null;
+  if (ldr[0] !== 'x16')
+    return null;
+
+  var isBrX16 = instructions[2] === 0xd61f0200;
+  if (!isBrX16)
+    return null;
+
+  var functionContext = mappedMemory.readPointer(functionContextPtr);
+  var functionAddress = mappedMemory.readPointer(functionContext);
+  return functionAddress;
+}
+
+function tryParseLdrRegAddress(instruction, pc) {
+  if ((instruction & 0xff000000) !== 0x58000000)
+    return null;
+
+  var reg = instruction & 0x1f;
+
+  var distance = (instruction >>> 5) & 0x7ffff;
+  var imm = pc.add(distance * 4);
+
+  return ['x' + reg, imm];
 }
