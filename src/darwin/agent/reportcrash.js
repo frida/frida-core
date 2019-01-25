@@ -359,19 +359,20 @@ if (Process.arch === 'arm64') {
       var symbolicator = this.symbolicator;
 
       var frames = callstack[1];
-      // var framePtrs = callstack[2];
+      var framePtrs = callstack[2];
       var length = callstack[3];
 
       for (var i = 0; i !== length; i++) {
         var frameSlot = frames.add(i * 8);
         var frame = Memory.readU64(frameSlot);
-        // var framePtr = Memory.readU64(framePtrs.add(i * 8));
 
         var symbol = CSSymbolicatorGetSymbolWithAddressAtTime(symbolicator, frame, kCSNow);
         if (!CSIsNull(symbol))
           continue;
 
-        var functionAddress = tryParseInterceptorOnLeaveTrampoline(frame, mappedMemory);
+        var framePtrAbove = (i > 0) ? Memory.readU64(framePtrs.add((i - 1) * 8)) : null;
+
+        var functionAddress = tryParseInterceptorTrampoline(frame, framePtrAbove, mappedMemory);
         if (functionAddress !== null)
           Memory.writeU64(frameSlot, functionAddress);
       }
@@ -399,19 +400,27 @@ MappedMemory.prototype.readPointer = function (address) {
   return Memory.readU64(pointerBuf);
 };
 
-function tryParseInterceptorOnLeaveTrampoline(location, mappedMemory) {
-  var instructions = new Uint32Array(mappedMemory.read(location, 12));
+function tryParseInterceptorTrampoline(code, stackFrameAbove, mappedMemory) {
+  var instructions = new Uint32Array(mappedMemory.read(code, 16));
 
+  var result = tryParseInterceptorOnLeaveTrampoline(instructions, code, mappedMemory);
+  if (result !== null)
+    return result;
+
+  return tryParseInterceptorCallbackTrampoline(instructions, code, stackFrameAbove, mappedMemory);
+}
+
+function tryParseInterceptorOnLeaveTrampoline(instructions, code, mappedMemory) {
   var ldr;
 
-  ldr = tryParseLdrRegAddress(instructions[0], location);
+  ldr = tryParseLdrRegAddress(instructions[0], code);
   if (ldr === null)
     return null;
   if (ldr[0] !== 'x17')
     return null;
-  var functionContextPtr = ldr[1];
+  var functionContextDPtr = ldr[1];
 
-  ldr = tryParseLdrRegAddress(instructions[1], location.add(4));
+  ldr = tryParseLdrRegAddress(instructions[1], code.add(4));
   if (ldr === null)
     return null;
   if (ldr[0] !== 'x16')
@@ -421,9 +430,39 @@ function tryParseInterceptorOnLeaveTrampoline(location, mappedMemory) {
   if (!isBrX16)
     return null;
 
-  var functionContext = mappedMemory.readPointer(functionContextPtr);
-  var functionAddress = mappedMemory.readPointer(functionContext);
-  return functionAddress;
+  return tryReadInterceptorFunctionContextDoublePointer(functionContextDPtr, mappedMemory);
+}
+
+var interceptorCallbackTrampolineSignature = [
+  0x910043ff, // add sp, sp, 0x10
+  0xa8c103e1, // ldp x1, x0, [sp], 0x10
+  0xa8c10be1, // ldp x1, x2, [sp], 0x10
+  0xa8c113e3, // ldp x3, x4, [sp], 0x10
+];
+
+function tryParseInterceptorCallbackTrampoline(instructions, code, stackFrameAbove, mappedMemory) {
+  if (stackFrameAbove === null)
+    return null;
+
+  var matches = interceptorCallbackTrampolineSignature.every(function (insn, index) {
+    return instructions[index] === insn;
+  });
+  if (!matches)
+    return null;
+
+  var cpuContextStart = stackFrameAbove.add(16 + 8);
+  var x17Start = cpuContextStart.add(19 * 8);
+  return tryReadInterceptorFunctionContextDoublePointer(x17Start, mappedMemory);
+}
+
+function tryReadInterceptorFunctionContextDoublePointer(functionContextDPtr, mappedMemory) {
+  try {
+    var functionContext = mappedMemory.readPointer(functionContextDPtr);
+    var functionAddress = mappedMemory.readPointer(functionContext);
+    return functionAddress;
+  } catch (e) {
+    return null;
+  }
 }
 
 function tryParseLdrRegAddress(instruction, pc) {
