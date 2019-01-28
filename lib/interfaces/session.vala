@@ -453,10 +453,6 @@ namespace Frida {
 			else
 				this.parameters = {};
 		}
-
-		public VariantDict load_parameters () {
-			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (parameters), false));
-		}
 	}
 
 	public struct AgentSessionId {

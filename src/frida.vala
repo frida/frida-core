@@ -1534,18 +1534,19 @@ namespace Frida {
 			construct;
 		}
 
-		public VariantDict parameters {
-			get;
-			construct;
-		}
+		private Bytes raw_parameters;
 
-		public Crash (uint pid, string process_name, string report, VariantDict parameters) {
+		public Crash (uint pid, string process_name, string report, Bytes raw_parameters) {
 			Object (
 				pid: pid,
 				process_name: process_name,
-				report: report,
-				parameters: parameters
+				report: report
 			);
+			this.raw_parameters = raw_parameters;
+		}
+
+		public VariantDict load_parameters () {
+			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, raw_parameters, false));
 		}
 
 		internal static Crash from_info (CrashInfo info) {
@@ -1553,7 +1554,7 @@ namespace Frida {
 				info.pid,
 				info.process_name,
 				info.report,
-				info.load_parameters ()
+				new Bytes (info.parameters)
 			);
 		}
 	}
