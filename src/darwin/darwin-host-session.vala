@@ -847,8 +847,6 @@ namespace Frida {
 			construct;
 		}
 
-		private Regex process_name_pattern;
-
 		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container) {
 			string * source = Frida.Data.Darwin.get_reportcrash_js_blob ().data;
 			Object (
@@ -857,14 +855,6 @@ namespace Frida {
 				pid: pid,
 				mapped_agent_container: mapped_agent_container
 			);
-		}
-
-		construct {
-			try {
-				process_name_pattern = new Regex ("^Process: +(.+) \\[\\d+\\]$", MULTILINE);
-			} catch (RegexError e) {
-				assert_not_reached ();
-			}
 		}
 
 		public async void start () throws Error {
@@ -911,15 +901,40 @@ namespace Frida {
 					var raw_report = event.get_string_element (2);
 
 					var tokens = raw_report.split ("\n", 2);
-					var header_json = tokens[0];
+					var raw_header = tokens[0];
 					var report = tokens[1];
 
-					string process_name = "";
-					MatchInfo mi;
-					if (process_name_pattern.match (report, 0, out mi))
-						process_name = mi.fetch (1);
+					var parameters = new VariantDict ();
+					try {
+						var header = new Json.Reader (Json.from_string (raw_header));
+						foreach (string member in header.list_members ()) {
+							header.read_member (member);
 
-					crash_received (CrashInfo (pid, process_name, report));
+							Variant? val = null;
+							if (header.is_value ()) {
+								Json.Node node = header.get_value ();
+								Type t = node.get_value_type ();
+								if (t == typeof (string))
+									val = new Variant.string (node.get_string ());
+								else if (t == typeof (int64))
+									val = new Variant.int64 (node.get_int ());
+								else if (t == typeof (bool))
+									val = new Variant.boolean (node.get_boolean ());
+							}
+
+							if (val != null)
+								parameters.insert_value (member, val);
+
+							header.end_member ();
+						}
+					} catch (GLib.Error e) {
+						assert_not_reached ();
+					}
+
+					string? process_name = null;
+					parameters.lookup ("name", "s", out process_name);
+
+					crash_received (CrashInfo (pid, process_name, report, parameters.end ()));
 
 					break;
 				default:

@@ -442,11 +442,16 @@ namespace Frida {
 			set;
 		}
 
-		public CrashInfo (uint pid, string process_name, string report) {
+		public CrashInfo (uint pid, string process_name, string report, Variant? parameters = null) {
 			this.pid = pid;
 			this.process_name = process_name;
+
 			this.report = report;
-			this.parameters = {};
+
+			if (parameters != null)
+				this.parameters = parameters.get_data_as_bytes ().get_data ();
+			else
+				this.parameters = {};
 		}
 
 		public VariantDict load_parameters () {
