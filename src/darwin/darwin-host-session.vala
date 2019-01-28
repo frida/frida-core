@@ -847,6 +847,8 @@ namespace Frida {
 			construct;
 		}
 
+		private Regex process_name_pattern;
+
 		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container) {
 			string * source = Frida.Data.Darwin.get_reportcrash_js_blob ().data;
 			Object (
@@ -855,6 +857,14 @@ namespace Frida {
 				pid: pid,
 				mapped_agent_container: mapped_agent_container
 			);
+		}
+
+		construct {
+			try {
+				process_name_pattern = new Regex ("^Process: +(.+) \\[\\d+\\]$", MULTILINE);
+			} catch (RegexError e) {
+				assert_not_reached ();
+			}
 		}
 
 		public async void start () throws Error {
@@ -898,8 +908,19 @@ namespace Frida {
 					break;
 				case "crash-received":
 					var pid = (uint) event.get_int_element (1);
-					var report = event.get_string_element (2);
-					crash_received (CrashInfo (pid, report));
+					var raw_report = event.get_string_element (2);
+
+					var tokens = raw_report.split ("\n", 2);
+					var header_json = tokens[0];
+					var report = tokens[1];
+
+					string process_name = "";
+					MatchInfo mi;
+					if (process_name_pattern.match (report, 0, out mi))
+						process_name = mi.fetch (1);
+
+					crash_received (CrashInfo (pid, process_name, report));
+
 					break;
 				default:
 					assert_not_reached ();

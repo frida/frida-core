@@ -1524,6 +1524,11 @@ namespace Frida {
 			construct;
 		}
 
+		public string process_name {
+			get;
+			construct;
+		}
+
 		public string report {
 			get;
 			construct;
@@ -1534,9 +1539,10 @@ namespace Frida {
 			construct;
 		}
 
-		public Crash (uint pid, string report, VariantDict parameters) {
+		public Crash (uint pid, string process_name, string report, VariantDict parameters) {
 			Object (
 				pid: pid,
+				process_name: process_name,
 				report: report,
 				parameters: parameters
 			);
@@ -1545,6 +1551,7 @@ namespace Frida {
 		internal static Crash from_info (CrashInfo info) {
 			return new Crash (
 				info.pid,
+				info.process_name,
 				info.report,
 				info.load_parameters ()
 			);

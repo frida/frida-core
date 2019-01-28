@@ -730,12 +730,14 @@ namespace Frida {
 		private Cancellable cancellable = new Cancellable ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
 		private Gee.HashMap<uint, CrashBuilder> crash_builders = new Gee.HashMap<uint, CrashBuilder> ();
+		private Regex java_crash_pattern;
 		private Regex native_crash_pattern;
 		private Timer since_start;
 
 		construct {
 			try {
-				native_crash_pattern = new Regex ("pid: (\\d+), tid: \\d+, name: ");
+				java_crash_pattern = new Regex ("^Process: (.+), PID: (\\d+)$", MULTILINE);
+				native_crash_pattern = new Regex ("^pid: (\\d+), tid: \\d+, name: (.+) +>>>", MULTILINE);
 			} catch (RegexError e) {
 				assert_not_reached ();
 			}
@@ -785,7 +787,18 @@ namespace Frida {
 
 			bool is_java_crash = entry.message.has_prefix ("FATAL EXCEPTION: ");
 			if (is_java_crash) {
-				on_crash_received (CrashInfo (entry.pid, entry.message));
+				string report = entry.message;
+
+				MatchInfo mi;
+				if (java_crash_pattern.match (report, 0, out mi)) {
+					string process_name = mi.fetch (1);
+
+					string raw_pid = mi.fetch (2);
+					uint pid = (uint) uint64.parse (raw_pid);
+
+					on_crash_received (CrashInfo (pid, process_name, report));
+				}
+
 				return;
 			}
 
@@ -824,7 +837,10 @@ namespace Frida {
 			if (native_crash_pattern.match (report, 0, out mi)) {
 				string raw_pid = mi.fetch (1);
 				uint pid = (uint) uint64.parse (raw_pid);
-				on_crash_received (CrashInfo (pid, report));
+
+				string process_name = mi.fetch (2);
+
+				on_crash_received (CrashInfo (pid, process_name, report));
 			}
 		}
 
