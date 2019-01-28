@@ -289,6 +289,10 @@ namespace Frida {
 
 		protected abstract async void perform_resume (uint pid) throws Error;
 
+		protected bool still_attached_to (uint pid) {
+			return agent_entries.has_key (pid);
+		}
+
 		public abstract async void kill (uint pid) throws Error;
 
 		public async Frida.AgentSessionId attach_to (uint pid) throws Error {

@@ -80,6 +80,7 @@ namespace Frida {
 #if ANDROID
 		private RoboLauncher robo_launcher;
 		private SystemServerAgent system_server_agent;
+		private CrashMonitor crash_monitor;
 #endif
 
 		construct {
@@ -99,6 +100,13 @@ namespace Frida {
 
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
+
+			robo_launcher = new RoboLauncher (this, helper, system_server_agent);
+			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
+			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
+
+			crash_monitor = new CrashMonitor ();
+			crash_monitor.process_crashed.connect (on_process_crashed);
 #endif
 		}
 
@@ -106,15 +114,17 @@ namespace Frida {
 			yield base.close ();
 
 #if ANDROID
-			if (robo_launcher != null) {
-				yield robo_launcher.close ();
-				robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
-				robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
-				robo_launcher = null;
-			}
+			yield robo_launcher.close ();
+			robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
+			robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
+			robo_launcher = null;
 
 			yield system_server_agent.close ();
 			system_server_agent = null;
+
+			crash_monitor.process_crashed.disconnect (on_process_crashed);
+			crash_monitor.close ();
+			crash_monitor = null;
 #endif
 
 			var linjector = injector as Linjector;
@@ -171,7 +181,7 @@ namespace Frida {
 
 		public override async void enable_spawn_gating () throws Error {
 #if ANDROID
-			yield get_robo_launcher ().enable_spawn_gating ();
+			yield robo_launcher.enable_spawn_gating ();
 #else
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
@@ -179,7 +189,7 @@ namespace Frida {
 
 		public override async void disable_spawn_gating () throws Error {
 #if ANDROID
-			yield get_robo_launcher ().disable_spawn_gating ();
+			yield robo_launcher.disable_spawn_gating ();
 #else
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
@@ -187,7 +197,7 @@ namespace Frida {
 
 		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
 #if ANDROID
-			return get_robo_launcher ().enumerate_pending_spawn ();
+			return robo_launcher.enumerate_pending_spawn ();
 #else
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
@@ -196,7 +206,7 @@ namespace Frida {
 		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
 #if ANDROID
 			if (!program.has_prefix ("/")) {
-				return yield get_robo_launcher ().spawn (program, options);
+				return yield robo_launcher.spawn (program, options);
 			} else {
 				return yield helper.spawn (program, options);
 			}
@@ -207,24 +217,21 @@ namespace Frida {
 
 		protected override bool try_handle_child (HostChildInfo info) {
 #if ANDROID
-			if (robo_launcher != null)
-				return robo_launcher.try_handle_child (info);
-#endif
-
+			return robo_launcher.try_handle_child (info);
+#else
 			return false;
+#endif
 		}
 
 		protected override void notify_child_resumed (uint pid) {
 #if ANDROID
-			if (robo_launcher != null)
-				robo_launcher.notify_child_resumed (pid);
+			robo_launcher.notify_child_resumed (pid);
 #endif
 		}
 
 		protected override void notify_child_gating_changed (uint pid, uint subscriber_count) {
 #if ANDROID
-			if (robo_launcher != null)
-				robo_launcher.notify_child_gating_changed (pid, subscriber_count);
+			robo_launcher.notify_child_gating_changed (pid, subscriber_count);
 #endif
 		}
 
@@ -288,21 +295,28 @@ namespace Frida {
 		}
 
 #if ANDROID
-		private RoboLauncher get_robo_launcher () {
-			if (robo_launcher == null) {
-				robo_launcher = new RoboLauncher (this, helper, system_server_agent);
-				robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
-				robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
-			}
-			return robo_launcher;
-		}
-
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
 		}
 
 		private void on_robo_launcher_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
+		}
+
+		protected override async CrashInfo? try_collect_crash (uint pid) {
+			return yield crash_monitor.try_collect_crash (pid);
+		}
+
+		private void on_process_crashed (CrashInfo info) {
+			process_crashed (info);
+
+			if (still_attached_to (info.pid)) {
+				/*
+				 * May take a while as a Java fatal exception typically won't terminate the process until
+				 * the user dismisses the dialog.
+				 */
+				crash_monitor.disable_crash_delivery_timeout (info.pid);
+			}
 		}
 #endif
 
@@ -706,6 +720,286 @@ namespace Frida {
 
 		protected override async uint get_target_pid () throws Error {
 			return LocalProcesses.get_pid ("system_server");
+		}
+	}
+
+	private class CrashMonitor : Object {
+		public signal void process_crashed (CrashInfo crash);
+
+		private Subprocess logcat;
+		private Cancellable cancellable = new Cancellable ();
+		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
+		private Gee.HashMap<uint, CrashBuilder> crash_builders = new Gee.HashMap<uint, CrashBuilder> ();
+		private Regex native_crash_pattern;
+		private Timer since_start;
+
+		construct {
+			try {
+				native_crash_pattern = new Regex ("pid: (\\d+), tid: \\d+, name: ");
+			} catch (RegexError e) {
+				assert_not_reached ();
+			}
+
+			start_monitoring ();
+
+			since_start = new Timer ();
+		}
+
+		public void close () {
+			cancellable.cancel ();
+
+			logcat.force_exit ();
+		}
+
+		public async CrashInfo? try_collect_crash (uint pid) {
+			var delivery = get_crash_delivery_for_pid (pid);
+			try {
+				return yield delivery.future.wait_async ();
+			} catch (Gee.FutureError future_error) {
+				return null;
+			}
+		}
+
+		public void disable_crash_delivery_timeout (uint pid) {
+			var delivery = crash_deliveries[pid];
+			if (delivery != null)
+				delivery.disable_timeout ();
+		}
+
+		private void on_crash_received (CrashInfo crash) {
+			var delivery = get_crash_delivery_for_pid (crash.pid);
+			delivery.complete (crash);
+
+			process_crashed (crash);
+		}
+
+		private void on_log_entry (LogEntry entry) {
+			if (since_start.elapsed () < 2.0)
+				return;
+
+			if (entry.tag == "libc") {
+				var delivery = get_crash_delivery_for_pid (entry.pid);
+				delivery.extend_timeout ();
+				return;
+			}
+
+			bool is_java_crash = entry.message.has_prefix ("FATAL EXCEPTION: ");
+			if (is_java_crash) {
+				on_crash_received (CrashInfo (entry.pid, entry.message));
+				return;
+			}
+
+			var builder = get_crash_builder_for_pid (entry.pid);
+			builder.append (entry.message);
+		}
+
+		private CrashDelivery get_crash_delivery_for_pid (uint pid) {
+			var delivery = crash_deliveries[pid];
+			if (delivery == null) {
+				delivery = new CrashDelivery (pid);
+				delivery.expired.connect (on_crash_delivery_expired);
+				crash_deliveries[pid] = delivery;
+			}
+			return delivery;
+		}
+
+		private void on_crash_delivery_expired (CrashDelivery delivery) {
+			crash_deliveries.unset (delivery.pid);
+		}
+
+		private CrashBuilder get_crash_builder_for_pid (uint pid) {
+			var builder = crash_builders[pid];
+			if (builder == null) {
+				builder = new CrashBuilder (pid);
+				builder.completed.connect (on_crash_builder_completed);
+				crash_builders[pid] = builder;
+			}
+			return builder;
+		}
+
+		private void on_crash_builder_completed (CrashBuilder builder, string report) {
+			crash_builders.unset (builder.pid);
+
+			MatchInfo mi;
+			if (native_crash_pattern.match (report, 0, out mi)) {
+				string raw_pid = mi.fetch (1);
+				uint pid = (uint) uint64.parse (raw_pid);
+				on_crash_received (CrashInfo (pid, report));
+			}
+		}
+
+		private void start_monitoring () {
+			try {
+				logcat = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" }, STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+				process_messages.begin ();
+			} catch (GLib.Error e) {
+				printerr ("Crash monitor not available: %s\n", e.message);
+			}
+		}
+
+		private async void process_messages () {
+			var stream = new DataInputStream (logcat.get_stdout_pipe ());
+			stream.byte_order = HOST_ENDIAN;
+
+			try {
+				while (true) {
+					var n = yield stream.fill_async ((ssize_t) (2 * sizeof (uint16)), Priority.DEFAULT, cancellable);
+					if (n == 0)
+						break;
+					size_t payload_size = stream.read_uint16 (cancellable);
+					size_t header_size = stream.read_uint16 (cancellable);
+					if (header_size < 24)
+						throw new Error.PROTOCOL ("Header too short");
+					n = yield stream.fill_async ((ssize_t) (header_size + payload_size), Priority.DEFAULT, cancellable);
+					if (n == 0)
+						break;
+
+					var entry = new LogEntry ();
+
+					entry.pid = stream.read_int32 (cancellable);
+					entry.tid = stream.read_uint32 (cancellable);
+					entry.sec = stream.read_uint32 (cancellable);
+					entry.nsec = stream.read_uint32 (cancellable);
+					entry.lid = stream.read_uint32 (cancellable);
+					size_t ignored_size = header_size - 24;
+					if (ignored_size > 0)
+						stream.skip (ignored_size, cancellable);
+
+					var payload_buf = new uint8[payload_size + 1];
+					stream.read (payload_buf[0:payload_size], cancellable);
+					payload_buf[payload_size] = 0;
+
+					uint8 * payload_start = payload_buf;
+
+					entry.priority = payload_start[0];
+					unowned string tag = (string) (payload_start + 1);
+					unowned string message = (string) (payload_start + 1 + tag.length + 1);
+					entry.tag = tag;
+					entry.message = message;
+
+					on_log_entry (entry);
+				}
+			} catch (GLib.Error e) {
+			}
+		}
+
+		private class LogEntry {
+			public int32 pid;
+			public uint32 tid;
+			public uint32 sec;
+			public uint32 nsec;
+			public uint32 lid;
+			public uint priority;
+			public string tag;
+			public string message;
+		}
+
+		private class CrashDelivery : Object {
+			public signal void expired ();
+
+			public uint pid {
+				get;
+				construct;
+			}
+
+			public Gee.Future<CrashInfo?> future {
+				get {
+					return promise.future;
+				}
+			}
+
+			private Gee.Promise<CrashInfo?> promise = new Gee.Promise <CrashInfo?> ();
+			private TimeoutSource expiry_source;
+
+			public CrashDelivery (uint pid) {
+				Object (pid: pid);
+			}
+
+			construct {
+				expiry_source = make_expiry_source (500);
+			}
+
+			public void disable_timeout () {
+				expiry_source.destroy ();
+				expiry_source = null;
+			}
+
+			private TimeoutSource make_expiry_source (uint timeout) {
+				var source = new TimeoutSource (timeout);
+				source.set_callback (on_timeout);
+				source.attach (MainContext.get_thread_default ());
+				return source;
+			}
+
+			public void extend_timeout () {
+				if (future.ready)
+					return;
+
+				disable_timeout ();
+				expiry_source = make_expiry_source (2000);
+			}
+
+			public void complete (CrashInfo? crash) {
+				if (future.ready)
+					return;
+
+				promise.set_value (crash);
+
+				expiry_source.destroy ();
+				expiry_source = make_expiry_source (1000);
+			}
+
+			private bool on_timeout () {
+				if (!future.ready)
+					promise.set_exception (new Error.TIMED_OUT ("Crash delivery timed out"));
+
+				expired ();
+
+				return false;
+			}
+		}
+
+		private class CrashBuilder : Object {
+			public signal void completed (string report);
+
+			public uint pid {
+				get;
+				construct;
+			}
+
+			private StringBuilder report = new StringBuilder ();
+			private TimeoutSource expiry_source;
+
+			public CrashBuilder (uint pid) {
+				Object (pid: pid);
+			}
+
+			construct {
+				expiry_source = make_expiry_source (250);
+			}
+
+			public void append (string chunk) {
+				report.append (chunk);
+				reset_timeout ();
+			}
+
+			private TimeoutSource make_expiry_source (uint timeout) {
+				var source = new TimeoutSource (timeout);
+				source.set_callback (on_timeout);
+				source.attach (MainContext.get_thread_default ());
+				return source;
+			}
+
+			private void reset_timeout () {
+				expiry_source.destroy ();
+				expiry_source = make_expiry_source (250);
+			}
+
+			private bool on_timeout () {
+				completed (report.str);
+
+				return false;
+			}
 		}
 	}
 
