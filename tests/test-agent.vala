@@ -29,15 +29,15 @@ namespace Frida.AgentTest {
 
 			unowned TargetFunc func = (TargetFunc) target_function;
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script ("load-and-receive-messages",
+				script_id = yield session.create_script ("load-and-receive-messages",
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter: function(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: Memory.readUtf8String(args[1]) });" +
 					 "  }" +
 					 "});").printf ((size_t) func));
-				yield session.load_script (sid);
+				yield session.load_script (script_id);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
@@ -45,7 +45,7 @@ namespace Frida.AgentTest {
 			func (1337, "Frida rocks");
 
 			var message = yield h.wait_for_message ();
-			assert (message.sender_id.handle == sid.handle);
+			assert (message.sender_id.handle == script_id.handle);
 			assert (message.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
 
 			yield h.unload_agent ();
@@ -59,9 +59,9 @@ namespace Frida.AgentTest {
 			var size = 4096;
 			var buf = new uint8[size];
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script ("performance",
+				script_id = yield session.create_script ("performance",
 					("var buf = Memory.readByteArray(ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), %d);" +
 					 "var startTime = new Date();" +
 					 "var iterations = 0;" +
@@ -75,7 +75,7 @@ namespace Frida.AgentTest {
 					 "};" +
 					 "sendNext();"
 					).printf ((size_t) buf, size));
-				yield session.load_script (sid);
+				yield session.load_script (script_id);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
@@ -111,9 +111,9 @@ namespace Frida.AgentTest {
 
 			var session = yield h.load_agent ();
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script ("launch-scenario", """
+				script_id = yield session.create_script ("launch-scenario", """
 'use strict';
 
 var readU16 = Memory.readU16;
@@ -214,7 +214,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
   }
 });
 """);
-				yield session.load_script (sid);
+				yield session.load_script (script_id);
 
 				h.disable_timeout ();
 
@@ -237,7 +237,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 							.end_array ()
 						.end_array ();
 					var raw_request = Json.to_string (request.get_root (), false);
-					yield session.post_to_script (sid, raw_request, false, new uint8[0] {});
+					yield session.post_to_script (script_id, raw_request, false, new uint8[0] {});
 
 					while (true) {
 						var message = yield h.wait_for_message ();
@@ -343,7 +343,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 			try {
 				// yield session.enable_jit ();
 
-				var sid = yield session.create_script ("thread-suspend-scenario", """
+				var script_id = yield session.create_script ("thread-suspend-scenario", """
 'use strict';
 
 console.log('Script runtime is: ' + Script.runtime);
@@ -351,7 +351,7 @@ console.log('Script runtime is: ' + Script.runtime);
 Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), function () {
 });
 """);
-				yield session.load_script (sid);
+				yield session.load_script (script_id);
 
 				var thread_id = get_current_thread_id ();
 
@@ -487,7 +487,7 @@ Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), fu
 				assert_not_reached ();
 			}
 
-			session.message_from_script.connect ((sid, message, has_data, data) => message_queue.add (new ScriptMessage (sid, message)));
+			session.message_from_script.connect ((script_id, message, has_data, data) => message_queue.add (new ScriptMessage (script_id, message)));
 
 			return session;
 		}

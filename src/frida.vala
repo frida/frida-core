@@ -388,6 +388,7 @@ namespace Frida {
 		public signal void spawn_removed (Spawn spawn);
 		public signal void child_added (Child child);
 		public signal void child_removed (Child child);
+		public signal void process_crashed (Crash crash);
 		public signal void output (uint pid, int fd, Bytes data);
 		public signal void uninjected (uint id);
 		public signal void lost ();
@@ -434,9 +435,11 @@ namespace Frida {
 		private Gee.Promise<bool> close_request;
 
 		protected HostSession host_session;
-		private Gee.HashMap<uint, Session> session_by_handle = new Gee.HashMap<uint, Session> ();
+		private Gee.HashMap<AgentSessionId?, Session> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, Session> (AgentSessionId.hash, AgentSessionId.equal);
 		private Gee.HashSet<Gee.Promise<Session>> pending_attach_requests = new Gee.HashSet<Gee.Promise<Session>> ();
-		private Gee.HashMap<uint, Gee.Promise<bool>> pending_detach_requests = new Gee.HashMap<uint, Gee.Promise<bool>> ();
+		private Gee.HashMap<AgentSessionId?, Gee.Promise<bool>> pending_detach_requests =
+			new Gee.HashMap<AgentSessionId?, Gee.Promise<bool>> (AgentSessionId.hash, AgentSessionId.equal);
 
 		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider, string? location = null) {
 			DeviceType dtype;
@@ -762,7 +765,7 @@ namespace Frida {
 
 			var result = new Gee.ArrayList<Spawn> ();
 			foreach (var p in pending_spawn)
-				result.add (spawn_from_info (p));
+				result.add (Spawn.from_info (p));
 			return new SpawnList (result);
 		}
 
@@ -774,11 +777,6 @@ namespace Frida {
 			protected override async SpawnList perform_operation () throws Error {
 				return yield parent.enumerate_pending_spawn ();
 			}
-		}
-
-		private Spawn spawn_from_info (HostSpawnInfo info) {
-			var identifier = info.identifier;
-			return new Spawn (info.pid, (identifier.length > 0) ? identifier : null);
 		}
 
 		public async ChildList enumerate_pending_children () throws Error {
@@ -794,7 +792,7 @@ namespace Frida {
 
 			var result = new Gee.ArrayList<Child> ();
 			foreach (var p in pending_children)
-				result.add (child_from_info (p));
+				result.add (Child.from_info (p));
 			return new ChildList (result);
 		}
 
@@ -806,20 +804,6 @@ namespace Frida {
 			protected override async ChildList perform_operation () throws Error {
 				return yield parent.enumerate_pending_children ();
 			}
-		}
-
-		private Child child_from_info (HostChildInfo info) {
-			var identifier = info.identifier;
-			var path = info.path;
-			return new Child (
-				info.pid,
-				info.parent_pid,
-				info.origin,
-				(identifier.length > 0) ? identifier : null,
-				(path.length > 0) ? path : null,
-				info.has_argv ? info.argv : null,
-				info.has_envp ? info.envp : null
-			);
 		}
 
 		public async uint spawn (string program, SpawnOptions? options = null) throws Error {
@@ -978,7 +962,7 @@ namespace Frida {
 				var agent_session_id = yield host_session.attach_to (pid);
 				var agent_session = yield provider.obtain_agent_session (host_session, agent_session_id);
 				session = new Session (this, pid, agent_session);
-				session_by_handle[agent_session_id.handle] = session;
+				agent_sessions[agent_session_id] = session;
 
 				attach_request.set_value (session);
 				pending_attach_requests.remove (attach_request);
@@ -1096,10 +1080,10 @@ namespace Frida {
 				var iterator = pending_detach_requests.entries.iterator ();
 				iterator.next ();
 				var entry = iterator.get ();
-				var handle = entry.key;
+				var session_id = entry.key;
 				var detach_request = entry.value;
 				detach_request.set_value (true);
-				pending_detach_requests.unset (handle);
+				pending_detach_requests.unset (session_id);
 			}
 
 			while (!pending_attach_requests.is_empty) {
@@ -1119,10 +1103,10 @@ namespace Frida {
 				}
 			}
 
-			foreach (var session in session_by_handle.values.to_array ()) {
-				yield session._do_close (reason, may_block);
+			foreach (var session in agent_sessions.values.to_array ()) {
+				yield session._do_close (reason, null, may_block);
 			}
-			session_by_handle.clear ();
+			agent_sessions.clear ();
 
 			provider.host_session_closed.disconnect (on_host_session_closed);
 			provider.agent_session_closed.disconnect (on_agent_session_closed);
@@ -1132,6 +1116,7 @@ namespace Frida {
 				host_session.spawn_removed.disconnect (on_spawn_removed);
 				host_session.child_added.disconnect (on_child_added);
 				host_session.child_removed.disconnect (on_child_removed);
+				host_session.process_crashed.disconnect (on_process_crashed);
 				host_session.output.disconnect (on_output);
 				host_session.uninjected.disconnect (on_uninjected);
 				if (may_block) {
@@ -1151,22 +1136,20 @@ namespace Frida {
 		}
 
 		public async void _release_session (Session session, bool may_block) {
-			bool session_exists = false;
-			uint handle = 0;
-			foreach (var entry in session_by_handle.entries) {
+			AgentSessionId? session_id = null;
+			foreach (var entry in agent_sessions.entries) {
 				if (entry.value == session) {
-					session_exists = true;
-					handle = entry.key;
+					session_id = entry.key;
 					break;
 				}
 			}
-			assert (session_exists);
-			session_by_handle.unset (handle);
+			assert (session_id != null);
+			agent_sessions.unset (session_id);
 
 			if (may_block) {
 				var detach_request = new Gee.Promise<bool> ();
 
-				pending_detach_requests[handle] = detach_request;
+				pending_detach_requests[session_id] = detach_request;
 
 				try {
 					yield detach_request.future.wait_async ();
@@ -1194,6 +1177,7 @@ namespace Frida {
 				host_session.spawn_removed.connect (on_spawn_removed);
 				host_session.child_added.connect (on_child_added);
 				host_session.child_removed.connect (on_child_removed);
+				host_session.process_crashed.connect (on_process_crashed);
 				host_session.output.connect (on_output);
 				host_session.uninjected.connect (on_uninjected);
 				ensure_request.set_value (true);
@@ -1205,19 +1189,23 @@ namespace Frida {
 		}
 
 		private void on_spawn_added (HostSpawnInfo info) {
-			spawn_added (spawn_from_info (info));
+			spawn_added (Spawn.from_info (info));
 		}
 
 		private void on_spawn_removed (HostSpawnInfo info) {
-			spawn_removed (spawn_from_info (info));
+			spawn_removed (Spawn.from_info (info));
 		}
 
 		private void on_child_added (HostChildInfo info) {
-			child_added (child_from_info (info));
+			child_added (Child.from_info (info));
 		}
 
 		private void on_child_removed (HostChildInfo info) {
-			child_removed (child_from_info (info));
+			child_removed (Child.from_info (info));
+		}
+
+		private void on_process_crashed (CrashInfo info) {
+			process_crashed (Crash.from_info (info));
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {
@@ -1241,15 +1229,13 @@ namespace Frida {
 			ensure_request = null;
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason) {
-			var handle = id.handle;
-
-			var session = session_by_handle[handle];
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
+			var session = agent_sessions[id];
 			if (session != null)
-				session._do_close.begin (reason, false);
+				session._do_close.begin (reason, crash, false);
 
 			Gee.Promise<bool> detach_request;
-			if (pending_detach_requests.unset (handle, out detach_request))
+			if (pending_detach_requests.unset (id, out detach_request))
 				detach_request.set_value (true);
 		}
 
@@ -1446,6 +1432,11 @@ namespace Frida {
 				identifier: identifier
 			);
 		}
+
+		internal static Spawn from_info (HostSpawnInfo info) {
+			var identifier = info.identifier;
+			return new Spawn (info.pid, (identifier.length > 0) ? identifier : null);
+		}
 	}
 
 	public class ChildList : Object {
@@ -1511,6 +1502,61 @@ namespace Frida {
 				envp: envp
 			);
 		}
+
+		internal static Child from_info (HostChildInfo info) {
+			var identifier = info.identifier;
+			var path = info.path;
+			return new Child (
+				info.pid,
+				info.parent_pid,
+				info.origin,
+				(identifier.length > 0) ? identifier : null,
+				(path.length > 0) ? path : null,
+				info.has_argv ? info.argv : null,
+				info.has_envp ? info.envp : null
+			);
+		}
+	}
+
+	public class Crash : Object {
+		public uint pid {
+			get;
+			construct;
+		}
+
+		public string process_name {
+			get;
+			construct;
+		}
+
+		public string report {
+			get;
+			construct;
+		}
+
+		private Bytes raw_parameters;
+
+		public Crash (uint pid, string process_name, string report, Bytes raw_parameters) {
+			Object (
+				pid: pid,
+				process_name: process_name,
+				report: report
+			);
+			this.raw_parameters = raw_parameters;
+		}
+
+		public VariantDict load_parameters () {
+			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, raw_parameters, false));
+		}
+
+		internal static Crash from_info (CrashInfo info) {
+			return new Crash (
+				info.pid,
+				info.process_name,
+				info.report,
+				new Bytes (info.parameters)
+			);
+		}
 	}
 
 	public class Icon : Object {
@@ -1545,7 +1591,7 @@ namespace Frida {
 	}
 
 	public class Session : Object {
-		public signal void detached (SessionDetachReason reason);
+		public signal void detached (SessionDetachReason reason, Crash? crash);
 
 		public uint pid {
 			get;
@@ -1569,7 +1615,8 @@ namespace Frida {
 
 		private Gee.Promise<bool> close_request;
 
-		private Gee.HashMap<uint, Script> script_by_id = new Gee.HashMap<uint, Script> ();
+		private Gee.HashMap<AgentScriptId?, Script> scripts =
+			new Gee.HashMap<AgentScriptId?, Script> (AgentScriptId.hash, AgentScriptId.equal);
 
 		private Debugger debugger;
 
@@ -1591,7 +1638,7 @@ namespace Frida {
 		}
 
 		public async void detach () {
-			yield _do_close (SessionDetachReason.APPLICATION_REQUESTED, true);
+			yield _do_close (SessionDetachReason.APPLICATION_REQUESTED, null, true);
 		}
 
 		public void detach_sync () {
@@ -1651,17 +1698,17 @@ namespace Frida {
 		public async Script create_script (string? name, string source) throws Error {
 			check_open ();
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script ((name == null) ? "" : name, source);
+				script_id = yield session.create_script ((name == null) ? "" : name, source);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 
 			check_open ();
 
-			var script = new Script (this, sid);
-			script_by_id[sid.handle] = script;
+			var script = new Script (this, script_id);
+			scripts[script_id] = script;
 
 			return script;
 		}
@@ -1685,17 +1732,17 @@ namespace Frida {
 		public async Script create_script_from_bytes (Bytes bytes) throws Error {
 			check_open ();
 
-			AgentScriptId sid;
+			AgentScriptId script_id;
 			try {
-				sid = yield session.create_script_from_bytes (bytes.get_data ());
+				script_id = yield session.create_script_from_bytes (bytes.get_data ());
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
 
 			check_open ();
 
-			var script = new Script (this, sid);
-			script_by_id[sid.handle] = script;
+			var script = new Script (this, script_id);
+			scripts[script_id] = script;
 
 			return script;
 		}
@@ -1814,14 +1861,14 @@ namespace Frida {
 			}
 		}
 
-		private void on_message_from_script (AgentScriptId sid, string message, bool has_data, uint8[] data) {
-			var script = script_by_id[sid.handle];
+		private void on_message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) {
+			var script = scripts[script_id];
 			if (script != null)
 				script.message (message, has_data ? new Bytes (data) : null);
 		}
 
-		public void _release_script (AgentScriptId sid) {
-			var script_did_exist = script_by_id.unset (sid.handle);
+		public void _release_script (AgentScriptId script_id) {
+			var script_did_exist = scripts.unset (script_id);
 			assert (script_did_exist);
 		}
 
@@ -1830,7 +1877,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Session is detached");
 		}
 
-		public async void _do_close (SessionDetachReason reason, bool may_block) {
+		public async void _do_close (SessionDetachReason reason, CrashInfo? crash, bool may_block) {
 			if (close_request != null) {
 				try {
 					yield close_request.future.wait_async ();
@@ -1846,7 +1893,7 @@ namespace Frida {
 				debugger = null;
 			}
 
-			foreach (var script in script_by_id.values.to_array ())
+			foreach (var script in scripts.values.to_array ())
 				yield script._do_close (may_block);
 
 			if (may_block)
@@ -1855,7 +1902,7 @@ namespace Frida {
 
 			yield device._release_session (this, may_block);
 
-			detached (reason);
+			detached (reason, (crash != null) ? Crash.from_info (crash) : null);
 			close_request.set_value (true);
 		}
 
@@ -2007,13 +2054,13 @@ namespace Frida {
 			close_request = new Gee.Promise<bool> ();
 
 			var parent = session;
-			var sid = AgentScriptId (id);
+			var script_id = AgentScriptId (id);
 
-			parent._release_script (sid);
+			parent._release_script (script_id);
 
 			if (may_block) {
 				try {
-					yield parent.session.destroy_script (sid);
+					yield parent.session.destroy_script (script_id);
 				} catch (GLib.Error ignored_error) {
 				}
 			}

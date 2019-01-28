@@ -287,6 +287,7 @@ namespace Frida {
 				proxy.output.connect (on_output);
 				proxy.spawn_added.connect (on_spawn_added);
 				proxy.spawn_removed.connect (on_spawn_removed);
+				proxy.injected.connect (on_injected);
 				proxy.uninjected.connect (on_uninjected);
 
 				obtain_request.set_value (proxy);
@@ -317,6 +318,7 @@ namespace Frida {
 			proxy.output.disconnect (on_output);
 			proxy.spawn_added.disconnect (on_spawn_added);
 			proxy.spawn_removed.disconnect (on_spawn_removed);
+			proxy.injected.disconnect (on_injected);
 			proxy.uninjected.disconnect (on_uninjected);
 			proxy = null;
 
@@ -337,6 +339,10 @@ namespace Frida {
 
 		private void on_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
+		}
+
+		private void on_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
+			injected (id, pid, has_mapped_module, mapped_module);
 		}
 
 		private void on_uninjected (uint id) {

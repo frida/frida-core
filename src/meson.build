@@ -37,6 +37,7 @@ if host_os_family == 'darwin'
       'darwin/frida-darwin.resources',
       'darwin/agent/launchd.js',
       'darwin/agent/xpcproxy.js',
+      'darwin/agent/reportcrash.js',
     ],
     output: [
       'frida-data-darwin.vapi',
@@ -51,6 +52,7 @@ if host_os_family == 'darwin'
       '-o', join_paths(meson.current_build_dir(), 'frida-data-darwin'),
       '@INPUT1@',
       '@INPUT2@',
+      '@INPUT3@',
     ],
   )
   darwin_sources += [darwin_data]

@@ -186,8 +186,8 @@ namespace Frida {
 			destroy_entry.begin (entry_to_remove, SessionDetachReason.SERVER_TERMINATED);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason) {
-			agent_session_closed (id, reason);
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
+			agent_session_closed (id, reason, crash);
 		}
 
 		private async void destroy_entry (Entry entry, SessionDetachReason reason) {
@@ -198,7 +198,7 @@ namespace Frida {
 		}
 
 		private class Entry : Object {
-			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason);
+			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
 
 			public uint port {
 				get;
@@ -220,19 +220,22 @@ namespace Frida {
 				construct;
 			}
 
-			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id = new Gee.HashMap<AgentSessionId?, AgentSession> ();
+			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id =
+				new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
 			public Entry (uint port, Droidy.Client client, DBusConnection connection, HostSession host_session) {
 				Object (port: port, client: client, connection: connection, host_session: host_session);
 
 				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
+				host_session.agent_session_crashed.connect (on_agent_session_crashed);
 			}
 
 			public async void destroy (SessionDetachReason reason) {
+				host_session.agent_session_crashed.disconnect (on_agent_session_crashed);
 				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
 
 				foreach (var agent_session_id in agent_session_by_id.keys)
-					agent_session_closed (agent_session_id, reason);
+					agent_session_closed (agent_session_id, reason, null);
 				agent_session_by_id.clear ();
 
 				try {
@@ -255,8 +258,13 @@ namespace Frida {
 			}
 
 			private void on_agent_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
+				if (agent_session_by_id.unset (id))
+					agent_session_closed (id, reason, null);
+			}
+
+			private void on_agent_session_crashed (AgentSessionId id, CrashInfo crash) {
 				agent_session_by_id.unset (id);
-				agent_session_closed (id, reason);
+				agent_session_closed (id, PROCESS_TERMINATED, crash);
 			}
 		}
 	}

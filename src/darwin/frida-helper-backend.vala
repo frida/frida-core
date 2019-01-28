@@ -542,15 +542,20 @@ namespace Frida {
 			Source.remove (timer);
 		}
 
-		public void _on_inject_instance_loaded (uint pid) {
+		public void _on_inject_instance_loaded (uint id, uint pid, DarwinModuleDetails? mapped_module) {
 			policy_softener.retain (pid);
+
+			if (mapped_module != null)
+				injected (id, pid, true, mapped_module);
+			else
+				injected (id, pid, false, DarwinModuleDetails (0, "", ""));
 		}
 
-		public void _on_inject_instance_unloaded (uint pid) {
+		public void _on_inject_instance_unloaded (uint id, uint pid) {
 			policy_softener.release (pid);
 		}
 
-		public void _on_inject_instance_detached (uint pid) {
+		public void _on_inject_instance_detached (uint id, uint pid) {
 			policy_softener.forget (pid);
 		}
 

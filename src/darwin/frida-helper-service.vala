@@ -47,6 +47,7 @@ namespace Frida {
 			backend.output.connect (on_backend_output);
 			backend.spawn_added.connect (on_backend_spawn_added);
 			backend.spawn_removed.connect (on_backend_spawn_removed);
+			backend.injected.connect (on_backend_injected);
 			backend.uninjected.connect (on_backend_uninjected);
 		}
 
@@ -89,6 +90,7 @@ namespace Frida {
 			backend.output.disconnect (on_backend_output);
 			backend.spawn_added.disconnect (on_backend_spawn_added);
 			backend.spawn_removed.disconnect (on_backend_spawn_removed);
+			backend.injected.disconnect (on_backend_injected);
 			backend.uninjected.disconnect (on_backend_uninjected);
 			backend = null;
 
@@ -222,6 +224,10 @@ namespace Frida {
 
 		private void on_backend_spawn_removed (HostSpawnInfo info) {
 			spawn_removed (info);
+		}
+
+		private void on_backend_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
+			injected (id, pid, has_mapped_module, mapped_module);
 		}
 
 		private void on_backend_uninjected (uint id) {

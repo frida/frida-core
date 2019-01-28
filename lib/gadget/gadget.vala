@@ -979,7 +979,7 @@ namespace Frida.Gadget {
 					yield call_dispose ();
 					yield engine.destroy_script (id);
 				}
-				id = instance.sid;
+				id = instance.script_id;
 
 				yield engine.load_script (id);
 				yield call_init ();
@@ -1066,8 +1066,8 @@ namespace Frida.Gadget {
 			unchanged_timeout = source;
 		}
 
-		private void on_message (AgentScriptId sid, string raw_message, Bytes? data) {
-			if (sid.handle != this.id.handle)
+		private void on_message (AgentScriptId script_id, string raw_message, Bytes? data) {
+			if (script_id.handle != this.id.handle)
 				return;
 
 			var parser = new Json.Parser ();
@@ -1525,13 +1525,13 @@ namespace Frida.Gadget {
 			public async AgentScriptId create_script (string name, string source) throws Error {
 				var engine = get_script_engine ();
 				var instance = yield engine.create_script ((name != "") ? name : null, source, null);
-				return instance.sid;
+				return instance.script_id;
 			}
 
 			public async AgentScriptId create_script_from_bytes (uint8[] bytes) throws Error {
 				var engine = get_script_engine ();
 				var instance = yield engine.create_script (null, null, new Bytes (bytes));
-				return instance.sid;
+				return instance.script_id;
 			}
 
 			public async uint8[] compile_script (string name, string source) throws Error {
@@ -1540,24 +1540,24 @@ namespace Frida.Gadget {
 				return bytes.get_data ();
 			}
 
-			public async void destroy_script (AgentScriptId sid) throws Error {
+			public async void destroy_script (AgentScriptId script_id) throws Error {
 				var engine = get_script_engine ();
-				yield engine.destroy_script (sid);
+				yield engine.destroy_script (script_id);
 			}
 
-			public async void load_script (AgentScriptId sid) throws Error {
+			public async void load_script (AgentScriptId script_id) throws Error {
 				var engine = get_script_engine ();
-				yield engine.load_script (sid);
+				yield engine.load_script (script_id);
 			}
 
-			public async void eternalize_script (AgentScriptId sid) throws Error {
+			public async void eternalize_script (AgentScriptId script_id) throws Error {
 				var engine = get_script_engine ();
-				var script = engine.eternalize_script (sid);
+				var script = engine.eternalize_script (script_id);
 				script_eternalized (script);
 			}
 
-			public async void post_to_script (AgentScriptId sid, string message, bool has_data, uint8[] data) throws Error {
-				get_script_engine ().post_to_script (sid, message, has_data ? new Bytes (data) : null);
+			public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) throws Error {
+				get_script_engine ().post_to_script (script_id, message, has_data ? new Bytes (data) : null);
 			}
 
 			public async void enable_debugger () throws Error {

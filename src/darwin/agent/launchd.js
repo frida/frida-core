@@ -12,7 +12,6 @@ var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
 var upcoming = {};
 var gating = false;
-var active = 0;
 
 var jbdCallImpl = Module.findExportByName(null, 'jbd_call');
 var jbdPidsToIgnore = {};
@@ -21,33 +20,21 @@ var runningOnElectra = jbdCallImpl !== null;
 rpc.exports = {
   prepareForLaunch: function (identifier) {
     upcoming[identifier] = true;
-    active++;
   },
   cancelLaunch: function (identifier) {
-    if (upcoming[identifier] !== undefined) {
+    if (upcoming[identifier] !== undefined)
       delete upcoming[identifier];
-      active--;
-    }
   },
   enableSpawnGating: function () {
-    if (gating)
-      return;
     gating = true;
-    active++;
   },
   disableSpawnGating: function () {
-    if (!gating)
-      return;
     gating = false;
-    active--;
   },
 };
 
 Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
-    if (active === 0)
-      return;
-
     var path = readString(args[1]);
     if (path !== '/usr/libexec/xpcproxy')
       return;
@@ -63,7 +50,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
         event = 'spawn';
       else
         return;
-    } else if (gating) {
+    } else if (gating || rawIdentifier === 'com.apple.ReportCrash') {
       identifier = rawIdentifier;
       event = 'spawn';
     } else {
@@ -81,19 +68,14 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
     this.pidPtr = args[0];
   },
   onLeave: function (retval) {
-    if (active === 0)
-      return;
-
     var event = this.event;
     if (event === undefined)
       return;
 
     var identifier = this.identifier;
 
-    if (event === 'launch:app') {
+    if (event === 'launch:app')
       delete upcoming[identifier];
-      active--;
-    }
 
     if (retval.toInt32() < 0)
       return;

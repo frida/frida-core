@@ -2,6 +2,8 @@ using Gee;
 
 namespace Frida {
 	public class Fruitjector : Object, Injector {
+		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
+
 		public DarwinHelper helper {
 			get;
 			construct;
@@ -26,10 +28,12 @@ namespace Frida {
 		}
 
 		construct {
+			helper.injected.connect (on_injected);
 			helper.uninjected.connect (on_uninjected);
 		}
 
 		~Fruitjector () {
+			helper.injected.disconnect (on_injected);
 			helper.uninjected.disconnect (on_uninjected);
 			if (close_helper) {
 				helper.close.begin ();
@@ -39,6 +43,7 @@ namespace Frida {
 		}
 
 		public async void close () {
+			helper.injected.disconnect (on_injected);
 			helper.uninjected.disconnect (on_uninjected);
 			if (close_helper) {
 				yield helper.close ();
@@ -91,6 +96,10 @@ namespace Frida {
 
 		public bool is_still_injected (uint id) {
 			return pid_by_id.has_key (id);
+		}
+
+		private void on_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
+			injected (id, pid, has_mapped_module, mapped_module);
 		}
 
 		private void on_uninjected (uint id) {
