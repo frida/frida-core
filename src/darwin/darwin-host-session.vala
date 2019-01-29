@@ -909,7 +909,7 @@ namespace Frida {
 					}
 
 					if (val != null)
-						parameters.insert_value (member, val);
+						parameters.insert_value (canonicalize_parameter_name (member), val);
 
 					header.end_member ();
 				}
@@ -953,6 +953,29 @@ namespace Frida {
 			string raw_stanza = Json.to_string (stanza.get_root (), false);
 
 			session.post_to_script.begin (script, raw_stanza, false, new uint8[0]);
+		}
+
+		private static string canonicalize_parameter_name (string name) {
+			var result = new StringBuilder ();
+
+			unichar c;
+			bool need_underscore = true;
+			for (int i = 0; name.get_next_char (ref i, out c);) {
+				if (c.isupper ()) {
+					if (i != 0 && need_underscore) {
+						result.append_c ('_');
+						need_underscore = false;
+					}
+
+					c = c.tolower ();
+				} else {
+					need_underscore = true;
+				}
+
+				result.append_unichar (c);
+			}
+
+			return result.str;
 		}
 
 		protected override async uint get_target_pid () throws Error {
