@@ -866,32 +866,7 @@ namespace Frida {
 				case "crash-detected":
 					var pid = (uint) event.get_int_element (1);
 
-					var builder = new Json.Builder ();
-					builder
-						.begin_object ()
-						.set_member_name ("type")
-						.add_string_value ("mapped-agents")
-						.set_member_name ("payload")
-						.begin_array ();
-					mapped_agent_container.enumerate_mapped_agents (agent => {
-						if (agent.pid == pid) {
-							DarwinModuleDetails details = agent.module;
-
-							builder
-								.begin_object ()
-								.set_member_name ("machHeaderAddress")
-								.add_string_value (details.mach_header_address.to_string ())
-								.set_member_name ("uuid")
-								.add_string_value (details.uuid)
-								.set_member_name ("path")
-								.add_string_value (details.path)
-								.end_object ();
-						}
-					});
-					builder
-						.end_array ()
-						.end_object ();
-					session.post_to_script.begin (script, Json.to_string (builder.get_root (), false), false, new uint8[0]);
+					send_mapped_agents (pid);
 
 					crash_detected (pid);
 
@@ -900,46 +875,84 @@ namespace Frida {
 					var pid = (uint) event.get_int_element (1);
 					var raw_report = event.get_string_element (2);
 
-					var tokens = raw_report.split ("\n", 2);
-					var raw_header = tokens[0];
-					var report = tokens[1];
+					var crash = parse_report (pid, raw_report);
 
-					var parameters = new VariantDict ();
-					try {
-						var header = new Json.Reader (Json.from_string (raw_header));
-						foreach (string member in header.list_members ()) {
-							header.read_member (member);
-
-							Variant? val = null;
-							if (header.is_value ()) {
-								Json.Node node = header.get_value ();
-								Type t = node.get_value_type ();
-								if (t == typeof (string))
-									val = new Variant.string (node.get_string ());
-								else if (t == typeof (int64))
-									val = new Variant.int64 (node.get_int ());
-								else if (t == typeof (bool))
-									val = new Variant.boolean (node.get_boolean ());
-							}
-
-							if (val != null)
-								parameters.insert_value (member, val);
-
-							header.end_member ();
-						}
-					} catch (GLib.Error e) {
-						assert_not_reached ();
-					}
-
-					string? process_name = null;
-					parameters.lookup ("name", "s", out process_name);
-
-					crash_received (CrashInfo (pid, process_name, report, parameters.end ()));
+					crash_received (crash);
 
 					break;
 				default:
 					assert_not_reached ();
 			}
+		}
+
+		private CrashInfo parse_report (uint pid, string raw_report) {
+			var tokens = raw_report.split ("\n", 2);
+			var raw_header = tokens[0];
+			var report = tokens[1];
+
+			var parameters = new VariantDict ();
+			try {
+				var header = new Json.Reader (Json.from_string (raw_header));
+				foreach (string member in header.list_members ()) {
+					header.read_member (member);
+
+					Variant? val = null;
+					if (header.is_value ()) {
+						Json.Node node = header.get_value ();
+						Type t = node.get_value_type ();
+						if (t == typeof (string))
+							val = new Variant.string (node.get_string ());
+						else if (t == typeof (int64))
+							val = new Variant.int64 (node.get_int ());
+						else if (t == typeof (bool))
+							val = new Variant.boolean (node.get_boolean ());
+					}
+
+					if (val != null)
+						parameters.insert_value (member, val);
+
+					header.end_member ();
+				}
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			string? process_name = null;
+			parameters.lookup ("name", "s", out process_name);
+			assert (process_name != null);
+
+			return CrashInfo (pid, process_name, report, parameters.end ());
+		}
+
+		private void send_mapped_agents (uint pid) {
+			var stanza = new Json.Builder ();
+			stanza
+				.begin_object ()
+				.set_member_name ("type")
+				.add_string_value ("mapped-agents")
+				.set_member_name ("payload")
+				.begin_array ();
+			mapped_agent_container.enumerate_mapped_agents (agent => {
+				if (agent.pid == pid) {
+					DarwinModuleDetails details = agent.module;
+
+					stanza
+						.begin_object ()
+						.set_member_name ("machHeaderAddress")
+						.add_string_value (details.mach_header_address.to_string ())
+						.set_member_name ("uuid")
+						.add_string_value (details.uuid)
+						.set_member_name ("path")
+						.add_string_value (details.path)
+						.end_object ();
+				}
+			});
+			stanza
+				.end_array ()
+				.end_object ();
+			string raw_stanza = Json.to_string (stanza.get_root (), false);
+
+			session.post_to_script.begin (script, raw_stanza, false, new uint8[0]);
 		}
 
 		protected override async uint get_target_pid () throws Error {

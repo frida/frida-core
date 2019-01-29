@@ -293,29 +293,25 @@ namespace Frida.Agent {
 				else
 					next_request_id = -1;
 
-				var builder = new Json.Builder ();
-				builder
-				.begin_array ()
-				.add_string_value ("frida:rpc")
-				.add_int_value (request_id)
-				.add_string_value ("call")
-				.add_string_value (method)
-				.begin_array ();
+				var request = new Json.Builder ();
+				request
+					.begin_array ()
+					.add_string_value ("frida:rpc")
+					.add_int_value (request_id)
+					.add_string_value ("call")
+					.add_string_value (method)
+					.begin_array ();
 				foreach (var arg in args)
-					builder.add_value (arg);
-				builder
-				.end_array ()
-				.end_array ();
-
-				var generator = new Json.Generator ();
-				generator.set_root (builder.get_root ());
-				size_t length;
-				var request = generator.to_data (out length);
+					request.add_value (arg);
+				request
+					.end_array ()
+					.end_array ();
+				string raw_request = Json.to_string (request.get_root (), false);
 
 				var response = new PendingResponse (() => call.callback ());
 				pending_responses[request_id.to_string ()] = response;
 
-				script.post (request);
+				script.post (raw_request);
 
 				yield;
 

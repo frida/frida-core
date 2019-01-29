@@ -228,13 +228,13 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 
 					var request = new Json.Builder ()
 						.begin_array ()
-							.add_string_value ("frida:rpc")
-							.add_int_value (id)
-							.add_string_value ("call")
-							.add_string_value ("prepareForLaunch")
-							.begin_array ()
-								.add_string_value ("foo.bar.Baz")
-							.end_array ()
+						.add_string_value ("frida:rpc")
+						.add_int_value (id)
+						.add_string_value ("call")
+						.add_string_value ("prepareForLaunch")
+						.begin_array ()
+						.add_string_value ("foo.bar.Baz")
+						.end_array ()
 						.end_array ();
 					var raw_request = Json.to_string (request.get_root (), false);
 					yield session.post_to_script (script_id, raw_request, false, new uint8[0] {});

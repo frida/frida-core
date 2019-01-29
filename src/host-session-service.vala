@@ -999,29 +999,25 @@ namespace Frida {
 
 			var request_id = next_request_id++;
 
-			var builder = new Json.Builder ();
-			builder
-			.begin_array ()
-			.add_string_value ("frida:rpc")
-			.add_int_value (request_id)
-			.add_string_value ("call")
-			.add_string_value (method)
-			.begin_array ();
+			var request = new Json.Builder ();
+			request
+				.begin_array ()
+				.add_string_value ("frida:rpc")
+				.add_int_value (request_id)
+				.add_string_value ("call")
+				.add_string_value (method)
+				.begin_array ();
 			foreach (var arg in args)
-				builder.add_value (arg);
-			builder
-			.end_array ()
-			.end_array ();
-
-			var generator = new Json.Generator ();
-			generator.set_root (builder.get_root ());
-			size_t length;
-			var request = generator.to_data (out length);
+				request.add_value (arg);
+			request
+				.end_array ()
+				.end_array ();
+			string raw_request = Json.to_string (request.get_root (), false);
 
 			var response = new PendingResponse (() => call.callback ());
 			pending[request_id.to_string ()] = response;
 
-			post_call_request.begin (request, response, session, script);
+			post_call_request.begin (raw_request, response, session, script);
 
 			yield;
 
@@ -1031,9 +1027,9 @@ namespace Frida {
 			return response.result;
 		}
 
-		private async void post_call_request (string request, PendingResponse response, AgentSession session, AgentScriptId script) {
+		private async void post_call_request (string raw_request, PendingResponse response, AgentSession session, AgentScriptId script) {
 			try {
-				yield session.post_to_script (script, request, false, new uint8[0]);
+				yield session.post_to_script (script, raw_request, false, new uint8[0]);
 			} catch (GLib.Error e) {
 				response.complete_with_error (Marshal.from_dbus (e));
 			}
