@@ -401,7 +401,12 @@ MappedMemory.prototype.readPointer = function (address) {
 };
 
 function tryParseInterceptorTrampoline(code, stackFrameAbove, mappedMemory) {
-  var instructions = new Uint32Array(mappedMemory.read(code, 16));
+  var instructions;
+  try {
+    instructions = new Uint32Array(mappedMemory.read(code, 16));
+  } catch (e) {
+    return null;
+  }
 
   var result = tryParseInterceptorOnLeaveTrampoline(instructions, code, mappedMemory);
   if (result !== null)
