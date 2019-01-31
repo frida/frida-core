@@ -578,6 +578,133 @@ namespace Frida {
 		}
 	}
 
+	public class RpcClient : Object {
+		public RpcPeer peer {
+			get;
+			construct;
+		}
+
+		private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
+
+		public RpcClient (RpcPeer peer) {
+			Object (peer: peer);
+		}
+
+		public async Json.Node call (string method, Json.Node[] args) throws Error {
+			string request_id = Uuid.string_random ();
+
+			var request = new Json.Builder ();
+			request
+				.begin_array ()
+				.add_string_value ("frida:rpc")
+				.add_string_value (request_id)
+				.add_string_value ("call")
+				.add_string_value (method)
+				.begin_array ();
+			foreach (var arg in args)
+				request.add_value (arg);
+			request
+				.end_array ()
+				.end_array ();
+			string raw_request = Json.to_string (request.get_root (), false);
+
+			var response = new PendingResponse (() => call.callback ());
+			pending_responses[request_id] = response;
+
+			try {
+				yield peer.post_rpc_message (raw_request);
+			} catch (Error e) {
+				pending_responses.unset (request_id);
+				throw e;
+			}
+
+			yield;
+
+			if (response.error != null)
+				throw response.error;
+
+			return response.result;
+		}
+
+		public bool try_handle_message (string raw_message) {
+			if (raw_message.index_of ("\"frida:rpc\"") == -1)
+				return false;
+
+			var parser = new Json.Parser ();
+			try {
+				parser.load_from_data (raw_message);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+			var message = parser.get_root ().get_object ();
+
+			bool handled = false;
+
+			var type = message.get_string_member ("type");
+			if (type == "send")
+				handled = try_handle_rpc_message (message);
+
+			return handled;
+		}
+
+		private bool try_handle_rpc_message (Json.Object message) {
+			var payload = message.get_member ("payload");
+			if (payload == null || payload.get_node_type () != Json.NodeType.ARRAY)
+				return false;
+			var rpc_message = payload.get_array ();
+			if (rpc_message.get_length () < 4)
+				return false;
+			else if (rpc_message.get_element (0).get_string () != "frida:rpc")
+				return false;
+
+			var request_id = rpc_message.get_int_element (1);
+			PendingResponse response;
+			if (!pending_responses.unset (request_id.to_string (), out response))
+				return false;
+
+			var status = rpc_message.get_string_element (2);
+			if (status == "ok")
+				response.complete_with_result (rpc_message.get_element (3));
+			else
+				response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
+
+			return true;
+		}
+
+		private class PendingResponse {
+			public delegate void CompletionHandler ();
+			private CompletionHandler handler;
+
+			public Json.Node? result {
+				get;
+				private set;
+			}
+
+			public Error? error {
+				get;
+				private set;
+			}
+
+			public PendingResponse (owned CompletionHandler handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete_with_result (Json.Node r) {
+				result = r;
+				handler ();
+			}
+
+			public void complete_with_error (Error e) {
+				error = e;
+				handler ();
+			}
+		}
+	}
+
+	public interface RpcPeer : Object {
+		public abstract async void post_rpc_message (string raw_message) throws Error;
+	}
+
 	namespace ServerGuid {
 		public const string HOST_SESSION_SERVICE = "6769746875622e636f6d2f6672696461";
 	}

@@ -140,7 +140,7 @@ namespace Frida.Agent {
 			message_from_debugger (message);
 		}
 
-		public class ScriptInstance : Object {
+		public class ScriptInstance : Object, RpcPeer {
 			public signal void message (string message, Bytes? data);
 
 			public AgentScriptId script_id {
@@ -177,11 +177,14 @@ namespace Frida.Agent {
 			private Gee.Promise<bool> destroy_request;
 			private Gee.Promise<bool> dispose_request;
 
-			private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
-			private int64 next_request_id = -1;
+			private RpcClient rpc_client;
 
 			public ScriptInstance (AgentScriptId script_id, Gum.Script script) {
 				Object (script_id: script_id, script: script);
+			}
+
+			construct {
+				rpc_client = new RpcClient (this);
 			}
 
 			public async void load () {
@@ -273,7 +276,7 @@ namespace Frida.Agent {
 
 				if (state == LOADED) {
 					try {
-						yield call ("dispose", new Json.Node[] {});
+						yield rpc_client.call ("dispose", new Json.Node[] {});
 					} catch (Error e) {
 					}
 
@@ -283,116 +286,17 @@ namespace Frida.Agent {
 				dispose_request.set_value (true);
 			}
 
-			private async Json.Node call (string method, Json.Node[] args) throws Error {
-				if (script == null)
-					throw new Error.INVALID_OPERATION ("Script is destroyed");
-
-				var request_id = next_request_id;
-				if (next_request_id != int32.MIN)
-					next_request_id--;
-				else
-					next_request_id = -1;
-
-				var request = new Json.Builder ();
-				request
-					.begin_array ()
-					.add_string_value ("frida:rpc")
-					.add_int_value (request_id)
-					.add_string_value ("call")
-					.add_string_value (method)
-					.begin_array ();
-				foreach (var arg in args)
-					request.add_value (arg);
-				request
-					.end_array ()
-					.end_array ();
-				string raw_request = Json.to_string (request.get_root (), false);
-
-				var response = new PendingResponse (() => call.callback ());
-				pending_responses[request_id.to_string ()] = response;
-
-				script.post (raw_request);
-
-				yield;
-
-				if (response.error != null)
-					throw response.error;
-
-				return response.result;
-			}
-
 			private void on_message (Gum.Script script, string raw_message, Bytes? data) {
-				bool handled = false;
-
-				if (raw_message.index_of ("\"frida:rpc\",-") != -1) {
-					var parser = new Json.Parser ();
-					try {
-						parser.load_from_data (raw_message);
-					} catch (GLib.Error e) {
-						assert_not_reached ();
-					}
-					var message = parser.get_root ().get_object ();
-
-					var type = message.get_string_member ("type");
-					if (type == "send")
-						handled = try_handle_rpc_message (message);
-				}
-
+				bool handled = rpc_client.try_handle_message (raw_message);
 				if (!handled)
 					this.message (raw_message, data);
 			}
 
-			private bool try_handle_rpc_message (Json.Object message) {
-				var payload = message.get_member ("payload");
-				if (payload == null || payload.get_node_type () != Json.NodeType.ARRAY)
-					return false;
-				var rpc_message = payload.get_array ();
-				if (rpc_message.get_length () < 4)
-					return false;
-				else if (rpc_message.get_element (0).get_string () != "frida:rpc")
-					return false;
+			private async void post_rpc_message (string raw_message) throws Error {
+				if (script == null)
+					throw new Error.INVALID_OPERATION ("Script is destroyed");
 
-				var request_id = rpc_message.get_int_element (1);
-				PendingResponse response;
-				if (!pending_responses.unset (request_id.to_string (), out response))
-					return false;
-
-				var status = rpc_message.get_string_element (2);
-				if (status == "ok")
-					response.complete_with_result (rpc_message.get_element (3));
-				else
-					response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
-
-				return true;
-			}
-
-			private class PendingResponse {
-				public delegate void CompletionHandler ();
-				private CompletionHandler handler;
-
-				public Json.Node? result {
-					get;
-					private set;
-				}
-
-				public Error? error {
-					get;
-					private set;
-				}
-
-				public PendingResponse (owned CompletionHandler handler) {
-					this.handler = (owned) handler;
-				}
-
-				public void complete_with_result (Json.Node r) {
-					result = r;
-					handler ();
-				}
-
-				public void complete_with_error (Error e) {
-					error = e;
-					handler ();
-				}
+				script.post (raw_message);
 			}
 		}
 	}

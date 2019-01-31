@@ -850,7 +850,7 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class Script : Object {
+	private class Script : Object, RpcPeer {
 		private const uint8 DUKTAPE_BYTECODE_MAGIC = 0xbf;
 
 		public enum ChangeBehavior {
@@ -884,9 +884,7 @@ namespace Frida.Gadget {
 		private bool load_in_progress = false;
 		private GLib.FileMonitor monitor;
 		private Source unchanged_timeout;
-
-		private Gee.HashMap<string, PendingResponse> pending = new Gee.HashMap<string, PendingResponse> ();
-		private int64 next_request_id = 1;
+		private RpcClient rpc_client;
 
 		public Script (string path, Json.Node parameters, ChangeBehavior on_change, ScriptEngine engine) {
 			Object (
@@ -895,6 +893,10 @@ namespace Frida.Gadget {
 				on_change: on_change,
 				engine: engine
 			);
+		}
+
+		construct {
+			rpc_client = new RpcClient (this);
 		}
 
 		public async void start () throws Error {
@@ -993,54 +995,15 @@ namespace Frida.Gadget {
 			stage.set_string ((peek_state () == State.CREATED) ? "early" : "late");
 
 			try {
-				yield call ("init", new Json.Node[] { stage, parameters });
+				yield rpc_client.call ("init", new Json.Node[] { stage, parameters });
 			} catch (Error e) {
 			}
 		}
 
 		private async void call_dispose () {
 			try {
-				yield call ("dispose", new Json.Node[] {});
+				yield rpc_client.call ("dispose", new Json.Node[] {});
 			} catch (Error e) {
-			}
-		}
-
-		private async Json.Node call (string method, Json.Node[] args) throws Error {
-			var request_id = next_request_id++;
-
-			var request = new Json.Builder ();
-			request
-				.begin_array ()
-				.add_string_value ("frida:rpc")
-				.add_int_value (request_id)
-				.add_string_value ("call")
-				.add_string_value (method)
-				.begin_array ();
-			foreach (var arg in args)
-				request.add_value (arg);
-			request
-				.end_array ()
-				.end_array ();
-			string raw_request = Json.to_string (request.get_root (), false);
-
-			var response = new PendingResponse (() => call.callback ());
-			pending[request_id.to_string ()] = response;
-
-			post_call_request.begin (raw_request, response);
-
-			yield;
-
-			if (response.error != null)
-				throw response.error;
-
-			return response.result;
-		}
-
-		private async void post_call_request (string raw_request, PendingResponse response) {
-			try {
-				engine.post_to_script (id, raw_request);
-			} catch (GLib.Error e) {
-				response.complete_with_error (Marshal.from_dbus (e));
 			}
 		}
 
@@ -1063,7 +1026,11 @@ namespace Frida.Gadget {
 		}
 
 		private void on_message (AgentScriptId script_id, string raw_message, Bytes? data) {
-			if (script_id.handle != this.id.handle)
+			if (script_id != id)
+				return;
+
+			bool handled = rpc_client.try_handle_message (raw_message);
+			if (handled)
 				return;
 
 			var parser = new Json.Parser ();
@@ -1074,38 +1041,14 @@ namespace Frida.Gadget {
 			}
 			var message = parser.get_root ().get_object ();
 
-			bool handled = false;
 			var type = message.get_string_member ("type");
-			if (type == "send")
-				handled = try_handle_rpc_message (message);
-			else if (type == "log")
+			if (type == "log")
 				handled = try_handle_log_message (message);
 
 			if (!handled) {
 				stdout.puts (raw_message);
 				stdout.putc ('\n');
 			}
-		}
-
-		private bool try_handle_rpc_message (Json.Object message) {
-			var payload = message.get_member ("payload");
-			if (payload == null || payload.get_node_type () != Json.NodeType.ARRAY)
-				return false;
-			var rpc_message = payload.get_array ();
-			if (rpc_message.get_length () < 4)
-				return false;
-			else if (rpc_message.get_element (0).get_string () != "frida:rpc")
-				return false;
-
-			var request_id = rpc_message.get_int_element (1);
-			PendingResponse response;
-			pending.unset (request_id.to_string (), out response);
-			var status = rpc_message.get_string_element (2);
-			if (status == "ok")
-				response.complete_with_result (rpc_message.get_element (3));
-			else
-				response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
-			return true;
 		}
 
 		private bool try_handle_log_message (Json.Object message) {
@@ -1127,33 +1070,8 @@ namespace Frida.Gadget {
 			return true;
 		}
 
-		private class PendingResponse {
-			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
-
-			public Json.Node? result {
-				get;
-				private set;
-			}
-
-			public Error? error {
-				get;
-				private set;
-			}
-
-			public PendingResponse (owned CompletionHandler handler) {
-				this.handler = (owned) handler;
-			}
-
-			public void complete_with_result (Json.Node r) {
-				result = r;
-				handler ();
-			}
-
-			public void complete_with_error (Error e) {
-				error = e;
-				handler ();
-			}
+		private async void post_rpc_message (string raw_message) throws Error {
+			engine.post_to_script (id, raw_message);
 		}
 	}
 
