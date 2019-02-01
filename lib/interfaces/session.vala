@@ -654,12 +654,18 @@ namespace Frida {
 			var rpc_message = payload.get_array ();
 			if (rpc_message.get_length () < 4)
 				return false;
-			else if (rpc_message.get_element (0).get_string () != "frida:rpc")
+
+			string? type = rpc_message.get_element (0).get_string ();
+			if (type == null || type != "frida:rpc")
 				return false;
 
-			var request_id = rpc_message.get_int_element (1);
+			var request_id_value = rpc_message.get_element (1);
+			if (request_id_value.get_value_type () != typeof (string))
+				return false;
+			string request_id = request_id_value.get_string ();
+
 			PendingResponse response;
-			if (!pending_responses.unset (request_id.to_string (), out response))
+			if (!pending_responses.unset (request_id, out response))
 				return false;
 
 			var status = rpc_message.get_string_element (2);
