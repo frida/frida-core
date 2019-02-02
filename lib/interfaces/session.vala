@@ -432,6 +432,11 @@ namespace Frida {
 			set;
 		}
 
+		public string summary {
+			get;
+			set;
+		}
+
 		public string report {
 			get;
 			set;
@@ -442,10 +447,11 @@ namespace Frida {
 			set;
 		}
 
-		public CrashInfo (uint pid, string process_name, string report, Variant? parameters = null) {
+		public CrashInfo (uint pid, string process_name, string summary, string report, Variant? parameters = null) {
 			this.pid = pid;
 			this.process_name = process_name;
 
+			this.summary = summary;
 			this.report = report;
 
 			if (parameters != null)

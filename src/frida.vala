@@ -1529,6 +1529,11 @@ namespace Frida {
 			construct;
 		}
 
+		public string summary {
+			get;
+			construct;
+		}
+
 		public string report {
 			get;
 			construct;
@@ -1536,10 +1541,11 @@ namespace Frida {
 
 		private Bytes raw_parameters;
 
-		public Crash (uint pid, string process_name, string report, Bytes raw_parameters) {
+		public Crash (uint pid, string process_name, string summary, string report, Bytes raw_parameters) {
 			Object (
 				pid: pid,
 				process_name: process_name,
+				summary: summary,
 				report: report
 			);
 			this.raw_parameters = raw_parameters;
@@ -1553,6 +1559,7 @@ namespace Frida {
 			return new Crash (
 				info.pid,
 				info.process_name,
+				info.summary,
 				info.report,
 				new Bytes (info.parameters)
 			);
