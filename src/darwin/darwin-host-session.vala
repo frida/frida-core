@@ -876,7 +876,6 @@ namespace Frida {
 					var raw_report = event.get_string_element (2);
 
 					var crash = parse_report (pid, raw_report);
-
 					crash_received (crash);
 
 					break;
@@ -885,7 +884,7 @@ namespace Frida {
 			}
 		}
 
-		private CrashInfo parse_report (uint pid, string raw_report) {
+		private static CrashInfo parse_report (uint pid, string raw_report) {
 			var tokens = raw_report.split ("\n", 2);
 			var raw_header = tokens[0];
 			var report = tokens[1];
@@ -921,7 +920,67 @@ namespace Frida {
 			parameters.lookup ("name", "s", out process_name);
 			assert (process_name != null);
 
-			return CrashInfo (pid, process_name, report, parameters.end ());
+			string summary = summarize (report);
+
+			return CrashInfo (pid, process_name, summary, report, parameters.end ());
+		}
+
+		private static string summarize (string report) {
+			MatchInfo info;
+
+			string? exception_type = null;
+			if (/^Exception Type: +(.+)$/m.match (report, 0, out info)) {
+				exception_type = info.fetch (1);
+			}
+
+			string? exception_subtype = null;
+			if (/^Exception Subtype: +(.+)$/m.match (report, 0, out info)) {
+				exception_subtype = info.fetch (1);
+			}
+
+			string? signal_description = null;
+			if (/^Termination Signal: +(.+): \d+$/m.match (report, 0, out info)) {
+				signal_description = info.fetch (1);
+			}
+
+			string? reason_namespace = null;
+			string? reason_code = null;
+			if (/^Termination Reason: +Namespace (.+), Code (.+)$/m.match (report, 0, out info)) {
+				reason_namespace = info.fetch (1);
+				reason_code = info.fetch (2);
+			}
+
+			if (reason_namespace == null)
+				return "Unknown error";
+
+			if (reason_namespace == "SIGNAL") {
+				if (exception_subtype != null) {
+					string? problem = null;
+					if (exception_type != null && /^EXC_(\w+)/.match (exception_type, 0, out info)) {
+						string raw_problem = info.fetch (1).replace ("_", " ");
+						problem = "%c%s".printf (raw_problem[0].toupper (), raw_problem.substring (1).down ());
+					}
+
+					string? cause = null;
+					if (/^KERN_(.+) at /.match (exception_subtype, 0, out info)) {
+						cause = info.fetch (1).replace ("_", " ").down ();
+					}
+
+					if (problem != null && cause != null)
+						return "%s due to %s".printf (problem, cause);
+				}
+
+				if (signal_description != null)
+					return signal_description;
+			}
+
+			if (reason_namespace == "CODESIGNING")
+				return "Codesigning violation";
+
+			if (reason_namespace == "JETSAM" && exception_subtype != null)
+				return "Jetsam %s budget exceeded".printf (exception_subtype.down ());
+
+			return "Unknown %s error %s".printf (reason_namespace.down (), reason_code);
 		}
 
 		private void send_mapped_agents (uint pid) {
