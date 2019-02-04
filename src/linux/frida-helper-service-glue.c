@@ -275,6 +275,7 @@ static FridaExecInstance * frida_exec_instance_new (FridaHelperService * service
 static void frida_exec_instance_free (FridaExecInstance * instance);
 static gboolean frida_exec_instance_prepare_transition (FridaExecInstance * self, GError ** error);
 static gboolean frida_exec_instance_try_perform_transition (FridaExecInstance * self, GError ** error);
+static void frida_exec_instance_suspend (FridaExecInstance * self);
 static void frida_exec_instance_resume (FridaExecInstance * self);
 
 static void frida_make_pipe (int fds[2]);
@@ -514,6 +515,12 @@ gboolean
 _frida_helper_service_try_transition_exec_instance (FridaHelperService * self, void * instance, GError ** error)
 {
   return frida_exec_instance_try_perform_transition (instance, error);
+}
+
+void
+_frida_helper_service_suspend_exec_instance (FridaHelperService * self, void * instance)
+{
+  frida_exec_instance_suspend (instance);
 }
 
 void
@@ -838,6 +845,13 @@ failure:
   {
     return FALSE;
   }
+}
+
+static void
+frida_exec_instance_suspend (FridaExecInstance * self)
+{
+  kill (self->pid, SIGSTOP);
+  frida_wait_for_child_signal (self->pid, SIGSTOP, NULL);
 }
 
 static void

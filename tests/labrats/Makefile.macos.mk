@@ -1,13 +1,11 @@
 MACOS_MINVER = 10.9
-MACOS_SDKVER = 10.13
-MACOS_CC := $(shell xcrun --sdk macosx$(MACOS_SDKVER) -f clang)
-MACOS_CFLAGS := -Wall -pipe -Os -isysroot $(shell xcrun --sdk macosx$(MACOS_SDKVER) --show-sdk-path) -mmacosx-version-min=$(MACOS_MINVER)
+MACOS_CC := $(shell xcrun --sdk macosx -f clang)
+MACOS_CFLAGS := -Wall -pipe -Os -isysroot $(shell xcrun --sdk macosx --show-sdk-path) -mmacosx-version-min=$(MACOS_MINVER)
 MACOS_LDFLAGS := -Wl,-dead_strip
 
 IOS_MINVER = 7.0
-IOS_SDKVER = 11.3
-IOS_CC := $(shell xcrun --sdk iphoneos$(IOS_SDKVER) -f clang)
-IOS_CFLAGS := -Wall -pipe -Os -isysroot $(shell xcrun --sdk iphoneos$(IOS_SDKVER) --show-sdk-path) -miphoneos-version-min=$(IOS_MINVER)
+IOS_CC := $(shell xcrun --sdk iphoneos -f clang)
+IOS_CFLAGS := -Wall -pipe -Os -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=$(IOS_MINVER)
 IOS_LDFLAGS := -Wl,-dead_strip
 
 all: \

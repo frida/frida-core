@@ -6,6 +6,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,7 @@ extern char *** _NSGetEnviron (void);
 # include <spawn.h>
 #endif
 
-static int spawn_child (const char * program, const char * method);
+static int spawn_child (const char * program, const char * method, bool exit_on_failure);
 static int join_child (pid_t pid);
 
 int
@@ -38,20 +39,38 @@ main (int argc, char * argv[])
   {
     const char * good_path = argv[0];
     const char * method = argv[2];
+    const bool exit_on_failure = true;
 
-    result = spawn_child (good_path, method);
+    result = spawn_child (good_path, method, exit_on_failure);
   }
   else if (strcmp (operation, "spawn-bad-path") == 0)
   {
+    const char * good_path = argv[0];
     char * bad_path;
-    const char * method;
+    const char * method = argv[2];
+    const bool exit_on_failure = true;
 
-    asprintf (&bad_path, "%s-does-not-exist", argv[0]);
-    method = argv[2];
+    asprintf (&bad_path, "%s-does-not-exist", good_path);
 
-    result = spawn_child (bad_path, method);
+    result = spawn_child (bad_path, method, exit_on_failure);
 
     free (bad_path);
+  }
+  else if (strcmp (operation, "spawn-bad-then-good-path") == 0)
+  {
+    const char * good_path = argv[0];
+    char * bad_path;
+    const char * method = argv[2];
+    const bool bad_exit_on_failure = false;
+    const bool good_exit_on_failure = true;
+
+    asprintf (&bad_path, "%s-does-not-exist", good_path);
+
+    spawn_child (bad_path, method, bad_exit_on_failure);
+
+    free (bad_path);
+
+    result = spawn_child (good_path, method, good_exit_on_failure);
   }
   else if (strcmp (operation, "say") == 0)
   {
@@ -76,7 +95,7 @@ missing_argument:
 }
 
 static int
-spawn_child (const char * path, const char * method)
+spawn_child (const char * path, const char * method, bool exit_on_failure)
 {
   char * argv[] = { (char *) path, "say", (char *) method, NULL };
   char ** envp = environ;
@@ -211,7 +230,10 @@ spawn_child (const char * path, const char * method)
   }
 
   fprintf (stderr, "%s failed: %s\n", exec_flavor, strerror (errno));
-  _exit (1);
+  if (exit_on_failure)
+    _exit (1);
+
+  return 1;
 
 missing_argument:
   {

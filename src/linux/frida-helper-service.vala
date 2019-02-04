@@ -17,7 +17,8 @@ namespace Frida {
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 
 		public Gee.HashMap<uint, void *> exec_instances = new Gee.HashMap<uint, void *> ();
-		private Gee.HashSet<uint> exec_waiters = new Gee.HashSet<uint> ();
+		private Gee.HashMap<uint, uint> exec_waiters = new Gee.HashMap<uint, uint> ();
+		private uint next_waiter_id = 1;
 
 		public Gee.HashMap<uint, void *> inject_instances = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<uint, RemoteThreadSession> inject_sessions = new Gee.HashMap<uint, RemoteThreadSession> ();
@@ -174,13 +175,14 @@ namespace Frida {
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 
-			Error? pending_error = null;
-
 			if (!_try_transition_exec_instance (instance)) {
-				exec_waiters.add (pid);
+				uint id = next_waiter_id++;
+				Error? pending_error = null;
+
+				exec_waiters[pid] = id;
 
 				Timeout.add (50, () => {
-					var cancelled = !exec_waiters.contains (pid);
+					var cancelled = !exec_waiters.has (pid, id);
 					if (cancelled) {
 						await_exec_transition.callback ();
 						return false;
@@ -202,24 +204,25 @@ namespace Frida {
 
 				yield;
 
-				var cancelled = !exec_waiters.remove (pid);
+				var cancelled = !exec_waiters.has (pid, id);
 				if (cancelled)
 					throw new Error.INVALID_OPERATION ("Cancelled");
+				exec_waiters.unset (pid);
+
+				if (pending_error != null) {
+					exec_instances.unset (pid);
+
+					_resume_exec_instance (instance);
+					_free_exec_instance (instance);
+
+					_notify_exec_pending (pid, false);
+
+					throw pending_error;
+				}
 			}
 
 			if (spawn_instances.has_key (pid))
 				monitor_child (pid);
-
-			if (pending_error != null) {
-				exec_instances.unset (pid);
-
-				_resume_exec_instance (instance);
-				_free_exec_instance (instance);
-
-				_notify_exec_pending (pid, false);
-
-				throw pending_error;
-			}
 		}
 
 		public async void cancel_exec_transition (uint pid) throws Error {
@@ -227,8 +230,9 @@ namespace Frida {
 			if (!exec_instances.unset (pid, out instance))
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 
-			exec_waiters.remove (pid);
+			exec_waiters.unset (pid);
 
+			_suspend_exec_instance (instance);
 			_resume_exec_instance (instance);
 			_free_exec_instance (instance);
 
@@ -259,7 +263,7 @@ namespace Frida {
 				return;
 			}
 
-			if (exec_waiters.contains (pid))
+			if (exec_waiters.has_key (pid))
 				throw new Error.INVALID_OPERATION ("Invalid operation");
 
 			instance_found = exec_instances.unset (pid, out instance);
@@ -390,6 +394,7 @@ namespace Frida {
 		protected extern void _do_prepare_exec_transition (uint pid) throws Error;
 		protected extern void _notify_exec_pending (uint pid, bool pending);
 		protected extern bool _try_transition_exec_instance (void * instance) throws Error;
+		protected extern void _suspend_exec_instance (void * instance);
 		protected extern void _resume_exec_instance (void * instance);
 		protected extern void _free_exec_instance (void * instance);
 
