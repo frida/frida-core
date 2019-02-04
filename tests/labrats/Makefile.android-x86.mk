@@ -1,25 +1,9 @@
-CC := $$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang
-STRIP := $$ANDROID_NDK_ROOT/toolchains/x86-4.9/prebuilt/darwin-x86_64/bin/i686-linux-android-strip
-CFLAGS := \
-	--sysroot=$$ANDROID_NDK_ROOT/platforms/android-14/arch-x86 \
-	-gcc-toolchain $$ANDROID_NDK_ROOT/toolchains/x86-4.9/prebuilt/darwin-x86_64 \
-	-target i686-none-linux-android \
-	-no-canonical-prefixes \
-	-Wall \
-	-pipe \
-	-fPIC -fPIE \
-	-Os \
-	-march=i686 \
-	-fdata-sections -ffunction-sections \
-	-funwind-tables -fno-exceptions -fno-rtti \
-	-DANDROID \
-	-I$$ANDROID_NDK_ROOT/platforms/android-14/arch-x86/usr/include
-LDFLAGS := \
-	-Wl,--no-undefined \
-	-Wl,-z,noexecstack \
-	-Wl,-z,relro \
-	-Wl,-z,now \
-	-Wl,--gc-sections
+ENV := ../../../build/frida-env-android-x86.rc
+
+CC := $(shell source $(ENV) && echo $$CC)
+STRIP := $(shell source $(ENV) && echo $$STRIP)
+CFLAGS := -Wall -pipe -Os $(shell source $(ENV) && echo $$CFLAGS)
+LDFLAGS := -Wl,--no-undefined $(shell source $(ENV) && echo $$LDFLAGS)
 
 all: \
 	sleeper-android-x86 \
