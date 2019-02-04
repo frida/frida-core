@@ -132,26 +132,26 @@
   <ItemGroup>
     <CustomBuild Include="lib\gadget\gadget.vala">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala lib/interfaces/session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;$(ProjectDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala lib/interfaces/session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;$(ProjectDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala lib/interfaces/session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;$(ProjectDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala lib/interfaces/session.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;$(ProjectDir)lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
     <None Include="lib\gadget\script-engine.vala" />
   </ItemGroup>
