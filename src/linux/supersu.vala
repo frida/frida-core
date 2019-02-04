@@ -228,9 +228,14 @@ namespace Frida.SuperSU {
 		}
 
 		private async void prepare_to_read (size_t required) throws GLib.Error {
-			var available = input.get_available ();
-			if (available < required)
-				yield input.fill_async ((ssize_t) (required - available));
+			while (true) {
+				size_t available = input.get_available ();
+				if (available >= required)
+					return;
+				ssize_t n = yield input.fill_async ((ssize_t) (required - available));
+				if (n == 0)
+					throw new Error.TRANSPORT ("Disconnected");
+			}
 		}
 
 		private async void write_credentials () throws GLib.Error {
