@@ -2860,7 +2860,8 @@ frida_resolve_inner_dlopen (pid_t pid,
       (insn[2].id == ARM_INS_BL || insn[2].id == ARM_INS_BLX) &&
       insn[3].id == ARM_INS_POP)
   {
-    impl = GSIZE_TO_POINTER (insn[2].detail->arm.operands[0].imm);
+    gsize thumb_bit = (insn[2].id == ARM_INS_BL) ? 1 : 0;
+    impl = GSIZE_TO_POINTER (insn[2].detail->arm.operands[0].imm | thumb_bit);
   }
 #elif defined (HAVE_ARM64)
   err = cs_open (CS_ARCH_ARM64, CS_MODE_ARM, &capstone);
