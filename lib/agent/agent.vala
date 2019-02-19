@@ -1012,6 +1012,8 @@ namespace Frida.Agent {
 		private PreparationState preparation_state = UNPREPARED;
 		private Mutex mutex;
 		private Cond cond;
+		private MainContext blocked_main_context;
+		private MainLoop loop;
 
 		private enum PreparationState {
 			UNPREPARED,
@@ -1046,33 +1048,65 @@ namespace Frida.Agent {
 				return;
 
 			mutex.lock ();
-
-			if (preparation_state == UNPREPARED) {
-				preparation_state = PREPARING;
-
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					do_prepare.begin ();
-					return false;
-				});
-				source.attach (main_context);
-			}
-
-			while (preparation_state != PREPARED)
-				cond.wait (mutex);
-
+			wait_until_prepared ();
 			mutex.unlock ();
 		}
 
 		private void on_leave (Gum.InvocationContext context) {
 		}
 
+		private void wait_until_prepared () {
+			if (preparation_state == PREPARED)
+				return;
+
+			if (preparation_state == UNPREPARED) {
+				preparation_state = PREPARING;
+
+				schedule_prepare ();
+			}
+
+			blocked_main_context = MainContext.get_thread_default ();
+			if (blocked_main_context != null) {
+				loop = new MainLoop (blocked_main_context);
+
+				mutex.unlock ();
+				loop.run ();
+				mutex.lock ();
+
+				loop = null;
+				blocked_main_context = null;
+			} else {
+				while (preparation_state != PREPARED)
+					cond.wait (mutex);
+			}
+		}
+
+		private void schedule_prepare () {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				do_prepare.begin ();
+				return false;
+			});
+			source.attach (main_context);
+		}
+
 		private async void do_prepare () {
 			yield handler.prepare_to_exit ();
 
 			mutex.lock ();
+
 			preparation_state = PREPARED;
 			cond.broadcast ();
+
+			if (blocked_main_context != null) {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					loop.quit ();
+					return false;
+				});
+				source.attach (blocked_main_context);
+			}
+
 			mutex.unlock ();
 		}
 	}

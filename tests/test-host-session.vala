@@ -146,6 +146,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Darwin/ExitMonitor/abort-from-js-thread-should-not-deadlock", () => {
+			var h = new Harness ((h) => Darwin.ExitMonitor.abort_from_js_thread_should_not_deadlock.begin (h as Harness));
+			h.run ();
+		});
+
 		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-native", () => {
 			var h = new Harness ((h) => Darwin.fork_native.begin (h as Harness));
 			h.run ();
@@ -1406,6 +1411,60 @@ send(ranges);
 				this.start = start;
 				this.end = end;
 				this.protection = protection;
+			}
+		}
+
+		namespace ExitMonitor {
+			private static async void abort_from_js_thread_should_not_deadlock (Harness h) {
+				try {
+					var device_manager = new DeviceManager ();
+					var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+					var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+					/* TODO: improve injector to handle injection into a process that hasn't yet finished initializing */
+					Thread.usleep (50000);
+
+					var session = yield device.attach (process.id);
+					var script = yield session.create_script ("dumper", """'use strict';
+rpc.exports = {
+  dispose: function () {
+    send('dispose');
+  }
+};
+
+var abort = new NativeFunction(Module.findExportByName('/usr/lib/system/libsystem_c.dylib', 'abort'), 'void', [], { exceptions: 'propagate' });
+setTimeout(function () { abort(); }, 50);
+""");
+
+					string? detach_reason = null;
+					string? received_message = null;
+					bool waiting = false;
+					session.detached.connect (reason => {
+						detach_reason = reason.to_string ();
+						if (waiting)
+							abort_from_js_thread_should_not_deadlock.callback ();
+					});
+					script.message.connect ((message, data) => {
+						assert (received_message == null);
+						received_message = message;
+						if (waiting)
+							abort_from_js_thread_should_not_deadlock.callback ();
+					});
+
+					yield script.load ();
+
+					while (received_message == null || detach_reason == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					assert (received_message == "{\"type\":\"send\",\"payload\":\"dispose\"}");
+					assert (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+
+					h.done ();
+				} catch (Error e) {
+					printerr ("ERROR: %s\n", e.message);
+				}
 			}
 		}
 
