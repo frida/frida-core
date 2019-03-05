@@ -67,7 +67,7 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
   api = _frida_get_springboard_api ();
 
   identifier = api->SBSCopyFrontmostApplicationDisplayIdentifier ();
-  if (identifier != nil)
+  if (identifier != nil && [identifier length] > 1)
   {
     NSString * name;
     struct kinfo_proc * entries;
@@ -105,6 +105,8 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
     result->_pid = 0;
     frida_image_data_init (&result->_small_icon, 0, 0, 0, "");
     frida_image_data_init (&result->_large_icon, 0, 0, 0, "");
+    if (identifier != nil)
+      [identifier release];
   }
 
   [pool release];
