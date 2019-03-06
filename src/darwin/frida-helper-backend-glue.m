@@ -1327,7 +1327,6 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 {
   gboolean result = FALSE;
   gchar path[4 * MAXPATHLEN];
-  gchar * dirname;
   NSAutoreleasePool * pool;
   NSURL * plist_url;
   NSDictionary * plist = nil;
@@ -1336,18 +1335,13 @@ frida_darwin_helper_backend_is_application_process (guint pid)
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
     return result;
 
-  dirname = g_path_get_dirname (path);
-  g_strlcpy (path, dirname, sizeof (path));
-  g_free (dirname);
-
-  g_strlcat (path, "/Info.plist", sizeof (path));
-
   if (!g_file_test (path, G_FILE_TEST_EXISTS))
     return result;
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  plist_url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
+  plist_url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]].URLByDeletingLastPathComponent;
+  plist_url = [plist_url URLByAppendingPathComponent:@"Info.plist" isDirectory:NO];
 
   if (@available(iOS 11, *))
     plist = [NSDictionary dictionaryWithContentsOfURL:plist_url error:nil];
