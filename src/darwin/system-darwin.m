@@ -95,8 +95,6 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
     g_free (entries);
 
     extract_icons_from_identifier (identifier, &result->_small_icon, &result->_large_icon);
-
-    [identifier release];
   }
   else
   {
@@ -105,10 +103,9 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
     result->_pid = 0;
     frida_image_data_init (&result->_small_icon, 0, 0, 0, "");
     frida_image_data_init (&result->_large_icon, 0, 0, 0, "");
-    if (identifier != nil)
-      [identifier release];
   }
 
+  [identifier release];
   [pool release];
 #else
   g_set_error (error,
