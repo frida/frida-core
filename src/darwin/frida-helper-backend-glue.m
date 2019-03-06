@@ -1329,13 +1329,10 @@ frida_darwin_helper_backend_is_application_process (guint pid)
   gchar path[4 * MAXPATHLEN];
   NSAutoreleasePool * pool;
   NSURL * plist_url;
-  NSDictionary * plist = nil;
-  NSString * identifier = nil;
+  NSDictionary * plist;
+  NSString * identifier;
 
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
-    return result;
-
-  if (!g_file_test (path, G_FILE_TEST_EXISTS))
     return result;
 
   pool = [[NSAutoreleasePool alloc] init];
