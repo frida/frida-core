@@ -1328,7 +1328,6 @@ frida_darwin_helper_backend_is_application_process (guint pid)
   gboolean result = FALSE;
   gchar path[4 * MAXPATHLEN];
   gchar * dirname;
-  struct stat info;
   NSAutoreleasePool * pool;
   NSURL * plist_url;
   NSDictionary * plist = nil;
@@ -1343,7 +1342,7 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 
   g_strlcat (path, "/Info.plist", sizeof (path));
 
-  if (stat (path, &info) != 0)
+  if (!g_file_test (path, G_FILE_TEST_EXISTS))
     return result;
 
   pool = [[NSAutoreleasePool alloc] init];
