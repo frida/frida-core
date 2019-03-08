@@ -341,6 +341,7 @@ static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
 extern int fileport_makeport (int fd, mach_port_t * port);
+extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
 
 void
 frida_darwin_helper_backend_make_pipe_endpoints (guint local_task, guint remote_pid, guint remote_task, FridaPipeEndpoints * result, GError ** error)
@@ -1325,18 +1326,33 @@ gboolean
 frida_darwin_helper_backend_is_application_process (guint pid)
 {
   gboolean result = FALSE;
+  gchar path[4 * MAXPATHLEN];
   NSAutoreleasePool * pool;
+  NSURL * plist_url;
+  NSDictionary * plist;
   NSString * identifier;
+
+  if (proc_pidpath (pid, path, sizeof (path)) <= 0)
+    return result;
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  identifier = _frida_get_springboard_api ()->SBSCopyDisplayIdentifierForProcessID (pid);
-  if (identifier != nil)
-  {
-    result = TRUE;
+  plist_url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]].URLByDeletingLastPathComponent;
+  plist_url = [plist_url URLByAppendingPathComponent:@"Info.plist" isDirectory:NO];
 
-    [identifier release];
+  if (@available(iOS 11, *))
+    plist = [NSDictionary dictionaryWithContentsOfURL:plist_url error:nil];
+  else
+    plist = [NSDictionary dictionaryWithContentsOfURL:plist_url];
+
+  if (plist == nil)
+  {
+    [pool release];
+    return result;
   }
+
+  identifier = [plist objectForKey:@"CFBundleIdentifier"];
+  result = identifier != nil;
 
   [pool release];
 
@@ -1504,7 +1520,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  gboolean need_helpers;
   GumAddress legacy_entry_address, modern_entry_address, launch_with_closure_address;
   GumDarwinModule * dyld;
   FridaExceptionPortSet * previous_ports;
@@ -1631,28 +1646,17 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, NULL);
 
-  need_helpers = TRUE;
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
   modern_entry_address = 0;
 
   launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_");
   if (launch_with_closure_address == 0)
-  {
-    gboolean system_is_at_least_mojave_or_ios12;
-
     launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_");
 
-    system_is_at_least_mojave_or_ios12 = launch_with_closure_address != 0;
-    if (system_is_at_least_mojave_or_ios12)
-      need_helpers = FALSE;
-  }
-
   if (launch_with_closure_address != 0)
-  {
     modern_entry_address = frida_find_run_initializers_call (task, instance->cpu_type, launch_with_closure_address);
-  }
 
-  instance->need_helpers = need_helpers;
+  instance->need_helpers = TRUE;
   instance->helpers_unset = FALSE;
   instance->modern_entry_address = modern_entry_address;
 
@@ -4283,7 +4287,7 @@ frida_is_hardware_breakpoint_support_working (void)
     g_assert_cmpint (res, ==, 0);
 
     version = atof (buf);
-    buggy_kernel = version >= 17.5f && version < 18.0f;
+    buggy_kernel = version >= 17.5f && version <= 18.0f;
 
     g_once_init_leave (&cached_result, !buggy_kernel + 1);
   }
