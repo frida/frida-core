@@ -304,27 +304,34 @@ namespace Frida {
 			try {
 				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 				server.start ();
+
 				var tokens = server.client_address.split ("=", 2);
+
 				resource_store.manage (new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir));
+
 				var connection_handler = server.new_connection.connect ((c) => {
 					pending_connection = c;
 					obtain.callback ();
 					return true;
 				});
-				timeout_source = new TimeoutSource.seconds (2);
+
+				timeout_source = new TimeoutSource.seconds (10);
 				timeout_source.set_callback (() => {
 					pending_error = new Error.TIMED_OUT ("Unexpectedly timed out while spawning helper process");
 					obtain.callback ();
 					return false;
 				});
 				timeout_source.attach (main_context);
+
 				try {
 					pending_superprocess = yield SuperSU.spawn ("/", new string[] { "su", "-c", helper_file.path, server.client_address });
 				} catch (Error e) {
 					string[] argv = { helper_file.path, server.client_address };
 					pending_subprocess = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
 				}
+
 				yield;
+
 				server.disconnect (connection_handler);
 				server.stop ();
 				server = null;
