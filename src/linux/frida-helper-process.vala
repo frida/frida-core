@@ -305,6 +305,15 @@ namespace Frida {
 				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
 				server.start ();
 
+				var idle_source = new IdleSource ();
+				idle_source.set_callback (() => {
+					obtain.callback ();
+					return false;
+				});
+				idle_source.attach (main_context);
+
+				yield;
+
 				var tokens = server.client_address.split ("=", 2);
 
 				resource_store.manage (new TemporaryFile (File.new_for_path (tokens[1]), resource_store.tempdir));
