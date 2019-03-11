@@ -283,10 +283,11 @@ namespace Frida {
 
 		public async Helper obtain () throws Error {
 			if (obtain_request != null) {
+				var future = obtain_request.future;
 				try {
-					return yield obtain_request.future.wait_async ();
+					return yield future.wait_async ();
 				} catch (Gee.FutureError future_error) {
-					throw new Error.INVALID_OPERATION (future_error.message);
+					throw (Error) future.exception;
 				}
 			}
 			obtain_request = new Gee.Promise<Helper> ();
