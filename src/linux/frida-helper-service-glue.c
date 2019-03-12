@@ -189,6 +189,7 @@ struct _FridaInjectInstance
 
   gchar * fifo_path;
   gint fifo;
+  gint previous_fifo;
 
   GumAddress remote_payload;
   guint remote_size;
@@ -284,6 +285,7 @@ static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * ser
 static void frida_inject_instance_recreate_fifo (FridaInjectInstance * self);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_init_fifo (FridaInjectInstance * self);
+static void frida_inject_instance_close_previous_fifo (FridaInjectInstance * self);
 static void frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy unload_policy);
 static gboolean frida_inject_instance_did_not_exec (FridaInjectInstance * self);
 static gboolean frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs, GError ** error);
@@ -671,6 +673,8 @@ _frida_helper_service_recreate_injectee_thread (FridaHelperService * self, void 
 
   instance->pid = pid;
 
+  frida_inject_instance_close_previous_fifo (instance);
+
   if (!frida_inject_instance_attach (instance, &saved_regs, error))
     goto failure;
 
@@ -882,6 +886,7 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   instance->temp_path = g_strdup (temp_path);
 
   frida_inject_instance_init_fifo (instance);
+  instance->previous_fifo = -1;
 
   instance->service = g_object_ref (service);
 
@@ -891,7 +896,8 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
 static void
 frida_inject_instance_recreate_fifo (FridaInjectInstance * self)
 {
-  close (self->fifo);
+  frida_inject_instance_close_previous_fifo (self);
+  self->previous_fifo = self->fifo;
   unlink (self->fifo_path);
   g_free (self->fifo_path);
 
@@ -943,6 +949,16 @@ frida_inject_instance_init_fifo (FridaInjectInstance * self)
 }
 
 static void
+frida_inject_instance_close_previous_fifo (FridaInjectInstance * self)
+{
+  if (self->previous_fifo != -1)
+  {
+    close (self->previous_fifo);
+    self->previous_fifo = -1;
+  }
+}
+
+static void
 frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy unload_policy)
 {
   if (instance->pid != 0 && instance->remote_payload != 0 && unload_policy == FRIDA_UNLOAD_POLICY_IMMEDIATE && !instance->exec_pending)
@@ -957,6 +973,7 @@ frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy un
     }
   }
 
+  frida_inject_instance_close_previous_fifo (instance);
   close (instance->fifo);
   unlink (instance->fifo_path);
   g_free (instance->fifo_path);
