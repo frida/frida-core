@@ -951,13 +951,19 @@ namespace Frida.Agent {
 		Gum.MemoryRange? result = mapped_range;
 
 		if (result == null) {
+			Gum.Address our_address = (Gum.Address) memory_range;
+
 			Gum.Process.enumerate_modules ((details) => {
-				if (details.name.index_of ("frida-agent") != -1) {
-					result = details.range;
+				var range = details.range;
+
+				if (our_address >= range.base_address && our_address < range.base_address + range.size) {
+					result = range;
 					return false;
 				}
+
 				return true;
 			});
+
 			assert (result != null);
 		}
 
