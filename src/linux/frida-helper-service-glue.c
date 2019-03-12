@@ -80,6 +80,12 @@
 #ifndef PTRACE_SETREGSET
 # define PTRACE_SETREGSET 0x4205
 #endif
+#ifndef PTRACE_SEIZE
+# define PTRACE_SEIZE 0x4206
+#endif
+#ifndef PTRACE_INTERRUPT
+# define PTRACE_INTERRUPT 0x4207
+#endif
 #ifndef NT_PRSTATUS
 # define NT_PRSTATUS 1
 #endif
