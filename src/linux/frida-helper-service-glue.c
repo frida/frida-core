@@ -82,11 +82,11 @@
 #endif
 
 #if defined (HAVE_I386)
-# define FridaRegs struct user_regs_struct
+typedef struct user_regs_struct FridaRegs;
 #elif defined (HAVE_ARM)
-# define FridaRegs struct pt_regs
+typedef struct pt_regs FridaRegs;
 #elif defined (HAVE_ARM64)
-# define FridaRegs struct user_pt_regs
+typedef struct user_pt_regs FridaRegs;
 #elif defined (HAVE_MIPS)
 typedef struct _FridaRegs FridaRegs;
 
