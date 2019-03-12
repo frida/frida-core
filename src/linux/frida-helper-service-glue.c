@@ -26,8 +26,10 @@
 # include <selinux/selinux.h>
 # include <sys/system_properties.h>
 #endif
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #ifdef HAVE_ARM
@@ -36,6 +38,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <sys/utsname.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #ifdef HAVE_SYS_USER_H
@@ -322,6 +325,8 @@ static guint frida_get_android_api_level (void);
 static GumAddress frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
 
+static gboolean frida_is_seize_supported (void);
+
 static gboolean frida_is_regset_supported = TRUE;
 
 guint
@@ -384,7 +389,7 @@ _frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, F
     }
 
     ptrace (PTRACE_TRACEME, 0, NULL, NULL);
-    kill (getpid (), SIGSTOP);
+    raise (SIGSTOP);
     if (execve (path, argv, envp) == -1)
     {
       g_printerr ("Unexpected error while spawning process (execve failed: %s)\n", g_strerror (errno));
@@ -780,20 +785,29 @@ static gboolean
 frida_exec_instance_prepare_transition (FridaExecInstance * self, GError ** error)
 {
   long pt_result;
-  int status;
-  pid_t wait_result;
   const gchar * failed_operation;
 
-  pt_result = ptrace (PTRACE_ATTACH, self->pid, NULL, NULL);
-  CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_ATTACH");
+  if (frida_is_seize_supported ())
+  {
+    pt_result = ptrace (PTRACE_SEIZE, self->pid, NULL, PTRACE_O_TRACEEXEC);
+    CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_SEIZE");
+  }
+  else
+  {
+    int status;
+    pid_t wait_result;
 
-  status = 0;
-  wait_result = waitpid (self->pid, &status, 0);
-  if (wait_result != self->pid || !WIFSTOPPED (status) || WSTOPSIG (status) != SIGSTOP)
-    goto wait_failed;
+    pt_result = ptrace (PTRACE_ATTACH, self->pid, NULL, NULL);
+    CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_ATTACH");
 
-  pt_result = ptrace (PTRACE_CONT, self->pid, NULL, NULL);
-  CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_CONT");
+    status = 0;
+    wait_result = waitpid (self->pid, &status, 0);
+    if (wait_result != self->pid || !WIFSTOPPED (status) || WSTOPSIG (status) != SIGSTOP)
+      goto wait_failed;
+
+    pt_result = ptrace (PTRACE_CONT, self->pid, NULL, NULL);
+    CHECK_OS_RESULT (pt_result, ==, 0, "PTRACE_CONT");
+  }
 
   return TRUE;
 
@@ -854,8 +868,16 @@ failure:
 static void
 frida_exec_instance_suspend (FridaExecInstance * self)
 {
-  kill (self->pid, SIGSTOP);
-  frida_wait_for_child_signal (self->pid, SIGSTOP, NULL);
+  if (frida_is_seize_supported ())
+  {
+    if (ptrace (PTRACE_INTERRUPT, self->pid, NULL, NULL) == 0)
+      frida_wait_for_child_signal (self->pid, SIGTRAP, NULL);
+  }
+  else
+  {
+    kill (self->pid, SIGSTOP);
+    frida_wait_for_child_signal (self->pid, SIGSTOP, NULL);
+  }
 }
 
 static void
@@ -1008,14 +1030,21 @@ static gboolean
 frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs, GError ** error)
 {
   const pid_t pid = self->pid;
+  gboolean can_seize;
   long ret;
   int attach_errno;
   const gchar * failed_operation;
   gboolean maybe_already_attached, success;
 
-  ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
+  can_seize = frida_is_seize_supported ();
+
+  if (can_seize)
+    ret = ptrace (PTRACE_SEIZE, pid, NULL, PTRACE_O_TRACEEXEC);
+  else
+    ret = ptrace (PTRACE_ATTACH, pid, NULL, NULL);
   attach_errno = errno;
-  maybe_already_attached = (ret != 0 && errno == EPERM);
+
+  maybe_already_attached = (ret != 0 && attach_errno == EPERM);
   if (maybe_already_attached)
   {
     ret = frida_get_regs (pid, saved_regs);
@@ -1025,9 +1054,15 @@ frida_inject_instance_attach (FridaInjectInstance * self, FridaRegs * saved_regs
   }
   else
   {
-    CHECK_OS_RESULT (ret, ==, 0, "PTRACE_ATTACH");
+    CHECK_OS_RESULT (ret, ==, 0, can_seize ? "PTRACE_SEIZE" : "PTRACE_ATTACH");
 
     self->already_attached = FALSE;
+
+    if (can_seize)
+    {
+      ret = ptrace (PTRACE_INTERRUPT, pid, NULL, NULL);
+      CHECK_OS_RESULT (ret, ==, 0, "PTRACE_INTERRUPT");
+    }
 
     success = frida_wait_for_attach_signal (pid);
     if (!success)
@@ -1980,36 +2015,79 @@ frida_wait_for_attach_signal (pid_t pid)
 {
   int status = 0;
   pid_t res;
+  int stop_signal;
 
   res = waitpid (pid, &status, 0);
   if (res != pid || !WIFSTOPPED (status))
     return FALSE;
+  stop_signal = WSTOPSIG (status);
 
-  switch (WSTOPSIG (status))
+  if (frida_is_seize_supported ())
   {
-    case SIGTRAP:
+    gboolean probably_about_to_exec;
+
+    probably_about_to_exec = stop_signal == SIGSTOP;
+    if (probably_about_to_exec)
+    {
       if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
         return FALSE;
-      if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
+      if (!frida_wait_for_child_signal (pid, SIGTRAP, NULL))
         return FALSE;
-      /* fall through */
-    case SIGSTOP:
-      if (frida_find_libc_base (pid) == 0)
-      {
+    }
+    else
+    {
+      if (stop_signal != SIGTRAP)
+        return FALSE;
+    }
+
+    if (frida_find_libc_base (pid) == 0)
+    {
+      if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
+        return FALSE;
+
+      g_usleep (50000);
+
+      if (ptrace (PTRACE_INTERRUPT, pid, NULL, NULL) != 0)
+        return FALSE;
+      if (!frida_wait_for_child_signal (pid, SIGTRAP, NULL))
+        return FALSE;
+
+      return frida_find_libc_base (pid) != 0;
+    }
+
+    return TRUE;
+  }
+  else
+  {
+    switch (stop_signal)
+    {
+      case SIGTRAP:
         if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
           return FALSE;
-        sleep (1);
-        kill (pid, SIGSTOP);
         if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
           return FALSE;
-        return frida_find_libc_base (pid) != 0;
-      }
-      return TRUE;
-    default:
-      break;
-  }
+        /* fall through */
+      case SIGSTOP:
+        if (frida_find_libc_base (pid) == 0)
+        {
+          if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
+            return FALSE;
 
-  return FALSE;
+          g_usleep (50000);
+
+          kill (pid, SIGSTOP);
+          if (!frida_wait_for_child_signal (pid, SIGSTOP, NULL))
+            return FALSE;
+
+          return frida_find_libc_base (pid) != 0;
+        }
+        return TRUE;
+      default:
+        break;
+    }
+
+    return FALSE;
+  }
 }
 
 static gboolean
@@ -3117,4 +3195,30 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   fclose (fp);
 
   return result;
+}
+
+static gboolean
+frida_is_seize_supported (void)
+{
+  static volatile gsize cached_result = 0;
+
+  if (g_once_init_enter (&cached_result))
+  {
+    struct utsname name;
+    guint major, minor;
+    gboolean is_supported;
+
+    bzero (&name, sizeof (name));
+    uname (&name);
+
+    major = 0;
+    minor = 0;
+    sscanf (name.release, "%u.%u", &major, &minor);
+
+    is_supported = (major == 3 && minor >= 4) || major > 3;
+
+    g_once_init_leave (&cached_result, is_supported + 1);
+  }
+
+  return cached_result - 1;
 }
