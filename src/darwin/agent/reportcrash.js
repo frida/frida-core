@@ -136,7 +136,7 @@ Interceptor.attach(NSMutableDictionary['- logCounter_isLog:byKey:count:withinLim
 
 Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
   onEnter: function (args) {
-    var newPath = Memory.readUtf8String(args[1]);
+    var newPath = args[1].readUtf8String();
     if (/\.ips$/.test(newPath)) {
       logPath = newPath;
     }
@@ -154,7 +154,7 @@ Interceptor.attach(AppleErrorReport['- saveToDir:'].implementation, {
 
 Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
   onEnter: function (args) {
-    var path = Memory.readUtf8String(args[0]);
+    var path = args[0].readUtf8String();
     this.isCrashLog = /\.ips$/.test(path);
   },
   onLeave: function (retval) {
@@ -191,7 +191,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
     var n = retval.toInt32();
     if (n === -1)
       return;
-    var chunk = Memory.readUtf8String(this.buf, n);
+    var chunk = this.buf.readUtf8String(n);
     logChunks.push(chunk);
   }
 });
@@ -205,7 +205,7 @@ Interceptor.attach(Module.findExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPref
   onLeave: function (retval) {
     if (this.name === 'SymbolicateCrashes' && this.domain === 'com.apple.CrashReporter') {
       if (!this.successPtr.isNull())
-        Memory.writeU8(this.successPtr, 1);
+        this.successPtr.writeU8(1);
       retval.replace(ptr(1));
     }
   }
@@ -223,13 +223,13 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
       return;
 
     var info = this.info;
-    switch (Memory.readUInt(this.count)) {
+    switch (this.count.readUInt()) {
       case 1:
       case 3:
-        allImageInfoAddr = uint64(Memory.readU32(info));
+        allImageInfoAddr = uint64(info.readU32());
         break;
       case 5:
-        allImageInfoAddr = Memory.readU64(info);
+        allImageInfoAddr = info.readU64();
         break;
       default:
         throw new Error('Unexpected TASK_DYLD_INFO count');
@@ -280,8 +280,8 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
         var extraImageCount = mappedAgents.length;
 
         var imageArrayCountPtr = allImageInfos.add(4);
-        var imageArrayCount = Memory.readU32(imageArrayCountPtr);
-        Memory.writeU32(imageArrayCountPtr, imageArrayCount + extraImageCount);
+        var imageArrayCount = imageArrayCountPtr.readU32();
+        imageArrayCountPtr.writeU32(imageArrayCount + extraImageCount);
 
         imageElementSize = 3 * (is64Bit ? 8 : 4);
         imageTrailerSize = extraImageCount * imageElementSize;
@@ -295,13 +295,15 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
           var modDate = 0;
 
           if (is64Bit) {
-            Memory.writeU64(element, loadAddress);
-            Memory.writeU64(element.add(8), filePath);
-            Memory.writeU64(element.add(16), modDate);
+            element
+                .writeU64(loadAddress).add(8)
+                .writeU64(filePath).add(8)
+                .writeU64(modDate);
           } else {
-            Memory.writeU32(element, loadAddress);
-            Memory.writeU32(element.add(4), filePath);
-            Memory.writeU32(element.add(8), modDate);
+            element
+                .writeU32(loadAddress).add(4)
+                .writeU32(filePath).add(4)
+                .writeU32(modDate);
           }
 
           imageTrailerPaths[filePath.toString()] = agent;
@@ -312,28 +314,28 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
       } else {
         var agent = imageTrailerPaths[startAddress.toString()];
         if (agent !== undefined)
-          Memory.writeUtf8String(getData(this), agent.path);
+          getData(this).writeUtf8String(agent.path);
       }
     }
   });
 
   function getData(invocationContext) {
-    return inplace ? invocationContext.data : Memory.readPointer(invocationContext.data);
+    return inplace ? invocationContext.data : invocationContext.data.readPointer();
   }
 });
 
 function pidForTask(task) {
   var pidBuf = Memory.alloc(4);
   _pidForTask(task, pidBuf);
-  return Memory.readU32(pidBuf);
+  return pidBuf.readU32();
 }
 
 function readRemotePointer(address) {
-  return is64Bit ? Memory.readU64(address) : uint64(Memory.readU32(address));
+  return is64Bit ? address.readU64() : uint64(address.readU32());
 }
 
 function readSizeFromU32(address) {
-  return uint64(Memory.readU32(address));
+  return uint64(address.readU32());
 }
 
 if (Process.arch === 'arm64') {
@@ -355,7 +357,7 @@ if (Process.arch === 'arm64') {
 
       var callstack = this.self.$ivars._callstack;
       var samplingContext = this.samplingContext;
-      var mappedMemory = new MappedMemory(Memory.readPointer(samplingContext.add(8)));
+      var mappedMemory = new MappedMemory(samplingContext.add(8).readPointer());
       var symbolicator = this.symbolicator;
 
       var frames = callstack[1];
@@ -364,17 +366,17 @@ if (Process.arch === 'arm64') {
 
       for (var i = 0; i !== length; i++) {
         var frameSlot = frames.add(i * 8);
-        var frame = Memory.readU64(frameSlot);
+        var frame = frameSlot.readU64();
 
         var symbol = CSSymbolicatorGetSymbolWithAddressAtTime(symbolicator, frame, kCSNow);
         if (!CSIsNull(symbol))
           continue;
 
-        var framePtrAbove = (i > 0) ? Memory.readU64(framePtrs.add((i - 1) * 8)) : null;
+        var framePtrAbove = (i > 0) ? framePtrs.add((i - 1) * 8).readU64() : null;
 
         var functionAddress = tryParseInterceptorTrampoline(frame, framePtrAbove, mappedMemory);
         if (functionAddress !== null)
-          Memory.writeU64(frameSlot, functionAddress);
+          frameSlot.writeU64(functionAddress);
       }
     },
   });
@@ -390,14 +392,14 @@ MappedMemory.prototype.read = function (address, size) {
   var kr = mappedMemoryRead(this.handle, address, size, pointerBuf);
   if (kr !== 0)
     throw new Error('Invalid address: 0x' + address.toString(16));
-  return Memory.readByteArray(Memory.readPointer(pointerBuf), size);
+  return pointerBuf.readPointer().readByteArray(size);
 };
 
 MappedMemory.prototype.readPointer = function (address) {
   var kr = mappedMemoryReadPointer(this.handle, address, pointerBuf);
   if (kr !== 0)
     throw new Error('Invalid address: 0x' + address.toString(16));
-  return Memory.readU64(pointerBuf);
+  return pointerBuf.readU64();
 };
 
 function tryParseInterceptorTrampoline(code, stackFrameAbove, mappedMemory) {

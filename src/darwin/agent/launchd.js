@@ -1,11 +1,5 @@
 'use strict';
 
-var readU16 = Memory.readU16;
-var writeU16 = Memory.writeU16;
-var readU32 = Memory.readU32;
-var readPointer = Memory.readPointer;
-var readString = Memory.readUtf8String;
-
 var pointerSize = Process.pointerSize;
 
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
@@ -37,11 +31,11 @@ rpc.exports = {
 
 Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
-    var path = readString(args[1]);
+    var path = args[1].readUtf8String();
     if (path !== '/usr/libexec/xpcproxy')
       return;
 
-    var rawIdentifier = readString(readPointer(args[3].add(pointerSize)));
+    var rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
 
     var identifier, event;
     if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
@@ -59,11 +53,11 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
       return;
     }
 
-    var attrs = readPointer(args[2].add(pointerSize));
+    var attrs = args[2].add(pointerSize).readPointer();
 
-    var flags = readU16(attrs);
+    var flags = attrs.readU16();
     flags |= POSIX_SPAWN_START_SUSPENDED;
-    writeU16(attrs, flags);
+    attrs.writeU16(flags);
 
     this.event = event;
     this.identifier = identifier;
@@ -82,7 +76,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
     if (retval.toInt32() < 0)
       return;
 
-    var pid = readU32(this.pidPtr);
+    var pid = this.pidPtr.readU32();
 
     if (runningOnElectra) {
       jbdPidsToIgnore[pid] = true;

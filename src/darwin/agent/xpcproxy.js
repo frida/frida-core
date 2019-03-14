@@ -7,11 +7,11 @@ var runningOnElectra = jbdCallImpl !== null;
 
 Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
-    var attrs = Memory.readPointer(args[2].add(Process.pointerSize));
+    var attrs = args[2].add(Process.pointerSize).readPointer();
 
-    var flags = Memory.readU16(attrs);
+    var flags = attrs.readU16();
     flags |= POSIX_SPAWN_START_SUSPENDED;
-    Memory.writeU16(attrs, flags);
+    attrs.writeU16(flags);
   }
 });
 
