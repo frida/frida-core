@@ -11,6 +11,7 @@ var jbdCallImpl = Module.findExportByName(null, 'jbd_call');
 var jbdPidsToIgnore = {};
 var runningOnElectra = jbdCallImpl !== null;
 
+var substrateInvocations = {};
 var substratePidsPending = {};
 
 rpc.exports = {
@@ -82,7 +83,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
       jbdPidsToIgnore[pid] = true;
     }
 
-    var dealingWithSubstrate = this.depth > 0;
+    var dealingWithSubstrate = substrateInvocations[this.threadId] === true;
     if (dealingWithSubstrate) {
       substratePidsPending[pid] = notifyFridaBackend;
     } else {
@@ -155,7 +156,10 @@ function tryDetectSubstrateLauncher() {
 function instrumentSubstrateLauncher(launcher) {
   Interceptor.attach(launcher.handlePosixSpawn, {
     onEnter: function () {
-      // Empty because our __posix_spawn() hook is informed by the InvocationContext depth.
+      substrateInvocations[this.threadId] = true;
+    },
+    onLeave: function () {
+      delete substrateInvocations[this.threadId];
     }
   });
 
