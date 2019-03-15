@@ -30,12 +30,21 @@ function sabotageJbdCall() {
   }, retType, argTypes));
 }
 
-var proxyer = tryDetectSubstrateProxyer();
+var proxyer = findSubstrateProxyer();
 if (proxyer !== null) {
   instrumentSubstrateProxyer(proxyer);
 }
 
-function tryDetectSubstrateProxyer() {
+function instrumentSubstrateProxyer(proxyer) {
+  Interceptor.attach(proxyer.exec, {
+    onEnter: function (args) {
+      var startSuspendedYup = ptr(1);
+      args[2] = startSuspendedYup;
+    }
+  });
+}
+
+function findSubstrateProxyer() {
   if (Process.arch !== 'arm64')
     return null;
 
@@ -63,13 +72,4 @@ function tryDetectSubstrateProxyer() {
     }
     return matches[0].address;
   }
-}
-
-function instrumentSubstrateProxyer(proxyer) {
-  Interceptor.attach(proxyer.exec, {
-    onEnter: function (args) {
-      var startSuspendedYup = ptr(1);
-      args[2] = startSuspendedYup;
-    }
-  });
 }
