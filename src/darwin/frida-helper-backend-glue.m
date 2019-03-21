@@ -339,6 +339,7 @@ static GumAddress frida_find_function_end (mach_port_t task, GumCpuType cpu_type
 static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
 
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
+static gboolean frida_darwin_backend_helper_find_uikit (const gchar * dependency, gboolean * has_uikit);
 
 extern int fileport_makeport (int fd, mach_port_t * port);
 extern int proc_pidpath (int pid, void * buffer, uint32_t buffer_size);
@@ -1327,36 +1328,28 @@ frida_darwin_helper_backend_is_application_process (guint pid)
 {
   gboolean result = FALSE;
   gchar path[4 * MAXPATHLEN];
-  NSAutoreleasePool * pool;
-  NSURL * plist_url;
-  NSDictionary * plist;
-  NSString * identifier;
+  GumDarwinModule * module;
 
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
     return result;
 
-  pool = [[NSAutoreleasePool alloc] init];
-
-  plist_url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]].URLByDeletingLastPathComponent;
-  plist_url = [plist_url URLByAppendingPathComponent:@"Info.plist" isDirectory:NO];
-
-  if (@available(iOS 11, *))
-    plist = [NSDictionary dictionaryWithContentsOfURL:plist_url error:nil];
-  else
-    plist = [NSDictionary dictionaryWithContentsOfURL:plist_url];
-
-  if (plist == nil)
-  {
-    [pool release];
+  module = gum_darwin_module_new_from_file (path, mach_task_self (), GUM_CPU_INVALID,
+      0, NULL, TRUE, NULL);
+  if (module == NULL)
     return result;
-  }
 
-  identifier = [plist objectForKey:@"CFBundleIdentifier"];
-  result = identifier != nil;
-
-  [pool release];
+  gum_darwin_module_enumerate_dependencies (module,
+      (GumDarwinFoundDependencyFunc) frida_darwin_backend_helper_find_uikit, &result);
+  g_object_unref (module);
 
   return result;
+}
+
+static gboolean
+frida_darwin_backend_helper_find_uikit (const gchar * dependency, gboolean * has_uikit)
+{
+  *has_uikit = strcmp (dependency, "/System/Library/Frameworks/UIKit.framework/UIKit") == 0;
+  return !*has_uikit;
 }
 
 #else
