@@ -772,6 +772,8 @@ static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp
 
 static void frida_configure_terminal_attributes (gint fd);
 
+static gboolean frida_find_uikit (const gchar * dependency, gboolean * has_uikit);
+
 void
 _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOptions * options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
@@ -1325,38 +1327,31 @@ frida_configure_terminal_attributes (gint fd)
 gboolean
 frida_darwin_helper_backend_is_application_process (guint pid)
 {
-  gboolean result = FALSE;
+  gboolean is_app;
   gchar path[4 * MAXPATHLEN];
-  NSAutoreleasePool * pool;
-  NSURL * plist_url;
-  NSDictionary * plist;
-  NSString * identifier;
+  GumDarwinModule * module;
 
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
-    return result;
+    return FALSE;
 
-  pool = [[NSAutoreleasePool alloc] init];
+  module = gum_darwin_module_new_from_file (path, mach_task_self (), GUM_CPU_INVALID, 0, NULL,
+      GUM_DARWIN_MODULE_FLAGS_HEADER_ONLY, NULL);
+  if (module == NULL)
+    return FALSE;
 
-  plist_url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]].URLByDeletingLastPathComponent;
-  plist_url = [plist_url URLByAppendingPathComponent:@"Info.plist" isDirectory:NO];
+  is_app = FALSE;
+  gum_darwin_module_enumerate_dependencies (module, (GumDarwinFoundDependencyFunc) frida_find_uikit, &is_app);
 
-  if (@available(iOS 11, *))
-    plist = [NSDictionary dictionaryWithContentsOfURL:plist_url error:nil];
-  else
-    plist = [NSDictionary dictionaryWithContentsOfURL:plist_url];
+  g_object_unref (module);
 
-  if (plist == nil)
-  {
-    [pool release];
-    return result;
-  }
+  return is_app;
+}
 
-  identifier = [plist objectForKey:@"CFBundleIdentifier"];
-  result = identifier != nil;
-
-  [pool release];
-
-  return result;
+static gboolean
+frida_find_uikit (const gchar * dependency, gboolean * has_uikit)
+{
+  *has_uikit = strcmp (dependency, "/System/Library/Frameworks/UIKit.framework/UIKit") == 0;
+  return !*has_uikit;
 }
 
 #else
@@ -1644,7 +1639,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     g_free (magic);
   }
 
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, NULL);
+  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
   modern_entry_address = 0;
