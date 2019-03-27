@@ -948,6 +948,7 @@ frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
   clone->temp_path = g_strdup (instance->temp_path);
 
   frida_inject_instance_init_fifo (clone);
+  clone->previous_fifo = -1;
 
   g_object_ref (clone->service);
 
