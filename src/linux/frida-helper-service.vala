@@ -475,6 +475,12 @@ namespace Frida {
 			} catch (Gee.FutureError e) {
 				assert_not_reached ();
 			}
+
+			Idle.add (() => {
+				cancel.callback ();
+				return false;
+			});
+			yield;
 		}
 
 		private async void monitor () {
