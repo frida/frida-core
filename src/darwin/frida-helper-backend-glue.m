@@ -1675,12 +1675,14 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   instance->info_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld12gProcessInfoE");
   instance->helpers_ptr_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld17gLibSystemHelpersE");
   instance->do_modinit_start = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE");
+  instance->do_modinit_end = gum_darwin_module_resolve_symbol_address (dyld, "__ZN16ImageLoaderMachO16doGetDOFSectionsERKN11ImageLoader11LinkContextERNSt3__16vectorINS0_7DOFInfoENS4_9allocatorIS6_EEEE");
   instance->strcmp_address = gum_darwin_module_resolve_symbol_address (dyld, "_strcmp");
 
   g_object_unref (dyld);
 
   if (legacy_entry_address == 0 || instance->dlopen_address == 0 || instance->register_helpers_address == 0 ||
-      instance->info_address == 0 || instance->do_modinit_start == 0 || instance->strcmp_address == 0)
+      instance->info_address == 0 || instance->do_modinit_start == 0 || instance->do_modinit_end == 0 ||
+      instance->strcmp_address == 0)
   {
     goto dyld_probe_failed;
   }
@@ -1691,10 +1693,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     instance->register_helpers_address |= 1;
     instance->do_modinit_start |= 1;
   }
-
-  instance->do_modinit_end = frida_find_function_end (task, instance->cpu_type, instance->do_modinit_start, 1024);
-  if (instance->do_modinit_end == 0)
-    goto dyld_probe_failed;
 
   instance->ret_gadget = frida_find_function_end (task, instance->cpu_type, instance->register_helpers_address, 128);
   if (instance->ret_gadget == 0)
