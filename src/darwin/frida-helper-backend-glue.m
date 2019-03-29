@@ -1515,6 +1515,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
+  gboolean need_helpers;
   GumAddress legacy_entry_address, modern_entry_address, launch_with_closure_address;
   GumDarwinModule * dyld;
   FridaExceptionPortSet * previous_ports;
@@ -1641,17 +1642,28 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
+  need_helpers = TRUE;
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
   modern_entry_address = 0;
 
   launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_");
   if (launch_with_closure_address == 0)
+  {
+    gboolean is_dyld_v3;
+
     launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_");
 
-  if (launch_with_closure_address != 0)
-    modern_entry_address = frida_find_run_initializers_call (task, instance->cpu_type, launch_with_closure_address);
+    is_dyld_v3 = launch_with_closure_address != 0 || gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld315internalInstallEv") != 0;
+    if (is_dyld_v3)
+      need_helpers = FALSE;
+  }
 
-  instance->need_helpers = TRUE;
+  if (launch_with_closure_address != 0)
+  {
+    modern_entry_address = frida_find_run_initializers_call (task, instance->cpu_type, launch_with_closure_address);
+  }
+
+  instance->need_helpers = need_helpers;
   instance->helpers_unset = FALSE;
   instance->modern_entry_address = modern_entry_address;
 
