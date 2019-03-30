@@ -585,7 +585,7 @@ namespace Frida {
 	}
 
 	public class RpcClient : Object {
-		public RpcPeer peer {
+		public weak RpcPeer peer {
 			get;
 			construct;
 		}
