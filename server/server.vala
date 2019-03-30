@@ -218,8 +218,21 @@ namespace Frida.Server {
 			server.new_connection.connect (on_connection_opened);
 			server.start ();
 
+			Idle.add (() => {
+				start.begin ();
+				return false;
+			});
+
 			loop = new MainLoop ();
 			loop.run ();
+		}
+
+		private async void start () {
+			try {
+				yield host_session.preload ();
+			} catch (Error e) {
+				printerr ("Unable to preload: %s\n", e.message);
+			}
 		}
 
 		public void stop () {

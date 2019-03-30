@@ -110,6 +110,14 @@ namespace Frida {
 #endif
 		}
 
+		public override async void preload () throws Error {
+#if ANDROID
+			yield system_server_agent.preload ();
+
+			yield robo_launcher.preload ();
+#endif
+		}
+
 		public override async void close () {
 			yield base.close ();
 
@@ -366,6 +374,10 @@ namespace Frida {
 
 		public RoboLauncher (LinuxHostSession host_session, HelperProcess helper, SystemServerAgent system_server_agent) {
 			Object (host_session: host_session, helper: helper, system_server_agent: system_server_agent);
+		}
+
+		public async void preload () throws Error {
+			yield ensure_loaded ();
 		}
 
 		public async void close () {
@@ -628,8 +640,18 @@ namespace Frida {
 			);
 		}
 
-		construct {
-			ensure_loaded.begin ();
+		public async void preload () throws Error {
+			yield enumerate_applications ();
+
+			try {
+				yield get_process_name ("");
+			} catch (Error e) {
+			}
+
+			try {
+				yield start_package ("", new DefaultActivityEntrypoint ());
+			} catch (Error e) {
+			}
 		}
 
 		public async HostApplicationInfo[] enumerate_applications () throws Error {

@@ -154,6 +154,9 @@ namespace Frida {
 		protected Injector injector;
 		protected Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
+		public virtual async void preload () throws Error {
+		}
+
 		public virtual async void close () {
 			if (pending_children_gc_timer != null) {
 				pending_children_gc_timer.destroy ();
