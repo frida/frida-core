@@ -208,4 +208,7 @@ subdir('lib')
 subdir('src')
 subdir('server')
 subdir('inject')
-subdir('tests')
+
+if get_option('enable_tests')
+  subdir('tests')
+endif
