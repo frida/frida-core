@@ -365,6 +365,7 @@ namespace Frida {
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
 		private Gee.HashMap<uint, MappedAgent> mapped_agents = new Gee.HashMap<uint, MappedAgent> ();
 		private Gee.HashMap<MappedAgent, Source> mapped_agents_dying = new Gee.HashMap<MappedAgent, Source> ();
+		private Gee.HashSet<uint> xpcproxies = new Gee.HashSet<uint> ();
 
 		public FruitController (DarwinHostSession host_session) {
 			Object (host_session: host_session, helper: host_session.helper);
@@ -372,6 +373,7 @@ namespace Frida {
 
 		construct {
 			launchd_agent = new LaunchdAgent (host_session);
+			launchd_agent.app_launch_started.connect (on_app_launch_started);
 			launchd_agent.app_launch_completed.connect (on_app_launch_completed);
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
@@ -383,6 +385,7 @@ namespace Frida {
 			launchd_agent.spawn_preparation_aborted.disconnect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_preparation_started.disconnect (on_spawn_preparation_started);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
+			launchd_agent.app_launch_started.disconnect (on_app_launch_started);
 		}
 
 		public async void close () {
@@ -489,7 +492,7 @@ namespace Frida {
 		}
 
 		public async CrashInfo? try_collect_crash (uint pid) {
-			if (crash_agents.has_key (pid))
+			if (crash_agents.has_key (pid) || xpcproxies.contains (pid))
 				return null;
 
 			var delivery = get_crash_delivery_for_pid (pid);
@@ -539,8 +542,15 @@ namespace Frida {
 			mapped_agents_dying[agent] = timeout;
 		}
 
+		private void on_app_launch_started (string identifier, uint pid) {
+			xpcproxies.add (pid);
+		}
+
 		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
 			Gee.Promise<uint> request;
+
+			xpcproxies.remove (pid);
+
 			if (spawn_requests.unset (identifier, out request)) {
 				if (error == null)
 					request.set_value (pid);
@@ -553,15 +563,19 @@ namespace Frida {
 		}
 
 		private void on_spawn_preparation_started (HostSpawnInfo info) {
+			xpcproxies.add (info.pid);
+
 			if (is_crash_reporter (info))
 				add_crash_reporter_agent (info.pid);
 		}
 
 		private void on_spawn_preparation_aborted (HostSpawnInfo info) {
+			xpcproxies.remove (info.pid);
 			crash_agents.unset (info.pid);
 		}
 
 		private void on_spawn_captured (HostSpawnInfo info) {
+			xpcproxies.remove (info.pid);
 			handle_spawn.begin (info);
 		}
 
@@ -590,6 +604,9 @@ namespace Frida {
 		}
 
 		private ReportCrashAgent add_crash_reporter_agent (uint pid) {
+			foreach (var delivery in crash_deliveries.values)
+				delivery.extend_timeout (5000);
+
 			var agent = new ReportCrashAgent (host_session, pid, this);
 			crash_agents[pid] = agent;
 
@@ -667,12 +684,12 @@ namespace Frida {
 				return source;
 			}
 
-			public void extend_timeout () {
+			public void extend_timeout (uint timeout = 20000) {
 				if (future.ready)
 					return;
 
 				expiry_source.destroy ();
-				expiry_source = make_expiry_source (20000);
+				expiry_source = make_expiry_source (timeout);
 			}
 
 			public void complete (CrashInfo? crash) {
@@ -726,6 +743,7 @@ namespace Frida {
 	}
 
 	private class LaunchdAgent : InternalAgent {
+		public signal void app_launch_started (string identifier, uint pid);
 		public signal void app_launch_completed (string identifier, uint pid, Error? error);
 		public signal void spawn_preparation_started (HostSpawnInfo info);
 		public signal void spawn_preparation_aborted (HostSpawnInfo info);
@@ -773,6 +791,8 @@ namespace Frida {
 		}
 
 		private async void prepare_app (string identifier, uint pid) {
+			app_launch_started (identifier, pid);
+
 			try {
 				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
 				yield agent.run_until_exec ();
