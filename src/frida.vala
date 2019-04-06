@@ -129,7 +129,7 @@ namespace Frida {
 
 			CancellableSource cancellable_source = null;
 			if (cancellable != null) {
-				cancellable_source = cancellable.source_new ();
+				cancellable_source = new CancellableSource (cancellable);
 				cancellable_source.set_callback (() => {
 					find_device.callback ();
 					return false;
@@ -600,7 +600,7 @@ namespace Frida {
 
 			CancellableSource cancellable_source = null;
 			if (cancellable != null) {
-				cancellable_source = cancellable.source_new ();
+				cancellable_source = new CancellableSource (cancellable);
 				cancellable_source.set_callback (() => {
 					done = true;
 					if (waiting)

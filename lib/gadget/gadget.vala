@@ -81,6 +81,16 @@ namespace Frida.Gadget {
 		public unowned ParamSpec? find_property (string name) {
 			return klass.find_property (name);
 		}
+
+		public new Value get_property (ParamSpec pspec) {
+			var val = Value (pspec.value_type);
+			base.get_property (pspec.name, ref val);
+			return val;
+		}
+
+		public new void set_property (ParamSpec pspec, Value value) {
+			base.set_property (pspec.name, value);
+		}
 	}
 
 	private enum TeardownRequirement {
@@ -132,6 +142,16 @@ namespace Frida.Gadget {
 
 		public unowned ParamSpec? find_property (string name) {
 			return klass.find_property (name);
+		}
+
+		public new Value get_property (ParamSpec pspec) {
+			var val = Value (pspec.value_type);
+			base.get_property (pspec.name, ref val);
+			return val;
+		}
+
+		public new void set_property (ParamSpec pspec, Value value) {
+			base.set_property (pspec.name, value);
 		}
 	}
 
@@ -193,6 +213,16 @@ namespace Frida.Gadget {
 
 		public unowned ParamSpec? find_property (string name) {
 			return klass.find_property (name);
+		}
+
+		public new Value get_property (ParamSpec pspec) {
+			var val = Value (pspec.value_type);
+			base.get_property (pspec.name, ref val);
+			return val;
+		}
+
+		public new void set_property (ParamSpec pspec, Value value) {
+			base.set_property (pspec.name, value);
 		}
 	}
 
