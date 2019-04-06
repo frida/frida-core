@@ -1870,7 +1870,7 @@ namespace Frida.Agent {
 		}
 
 		private Gee.HashSet<Gum.InvocationListener> listeners = new Gee.HashSet<Gum.InvocationListener> ();
-		private Gee.HashSet<Posix.Dir> tracked_handles = new Gee.HashSet<unowned Posix.Dir> ();
+		private Gee.HashSet<unowned Posix.Dir> tracked_handles = new Gee.HashSet<unowned Posix.Dir> ();
 
 		public DirListCloaker (DirListFilter filter) {
 			Object (filter: filter);
