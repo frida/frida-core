@@ -216,7 +216,7 @@ namespace Winjector {
 		private uint next_id = 0;
 		private uint pending = 0;
 
-		public Service () {
+		protected Service () {
 			Idle.add (() => {
 				start.begin ();
 				return false;
