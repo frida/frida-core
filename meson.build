@@ -209,6 +209,6 @@ subdir('src')
 subdir('server')
 subdir('inject')
 
-if get_option('enable_tests')
+if get_option('tests')
   subdir('tests')
 endif
