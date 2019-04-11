@@ -219,9 +219,8 @@ namespace Frida {
 		[CCode (has_target = false)]
 		private delegate Gum.Darwin.Status EntitleNowFunc (DaemonConnection connection, Posix.pid_t pid);
 
-		[Compact]
-		[CCode (free_function = "")]
-		private class DaemonConnection {
+		[CCode (has_type_id = false)]
+		private struct DaemonConnection : size_t {
 		}
 	}
 #endif
