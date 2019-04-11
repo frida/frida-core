@@ -99,9 +99,9 @@ if host_os_family == 'darwin'
   helper_inputs = ['darwin/frida-helper.xcent']
   if helper32 == '' and helper64 == ''
     if host_is_64bit
-      helper64 = helper
+      helper64 = helper.full_path()
     else
-      helper32 = helper
+      helper32 = helper.full_path()
     endif
     helper_inputs += helper
   endif
@@ -195,9 +195,9 @@ if host_os_family == 'linux'
   helper_inputs = []
   if helper32 == '' and helper64 == ''
     if host_is_64bit
-      helper64 = helper
+      helper64 = helper.full_path()
     else
-      helper32 = helper
+      helper32 = helper.full_path()
     endif
     helper_inputs += helper
   endif
@@ -239,9 +239,9 @@ agent64 = get_option('with-64bit-agent')
 agent_inputs = ['agent.resources']
 if agent32 == '' and agent64 == ''
   if host_is_64bit
-    agent64 = agent
+    agent64 = agent.full_path()
   else
-    agent32 = agent
+    agent32 = agent.full_path()
   endif
   agent_inputs += agent
 endif
