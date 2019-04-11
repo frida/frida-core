@@ -96,19 +96,17 @@ if host_os_family == 'darwin'
 
   helper32 = get_option('with-32bit-helper')
   helper64 = get_option('with-64bit-helper')
+  helper_inputs = ['darwin/frida-helper.xcent']
   if helper32 == '' and helper64 == ''
     if host_is_64bit
       helper64 = helper
     else
       helper32 = helper
     endif
+    helper_inputs += helper
   endif
   helper_process_data = custom_target('frida-data-helper-process',
-    input: [
-      helper32,
-      helper64,
-      'darwin/frida-helper.xcent',
-    ],
+    input: helper_inputs,
     output: [
       'frida-data-helper-process.vapi',
       'frida-data-helper-process.h',
@@ -118,9 +116,9 @@ if host_os_family == 'darwin'
     command: [
       files('darwin/embed-helper.sh'),
       host_os,
+      helper32,
+      helper64,
       '@INPUT0@',
-      '@INPUT1@',
-      '@INPUT2@',
       meson.current_build_dir(),
       resource_compiler,
       meson.get_cross_binary('strip', 'strip'),
@@ -194,18 +192,17 @@ if host_os_family == 'linux'
 
   helper32 = get_option('with-32bit-helper')
   helper64 = get_option('with-64bit-helper')
+  helper_inputs = []
   if helper32 == '' and helper64 == ''
     if host_is_64bit
       helper64 = helper
     else
       helper32 = helper
     endif
+    helper_inputs += helper
   endif
   helper_process_data = custom_target('frida-data-helper-process',
-    input: [
-      helper32,
-      helper64,
-    ],
+    input: helper_inputs,
     output: [
       'frida-data-helper-process.vapi',
       'frida-data-helper-process.h',
@@ -215,8 +212,8 @@ if host_os_family == 'linux'
     command: [
       files('linux/embed-helper.sh'),
       host_os,
-      '@INPUT0@',
-      '@INPUT1@',
+      helper32,
+      helper64,
       meson.current_build_dir(),
       resource_compiler,
       meson.get_cross_binary('strip', 'strip'),
@@ -239,19 +236,17 @@ endif
 
 agent32 = get_option('with-32bit-agent')
 agent64 = get_option('with-64bit-agent')
+agent_inputs = ['agent.resources']
 if agent32 == '' and agent64 == ''
   if host_is_64bit
     agent64 = agent
   else
     agent32 = agent
   endif
+  agent_inputs += agent
 endif
 agent_data = custom_target('frida-data-agent',
-  input: [
-    agent32,
-    agent64,
-    'agent.resources',
-  ],
+  input: agent_inputs,
   output: [
     'frida-data-agent.vapi',
     'frida-data-agent.h',
@@ -261,11 +256,11 @@ agent_data = custom_target('frida-data-agent',
   command: [
     files('embed-agent.sh'),
     host_os,
-    '@INPUT0@',
-    '@INPUT1@',
+    agent32,
+    agent64,
     meson.current_build_dir(),
     resource_compiler,
-    '@INPUT2@',
+    '@INPUT0@',
     meson.get_cross_binary('strip', 'strip'),
     get_option('strip').to_string(),
   ],
