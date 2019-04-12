@@ -20,30 +20,12 @@ elif host_os_family != 'windows'
   extra_link_depends += [symscript]
 endif
 
-gadget = shared_library('frida-gadget', gadget_sources,
+shared_library('frida-gadget', gadget_sources,
   name_prefix: '',
   c_args: frida_component_cflags,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-gadget.def',
   dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep, tls_provider_dep],
-  install: host_os_family != 'darwin',
+  install: true,
 )
-
-if host_os_family == 'darwin'
-  custom_target('frida-gadget-signed',
-    input: gadget,
-    output: 'FridaGadget.dylib',
-    command: [
-      files('sign.sh'),
-      host_os,
-      '@INPUT@',
-      '@OUTPUT@',
-      meson.get_cross_binary('strip', 'strip'),
-      get_option('strip').to_string(),
-    ],
-    build_by_default: true,
-    install: true,
-    install_dir: get_option('libdir'),
-  )
-endif
