@@ -10,6 +10,7 @@ namespace Frida.Server {
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
+	private static bool verbose = false;
 
 	private delegate void ReadyHandler (bool success);
 
@@ -20,6 +21,7 @@ namespace Frida.Server {
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
+		{ "verbose", 'v', 0, OptionArg.NONE, ref verbose, "Be verbose", null },
 		{ null }
 	};
 
@@ -31,15 +33,18 @@ namespace Frida.Server {
 			ctx.set_help_enabled (true);
 			ctx.add_main_entries (options, null);
 			ctx.parse (ref args);
-			if (output_version) {
-				stdout.printf ("%s\n", version_string ());
-				return 0;
-			}
 		} catch (OptionError e) {
 			printerr ("%s\n", e.message);
 			printerr ("Run '%s --help' to see a full list of available command line options.\n", args[0]);
 			return 1;
 		}
+
+		if (output_version) {
+			stdout.printf ("%s\n", version_string ());
+			return 0;
+		}
+
+		Environment.set_verbose_logging_enabled (verbose);
 
 		string listen_uri;
 		try {
@@ -172,6 +177,7 @@ namespace Frida.Server {
 
 	namespace Environment {
 		public extern void init ();
+		public extern void set_verbose_logging_enabled (bool enabled);
 		public extern void configure ();
 	}
 

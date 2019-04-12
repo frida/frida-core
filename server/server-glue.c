@@ -39,6 +39,8 @@ void CFLog (CFLogLevel level, CFStringRef format, ...);
 static void frida_server_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
 static void frida_server_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
+static gboolean frida_verbose_logging_enabled = FALSE;
+
 void
 frida_server_environment_init (void)
 {
@@ -47,6 +49,12 @@ frida_server_environment_init (void)
   g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
   gio_init ();
   gum_init ();
+}
+
+void
+frida_server_environment_set_verbose_logging_enabled (gboolean enabled)
+{
+  frida_verbose_logging_enabled = enabled;
 }
 
 void
@@ -81,6 +89,9 @@ frida_server_on_assert_failure (const gchar * log_domain, const gchar * file, gi
 static void
 frida_server_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data)
 {
+  if (!frida_verbose_logging_enabled && (log_level & G_LOG_LEVEL_MASK) >= G_LOG_LEVEL_DEBUG)
+    return;
+
 #if defined (HAVE_DARWIN)
   CFLogLevel cf_log_level;
   CFStringRef message_str;
