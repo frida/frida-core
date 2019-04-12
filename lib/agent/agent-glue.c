@@ -114,7 +114,7 @@ _frida_agent_environment_join_pthread (gpointer pthread)
   int join_result;
 
   join_result = pthread_join ((pthread_t) pthread, NULL);
-  g_assert_cmpint (join_result, ==, 0);
+  g_assert (join_result == 0);
 #endif
 }
 
@@ -239,7 +239,7 @@ _frida_agent_thread_suspend_monitor_remove_cloaked_threads (task_inspect_t task,
     else
       old_threads[o++] = thread;
   }
-  g_assert_cmpuint (o, >, 0);
+  g_assert (o > 0);
 
   page_size = getpagesize ();
   old_size = *count * sizeof (thread_t);

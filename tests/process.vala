@@ -137,7 +137,7 @@ var result = ProcessBackend.join (handle, timeout_msec);
 			if (num_differences > 0)
 				printerr ("\n");
 
-			// assert (num_differences == 0);
+			// assert_true (num_differences == 0);
 		}
 	}
 

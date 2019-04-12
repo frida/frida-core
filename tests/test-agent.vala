@@ -45,8 +45,8 @@ namespace Frida.AgentTest {
 			func (1337, "Frida rocks");
 
 			var message = yield h.wait_for_message ();
-			assert (message.sender_id.handle == script_id.handle);
-			assert (message.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
+			assert_true (message.sender_id.handle == script_id.handle);
+			assert_true (message.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
 
 			yield h.unload_agent ();
 
@@ -81,7 +81,7 @@ namespace Frida.AgentTest {
 			}
 
 			var first_message = yield h.wait_for_message ();
-			assert (first_message.content == "{\"type\":\"send\",\"payload\":{}}");
+			assert_true (first_message.content == "{\"type\":\"send\",\"payload\":{}}");
 
 			var timer = new Timer ();
 			int count = 0;
@@ -89,7 +89,7 @@ namespace Frida.AgentTest {
 				var message = yield h.wait_for_message ();
 				count++;
 				if (message.content != "{\"type\":\"send\",\"payload\":{}}") {
-					assert (message.content == "{\"type\":\"send\",\"payload\":null}");
+					assert_true (message.content == "{\"type\":\"send\",\"payload\":null}");
 					break;
 				}
 			}
@@ -245,7 +245,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 						var reader = new Json.Reader (Json.from_string (message.content));
 
 						reader.read_member ("type");
-						if (reader.get_string_value () !=  "send") {
+						if (reader.get_string_value () != "send") {
 							printerr ("%s\n", message.content);
 							continue;
 						}
@@ -258,19 +258,19 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 						}
 
 						reader.read_element (0);
-						assert (reader.get_string_value () ==  "frida:rpc");
+						assert_true (reader.get_string_value () == "frida:rpc");
 						reader.end_element ();
 
 						reader.read_element (1);
-						assert (reader.get_int_value () == id);
+						assert_true (reader.get_int_value () == id);
 						reader.end_element ();
 
 						reader.read_element (2);
-						assert (reader.get_string_value () ==  "ok");
+						assert_true (reader.get_string_value () == "ok");
 						reader.end_element ();
 
 						reader.read_element (3);
-						assert (reader.get_null_value ());
+						assert_true (reader.get_null_value ());
 						reader.end_element ();
 
 						reader.end_member ();
@@ -287,7 +287,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 						var reader = new Json.Reader (Json.from_string (message.content));
 
 						reader.read_member ("type");
-						if (reader.get_string_value () !=  "send") {
+						if (reader.get_string_value () != "send") {
 							printerr ("%s\n", message.content);
 							continue;
 						}
@@ -300,15 +300,15 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 						}
 
 						reader.read_element (0);
-						assert (reader.get_string_value () ==  "launch:app");
+						assert_true (reader.get_string_value () == "launch:app");
 						reader.end_element ();
 
 						reader.read_element (1);
-						assert (reader.get_string_value () == "foo.bar.Baz");
+						assert_true (reader.get_string_value () == "foo.bar.Baz");
 						reader.end_element ();
 
 						reader.read_element (2);
-						assert (reader.get_int_value () ==  child.id);
+						assert_true (reader.get_int_value () == child.id);
 						reader.end_element ();
 
 						reader.end_member ();
@@ -386,7 +386,7 @@ Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), fu
 
 		private static void call_hooked_function () {
 			var fd = Posix.open ("/etc/hosts", Posix.O_RDONLY);
-			assert (fd != -1);
+			assert_true (fd != -1);
 			Posix.close (fd);
 		}
 
@@ -450,11 +450,11 @@ Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), fu
 #endif
 
 			module = GLib.Module.open (agent_filename, BIND_LOCAL | BIND_LAZY);
-			assert (module != null);
+			assert_nonnull (module);
 
 			void * main_func_symbol;
 			var main_func_found = module.symbol ("frida_agent_main", out main_func_symbol);
-			assert (main_func_found);
+			assert_true (main_func_found);
 			main_impl = (AgentMainFunc) main_func_symbol;
 
 			Gee.Promise<IOStream> stream_request;

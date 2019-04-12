@@ -151,11 +151,11 @@ frida_injection_instance_new (FridaQinjector * qinjector, guint id, pid_t pid, c
   instance->already_attached = FALSE;
   instance->fifo_path = g_strdup_printf ("%s/qinjector-%d", temp_path, pid);
   ret = mkfifo (instance->fifo_path, mode);
-  g_assert_cmpint (ret, ==, 0);
+  g_assert (ret == 0);
   ret = chmod (instance->fifo_path, mode);
-  g_assert_cmpint (ret, ==, 0);
+  g_assert (ret == 0);
   instance->fifo = open (instance->fifo_path, O_RDONLY | O_NONBLOCK);
-  g_assert_cmpint (instance->fifo, !=, -1);
+  g_assert (instance->fifo != -1);
 
   return instance;
 }
@@ -686,7 +686,7 @@ frida_resolve_remote_library_function (int remote_pid, const gchar * library_nam
     return -1;
   g_assert (remote_base != 0);
 
-  g_assert_cmpstr (local_library_path, ==, remote_library_path);
+  g_assert (g_strcmp0 (local_library_path, remote_library_path) == 0);
 
   canonical_library_name = g_path_get_basename (local_library_path);
 

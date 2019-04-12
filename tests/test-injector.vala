@@ -43,7 +43,7 @@ namespace Frida.InjectorTest {
 
 		rat.inject ("simple-agent", "", arch);
 		rat.wait_for_uninject ();
-		assert (content_of (logfile) == ">m<");
+		assert_true (content_of (logfile) == ">m<");
 
 		var requested_exit_code = 43;
 		rat.inject ("simple-agent", requested_exit_code.to_string (), arch);
@@ -53,22 +53,22 @@ namespace Frida.InjectorTest {
 			case Frida.Test.OS.MACOS:   // Gum.Darwin.Mapper
 			case Frida.Test.OS.IOS:     // Gum.Darwin.Mapper
 			case Frida.Test.OS.ANDROID: // Bionic's behavior
-				assert (content_of (logfile) == ">m<>m");
+				assert_true (content_of (logfile) == ">m<>m");
 				break;
 			case Frida.Test.OS.LINUX:
 				if (Frida.Test.libc () == Frida.Test.Libc.UCLIBC) {
-					assert (content_of (logfile) == ">m<>m");
+					assert_true (content_of (logfile) == ">m<>m");
 				} else {
-					assert (content_of (logfile) == ">m<>m<");
+					assert_true (content_of (logfile) == ">m<>m<");
 				}
 				break;
 			default:
-				assert (content_of (logfile) == ">m<>m<");
+				assert_true (content_of (logfile) == ">m<>m<");
 				break;
 		}
 
 		var exit_code = rat.wait_for_process_to_exit ();
-		assert (exit_code == requested_exit_code);
+		assert_true (exit_code == requested_exit_code);
 
 		try {
 			logfile.delete ();
@@ -93,7 +93,7 @@ namespace Frida.InjectorTest {
 
 		rat.inject ("resident-agent", "", arch);
 		rat.wait_for_uninject ();
-		assert (content_of (logfile) == ">m");
+		assert_true (content_of (logfile) == ">m");
 
 		try {
 			rat.process.kill ();
@@ -149,7 +149,7 @@ namespace Frida.InjectorTest {
 
 		rat.inject ("simple-agent", "", arch);
 		rat.wait_for_uninject ();
-		assert (content_of (logfile) == ">m<");
+		assert_true (content_of (logfile) == ">m<");
 
 		rat.close ();
 	}
@@ -234,7 +234,7 @@ namespace Frida.InjectorTest {
 
 			try {
 				var path = Frida.Test.Labrats.path_to_library (name, arch);
-				assert (FileUtils.test (path, FileTest.EXISTS));
+				assert_true (FileUtils.test (path, FileTest.EXISTS));
 
 				yield injector.inject_library_file (process.id, path, "frida_agent_main", data);
 			} catch (Error e) {
@@ -247,7 +247,7 @@ namespace Frida.InjectorTest {
 
 		public void wait_for_uninject () {
 			var success = try_wait_for_uninject (1000);
-			assert (success);
+			assert_true (success);
 		}
 
 		public bool try_wait_for_uninject (uint timeout) {

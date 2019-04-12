@@ -68,7 +68,7 @@ frida_test_process_backend_filename_of (void * handle)
 {
   guint image_count, image_idx;
 
-  g_assert (handle == &frida_magic_self_handle);
+  g_assert_true (handle == &frida_magic_self_handle);
 
   image_count = _dyld_image_count ();
   for (image_idx = 0; image_idx != image_count; image_idx++)
@@ -89,7 +89,7 @@ char *
 frida_test_process_backend_filename_of (void * handle)
 {
 #ifdef HAVE_QNX
-  g_assert (handle == &frida_magic_self_handle);
+  g_assert_true (handle == &frida_magic_self_handle);
 
   struct dlopen_handle ** _handle = dlopen (NULL, RTLD_LAZY);
   struct dlopen_handle * p_u = *(_handle);

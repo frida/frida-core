@@ -15,7 +15,7 @@ _frida_agent_resource_clone_so (GInputStream * so)
 
   data = g_malloc (size);
   g_input_stream_read_all (so, data, size, &read, NULL, NULL);
-  g_assert_cmpint (read, ==, size);
+  g_assert (read == size);
 
   /* TODO: update .so identity */
 

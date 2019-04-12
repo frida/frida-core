@@ -166,7 +166,7 @@ _frida_darwin_pipe_consume_stashed_file_descriptor (const gchar * address, GErro
   mach_port_t wrapper;
 
   assigned = sscanf (address, "pipe:port=0x%x", &port);
-  g_assert_cmpint (assigned, ==, 1);
+  g_assert (assigned == 1);
 
   kr = mach_msg (&init.header, MACH_RCV_MSG, 0, sizeof (init), port, 1, MACH_PORT_NULL);
   CHECK_MACH_RESULT (kr, ==, 0, "mach_msg");

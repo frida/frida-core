@@ -628,8 +628,8 @@ namespace Frida.HostSessionTest {
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
-						assert (e is Error.EXECUTABLE_NOT_FOUND);
-						assert (e.message == "Unable to find executable at '%s'".printf (inexistent_path));
+						assert_true (e is Error.EXECUTABLE_NOT_FOUND);
+						assert_true (e.message == "Unable to find executable at '%s'".printf (inexistent_path));
 					}
 
 					stdout.printf ("\nEnter an absolute path that exists but is not a valid executable: ");
@@ -641,8 +641,8 @@ namespace Frida.HostSessionTest {
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
-						assert (e is Error.EXECUTABLE_NOT_SUPPORTED);
-						assert (e.message == "Unable to spawn executable at '%s': unsupported file format".printf (nonexec_path));
+						assert_true (e is Error.EXECUTABLE_NOT_SUPPORTED);
+						assert_true (e.message == "Unable to spawn executable at '%s': unsupported file format".printf (nonexec_path));
 					}
 
 					var processes = yield device.enumerate_processes ();
@@ -667,8 +667,8 @@ namespace Frida.HostSessionTest {
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
-						assert (e is Error.PROCESS_NOT_FOUND);
-						assert (e.message == "Unable to find process with pid %u".printf (inexistent_pid));
+						assert_true (e is Error.PROCESS_NOT_FOUND);
+						assert_true (e.message == "Unable to find process with pid %u".printf (inexistent_pid));
 					}
 
 					stdout.printf ("\nEnter PID of a process that you don't have access to: ");
@@ -682,8 +682,8 @@ namespace Frida.HostSessionTest {
 						assert_not_reached ();
 					} catch (Error e) {
 						stdout.printf ("\nResult: \"%s\"\n\n", e.message);
-						assert (e is Error.PERMISSION_DENIED);
-						assert (e.message == "Unable to access process with pid %u from the current user account".printf (privileged_pid));
+						assert_true (e is Error.PERMISSION_DENIED);
+						assert_true (e.message == "Unable to access process with pid %u from the current user account".printf (privileged_pid));
 					}
 
 					yield device_manager.close ();
@@ -843,13 +843,13 @@ namespace Frida.HostSessionTest {
 			h.assert_n_providers_available (1);
 			var prov = h.first_provider ();
 
-			assert (prov.name == "Local System");
+			assert_true (prov.name == "Local System");
 
 			try {
 				var session = yield prov.create ();
 				var applications = yield session.enumerate_applications ();
 				var processes = yield session.enumerate_processes ();
-				assert (processes.length > 0);
+				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
 					foreach (var app in applications)
@@ -890,8 +890,8 @@ namespace Frida.HostSessionTest {
 
 				string received_output = null;
 				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
-					assert (source_pid == pid);
-					assert (fd == 1);
+					assert_true (source_pid == pid);
+					assert_true (fd == 1);
 
 					var buf = new uint8[data.length + 1];
 					Memory.copy (buf, data, data.length);
@@ -941,7 +941,7 @@ namespace Frida.HostSessionTest {
 					yield;
 					waiting = false;
 				}
-				assert (received_output == "Hello stdout");
+				assert_true (received_output == "Hello stdout");
 				host_session.disconnect (output_handler);
 
 				yield host_session.resume (pid);
@@ -951,7 +951,7 @@ namespace Frida.HostSessionTest {
 					yield;
 					waiting = false;
 				}
-				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
+				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				session.disconnect (message_handler);
 
 				yield host_session.kill (pid);
@@ -1040,7 +1040,7 @@ Java.perform(function () {
 						waiting = false;
 					}
 					printerr ("received_message: %s\n", received_message);
-					assert (received_message == "{\"type\":\"send\",\"payload\":\"onResume\"}");
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"onResume\"}");
 					received_message = null;
 
 					yield device_manager.close ();
@@ -1068,22 +1068,22 @@ Java.perform(function () {
 			h.assert_n_providers_available (1);
 			var prov = h.first_provider ();
 
-			assert (prov.name == "Local System");
+			assert_true (prov.name == "Local System");
 
 			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
 				var icon = prov.icon;
-				assert (icon != null);
+				assert_nonnull (icon);
 				var icon_data = icon.data;
-				assert (icon_data.width == 16 && icon_data.height == 16);
-				assert (icon_data.rowstride == icon_data.width * 4);
-				assert (icon_data.pixels.length > 0);
+				assert_true (icon_data.width == 16 && icon_data.height == 16);
+				assert_true (icon_data.rowstride == icon_data.width * 4);
+				assert_true (icon_data.pixels.length > 0);
 			}
 
 			try {
 				var session = yield prov.create ();
 				var applications = yield session.enumerate_applications ();
 				var processes = yield session.enumerate_processes ();
-				assert (processes.length > 0);
+				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
 					foreach (var app in applications)
@@ -1127,8 +1127,8 @@ Java.perform(function () {
 
 				string received_output = null;
 				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
-					assert (source_pid == pid);
-					assert (fd == 1);
+					assert_true (source_pid == pid);
+					assert_true (fd == 1);
 
 					var buf = new uint8[data.length + 1];
 					Memory.copy (buf, data, data.length);
@@ -1174,7 +1174,7 @@ Java.perform(function () {
 					yield;
 					waiting = false;
 				}
-				assert (received_output == "Hello stdout");
+				assert_true (received_output == "Hello stdout");
 				host_session.disconnect (output_handler);
 
 				yield host_session.resume (pid);
@@ -1184,7 +1184,7 @@ Java.perform(function () {
 					yield;
 					waiting = false;
 				}
-				assert (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60,\"initialized\":true}}");
+				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60,\"initialized\":true}}");
 				session.disconnect (message_handler);
 
 				yield host_session.kill (pid);
@@ -1225,7 +1225,7 @@ Java.perform(function () {
 				string received_stdout = null;
 				string received_stderr = null;
 				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
-					assert (source_pid == pid);
+					assert_true (source_pid == pid);
 
 					if (data.length > 0) {
 						var buf = new uint8[data.length + 1];
@@ -1242,9 +1242,9 @@ Java.perform(function () {
 							assert_not_reached ();
 					} else {
 						if (fd == 1)
-							assert (received_stdout != null);
+							assert_nonnull (received_stdout);
 						else if (fd == 2)
-							assert (received_stderr != null);
+							assert_nonnull (received_stderr);
 						else
 							assert_not_reached ();
 					}
@@ -1264,8 +1264,8 @@ Java.perform(function () {
 					yield;
 					waiting = false;
 				}
-				assert (received_stdout == "Hello stdout");
-				assert (received_stderr == "Hello stderr");
+				assert_true (received_stdout == "Hello stdout");
+				assert_true (received_stderr == "Hello stderr");
 				host_session.disconnect (output_handler);
 
 				yield host_session.kill (pid);
@@ -1313,7 +1313,7 @@ send(ranges);
 				string received_message = null;
 				bool waiting = false;
 				script.message.connect ((message, data) => {
-					assert (received_message == null);
+					assert_null (received_message);
 					received_message = message;
 					if (waiting)
 						own_memory_ranges_should_be_cloaked.callback ();
@@ -1328,7 +1328,7 @@ send(ranges);
 				}
 
 				var message = Json.from_string (received_message).get_object ();
-				assert (message.get_string_member ("type") == "send");
+				assert_true (message.get_string_member ("type") == "send");
 
 				var uncloaked_ranges = new Gee.ArrayList <string> ();
 				message.get_array_member ("payload").foreach_element ((array, index, element) => {
@@ -1346,7 +1346,7 @@ send(ranges);
 				}
 				printerr ("\n");
 
-				// assert (uncloaked_ranges.is_empty);
+				// assert_true (uncloaked_ranges.is_empty);
 
 				yield script.unload ();
 
@@ -1369,7 +1369,7 @@ send(ranges);
 
 				var range_pattern = new Regex ("([0-9a-f]{8,})-([0-9a-f]{8,})\\s+.+\\s+([rwx-]{3})\\/");
 				MatchInfo match_info;
-				assert (range_pattern.match (vmmap_output, 0, out match_info));
+				assert_true (range_pattern.match (vmmap_output, 0, out match_info));
 				while (match_info.matches ()) {
 					var start = uint64.parse ("0x" + match_info.fetch (1));
 					var end = uint64.parse ("0x" + match_info.fetch (2));
@@ -1445,7 +1445,7 @@ setTimeout(function () { abort(); }, 50);
 							abort_from_js_thread_should_not_deadlock.callback ();
 					});
 					script.message.connect ((message, data) => {
-						assert (received_message == null);
+						assert_null (received_message);
 						received_message = message;
 						if (waiting)
 							abort_from_js_thread_should_not_deadlock.callback ();
@@ -1458,8 +1458,8 @@ setTimeout(function () { abort(); }, 50);
 						yield;
 						waiting = false;
 					}
-					assert (received_message == "{\"type\":\"send\",\"payload\":\"dispose\"}");
-					assert (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"dispose\"}");
+					assert_true (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 					h.done ();
 				} catch (Error e) {
@@ -1542,7 +1542,7 @@ setTimeout(function () { abort(); }, 50);
 						yield;
 						waiting = false;
 					}
-					assert (received_message == "{\"type\":\"send\",\"payload\":\"hello\"}");
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"hello\"}");
 					session.disconnect (message_handler);
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
@@ -1634,7 +1634,7 @@ Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), functi
 						waiting = false;
 					}
 					printerr ("received_message: %s\n", received_message);
-					assert (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
+					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"UIApplicationMain\"}");
 					received_message = null;
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
@@ -1736,8 +1736,8 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (parent_messages.size == 1);
-				assert (parse_string_message_payload (parent_messages[0]) == "[PARENT] Parent speaking");
+				assert_true (parent_messages.size == 1);
+				assert_true (parse_string_message_payload (parent_messages[0]) == "[PARENT] Parent speaking");
 
 				while (the_child == null) {
 					waiting = true;
@@ -1746,13 +1746,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				var child = the_child;
 				the_child = null;
-				assert (child.pid != parent_pid);
-				assert (child.parent_pid == parent_pid);
-				assert (child.origin == FORK);
-				assert (child.identifier == null);
-				assert (child.path == null);
-				assert (child.argv == null);
-				assert (child.envp == null);
+				assert_true (child.pid != parent_pid);
+				assert_true (child.parent_pid == parent_pid);
+				assert_true (child.origin == FORK);
+				assert_null (child.identifier);
+				assert_null (child.path);
+				assert_null (child.argv);
+				assert_null (child.envp);
 				var child_session = yield device.attach (child.pid);
 				child_session.detached.connect (reason => {
 					child_detach_reason = reason.to_string ();
@@ -1780,26 +1780,26 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (child_messages.size == 1);
-				assert (parse_string_message_payload (child_messages[0]) == "[CHILD] Child speaking");
+				assert_true (child_messages.size == 1);
+				assert_true (parse_string_message_payload (child_messages[0]) == "[CHILD] Child speaking");
 
 				while (parent_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				while (child_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				yield h.process_events ();
-				assert (parent_messages.size == 1);
-				assert (child_messages.size == 1);
+				assert_true (parent_messages.size == 1);
+				assert_true (child_messages.size == 1);
 
 				yield device_manager.close ();
 
@@ -1866,13 +1866,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				var child_pre_exec = the_child;
 				the_child = null;
-				assert (child_pre_exec.pid != parent_pid);
-				assert (child_pre_exec.parent_pid == parent_pid);
-				assert (child_pre_exec.origin == FORK);
-				assert (child_pre_exec.identifier == null);
-				assert (child_pre_exec.path == null);
-				assert (child_pre_exec.argv == null);
-				assert (child_pre_exec.envp == null);
+				assert_true (child_pre_exec.pid != parent_pid);
+				assert_true (child_pre_exec.parent_pid == parent_pid);
+				assert_true (child_pre_exec.origin == FORK);
+				assert_null (child_pre_exec.identifier);
+				assert_null (child_pre_exec.path);
+				assert_null (child_pre_exec.argv);
+				assert_null (child_pre_exec.envp);
 
 				var child_session_pre_exec = yield device.attach (child_pre_exec.pid);
 				yield child_session_pre_exec.enable_child_gating ();
@@ -1889,7 +1889,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (child_pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
+				assert_true (child_pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
 
 				while (the_child == null) {
 					waiting = true;
@@ -1898,13 +1898,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				var child_post_exec = the_child;
 				the_child = null;
-				assert (child_post_exec.pid == child_pre_exec.pid);
-				assert (child_post_exec.parent_pid == child_post_exec.pid);
-				assert (child_post_exec.origin == EXEC);
-				assert (child_post_exec.identifier == null);
-				assert (child_post_exec.path != null);
-				assert (child_post_exec.argv != null);
-				assert (child_post_exec.envp != null);
+				assert_true (child_post_exec.pid == child_pre_exec.pid);
+				assert_true (child_post_exec.parent_pid == child_post_exec.pid);
+				assert_true (child_post_exec.origin == EXEC);
+				assert_null (child_post_exec.identifier);
+				assert_nonnull (child_post_exec.path);
+				assert_nonnull (child_post_exec.argv);
+				assert_nonnull (child_post_exec.envp);
 
 				var child_session_post_exec = yield device.attach (child_post_exec.pid);
 				child_session_post_exec.detached.connect (reason => {
@@ -1935,25 +1935,25 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (child_messages.size == 1);
-				assert (parse_string_message_payload (child_messages[0]) == method);
+				assert_true (child_messages.size == 1);
+				assert_true (parse_string_message_payload (child_messages[0]) == method);
 
 				while (child_post_exec_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (child_post_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (child_post_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				while (parent_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				yield h.process_events ();
-				assert (child_messages.size == 1);
+				assert_true (child_messages.size == 1);
 
 				yield device_manager.close ();
 
@@ -2017,7 +2017,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
+				assert_true (pre_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_REPLACED");
 
 				while (the_child == null) {
 					waiting = true;
@@ -2026,14 +2026,14 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				var child = the_child;
 				the_child = null;
-				assert (child.pid == pre_exec_pid);
-				assert (child.parent_pid == pre_exec_pid);
-				assert (child.origin == EXEC);
-				assert (child.identifier == null);
-				assert (child.path != null);
-				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
-				assert (child.argv != null);
-				assert (child.envp != null);
+				assert_true (child.pid == pre_exec_pid);
+				assert_true (child.parent_pid == pre_exec_pid);
+				assert_true (child.origin == EXEC);
+				assert_null (child.identifier);
+				assert_nonnull (child.path);
+				assert_true (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert_nonnull (child.argv);
+				assert_nonnull (child.envp);
 
 				var post_exec_session = yield device.attach (child.pid);
 				post_exec_session.detached.connect (reason => {
@@ -2064,18 +2064,18 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (messages.size == 1);
-				assert (parse_string_message_payload (messages[0]) == method);
+				assert_true (messages.size == 1);
+				assert_true (parse_string_message_payload (messages[0]) == method);
 
 				while (post_exec_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (post_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (post_exec_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				yield h.process_events ();
-				assert (messages.size == 1);
+				assert_true (messages.size == 1);
 
 				yield device_manager.close ();
 
@@ -2134,7 +2134,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				yield device_manager.close ();
 
@@ -2202,16 +2202,16 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				var child = the_child;
 				the_child = null;
-				assert (child.pid != parent_pid);
-				assert (child.parent_pid == parent_pid);
-				assert (child.origin == SPAWN);
-				assert (child.identifier == null);
-				assert (child.path != null);
-				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
-				assert (child.argv != null);
-				assert (child.envp != null);
+				assert_true (child.pid != parent_pid);
+				assert_true (child.parent_pid == parent_pid);
+				assert_true (child.origin == SPAWN);
+				assert_null (child.identifier);
+				assert_nonnull (child.path);
+				assert_true (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert_nonnull (child.argv);
+				assert_nonnull (child.envp);
 
-				assert (parent_detach_reason == null);
+				assert_null (parent_detach_reason);
 
 				var child_session = yield device.attach (child.pid);
 				child_session.detached.connect (reason => {
@@ -2242,25 +2242,25 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (child_messages.size == 1);
-				assert (parse_string_message_payload (child_messages[0]) == method);
+				assert_true (child_messages.size == 1);
+				assert_true (parse_string_message_payload (child_messages[0]) == method);
 
 				while (child_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				while (parent_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				yield h.process_events ();
-				assert (child_messages.size == 1);
+				assert_true (child_messages.size == 1);
 
 				yield device_manager.close ();
 
@@ -2285,19 +2285,19 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 			h.assert_n_providers_available (1);
 			var prov = h.first_provider ();
 
-			assert (prov.name == "Local System");
+			assert_true (prov.name == "Local System");
 
 			var icon = prov.icon;
-			assert (icon != null);
+			assert_nonnull (icon);
 			var icon_data = icon.data;
-			assert (icon_data.width == 16 && icon_data.height == 16);
-			assert (icon_data.rowstride == icon_data.width * 4);
-			assert (icon_data.pixels.length > 0);
+			assert_true (icon_data.width == 16 && icon_data.height == 16);
+			assert_true (icon_data.rowstride == icon_data.width * 4);
+			assert_true (icon_data.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
 				var processes = yield session.enumerate_processes ();
-				assert (processes.length > 0);
+				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
 					foreach (var process in processes)
@@ -2329,8 +2329,8 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 
 				string received_output = null;
 				var output_handler = host_session.output.connect ((source_pid, fd, data) => {
-					assert (source_pid == pid);
-					assert (fd == 1);
+					assert_true (source_pid == pid);
+					assert_true (fd == 1);
 
 					var buf = new uint8[data.length + 1];
 					Memory.copy (buf, data, data.length);
@@ -2377,7 +2377,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (received_output == "Hello stdout");
+				assert_true (received_output == "Hello stdout");
 				host_session.disconnect (output_handler);
 
 				yield host_session.resume (pid);
@@ -2387,7 +2387,7 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					yield;
 					waiting = false;
 				}
-				assert (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
+				assert_true (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
 				session.disconnect (message_handler);
 
 				yield host_session.kill (pid);
@@ -2465,16 +2465,16 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 				}
 				var child = the_child;
 				the_child = null;
-				assert (child.pid != parent_pid);
-				assert (child.parent_pid == parent_pid);
-				assert (child.origin == SPAWN);
-				assert (child.identifier == null);
-				assert (child.path != null);
-				assert (Path.get_basename (child.path).has_prefix ("spawner-"));
-				assert (child.argv != null);
-				assert (child.envp == null);
+				assert_true (child.pid != parent_pid);
+				assert_true (child.parent_pid == parent_pid);
+				assert_true (child.origin == SPAWN);
+				assert_null (child.identifier);
+				assert_nonnull (child.path);
+				assert_true (Path.get_basename (child.path).has_prefix ("spawner-"));
+				assert_nonnull (child.argv);
+				assert_null (child.envp);
 
-				assert (parent_detach_reason == null);
+				assert_null (parent_detach_reason);
 
 				var child_session = yield device.attach (child.pid);
 				child_session.detached.connect (reason => {
@@ -2505,25 +2505,25 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 					yield;
 					waiting = false;
 				}
-				assert (child_messages.size == 1);
-				assert (parse_string_message_payload (child_messages[0]) == method);
+				assert_true (child_messages.size == 1);
+				assert_true (parse_string_message_payload (child_messages[0]) == method);
 
 				while (child_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (child_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				while (parent_detach_reason == null) {
 					waiting = true;
 					yield;
 					waiting = false;
 				}
-				assert (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
+				assert_true (parent_detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 				yield h.process_events ();
-				assert (child_messages.size == 1);
+				assert_true (child_messages.size == 1);
 
 				yield device_manager.close ();
 
@@ -2554,20 +2554,20 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 			var prov = h.first_provider ();
 
 #if WINDOWS
-			assert (prov.name != "iOS Device"); /* should manage to extract a user-defined name */
+			assert_true (prov.name != "iOS Device"); /* should manage to extract a user-defined name */
 #endif
 
 			var icon = prov.icon;
-			assert (icon != null);
+			assert_nonnull (icon);
 			var icon_data = icon.data;
-			assert (icon_data.width == 16 && icon_data.height == 16);
-			assert (icon_data.rowstride == icon_data.width * 4);
-			assert (icon_data.pixels.length > 0);
+			assert_true (icon_data.width == 16 && icon_data.height == 16);
+			assert_true (icon_data.rowstride == icon_data.width * 4);
+			assert_true (icon_data.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
 				var processes = yield session.enumerate_processes ();
-				assert (processes.length > 0);
+				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
 					foreach (var process in processes)
@@ -2603,7 +2603,7 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 				var host_session = yield prov.create ();
 				stdout.printf ("enumerating processes\n");
 				var processes = yield host_session.enumerate_processes ();
-				assert (processes.length > 0);
+				assert_true (processes.length > 0);
 
 				HostProcessInfo? process = null;
 				foreach (var p in processes) {
@@ -2612,7 +2612,7 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 						break;
 					}
 				}
-				assert (process != null);
+				assert_nonnull ((void *) process);
 
 				stdout.printf ("attaching to target process\n");
 				var session_id = yield host_session.attach_to (process.pid);
@@ -2690,18 +2690,18 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 				try {
 					var plist = new Frida.Fruity.PropertyList.from_xml (xml);
 					var plist_keys = plist.get_keys ();
-					assert (plist_keys.length == 3);
-					assert (plist.get_int ("DeviceID") == 2);
-					assert (plist.get_string ("MessageType") == "Attached");
+					assert_true (plist_keys.length == 3);
+					assert_true (plist.get_int ("DeviceID") == 2);
+					assert_true (plist.get_string ("MessageType") == "Attached");
 
 					var proplist = plist.get_plist ("Properties");
 					var proplist_keys = proplist.get_keys ();
-					assert (proplist_keys.length == 5);
-					assert (proplist.get_string ("ConnectionType") == "USB");
-					assert (proplist.get_int ("DeviceID") == 2);
-					assert (proplist.get_int ("LocationID") == 0);
-					assert (proplist.get_int ("ProductID") == 4759);
-					assert (proplist.get_string ("SerialNumber") == "220f889780dda462091a65df48b9b6aedb05490f");
+					assert_true (proplist_keys.length == 5);
+					assert_true (proplist.get_string ("ConnectionType") == "USB");
+					assert_true (proplist.get_int ("DeviceID") == 2);
+					assert_true (proplist.get_int ("LocationID") == 0);
+					assert_true (proplist.get_int ("ProductID") == 4759);
+					assert_true (proplist.get_string ("SerialNumber") == "220f889780dda462091a65df48b9b6aedb05490f");
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -2736,7 +2736,7 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 					"	</dict>\n" +
 					"</dict>\n" +
 					"</plist>\n";
-				assert (actual_xml == expected_xml);
+				assert_true (actual_xml == expected_xml);
 			}
 
 		}
@@ -2759,19 +2759,19 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 			yield h.wait_for_provider ();
 			var prov = h.first_provider ();
 
-			assert (prov.name != "Android Device");
+			assert_true (prov.name != "Android Device");
 
 			var icon = prov.icon;
-			assert (icon != null);
+			assert_nonnull (icon);
 			var icon_data = icon.data;
-			assert (icon_data.width == 16 && icon_data.height == 16);
-			assert (icon_data.rowstride == icon_data.width * 4);
-			assert (icon_data.pixels.length > 0);
+			assert_true (icon_data.width == 16 && icon_data.height == 16);
+			assert_true (icon_data.rowstride == icon_data.width * 4);
+			assert_true (icon_data.pixels.length > 0);
 
 			try {
 				var session = yield prov.create ();
 				var processes = yield session.enumerate_processes ();
-				assert (processes.length > 0);
+				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
 					foreach (var process in processes)
@@ -2798,7 +2798,7 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 			assert_not_reached ();
 		}
 
-		assert (message.get_string_member ("type") == "send");
+		assert_true (message.get_string_member ("type") == "send");
 
 		return message.get_string_member ("payload");
 	}
@@ -2825,10 +2825,10 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 		construct {
 			service = new HostSessionService ();
 			service.provider_available.connect ((provider) => {
-				assert (available_providers.add (provider));
+				assert_true (available_providers.add (provider));
 			});
 			service.provider_unavailable.connect ((provider) => {
-				assert (available_providers.remove (provider));
+				assert_true (available_providers.remove (provider));
 			});
 		}
 
@@ -2843,15 +2843,15 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 		}
 
 		public void assert_no_providers_available () {
-			assert (available_providers.is_empty);
+			assert_true (available_providers.is_empty);
 		}
 
 		public void assert_n_providers_available (int n) {
-			assert (available_providers.size == n);
+			assert_true (available_providers.size == n);
 		}
 
 		public HostSessionProvider first_provider () {
-			assert (available_providers.size >= 1);
+			assert_true (available_providers.size >= 1);
 			return available_providers[0];
 		}
 	}

@@ -1214,12 +1214,12 @@ frida_kill_application (NSString * identifier)
     guint count, i;
 
     err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &length, NULL, 0);
-    g_assert_cmpint (err, !=, -1);
+    g_assert (err != -1);
 
     entries = g_malloc0 (length);
 
     err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &length, NULL, 0);
-    g_assert_cmpint (err, !=, -1);
+    g_assert (err != -1);
     count = length / sizeof (struct kinfo_proc);
 
     for (i = 0, found = FALSE; i != count && !found; i++)
@@ -1876,7 +1876,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   instance->payload_address = payload_address;
 
   kr = mach_vm_allocate (self_task, &agent_context_address, layout.data_size, VM_FLAGS_ANYWHERE);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
   instance->agent_context = (FridaAgentContext *) agent_context_address;
   instance->agent_context_size = layout.data_size;
 
@@ -2357,7 +2357,7 @@ frida_spawn_instance_on_server_recv (void * context)
   frida_spawn_instance_receive_breakpoint_request (self);
 
   kr = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
@@ -2389,10 +2389,10 @@ frida_spawn_instance_on_server_recv (void * context)
     }
 
     kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+    g_assert (kr == KERN_SUCCESS);
 
     kr = frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
-    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+    g_assert (kr == KERN_SUCCESS);
 
     frida_spawn_instance_send_breakpoint_response (self);
     return;
@@ -2441,10 +2441,10 @@ frida_spawn_instance_on_server_recv (void * context)
   }
 
   kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   kr = frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   frida_spawn_instance_send_breakpoint_response (self);
 }
@@ -2571,7 +2571,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       previous_ports->count = 0;
 
       kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &self->previous_thread_state, state_count);
-      g_assert_cmpint (kr, ==, KERN_SUCCESS);
+      g_assert (kr == KERN_SUCCESS);
 
       frida_spawn_instance_destroy_dyld_data (self);
 
@@ -2677,7 +2677,7 @@ frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
   header->msgh_size = sizeof (*request);
   header->msgh_local_port = self->server_port;
   kr = mach_msg_receive (header);
-  g_assert_cmpint (kr, ==, 0);
+  g_assert (kr == 0);
 }
 
 static void
@@ -2839,7 +2839,7 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
   }
 
   kr = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   write_succeeded = gum_darwin_write (self->task, self->dyld_data, (const guint8 *) &data, sizeof (data));
   g_assert (write_succeeded);
@@ -2858,7 +2858,7 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
     return;
 
   kr = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   self->dyld_data = 0;
 }
@@ -3010,7 +3010,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
 static void
 frida_spawn_instance_set_nth_breakpoint (FridaSpawnInstance * self, guint n, GumAddress break_at, FridaBreakpointRepeat repeat)
 {
-  g_assert_cmpint (n, <, FRIDA_MAX_BREAKPOINTS);
+  g_assert (n < FRIDA_MAX_BREAKPOINTS);
 
   if (self->breakpoints[n].address != 0 && self->breakpoints[n].address != break_at)
     frida_spawn_instance_disable_nth_breakpoint (self, n);
@@ -3026,7 +3026,7 @@ frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n)
 {
   FridaBreakpoint * breakpoint;
 
-  g_assert_cmpint (n, <, FRIDA_MAX_BREAKPOINTS);
+  g_assert (n < FRIDA_MAX_BREAKPOINTS);
 
   breakpoint = &self->breakpoints[n];
 
@@ -3042,7 +3042,7 @@ frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n)
 static void
 frida_spawn_instance_unset_nth_breakpoint (FridaSpawnInstance * self, guint n)
 {
-  g_assert_cmpint (n, <, FRIDA_MAX_BREAKPOINTS);
+  g_assert (n < FRIDA_MAX_BREAKPOINTS);
 
   frida_spawn_instance_disable_nth_breakpoint (self, n);
 
@@ -3053,7 +3053,7 @@ frida_spawn_instance_unset_nth_breakpoint (FridaSpawnInstance * self, guint n)
 static void
 frida_spawn_instance_disable_nth_breakpoint (FridaSpawnInstance * self, guint n)
 {
-  g_assert_cmpint (n, <, FRIDA_MAX_BREAKPOINTS);
+  g_assert (n < FRIDA_MAX_BREAKPOINTS);
 
   if (frida_is_hardware_breakpoint_support_working ())
   {
@@ -3073,7 +3073,7 @@ frida_spawn_instance_put_software_breakpoint (FridaSpawnInstance * self, GumAddr
 {
   guint32 instr_data;
 
-  g_assert_cmpint (index, <, FRIDA_MAX_BREAKPOINTS);
+  g_assert (index < FRIDA_MAX_BREAKPOINTS);
 
   instr_data = 0xd4200000 | ((index & 0xffff) << 5);
 
@@ -3114,10 +3114,10 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   if (scratch_page == 0)
   {
     kr = mach_vm_allocate (self->task, (mach_vm_address_t *) &scratch_page, page_size, VM_FLAGS_ANYWHERE);
-    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+    g_assert (kr == KERN_SUCCESS);
 
     kr = mach_vm_copy (self->task, page_start, page_size, scratch_page);
-    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+    g_assert (kr == KERN_SUCCESS);
 
     for (i = 0; i != FRIDA_MAX_PAGE_POOL; i++)
     {
@@ -3132,7 +3132,7 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   else
   {
     kr = mach_vm_protect (self->task, scratch_page, page_size, FALSE, PROT_READ | PROT_WRITE);
-    g_assert_cmpint (kr, ==, KERN_SUCCESS);
+    g_assert (kr == KERN_SUCCESS);
   }
 
   original_instruction_ptr = (guint32 *) gum_darwin_read (self->task, address, 4, NULL);
@@ -3143,14 +3143,14 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   g_assert (write_succeeded);
 
   kr = mach_vm_protect (self->task, scratch_page, page_size, FALSE, PROT_READ | PROT_EXEC);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   target_address = address - page_offset;
 
   kr = mach_vm_remap (self->task, (mach_vm_address_t *) &target_address, page_size, 0,
       VM_FLAGS_OVERWRITE | VM_FLAGS_FIXED, self->task, scratch_page, TRUE,
       &cur_protection, &max_protection, VM_INHERIT_COPY);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   return original_instruction;
 }
@@ -3165,10 +3165,10 @@ frida_make_pipe (int fds[2])
   g_assert (pipe_opened);
 
   res = fcntl (fds[0], F_SETNOSIGPIPE, TRUE);
-  g_assert_cmpint (res, ==, 0);
+  g_assert (res == 0);
 
   res = fcntl (fds[1], F_SETNOSIGPIPE, TRUE);
-  g_assert_cmpint (res, ==, 0);
+  g_assert (res == 0);
 }
 
 static FridaInjectInstance *
@@ -3212,7 +3212,7 @@ frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
   self_task = mach_task_self ();
 
   kr = mach_vm_allocate (self_task, &agent_context_address, instance->agent_context_size, VM_FLAGS_ANYWHERE);
-  g_assert_cmpint (kr, ==, KERN_SUCCESS);
+  g_assert (kr == KERN_SUCCESS);
 
   clone->agent_context = (FridaAgentContext *) agent_context_address;
   memcpy (clone->agent_context, instance->agent_context, instance->agent_context_size);
@@ -3337,7 +3337,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 
   self->entrypoint_data = payload_base + layout->data_offset +
       G_STRUCT_OFFSET (FridaAgentContext, entrypoint_data_storage);
-  g_assert_cmpint (strlen (details->entrypoint_data), <, sizeof (self->entrypoint_data_storage));
+  g_assert (strlen (details->entrypoint_data) < sizeof (self->entrypoint_data_storage));
   strcpy (self->entrypoint_data_storage, details->entrypoint_data);
 
   self->mapped_range = (mapper != NULL)
@@ -4289,7 +4289,7 @@ frida_is_hardware_breakpoint_support_working (void)
 
     size = sizeof (buf);
     res = sysctlbyname ("kern.osrelease", buf, &size, NULL, 0);
-    g_assert_cmpint (res, ==, 0);
+    g_assert (res == 0);
 
     version = atof (buf);
     buggy_kernel = version >= 17.5f && version <= 18.0f;
@@ -4319,7 +4319,7 @@ frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddr
   capstone = frida_create_capstone (cpu_type, start);
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   image = gum_darwin_read (task, address, max_size, NULL);
 
@@ -4396,7 +4396,7 @@ frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start
   capstone = frida_create_capstone (cpu_type, start);
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   image = gum_darwin_read (task, address, max_size, NULL);
 
@@ -4515,7 +4515,7 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
       g_assert_not_reached ();
   }
 
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   return capstone;
 }

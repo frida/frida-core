@@ -25,7 +25,7 @@ namespace Frida.GadgetTest {
 			try {
 				var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"), null, envp);
 				var exitcode = process.join (5000);
-				assert (exitcode == 123);
+				assert_true (exitcode == 123);
 			} catch (Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();

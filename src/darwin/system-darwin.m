@@ -281,12 +281,12 @@ frida_system_query_kinfo_procs (guint * count)
   gint err;
 
   err = sysctl (name, G_N_ELEMENTS (name) - 1, NULL, &size, NULL, 0);
-  g_assert_cmpint (err, !=, -1);
+  g_assert (err != -1);
 
   entries = g_malloc0 (size);
 
   err = sysctl (name, G_N_ELEMENTS (name) - 1, entries, &size, NULL, 0);
-  g_assert_cmpint (err, !=, -1);
+  g_assert (err != -1);
 
   *count = size / sizeof (struct kinfo_proc);
 

@@ -82,7 +82,7 @@ frida_selinux_apply_policy_patch (void)
   }
 
   res = policydb_load_isids (&db, &sidtab);
-  g_assert_cmpint (res, ==, 0);
+  g_assert (res == 0);
 
   if (frida_ensure_type (&db, "frida_file", 2, "file_type", "mlstrustedobject", &error) == NULL)
   {
@@ -173,7 +173,7 @@ frida_save_policy (const gchar * filename, policydb_t * db, GError ** error)
   int res;
 
   res = policydb_to_image (NULL, db, &data, &size);
-  g_assert_cmpint (res, ==, 0);
+  g_assert (res == 0);
 
   return frida_set_file_contents (filename, data, size, error);
 }
@@ -299,7 +299,7 @@ frida_ensure_permissive (policydb_t * db, const gchar * type_name, GError ** err
   }
 
   res = ebitmap_set_bit (&db->permissive_map, type->s.value, 1);
-  g_assert_cmpint (res, ==, 0);
+  g_assert (res == 0);
 
   return TRUE;
 }
@@ -386,7 +386,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
 #endif
 
     res = avtab_insert (&db->te_avtab, &key, av);
-    g_assert_cmpint (res, ==, 0);
+    g_assert (res == 0);
   }
 
   av->data |= perm_bit;

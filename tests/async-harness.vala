@@ -31,7 +31,7 @@ namespace Frida.Test {
 
 			main_loop.run ();
 
-			assert (!timed_out);
+			assert_false (timed_out);
 			if (timeout_id != 0) {
 				Source.remove (timeout_id);
 				timeout_id = 0;

@@ -964,10 +964,10 @@ frida_inject_instance_init_fifo (FridaInjectInstance * self)
   self->fifo_path = g_strdup_printf ("%s/linjector-%u", self->temp_path, self->id);
 
   ret = mkfifo (self->fifo_path, mode);
-  g_assert_cmpint (ret, ==, 0);
+  g_assert (ret == 0);
 
   ret = chmod (self->fifo_path, mode);
-  g_assert_cmpint (ret, ==, 0);
+  g_assert (ret == 0);
 
 #ifdef HAVE_ANDROID
   setfilecon (self->fifo_path, "u:object_r:frida_file:s0");
@@ -1297,7 +1297,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_x86_writer_put_breakpoint (&cw);
   gum_x86_writer_flush (&cw);
-  g_assert_cmpuint (gum_x86_writer_offset (&cw), <=, worker_offset);
+  g_assert (gum_x86_writer_offset (&cw) <= worker_offset);
   while (gum_x86_writer_offset (&cw) != worker_offset - code->size)
     gum_x86_writer_put_nop (&cw);
   frida_inject_instance_commit_x86_code (&cw, code);
@@ -1519,7 +1519,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_thumb_writer_put_breakpoint (&cw);
   gum_thumb_writer_flush (&cw);
-  g_assert_cmpuint (gum_thumb_writer_offset (&cw), <=, worker_offset);
+  g_assert (gum_thumb_writer_offset (&cw) <= worker_offset);
   while (gum_thumb_writer_offset (&cw) != worker_offset - code->size)
     gum_thumb_writer_put_nop (&cw);
   frida_inject_instance_commit_arm_code (&cw, code);
@@ -1739,7 +1739,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_arm64_writer_put_brk_imm (&cw, 0);
   gum_arm64_writer_flush (&cw);
-  g_assert_cmpuint (gum_arm64_writer_offset (&cw), <=, worker_offset);
+  g_assert (gum_arm64_writer_offset (&cw) <= worker_offset);
   while (gum_arm64_writer_offset (&cw) != worker_offset - code->size)
     gum_arm64_writer_put_nop (&cw);
   frida_inject_instance_commit_arm64_code (&cw, code);
@@ -1954,7 +1954,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
 
   gum_mips_writer_put_break (&cw);
   gum_mips_writer_flush (&cw);
-  g_assert_cmpuint (gum_mips_writer_offset (&cw), <=, worker_offset);
+  g_assert (gum_mips_writer_offset (&cw) <= worker_offset);
   while (gum_mips_writer_offset (&cw) != worker_offset - code->size)
     gum_mips_writer_put_nop (&cw);
   frida_inject_instance_commit_mips_code (&cw, code);
@@ -2599,7 +2599,7 @@ frida_remote_call (pid_t pid, GumAddress func, const GumAddress * args, gint arg
 
   regs.pc = func;
 
-  g_assert_cmpuint (args_length, <=, 8);
+  g_assert (args_length <= 8);
   for (i = 0; i != args_length; i++)
     regs.regs[i] = args[i];
 
@@ -2884,10 +2884,10 @@ frida_resolve_inner_dlopen (pid_t pid,
 
 #if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
   err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   dlopen_address = GPOINTER_TO_SIZE (impl);
 
@@ -2921,10 +2921,10 @@ frida_resolve_inner_dlopen (pid_t pid,
     *pic_value = frida_resolve_linker_address (pid, GSIZE_TO_POINTER (*pic_value));
 #elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
   err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   dlopen_address = GPOINTER_TO_SIZE (impl);
 
@@ -2945,10 +2945,10 @@ frida_resolve_inner_dlopen (pid_t pid,
   }
 #elif defined (HAVE_ARM)
   err = cs_open (CS_ARCH_ARM, CS_MODE_THUMB, &capstone);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   dlopen_address = GPOINTER_TO_SIZE (impl) & (gsize) ~1;
 
@@ -2967,10 +2967,10 @@ frida_resolve_inner_dlopen (pid_t pid,
   }
 #elif defined (HAVE_ARM64)
   err = cs_open (CS_ARCH_ARM64, CS_MODE_ARM, &capstone);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert_cmpint (err, ==, CS_ERR_OK);
+  g_assert (err == CS_ERR_OK);
 
   dlopen_address = GPOINTER_TO_SIZE (impl);
 
@@ -3105,7 +3105,7 @@ frida_resolve_library_function (pid_t pid, const gchar * library_name, const gch
   if (remote_base == 0)
     return 0;
 
-  g_assert_cmpstr (local_library_path, ==, remote_library_path);
+  g_assert (g_strcmp0 (local_library_path, remote_library_path) == 0);
 
   canonical_library_name = g_path_get_basename (local_library_path);
 
@@ -3156,7 +3156,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
     n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
     if (n == 1)
       continue;
-    g_assert_cmpint (n, ==, 2);
+    g_assert (n == 2);
 
     if (path[0] == '[')
       continue;

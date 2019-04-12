@@ -22,7 +22,7 @@ frida_collect_memory_footprint (FridaTestProcess * process)
 
   success = GetProcessMemoryInfo (frida_test_process_get_handle (process), (PPROCESS_MEMORY_COUNTERS) &counters,
       sizeof (counters));
-  g_assert (success);
+  g_assert_true (success);
 
   return counters.PrivateUsage;
 }
@@ -34,7 +34,7 @@ frida_collect_handles (FridaTestProcess * process)
   BOOL success;
 
   success = GetProcessHandleCount (frida_test_process_get_handle (process), &count);
-  g_assert (success);
+  g_assert_true (success);
 
   return count;
 }
@@ -97,7 +97,7 @@ frida_collect_memory_footprint (FridaTestProcess * process)
   path = g_strdup_printf ("/proc/%u/statm", frida_test_process_get_id (process));
 
   success = g_file_get_contents (path, &stats, NULL, NULL);
-  g_assert (success);
+  g_assert_true (success);
 
   num_pages = atoi (strchr (stats,  ' ') + 1); /* RSS */
 
@@ -117,7 +117,7 @@ frida_collect_file_descriptors (FridaTestProcess * process)
   path = g_strdup_printf ("/proc/%u/fd", frida_test_process_get_id (process));
 
   dir = g_dir_open (path, 0, NULL);
-  g_assert (dir != NULL);
+  g_assert_nonnull (dir);
 
   count = 0;
   while (g_dir_read_name (dir) != NULL)
