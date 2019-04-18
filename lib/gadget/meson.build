@@ -5,7 +5,7 @@ gadget_sources = [
 ]
 
 if not enable_diet
-  gadget_sources += ['dummy.cpp']
+  gadget_sources += ['allocator.cpp']
 endif
 
 extra_link_args = []

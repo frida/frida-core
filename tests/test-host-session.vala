@@ -799,18 +799,30 @@ namespace Frida.HostSessionTest {
 
 			/* Warm up static allocations */
 			var session = yield device.attach (process.id);
+			yield session.enable_jit ();
+			var script = yield session.create_script ("leak-check", "'use strict';");
+			yield script.load ();
+			yield script.unload ();
+			script = null;
 			yield detach_and_wait_for_cleanup (session);
 			session = null;
 
 			var usage_before = process.snapshot_resource_usage ();
 
-			session = yield device.attach (process.id);
-			yield detach_and_wait_for_cleanup (session);
-			session = null;
+			for (var i = 0; i != 1; i++) {
+				session = yield device.attach (process.id);
+				yield session.enable_jit ();
+				script = yield session.create_script ("leak-check", "'use strict';");
+				yield script.load ();
+				yield script.unload ();
+				script = null;
+				yield detach_and_wait_for_cleanup (session);
+				session = null;
 
-			var usage_after = process.snapshot_resource_usage ();
+				var usage_after = process.snapshot_resource_usage ();
 
-			usage_after.assert_equals (usage_before);
+				usage_after.assert_equals (usage_before);
+			}
 
 			yield device_manager.close ();
 

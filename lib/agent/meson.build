@@ -2,6 +2,7 @@ agent_sources = [
   'agent.vala',
   'agent-glue.c',
   'script-engine.vala',
+  'libc.c',
 ]
 
 if host_os_family == 'linux'
@@ -9,7 +10,7 @@ if host_os_family == 'linux'
 endif
 
 if not enable_diet
-  agent_sources += ['dummy.cpp']
+  agent_sources += ['allocator.cpp']
 endif
 
 extra_vala_args = []

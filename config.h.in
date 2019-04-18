@@ -39,6 +39,9 @@
 /* Define to 1 if you have the <sys/xattr.h> header file. */
 #mesondefine HAVE_SYS_XATTR_H
 
+/* Define to 1 if you have the <xlocale.h> header file. */
+#mesondefine HAVE_XLOCALE_H
+
 /* Define to 1 if OS is QNX based. */
 #mesondefine HAVE_QNX
 

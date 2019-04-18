@@ -94,6 +94,7 @@ endforeach
 
 headers = [
   'sys/user.h',
+  'xlocale.h',
 ]
 foreach h : headers
   if cc.has_header(h)
