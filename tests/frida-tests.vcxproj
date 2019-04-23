@@ -87,13 +87,13 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-32.lib;gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(TargetDir)dbghelp-32.dll"
@@ -106,13 +106,13 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
-      <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-64.lib;gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(TargetDir)dbghelp-32.dll"
@@ -125,13 +125,13 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;NDEBUG;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalDependencies>gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-32.lib;gum-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(TargetDir)dbghelp-32.dll"
@@ -144,13 +144,13 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;NDEBUG;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
-      <AdditionalDependencies>gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-64.lib;gum-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-32.dll" "$(TargetDir)dbghelp-32.dll"
@@ -189,29 +189,32 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
     <CustomBuild Include="main.vala">
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)"					^
-	test-agent.vala				^
-	test-host-session.vala			^
-	test-system.vala			^
-	test-injector.vala			^
-	main.vala				^
-	runner.vala				^
-	labrats.vala				^
-	async-harness.vala			^
-	process.vala				^
-	-D WINDOWS				^
-	--ccode					^
-	--directory=$(IntDir)			^
-	--header=$(IntDir)frida-tests.h		^
-	--vapidir="$(IntDir)..\frida-core"	^
-	--vapidir="$(IntDir)..\frida-pipe-32"	^
-	--vapidir="$(IntDir)..\frida-pipe-64"	^
-	$(ValaFlags)				^
-	--pkg=gio-2.0				^
-	--pkg=gmodule-2.0			^
-	--pkg=gee-0.8				^
-	--pkg=json-glib-1.0			^
-	--pkg=frida-gum-1.0			^
-	--pkg=frida-core			^
+	test-agent.vala					^
+	test-host-session.vala				^
+	test-system.vala				^
+	test-injector.vala				^
+	main.vala					^
+	runner.vala					^
+	labrats.vala					^
+	async-harness.vala				^
+	process.vala					^
+	-D WINDOWS					^
+	--ccode						^
+	--directory=$(IntDir)				^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"		^
+	--vapidir="$(IntDir)..\frida-interfaces-32"	^
+	--vapidir="$(IntDir)..\frida-interfaces-64"	^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
+	$(ValaFlags)					^
+	--pkg=gio-2.0					^
+	--pkg=gmodule-2.0				^
+	--pkg=gee-0.8					^
+	--pkg=json-glib-1.0				^
+	--pkg=frida-gum-1.0				^
+	--pkg=frida-core				^
+	--pkg=frida-interfaces				^
 	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -219,29 +222,32 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)"					^
-	test-agent.vala				^
-	test-host-session.vala			^
-	test-system.vala			^
-	test-injector.vala			^
-	main.vala				^
-	runner.vala				^
-	labrats.vala				^
-	async-harness.vala			^
-	process.vala				^
-	-D WINDOWS				^
-	--ccode					^
-	--directory=$(IntDir)			^
-	--header=$(IntDir)frida-tests.h		^
-	--vapidir="$(IntDir)..\frida-core"	^
-	--vapidir="$(IntDir)..\frida-pipe-32"	^
-	--vapidir="$(IntDir)..\frida-pipe-64"	^
-	$(ValaFlags)				^
-	--pkg=gio-2.0				^
-	--pkg=gmodule-2.0			^
-	--pkg=gee-0.8				^
-	--pkg=json-glib-1.0			^
-	--pkg=frida-gum-1.0			^
-	--pkg=frida-core			^
+	test-agent.vala					^
+	test-host-session.vala				^
+	test-system.vala				^
+	test-injector.vala				^
+	main.vala					^
+	runner.vala					^
+	labrats.vala					^
+	async-harness.vala				^
+	process.vala					^
+	-D WINDOWS					^
+	--ccode						^
+	--directory=$(IntDir)				^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"		^
+	--vapidir="$(IntDir)..\frida-interfaces-32"	^
+	--vapidir="$(IntDir)..\frida-interfaces-64"	^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
+	$(ValaFlags)					^
+	--pkg=gio-2.0					^
+	--pkg=gmodule-2.0				^
+	--pkg=gee-0.8					^
+	--pkg=json-glib-1.0				^
+	--pkg=frida-gum-1.0				^
+	--pkg=frida-core				^
+	--pkg=frida-interfaces				^
 	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -249,29 +255,32 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)"					^
-	test-agent.vala				^
-	test-host-session.vala			^
-	test-system.vala			^
-	test-injector.vala			^
-	main.vala				^
-	runner.vala				^
-	labrats.vala				^
-	async-harness.vala			^
-	process.vala				^
-	-D WINDOWS				^
-	--ccode					^
-	--directory=$(IntDir)			^
-	--header=$(IntDir)frida-tests.h		^
-	--vapidir="$(IntDir)..\frida-core"	^
-	--vapidir="$(IntDir)..\frida-pipe-32"	^
-	--vapidir="$(IntDir)..\frida-pipe-64"	^
-	$(ValaFlags)				^
-	--pkg=gio-2.0				^
-	--pkg=gmodule-2.0			^
-	--pkg=gee-0.8				^
-	--pkg=json-glib-1.0			^
-	--pkg=frida-gum-1.0			^
-	--pkg=frida-core			^
+	test-agent.vala					^
+	test-host-session.vala				^
+	test-system.vala				^
+	test-injector.vala				^
+	main.vala					^
+	runner.vala					^
+	labrats.vala					^
+	async-harness.vala				^
+	process.vala					^
+	-D WINDOWS					^
+	--ccode						^
+	--directory=$(IntDir)				^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"		^
+	--vapidir="$(IntDir)..\frida-interfaces-32"	^
+	--vapidir="$(IntDir)..\frida-interfaces-64"	^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
+	$(ValaFlags)					^
+	--pkg=gio-2.0					^
+	--pkg=gmodule-2.0				^
+	--pkg=gee-0.8					^
+	--pkg=json-glib-1.0				^
+	--pkg=frida-gum-1.0				^
+	--pkg=frida-core				^
+	--pkg=frida-interfaces				^
 	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
@@ -279,29 +288,32 @@ echo &gt; "$(IntDir)valacode.stamp"
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)"					^
-	test-agent.vala				^
-	test-host-session.vala			^
-	test-system.vala			^
-	test-injector.vala			^
-	main.vala				^
-	runner.vala				^
-	labrats.vala				^
-	async-harness.vala			^
-	process.vala				^
-	-D WINDOWS				^
-	--ccode					^
-	--directory=$(IntDir)			^
-	--header=$(IntDir)frida-tests.h		^
-	--vapidir="$(IntDir)..\frida-core"	^
-	--vapidir="$(IntDir)..\frida-pipe-32"	^
-	--vapidir="$(IntDir)..\frida-pipe-64"	^
-	$(ValaFlags)				^
-	--pkg=gio-2.0				^
-	--pkg=gmodule-2.0			^
-	--pkg=gee-0.8				^
-	--pkg=json-glib-1.0			^
-	--pkg=frida-gum-1.0			^
-	--pkg=frida-core			^
+	test-agent.vala					^
+	test-host-session.vala				^
+	test-system.vala				^
+	test-injector.vala				^
+	main.vala					^
+	runner.vala					^
+	labrats.vala					^
+	async-harness.vala				^
+	process.vala					^
+	-D WINDOWS					^
+	--ccode						^
+	--directory=$(IntDir)				^
+	--header=$(IntDir)frida-tests.h			^
+	--vapidir="$(IntDir)..\frida-core"		^
+	--vapidir="$(IntDir)..\frida-interfaces-32"	^
+	--vapidir="$(IntDir)..\frida-interfaces-64"	^
+	--vapidir="$(IntDir)..\frida-pipe-32"		^
+	--vapidir="$(IntDir)..\frida-pipe-64"		^
+	$(ValaFlags)					^
+	--pkg=gio-2.0					^
+	--pkg=gmodule-2.0				^
+	--pkg=gee-0.8					^
+	--pkg=json-glib-1.0				^
+	--pkg=frida-gum-1.0				^
+	--pkg=frida-core				^
+	--pkg=frida-interfaces				^
 	--pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>

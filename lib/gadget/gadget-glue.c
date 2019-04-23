@@ -1,11 +1,8 @@
 #include "frida-gadget.h"
 
-#ifndef G_OS_WIN32
-# include "frida-interfaces.h"
-#endif
+#include "frida-interfaces.h"
 
 #ifdef G_OS_WIN32
-# include <process.h>
 # define VC_EXTRALEAN
 # include <windows.h>
 # undef VC_EXTRALEAN
@@ -13,6 +10,7 @@
 # include <signal.h>
 # include <unistd.h>
 #endif
+#include <gumjs/gumscriptbackend.h>
 #ifdef HAVE_GLIB_SCHANNEL_STATIC
 # include <glib-schannel-static.h>
 #endif
@@ -112,12 +110,6 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
   return TRUE;
 }
 
-guint
-_frida_gadget_getpid (void)
-{
-  return GetCurrentProcessId ();
-}
-
 void
 _frida_gadget_kill (guint pid)
 {
@@ -163,12 +155,6 @@ on_unload (void)
   frida_gadget_unload ();
 }
 
-guint
-_frida_gadget_getpid (void)
-{
-  return getpid ();
-}
-
 void
 _frida_gadget_kill (guint pid)
 {
@@ -191,7 +177,7 @@ frida_gadget_environment_init (void)
 {
   gum_init_embedded ();
 
-  g_thread_set_garbage_handler (frida_gadget_on_pending_garbage, NULL);
+  g_thread_set_garbage_handler (_frida_gadget_on_pending_thread_garbage, NULL);
 
 #ifdef HAVE_GLIB_SCHANNEL_STATIC
   g_io_module_schannel_register ();

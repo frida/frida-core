@@ -11,20 +11,20 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{D873638D-AA0D-4252-9334-456557A65D95}</ProjectGuid>
+    <ProjectGuid>{26CCF317-ACE8-4CD6-BDDE-FFED1AA2FADD}</ProjectGuid>
     <RootNamespace>frida</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>frida-agent-64</ProjectName>
+    <ProjectName>frida-payload-64</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <PlatformToolset>v141_xp</PlatformToolset>
   </PropertyGroup>
@@ -53,29 +53,18 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-payload-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
-    <Link>
-      <ModuleDefinitionFile>frida-agent.def</ModuleDefinitionFile>
-      <SubSystem>Windows</SubSystem>
-    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-payload-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
-    <Link>
-      <ModuleDefinitionFile>frida-agent.def</ModuleDefinitionFile>
-      <SubSystem>Windows</SubSystem>
-    </Link>
   </ItemDefinitionGroup>
-  <Import Project="frida-agent-common.props" />
+  <Import Project="frida-payload-common.props" />
   <ItemGroup>
-    <ProjectReference Include="..\..\..\capstone\capstone-64.vcxproj">
-      <Project>{3d5dfa8a-628c-40cc-86d7-078f72833309}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\..\frida-gum\bindings\gumjs\gumjs-64.vcxproj">
       <Project>{0b39885e-731c-4a45-a7de-44cbdbbf0067}</Project>
     </ProjectReference>
@@ -93,20 +82,6 @@
       <Private>false</Private>
       <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
-    </ProjectReference>
-    <ProjectReference Include="..\interfaces\frida-interfaces-64.vcxproj">
-      <Project>{a31522d9-715b-4e04-aa57-df7afebe082c}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\payload\frida-payload-64.vcxproj">
-      <Project>{26ccf317-ace8-4cd6-bdde-ffed1aa2fadd}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\pipe\frida-pipe-64.vcxproj">
-      <Project>{d50f460f-9c4d-42eb-a8c4-48c0c46cfaaf}</Project>
-      <Private>false</Private>
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
     </ProjectReference>
   </ItemGroup>

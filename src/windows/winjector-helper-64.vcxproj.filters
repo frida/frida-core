@@ -44,9 +44,6 @@
     <ClCompile Include="$(IntDir)winjector-types.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)session.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">
@@ -56,9 +53,6 @@
   <ItemGroup>
     <None Include="winjector-types.vala">
       <Filter>Source Files</Filter>
-    </None>
-    <None Include="$(ProjectDir)..\..\lib\interfaces\session.vala">
-      <Filter>Source Files\lib\interfaces</Filter>
     </None>
   </ItemGroup>
 </Project>

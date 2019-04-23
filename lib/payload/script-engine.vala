@@ -1,5 +1,5 @@
-namespace Frida.Agent {
-	internal class ScriptEngine : Object {
+namespace Frida {
+	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
 		public signal void message_from_debugger (string message);
 

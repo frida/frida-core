@@ -21,12 +21,12 @@
     <ClCompile Include="lib\gadget\gadget-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="lib\gadget\allocator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)lib\gadget\gadget.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)lib\gadget\script-engine.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
@@ -34,10 +34,5 @@
     <CustomBuild Include="lib\gadget\gadget.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="lib\gadget\script-engine.vala">
-      <Filter>Source Files</Filter>
-    </None>
   </ItemGroup>
 </Project>

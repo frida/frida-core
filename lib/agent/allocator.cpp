@@ -2,13 +2,13 @@
 #include <new>
 
 void *
-operator new (std::size_t n) throw (std::bad_alloc)
+operator new (std::size_t n)
 {
   return gum_malloc (n);
 }
 
 void
-operator delete (void * p) throw ()
+operator delete (void * p)
 {
   gum_free (p);
 }

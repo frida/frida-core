@@ -14,23 +14,25 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
     <Filter Include="Source Files\generated">
-      <UniqueIdentifier>{ae68f2cc-7b74-44ad-addd-3d447d9b2a4e}</UniqueIdentifier>
+      <UniqueIdentifier>{6c15c760-cd5b-41c4-ad64-83283571aeaf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\generated">
+      <UniqueIdentifier>{984e0fc8-e24c-4868-a432-6dd66cc7db4d}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)agent.c">
+    <ClCompile Include="$(IntDir)session.c">
       <Filter>Source Files\generated</Filter>
-    </ClCompile>
-    <ClCompile Include="agent-glue.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="allocator.cpp">
-      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="agent.vala">
+    <CustomBuild Include="session.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(IntDir)frida-interfaces.h">
+      <Filter>Header Files\generated</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -1272,7 +1272,7 @@ namespace Frida.Gadget {
 					assert_not_reached ();
 				}
 
-				var pid = _getpid ();
+				var pid = get_process_id ();
 				var identifier = "re.frida.Gadget";
 				var name = "Gadget";
 				var no_icon = ImageData (0, 0, 0, "");
@@ -1573,36 +1573,6 @@ namespace Frida.Gadget {
 		return parameters;
 	}
 
-	private class ThreadIgnoreScope {
-		private Gum.Interceptor interceptor;
-
-		private Gum.ThreadId thread_id;
-
-		private uint num_ranges;
-		private Gum.MemoryRange ranges[2];
-
-		public ThreadIgnoreScope () {
-			interceptor = Gum.Interceptor.obtain ();
-			interceptor.ignore_current_thread ();
-
-			thread_id = Gum.Process.get_current_thread_id ();
-			Gum.Cloak.add_thread (thread_id);
-
-			num_ranges = Gum.Thread.try_get_ranges (ranges);
-			for (var i = 0; i != num_ranges; i++)
-				Gum.Cloak.add_range (ranges[i]);
-		}
-
-		~ThreadIgnoreScope () {
-			for (var i = 0; i != num_ranges; i++)
-				Gum.Cloak.remove_range (ranges[i]);
-
-			Gum.Cloak.remove_thread (thread_id);
-
-			interceptor.unignore_current_thread ();
-		}
-	}
-
 	namespace Environment {
 		private extern void init ();
 		private extern void deinit ();
@@ -1622,7 +1592,6 @@ namespace Frida.Gadget {
 		private extern bool has_objc_class (string name);
 	}
 
-	public extern uint _getpid ();
 	public extern void _kill (uint pid);
 
 	private extern void log_info (string message);
@@ -1632,7 +1601,7 @@ namespace Frida.Gadget {
 	private uint gc_generation = 0;
 	private bool gc_scheduled = false;
 
-	public void on_pending_garbage (void * data) {
+	public void _on_pending_thread_garbage (void * data) {
 		gc_mutex.lock ();
 		gc_generation++;
 		bool already_scheduled = gc_scheduled;

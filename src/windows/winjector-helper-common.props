@@ -12,14 +12,13 @@
   <ItemGroup>
     <CustomBuild Include="winjector-helper.vala">
       <FileType>Document</FileType>
-      <Command>"$(ValaCompiler)" winjector-helper.vala winjector-types.vala ..\..\lib\interfaces\session.vala -D WINDOWS --ccode --directory=$(IntDir) --header="$(IntDir)winjector-helper.h" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-pipe || exit 1
+      <Command>"$(ValaCompiler)" winjector-helper.vala winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --header="$(IntDir)winjector-helper.h" --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-interfaces --pkg=frida-pipe || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message>Compiling vala code</Message>
       <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)winjector-types.vala;$(ProjectDir)..\..\lib\interfaces\session.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
     <None Include="winjector-types.vala" />
-    <None Include="$(ProjectDir)..\..\lib\interfaces\session.vala" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,12 +33,6 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="$(IntDir)winjector-types.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)session.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>

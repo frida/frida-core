@@ -86,11 +86,12 @@
       <ModuleDefinitionFile>lib\gadget\frida-gadget.def</ModuleDefinitionFile>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalDependencies>gumjs-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-32.lib;gum-32.lib;gumjs-32.lib;frida-interfaces-32.lib;frida-payload-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -98,11 +99,12 @@
       <ModuleDefinitionFile>lib\gadget\frida-gadget.def</ModuleDefinitionFile>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
-      <AdditionalDependencies>gumjs-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-64.lib;gum-64.lib;gumjs-64.lib;frida-interfaces-64.lib;frida-payload-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -110,11 +112,12 @@
       <ModuleDefinitionFile>lib\gadget\frida-gadget.def</ModuleDefinitionFile>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalDependencies>gumjs-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-32.lib;gum-32.lib;gumjs-32.lib;frida-interfaces-32.lib;frida-payload-32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -122,48 +125,38 @@
       <ModuleDefinitionFile>lib\gadget\frida-gadget.def</ModuleDefinitionFile>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
-      <AdditionalDependencies>gumjs-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone-64.lib;gum-64.lib;gumjs-64.lib;frida-interfaces-64.lib;frida-payload-64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <CustomBuild Include="lib\gadget\gadget.vala">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-payload-32" --vapidir="$(IntDir)..\frida-payload-64" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-interfaces --pkg=frida-payload || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(ValaCompiler)" lib/gadget/gadget.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-payload-32" --vapidir="$(IntDir)..\frida-payload-64" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-interfaces --pkg=frida-payload || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-payload-32" --vapidir="$(IntDir)..\frida-payload-64" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-interfaces --pkg=frida-payload || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala lib/gadget/script-engine.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-core" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-core || exit 1
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(ValaCompiler)" lib/gadget/gadget.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-gadget --header=$(IntDir)frida-gadget.h --symbols=$(IntDir)frida-gadget.symbols --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-payload-32" --vapidir="$(IntDir)..\frida-payload-64" $(ValaFlags) --pkg config --pkg=gee-0.8 --pkg=gio-2.0 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-interfaces --pkg=frida-payload || exit 1
 echo &gt; "$(IntDir)valacode.stamp"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling vala code</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);$(ProjectDir)lib\gadget\gadget.vala;$(ProjectDir)lib\gadget\script-engine.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
-    <None Include="lib\gadget\script-engine.vala" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="frida-core.vcxproj">
-      <Project>{b7dc9b02-a5ff-4aa1-b2a2-dc1653168d44}</Project>
-      <Private>false</Private>
-      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
-      <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
-      <LinkLibraryDependencies>true</LinkLibraryDependencies>
-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)lib\gadget\gadget.c">
@@ -176,17 +169,8 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)gadget\</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)gadget\</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(IntDir)lib\gadget\script-engine.c">
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
-      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(IntDir)gadget\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(IntDir)gadget\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)gadget\</ObjectFileName>
-      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)gadget\</ObjectFileName>
-    </ClCompile>
     <ClCompile Include="lib\gadget\gadget-glue.c" />
+    <ClCompile Include="lib\gadget\allocator.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

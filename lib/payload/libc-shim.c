@@ -13,6 +13,8 @@
 #undef snprintf
 #undef vsnprintf
 
+#ifndef HAVE_WINDOWS
+
 void *
 malloc (size_t size)
 {
@@ -219,6 +221,66 @@ asprintf_l (char ** ret, locale_t loc, const char * format, ...)
   va_end (args);
 
   return result;
+}
+
+#endif
+
+#endif
+
+#ifdef HAVE_DARWIN
+
+/*
+ * Get rid of the -lresolv dependency until we actually need it, i.e. if/when
+ * we expose GLib's resolvers to JavaScript. This is however not needed for
+ * our current Socket.connect() API, which is neat.
+ */
+
+#include <resolv.h>
+
+int
+res_9_init (void)
+{
+  g_assert_not_reached ();
+  return -1;
+}
+
+int
+res_9_ninit (res_9_state state)
+{
+  g_assert_not_reached ();
+  return -1;
+}
+
+void
+res_9_ndestroy (res_9_state state)
+{
+  g_assert_not_reached ();
+}
+
+int
+res_9_nquery (res_9_state state, const char * dname, int klass, int type, u_char * answer, int anslen)
+{
+  g_assert_not_reached ();
+  return -1;
+}
+
+int
+res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp_dn, char * exp_dn, int length)
+{
+  g_assert_not_reached ();
+  return -1;
+}
+
+#endif
+
+#ifdef HAVE_LINUX
+
+G_GNUC_INTERNAL long
+frida_set_errno (int n)
+{
+  errno = n;
+
+  return -1;
 }
 
 #endif

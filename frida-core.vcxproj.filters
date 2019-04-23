@@ -84,9 +84,6 @@
     <None Include="src\windows\windows-host-session.vala">
       <Filter>Source Files\windows</Filter>
     </None>
-    <None Include="lib\interfaces\session.vala">
-      <Filter>Source Files\lib\interfaces</Filter>
-    </None>
     <None Include="src\tcp\tcp-host-session.vala">
       <Filter>Source Files\tcp</Filter>
     </None>
@@ -130,9 +127,6 @@
     </ClCompile>
     <ClCompile Include="$(IntDir)src\system.c">
       <Filter>Source Files\generated\core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)lib\interfaces\session.c">
-      <Filter>Source Files\generated\lib\interfaces</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-agent.c">
       <Filter>Source Files\generated\data</Filter>
