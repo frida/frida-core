@@ -11,7 +11,6 @@ endif
 if host_os == 'ios'
   server_sources += [
     'server-ios.c',
-    'server-ios-jit.c',
   ]
 endif
 

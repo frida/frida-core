@@ -58,11 +58,6 @@ cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
 	</dict>
 	<key>UserName</key>
 	<string>root</string>
-	<key>MachServices</key>
-	<dict>
-		<key>com.apple.uikit.viewservice.frida</key>
-		<true/>
-	</dict>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
