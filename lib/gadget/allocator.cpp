@@ -8,7 +8,7 @@ operator new (std::size_t size)
 }
 
 void
-operator delete (void * mem) throw()
+operator delete (void * mem)
 {
   gum_free (mem);
 }
