@@ -1,3 +1,5 @@
+#ifndef HAVE_WINDOWS
+
 #include <gum/gum.h>
 #include <new>
 
@@ -12,3 +14,5 @@ operator delete (void * mem)
 {
   gum_free (mem);
 }
+
+#endif
