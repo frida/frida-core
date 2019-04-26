@@ -483,6 +483,8 @@ Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), fu
 				yield provider.open (session_id);
 
 				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id));
+
+				yield session.enable_jit ();
 			} catch (GLib.Error dbus_error) {
 				assert_not_reached ();
 			}
