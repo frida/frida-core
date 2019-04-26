@@ -38,11 +38,11 @@ namespace Frida {
 			var interceptor = Gum.Interceptor.obtain ();
 
 #if WINDOWS
-			var cpiw_export = Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW");
-			if (cpiw_export == null)
-				cpiw_export = Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessInternalW");
-			assert(cpiw_export != null);
-			interceptor.attach_listener (cpiw_export, this);
+			var create_process_internal = Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW");
+			if (create_process_internal == null)
+				create_process_internal = Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessInternalW");
+			assert (create_process_internal != null);
+			interceptor.attach_listener (create_process_internal, this);
 #else
 			var libc_name = detect_libc_name ();
 #if DARWIN
