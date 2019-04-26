@@ -41,8 +41,8 @@ namespace Frida {
       var cpiw_export = Gum.Module.find_export_by_name ("kernelbase.dll", "CreateProcessInternalW");
       if (cpiw_export == null)
         cpiw_export = Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessInternalW");
-			assert(cpiw_export != null);
-			interceptor.attach_listener (cpiw_export, this);
+	  assert(cpiw_export != null);
+	  interceptor.attach_listener (cpiw_export, this);
 #else
 			var libc_name = detect_libc_name ();
 #if DARWIN
