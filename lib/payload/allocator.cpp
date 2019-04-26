@@ -10,7 +10,7 @@ operator new (std::size_t size)
 }
 
 void
-operator delete (void * mem)
+operator delete (void * mem) noexcept
 {
   gum_free (mem);
 }

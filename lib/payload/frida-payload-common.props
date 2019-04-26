@@ -82,6 +82,7 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="libc-shim.c" />
+    <ClCompile Include="allocator.cpp" />
   </ItemGroup>
 
 </Project>

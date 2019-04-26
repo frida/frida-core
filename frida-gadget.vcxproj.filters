@@ -21,9 +21,6 @@
     <ClCompile Include="lib\gadget\gadget-glue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="lib\gadget\allocator.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(IntDir)lib\gadget\gadget.c">

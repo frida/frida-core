@@ -4,7 +4,7 @@ agent_sources = [
 ]
 
 if not enable_diet
-  agent_sources += ['allocator.cpp']
+  agent_sources += ['dummy.cpp']
 endif
 
 extra_link_args = []

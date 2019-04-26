@@ -170,7 +170,6 @@ echo &gt; "$(IntDir)valacode.stamp"</Command>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)gadget\</ObjectFileName>
     </ClCompile>
     <ClCompile Include="lib\gadget\gadget-glue.c" />
-    <ClCompile Include="lib\gadget\allocator.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
