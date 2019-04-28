@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2013 The Android Open Source Project
- * Copyright (C) 2017 Ole André Vadla Ravnås <oleavr@nowsecure.com>
+ * Copyright (C) 2017-2019 Ole André Vadla Ravnås <oleavr@nowsecure.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,7 +49,13 @@ ENTRY_PRIVATE(syscall)
   /* check if syscall returned successfully */
   cmn     x0, #(FRIDA_MAX_ERRNO + 1)
   cneg    x0, x0, hi
-  b.hi    frida_set_errno
+  b.hi    _frida_on_syscall_error
 
   ret
 END(syscall)
+
+ENTRY_PRIVATE(_frida_on_syscall_error)
+  adrp    x0, frida_set_errno
+  add     x0, x0, :lo12:frida_set_errno
+  br      x0
+END(_frida_on_syscall_error)
