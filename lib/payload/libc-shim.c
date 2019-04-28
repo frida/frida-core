@@ -310,7 +310,7 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #ifdef HAVE_LINUX
 
 G_GNUC_INTERNAL long
-frida_set_errno (int n)
+_frida_set_errno (int n)
 {
   errno = n;
 

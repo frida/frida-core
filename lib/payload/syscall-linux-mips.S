@@ -60,7 +60,7 @@ ENTRY_PRIVATE(syscall)
   j       $ra
   nop
 1:
-  la      $t9, frida_set_errno
+  la      $t9, _frida_set_errno
   j       $t9
   nop
   .set reorder

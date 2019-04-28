@@ -63,7 +63,7 @@ ENTRY_PRIVATE(syscall)
   jb      1f
   negl    %eax
   movl    %eax, %edi
-  call    frida_set_errno
+  call    _frida_set_errno
 1:
   ret
 END(syscall)

@@ -55,7 +55,7 @@ ENTRY_PRIVATE(syscall)
 END(syscall)
 
 ENTRY_PRIVATE(_frida_on_syscall_error)
-  adrp    x0, frida_set_errno
-  add     x0, x0, :lo12:frida_set_errno
+  adrp    x0, _frida_set_errno
+  add     x0, x0, :lo12:_frida_set_errno
   br      x0
 END(_frida_on_syscall_error)

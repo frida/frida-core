@@ -87,7 +87,7 @@ ENTRY_PRIVATE(syscall)
   # Yes, so set errno.
   negl    %eax
   pushl   %eax
-  call    frida_set_errno
+  call    _frida_set_errno
   addl    $4, %esp
 1:
   # Restore the callee save registers.

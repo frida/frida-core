@@ -53,5 +53,5 @@ ENTRY_PRIVATE(syscall)
   cmn     r0, #(FRIDA_MAX_ERRNO + 1)
   bxls    lr
   neg     r0, r0
-  b       frida_set_errno
+  b       _frida_set_errno
 END(syscall)
