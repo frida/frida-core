@@ -36,10 +36,7 @@ void
 frida_join_pthread (gpointer pthread)
 {
 #ifndef HAVE_WINDOWS
-  int join_result;
-
-  join_result = pthread_join ((pthread_t) pthread, NULL);
-  g_assert (join_result == 0);
+  pthread_join ((pthread_t) pthread, NULL);
 #endif
 }
 

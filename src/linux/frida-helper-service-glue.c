@@ -959,15 +959,11 @@ static void
 frida_inject_instance_init_fifo (FridaInjectInstance * self)
 {
   const int mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  int ret;
 
   self->fifo_path = g_strdup_printf ("%s/linjector-%u", self->temp_path, self->id);
 
-  ret = mkfifo (self->fifo_path, mode);
-  g_assert (ret == 0);
-
-  ret = chmod (self->fifo_path, mode);
-  g_assert (ret == 0);
+  mkfifo (self->fifo_path, mode);
+  chmod (self->fifo_path, mode);
 
 #ifdef HAVE_ANDROID
   setfilecon (self->fifo_path, "u:object_r:frida_file:s0");
