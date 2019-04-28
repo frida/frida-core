@@ -35,7 +35,7 @@ namespace Frida {
 #else
 		string? libc_name = null;
 
-		Gum.Address address_in_libc = (Gum.Address) Posix.opendir;
+		Gum.Address address_in_libc = Gum.Address.from_pointer ((void *) Posix.opendir);
 		Gum.Process.enumerate_modules ((details) => {
 			var range = details.range;
 
@@ -57,7 +57,7 @@ namespace Frida {
 		Gum.MemoryRange? result = mapped_range;
 
 		if (result == null) {
-			Gum.Address our_address = (Gum.Address) detect_own_memory_range;
+			Gum.Address our_address = Gum.Address.from_pointer ((void *) detect_own_memory_range);
 
 			Gum.Process.enumerate_modules ((details) => {
 				var range = details.range;
