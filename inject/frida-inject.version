@@ -1,0 +1,4 @@
+FRIDA_INJECT {
+  local:
+    *;
+};

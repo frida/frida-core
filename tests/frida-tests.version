@@ -1,0 +1,4 @@
+FRIDA_TESTS {
+  local:
+    *;
+};

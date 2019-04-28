@@ -1,0 +1,4 @@
+FRIDA_RESOURCE_COMPILER {
+  local:
+    *;
+};

@@ -35,17 +35,26 @@ if host_os_family == 'darwin'
   runner_name = 'frida-tests-unsigned'
 endif
 
-runner_link_args = []
-runner_link_depends = []
+extra_link_args = []
+extra_link_depends = []
+if host_os_family == 'darwin'
+  symlist = 'frida-tests.symbols'
+  extra_link_args += ['-Wl,-exported_symbols_list,' + join_paths(meson.current_source_dir(), symlist)]
+  extra_link_depends += [symlist]
+elif host_os_family != 'windows'
+  symscript = 'frida-tests.version'
+  extra_link_args += ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), symscript)]
+  extra_link_depends += [symscript]
+endif
 if host_os == 'macos'
   runner_plist = 'frida-tests.plist'
-  runner_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + join_paths(meson.current_source_dir(), runner_plist)]
-  runner_link_depends += [runner_plist]
+  extra_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + join_paths(meson.current_source_dir(), runner_plist)]
+  extra_link_depends += [runner_plist]
 endif
 
 runner = executable(runner_name, 'main.vala',
-  link_args: runner_link_args,
-  link_depends: runner_link_depends,
+  link_args: extra_link_args,
+  link_depends: extra_link_depends,
   link_with: frida_tests,
   dependencies: [core_dep],
 )
