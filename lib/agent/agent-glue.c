@@ -1,6 +1,7 @@
 #include "frida-agent.h"
 
 #include "frida-interfaces.h"
+#include "frida-payload.h"
 
 #if defined (HAVE_ANDROID) && __ANDROID_API__ < __ANDROID_API_L__
 # include <signal.h>
@@ -16,6 +17,7 @@ void
 _frida_agent_environment_init (void)
 {
   gum_init_embedded ();
+  frida_init_libc_shim ();
 
   g_thread_set_garbage_handler (_frida_agent_on_pending_thread_garbage, NULL);
 
@@ -41,6 +43,7 @@ _frida_agent_environment_init (void)
 void
 _frida_agent_environment_deinit (void)
 {
+  frida_deinit_libc_shim ();
   gum_deinit_embedded ();
 }
 

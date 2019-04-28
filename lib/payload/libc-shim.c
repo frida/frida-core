@@ -13,23 +13,48 @@
 #undef snprintf
 #undef vsnprintf
 
+static gboolean shim_deinitialized = FALSE;
+
+void
+frida_init_libc_shim (void)
+{
+}
+
+void
+frida_deinit_libc_shim (void)
+{
+  shim_deinitialized = TRUE;
+}
+
 #ifndef HAVE_WINDOWS
 
 void *
 malloc (size_t size)
 {
+  g_assert (!shim_deinitialized);
+
+  gum_memory_init ();
+
   return gum_malloc (size);
 }
 
 void *
 calloc (size_t count, size_t size)
 {
+  g_assert (!shim_deinitialized);
+
+  gum_memory_init ();
+
   return gum_calloc (count, size);
 }
 
 void *
 realloc (void * ptr, size_t size)
 {
+  g_assert (!shim_deinitialized);
+
+  gum_memory_init ();
+
   return gum_realloc (ptr, size);
 }
 
@@ -37,6 +62,10 @@ int
 posix_memalign (void ** memptr, size_t alignment, size_t size)
 {
   gpointer result;
+
+  g_assert (!shim_deinitialized);
+
+  gum_memory_init ();
 
   result = gum_memalign (alignment, size);
   if (result == NULL)
@@ -49,6 +78,11 @@ posix_memalign (void ** memptr, size_t alignment, size_t size)
 void
 free (void * ptr)
 {
+  if (shim_deinitialized)
+    return;
+
+  gum_memory_init ();
+
   gum_free (ptr);
 }
 

@@ -1,6 +1,7 @@
 #include "frida-gadget.h"
 
 #include "frida-interfaces.h"
+#include "frida-payload.h"
 
 #ifdef G_OS_WIN32
 # define VC_EXTRALEAN
@@ -176,6 +177,7 @@ void
 frida_gadget_environment_init (void)
 {
   gum_init_embedded ();
+  frida_init_libc_shim ();
 
   g_thread_set_garbage_handler (_frida_gadget_on_pending_thread_garbage, NULL);
 
@@ -230,6 +232,7 @@ frida_gadget_environment_deinit (void)
   g_main_context_unref (main_context);
   main_context = NULL;
 
+  frida_deinit_libc_shim ();
   gum_deinit_embedded ();
 }
 
