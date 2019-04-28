@@ -23,6 +23,8 @@ frida_init (void)
 
   if (g_once_init_enter (&frida_initialized))
   {
+    g_set_prgname ("frida");
+
     main_context = g_main_context_ref (g_main_context_default ());
     main_loop = g_main_loop_new (main_context, FALSE);
     main_thread = g_thread_new ("frida-main-loop", run_main_loop, NULL);
