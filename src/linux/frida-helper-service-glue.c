@@ -2860,8 +2860,7 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
 }
 
 static GumAddress
-frida_resolve_inner_dlopen (pid_t pid,
-                            GumAddress * pic_value)
+frida_resolve_inner_dlopen (pid_t pid, GumAddress * pic_value)
 {
   gpointer impl;
   csh capstone;
