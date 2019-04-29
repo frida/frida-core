@@ -102,6 +102,8 @@ namespace Frida.InjectorTest {
 		} catch (GLib.Error e) {
 			assert_not_reached ();
 		}
+
+		rat.close ();
 	}
 
 	private static void test_resource_leaks () {
