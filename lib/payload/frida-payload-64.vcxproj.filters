@@ -57,9 +57,6 @@
     <ClCompile Include="$(IntDir)thread-suspend-monitor.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="allocator.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="process.vala">

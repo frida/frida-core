@@ -13,10 +13,6 @@ payload_sources = [
   'libc-shim.c',
 ]
 
-if not enable_diet
-  payload_sources += ['allocator.cpp']
-endif
-
 if host_os_family == 'linux'
   payload_sources += ['syscall-linux-@0@.S'.format(host_arch)]
 endif
