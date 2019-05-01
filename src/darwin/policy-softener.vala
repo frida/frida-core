@@ -168,27 +168,28 @@ namespace Frida {
 		private const string LIBJAILBREAK_PATH = "/usr/lib/libjailbreak.dylib";
 
 		private Module libjailbreak;
-		private ConnectFunc jb_connect;
-		private DisconnectFunc jb_disconnect;
-		private EntitleNowFunc jb_entitle_now;
+		private void * jbd_call;
 
-		private DaemonConnection connection;
+		private uint32 connection;
+
+		private extern static uint32 _internal_jb_connect ();
+		private extern static void _internal_jb_disconnect (uint32 connection);
+		private extern static int _internal_jb_entitle_now (void * jbd_call, uint32 connection, uint pid);
 
 		construct {
 			libjailbreak = Module.open (LIBJAILBREAK_PATH, BIND_LAZY);
 			assert (libjailbreak != null);
 
-			jb_connect = (ConnectFunc) resolve_symbol ("jb_connect");
-			jb_disconnect = (DisconnectFunc) resolve_symbol ("jb_disconnect");
-			jb_entitle_now = (EntitleNowFunc) resolve_symbol ("jb_entitle_now");
+			jbd_call = resolve_symbol ("jbd_call");
+			assert (jbd_call != null);
 
-			connection = jb_connect ();
+			connection = _internal_jb_connect ();
 
 			entitle_and_platformize (Posix.getpid ());
 		}
 
 		~ElectraPolicySoftener () {
-			jb_disconnect (connection);
+			_internal_jb_disconnect (connection);
 		}
 
 		public static bool is_available () {
@@ -202,7 +203,7 @@ namespace Frida {
 		}
 
 		private void entitle_and_platformize (uint pid) {
-			jb_entitle_now (connection, (Posix.pid_t) pid);
+			_internal_jb_entitle_now (jbd_call, connection, (Posix.pid_t) pid);
 		}
 
 		private void * resolve_symbol (string name) {
@@ -210,17 +211,6 @@ namespace Frida {
 			bool found = libjailbreak.symbol (name, out symbol);
 			assert (found);
 			return symbol;
-		}
-
-		[CCode (has_target = false)]
-		private delegate DaemonConnection ConnectFunc ();
-		[CCode (has_target = false)]
-		private delegate void DisconnectFunc (DaemonConnection connection);
-		[CCode (has_target = false)]
-		private delegate Gum.Darwin.Status EntitleNowFunc (DaemonConnection connection, Posix.pid_t pid);
-
-		[CCode (has_type_id = false)]
-		private struct DaemonConnection : size_t {
 		}
 	}
 #endif
