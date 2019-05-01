@@ -170,7 +170,7 @@ namespace Frida {
 		private Module libjailbreak;
 		private void * jbd_call;
 
-		private uint32 connection;
+		private uint connection;
 
 		construct {
 			libjailbreak = Module.open (LIBJAILBREAK_PATH, BIND_LAZY);
@@ -209,9 +209,9 @@ namespace Frida {
 			return symbol;
 		}
 
-		private extern static uint32 _internal_jb_connect ();
-		private extern static void _internal_jb_disconnect (uint32 connection);
-		private extern static int _internal_jb_entitle_now (void * jbd_call, uint32 connection, uint pid);
+		private extern static uint _internal_jb_connect ();
+		private extern static void _internal_jb_disconnect (uint connection);
+		private extern static int _internal_jb_entitle_now (void * jbd_call, uint connection, uint pid);
 	}
 #endif
 }
