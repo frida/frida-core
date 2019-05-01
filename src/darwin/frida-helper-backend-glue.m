@@ -4294,6 +4294,13 @@ frida_is_hardware_breakpoint_support_working (void)
     version = atof (buf);
     buggy_kernel = version >= 17.5f && version <= 18.0f;
 
+    size = sizeof (buf);
+    res = sysctlbyname ("kern.version", buf, &size, NULL, 0);
+    g_assert (res == 0);
+
+    if (strnstr (buf, "4903.202.2~1", size) != NULL)
+      buggy_kernel = FALSE;
+
     g_once_init_leave (&cached_result, !buggy_kernel + 1);
   }
 
