@@ -3,7 +3,7 @@
 #ifdef HAVE_IOS
 # include <mach/mach.h>
 
-typedef int (* JbdCallFunc) (guint32 service_port, guint command, guint pid);
+typedef int (* JbdCallFunc) (mach_port_t service_port, guint command, guint pid);
 
 extern kern_return_t bootstrap_look_up (mach_port_t bootstrap_port, char * service_name, mach_port_t * service_port);
 
