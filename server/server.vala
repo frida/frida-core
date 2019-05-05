@@ -237,7 +237,8 @@ namespace Frida.Server {
 			try {
 				yield host_session.preload ();
 			} catch (Error e) {
-				printerr ("Unable to preload: %s\n", e.message);
+				if (verbose)
+					printerr ("Unable to preload: %s\n", e.message);
 			}
 		}
 
