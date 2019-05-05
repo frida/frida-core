@@ -23,8 +23,8 @@
 #include <fcntl.h>
 #include <pthread.h>
 #ifdef HAVE_ANDROID
+# include <gum/gumandroid.h>
 # include <selinux/selinux.h>
-# include <sys/system_properties.h>
 #endif
 #include <signal.h>
 #include <stdio.h>
@@ -238,7 +238,6 @@ struct _FridaInjectParams
   GumAddress syscall_impl;
 
   GumAddress dlopen_impl;
-  GumAddress dlopen_pic_value;
   GumAddress dlclose_impl;
   GumAddress dlsym_impl;
 };
@@ -325,8 +324,7 @@ static GumAddress frida_find_libc_base (pid_t pid);
 static GumAddress frida_resolve_linker_address (pid_t pid, gpointer func);
 #endif
 #if defined (HAVE_ANDROID)
-static GumAddress frida_resolve_inner_dlopen (pid_t pid, GumAddress * pic_value);
-static guint frida_get_android_api_level (void);
+static GumAddress frida_resolve_android_dlopen (pid_t pid);
 #endif
 static GumAddress frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
@@ -595,16 +593,14 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
 
 #if defined (HAVE_GLIBC)
   params.dlopen_impl = frida_resolve_libc_function (pid, "__libc_dlopen_mode");
-  params.dlopen_pic_value = 0;
   params.dlclose_impl = frida_resolve_libc_function (pid, "__libc_dlclose");
   params.dlsym_impl = frida_resolve_libc_function (pid, "__libc_dlsym");
 #elif defined (HAVE_UCLIBC)
   params.dlopen_impl = frida_resolve_linker_address (params.pid, dlopen);
-  params.dlopen_pic_value = 0;
   params.dlclose_impl = frida_resolve_linker_address (params.pid, dlclose);
   params.dlsym_impl = frida_resolve_linker_address (params.pid, dlsym);
 #elif defined (HAVE_ANDROID)
-  params.dlopen_impl = frida_resolve_inner_dlopen (pid, &params.dlopen_pic_value);
+  params.dlopen_impl = frida_resolve_android_dlopen (pid);
   params.dlclose_impl = frida_resolve_linker_address (pid, dlclose);
   params.dlsym_impl = frida_resolve_linker_address (pid, dlsym);
 #endif
@@ -1327,8 +1323,6 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
   EMIT_CMP (XAX, 0);
   EMIT_JNE (skip_dlopen);
   {
-    if (params->dlopen_pic_value != 0)
-      EMIT_LOAD_IMM (XBX, params->dlopen_pic_value);
 #ifdef HAVE_ANDROID
     EMIT_CALL_IMM (params->dlopen_impl,
         3,
@@ -2834,18 +2828,14 @@ frida_find_libc_base (pid_t pid)
 static GumAddress
 frida_resolve_linker_address (pid_t pid, gpointer func)
 {
-#if GLIB_SIZEOF_VOID_P == 4
-  const gchar * linker_path = "/system/bin/linker";
-#else
-  const gchar * linker_path = "/system/bin/linker64";
-#endif
   Dl_info info;
+  const gchar * linker_path;
   GumAddress local_base, remote_base, remote_address;
 
-  if (dladdr (func, &info))
-  {
+  if (dladdr (func, &info) != 0)
     linker_path = info.dli_fname;
-  }
+  else
+    linker_path = gum_android_get_linker_module_details ()->path;
 
   local_base = frida_find_library_base (getpid (), linker_path, NULL);
   g_assert (local_base != 0);
@@ -2860,149 +2850,17 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
 }
 
 static GumAddress
-frida_resolve_inner_dlopen (pid_t pid, GumAddress * pic_value)
+frida_resolve_android_dlopen (pid_t pid)
 {
   gpointer impl;
-  csh capstone;
-  cs_err err;
-  gsize dlopen_address;
-  cs_insn * insn;
-  size_t count;
+  GumAndroidUnrestrictedLinkerApi api;
 
-  impl = dlopen;
-  *pic_value = 0;
-
-  if (frida_get_android_api_level () < 26)
-  {
-    return frida_resolve_linker_address (pid, impl);
-  }
-
-#if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
-  err = cs_open (CS_ARCH_X86, CS_MODE_32, &capstone);
-  g_assert (err == CS_ERR_OK);
-
-  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert (err == CS_ERR_OK);
-
-  dlopen_address = GPOINTER_TO_SIZE (impl);
-
-  insn = NULL;
-  count = cs_disasm (capstone, GSIZE_TO_POINTER (dlopen_address), 48, dlopen_address, 18, &insn);
-
-  for (size_t i = 0; i != count; i++)
-  {
-    const cs_insn * cur = &insn[i];
-    const cs_x86_op * op1 = &cur->detail->x86.operands[0];
-    const cs_x86_op * op2 = &cur->detail->x86.operands[1];
-
-    switch (cur->id)
-    {
-      case X86_INS_CALL:
-        if (op1->type == X86_OP_IMM)
-          impl = GSIZE_TO_POINTER (op1->imm);
-        break;
-      case X86_INS_POP:
-        if (op1->reg == X86_REG_EBX && *pic_value == 0)
-          *pic_value = cur->address;
-        break;
-      case X86_INS_ADD:
-        if (op1->reg == X86_REG_EBX)
-          *pic_value += op2->imm;
-        break;
-    }
-  }
-
-  if (*pic_value != 0)
-    *pic_value = frida_resolve_linker_address (pid, GSIZE_TO_POINTER (*pic_value));
-#elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
-  err = cs_open (CS_ARCH_X86, CS_MODE_64, &capstone);
-  g_assert (err == CS_ERR_OK);
-
-  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert (err == CS_ERR_OK);
-
-  dlopen_address = GPOINTER_TO_SIZE (impl);
-
-  insn = NULL;
-  count = cs_disasm (capstone, GSIZE_TO_POINTER (dlopen_address), 16, dlopen_address, 4, &insn);
-
-  for (size_t i = 0; i != count; i++)
-  {
-    const cs_insn * cur = &insn[i];
-    const cs_x86_op * op = &cur->detail->x86.operands[0];
-
-    if (cur->id == X86_INS_JMP)
-    {
-      if (op->type == X86_OP_IMM)
-        impl = GSIZE_TO_POINTER (op->imm);
-      break;
-    }
-  }
-#elif defined (HAVE_ARM)
-  err = cs_open (CS_ARCH_ARM, CS_MODE_THUMB, &capstone);
-  g_assert (err == CS_ERR_OK);
-
-  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert (err == CS_ERR_OK);
-
-  dlopen_address = GPOINTER_TO_SIZE (impl) & (gsize) ~1;
-
-  insn = NULL;
-  count = cs_disasm (capstone, GSIZE_TO_POINTER (dlopen_address), 10, dlopen_address, 4, &insn);
-  if (count == 4 &&
-      insn[0].id == ARM_INS_PUSH &&
-      (insn[1].id == ARM_INS_MOV &&
-          insn[1].detail->arm.operands[0].reg == ARM_REG_R2 &&
-          insn[1].detail->arm.operands[1].reg == ARM_REG_LR) &&
-      (insn[2].id == ARM_INS_BL || insn[2].id == ARM_INS_BLX) &&
-      insn[3].id == ARM_INS_POP)
-  {
-    gsize thumb_bit = (insn[2].id == ARM_INS_BL) ? 1 : 0;
-    impl = GSIZE_TO_POINTER (insn[2].detail->arm.operands[0].imm | thumb_bit);
-  }
-#elif defined (HAVE_ARM64)
-  err = cs_open (CS_ARCH_ARM64, CS_MODE_ARM, &capstone);
-  g_assert (err == CS_ERR_OK);
-
-  err = cs_option (capstone, CS_OPT_DETAIL, CS_OPT_ON);
-  g_assert (err == CS_ERR_OK);
-
-  dlopen_address = GPOINTER_TO_SIZE (impl);
-
-  insn = NULL;
-  count = cs_disasm (capstone, GSIZE_TO_POINTER (dlopen_address), 6 * sizeof (guint32), dlopen_address, 6, &insn);
-  if (count == 6 &&
-      insn[0].id == ARM64_INS_STP &&
-      insn[1].id == ARM64_INS_MOV &&
-      (insn[2].id == ARM64_INS_MOV &&
-          insn[2].detail->arm64.operands[0].reg == ARM64_REG_X2 &&
-          insn[2].detail->arm64.operands[1].reg == ARM64_REG_LR) &&
-      insn[3].id == ARM64_INS_BL &&
-      insn[4].id == ARM64_INS_LDP &&
-      insn[5].id == ARM64_INS_RET)
-  {
-    impl = GSIZE_TO_POINTER (insn[3].detail->arm64.operands[0].imm);
-  }
-#else
-# error Unsupported architecture
-#endif
-
-  cs_free (insn, count);
-
-  cs_close (&capstone);
+  if (gum_android_find_unrestricted_linker_api (&api))
+    impl = api.dlopen;
+  else
+    impl = dlopen;
 
   return frida_resolve_linker_address (pid, impl);
-}
-
-static guint
-frida_get_android_api_level (void)
-{
-  gchar sdk_version[PROP_VALUE_MAX];
-
-  sdk_version[0] = '\0';
-  __system_property_get ("ro.build.version.sdk", sdk_version);
-
-  return atoi (sdk_version);
 }
 
 #elif defined (HAVE_UCLIBC)
