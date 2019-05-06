@@ -580,7 +580,13 @@ namespace Frida {
 							yield agent.load ();
 						} catch (Error e) {
 							zygote_agents.unset (pid);
-							throw e;
+
+							if (e is Error.PERMISSION_DENIED) {
+								throw new Error.NOT_SUPPORTED ("Unable to access %s while preparing for app launch;" +
+									" try disabling Magisk Hide in case it is active", name);
+							} else {
+								throw e;
+							}
 						}
 					}
 				}
