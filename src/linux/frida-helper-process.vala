@@ -1,5 +1,5 @@
 namespace Frida {
-	internal class HelperProcess {
+	internal class LinuxHelperProcess : Object {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
@@ -8,9 +8,6 @@ namespace Frida {
 				return resource_store.tempdir;
 			}
 		}
-
-		private HelperFactory factory32;
-		private HelperFactory factory64;
 
 		private ResourceStore resource_store {
 			get {
@@ -27,9 +24,11 @@ namespace Frida {
 		private ResourceStore _resource_store;
 
 		private MainContext main_context;
+		private HelperFactory factory32;
+		private HelperFactory factory64;
 
-		public HelperProcess () {
-			this.main_context = MainContext.get_thread_default ();
+		construct {
+			main_context = MainContext.get_thread_default ();
 		}
 
 		public async void close () {
@@ -48,56 +47,32 @@ namespace Frida {
 
 		public async uint spawn (string path, HostSpawnOptions options) throws Error {
 			var helper = yield obtain_for_path (path);
-			try {
-				return yield helper.spawn (path, options);
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
+			return yield helper.spawn (path, options);
 		}
 
 		public async void prepare_exec_transition (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			try {
-				yield helper.prepare_exec_transition (pid);
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
+			yield helper.prepare_exec_transition (pid);
 		}
 
 		public async void await_exec_transition (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			try {
-				yield helper.await_exec_transition (pid);
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
+			yield helper.await_exec_transition (pid);
 		}
 
 		public async void cancel_exec_transition (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			try {
-				yield helper.cancel_exec_transition (pid);
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
+			yield helper.cancel_exec_transition (pid);
 		}
 
 		public async void input (uint pid, uint8[] data) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			try {
-				yield helper.input (pid, data);
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
+			yield helper.input (pid, data);
 		}
 
 		public async void resume (uint pid) throws Error {
 			var helper = yield obtain_for_pid (pid);
-			try {
-				yield helper.resume (pid);
-			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
-			}
+			yield helper.resume (pid);
 		}
 
 		public async void kill (uint pid) throws Error {
@@ -155,15 +130,15 @@ namespace Frida {
 			}
 		}
 
-		private async Helper obtain_for_path (string path) throws Error {
+		private async LinuxHelper obtain_for_path (string path) throws Error {
 			return yield obtain_for_cpu_type (cpu_type_from_file (path));
 		}
 
-		private async Helper obtain_for_pid (uint pid) throws Error {
+		private async LinuxHelper obtain_for_pid (uint pid) throws Error {
 			return yield obtain_for_cpu_type (cpu_type_from_pid (pid));
 		}
 
-		private async Helper obtain_for_cpu_type (Gum.CpuType cpu_type) throws Error {
+		private async LinuxHelper obtain_for_cpu_type (Gum.CpuType cpu_type) throws Error {
 			switch (cpu_type) {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
@@ -179,16 +154,16 @@ namespace Frida {
 			}
 		}
 
-		private async Helper obtain_for_injectee_id (uint id) throws Error {
+		private async LinuxHelper obtain_for_injectee_id (uint id) throws Error {
 			if (id % 2 != 0)
 				return yield obtain_for_32bit ();
 			else
 				return yield obtain_for_64bit ();
 		}
 
-		private async Helper obtain_for_32bit () throws Error {
+		private async LinuxHelper obtain_for_32bit () throws Error {
 			if (factory32 == null) {
-				if (resource_store.helper32 == null)
+				if (sizeof (void *) != 4 && resource_store.helper32 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
 				factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
 				factory32.output.connect (on_factory_output);
@@ -198,9 +173,9 @@ namespace Frida {
 			return yield factory32.obtain ();
 		}
 
-		private async Helper obtain_for_64bit () throws Error {
+		private async LinuxHelper obtain_for_64bit () throws Error {
 			if (factory64 == null) {
-				if (resource_store.helper64 == null)
+				if (sizeof (void *) != 8 && resource_store.helper64 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 64-bit processes due to build configuration");
 				factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
 				factory64.output.connect (on_factory_output);
@@ -249,26 +224,25 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
-		private TemporaryFile helper_file;
+		private TemporaryFile? helper_file;
 		private ResourceStore resource_store;
 		private MainContext? main_context;
 		private Object process;
 		private DBusConnection connection;
-		private Helper proxy;
-		private Gee.Promise<Helper> obtain_request;
+		private LinuxHelper helper;
+		private Gee.Promise<LinuxHelper> obtain_request;
 
-		public HelperFactory (TemporaryFile helper_file, ResourceStore resource_store, MainContext? main_context) {
+		public HelperFactory (TemporaryFile? helper_file, ResourceStore resource_store, MainContext? main_context) {
 			this.helper_file = helper_file;
 			this.resource_store = resource_store;
 			this.main_context = main_context;
 		}
 
 		public async void close () {
-			if (proxy != null) {
-				try {
-					yield proxy.stop ();
-				} catch (GLib.Error e) {
-				}
+			if (helper != null) {
+				yield helper.close ();
+
+				discard_helper ();
 			}
 
 			if (connection != null) {
@@ -281,7 +255,7 @@ namespace Frida {
 			process = null;
 		}
 
-		public async Helper obtain () throws Error {
+		public async LinuxHelper obtain () throws Error {
 			if (obtain_request != null) {
 				var future = obtain_request.future;
 				try {
@@ -290,12 +264,19 @@ namespace Frida {
 					throw (Error) future.exception;
 				}
 			}
-			obtain_request = new Gee.Promise<Helper> ();
+			obtain_request = new Gee.Promise<LinuxHelper> ();
+
+			if (helper_file == null) {
+				assign_helper (new LinuxHelperBackend ());
+
+				obtain_request.set_value (helper);
+				return helper;
+			}
 
 			SuperSU.Process pending_superprocess = null;
 			Subprocess pending_subprocess = null;
 			DBusConnection pending_connection = null;
-			Helper pending_proxy = null;
+			LinuxRemoteHelper pending_proxy = null;
 			Error pending_error = null;
 
 			DBusServer server = null;
@@ -367,12 +348,10 @@ namespace Frida {
 				connection = pending_connection;
 				connection.on_closed.connect (on_connection_closed);
 
-				proxy = pending_proxy;
-				proxy.output.connect (on_output);
-				proxy.uninjected.connect (on_uninjected);
+				assign_helper (new HelperSession (pending_proxy));
 
-				obtain_request.set_value (proxy);
-				return proxy;
+				obtain_request.set_value (helper);
+				return helper;
 			} else {
 				if (pending_subprocess != null)
 					pending_subprocess.force_exit ();
@@ -385,14 +364,140 @@ namespace Frida {
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
 			obtain_request = null;
 
-			proxy.output.disconnect (on_output);
-			proxy.uninjected.disconnect (on_uninjected);
-			proxy = null;
+			discard_helper ();
 
 			connection.on_closed.disconnect (on_connection_closed);
 			connection = null;
 
 			process = null;
+		}
+
+		private void assign_helper (owned LinuxHelper h) {
+			helper = h;
+			helper.output.connect (on_helper_output);
+			helper.uninjected.connect (on_helper_uninjected);
+		}
+
+		private void discard_helper () {
+			if (helper == null)
+				return;
+			helper.output.disconnect (on_helper_output);
+			helper.uninjected.disconnect (on_helper_uninjected);
+			helper = null;
+		}
+
+		private void on_helper_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
+		}
+
+		private void on_helper_uninjected (uint id) {
+			uninjected (id);
+		}
+	}
+
+	private class HelperSession : Object, LinuxHelper {
+		public LinuxRemoteHelper proxy {
+			get;
+			construct;
+		}
+
+		public HelperSession (LinuxRemoteHelper proxy) {
+			Object (proxy: proxy);
+		}
+
+		construct {
+			proxy.output.connect (on_output);
+			proxy.uninjected.connect (on_uninjected);
+		}
+
+		public async void close () {
+			try {
+				yield proxy.stop ();
+			} catch (GLib.Error e) {
+			}
+
+			proxy.output.disconnect (on_output);
+			proxy.uninjected.disconnect (on_uninjected);
+		}
+
+		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+			try {
+				return yield proxy.spawn (path, options);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void prepare_exec_transition (uint pid) throws Error {
+			try {
+				yield proxy.prepare_exec_transition (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void await_exec_transition (uint pid) throws Error {
+			try {
+				yield proxy.await_exec_transition (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void cancel_exec_transition (uint pid) throws Error {
+			try {
+				yield proxy.cancel_exec_transition (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void input (uint pid, uint8[] data) throws Error {
+			try {
+				yield proxy.input (pid, data);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void resume (uint pid) throws Error {
+			try {
+				yield proxy.resume (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void kill (uint pid) throws Error {
+			try {
+				yield proxy.kill (pid);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
+			try {
+				return yield proxy.inject_library_file (pid, path, entrypoint, data, temp_path);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+			try {
+				return yield proxy.demonitor_and_clone_injectee_state (id);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
+		}
+
+		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+			try {
+				yield proxy.recreate_injectee_thread (pid, id);
+			} catch (GLib.Error e) {
+				throw Marshal.from_dbus (e);
+			}
 		}
 
 		private void on_output (uint pid, int fd, uint8[] data) {

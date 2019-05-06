@@ -1,4 +1,4 @@
-#include "frida-helper-service.h"
+#include "frida-helper-backend.h"
 
 #include <gio/gunixinputstream.h>
 #include <glib-unix.h>
@@ -169,14 +169,14 @@ struct _FridaSpawnInstance
 {
   pid_t pid;
 
-  FridaHelperService * service;
+  FridaLinuxHelperBackend * backend;
 };
 
 struct _FridaExecInstance
 {
   pid_t pid;
 
-  FridaHelperService * service;
+  FridaLinuxHelperBackend * backend;
 };
 
 struct _FridaNotifyExecPendingContext
@@ -206,7 +206,7 @@ struct _FridaInjectInstance
   GumAddress stack_top;
   GumAddress trampoline_data;
 
-  FridaHelperService * service;
+  FridaLinuxHelperBackend * backend;
 };
 
 struct _FridaInjectRegion
@@ -274,13 +274,13 @@ struct _FridaProbeElfContext
 
 static gboolean frida_set_matching_inject_instances_exec_pending (GeeMapEntry * entry, FridaNotifyExecPendingContext * ctx);
 
-static guint frida_helper_service_generate_id (FridaHelperService * self);
+static guint frida_helper_backend_generate_id (FridaLinuxHelperBackend * self);
 
-static FridaSpawnInstance * frida_spawn_instance_new (FridaHelperService * service);
+static FridaSpawnInstance * frida_spawn_instance_new (FridaLinuxHelperBackend * backend);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
 
-static FridaExecInstance * frida_exec_instance_new (FridaHelperService * service, pid_t pid);
+static FridaExecInstance * frida_exec_instance_new (FridaLinuxHelperBackend * backend, pid_t pid);
 static void frida_exec_instance_free (FridaExecInstance * instance);
 static gboolean frida_exec_instance_prepare_transition (FridaExecInstance * self, GError ** error);
 static gboolean frida_exec_instance_try_perform_transition (FridaExecInstance * self, GError ** error);
@@ -289,7 +289,7 @@ static void frida_exec_instance_resume (FridaExecInstance * self);
 
 static void frida_make_pipe (int fds[2]);
 
-static FridaInjectInstance * frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path);
+static FridaInjectInstance * frida_inject_instance_new (FridaLinuxHelperBackend * backend, guint id, pid_t pid, const gchar * temp_path);
 static void frida_inject_instance_recreate_fifo (FridaInjectInstance * self);
 static FridaInjectInstance * frida_inject_instance_clone (const FridaInjectInstance * instance, guint id);
 static void frida_inject_instance_init_fifo (FridaInjectInstance * self);
@@ -334,7 +334,7 @@ static gboolean frida_is_seize_supported (void);
 static gboolean frida_is_regset_supported = TRUE;
 
 guint
-_frida_helper_service_do_spawn (FridaHelperService * self, const gchar * path, FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
+_frida_linux_helper_backend_do_spawn (FridaLinuxHelperBackend * self, const gchar * path, FridaHostSpawnOptions * options, FridaStdioPipes ** pipes, GError ** error)
 {
   FridaSpawnInstance * instance;
   gchar ** argv, ** envp;
@@ -464,19 +464,19 @@ beach:
 }
 
 void
-_frida_helper_service_resume_spawn_instance (FridaHelperService * self, void * instance)
+_frida_linux_helper_backend_resume_spawn_instance (FridaLinuxHelperBackend * self, void * instance)
 {
   frida_spawn_instance_resume (instance);
 }
 
 void
-_frida_helper_service_free_spawn_instance (FridaHelperService * self, void * instance)
+_frida_linux_helper_backend_free_spawn_instance (FridaLinuxHelperBackend * self, void * instance)
 {
   frida_spawn_instance_free (instance);
 }
 
 void
-_frida_helper_service_do_prepare_exec_transition (FridaHelperService * self, guint pid, GError ** error)
+_frida_linux_helper_backend_do_prepare_exec_transition (FridaLinuxHelperBackend * self, guint pid, GError ** error)
 {
   FridaExecInstance * instance;
 
@@ -497,7 +497,7 @@ failure:
 }
 
 void
-_frida_helper_service_notify_exec_pending (FridaHelperService * self, guint pid, gboolean pending)
+_frida_linux_helper_backend_notify_exec_pending (FridaLinuxHelperBackend * self, guint pid, gboolean pending)
 {
   FridaNotifyExecPendingContext ctx;
 
@@ -523,31 +523,31 @@ frida_set_matching_inject_instances_exec_pending (GeeMapEntry * entry, FridaNoti
 }
 
 gboolean
-_frida_helper_service_try_transition_exec_instance (FridaHelperService * self, void * instance, GError ** error)
+_frida_linux_helper_backend_try_transition_exec_instance (FridaLinuxHelperBackend * self, void * instance, GError ** error)
 {
   return frida_exec_instance_try_perform_transition (instance, error);
 }
 
 void
-_frida_helper_service_suspend_exec_instance (FridaHelperService * self, void * instance)
+_frida_linux_helper_backend_suspend_exec_instance (FridaLinuxHelperBackend * self, void * instance)
 {
   frida_exec_instance_suspend (instance);
 }
 
 void
-_frida_helper_service_resume_exec_instance (FridaHelperService * self, void * instance)
+_frida_linux_helper_backend_resume_exec_instance (FridaLinuxHelperBackend * self, void * instance)
 {
   frida_exec_instance_resume (instance);
 }
 
 void
-_frida_helper_service_free_exec_instance (FridaHelperService * self, void * instance)
+_frida_linux_helper_backend_free_exec_instance (FridaLinuxHelperBackend * self, void * instance)
 {
   frida_exec_instance_free (instance);
 }
 
 guint
-_frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, GError ** error)
+_frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, GError ** error)
 {
   FridaInjectInstance * instance;
   FridaInjectParams params;
@@ -607,7 +607,7 @@ _frida_helper_service_do_inject (FridaHelperService * self, guint pid, const gch
   if (params.dlopen_impl == 0 || params.dlclose_impl == 0 || params.dlsym_impl == 0)
     goto no_libc;
 
-  instance = frida_inject_instance_new (self, frida_helper_service_generate_id (self), pid, temp_path);
+  instance = frida_inject_instance_new (self, frida_helper_backend_generate_id (self), pid, temp_path);
   if (instance->executable_path == NULL)
     goto premature_termination;
 
@@ -654,14 +654,14 @@ premature_termination:
 }
 
 guint
-_frida_helper_service_demonitor_and_clone_injectee_state (FridaHelperService * self, void * raw_instance)
+_frida_linux_helper_backend_demonitor_and_clone_injectee_state (FridaLinuxHelperBackend * self, void * raw_instance)
 {
   FridaInjectInstance * instance = raw_instance;
   FridaInjectInstance * clone;
 
   frida_inject_instance_recreate_fifo (instance);
 
-  clone = frida_inject_instance_clone (instance, frida_helper_service_generate_id (self));
+  clone = frida_inject_instance_clone (instance, frida_helper_backend_generate_id (self));
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (clone->id), clone);
 
@@ -669,7 +669,7 @@ _frida_helper_service_demonitor_and_clone_injectee_state (FridaHelperService * s
 }
 
 void
-_frida_helper_service_recreate_injectee_thread (FridaHelperService * self, void * raw_instance, guint pid, GError ** error)
+_frida_linux_helper_backend_recreate_injectee_thread (FridaLinuxHelperBackend * self, void * raw_instance, guint pid, GError ** error)
 {
   FridaInjectInstance * instance = raw_instance;
   gboolean is_uninitialized_clone;
@@ -704,13 +704,13 @@ _frida_helper_service_recreate_injectee_thread (FridaHelperService * self, void 
 
 failure:
   {
-    _frida_helper_service_destroy_inject_instance (self, instance->id, FRIDA_UNLOAD_POLICY_IMMEDIATE);
+    _frida_linux_helper_backend_destroy_inject_instance (self, instance->id, FRIDA_UNLOAD_POLICY_IMMEDIATE);
     return;
   }
 }
 
 static guint
-frida_helper_service_generate_id (FridaHelperService * self)
+frida_helper_backend_generate_id (FridaLinuxHelperBackend * self)
 {
   guint id;
 
@@ -726,24 +726,24 @@ frida_helper_service_generate_id (FridaHelperService * self)
 }
 
 GInputStream *
-_frida_helper_service_get_fifo_for_inject_instance (FridaHelperService * self, void * instance)
+_frida_linux_helper_backend_get_fifo_for_inject_instance (FridaLinuxHelperBackend * self, void * instance)
 {
   return g_unix_input_stream_new (((FridaInjectInstance *) instance)->fifo, FALSE);
 }
 
 void
-_frida_helper_service_free_inject_instance (FridaHelperService * self, void * instance, FridaUnloadPolicy unload_policy)
+_frida_linux_helper_backend_free_inject_instance (FridaLinuxHelperBackend * self, void * instance, FridaUnloadPolicy unload_policy)
 {
   frida_inject_instance_free (instance, unload_policy);
 }
 
 static FridaSpawnInstance *
-frida_spawn_instance_new (FridaHelperService * service)
+frida_spawn_instance_new (FridaLinuxHelperBackend * backend)
 {
   FridaSpawnInstance * instance;
 
   instance = g_slice_new0 (FridaSpawnInstance);
-  instance->service = g_object_ref (service);
+  instance->backend = g_object_ref (backend);
 
   return instance;
 }
@@ -751,7 +751,7 @@ frida_spawn_instance_new (FridaHelperService * service)
 static void
 frida_spawn_instance_free (FridaSpawnInstance * instance)
 {
-  g_object_unref (instance->service);
+  g_object_unref (instance->backend);
 
   g_slice_free (FridaSpawnInstance, instance);
 }
@@ -763,14 +763,14 @@ frida_spawn_instance_resume (FridaSpawnInstance * self)
 }
 
 static FridaExecInstance *
-frida_exec_instance_new (FridaHelperService * service, pid_t pid)
+frida_exec_instance_new (FridaLinuxHelperBackend * backend, pid_t pid)
 {
   FridaExecInstance * instance;
 
   instance = g_slice_new0 (FridaExecInstance);
   instance->pid = pid;
 
-  instance->service = g_object_ref (service);
+  instance->backend = g_object_ref (backend);
 
   return instance;
 }
@@ -778,7 +778,7 @@ frida_exec_instance_new (FridaHelperService * service, pid_t pid)
 static void
 frida_exec_instance_free (FridaExecInstance * instance)
 {
-  g_object_unref (instance->service);
+  g_object_unref (instance->backend);
 
   g_slice_free (FridaExecInstance, instance);
 }
@@ -895,7 +895,7 @@ frida_make_pipe (int fds[2])
 }
 
 static FridaInjectInstance *
-frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, const gchar * temp_path)
+frida_inject_instance_new (FridaLinuxHelperBackend * backend, guint id, pid_t pid, const gchar * temp_path)
 {
   FridaInjectInstance * instance;
 
@@ -912,7 +912,7 @@ frida_inject_instance_new (FridaHelperService * service, guint id, pid_t pid, co
   frida_inject_instance_init_fifo (instance);
   instance->previous_fifo = -1;
 
-  instance->service = g_object_ref (service);
+  instance->backend = g_object_ref (backend);
 
   return instance;
 }
@@ -946,7 +946,7 @@ frida_inject_instance_clone (const FridaInjectInstance * instance, guint id)
   frida_inject_instance_init_fifo (clone);
   clone->previous_fifo = -1;
 
-  g_object_ref (clone->service);
+  g_object_ref (clone->backend);
 
   return clone;
 }
@@ -1003,7 +1003,7 @@ frida_inject_instance_free (FridaInjectInstance * instance, FridaUnloadPolicy un
 
   g_free (instance->executable_path);
 
-  g_object_unref (instance->service);
+  g_object_unref (instance->backend);
 
   g_slice_free (FridaInjectInstance, instance);
 }

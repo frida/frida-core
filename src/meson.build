@@ -60,6 +60,7 @@ if host_os_family == 'darwin'
   helper_backend_sources = [
     'darwin/frida-helper-backend.vala',
     'darwin/frida-helper-backend-glue.m',
+    'darwin/frida-helper-types.vala',
     'darwin/policy-softener.vala',
     'darwin/policy-softener-glue.c',
     'darwin/port.vala',
@@ -68,8 +69,7 @@ if host_os_family == 'darwin'
   if host_os == 'ios'
     helper_backend_sources += ['darwin/springboard.m']
   endif
-  helper_types_sources = ['darwin/frida-helper-types.vala']
-  helper_backend = static_library('frida-helper-backend', helper_backend_sources + helper_types_sources,
+  helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
     vala_args: ['--pkg=frida-gum-darwin-1.0', '--pkg=posix'],
     dependencies: [gmodule_dep, gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
@@ -168,42 +168,39 @@ if host_os_family == 'linux'
     linux_sources += [android_data]
   endif
 
-  helper_types_sources = ['linux/frida-helper-types.vala']
-  linux_sources += helper_types_sources
-
-  helper_service_sources = [
-    'linux/frida-helper-service.vala',
-    'linux/frida-helper-service-glue.c',
+  helper_backend_sources = [
+    'linux/frida-helper-backend.vala',
+    'linux/frida-helper-backend-glue.c',
+    'linux/frida-helper-types.vala',
   ]
-  helper_service_extra_deps = []
+  helper_backend_extra_deps = []
   if host_os == 'android'
-    helper_service_extra_deps += [frida_selinux_dep]
+    helper_backend_extra_deps += [frida_selinux_dep]
   endif
-  helper_service = static_library('frida-helper-service', helper_service_sources + helper_types_sources,
+  helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
     vala_args: ['--pkg=posix'],
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep] + helper_service_extra_deps,
+    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep] + helper_backend_extra_deps,
   )
+  backend_libs += [helper_backend]
 
-  helper = executable('frida-helper', 'linux/frida-helper.vala',
+  helper_sources = [
+    'linux/frida-helper-service.vala',
+  ]
+  helper = executable('frida-helper', helper_sources,
     vala_args: ['--pkg=posix'],
-    link_with: helper_service,
+    link_with: helper_backend,
     dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
   )
 
   helper32 = get_option('with-32bit-helper')
   helper64 = get_option('with-64bit-helper')
-  helper_inputs = []
-  if helper32 == '' and helper64 == ''
-    if host_is_64bit
-      helper64 = helper.full_path()
-    else
-      helper32 = helper.full_path()
-    endif
-    helper_inputs += helper
+  if host_is_64bit
+    helper64 = ''
+  else
+    helper32 = ''
   endif
   helper_process_data = custom_target('frida-data-helper-process',
-    input: helper_inputs,
     output: [
       'frida-data-helper-process.vapi',
       'frida-data-helper-process.h',

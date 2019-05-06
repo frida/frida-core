@@ -74,7 +74,7 @@ namespace Frida {
 	public class LinuxHostSession : BaseDBusHostSession {
 		private AgentContainer system_session_container;
 
-		private HelperProcess helper;
+		private LinuxHelperProcess helper;
 		private AgentResource agent;
 
 #if ANDROID
@@ -84,7 +84,7 @@ namespace Frida {
 #endif
 
 		construct {
-			helper = new HelperProcess ();
+			helper = new LinuxHelperProcess ();
 			helper.output.connect (on_output);
 
 			injector = new Linjector.with_helper (helper);
@@ -101,7 +101,7 @@ namespace Frida {
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
 
-			robo_launcher = new RoboLauncher (this, helper, system_server_agent);
+			robo_launcher = new RoboLauncher (this, system_server_agent);
 			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
 
@@ -354,11 +354,6 @@ namespace Frida {
 			construct;
 		}
 
-		public HelperProcess helper {
-			get;
-			construct;
-		}
-
 		public SystemServerAgent system_server_agent {
 			get;
 			construct;
@@ -372,8 +367,8 @@ namespace Frida {
 		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		public RoboLauncher (LinuxHostSession host_session, HelperProcess helper, SystemServerAgent system_server_agent) {
-			Object (host_session: host_session, helper: helper, system_server_agent: system_server_agent);
+		public RoboLauncher (LinuxHostSession host_session, SystemServerAgent system_server_agent) {
+			Object (host_session: host_session, system_server_agent: system_server_agent);
 		}
 
 		public async void preload () throws Error {

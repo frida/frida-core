@@ -2,7 +2,7 @@ using Gee;
 
 namespace Frida {
 	public class Linjector : Object, Injector {
-		private HelperProcess helper;
+		private LinuxHelperProcess helper;
 		private bool close_helper;
 
 		private HashMap<uint, uint> pid_by_id = new HashMap<uint, uint> ();
@@ -13,16 +13,16 @@ namespace Frida {
 			close_helper = true;
 		}
 
-		internal Linjector.with_helper (HelperProcess helper) {
+		internal Linjector.with_helper (LinuxHelperProcess helper) {
 			close_helper = false;
 
 			this.helper = helper;
 			this.helper.uninjected.connect (on_uninjected);
 		}
 
-		private HelperProcess get_helper () {
+		private LinuxHelperProcess get_helper () {
 			if (helper == null) {
-				helper = new HelperProcess ();
+				helper = new LinuxHelperProcess ();
 				helper.uninjected.connect (on_uninjected);
 			}
 			return helper;
