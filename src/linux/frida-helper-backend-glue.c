@@ -1693,7 +1693,7 @@ static void
 frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAddress remote_address, FridaCodeChunk * code)
 {
   GumArm64Writer cw;
-  const guint worker_offset = 96;
+  const guint worker_offset = 128;
   const gchar * skip_dlopen = "skip_dlopen";
   const gchar * skip_dlclose = "skip_dlclose";
   const gchar * skip_detach = "skip_detach";
