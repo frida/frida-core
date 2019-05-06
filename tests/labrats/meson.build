@@ -20,13 +20,8 @@ if host_os == 'linux'
     'forker-linux-' + host_abi,
     'spawner-linux-' + host_abi,
     'simple-agent-linux-' + host_abi + '.so',
+    'resident-agent-linux-' + host_abi + '.so',
   ]
-
-  if host_abi == 'x86' or host_abi == 'x86_64'
-    labrat_files += [
-      'resident-agent-linux-' + host_abi + '.so',
-    ]
-  endif
 endif
 
 if host_os == 'ios'
