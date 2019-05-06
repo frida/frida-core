@@ -32,9 +32,7 @@
 #include <strings.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
-#ifdef HAVE_ARM
-# include <asm/ptrace.h>
-#endif
+#include <asm/ptrace.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
