@@ -80,8 +80,9 @@ if host_os_family == 'darwin'
     'darwin/frida-helper-service.vala',
     'darwin/frida-helper-service-glue.m',
   ]
-  helper_link_args = []
-  helper_link_depends = []
+  helper_symlist = 'darwin/frida-helper.symbols'
+  helper_link_args = ['-Wl,-exported_symbols_list,' + join_paths(meson.current_source_dir(), helper_symlist)]
+  helper_link_depends = [helper_symlist]
   if host_os == 'macos'
     helper_plist = 'darwin/frida-helper.plist'
     helper_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + join_paths(meson.current_source_dir(), helper_plist)]
@@ -187,8 +188,13 @@ if host_os_family == 'linux'
   helper_sources = [
     'linux/frida-helper-service.vala',
   ]
+  helper_symscript = 'linux/frida-helper.version'
+  helper_link_args = ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), helper_symscript)]
+  helper_link_depends = [helper_symscript]
   helper = executable('frida-helper', helper_sources,
     vala_args: ['--pkg=posix'],
+    link_args: helper_link_args,
+    link_depends: helper_link_depends,
     link_with: helper_backend,
     dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
   )
