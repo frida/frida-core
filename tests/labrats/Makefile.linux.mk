@@ -7,30 +7,35 @@ all: \
 	sleeper-linux-x86_64 \
 	sleeper-linux-arm \
 	sleeper-linux-armhf \
+	sleeper-linux-arm64 \
 	sleeper-linux-mips \
 	sleeper-linux-mipsel \
 	forker-linux-x86 \
 	forker-linux-x86_64 \
 	forker-linux-arm \
 	forker-linux-armhf \
+	forker-linux-arm64 \
 	forker-linux-mips \
 	forker-linux-mipsel \
 	spawner-linux-x86 \
 	spawner-linux-x86_64 \
 	spawner-linux-arm \
 	spawner-linux-armhf \
+	spawner-linux-arm64 \
 	spawner-linux-mips \
 	spawner-linux-mipsel \
 	simple-agent-linux-x86.so \
 	simple-agent-linux-x86_64.so \
 	simple-agent-linux-arm.so \
 	simple-agent-linux-armhf.so \
+	simple-agent-linux-arm64.so \
 	simple-agent-linux-mips.so \
 	simple-agent-linux-mipsel.so \
 	resident-agent-linux-x86.so \
 	resident-agent-linux-x86_64.so \
 	resident-agent-linux-arm.so \
 	resident-agent-linux-armhf.so \
+	resident-agent-linux-arm64.so \
 	resident-agent-linux-mips.so \
 	resident-agent-linux-mipsel.so \
 	$(NULL)
@@ -54,6 +59,11 @@ $1-linux-arm: $2
 $1-linux-armhf: $2
 	arm-linux-gnueabihf-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
 	arm-linux-gnueabihf-strip --strip-all $$@.tmp
+	mv $$@.tmp $$@
+
+$1-linux-arm64: $2
+	aarch64-linux-gnu-gcc $$(CFLAGS) $$(LDFLAGS) $$< -o $$@.tmp $3
+	aarch64-linux-gnu-strip --strip-all $$@.tmp
 	mv $$@.tmp $$@
 
 $1-linux-mips: $2
@@ -91,6 +101,11 @@ $(eval $(call declare-executable,spawner,spawner-unix.c,-ldl))
 %-agent-linux-armhf.so: %-agent.c
 	arm-linux-gnueabihf-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
 	arm-linux-gnueabihf-strip --strip-all $@.tmp
+	mv $@.tmp $@
+
+%-agent-linux-arm64.so: %-agent.c
+	aarch64-linux-gnu-gcc $(CFLAGS) $(LDFLAGS) -shared $< -o $@.tmp
+	aarch64-linux-gnu-strip --strip-all $@.tmp
 	mv $@.tmp $@
 
 %-agent-linux-mips.so: %-agent.c
