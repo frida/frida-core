@@ -5,7 +5,7 @@ gadget_sources = [
 
 force_cpp_linking = gumjs_dep.get_pkgconfig_variable('gumjs_v8') == 'enabled'
 if force_cpp_linking
-  agent_sources += ['dummy.cpp']
+  gadget_sources += ['dummy.cpp']
 endif
 
 extra_link_args = []
