@@ -165,20 +165,13 @@ endif
 
 resource_compiler = find_program('frida-resource-compiler')
 
-enable_diet_value = get_option('enable_diet')
-if enable_diet_value == 'auto'
-  enable_diet = host_os == 'qnx'
+mapper_opt = get_option('mapper')
+if mapper_opt.auto()
+  have_mapper = host_os_family == 'darwin'
 else
-  enable_diet = enable_diet_value == 'yes'
+  have_mapper = mapper_opt.enabled()
 endif
-
-enable_mapper_value = get_option('enable_mapper')
-if enable_mapper_value == 'auto'
-  enable_mapper = host_os_family == 'darwin'
-else
-  enable_mapper = enable_mapper_value == 'yes'
-endif
-if enable_mapper
+if have_mapper
   cdata.set('HAVE_MAPPER', 1)
 endif
 

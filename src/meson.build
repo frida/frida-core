@@ -96,8 +96,8 @@ if host_os_family == 'darwin'
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
   )
 
-  helper32 = get_option('with-32bit-helper')
-  helper64 = get_option('with-64bit-helper')
+  helper32 = get_option('helper32')
+  helper64 = get_option('helper64')
   helper_inputs = ['darwin/frida-helper.xcent']
   if helper32 == '' and helper64 == ''
     if host_is_64bit
@@ -199,8 +199,8 @@ if host_os_family == 'linux'
     dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
   )
 
-  helper32 = get_option('with-32bit-helper')
-  helper64 = get_option('with-64bit-helper')
+  helper32 = get_option('helper32')
+  helper64 = get_option('helper64')
   if host_is_64bit
     helper64 = ''
   else
@@ -238,8 +238,8 @@ if host_os_family == 'qnx'
   ]
 endif
 
-agent32 = get_option('with-32bit-agent')
-agent64 = get_option('with-64bit-agent')
+agent32 = get_option('agent32')
+agent64 = get_option('agent64')
 agent_inputs = ['agent.resources']
 if agent32 == '' and agent64 == ''
   if host_is_64bit
