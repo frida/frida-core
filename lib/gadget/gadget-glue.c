@@ -301,23 +301,6 @@ frida_gadget_environment_get_main_context (void)
   return main_context;
 }
 
-GumScriptBackend *
-frida_gadget_environment_obtain_script_backend (FridaGadgetRuntimeFlavor runtime)
-{
-  GumScriptBackend * backend = NULL;
-
-#ifdef HAVE_DIET
-  backend = gum_script_backend_obtain_duk ();
-#else
-  if (runtime == FRIDA_GADGET_RUNTIME_FLAVOR_JIT)
-    backend = gum_script_backend_obtain_v8 ();
-  if (backend == NULL)
-    backend = gum_script_backend_obtain_duk ();
-#endif
-
-  return backend;
-}
-
 gchar *
 frida_gadget_environment_detect_bundle_id (void)
 {

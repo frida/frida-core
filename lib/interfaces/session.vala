@@ -46,7 +46,9 @@ namespace Frida {
 		public abstract async void disable_child_gating () throws GLib.Error;
 
 		public abstract async AgentScriptId create_script (string name, string source) throws GLib.Error;
+		public abstract async AgentScriptId create_script_with_options (string source, AgentScriptOptions options) throws GLib.Error;
 		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes) throws GLib.Error;
+		public abstract async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options) throws GLib.Error;
 		public abstract async uint8[] compile_script (string name, string source) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id) throws GLib.Error;
@@ -497,6 +499,64 @@ namespace Frida {
 		public static bool equal (AgentScriptId? a, AgentScriptId? b) {
 			return a.handle == b.handle;
 		}
+	}
+
+	public struct AgentScriptOptions {
+		public uint8[] data {
+			get;
+			set;
+		}
+
+		public AgentScriptOptions () {
+			this.data = {};
+		}
+	}
+
+	public class ScriptOptions : Object {
+		public string? name {
+			get;
+			set;
+		}
+
+		public ScriptRuntime runtime {
+			get;
+			set;
+			default = DEFAULT;
+		}
+
+		public Bytes _serialize () {
+			var dict = new VariantDict ();
+
+			if (name != null)
+				dict.insert_value ("name", new Variant.string (name));
+
+			if (runtime != DEFAULT)
+				dict.insert_value ("runtime", new Variant.byte (runtime));
+
+			return dict.end ().get_data_as_bytes ();
+		}
+
+		public static ScriptOptions _deserialize (uint8[] data) {
+			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
+
+			var options = new ScriptOptions ();
+
+			string? name = null;
+			dict.lookup ("name", "s", out name);
+			options.name = name;
+
+			uint8 raw_runtime = ScriptRuntime.DEFAULT;
+			dict.lookup ("runtime", "y", out raw_runtime);
+			options.runtime = (ScriptRuntime) raw_runtime;
+
+			return options;
+		}
+	}
+
+	public enum ScriptRuntime {
+		DEFAULT,
+		DUK,
+		V8
 	}
 
 	public struct InjectorPayloadId {

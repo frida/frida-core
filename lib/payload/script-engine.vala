@@ -3,19 +3,21 @@ namespace Frida {
 		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
 		public signal void message_from_debugger (string message);
 
-		private Gum.ScriptBackend backend;
-		private Gum.MemoryRange agent_range;
+		public weak ProcessInvader invader {
+			get;
+			construct;
+		}
 
 		private Gee.HashMap<AgentScriptId?, ScriptInstance> instances =
 			new Gee.HashMap<AgentScriptId?, ScriptInstance> (AgentScriptId.hash, AgentScriptId.equal);
 		private Gee.HashSet<ScriptInstance> dying_instances = new Gee.HashSet<ScriptInstance> ();
 		private uint next_script_id = 1;
 
+		private ScriptRuntime preferred_runtime = DEFAULT;
 		private bool debugger_enabled = false;
 
-		public ScriptEngine (Gum.ScriptBackend backend, Gum.MemoryRange agent_range) {
-			this.backend = backend;
-			this.agent_range = agent_range;
+		public ScriptEngine (ProcessInvader invader) {
+			Object (invader: invader);
 		}
 
 		public async void prepare_for_termination () {
@@ -45,30 +47,38 @@ namespace Frida {
 			} while (!instances.is_empty || !dying_instances.is_empty);
 
 			if (debugger_enabled) {
-				backend.set_debug_message_handler (null);
+				try {
+					invader.get_script_backend (V8).set_debug_message_handler (null);
+				} catch (Error e) {
+					assert_not_reached ();
+				}
 				debugger_enabled = false;
 			}
 		}
 
-		public async ScriptInstance create_script (string? name, string? source, Bytes? bytes) throws Error {
+		public async ScriptInstance create_script (string? source, Bytes? bytes, ScriptOptions options) throws Error {
 			var script_id = AgentScriptId (next_script_id++);
+
+			string? name = options.name;
+			if (name == null)
+				name = "script%u".printf (script_id.handle);
+
+			ScriptRuntime runtime = options.runtime;
+			if (runtime == DEFAULT)
+				runtime = preferred_runtime;
+
+			Gum.ScriptBackend backend = invader.get_script_backend (options.runtime);
 
 			Gum.Script script;
 			try {
-				if (source != null) {
-					string script_name;
-					if (name != null)
-						script_name = name;
-					else
-						script_name = "script%u".printf (script_id.handle);
-					script = yield backend.create (script_name, source);
-				} else {
+				if (source != null)
+					script = yield backend.create (name, source);
+				else
 					script = yield backend.create_from_bytes (bytes);
-				}
 			} catch (IOError e) {
 				throw new Error.INVALID_ARGUMENT (e.message);
 			}
-			script.get_stalker ().exclude (agent_range);
+			script.get_stalker ().exclude (invader.get_memory_range ());
 
 			var instance = new ScriptInstance (script_id, script);
 			instances[script_id] = instance;
@@ -80,7 +90,7 @@ namespace Frida {
 
 		public async Bytes compile_script (string? name, string source) throws Error {
 			try {
-				return yield backend.compile ((name != null) ? name : "agent", source);
+				return yield invader.get_script_backend (DUK).compile ((name != null) ? name : "agent", source);
 			} catch (IOError e) {
 				throw new Error.INVALID_ARGUMENT (e.message);
 			}
@@ -123,17 +133,30 @@ namespace Frida {
 		}
 
 		public void enable_debugger () throws Error {
-			backend.set_debug_message_handler (on_debug_message);
+			invader.get_script_backend (V8).set_debug_message_handler (on_debug_message);
 			debugger_enabled = true;
 		}
 
 		public void disable_debugger () throws Error {
-			backend.set_debug_message_handler (null);
+			invader.get_script_backend (V8).set_debug_message_handler (null);
 			debugger_enabled = false;
 		}
 
 		public void post_message_to_debugger (string message) {
+			Gum.ScriptBackend backend;
+			try {
+				backend = invader.get_script_backend (V8);
+			} catch (Error e) {
+				return;
+			}
+
 			backend.post_debug_message (message);
+		}
+
+		public void enable_jit () throws Error {
+			invader.get_script_backend (V8); // Will throw if not available.
+
+			preferred_runtime = V8;
 		}
 
 		private void on_debug_message (string message) {

@@ -117,6 +117,9 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
     all_enum_names = [m.group(1) for m in re.finditer(r"^\t+public\s+enum\s+(\w+)\s+", api_vala + "\n" + interfaces_vapi, re.MULTILINE)]
     enum_types = []
 
+    interfaces_public_types = {
+        "ScriptOptions": "Script",
+    }
     internal_type_prefixes = [
         "Fruity",
         "HostSession",
@@ -156,14 +159,22 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
                 enum.c_definition = beautify_cenum(m.group(0))
                 break
 
-    object_types = [ApiObjectType(m.group(2), m.group(1)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", api_vala, re.MULTILINE)]
+    object_types = parse_vala_object_types(api_vala)
+
+    for potential_type in parse_vala_object_types(interfaces_vapi):
+        insert_after = interfaces_public_types.get(potential_type.name, None)
+        if insert_after is not None:
+            for i, t in enumerate(object_types):
+                if t.name == insert_after:
+                    object_types.insert(i + 1, potential_type)
+
     object_type_by_name = {}
     for klass in object_types:
         object_type_by_name[klass.name] = klass
     seen_cfunctions = set()
     seen_cdelegates = set()
     for object_type in sorted(object_types, key=lambda klass: len(klass.c_name_lc), reverse=True):
-        for m in re.finditer(r"^.*?\s+" + object_type.c_name_lc + r"_(\w+)\s+[^;]+;", core_header, re.MULTILINE):
+        for m in re.finditer(r"^.*?\s+" + object_type.c_name_lc + r"_(\w+)\s+[^;]+;", (core_header + interfaces_header), re.MULTILINE):
             method_cprototype = beautify_cprototype(m.group(0))
             method_name = m.group(1)
             method_cname_lc = object_type.c_name_lc + '_' + method_name
@@ -191,7 +202,7 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
     current_enum = None
     current_object_type = None
     ignoring = False
-    for line in core_vapi.split("\n"):
+    for line in (core_vapi + interfaces_vapi).split("\n"):
         stripped_line = line.strip()
         level = 0
         for c in line:
@@ -250,6 +261,9 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
             enum.vapi_members.extend([line.lstrip() for line in m.group(2).strip().split("\n")])
 
     return ApiSpec(api_version, object_types, enum_types, error_types)
+
+def parse_vala_object_types(source):
+    return [ApiObjectType(m.group(2), m.group(1)) for m in re.finditer(r"^\t+public\s+(class|interface)\s+(\w+)\s+", source, re.MULTILINE)]
 
 class ApiSpec:
     def __init__(self, version, object_types, enum_types, error_types):

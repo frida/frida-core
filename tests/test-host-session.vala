@@ -445,21 +445,17 @@ namespace Frida.HostSessionTest {
 				}
 			}
 
-			private static uint next_script_id = 1;
-
 			private static async Script? add_script (Gee.ArrayList<Script> container, Session session) {
 				Script script;
 
 				try {
-					var name = "hello%u".printf (next_script_id++);
-
-					script = yield session.create_script (name,
-						"'use strict';" +
-						"var puts = new NativeFunction(Module.findExportByName(null, 'puts'), 'int', ['pointer']);" +
-						"var i = 1;" +
-						"setInterval(function () {" +
-						"  puts(Memory.allocUtf8String('hello' + i++));" +
-						"}, 1000);");
+					script = yield session.create_script ("""
+						var puts = new NativeFunction(Module.getExportByName(null, 'puts'), 'int', ['pointer']);
+						var i = 1;
+						setInterval(function () {
+						  puts(Memory.allocUtf8String('hello' + i++));
+						}, 1000);
+						""");
 
 					script.message.connect ((message, data) => {
 						print ("Got message: %s\n", message);
@@ -719,7 +715,7 @@ namespace Frida.HostSessionTest {
 						timer.reset ();
 						var session = yield device.attach (pid);
 						print ("attach took %u ms\n", (uint) (timer.elapsed () * 1000.0));
-						var script = yield session.create_script ("perf", "'use strict';");
+						var script = yield session.create_script ("true;");
 						yield script.load ();
 
 						yield script.unload ();
@@ -800,7 +796,7 @@ namespace Frida.HostSessionTest {
 			/* Warm up static allocations */
 			var session = yield device.attach (process.id);
 			yield session.enable_jit ();
-			var script = yield session.create_script ("leak-check", "'use strict';");
+			var script = yield session.create_script ("true;");
 			yield script.load ();
 			yield script.unload ();
 			script = null;
@@ -812,7 +808,7 @@ namespace Frida.HostSessionTest {
 			for (var i = 0; i != 1; i++) {
 				session = yield device.attach (process.id);
 				yield session.enable_jit ();
-				script = yield session.create_script ("leak-check", "'use strict';");
+				script = yield session.create_script ("true;");
 				yield script.load ();
 				yield script.unload ();
 				script = null;
@@ -929,23 +925,23 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
-				var script_id = yield session.create_script ("spawn",
-					"'use strict';" +
-					"var write = new NativeFunction(Module.findExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);" +
-					"var message = Memory.allocUtf8String('Hello stdout');" +
-					"write(1, message, 12);" +
-					"Process.enumerateModules({" +
-					"  onMatch: function (m) {" +
-					"    if (m.name.indexOf('libc') === 0) {" +
-					"      Interceptor.attach (Module.findExportByName(m.name, 'sleep'), {" +
-					"        onEnter: function (args) {" +
-					"          send({ seconds: args[0].toInt32() });" +
-					"        }" +
-					"      });" +
-					"    }" +
-					"  }," +
-					"  onComplete: function () {}" +
-					"});");
+				var script_id = yield session.create_script_with_options ("""
+					var write = new NativeFunction(Module.getExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);
+					var message = Memory.allocUtf8String('Hello stdout');
+					write(1, message, 12);
+					Process.enumerateModules({
+					  onMatch: function (m) {
+					    if (m.name.indexOf('libc') === 0) {
+					      Interceptor.attach (Module.getExportByName(m.name, 'sleep'), {
+					        onEnter: function (args) {
+					          send({ seconds: args[0].toInt32() });
+					        }
+					      });
+					    }
+					  },
+					  onComplete: function () {}
+					});
+					""", AgentScriptOptions ());
 				yield session.load_script (script_id);
 
 				if (received_output == null) {
@@ -1024,15 +1020,15 @@ namespace Frida.HostSessionTest {
 					var session = yield device.attach (pid);
 
 					printerr ("session.create_script()\n");
-					var script = yield session.create_script ("test", """'use strict';
-Java.perform(function () {
-  var Activity = Java.use('android.app.Activity');
-  Activity.onResume.implementation = function () {
-    send('onResume');
-    this.onResume();
-  };
-});
-""");
+					var script = yield session.create_script ("""
+						Java.perform(function () {
+						  var Activity = Java.use('android.app.Activity');
+						  Activity.onResume.implementation = function () {
+						    send('onResume');
+						    this.onResume();
+						  };
+						});
+						""");
 					script.message.connect ((message, data) => {
 						received_message = message;
 						if (waiting)
@@ -1166,19 +1162,19 @@ Java.perform(function () {
 						run_spawn_scenario.callback ();
 				});
 
-				var script_id = yield session.create_script ("spawn",
-					"'use strict';" +
-					"var write = new NativeFunction(Module.findExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);" +
-					"var message = Memory.allocUtf8String('Hello stdout');" +
-					"var cout = Memory.readPointer(Module.findExportByName('libc++.1.dylib', '_ZNSt3__14coutE'));" +
-					"var properlyInitialized = !cout.isNull();" +
-					"write(1, message, 12);" +
-					"var sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';" +
-					"Interceptor.attach(Module.findExportByName('libSystem.B.dylib', sleepFuncName), {" +
-					"  onEnter: function (args) {" +
-					"    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });" +
-					"  }" +
-					"});");
+				var script_id = yield session.create_script_with_options ("""
+					var write = new NativeFunction(Module.getExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);
+					var message = Memory.allocUtf8String('Hello stdout');
+					var cout = Memory.readPointer(Module.findExportByName('libc++.1.dylib', '_ZNSt3__14coutE'));
+					var properlyInitialized = !cout.isNull();
+					write(1, message, 12);
+					var sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';
+					Interceptor.attach(Module.getExportByName('libSystem.B.dylib', sleepFuncName), {
+					  onEnter: function (args) {
+					    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });
+					  }
+					});
+					""", AgentScriptOptions ());
 				yield session.load_script (script_id);
 
 				if (received_output == null) {
@@ -1315,13 +1311,13 @@ Java.perform(function () {
 				var original_ranges = dump_ranges (process.id);
 
 				session = yield device.attach (process.id);
-				var script = yield session.create_script ("dumper", """'use strict';
-var ranges = Process.enumerateRangesSync({ protection: '---', coalesce: true })
-  .map(function (range) {
-    return range.base.toString() + "-" + range.base.add(range.size).toString();
-  });
-send(ranges);
-""");
+				var script = yield session.create_script ("""
+					var ranges = Process.enumerateRangesSync({ protection: '---', coalesce: true })
+					  .map(function (range) {
+					    return range.base.toString() + "-" + range.base.add(range.size).toString();
+					  });
+					send(ranges);
+					""");
 				string received_message = null;
 				bool waiting = false;
 				script.message.connect ((message, data) => {
@@ -1437,16 +1433,16 @@ send(ranges);
 					Thread.usleep (50000);
 
 					var session = yield device.attach (process.id);
-					var script = yield session.create_script ("dumper", """'use strict';
-rpc.exports = {
-  dispose: function () {
-    send('dispose');
-  }
-};
+					var script = yield session.create_script ("""
+						rpc.exports = {
+						  dispose: function () {
+						    send('dispose');
+						  }
+						};
 
-var abort = new NativeFunction(Module.findExportByName('/usr/lib/system/libsystem_c.dylib', 'abort'), 'void', [], { exceptions: 'propagate' });
-setTimeout(function () { abort(); }, 50);
-""");
+						var abort = new NativeFunction(Module.getExportByName('/usr/lib/system/libsystem_c.dylib', 'abort'), 'void', [], { exceptions: 'propagate' });
+						setTimeout(function () { abort(); }, 50);
+						""");
 
 					string? detach_reason = null;
 					string? received_message = null;
@@ -1547,7 +1543,7 @@ setTimeout(function () { abort(); }, 50);
 						if (waiting)
 							cross_arch.callback ();
 					});
-					var script_id = yield session.create_script ("test", "send('hello');");
+					var script_id = yield session.create_script_with_options ("send('hello');", AgentScriptOptions ());
 					yield session.load_script (script_id);
 					if (received_message == null) {
 						waiting = true;
@@ -1622,11 +1618,11 @@ setTimeout(function () { abort(); }, 50);
 					var session = yield device.attach (pid);
 
 					printerr ("session.create_script()\n");
-					var script = yield session.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), function () {
-  send('UIApplicationMain');
-});
-""");
+					var script = yield session.create_script ("""
+						Interceptor.attach(Module.getExportByName('UIKit', 'UIApplicationMain'), function () {
+						  send('UIApplicationMain');
+						});
+						""");
 					script.message.connect ((message, data) => {
 						received_message = message;
 						if (waiting)
@@ -1727,13 +1723,13 @@ Interceptor.attach(Module.findExportByName('UIKit', 'UIApplicationMain'), functi
 						run_fork_scenario.callback ();
 				});
 				yield parent_session.enable_child_gating ();
-				var parent_script = yield parent_session.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName(null, 'puts'), {
-  onEnter: function (args) {
-    send('[PARENT] ' + Memory.readUtf8String(args[0]));
-  }
-});
-""");
+				var parent_script = yield parent_session.create_script ("""
+					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					  onEnter: function (args) {
+					    send('[PARENT] ' + Memory.readUtf8String(args[0]));
+					  }
+					});
+					""");
 				parent_script.message.connect ((message, data) => {
 					if (GLib.Test.verbose ())
 						printerr ("Message from parent: %s\n", message);
@@ -1771,13 +1767,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					if (waiting)
 						run_fork_scenario.callback ();
 				});
-				var child_script = yield child_session.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName(null, 'puts'), {
-  onEnter: function (args) {
-    send('[CHILD] ' + Memory.readUtf8String(args[0]));
-  }
-});
-""");
+				var child_script = yield child_session.create_script ("""
+					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					  onEnter: function (args) {
+					    send('[CHILD] ' + Memory.readUtf8String(args[0]));
+					  }
+					});
+					""");
 				child_script.message.connect ((message, data) => {
 					if (GLib.Test.verbose ())
 						printerr ("Message from child: %s\n", message);
@@ -1924,13 +1920,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					if (waiting)
 						run_fork_plus_exec_scenario.callback ();
 				});
-				var script = yield child_session_post_exec.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName(null, 'puts'), {
-  onEnter: function (args) {
-    send(Memory.readUtf8String(args[0]));
-  }
-});
-""");
+				var script = yield child_session_post_exec.create_script ("""
+					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					  onEnter: function (args) {
+					    send(Memory.readUtf8String(args[0]));
+					  }
+					});
+					""");
 				script.message.connect ((message, data) => {
 					if (GLib.Test.verbose ())
 						printerr ("Message from child: %s\n", message);
@@ -2053,13 +2049,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					if (waiting)
 						run_exec_scenario.callback ();
 				});
-				var script = yield post_exec_session.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName(null, 'puts'), {
-  onEnter: function (args) {
-    send(Memory.readUtf8String(args[0]));
-  }
-});
-""");
+				var script = yield post_exec_session.create_script ("""
+					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					  onEnter: function (args) {
+					    send(Memory.readUtf8String(args[0]));
+					  }
+					});
+					""");
 				script.message.connect ((message, data) => {
 					if (GLib.Test.verbose ())
 						printerr ("Message: %s\n", message);
@@ -2231,13 +2227,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					if (waiting)
 						run_posix_spawn_scenario.callback ();
 				});
-				var script = yield child_session.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName(null, 'puts'), {
-  onEnter: function (args) {
-    send(Memory.readUtf8String(args[0]));
-  }
-});
-""");
+				var script = yield child_session.create_script ("""
+					Interceptor.attach(Module.getExportByName(null, 'puts'), {
+					  onEnter: function (args) {
+					    send(Memory.readUtf8String(args[0]));
+					  }
+					});
+					""");
 				script.message.connect ((message, data) => {
 					if (GLib.Test.verbose ())
 						printerr ("Message from child: %s\n", message);
@@ -2368,20 +2364,20 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 						spawn.callback ();
 				});
 
-				var script_id = yield session.create_script ("spawn",
-					"'use strict';" +
-					"var STD_OUTPUT_HANDLE = -11;" +
-					"var winAbi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';" +
-					"var GetStdHandle = new NativeFunction(Module.findExportByName('kernel32.dll', 'GetStdHandle'), 'pointer', ['int'], winAbi);" +
-					"var WriteFile = new NativeFunction(Module.findExportByName('kernel32.dll', 'WriteFile'), 'int', ['pointer', 'pointer', 'uint', 'pointer', 'pointer'], winAbi);" +
-					"var stdout = GetStdHandle(STD_OUTPUT_HANDLE);" +
-					"var message = Memory.allocUtf8String('Hello stdout');" +
-					"var success = WriteFile(stdout, message, 12, NULL, NULL);" +
-					"Interceptor.attach (Module.findExportByName('user32.dll', 'GetMessageW'), {" +
-					"  onEnter: function (args) {" +
-					"    send('GetMessage');" +
-					"  }" +
-					"});");
+				var script_id = yield session.create_script_with_options ("""
+					var STD_OUTPUT_HANDLE = -11;
+					var winAbi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';
+					var GetStdHandle = new NativeFunction(Module.getExportByName('kernel32.dll', 'GetStdHandle'), 'pointer', ['int'], winAbi);
+					var WriteFile = new NativeFunction(Module.getExportByName('kernel32.dll', 'WriteFile'), 'int', ['pointer', 'pointer', 'uint', 'pointer', 'pointer'], winAbi);
+					var stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+					var message = Memory.allocUtf8String('Hello stdout');
+					var success = WriteFile(stdout, message, 12, NULL, NULL);
+					Interceptor.attach (Module.getExportByName('user32.dll', 'GetMessageW'), {
+					  onEnter: function (args) {
+					    send('GetMessage');
+					  }
+					});
+					""", AgentScriptOptions ());
 				yield session.load_script (script_id);
 
 				if (received_output == null) {
@@ -2494,13 +2490,13 @@ Interceptor.attach(Module.findExportByName(null, 'puts'), {
 					if (waiting)
 						create_process.callback ();
 				});
-				var script = yield child_session.create_script ("test", """'use strict';
-Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW'), {
-  onEnter: function (args) {
-    send(Memory.readUtf16String(args[0]));
-  }
-});
-""");
+				var script = yield child_session.create_script ("""
+					Interceptor.attach(Module.getExportByName('kernel32.dll', 'OutputDebugStringW'), {
+					  onEnter: function (args) {
+					    send(Memory.readUtf16String(args[0]));
+					  }
+					});
+					""");
 				script.message.connect ((message, data) => {
 					if (GLib.Test.verbose ())
 						printerr ("Message from child: %s\n", message);
@@ -2635,13 +2631,13 @@ Interceptor.attach(Module.findExportByName('kernel32.dll', 'OutputDebugStringW')
 					large_messages.callback ();
 				});
 				stdout.printf ("creating script\n");
-				var script_id = yield session.create_script ("large-messages",
-					"function onMessage(message) {" +
-					"  send(\"ACK: \" + message.length);" +
-					"  recv(onMessage);" +
-					"}" +
-					"recv(onMessage);"
-				);
+				var script_id = yield session.create_script_with_options ("""
+					function onMessage(message) {
+					  send('ACK: ' + message.length);
+					  recv(onMessage);
+					}
+					recv(onMessage);
+					""", AgentScriptOptions ());
 				stdout.printf ("loading script\n");
 				yield session.load_script (script_id);
 				var steps = new uint[] { 1024, 4096, 8192, 16384, 32768 };

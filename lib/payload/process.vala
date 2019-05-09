@@ -75,4 +75,10 @@ namespace Frida {
 
 		return result;
 	}
+
+	public interface ProcessInvader : Object {
+		public abstract Gum.MemoryRange get_memory_range ();
+		public abstract Gum.ScriptBackend get_script_backend (ScriptRuntime runtime) throws Error;
+		public abstract Gum.ScriptBackend? get_active_script_backend ();
+	}
 }
