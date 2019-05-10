@@ -1702,12 +1702,16 @@ namespace Frida {
 			}
 		}
 
-		public async Script create_script (string? name, string source) throws Error {
+		public async Script create_script (string source, ScriptOptions? options = null) throws Error {
 			check_open ();
+
+			var raw_options = AgentScriptOptions ();
+			if (options != null)
+				raw_options.data = options._serialize ().get_data ();
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script ((name == null) ? "" : name, source);
+				script_id = yield session.create_script_with_options (source, raw_options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1720,28 +1724,32 @@ namespace Frida {
 			return script;
 		}
 
-		public Script create_script_sync (string? name, string source) throws Error {
+		public Script create_script_sync (string source, ScriptOptions? options = null) throws Error {
 			var task = create<CreateScriptTask> () as CreateScriptTask;
-			task.name = name;
 			task.source = source;
+			task.options = options;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class CreateScriptTask : SessionTask<Script> {
-			public string? name;
 			public string source;
+			public ScriptOptions? options;
 
 			protected override async Script perform_operation () throws Error {
-				return yield parent.create_script (name, source);
+				return yield parent.create_script (source, options);
 			}
 		}
 
-		public async Script create_script_from_bytes (Bytes bytes) throws Error {
+		public async Script create_script_from_bytes (Bytes bytes, ScriptOptions? options = null) throws Error {
 			check_open ();
+
+			var raw_options = AgentScriptOptions ();
+			if (options != null)
+				raw_options.data = options._serialize ().get_data ();
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script_from_bytes (bytes.get_data ());
+				script_id = yield session.create_script_from_bytes_with_options (bytes.get_data (), raw_options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1754,17 +1762,19 @@ namespace Frida {
 			return script;
 		}
 
-		public Script create_script_from_bytes_sync (Bytes bytes) throws Error {
+		public Script create_script_from_bytes_sync (Bytes bytes, ScriptOptions? options = null) throws Error {
 			var task = create<CreateScriptFromBytesTask> () as CreateScriptFromBytesTask;
 			task.bytes = bytes;
+			task.options = options;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class CreateScriptFromBytesTask : SessionTask<Script> {
 			public Bytes bytes;
+			public ScriptOptions? options;
 
 			protected override async Script perform_operation () throws Error {
-				return yield parent.create_script_from_bytes (bytes);
+				return yield parent.create_script_from_bytes (bytes, options);
 			}
 		}
 

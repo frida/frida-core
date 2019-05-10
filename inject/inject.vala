@@ -287,21 +287,25 @@ namespace Frida.Inject {
 			load_in_progress = true;
 
 			try {
-				string name;
 				string source;
+
+				var options = new ScriptOptions ();
+
 				if (script_path != null) {
-					name = Path.get_basename (script_path).split (".", 2)[0];
 					try {
 						FileUtils.get_contents (script_path, out source);
 					} catch (FileError e) {
 						throw new Error.INVALID_ARGUMENT (e.message);
 					}
+
+					options.name = Path.get_basename (script_path).split (".", 2)[0];
 				} else {
-					name = "frida";
 					source = script_source;
+
+					options.name = "frida";
 				}
 
-				var s = yield session.create_script (name, source);
+				var s = yield session.create_script (source, options);
 
 				if (script != null) {
 					try {

@@ -1,7 +1,7 @@
 namespace Frida {
 #if DARWIN
 	public class ThreadSuspendMonitor : Object {
-		public weak ThreadSuspendScriptRunner runner {
+		public weak ProcessInvader invader {
 			get;
 			construct;
 		}
@@ -19,8 +19,8 @@ namespace Frida {
 		[CCode (has_target = false)]
 		private delegate int ThreadResumeFunc (uint thread_id);
 
-		public ThreadSuspendMonitor (ThreadSuspendScriptRunner runner) {
-			Object (runner: runner);
+		public ThreadSuspendMonitor (ProcessInvader invader) {
+			Object (invader: invader);
 		}
 
 		construct {
@@ -71,7 +71,7 @@ namespace Frida {
 			if (Gum.Cloak.has_thread (thread_id))
 				return 0;
 
-			var script_backend = runner.get_current_script_backend ();
+			var script_backend = invader.get_active_script_backend ();
 			uint caller_thread_id = (uint) Gum.Process.get_current_thread_id ();
 			if (script_backend == null || thread_id == caller_thread_id)
 				return thread_suspend (thread_id);
@@ -109,18 +109,14 @@ namespace Frida {
 	}
 #else
 	public class ThreadSuspendMonitor : Object {
-		public weak ThreadSuspendScriptRunner runner {
+		public weak ProcessInvader invader {
 			get;
 			construct;
 		}
 
-		public ThreadSuspendMonitor (ThreadSuspendScriptRunner runner) {
-			Object (runner: runner);
+		public ThreadSuspendMonitor (ProcessInvader invader) {
+			Object (invader: invader);
 		}
 	}
 #endif
-
-	public interface ThreadSuspendScriptRunner : Object {
-		public abstract Gum.ScriptBackend? get_current_script_backend ();
-	}
 }

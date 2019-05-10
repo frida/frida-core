@@ -11,7 +11,7 @@ namespace Frida.Agent {
 		FORK
 	}
 
-	private class Runner : Object, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler, ThreadSuspendScriptRunner {
+	private class Runner : Object, ProcessInvader, AgentSessionProvider, ExitHandler, ForkHandler, SpawnHandler {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
 
@@ -47,12 +47,12 @@ namespace Frida.Agent {
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
-		private Gum.ScriptBackend? script_backend;
+		private Gum.MemoryRange agent_range;
+		private Gum.ScriptBackend? duk_backend;
+		private Gum.ScriptBackend? v8_backend;
 		private ExitMonitor exit_monitor;
 		private Gum.Interceptor interceptor;
 		private Gum.Exceptor exceptor;
-		private bool jit_enabled = false;
-		protected Gum.MemoryRange agent_range;
 
 		private uint child_gating_subscriber_count = 0;
 		private ForkMonitor? fork_monitor;
@@ -450,8 +450,39 @@ namespace Frida.Agent {
 			}
 		}
 
-		private Gum.ScriptBackend? get_current_script_backend () {
-			return script_backend;
+		public Gum.MemoryRange get_memory_range () {
+			return agent_range;
+		}
+
+		public Gum.ScriptBackend get_script_backend (ScriptRuntime runtime) throws Error {
+			switch (runtime) {
+				case DEFAULT:
+					break;
+				case DUK:
+					if (duk_backend == null) {
+						duk_backend = Gum.ScriptBackend.obtain_duk ();
+						if (duk_backend == null)
+							throw new Error.NOT_SUPPORTED ("Duktape runtime not available due to build configuration");
+					}
+					return duk_backend;
+				case V8:
+					if (v8_backend == null) {
+						v8_backend = Gum.ScriptBackend.obtain_v8 ();
+						if (v8_backend == null)
+							throw new Error.NOT_SUPPORTED ("V8 runtime not available due to build configuration");
+					}
+					return v8_backend;
+			}
+
+			try {
+				return get_script_backend (DUK);
+			} catch (Error e) {
+			}
+			return get_script_backend (V8);
+		}
+
+		public Gum.ScriptBackend? get_active_script_backend () {
+			return (v8_backend != null) ? v8_backend : duk_backend;
 		}
 
 		private async void open (AgentSessionId id) throws Error {
@@ -585,23 +616,6 @@ namespace Frida.Agent {
 			fork_monitor = null;
 
 			interceptor.end_transaction ();
-		}
-
-		public ScriptEngine create_script_engine () {
-			if (script_backend == null)
-				script_backend = Environment._obtain_script_backend (jit_enabled);
-
-			return new ScriptEngine (script_backend, agent_range);
-		}
-
-		public void enable_jit () throws Error {
-			if (jit_enabled)
-				return;
-
-			if (script_backend != null)
-				throw new Error.INVALID_OPERATION ("JIT may only be enabled before the first script is created");
-
-			jit_enabled = true;
 		}
 
 		public void schedule_idle (owned SourceFunc function) {
@@ -795,6 +809,12 @@ namespace Frida.Agent {
 			Object (runner: runner, id: id);
 		}
 
+		construct {
+			script_engine = new ScriptEngine (runner);
+			script_engine.message_from_script.connect (on_message_from_script);
+			script_engine.message_from_debugger.connect (on_message_from_debugger);
+		}
+
 		public async void close () throws Error {
 			if (close_request != null) {
 				try {
@@ -812,10 +832,9 @@ namespace Frida.Agent {
 				assert_not_reached ();
 			}
 
-			if (script_engine != null) {
-				yield script_engine.shutdown ();
-				script_engine = null;
-			}
+			yield script_engine.shutdown ();
+			script_engine.message_from_script.disconnect (on_message_from_script);
+			script_engine.message_from_debugger.disconnect (on_message_from_debugger);
 
 			closed (this);
 
@@ -823,11 +842,12 @@ namespace Frida.Agent {
 		}
 
 		public async void prepare_for_termination () {
-			if (script_engine != null)
-				yield script_engine.prepare_for_termination ();
+			yield script_engine.prepare_for_termination ();
 		}
 
 		public async void enable_child_gating () throws Error {
+			check_open ();
+
 			if (child_gating_enabled)
 				return;
 
@@ -846,86 +866,112 @@ namespace Frida.Agent {
 		}
 
 		public async AgentScriptId create_script (string name, string source) throws Error {
-			var engine = get_script_engine ();
-			var instance = yield engine.create_script ((name != "") ? name : null, source, null);
+			check_open ();
+
+			var options = new ScriptOptions ();
+			if (name != "")
+				options.name = name;
+
+			var instance = yield script_engine.create_script (source, null, options);
+			return instance.script_id;
+		}
+
+		public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options) throws Error {
+			check_open ();
+
+			var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
 			return instance.script_id;
 		}
 
 		public async AgentScriptId create_script_from_bytes (uint8[] bytes) throws Error {
-			var engine = get_script_engine ();
-			var instance = yield engine.create_script (null, null, new Bytes (bytes));
+			check_open ();
+
+			var instance = yield script_engine.create_script (null, new Bytes (bytes), new ScriptOptions ());
+			return instance.script_id;
+		}
+
+		public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options) throws Error {
+			check_open ();
+
+			var instance = yield script_engine.create_script (null, new Bytes (bytes), ScriptOptions._deserialize (options.data));
 			return instance.script_id;
 		}
 
 		public async uint8[] compile_script (string name, string source) throws Error {
-			var engine = get_script_engine ();
-			var bytes = yield engine.compile_script ((name != "") ? name : null, source);
+			check_open ();
+
+			var bytes = yield script_engine.compile_script ((name != "") ? name : null, source);
 			return bytes.get_data ();
 		}
 
 		public async void destroy_script (AgentScriptId script_id) throws Error {
-			var engine = get_script_engine ();
-			yield engine.destroy_script (script_id);
+			check_open ();
+
+			yield script_engine.destroy_script (script_id);
 		}
 
 		public async void load_script (AgentScriptId script_id) throws Error {
-			var engine = get_script_engine ();
-			yield engine.load_script (script_id);
+			check_open ();
+
+			yield script_engine.load_script (script_id);
 		}
 
 		public async void eternalize_script (AgentScriptId script_id) throws Error {
-			var engine = get_script_engine ();
-			var script = engine.eternalize_script (script_id);
+			check_open ();
+
+			var script = script_engine.eternalize_script (script_id);
 			script_eternalized (script);
 		}
 
 		public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) throws Error {
-			get_script_engine ().post_to_script (script_id, message, has_data ? new Bytes (data) : null);
+			check_open ();
+
+			script_engine.post_to_script (script_id, message, has_data ? new Bytes (data) : null);
 		}
 
 		public async void enable_debugger () throws Error {
-			get_script_engine ().enable_debugger ();
+			check_open ();
+
+			script_engine.enable_debugger ();
 		}
 
 		public async void disable_debugger () throws Error {
-			get_script_engine ().disable_debugger ();
+			check_open ();
+
+			script_engine.disable_debugger ();
 		}
 
 		public async void post_message_to_debugger (string message) throws Error {
-			get_script_engine ().post_message_to_debugger (message);
+			check_open ();
+
+			script_engine.post_message_to_debugger (message);
 		}
 
 		public async void enable_jit () throws GLib.Error {
-			runner.enable_jit ();
-		}
-
-		private ScriptEngine get_script_engine () throws Error {
 			check_open ();
 
-			if (script_engine == null) {
-				script_engine = runner.create_script_engine ();
-				script_engine.message_from_script.connect ((script_id, message, data) => {
-					var has_data = data != null;
-					var data_param = has_data ? data.get_data () : new uint8[0];
-					this.message_from_script (script_id, message, has_data, data_param);
-				});
-				script_engine.message_from_debugger.connect ((message) => this.message_from_debugger (message));
-			}
-
-			return script_engine;
+			script_engine.enable_jit ();
 		}
 
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Session is closing");
 		}
+
+		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
+			bool has_data = data != null;
+			var data_param = has_data ? data.get_data () : new uint8[0];
+			this.message_from_script (script_id, message, has_data, data_param);
+		}
+
+		private void on_message_from_debugger (string message) {
+			this.message_from_debugger (message);
+		}
 	}
 
 	namespace Environment {
 		public extern void _init ();
 		public extern void _deinit ();
-
-		public extern unowned Gum.ScriptBackend _obtain_script_backend (bool jit_enabled);
 	}
 
 	private Mutex gc_mutex;
