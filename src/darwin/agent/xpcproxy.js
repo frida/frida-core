@@ -3,7 +3,7 @@ var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 var jbdCallImpl = Module.findExportByName(null, 'jbd_call');
 var runningOnElectra = jbdCallImpl !== null;
 
-Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
+Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
     var attrs = args[2].add(Process.pointerSize).readPointer();
 

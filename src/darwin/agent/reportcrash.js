@@ -12,37 +12,37 @@ var nativeOptions = {
   exceptions: 'propagate'
 };
 var _pidForTask = new NativeFunction(
-    Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
+    Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
     'int',
     ['uint', 'pointer'],
     nativeOptions
 );
 var unlink = new NativeFunction(
-    Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'unlink'),
+    Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'unlink'),
     'int',
     ['pointer'],
     nativeOptions
 );
 var CSSymbolicatorGetSymbolWithAddressAtTime = new NativeFunction(
-    Module.findExportByName(CORESYMBOLICATION_PATH, 'CSSymbolicatorGetSymbolWithAddressAtTime'),
+    Module.getExportByName(CORESYMBOLICATION_PATH, 'CSSymbolicatorGetSymbolWithAddressAtTime'),
     CSTypeRef,
     [CSTypeRef, 'uint64', 'uint64'],
     nativeOptions
 );
 var CSIsNull = new NativeFunction(
-    Module.findExportByName(CORESYMBOLICATION_PATH, 'CSIsNull'),
+    Module.getExportByName(CORESYMBOLICATION_PATH, 'CSIsNull'),
     'int',
     [CSTypeRef],
     nativeOptions
 );
 var mappedMemoryRead = new NativeFunction(
-    Module.findExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read'),
+    Module.getExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read'),
     'uint',
     ['pointer', 'uint64', 'uint64', 'pointer'],
     nativeOptions
 );
 var mappedMemoryReadPointer = new NativeFunction(
-    Module.findExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read_pointer'),
+    Module.getExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read_pointer'),
     'uint',
     ['pointer', 'uint64', 'pointer'],
     nativeOptions
@@ -102,7 +102,7 @@ Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateF
   },
 });
 
-Interceptor.attach(Module.findExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit'), {
+Interceptor.attach(Module.getExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit'), {
   onEnter: function (args) {
     this.pid = pidForTask(args[0].toUInt32());
   },
@@ -132,7 +132,7 @@ Interceptor.attach(NSMutableDictionary['- logCounter_isLog:byKey:count:withinLim
   },
 });
 
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
+Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
   onEnter: function (args) {
     var newPath = args[1].readUtf8String();
     if (/\.ips$/.test(newPath)) {
@@ -150,7 +150,7 @@ Interceptor.attach(AppleErrorReport['- saveToDir:'].implementation, {
   },
 });
 
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
+Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
   onEnter: function (args) {
     var path = args[0].readUtf8String();
     this.isCrashLog = /\.ips$/.test(path);
@@ -161,7 +161,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotect
   },
 });
 
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
+Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
     if (fd !== logFd)
@@ -176,7 +176,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   },
 });
 
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
+Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
     this.isCrashLog = (fd === logFd);
@@ -194,7 +194,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
   }
 });
 
-Interceptor.attach(Module.findExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
+Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
   onEnter: function (args) {
     this.name = new ObjC.Object(args[0]).toString();
     this.domain = new ObjC.Object(args[1]).toString();
@@ -209,7 +209,7 @@ Interceptor.attach(Module.findExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPref
   }
 });
 
-Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), {
+Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), {
   onEnter: function (args) {
     this.pid = pidForTask(args[0].toUInt32());
     this.flavor = args[1].toUInt32();
@@ -246,7 +246,7 @@ Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), 
   var readSize = (sizeWidth !== 32) ? Memory['readU' + sizeWidth].bind(Memory) : readSizeFromU32;
   var writeSize = Memory['writeU' + sizeWidth].bind(Memory);
 
-  Interceptor.attach(Module.findExportByName(LIBSYSTEM_KERNEL_PATH, name), {
+  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, name), {
     onEnter: function (args) {
       var pid = pidForTask(args[0].toUInt32());
       if (pid !== crashedPid)

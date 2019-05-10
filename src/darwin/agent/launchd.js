@@ -28,7 +28,7 @@ rpc.exports = {
   },
 };
 
-Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
+Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
     var path = args[1].readUtf8String();
     if (path !== '/usr/libexec/xpcproxy')

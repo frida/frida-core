@@ -153,7 +153,7 @@ rpc.exports = {
   },
 };
 
-Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
+Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
     if (active === 0)
       return;
@@ -344,7 +344,7 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 				var script_id = yield session.create_script ("thread-suspend-scenario", """
 console.log('Script runtime is: ' + Script.runtime);
 
-Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), function () {
+Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), function () {
 });
 """);
 				yield session.load_script (script_id);
