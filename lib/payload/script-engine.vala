@@ -63,11 +63,7 @@ namespace Frida {
 			if (name == null)
 				name = "script%u".printf (script_id.handle);
 
-			ScriptRuntime runtime = options.runtime;
-			if (runtime == DEFAULT)
-				runtime = preferred_runtime;
-
-			Gum.ScriptBackend backend = invader.get_script_backend (runtime);
+			Gum.ScriptBackend backend = pick_backend (options);
 
 			Gum.Script script;
 			try {
@@ -88,12 +84,26 @@ namespace Frida {
 			return instance;
 		}
 
-		public async Bytes compile_script (string? name, string source) throws Error {
+		public async Bytes compile_script (string source, ScriptOptions options) throws Error {
+			string? name = options.name;
+			if (name == null)
+				name = "agent";
+
+			Gum.ScriptBackend backend = pick_backend (options);
+
 			try {
-				return yield invader.get_script_backend (DUK).compile ((name != null) ? name : "agent", source);
+				return yield backend.compile (name, source);
 			} catch (IOError e) {
 				throw new Error.INVALID_ARGUMENT (e.message);
 			}
+		}
+
+		private Gum.ScriptBackend pick_backend (ScriptOptions options) throws Error {
+			ScriptRuntime runtime = options.runtime;
+			if (runtime == DEFAULT)
+				runtime = preferred_runtime;
+
+			return invader.get_script_backend (runtime);
 		}
 
 		public async void destroy_script (AgentScriptId script_id) throws Error {

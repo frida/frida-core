@@ -50,6 +50,7 @@ namespace Frida {
 		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes) throws GLib.Error;
 		public abstract async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options) throws GLib.Error;
 		public abstract async uint8[] compile_script (string name, string source) throws GLib.Error;
+		public abstract async uint8[] compile_script_with_options (string source, AgentScriptOptions options) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id) throws GLib.Error;
 		public abstract async void eternalize_script (AgentScriptId script_id) throws GLib.Error;

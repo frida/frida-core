@@ -900,7 +900,18 @@ namespace Frida.Agent {
 		public async uint8[] compile_script (string name, string source) throws Error {
 			check_open ();
 
-			var bytes = yield script_engine.compile_script ((name != "") ? name : null, source);
+			var options = new ScriptOptions ();
+			if (name != "")
+				options.name = name;
+
+			var bytes = yield script_engine.compile_script (source, options);
+			return bytes.get_data ();
+		}
+
+		public async uint8[] compile_script_with_options (string source, AgentScriptOptions options) throws Error {
+			check_open ();
+
+			var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options.data));
 			return bytes.get_data ();
 		}
 

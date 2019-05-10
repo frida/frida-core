@@ -1778,12 +1778,16 @@ namespace Frida {
 			}
 		}
 
-		public async Bytes compile_script (string? name, string source) throws Error {
+		public async Bytes compile_script (string source, ScriptOptions? options = null) throws Error {
 			check_open ();
+
+			var raw_options = AgentScriptOptions ();
+			if (options != null)
+				raw_options.data = options._serialize ().get_data ();
 
 			uint8[] data;
 			try {
-				data = yield session.compile_script ((name == null) ? "" : name, source);
+				data = yield session.compile_script_with_options (source, raw_options);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -1791,19 +1795,19 @@ namespace Frida {
 			return new Bytes (data);
 		}
 
-		public Bytes compile_script_sync (string? name, string source) throws Error {
+		public Bytes compile_script_sync (string source, ScriptOptions? options = null) throws Error {
 			var task = create<CompileScriptTask> () as CompileScriptTask;
-			task.name = name;
 			task.source = source;
+			task.options = options;
 			return task.start_and_wait_for_completion ();
 		}
 
 		private class CompileScriptTask : SessionTask<Bytes> {
-			public string? name;
 			public string source;
+			public ScriptOptions? options;
 
 			protected override async Bytes perform_operation () throws Error {
-				return yield parent.compile_script (name, source);
+				return yield parent.compile_script (source, options);
 			}
 		}
 
