@@ -1,5 +1,3 @@
-'use strict';
-
 var exit = new NativeFunction(
     Module.findExportByName('libSystem.B.dylib', 'exit'),
     'void',

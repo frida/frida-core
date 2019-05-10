@@ -114,8 +114,6 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				script_id = yield session.create_script ("launch-scenario", """
-'use strict';
-
 var readU16 = Memory.readU16;
 var writeU16 = Memory.writeU16;
 var readU32 = Memory.readU32;
@@ -344,8 +342,6 @@ Interceptor.attach(Module.findExportByName('/usr/lib/system/libsystem_kernel.dyl
 				// yield session.enable_jit ();
 
 				var script_id = yield session.create_script ("thread-suspend-scenario", """
-'use strict';
-
 console.log('Script runtime is: ' + Script.runtime);
 
 Interceptor.attach(Module.findExportByName('libsystem_kernel.dylib', 'open'), function () {

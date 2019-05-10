@@ -1,5 +1,3 @@
-'use strict';
-
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
 var jbdCallImpl = Module.findExportByName(null, 'jbd_call');

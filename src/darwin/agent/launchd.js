@@ -1,5 +1,3 @@
-'use strict';
-
 var pointerSize = Process.pointerSize;
 
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;

@@ -1,5 +1,3 @@
-'use strict';
-
 var ApplicationInfo, ComponentName, Intent, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
 var context, packageManager, activityManager;
 
