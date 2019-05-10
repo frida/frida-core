@@ -67,7 +67,7 @@ namespace Frida {
 			if (runtime == DEFAULT)
 				runtime = preferred_runtime;
 
-			Gum.ScriptBackend backend = invader.get_script_backend (options.runtime);
+			Gum.ScriptBackend backend = invader.get_script_backend (runtime);
 
 			Gum.Script script;
 			try {
