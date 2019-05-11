@@ -77,7 +77,6 @@ static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 static FridaFoundationApi * frida_foundation_api_try_get (void);
 static FridaCFApi * frida_cf_api_try_get (void);
 static FridaObjCApi * frida_objc_api_try_get (void);
-static gboolean frida_dylib_range_try_get (const gchar * apple[], GumMemoryRange * range);
 
 #endif
 
@@ -126,29 +125,6 @@ _frida_gadget_kill (guint pid)
 }
 
 #else
-
-# ifdef HAVE_DARWIN
-
-__attribute__ ((constructor)) static void
-on_load (int argc, const char * argv[], const char * envp[], const char * apple[])
-{
-  GumMemoryRange frida_dylib_range;
-
-  if (frida_dylib_range_try_get (apple, &frida_dylib_range))
-    frida_gadget_load (&frida_dylib_range);
-  else
-    frida_gadget_load (NULL);
-}
-
-# else
-
-__attribute__ ((constructor)) static void
-on_load (void)
-{
-  frida_gadget_load (NULL);
-}
-
-# endif
 
 __attribute__ ((destructor)) static void
 on_unload (void)
@@ -586,25 +562,6 @@ frida_objc_api_try_get (void)
   api = GSIZE_TO_POINTER (api_value - 1);
 
   return api;
-}
-
-static gboolean
-frida_dylib_range_try_get (const gchar * apple[], GumMemoryRange * range)
-{
-  const gchar * entry;
-  guint i = 0;
-
-  while ((entry = apple[i++]) != NULL)
-  {
-    if (g_str_has_prefix (entry, "frida_dylib_range="))
-    {
-      if (sscanf (entry, "frida_dylib_range=0x%" G_GINT64_MODIFIER "x,0x%" G_GSIZE_MODIFIER "x",
-          &range->base_address, &range->size) == 2)
-        return TRUE;
-    }
-  }
-
-  return FALSE;
 }
 
 #endif

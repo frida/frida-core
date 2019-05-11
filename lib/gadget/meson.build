@@ -1,5 +1,6 @@
 gadget_sources = [
   'gadget.vala',
+  'gadget-entrypoint-unix.c',
   'gadget-glue.c',
 ]
 
