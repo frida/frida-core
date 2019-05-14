@@ -205,7 +205,11 @@ compare_location_and_create_image_device_info_if_matching (const FridaDeviceInfo
 
   friendly_name = frida_read_registry_string (devkey, L"FriendlyName");
   if (friendly_name == NULL)
-    goto keep_looking;
+  {
+    friendly_name = frida_read_registry_string (devkey, L"Label");
+    if (friendly_name == NULL)
+      goto keep_looking;
+  }
 
   icon_url = frida_read_registry_multi_string (devkey, L"Icons");
   if (icon_url == NULL)
