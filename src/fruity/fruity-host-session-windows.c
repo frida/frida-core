@@ -151,15 +151,34 @@ compare_udid_and_create_mobile_device_info_if_matching (const FridaDeviceInfo * 
 {
   FridaFindMobileDeviceContext * ctx = (FridaFindMobileDeviceContext *) user_data;
   WCHAR * udid, * location;
+  size_t udid_len;
 
   udid = wcsrchr (device_info->instance_id, L'\\');
   if (udid == NULL)
-    goto keep_looking;
+    goto match_devicepath;
   udid++;
 
-  if (_wcsicmp (udid, ctx->udid) != 0)
+  if (_wcsicmp (udid, ctx->udid) == 0)
+    goto match;
+
+match_devicepath:
+  udid = device_info->device_path;
+
+  if (udid == NULL)
     goto keep_looking;
 
+  udid_len = wcslen(ctx->udid);
+  while (*udid != L'\0')
+  {
+    if (_wcsnicmp(udid, ctx->udid, udid_len) == 0)
+      break;
+    udid++;
+  }
+
+  if (*udid == L'\0')
+    goto keep_looking;
+
+match:
   location = (WCHAR *) g_memdup (device_info->location, ((guint) wcslen (device_info->location) + 1) * sizeof (WCHAR));
   ctx->mobile_device = frida_mobile_device_info_new (location);
 
