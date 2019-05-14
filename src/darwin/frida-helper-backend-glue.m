@@ -178,6 +178,7 @@ struct _FridaInjectInstance
   FridaAgentContext * agent_context;
   mach_vm_address_t remote_agent_context;
   mach_vm_size_t agent_context_size;
+  gboolean is_loaded;
   gboolean is_mapped;
 
   mach_port_t thread;
@@ -2040,6 +2041,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (instance->id), instance);
 
+  instance->is_loaded = TRUE;
   _frida_darwin_helper_backend_on_inject_instance_loaded (self, instance->id, instance->pid, (mapper != NULL) ? &mapped_module : NULL);
 
   result = instance->id;
@@ -3186,6 +3188,7 @@ frida_inject_instance_new (FridaDarwinHelperBackend * backend, guint id, guint p
   instance->payload_size = 0;
   instance->agent_context = NULL;
   instance->agent_context_size = 0;
+  instance->is_loaded = FALSE;
   instance->is_mapped = FALSE;
 
   instance->thread = MACH_PORT_NULL;
@@ -3245,7 +3248,11 @@ frida_inject_instance_free (FridaInjectInstance * instance)
       frida_inject_instance_task_did_not_exec (instance))
   {
     mach_vm_deallocate (instance->task, instance->payload_address, instance->payload_size);
-    _frida_darwin_helper_backend_on_inject_instance_unloaded (instance->backend, instance->id, instance->pid);
+
+    if (instance->is_loaded)
+    {
+      _frida_darwin_helper_backend_on_inject_instance_unloaded (instance->backend, instance->id, instance->pid);
+    }
   }
   else
   {
