@@ -151,15 +151,32 @@ compare_udid_and_create_mobile_device_info_if_matching (const FridaDeviceInfo * 
 {
   FridaFindMobileDeviceContext * ctx = (FridaFindMobileDeviceContext *) user_data;
   WCHAR * udid, * location;
+  size_t udid_len;
 
   udid = wcsrchr (device_info->instance_id, L'\\');
   if (udid == NULL)
-    goto keep_looking;
+    goto try_device_path;
   udid++;
 
-  if (_wcsicmp (udid, ctx->udid) != 0)
+  if (_wcsicmp (udid, ctx->udid) == 0)
+    goto match;
+
+try_device_path:
+  udid = device_info->device_path;
+  if (udid == NULL)
     goto keep_looking;
 
+  udid_len = wcslen (ctx->udid);
+  while (*udid != L'\0')
+  {
+    if (_wcsnicmp (udid, ctx->udid, udid_len) == 0)
+      goto match;
+    udid++;
+  }
+
+  goto keep_looking;
+
+match:
   location = (WCHAR *) g_memdup (device_info->location, ((guint) wcslen (device_info->location) + 1) * sizeof (WCHAR));
   ctx->mobile_device = frida_mobile_device_info_new (location);
 
@@ -186,7 +203,11 @@ compare_location_and_create_image_device_info_if_matching (const FridaDeviceInfo
 
   friendly_name = frida_read_registry_string (devkey, L"FriendlyName");
   if (friendly_name == NULL)
-    goto keep_looking;
+  {
+    friendly_name = frida_read_registry_string (devkey, L"Label");
+    if (friendly_name == NULL)
+      goto keep_looking;
+  }
 
   icon_url = frida_read_registry_multi_string (devkey, L"Icons");
   if (icon_url == NULL)
