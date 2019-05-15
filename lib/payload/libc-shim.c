@@ -86,6 +86,12 @@ free (void * ptr)
   gum_free (ptr);
 }
 
+char *
+strdup (const char * s)
+{
+  return g_strdup (s);
+}
+
 int
 printf (const char * format, ...)
 {
