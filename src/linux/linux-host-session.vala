@@ -583,7 +583,7 @@ namespace Frida {
 
 							if (e is Error.PERMISSION_DENIED) {
 								throw new Error.NOT_SUPPORTED ("Unable to access %s while preparing for app launch;" +
-									" try disabling Magisk Hide in case it is active", name);
+									" try disabling Magisk Hide in case it is active.\nYou can also try to disable Magisk Hide before starting the frida server. Wait for a few seconds and then start the Magisk Hide again.", name);
 							} else {
 								throw e;
 							}
