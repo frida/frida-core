@@ -9,6 +9,9 @@
 /* Define to 1 if target is AArch64 based. */
 #mesondefine HAVE_ARM64
 
+/* Define to 1 if AddressSanitizer is enabled. */
+#mesondefine HAVE_ASAN
+
 /* Define to 1 if OS is Darwin based. */
 #mesondefine HAVE_DARWIN
 

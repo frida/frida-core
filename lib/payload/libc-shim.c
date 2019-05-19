@@ -26,7 +26,7 @@ frida_deinit_libc_shim (void)
   shim_deinitialized = TRUE;
 }
 
-#ifndef HAVE_WINDOWS
+#if !defined (HAVE_WINDOWS) && !defined (HAVE_ASAN)
 
 void *
 malloc (size_t size)
