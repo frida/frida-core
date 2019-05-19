@@ -131,7 +131,7 @@ namespace Frida {
 			system_server_agent = null;
 
 			crash_monitor.process_crashed.disconnect (on_process_crashed);
-			crash_monitor.close ();
+			yield crash_monitor.close ();
 			crash_monitor = null;
 #endif
 
@@ -749,7 +749,7 @@ namespace Frida {
 	private class CrashMonitor : Object {
 		public signal void process_crashed (CrashInfo crash);
 
-		private Subprocess logcat;
+		private Object logcat;
 		private DataInputStream input;
 		private Cancellable cancellable = new Cancellable ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
@@ -757,16 +757,22 @@ namespace Frida {
 		private Timer since_start;
 
 		construct {
-			start_monitoring ();
-
 			since_start = new Timer ();
+
+			start_monitoring.begin ();
 		}
 
-		public void close () {
+		public async void close () {
 			cancellable.cancel ();
 
 			if (logcat != null) {
-				logcat.force_exit ();
+				if (logcat is Subprocess) {
+					var process = logcat as Subprocess;
+					process.send_signal (Posix.Signal.TERM);
+				} else if (logcat is SuperSU.Process) {
+					var process = logcat as SuperSU.Process;
+					yield process.detach (); // TODO: Figure out how we can terminate it.
+				}
 				logcat = null;
 			}
 		}
@@ -930,16 +936,34 @@ namespace Frida {
 			return "%s %s".printf (signal_name, code_name);
 		}
 
-		private void start_monitoring () {
+		private async void start_monitoring () {
+			InputStream stdout_pipe = null;
+
 			try {
-				logcat = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" }, STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+				var process = yield SuperSU.spawn ("/", new string[] { "su", "-c", "logcat", "-b", "crash", "-B" }, null, true);
 
-				input = new DataInputStream (logcat.get_stdout_pipe ());
-				input.byte_order = HOST_ENDIAN;
-
-				process_messages.begin ();
-			} catch (GLib.Error e) {
+				logcat = process;
+				stdout_pipe = process.output;
+			} catch (Error e) {
 			}
+
+			if (stdout_pipe == null) {
+				try {
+					var process = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" }, STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+
+					logcat = process;
+					stdout_pipe = process.get_stdout_pipe ();
+				} catch (GLib.Error e) {
+				}
+			}
+
+			if (stdout_pipe == null)
+				return;
+
+			input = new DataInputStream (stdout_pipe);
+			input.byte_order = HOST_ENDIAN;
+
+			process_messages.begin ();
 		}
 
 		private async void process_messages () {
