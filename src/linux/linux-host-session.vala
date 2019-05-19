@@ -765,7 +765,10 @@ namespace Frida {
 		public void close () {
 			cancellable.cancel ();
 
-			logcat.force_exit ();
+			if (logcat != null) {
+				logcat.force_exit ();
+				logcat = null;
+			}
 		}
 
 		public async CrashInfo? try_collect_crash (uint pid) {
