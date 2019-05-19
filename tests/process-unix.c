@@ -205,7 +205,7 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
         ctx.pid = 0;
         ctx.error = error;
 
-        frida_super_su_spawn ("/", wrapper_argv, 3, envp, envp_length, TRUE, frida_test_process_backend_on_super_su_spawn_ready, &ctx);
+        frida_super_su_spawn ("/", wrapper_argv, 3, envp, envp_length, TRUE, NULL, frida_test_process_backend_on_super_su_spawn_ready, &ctx);
 
         g_free (wrapper_argv[2]);
 

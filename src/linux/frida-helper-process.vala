@@ -252,6 +252,10 @@ namespace Frida {
 				}
 			}
 
+			if (process != null && process is SuperSU.Process) {
+				var process = process as SuperSU.Process;
+				yield process.detach ();
+			}
 			process = null;
 		}
 

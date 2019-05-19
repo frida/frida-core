@@ -1,14 +1,14 @@
 namespace Frida.SuperSU {
-	public async Process spawn (string working_directory, string[] argv, string[]? envp = null, bool capture_output = false) throws Error {
+	public async Process spawn (string working_directory, string[] argv, string[]? envp = null, bool capture_output = false, Cancellable? cancellable = null) throws Error {
 		var connection = new Connection ();
 
-		yield connection.open ();
+		yield connection.open (cancellable);
 
 		try {
-			yield connection.write_strv (argv);
-			yield connection.write_strv ((envp != null) ? envp : Environ.get ());
-			yield connection.write_string (working_directory);
-			yield connection.write_string ("");
+			yield connection.write_strv (argv, cancellable);
+			yield connection.write_strv ((envp != null) ? envp : Environ.get (), cancellable);
+			yield connection.write_string (working_directory, cancellable);
+			yield connection.write_string ("", cancellable);
 		} catch (GLib.Error e) {
 			throw new Error.PROTOCOL ("Unable to spawn: " + e.message);
 		}
@@ -35,6 +35,8 @@ namespace Frida.SuperSU {
 
 		private Gee.Promise<int> exit_promise;
 
+		private Cancellable cancellable = new Cancellable ();
+
 		internal Process (Connection connection, bool capture_output) {
 			this.connection = connection;
 
@@ -57,11 +59,16 @@ namespace Frida.SuperSU {
 			read_until_exit.begin ();
 		}
 
+		public async void detach () {
+			cancellable.cancel ();
+
+			yield wait ();
+		}
+
 		public async void wait () {
 			try {
 				yield exit_promise.future.wait_async ();
 			} catch (Gee.FutureError e) {
-				assert_not_reached ();
 			}
 		}
 
@@ -71,21 +78,21 @@ namespace Frida.SuperSU {
 				int status = int.MIN;
 
 				while (!done) {
-					var command = yield connection.read_size ();
+					var command = yield connection.read_size (cancellable);
 					switch (command) {
 						case 1: {
-							var data = yield connection.read_byte_array ();
+							var data = yield connection.read_byte_array (cancellable);
 							if (output_out != null)
-								yield output_out.write_bytes_async (data);
+								yield output_out.write_bytes_async (data, Priority.DEFAULT, cancellable);
 							else
 								stdout.write (data.get_data ());
 							break;
 						}
 
 						case 2: {
-							var data = yield connection.read_byte_array ();
+							var data = yield connection.read_byte_array (cancellable);
 							if (output_out != null)
-								yield output_out.write_bytes_async (data);
+								yield output_out.write_bytes_async (data, Priority.DEFAULT, cancellable);
 							else
 								stderr.write (data.get_data ());
 							break;
@@ -93,9 +100,9 @@ namespace Frida.SuperSU {
 
 						case 3: {
 							done = true;
-							var type = yield connection.read_size ();
+							var type = yield connection.read_size (cancellable);
 							if (type == 4)
-								status = (int) yield connection.read_ssize ();
+								status = (int) yield connection.read_ssize (cancellable);
 							break;
 						}
 
@@ -105,10 +112,10 @@ namespace Frida.SuperSU {
 					}
 				}
 
-				yield connection.close ();
+				yield connection.close (cancellable);
 				exit_promise.set_value (status);
 			} catch (GLib.Error e) {
-				yield connection.close ();
+				yield connection.close (cancellable);
 				exit_promise.set_exception (e);
 			}
 		}
@@ -120,20 +127,20 @@ namespace Frida.SuperSU {
 		private DataOutputStream output;
 		private Socket socket;
 
-		public async void open () throws Error {
+		public async void open (Cancellable cancellable) throws Error {
 			var address = "eu.chainfire.supersu";
 			while (true) {
-				var redirect = yield establish (address);
+				var redirect = yield establish (address, cancellable);
 				if (redirect == null)
 					break;
 				address = redirect;
 			}
 		}
 
-		public async void close () {
+		public async void close (Cancellable cancellable) {
 			if (connection != null) {
 				try {
-					yield connection.close_async ();
+					yield connection.close_async (Priority.DEFAULT, cancellable);
 				} catch (IOError e) {
 				}
 				connection = null;
@@ -142,10 +149,10 @@ namespace Frida.SuperSU {
 			output = null;
 		}
 
-		private async string? establish (string address) throws Error {
+		private async string? establish (string address, Cancellable cancellable) throws Error {
 			try {
 				var client = new SocketClient ();
-				connection = yield client.connect_async (new UnixSocketAddress.with_type (address, -1, UnixSocketAddressType.ABSTRACT));
+				connection = yield client.connect_async (new UnixSocketAddress.with_type (address, -1, UnixSocketAddressType.ABSTRACT), cancellable);
 
 				input = new DataInputStream (connection.get_input_stream ());
 				input.set_byte_order (DataStreamByteOrder.HOST_ENDIAN);
@@ -156,11 +163,11 @@ namespace Frida.SuperSU {
 				socket = connection.get_socket ();
 
 				write_size (0);
-				yield write_credentials ();
+				yield write_credentials (cancellable);
 
-				var redirect = yield read_string ();
+				var redirect = yield read_string (cancellable);
 				if (redirect.length > 0)
-					yield close ();
+					yield close (cancellable);
 
 				return redirect.length > 0 ? redirect : null;
 			} catch (GLib.Error e) {
@@ -168,14 +175,14 @@ namespace Frida.SuperSU {
 			}
 		}
 
-		public async string read_string () throws GLib.Error {
-			var size = yield read_size ();
+		public async string read_string (Cancellable cancellable) throws GLib.Error {
+			var size = yield read_size (cancellable);
 			if (size == 0)
 				return "";
 
 			var data_buf = new uint8[size + 1];
 			size_t bytes_read;
-			yield input.read_all_async (data_buf[0:size], Priority.DEFAULT, null, out bytes_read);
+			yield input.read_all_async (data_buf[0:size], Priority.DEFAULT, cancellable, out bytes_read);
 			if (bytes_read != size)
 				throw new IOError.FAILED ("Unable to read string");
 			data_buf[size] = 0;
@@ -184,41 +191,41 @@ namespace Frida.SuperSU {
 			return (string) v;
 		}
 
-		public async void write_string (string str) throws GLib.Error {
+		public async void write_string (string str, Cancellable cancellable) throws GLib.Error {
 			write_size (str.length);
 
 			if (str.length > 0) {
 				unowned uint8[] buf = (uint8[]) str;
-				yield output.write_all_async (buf[0:str.length], Priority.DEFAULT, null, null);
+				yield output.write_all_async (buf[0:str.length], Priority.DEFAULT, cancellable, null);
 			}
 		}
 
-		public async void write_strv (string[] strv) throws GLib.Error {
+		public async void write_strv (string[] strv, Cancellable cancellable) throws GLib.Error {
 			write_size (strv.length);
 			foreach (string s in strv)
-				yield write_string (s);
+				yield write_string (s, cancellable);
 		}
 
-		public async Bytes read_byte_array () throws GLib.Error {
-			var size = yield read_size ();
+		public async Bytes read_byte_array (Cancellable cancellable) throws GLib.Error {
+			var size = yield read_size (cancellable);
 			if (size == 0)
 				return new Bytes (new uint8[0]);
 
-			var data = yield input.read_bytes_async (size);
+			var data = yield input.read_bytes_async (size, Priority.DEFAULT, cancellable);
 			if (data.length != size)
 				throw new IOError.FAILED ("Unable to read byte array");
 
 			return data;
 		}
 
-		public async size_t read_size () throws GLib.Error {
-			yield prepare_to_read (sizeof (uint32));
+		public async size_t read_size (Cancellable cancellable) throws GLib.Error {
+			yield prepare_to_read (sizeof (uint32), cancellable);
 
 			return input.read_uint32 ();
 		}
 
-		public async ssize_t read_ssize () throws GLib.Error {
-			yield prepare_to_read (sizeof (int32));
+		public async ssize_t read_ssize (Cancellable cancellable) throws GLib.Error {
+			yield prepare_to_read (sizeof (int32), cancellable);
 
 			return input.read_int32 ();
 		}
@@ -227,19 +234,19 @@ namespace Frida.SuperSU {
 			output.put_uint32 ((uint32) size);
 		}
 
-		private async void prepare_to_read (size_t required) throws GLib.Error {
+		private async void prepare_to_read (size_t required, Cancellable cancellable) throws GLib.Error {
 			while (true) {
 				size_t available = input.get_available ();
 				if (available >= required)
 					return;
-				ssize_t n = yield input.fill_async ((ssize_t) (required - available));
+				ssize_t n = yield input.fill_async ((ssize_t) (required - available), Priority.DEFAULT, cancellable);
 				if (n == 0)
 					throw new Error.TRANSPORT ("Disconnected");
 			}
 		}
 
-		private async void write_credentials () throws GLib.Error {
-			yield output.flush_async ();
+		private async void write_credentials (Cancellable cancellable) throws GLib.Error {
+			yield output.flush_async (Priority.DEFAULT, cancellable);
 
 			var parameters = new MemoryOutputStream.resizable ();
 			var p = new DataOutputStream (parameters);
