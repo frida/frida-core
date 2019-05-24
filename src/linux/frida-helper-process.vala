@@ -26,23 +26,12 @@ namespace Frida {
 		private MainContext main_context;
 		private HelperFactory factory32;
 		private HelperFactory factory64;
-		private Gee.HashMap<uint, Gum.CpuType> cpu_types = new Gee.HashMap<uint, Gum.CpuType> ();
-		private Gee.Promise<bool> cpu_types_gc_request;
-		private Source cpu_types_gc_timer;
 
 		construct {
 			main_context = MainContext.get_thread_default ();
 		}
 
 		public async void close () {
-			if (cpu_types_gc_timer != null) {
-				cpu_types_gc_timer.destroy ();
-				cpu_types_gc_timer = null;
-			}
-
-			if (cpu_types_gc_request != null)
-				yield garbage_collect_cpu_types ();
-
 			if (factory32 != null) {
 				yield factory32.close ();
 				factory32 = null;
@@ -82,8 +71,19 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid) throws Error {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.resume (pid);
+			var cpu_type = cpu_type_from_pid (pid);
+			var helper = yield obtain_for_cpu_type (cpu_type);
+			try {
+				yield helper.resume (pid);
+			} catch (Error e) {
+				if (!(e is Error.INVALID_ARGUMENT))
+					throw e;
+				if (cpu_type == Gum.CpuType.AMD64 || cpu_type == Gum.CpuType.ARM64)
+					helper = yield obtain_for_32bit ();
+				else
+					helper = yield obtain_for_64bit ();
+				yield helper.resume (pid);
+			}
 		}
 
 		public async void kill (uint pid) throws Error {
@@ -204,7 +204,7 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private Gum.CpuType cpu_type_from_file (string path) throws Error {
+		private static Gum.CpuType cpu_type_from_file (string path) throws Error {
 			try {
 				return Gum.Linux.cpu_type_from_file (path);
 			} catch (GLib.Error e) {
@@ -217,13 +217,9 @@ namespace Frida {
 			}
 		}
 
-		private Gum.CpuType cpu_type_from_pid (uint pid) throws Error {
+		private static Gum.CpuType cpu_type_from_pid (uint pid) throws Error {
 			try {
-				if (!cpu_types.has_key(pid)) {
-					cpu_types[pid] = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
-					garbage_collect_cpu_types_soon();
-				}
-				return cpu_types[pid];
+				return Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
 			} catch (GLib.Error e) {
 				if (e is FileError.NOENT)
 					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
@@ -232,45 +228,6 @@ namespace Frida {
 				else
 					throw new Error.NOT_SUPPORTED (e.message);
 			}
-		}
-
-		private void garbage_collect_cpu_types_soon () {
-			if (cpu_types_gc_timer != null || cpu_types_gc_request != null)
-				return;
-
-			var timer = new TimeoutSource.seconds (1);
-			timer.set_callback (() => {
-				cpu_types_gc_timer = null;
-				garbage_collect_cpu_types.begin ();
-				return false;
-			});
-			timer.attach (main_context);
-			cpu_types_gc_timer = timer;
-		}
-
-		private async void garbage_collect_cpu_types () {
-			if (cpu_types_gc_request != null) {
-				try {
-					yield cpu_types_gc_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					assert_not_reached ();
-				}
-				return;
-			}
-
-			cpu_types_gc_request = new Gee.Promise<bool> ();
-			foreach (var pid in cpu_types.keys.to_array ()) {
-				try {
-					Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
-				} catch (GLib.Error e) {
-					cpu_types.unset(pid);
-				}
-			}
-			cpu_types_gc_request.set_value (true);
-			cpu_types_gc_request = null;
-
-			if (!cpu_types.is_empty)
-				garbage_collect_cpu_types_soon ();
 		}
 	}
 
