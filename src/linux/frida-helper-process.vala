@@ -71,8 +71,19 @@ namespace Frida {
 		}
 
 		public async void resume (uint pid) throws Error {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.resume (pid);
+			var cpu_type = cpu_type_from_pid (pid);
+			var helper = yield obtain_for_cpu_type (cpu_type);
+			try {
+				yield helper.resume (pid);
+			} catch (Error e) {
+				if (!(e is Error.INVALID_ARGUMENT))
+					throw e;
+				if (cpu_type == Gum.CpuType.AMD64 || cpu_type == Gum.CpuType.ARM64)
+					helper = yield obtain_for_32bit ();
+				else
+					helper = yield obtain_for_64bit ();
+				yield helper.resume (pid);
+			}
 		}
 
 		public async void kill (uint pid) throws Error {
