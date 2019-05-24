@@ -402,6 +402,9 @@ namespace Frida.Agent {
 				}
 			}
 
+			if (actor == CHILD)
+				release_child_gating ();
+
 			fork_parent_pid = 0;
 			fork_child_pid = 0;
 			fork_child_id = HostChildId (0);
@@ -413,9 +416,6 @@ namespace Frida.Agent {
 			fork_recovery_state = RECOVERED;
 			fork_cond.signal ();
 			fork_mutex.unlock ();
-
-			if (actor == CHILD)
-				release_child_gating ();
 		}
 
 		private async void prepare_to_exec (HostChildInfo * info) {
