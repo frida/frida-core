@@ -86,6 +86,12 @@ free (void * ptr)
   gum_free (ptr);
 }
 
+void *
+memcpy (void * dst, const void * src, size_t n)
+{
+  return gum_memcpy (dst, src, n);
+}
+
 char *
 strdup (const char * s)
 {
