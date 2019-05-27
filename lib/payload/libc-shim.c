@@ -9,6 +9,7 @@
 # include <xlocale.h>
 #endif
 
+#undef memcpy
 #undef sprintf
 #undef snprintf
 #undef vsnprintf
