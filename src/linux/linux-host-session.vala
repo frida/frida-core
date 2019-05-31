@@ -1014,7 +1014,6 @@ namespace Frida {
 				if (n == 0)
 					throw new Error.TRANSPORT ("Disconnected");
 			}
-
 		}
 
 		private class LogEntry {
