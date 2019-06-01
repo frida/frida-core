@@ -1713,7 +1713,22 @@ namespace Frida {
 			try {
 				script_id = yield session.create_script_with_options (source, raw_options);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				if (e is DBusError.UNKNOWN_METHOD) {
+					string? name = (options != null) ? options.name : null;
+					if (name == null)
+						name = "";
+
+					if (options != null && options.runtime != DEFAULT)
+						throw new Error.INVALID_ARGUMENT ("Remote Frida does not support the “runtime” option; please upgrade it");
+
+					try {
+						script_id = yield session.create_script (name, source);
+					} catch (GLib.Error e) {
+						throw Marshal.from_dbus (e);
+					}
+				} else {
+					throw Marshal.from_dbus (e);
+				}
 			}
 
 			check_open ();
@@ -1751,7 +1766,18 @@ namespace Frida {
 			try {
 				script_id = yield session.create_script_from_bytes_with_options (bytes.get_data (), raw_options);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				if (e is DBusError.UNKNOWN_METHOD) {
+					if (options != null && options.runtime != DEFAULT)
+						throw new Error.INVALID_ARGUMENT ("Remote Frida does not support the “runtime” option; please upgrade it");
+
+					try {
+						script_id = yield session.create_script_from_bytes (bytes.get_data ());
+					} catch (GLib.Error e) {
+						throw Marshal.from_dbus (e);
+					}
+				} else {
+					throw Marshal.from_dbus (e);
+				}
 			}
 
 			check_open ();
@@ -1789,7 +1815,22 @@ namespace Frida {
 			try {
 				data = yield session.compile_script_with_options (source, raw_options);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				if (e is DBusError.UNKNOWN_METHOD) {
+					string? name = (options != null) ? options.name : null;
+					if (name == null)
+						name = "";
+
+					if (options != null && options.runtime != DEFAULT)
+						throw new Error.INVALID_ARGUMENT ("Remote Frida does not support the “runtime” option; please upgrade it");
+
+					try {
+						data = yield session.compile_script (name, source);
+					} catch (GLib.Error e) {
+						throw Marshal.from_dbus (e);
+					}
+				} else {
+					throw Marshal.from_dbus (e);
+				}
 			}
 
 			return new Bytes (data);
