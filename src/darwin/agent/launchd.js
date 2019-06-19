@@ -5,9 +5,7 @@ var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 var upcoming = {};
 var gating = false;
 
-var jbdCallImpl = Module.findExportByName(null, 'jbd_call');
-var jbdPidsToIgnore = {};
-var runningOnElectra = jbdCallImpl !== null;
+var jbdPidsToIgnore = null;
 
 var substrateInvocations = {};
 var substratePidsPending = {};
@@ -27,6 +25,8 @@ rpc.exports = {
     gating = false;
   },
 };
+
+applyJailbreakQuirks();
 
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
@@ -77,9 +77,8 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 
     var pid = this.pidPtr.readU32();
 
-    if (runningOnElectra) {
+    if (jbdPidsToIgnore !== null)
       jbdPidsToIgnore[pid] = true;
-    }
 
     var dealingWithSubstrate = substrateInvocations[this.threadId] === true;
     if (dealingWithSubstrate) {
@@ -94,11 +93,20 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
   }
 });
 
-if (runningOnElectra) {
-  sabotageJbdCallForOurPids();
+function applyJailbreakQuirks() {
+  var jbdCallImpl = findJbdCallImpl();
+  if (jbdCallImpl !== null) {
+    jbdPidsToIgnore = {};
+    sabotageJbdCallForOurPids(jbdCallImpl);
+    return;
+  }
+
+  var launcher = findSubstrateLauncher();
+  if (launcher !== null)
+    instrumentSubstrateLauncher(launcher);
 }
 
-function sabotageJbdCallForOurPids() {
+function sabotageJbdCallForOurPids(jbdCallImpl) {
   var retType = 'int';
   var argTypes = ['uint', 'uint', 'uint'];
 
@@ -113,11 +121,6 @@ function sabotageJbdCallForOurPids() {
 
     return jbdCall(port, command, pid);
   }, retType, argTypes));
-}
-
-var launcher = findSubstrateLauncher();
-if (launcher !== null) {
-  instrumentSubstrateLauncher(launcher);
 }
 
 function instrumentSubstrateLauncher(launcher) {
@@ -151,6 +154,22 @@ function instrumentSubstrateLauncher(launcher) {
         notify();
     },
   });
+}
+
+function findJbdCallImpl() {
+  var impl = Module.findExportByName(null, 'jbd_call');
+  if (impl !== null)
+    return impl;
+
+  var payload = Process.findModuleByName('/chimera/pspawn_payload.dylib');
+  if (payload === null)
+    return null;
+
+  var matches = Memory.scanSync(payload.base, payload.size, 'ff 43 01 d1 f4 4f 03 a9 fd 7b 04 a9 fd 03 01 91');
+  if (matches.length !== 1)
+    throw new Error('Unsupported version of Chimera; please file a bug');
+
+  return matches[0].address;
 }
 
 function findSubstrateLauncher() {

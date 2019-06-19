@@ -1,7 +1,6 @@
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
-var jbdCallImpl = Module.findExportByName(null, 'jbd_call');
-var runningOnElectra = jbdCallImpl !== null;
+applyJailbreakQuirks();
 
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
@@ -13,11 +12,19 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
   }
 });
 
-if (runningOnElectra) {
-  sabotageJbdCall();
+function applyJailbreakQuirks() {
+  var jbdCallImpl = findJbdCallImpl();
+  if (jbdCallImpl !== null) {
+    sabotageJbdCall(jbdCallImpl);
+    return;
+  }
+
+  var proxyer = findSubstrateProxyer();
+  if (proxyer !== null)
+    instrumentSubstrateProxyer(proxyer);
 }
 
-function sabotageJbdCall() {
+function sabotageJbdCall(jbdCallImpl) {
   var retType = 'int';
   var argTypes = ['uint', 'uint', 'uint'];
 
@@ -28,11 +35,6 @@ function sabotageJbdCall() {
   }, retType, argTypes));
 }
 
-var proxyer = findSubstrateProxyer();
-if (proxyer !== null) {
-  instrumentSubstrateProxyer(proxyer);
-}
-
 function instrumentSubstrateProxyer(proxyer) {
   Interceptor.attach(proxyer.exec, {
     onEnter: function (args) {
@@ -40,6 +42,22 @@ function instrumentSubstrateProxyer(proxyer) {
       args[2] = startSuspendedYup;
     }
   });
+}
+
+function findJbdCallImpl() {
+  var impl = Module.findExportByName(null, 'jbd_call');
+  if (impl !== null)
+    return impl;
+
+  var payload = Process.findModuleByName('/chimera/pspawn_payload.dylib');
+  if (payload === null)
+    return null;
+
+  var matches = Memory.scanSync(payload.base, payload.size, 'ff 43 01 d1 f4 4f 03 a9 fd 7b 04 a9 fd 03 01 91');
+  if (matches.length !== 1)
+    throw new Error('Unsupported version of Chimera; please file a bug');
+
+  return matches[0].address;
 }
 
 function findSubstrateProxyer() {
