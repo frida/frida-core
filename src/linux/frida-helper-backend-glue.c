@@ -2952,7 +2952,7 @@ frida_resolve_library_function (pid_t pid, const gchar * library_name, const gch
   local_base = frida_find_library_base (getpid (), library_name, &local_library_path);
   g_assert (local_base != 0);
 
-  remote_base = frida_find_library_base (pid, library_name, &remote_library_path);
+  remote_base = frida_find_library_base (pid, local_library_path, &remote_library_path);
   if (remote_base == 0)
     return 0;
 
