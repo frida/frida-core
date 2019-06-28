@@ -64,13 +64,13 @@ function findSubstrateProxyer() {
   if (Process.arch !== 'arm64')
     return null;
 
-  var PROXYER_T_DYLIB_NAME = '50 72 6f 78 79 65 72 2e 74 2e 64 79 6c 69 62';
+  var proxyerDylibName = '50 72 6f 78 79 65 72 2e 74 2e 64 79 6c 69 62';
 
   var modules = new ModuleMap();
   var ranges = Process.enumerateRanges('r-x')
       .filter(function (r) { return !modules.has(r.base); })
       .filter(function (r) { return (r.base.readU32() & 0xfffffffe) >>> 0 === 0xfeedface; })
-      .filter(function (r) { return Memory.scanSync(r.base, 2048, PROXYER_T_DYLIB_NAME).length > 0; });
+      .filter(function (r) { return Memory.scanSync(r.base, 2048, proxyerDylibName).length > 0; });
   if (ranges.length === 0)
     return null;
   var proxyer = ranges[0];

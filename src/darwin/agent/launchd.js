@@ -176,18 +176,15 @@ function findSubstrateLauncher() {
   if (Process.arch !== 'arm64')
     return null;
 
-  var LAUNCHER_T_DYLIB_NAME = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62';
+  var imp = Module.enumerateImports('/sbin/launchd')
+      .filter(function (imp) { return imp.name === 'posix_spawn'; })[0];
+  var impl = imp.slot.readPointer();
+  var header = findClosestMachHeader(impl);
 
-  var modules = new ModuleMap();
-  var ranges = Process.enumerateRanges('r-x')
-      .filter(function (r) { return !modules.has(r.base); })
-      .filter(function (r) { return (r.base.readU32() & 0xfffffffe) >>> 0 === 0xfeedface; })
-      .filter(function (r) { return Memory.scanSync(r.base, 2048, LAUNCHER_T_DYLIB_NAME).length > 0; });
-  if (ranges.length === 0)
+  var launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62';
+  var isSubstrate = Memory.scanSync(header, 2048, launcherDylibName).length > 0;
+  if (!isSubstrate)
     return null;
-  var launcher = ranges[0];
-  var base = launcher.base;
-  var size = launcher.size;
 
   return {
     handlePosixSpawn: resolveFunction('fd 7b bf a9 fd 03 00 91 f4 4f bf a9 f6 57 bf a9 f8 5f bf a9 fa 67 bf a9 fc 6f bf a9 ff 03 04 d1'),
@@ -195,10 +192,19 @@ function findSubstrateLauncher() {
   };
 
   function resolveFunction(signature) {
-    var matches = Memory.scanSync(base, size, signature);
+    var matches = Memory.scanSync(header, 37056, signature);
     if (matches.length !== 1) {
       throw new Error('Unsupported version of Substrate; please file a bug');
     }
     return matches[0].address;
+  }
+}
+
+function findClosestMachHeader(address) {
+  var cur = address.and(ptr(4095).not());
+  while (true) {
+    if ((cur.readU32() & 0xfffffffe) >>> 0 === 0xfeedface)
+      return cur;
+    cur = cur.sub(4096);
   }
 }
