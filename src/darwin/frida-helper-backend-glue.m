@@ -56,6 +56,7 @@ typedef struct _FridaSpawnInstanceDyldData FridaSpawnInstanceDyldData;
 typedef guint FridaBreakpointPhase;
 typedef guint FridaBreakpointRepeat;
 typedef struct _FridaBreakpoint FridaBreakpoint;
+typedef guint FridaRetState;
 typedef struct _FridaPagePoolEntry FridaPagePoolEntry;
 typedef struct _FridaInjectInstance FridaInjectInstance;
 typedef struct _FridaInjectPayloadLayout FridaInjectPayloadLayout;
@@ -133,7 +134,6 @@ struct _FridaSpawnInstance
   mach_vm_address_t fake_helpers;
   mach_vm_address_t fake_error_buf;
   mach_vm_address_t dyld_data;
-  gboolean need_helpers;
   GumAddress modern_entry_address;
   GumAddress dlopen_address;
   GumAddress info_address;
@@ -141,10 +141,10 @@ struct _FridaSpawnInstance
   GumAddress dlerror_clear_address;
   GumAddress helpers_ptr_address;
   GumAddress ret_gadget;
+  FridaRetState ret_state;
   GumAddress do_modinit_start;
   GumAddress do_modinit_end;
   GumAddress strcmp_address;
-  gboolean helpers_unset;
   mach_port_t task;
   GumDarwinUnifiedThreadState previous_thread_state;
 };
@@ -157,6 +157,12 @@ enum _FridaBreakpointPhase
   FRIDA_BREAKPOINT_SKIP_CLEAR,
   FRIDA_BREAKPOINT_CLEANUP,
   FRIDA_BREAKPOINT_DONE
+};
+
+enum _FridaRetState
+{
+  FRIDA_RET_FROM_HELPER,
+  FRIDA_RET_FROM_STRCMP
 };
 
 struct _FridaSpawnInstanceDyldData
@@ -1516,7 +1522,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
-  gboolean need_helpers;
   GumAddress legacy_entry_address, modern_entry_address, launch_with_closure_address;
   GumDarwinModule * dyld;
   FridaExceptionPortSet * previous_ports;
@@ -1578,15 +1583,15 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
    * - On newer dyld versions, the code path triggered by dlopen() is different and may
    *   fail if "libSystemInitialized" is still false when loading libSystem dependencies
    *   (most notably libc++.1.dylib).
-   * - To work around this, just before calling dlopen() we place a breakpoint at the 
-   *   beginning of "strcmp()" and force it to return 0 when called from
-   *   "ImageLoaderMachO::doModInitFunctions()" method.
+   * - To work around this, just before calling dlopen() we place a breakpoint at the
+   *   beginning of strcmp() and force it to return 0 when called from the
+   *   ImageLoaderMachO::doModInitFunctions() method.
    * - This tweak isn't necessary on older dyld versions for which we don't need helpers,
    *   because the failing check isn't there and because it wouldn't have failed since
-   *   "libSystemInitialized" variable gets set early on in our flow.
+   *   the libSystemInitialized variable gets set early on in our flow.
    *
    * Also, starting with Mojave and iOS 12 the dlopen() symbol is gone and we have to use
-   * dlopen_internal(). There is also no need to registerThreadHelpers() anymore.
+   * dlopen_internal().
    *
    * Then later when resume() is called:
    * - Send a response to the message we got on our exception port, so the
@@ -1643,20 +1648,13 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
-  need_helpers = TRUE;
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
   modern_entry_address = 0;
 
   launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_");
   if (launch_with_closure_address == 0)
   {
-    gboolean is_dyld_v3;
-
     launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_");
-
-    is_dyld_v3 = launch_with_closure_address != 0 || gum_darwin_module_resolve_symbol_address (dyld, "__ZN5dyld315internalInstallEv") != 0;
-    if (is_dyld_v3)
-      need_helpers = FALSE;
   }
 
   if (launch_with_closure_address != 0)
@@ -1664,8 +1662,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     modern_entry_address = frida_find_run_initializers_call (task, instance->cpu_type, launch_with_closure_address);
   }
 
-  instance->need_helpers = need_helpers;
-  instance->helpers_unset = FALSE;
   instance->modern_entry_address = modern_entry_address;
 
   instance->dlopen_address = gum_darwin_module_resolve_symbol_address (dyld, "_dlopen");
@@ -1701,6 +1697,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   if (instance->cpu_type == GUM_CPU_ARM)
     instance->ret_gadget |= 1;
+
+  instance->ret_state = FRIDA_RET_FROM_HELPER;
 
   frida_spawn_instance_create_dyld_data (instance);
 
@@ -2319,6 +2317,15 @@ frida_spawn_instance_free (FridaSpawnInstance * instance)
   g_slice_free (FridaSpawnInstance, instance);
 }
 
+static GumAddress
+frida_spawn_instance_get_ret_gadget_address (FridaSpawnInstance * self)
+{
+  if (self->cpu_type == GUM_CPU_ARM)
+    return self->ret_gadget & ~GUM_ADDRESS (1);
+
+  return self->ret_gadget;
+}
+
 static void
 frida_spawn_instance_resume (FridaSpawnInstance * self)
 {
@@ -2468,26 +2475,38 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     if (pc == self->modern_entry_address)
       self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
     else
-      self->breakpoint_phase = self->need_helpers ? FRIDA_BREAKPOINT_SET_HELPERS : FRIDA_BREAKPOINT_DLOPEN_LIBC;
+      self->breakpoint_phase = FRIDA_BREAKPOINT_SET_HELPERS;
   }
 
-#ifndef HAVE_I386
-  if (pc == (self->ret_gadget & ~1))
+  if (pc == frida_spawn_instance_get_ret_gadget_address (self))
   {
+#ifdef HAVE_I386
+    if (self->ret_state == FRIDA_RET_FROM_HELPER)
+    {
+      if (self->cpu_type == GUM_CPU_AMD64)
+        state->uts.ts64.__rax = self->fake_error_buf;
+      else
+        state->uts.ts32.__eax = self->fake_error_buf;
+    }
+#else
     if (self->cpu_type == GUM_CPU_ARM64)
     {
       state->ts_64.__pc = state->ts_64.__lr;
-      state->ts_64.__x[0] = self->fake_error_buf;
+      if (self->ret_state == FRIDA_RET_FROM_HELPER)
+        state->ts_64.__x[0] = self->fake_error_buf;
     }
     else
     {
       state->ts_32.__pc = state->ts_32.__lr;
-      state->ts_32.__r[0] = self->fake_error_buf;
+      if (self->ret_state == FRIDA_RET_FROM_HELPER)
+        state->ts_32.__r[0] = self->fake_error_buf;
     }
+#endif
+
+    self->ret_state = FRIDA_RET_FROM_HELPER;
 
     return TRUE;
   }
-#endif
 
   if (frida_spawn_instance_handle_modinit (self, state, pc))
     return TRUE;
@@ -2497,8 +2516,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     case FRIDA_BREAKPOINT_SET_HELPERS:
       frida_spawn_instance_call_set_helpers (self, state, self->fake_helpers);
 
-      if (self->cpu_type == GUM_CPU_ARM64)
-        frida_spawn_instance_set_nth_breakpoint (self, 2, self->ret_gadget, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+      frida_spawn_instance_set_nth_breakpoint (self, 2, self->ret_gadget, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
 
       self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_LIBC;
 
@@ -2540,8 +2558,6 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
         state->ts_32.__pc = state->ts_32.__lr;
 #endif
 
-      if (!self->helpers_unset && self->cpu_type == GUM_CPU_ARM)
-        frida_spawn_instance_set_nth_breakpoint (self, 2, self->ret_gadget & ~1, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
       self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
 
       return TRUE;
@@ -2622,6 +2638,8 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
       {
         state->uts.ts64.__rax = 0;
         state->uts.ts64.__rip = self->ret_gadget;
+
+        self->ret_state = FRIDA_RET_FROM_STRCMP;
       }
     }
     else
@@ -2636,6 +2654,8 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
       {
         state->uts.ts32.__eax = 0;
         state->uts.ts32.__eip = self->ret_gadget;
+
+        self->ret_state = FRIDA_RET_FROM_STRCMP;
       }
     }
 #else
@@ -2646,6 +2666,8 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
       {
         state->ts_64.__x[0] = 0;
         state->ts_64.__pc = ret_address;
+
+        self->ret_state = FRIDA_RET_FROM_STRCMP;
       }
     }
     else
@@ -2656,6 +2678,8 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
         /* Make both args point to a NUL byte. */
         state->ts_32.__r[0] = self->lib_name + 26;
         state->ts_32.__r[1] = state->ts_32.__r[0];
+
+        self->ret_state = FRIDA_RET_FROM_STRCMP;
       }
     }
 #endif
@@ -2806,12 +2830,12 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 
       /* version */
       helpers32[0] = 1;
-      /* acquireGlobalDyldLock (unused) */
-      helpers32[1] = 0;
+      /* acquireGlobalDyldLock */
+      helpers32[1] = (guint32) self->ret_gadget;
       /* releaseGlobalDyldLock */
       helpers32[2] = (guint32) self->ret_gadget;
-      /* getThreadBufferFor_dlerror (unused) */
-      helpers32[3] = 0;
+      /* getThreadBufferFor_dlerror */
+      helpers32[3] = (guint32) self->ret_gadget;
 
       break;
     }
@@ -2823,15 +2847,12 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 
       /* version */
       helpers64[0] = 1;
-      /* acquireGlobalDyldLock (unused) */
-      helpers64[1] = 0;
+      /* acquireGlobalDyldLock */
+      helpers64[1] = self->ret_gadget;
       /* releaseGlobalDyldLock */
-      helpers64[2] = (guint64) self->ret_gadget;
-      /* getThreadBufferFor_dlerror (unused) */
-      if (self->cpu_type == GUM_CPU_ARM64)
-        helpers64[3] = (guint64) self->ret_gadget;
-      else
-        helpers64[3] = 0;
+      helpers64[2] = self->ret_gadget;
+      /* getThreadBufferFor_dlerror */
+      helpers64[3] = self->ret_gadget;
 
       break;
     }
@@ -2897,8 +2918,6 @@ frida_spawn_instance_unset_helpers (FridaSpawnInstance * self)
   }
 
   g_assert (write_succeeded);
-
-  self->helpers_unset = TRUE;
 }
 
 static void
@@ -4207,6 +4226,7 @@ frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddress break_at,
 #else
 # define FRIDA_S_USER ((uint32_t) (2u << 1))
 # define FRIDA_BAS_ANY ((uint32_t) 15u)
+# define FRIDA_BAS_THUMB ((uint32_t) 12u)
 # define FRIDA_BCR_ENABLE ((uint32_t) 1u)
 
   if (cpu_type == GUM_CPU_ARM64)
@@ -4222,10 +4242,11 @@ frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddress break_at,
   else
   {
     arm_debug_state_t * s = state;
+    uint32_t bas = (break_at & 1) ? FRIDA_BAS_THUMB : FRIDA_BAS_ANY;
 
     s->__bvr[n] = break_at;
     if (break_at != 0)
-      s->__bcr[n] = (FRIDA_BAS_ANY << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
+      s->__bcr[n] = (bas << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
     else
       s->__bcr[n] = 0;
   }
