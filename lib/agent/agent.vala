@@ -395,11 +395,15 @@ namespace Frida.Agent {
 				if (identifier != null)
 					info.identifier = identifier;
 
+				var controller_proxy = controller as DBusProxy;
+				var previous_timeout = controller_proxy.get_default_timeout ();
+				controller_proxy.set_default_timeout (int.MAX);
 				try {
 					yield controller.wait_for_permission_to_resume (fork_child_id, info);
 				} catch (GLib.Error e) {
 					// The connection will/did get closed and we will unload...
 				}
+				controller_proxy.set_default_timeout (previous_timeout);
 			}
 
 			if (actor == CHILD)
