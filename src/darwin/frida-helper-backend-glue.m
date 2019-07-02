@@ -2516,8 +2516,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     case FRIDA_BREAKPOINT_SET_HELPERS:
       frida_spawn_instance_call_set_helpers (self, state, self->fake_helpers);
 
-      frida_spawn_instance_set_nth_breakpoint (self, 2, frida_spawn_instance_get_ret_gadget_address (self),
-          FRIDA_BREAKPOINT_REPEAT_ALWAYS);
+      frida_spawn_instance_set_nth_breakpoint (self, 2, self->ret_gadget, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
 
       self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_LIBC;
 
@@ -4227,6 +4226,7 @@ frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddress break_at,
 #else
 # define FRIDA_S_USER ((uint32_t) (2u << 1))
 # define FRIDA_BAS_ANY ((uint32_t) 15u)
+# define FRIDA_BAS_THUMB ((uint32_t) 12u)
 # define FRIDA_BCR_ENABLE ((uint32_t) 1u)
 
   if (cpu_type == GUM_CPU_ARM64)
@@ -4242,10 +4242,11 @@ frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddress break_at,
   else
   {
     arm_debug_state_t * s = state;
+    uint32_t bas = (break_at & 1) ? FRIDA_BAS_THUMB : FRIDA_BAS_ANY;
 
     s->__bvr[n] = break_at;
     if (break_at != 0)
-      s->__bcr[n] = (FRIDA_BAS_ANY << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
+      s->__bcr[n] = (bas << 5) | FRIDA_S_USER | FRIDA_BCR_ENABLE;
     else
       s->__bcr[n] = 0;
   }
