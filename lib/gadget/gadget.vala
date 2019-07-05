@@ -307,7 +307,7 @@ namespace Frida.Gadget {
 
 #if ANDROID
 		construct {
-			if (executable_name.index_of ("app_process") >= 0) {
+			if (executable_name.has_prefix ("app_process")) {
 				try {
 					string cmdline;
 					FileUtils.get_contents ("/proc/self/cmdline", out cmdline);
