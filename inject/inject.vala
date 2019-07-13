@@ -4,6 +4,7 @@ namespace Frida.Inject {
 	private static int target_pid = -1;
 	private static string? target_name;
 	private static string? script_path;
+	private static string? parameters;
 	private static bool eternalize;
 	private static bool enable_jit;
 	private static bool enable_development;
@@ -13,6 +14,7 @@ namespace Frida.Inject {
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, null, "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, null, "PID" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
+		{ "parameters",  's', 0, OptionArg.STRING, ref parameters, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON"},
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
 		{ "enable-jit", 0, 0, OptionArg.NONE, ref enable_jit, "Enable the JIT runtime", null },
 		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
@@ -59,7 +61,7 @@ namespace Frida.Inject {
 			script_source = read_stdin ();
 		}
 
-		application = new Application (target_pid, target_name, script_path, script_source, enable_jit, enable_development);
+		application = new Application (target_pid, target_name, script_path, script_source, parameters, enable_jit, enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -117,6 +119,11 @@ namespace Frida.Inject {
 			construct;
 		}
 
+		public string? parameters {
+			get;
+			construct;
+		}
+
 		public bool enable_jit {
 			get;
 			construct;
@@ -134,12 +141,13 @@ namespace Frida.Inject {
 		private MainLoop loop;
 		private bool stopping;
 
-		public Application (int target_pid, string? target_name, string? script_path, string? script_source, bool enable_jit, bool enable_development) {
+		public Application (int target_pid, string? target_name, string? script_path, string? script_source, string? parameters, bool enable_jit, bool enable_development) {
 			Object (
 				target_pid: target_pid,
 				target_name: target_name,
 				script_path: script_path,
 				script_source: script_source,
+				parameters: parameters,
 				enable_jit: enable_jit,
 				enable_development: enable_development
 			);
@@ -175,7 +183,7 @@ namespace Frida.Inject {
 
 				var session = yield device.attach (pid);
 
-				var r = new ScriptRunner (session, script_path, script_source, enable_jit, enable_development);
+				var r = new ScriptRunner (session, script_path, script_source, parameters, enable_jit, enable_development);
 				yield r.start ();
 				script_runner = r;
 
@@ -220,6 +228,7 @@ namespace Frida.Inject {
 		private Script script;
 		private string? script_path;
 		private string? script_source;
+		private string? parameters;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private RpcClient rpc_client;
@@ -227,10 +236,11 @@ namespace Frida.Inject {
 		private bool load_in_progress = false;
 		private bool enable_development = false;
 
-		public ScriptRunner (Session session, string? script_path, string? script_source, bool enable_jit, bool enable_development) {
+		public ScriptRunner (Session session, string? script_path, string? script_source, string? parameters, bool enable_jit, bool enable_development) {
 			this.session = session;
 			this.script_path = script_path;
 			this.script_source = script_source;
+			this.parameters = parameters;
 			this.enable_development = enable_development;
 
 			if (enable_jit)
@@ -321,15 +331,31 @@ namespace Frida.Inject {
 				script.message.connect (on_message);
 				yield script.load ();
 
-				try {
-					yield rpc_client.call ("init", new Json.Node[] {});
-				} catch (Error e) {
-				}
+				call_init ();
 
 				if (eternalize)
 					yield script.eternalize ();
 			} finally {
 				load_in_progress = false;
+			}
+		}
+
+		private async void call_init () {
+			var stage = new Json.Node (Json.NodeType.VALUE);
+			stage.set_string ("early");
+
+			var params = new Json.Node (Json.NodeType.OBJECT);;
+			try {
+				var parser = new Json.Parser ();
+				parser.load_from_data (parameters, -1);
+				params.set_object (parser.get_root().get_object ());
+			} catch (GLib.Error e) {
+				params.set_object (new Json.Object ()); 
+			}
+
+			try {
+				yield rpc_client.call ("init", new Json.Node[] { stage, params });
+			} catch (Error e) {
 			}
 		}
 
