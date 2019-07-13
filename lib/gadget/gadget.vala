@@ -304,6 +304,22 @@ namespace Frida.Gadget {
 				range: range
 			);
 		}
+
+#if ANDROID
+		construct {
+			if (executable_name.has_prefix ("app_process")) {
+				try {
+					string cmdline;
+					FileUtils.get_contents ("/proc/self/cmdline", out cmdline);
+					if (cmdline != "zygote" && cmdline != "zygote64") {
+						executable_name = cmdline;
+						cached_bundle_id = cmdline[0:cmdline.last_index_of (":")];
+					}
+				} catch (FileError e) {
+				}
+			}
+		}
+#endif
 	}
 
 	private enum State {
