@@ -64,13 +64,18 @@ namespace Frida.Inject {
 		var parameters = new Json.Node (Json.NodeType.OBJECT);
 		parameters.set_object (new Json.Object ()); 
 		if (parameters_str != null) {
+			if (parameters_str == "") {
+				printerr ("Parameters argument must be specified as JSON if present\n");
+				return 4;
+			}
+
 			try {
 				var parser = new Json.Parser ();
 				parser.load_from_data (parameters_str, -1);
 				parameters.set_object (parser.get_root ().get_object ());
 			} catch (GLib.Error e) {
 				printerr ("Failed to parse parameters argument as JSON\n");
-				return 4;
+				return 5;
 			}
 		}
 
@@ -132,7 +137,7 @@ namespace Frida.Inject {
 			construct;
 		}
 
-		public Json.Node? parameters {
+		public Json.Node parameters {
 			get;
 			construct;
 		}
@@ -154,7 +159,7 @@ namespace Frida.Inject {
 		private MainLoop loop;
 		private bool stopping;
 
-		public Application (int target_pid, string? target_name, string? script_path, string? script_source, Json.Node? parameters, bool enable_jit, bool enable_development) {
+		public Application (int target_pid, string? target_name, string? script_path, string? script_source, Json.Node parameters, bool enable_jit, bool enable_development) {
 			Object (
 				target_pid: target_pid,
 				target_name: target_name,
@@ -241,7 +246,7 @@ namespace Frida.Inject {
 		private Script script;
 		private string? script_path;
 		private string? script_source;
-		private Json.Node? parameters;
+		private Json.Node parameters;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
 		private RpcClient rpc_client;
@@ -249,7 +254,7 @@ namespace Frida.Inject {
 		private bool load_in_progress = false;
 		private bool enable_development = false;
 
-		public ScriptRunner (Session session, string? script_path, string? script_source, Json.Node? parameters, bool enable_jit, bool enable_development) {
+		public ScriptRunner (Session session, string? script_path, string? script_source, Json.Node parameters, bool enable_jit, bool enable_development) {
 			this.session = session;
 			this.script_path = script_path;
 			this.script_source = script_source;
