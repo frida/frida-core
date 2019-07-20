@@ -61,13 +61,13 @@ namespace Frida.Inject {
 			script_source = read_stdin ();
 		}
 
-		Json.Node parameters = new Json.Node (Json.NodeType.OBJECT);
+		var parameters = new Json.Node (Json.NodeType.OBJECT);
 		parameters.set_object (new Json.Object ()); 
 		if (parameters_str != null && parameters_str != "") {
 			try {
 				var parser = new Json.Parser ();
 				parser.load_from_data (parameters_str, -1);
-				parameters.set_object (parser.get_root().get_object ());
+				parameters.set_object (parser.get_root ().get_object ());
 			} catch (GLib.Error e) {
 			}
 		}
