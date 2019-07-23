@@ -74,7 +74,7 @@ namespace Frida.Inject {
 				parser.load_from_data (parameters_str, -1);
 				parameters.set_object (parser.get_root ().get_object ());
 			} catch (GLib.Error e) {
-				printerr ("Failed to parse parameters argument as JSON\n");
+				printerr ("Failed to parse parameters argument as JSON: %s\n", e.message);
 				return 5;
 			}
 		}
