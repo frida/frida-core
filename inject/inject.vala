@@ -349,7 +349,7 @@ namespace Frida.Inject {
 				script.message.connect (on_message);
 				yield script.load ();
 
-				call_init ();
+				yield call_init ();
 
 				if (eternalize)
 					yield script.eternalize ();
