@@ -10,41 +10,38 @@ namespace Frida {
 
 		private Gee.HashMap<AgentScriptId?, ScriptInstance> instances =
 			new Gee.HashMap<AgentScriptId?, ScriptInstance> (AgentScriptId.hash, AgentScriptId.equal);
-		private Gee.HashSet<ScriptInstance> dying_instances = new Gee.HashSet<ScriptInstance> ();
 		private uint next_script_id = 1;
 
 		private ScriptRuntime preferred_runtime = DEFAULT;
 		private bool debugger_enabled = false;
 
+		private delegate void CompletionNotify ();
+
 		public ScriptEngine (ProcessInvader invader) {
 			Object (invader: invader);
 		}
 
-		public async void prepare_for_termination () {
-			foreach (var instance in instances.values.to_array ())
-				yield instance.prepare_for_termination ();
-		}
+		public async void close () {
+			uint pending = 1;
 
-		public async void shutdown () {
-			do {
-				while (!instances.is_empty) {
-					var iterator = instances.keys.iterator ();
-					iterator.next ();
-					var id = iterator.get ();
-					try {
-						yield destroy_script (id);
-					} catch (Error e) {
-						assert_not_reached ();
-					}
+			CompletionNotify on_complete = () => {
+				pending--;
+				if (pending == 0) {
+					schedule_idle (() => {
+						close.callback ();
+						return false;
+					});
 				}
+			};
 
-				while (!dying_instances.is_empty) {
-					var iterator = dying_instances.iterator ();
-					iterator.next ();
-					var instance = iterator.get ();
-					yield instance.destroy ();
-				}
-			} while (!instances.is_empty || !dying_instances.is_empty);
+			foreach (var instance in instances.values.to_array ()) {
+				pending++;
+				close_instance.begin (instance, on_complete);
+			}
+
+			on_complete ();
+
+			yield;
 
 			if (debugger_enabled) {
 				try {
@@ -54,6 +51,46 @@ namespace Frida {
 				}
 				debugger_enabled = false;
 			}
+		}
+
+		private async void close_instance (ScriptInstance instance, CompletionNotify on_complete) {
+			yield instance.close ();
+
+			on_complete ();
+		}
+
+		public async void flush () {
+			uint pending = 1;
+
+			CompletionNotify on_complete = () => {
+				pending--;
+				if (pending == 0) {
+					schedule_idle (() => {
+						flush.callback ();
+						return false;
+					});
+				}
+			};
+
+			foreach (var instance in instances.values.to_array ()) {
+				pending++;
+				flush_instance.begin (instance, on_complete);
+			}
+
+			on_complete ();
+
+			yield;
+		}
+
+		private async void flush_instance (ScriptInstance instance, CompletionNotify on_complete) {
+			yield instance.flush ();
+
+			on_complete ();
+		}
+
+		public async void prepare_for_termination () {
+			foreach (var instance in instances.values.to_array ())
+				yield instance.prepare_for_termination ();
 		}
 
 		public async ScriptInstance create_script (string? source, Bytes? bytes, ScriptOptions options) throws Error {
@@ -79,9 +116,17 @@ namespace Frida {
 			var instance = new ScriptInstance (script_id, script);
 			instances[script_id] = instance;
 
-			instance.message.connect (on_message);
+			instance.closed.connect (on_instance_closed);
+			instance.message.connect (on_instance_message);
 
 			return instance;
+		}
+
+		private void detach_instance (ScriptInstance instance) {
+			instance.closed.disconnect (on_instance_closed);
+			instance.message.disconnect (on_instance_message);
+
+			instances.unset (instance.script_id);
 		}
 
 		public async Bytes compile_script (string source, ScriptOptions options) throws Error {
@@ -107,18 +152,18 @@ namespace Frida {
 		}
 
 		public async void destroy_script (AgentScriptId script_id) throws Error {
-			ScriptInstance instance;
-			if (!instances.unset (script_id, out instance))
+			var instance = instances[script_id];
+			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			dying_instances.add (instance);
-			yield instance.destroy ();
-			dying_instances.remove (instance);
+
+			yield instance.close ();
 		}
 
 		public async void load_script (AgentScriptId script_id) throws Error {
 			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+
 			yield instance.load ();
 		}
 
@@ -126,8 +171,11 @@ namespace Frida {
 			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
+
 			var script = instance.eternalize ();
-			instances.unset (script_id);
+
+			detach_instance (instance);
+
 			return script;
 		}
 
@@ -135,10 +183,15 @@ namespace Frida {
 			var instance = instances[script_id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid script ID");
-			instance.script.post (message, data);
+
+			instance.post (message, data);
 		}
 
-		private void on_message (ScriptInstance instance, string message, GLib.Bytes? data) {
+		private void on_instance_closed (ScriptInstance instance) {
+			detach_instance (instance);
+		}
+
+		private void on_instance_message (ScriptInstance instance, string message, GLib.Bytes? data) {
 			message_from_script (instance.script_id, message, data);
 		}
 
@@ -173,7 +226,14 @@ namespace Frida {
 			message_from_debugger (message);
 		}
 
+		private static void schedule_idle (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (MainContext.get_thread_default ());
+		}
+
 		public class ScriptInstance : Object, RpcPeer {
+			public signal void closed ();
 			public signal void message (string message, Bytes? data);
 
 			public AgentScriptId script_id {
@@ -199,6 +259,7 @@ namespace Frida {
 
 			private enum State {
 				CREATED,
+				LOADING,
 				LOADED,
 				ETERNALIZED,
 				DISPOSED,
@@ -207,8 +268,9 @@ namespace Frida {
 			}
 
 			private Gee.Promise<bool> load_request;
-			private Gee.Promise<bool> destroy_request;
+			private Gee.Promise<bool> close_request;
 			private Gee.Promise<bool> dispose_request;
+			private Gee.Promise<bool> flush_complete = new Gee.Promise<bool> ();
 
 			private RpcClient rpc_client;
 
@@ -220,49 +282,54 @@ namespace Frida {
 				rpc_client = new RpcClient (this);
 			}
 
-			public async void load () {
-				if (load_request != null) {
+			public async void close () {
+				if (close_request != null) {
 					try {
-						yield load_request.future.wait_async ();
+						yield close_request.future.wait_async ();
 					} catch (Gee.FutureError e) {
 						assert_not_reached ();
 					}
 					return;
 				}
-				load_request = new Gee.Promise<bool> ();
-
-				yield script.load ();
-
-				state = LOADED;
-
-				load_request.set_value (true);
-			}
-
-			public async void destroy () {
-				if (destroy_request != null) {
-					try {
-						yield destroy_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
-						assert_not_reached ();
-					}
-					return;
-				}
-				destroy_request = new Gee.Promise<bool> ();
+				close_request = new Gee.Promise<bool> ();
 
 				var main_context = MainContext.get_thread_default ();
 
 				yield ensure_dispose_called ();
 
 				if (state == DISPOSED) {
-					yield script.unload ();
+					var unload_operation = unload ();
+
+					var js_source = new IdleSource ();
+					js_source.set_callback (() => {
+						var agent_source = new IdleSource ();
+						agent_source.set_callback (() => {
+							close.callback ();
+							return false;
+						});
+						agent_source.attach (main_context);
+						return false;
+					});
+					js_source.attach (Gum.ScriptBackend.get_scheduler ().get_js_context ());
+					yield;
+
+					flush_complete.set_value (true);
+
+					try {
+						yield unload_operation.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
 
 					state = UNLOADED;
+				} else {
+					flush_complete.set_value (true);
 				}
 
 				script.weak_ref (() => {
 					var source = new IdleSource ();
 					source.set_callback (() => {
-						destroy.callback ();
+						close.callback ();
 						return false;
 					});
 					source.attach (main_context);
@@ -272,7 +339,47 @@ namespace Frida {
 
 				state = DESTROYED;
 
-				destroy_request.set_value (true);
+				closed ();
+
+				close_request.set_value (true);
+			}
+
+			public async void flush () {
+				if (close_request == null)
+					close.begin ();
+
+				try {
+					yield flush_complete.future.wait_async ();
+				} catch (Gee.FutureError e) {
+					assert_not_reached ();
+				}
+			}
+
+			public async void load () throws Error {
+				if (state != CREATED)
+					throw new Error.INVALID_OPERATION ("Script cannot be loaded in its current state");
+
+				load_request = new Gee.Promise<bool> ();
+				state = LOADING;
+
+				yield script.load ();
+
+				state = LOADED;
+				load_request.set_value (true);
+			}
+
+			private Gee.Promise<bool> unload () {
+				var request = new Gee.Promise<bool> ();
+
+				perform_unload.begin (request);
+
+				return request;
+			}
+
+			private async void perform_unload (Gee.Promise<bool> request) {
+				yield script.unload ();
+
+				request.set_value (true);
 			}
 
 			public Gum.Script eternalize () throws Error {
@@ -304,8 +411,13 @@ namespace Frida {
 				}
 				dispose_request = new Gee.Promise<bool> ();
 
-				if (load_request != null)
-					yield load ();
+				if (state == LOADING) {
+					try {
+						yield load_request.future.wait_async ();
+					} catch (Gee.FutureError e) {
+						assert_not_reached ();
+					}
+				}
 
 				if (state == LOADED) {
 					try {
@@ -317,6 +429,13 @@ namespace Frida {
 				}
 
 				dispose_request.set_value (true);
+			}
+
+			public void post (string message, Bytes? data) throws Error {
+				if (state != LOADED)
+					throw new Error.INVALID_OPERATION ("Only loaded scripts may be posted to");
+
+				script.post (message, data);
 			}
 
 			private void on_message (Gum.Script script, string raw_message, Bytes? data) {

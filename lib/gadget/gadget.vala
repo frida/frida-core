@@ -708,7 +708,7 @@ namespace Frida.Gadget {
 		protected override async void on_stop () {
 			yield script.stop ();
 
-			yield engine.shutdown ();
+			yield engine.close ();
 		}
 
 		private static string resolve_script_path (Config config, Location location) {
@@ -787,7 +787,7 @@ namespace Frida.Gadget {
 				yield script.stop ();
 			scripts.clear ();
 
-			yield engine.shutdown ();
+			yield engine.close ();
 		}
 
 		private async void scan () throws Error {
@@ -1442,7 +1442,7 @@ namespace Frida.Gadget {
 		}
 
 		private class ClientSession : Object, AgentSession {
-			public signal void closed (ClientSession session);
+			public signal void closed ();
 			public signal void script_eternalized (Gum.Script script);
 
 			public weak Server server {
@@ -1485,11 +1485,11 @@ namespace Frida.Gadget {
 				}
 				close_request = new Gee.Promise<bool> ();
 
-				yield script_engine.shutdown ();
+				yield script_engine.close ();
 				script_engine.message_from_script.disconnect (on_message_from_script);
 				script_engine.message_from_debugger.disconnect (on_message_from_debugger);
 
-				closed (this);
+				closed ();
 
 				close_request.set_value (true);
 			}
