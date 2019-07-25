@@ -71,6 +71,8 @@ namespace Frida.Agent {
 		private SpawnMonitor spawn_monitor;
 		private ThreadSuspendMonitor thread_suspend_monitor;
 
+		private delegate void CompletionNotify ();
+
 		private enum ForkRecoveryState {
 			RECOVERING,
 			RECOVERED
@@ -357,7 +359,7 @@ namespace Frida.Agent {
 				pid = fork_parent_pid;
 				injectee_id = fork_parent_injectee_id;
 			} else if (actor == CHILD) {
-				yield close_all_clients ();
+				yield flush_all_clients ();
 
 				if (fork_child_socket != null) {
 					var stream = SocketConnection.factory_create_connection (fork_child_socket);
@@ -509,14 +511,67 @@ namespace Frida.Agent {
 		}
 
 		private async void close_all_clients () {
-			foreach (var client in clients.to_array ()) {
-				try {
-					yield client.close ();
-				} catch (GLib.Error e) {
-					assert_not_reached ();
+			uint pending = 1;
+
+			CompletionNotify on_complete = () => {
+				pending--;
+				if (pending == 0) {
+					schedule_idle (() => {
+						close_all_clients.callback ();
+						return false;
+					});
 				}
+			};
+
+			foreach (var client in clients.to_array ()) {
+				pending++;
+				close_client.begin (client, on_complete);
 			}
+
+			on_complete ();
+
+			yield;
+
 			assert (clients.is_empty);
+		}
+
+		private async void close_client (AgentClient client, CompletionNotify on_complete) {
+			try {
+				yield client.close ();
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			on_complete ();
+		}
+
+		private async void flush_all_clients () {
+			uint pending = 1;
+
+			CompletionNotify on_complete = () => {
+				pending--;
+				if (pending == 0) {
+					schedule_idle (() => {
+						flush_all_clients.callback ();
+						return false;
+					});
+				}
+			};
+
+			foreach (var client in clients.to_array ()) {
+				pending++;
+				flush_client.begin (client, on_complete);
+			}
+
+			on_complete ();
+
+			yield;
+		}
+
+		private async void flush_client (AgentClient client, CompletionNotify on_complete) {
+			yield client.flush ();
+
+			on_complete ();
 		}
 
 		private void on_client_closed (AgentClient client) {
@@ -786,7 +841,7 @@ namespace Frida.Agent {
 	}
 
 	private class AgentClient : Object, AgentSession {
-		public signal void closed (AgentClient client);
+		public signal void closed ();
 		public signal void script_eternalized (Gum.Script script);
 
 		public weak Runner runner {
@@ -805,6 +860,7 @@ namespace Frida.Agent {
 		}
 
 		private Gee.Promise<bool> close_request;
+		private Gee.Promise<bool> flush_complete = new Gee.Promise<bool> ();
 
 		private bool child_gating_enabled = false;
 		private ScriptEngine script_engine;
@@ -836,13 +892,27 @@ namespace Frida.Agent {
 				assert_not_reached ();
 			}
 
-			yield script_engine.shutdown ();
+			yield script_engine.flush ();
+			flush_complete.set_value (true);
+
+			yield script_engine.close ();
 			script_engine.message_from_script.disconnect (on_message_from_script);
 			script_engine.message_from_debugger.disconnect (on_message_from_debugger);
 
-			closed (this);
+			closed ();
 
 			close_request.set_value (true);
+		}
+
+		public async void flush () {
+			if (close_request == null)
+				close.begin ();
+
+			try {
+				yield flush_complete.future.wait_async ();
+			} catch (Gee.FutureError e) {
+				assert_not_reached ();
+			}
 		}
 
 		public async void prepare_for_termination () {
