@@ -313,7 +313,12 @@ namespace Frida.Gadget {
 					FileUtils.get_contents ("/proc/self/cmdline", out cmdline);
 					if (cmdline != "zygote" && cmdline != "zygote64") {
 						executable_name = cmdline;
-						cached_bundle_id = cmdline[0:cmdline.last_index_of (":")];
+						var index = cmdline.last_index_of (":");
+						if(index==-1){
+						  cached_bundle_id = cmdline;
+						}else{
+						  cached_bundle_id = cmdline[0:index];
+						}
 					}
 				} catch (FileError e) {
 				}
