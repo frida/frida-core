@@ -1437,6 +1437,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
     gum_thumb_writer_put_str_reg_reg_offset (&cw, ARM_REG_##reg, ARM_REG_R6, G_STRUCT_OFFSET (FridaTrampolineData, field))
 #define EMIT_LDR(dst, src) \
     gum_thumb_writer_put_ldr_reg_reg (&cw, ARM_REG_##dst, ARM_REG_##src)
+#define EMIT_LDR_OFFSET(dst, src, src_offset) \
+    gum_thumb_writer_put_ldr_reg_reg_offset (&cw, ARM_REG_##dst, ARM_REG_##src, src_offset)
 #define EMIT_LDR_ADDRESS(reg, value) \
     gum_thumb_writer_put_ldr_reg_address (&cw, ARM_REG_##reg, value)
 #define EMIT_LDR_U32(reg, value) \
@@ -1570,6 +1572,8 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       ARG_IMM (FRIDA_REMOTE_DATA_FIELD (entrypoint_data)),
       ARG_REG (R1),
       ARG_REG (R2));
+
+  EMIT_LDR_OFFSET (R7, SP, 4);
 
   EMIT_LDR (R0, SP);
   EMIT_CMP (R0, FRIDA_UNLOAD_POLICY_IMMEDIATE);
@@ -1791,6 +1795,7 @@ frida_inject_instance_emit_payload_code (const FridaInjectParams * params, GumAd
       ARG_REG (X1),
       ARG_REG (X2));
 
+  EMIT_LDR (W21, SP, 8);
   EMIT_LDR (W22, SP, 0);
 
   EMIT_LDR_U64 (X1, FRIDA_UNLOAD_POLICY_IMMEDIATE);

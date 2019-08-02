@@ -10,6 +10,7 @@ payload_sources = [
   'exit-monitor.vala',
   'cloak.vala',
   'fd-guard.vala',
+  'fdt-padder.vala',
   'libc-shim.c',
 ]
 

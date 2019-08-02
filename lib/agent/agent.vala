@@ -98,10 +98,14 @@ namespace Frida.Agent {
 				var agent_range = detect_own_memory_range (mapped_range);
 				Gum.Cloak.add_range (agent_range);
 
+				var fdt_padder = FileDescriptorTablePadder.obtain ();
+
 #if LINUX
 				var injector_state = (LinuxInjectorState *) opaque_injector_state;
-				if (injector_state != null)
+				if (injector_state != null) {
+					fdt_padder.move_descriptor_if_needed (ref injector_state.fifo_fd);
 					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+				}
 #endif
 
 				var ignore_scope = new ThreadIgnoreScope ();
@@ -109,7 +113,7 @@ namespace Frida.Agent {
 				shared_instance = new Runner (pipe_address, agent_range);
 
 				try {
-					shared_instance.run ();
+					shared_instance.run ((owned) fdt_padder);
 				} catch (Error e) {
 					printerr ("Unable to start agent: %s\n", e.message);
 				}
@@ -139,8 +143,10 @@ namespace Frida.Agent {
 			{
 #if LINUX
 				var injector_state = (LinuxInjectorState *) opaque_injector_state;
-				if (injector_state != null)
+				if (injector_state != null) {
+					FileDescriptorTablePadder.obtain ().move_descriptor_if_needed (ref injector_state.fifo_fd);
 					Gum.Cloak.add_file_descriptor (injector_state.fifo_fd);
+				}
 #endif
 
 				var ignore_scope = new ThreadIgnoreScope ();
@@ -216,14 +222,28 @@ namespace Frida.Agent {
 			interceptor.end_transaction ();
 		}
 
-		private void run () throws Error {
+		private void run (owned FileDescriptorTablePadder padder) throws Error {
 			main_context.push_thread_default ();
 
-			setup_connection_with_pipe_address.begin (pipe_address);
+			start.begin ((owned) padder);
 
 			main_loop.run ();
 
 			main_context.pop_thread_default ();
+		}
+
+		private async void start (owned FileDescriptorTablePadder padder) {
+			yield setup_connection_with_pipe_address (pipe_address);
+
+			Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () => {
+				schedule_idle (() => {
+					start.callback ();
+					return false;
+				});
+			});
+			yield;
+
+			padder = null;
 		}
 
 		private void keep_running_eternalized_scripts () {
@@ -257,6 +277,8 @@ namespace Frida.Agent {
 		}
 
 		private void prepare_to_fork () {
+			var fdt_padder = FileDescriptorTablePadder.obtain ();
+
 			schedule_idle (() => {
 				do_prepare_to_fork.begin ();
 				return false;
@@ -274,7 +296,10 @@ namespace Frida.Agent {
 			Gum.prepare_to_fork ();
 			GIOFork.prepare_to_fork ();
 			GLibFork.prepare_to_fork ();
+
 #endif
+
+			fdt_padder = null;
 		}
 
 		private async void do_prepare_to_fork () {
@@ -307,6 +332,8 @@ namespace Frida.Agent {
 		}
 
 		private void recover_from_fork (ForkActor actor, string? identifier) {
+			var fdt_padder = FileDescriptorTablePadder.obtain ();
+
 			if (actor == PARENT) {
 #if !WINDOWS
 				GLibFork.recover_from_fork_in_parent ();
@@ -351,6 +378,8 @@ namespace Frida.Agent {
 				fork_cond.wait (fork_mutex);
 
 			fork_mutex.unlock ();
+
+			fdt_padder = null;
 		}
 
 		private async void recreate_agent_thread (ForkActor actor) {
