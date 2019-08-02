@@ -45,6 +45,9 @@
     <ClCompile Include="$(IntDir)fd-guard.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)fdt-padder.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
     <ClCompile Include="$(IntDir)fork-monitor.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
@@ -76,6 +79,9 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="fd-guard.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="fdt-padder.vala">
       <Filter>Source Files</Filter>
     </None>
     <None Include="fork-monitor.vala">

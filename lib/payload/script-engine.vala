@@ -1,3 +1,13 @@
+private enum ScriptState {
+	CREATED,
+	LOADING,
+	LOADED,
+	ETERNALIZED,
+	DISPOSED,
+	UNLOADED,
+	DESTROYED
+}
+
 namespace Frida {
 	public class ScriptEngine : Object {
 		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
@@ -255,17 +265,7 @@ namespace Frida {
 			}
 			private Gum.Script _script;
 
-			private State state = CREATED;
-
-			private enum State {
-				CREATED,
-				LOADING,
-				LOADED,
-				ETERNALIZED,
-				DISPOSED,
-				UNLOADED,
-				DESTROYED
-			}
+			private ScriptState state = CREATED;
 
 			private Gee.Promise<bool> load_request;
 			private Gee.Promise<bool> close_request;
