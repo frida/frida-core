@@ -48,10 +48,29 @@ namespace Frida {
 				return;
 
 			int pair[2];
-			if (Posix.pipe (pair) == -1)
+			try {
+				Unix.open_pipe (pair, Posix.FD_CLOEXEC);
+			} catch (GLib.Error e) {
 				return;
+			}
 
-			if (Posix.dup2 (fd, pair[0]) != -1) {
+			int result = -1;
+#if LINUX
+			do {
+				result = Linux.dup3 (fd, pair[0], Posix.FD_CLOEXEC);
+			} while (result == -1 && Posix.errno == Posix.EINTR);
+#else
+			do {
+				result = Posix.dup2 (fd, pair[0]);
+			} while (result == -1 && Posix.errno == Posix.EINTR);
+
+			if (result != -1) {
+				do {
+					result = Posix.fcntl (pair[0], Posix.F_SETFD, Posix.FD_CLOEXEC);
+				} while (result == -1 && Posix.errno == Posix.EINTR);
+			}
+#endif
+			if (result != -1) {
 				fds += fd;
 				Gum.Cloak.add_file_descriptor (fd);
 				fd = pair[0];
@@ -84,8 +103,11 @@ namespace Frida {
 
 		private bool grow_table () {
 			int pair[2];
-			if (Posix.pipe (pair) == -1)
+			try {
+				Unix.open_pipe (pair, Posix.FD_CLOEXEC);
+			} catch (GLib.Error e) {
 				return false;
+			}
 			fds += pair[0];
 			fds += pair[1];
 			return true;

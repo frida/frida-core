@@ -22,6 +22,9 @@ extra_vala_args = []
 if host_os_family != 'windows'
   extra_vala_args += ['--pkg=posix']
 endif
+if host_os_family == 'linux'
+  extra_vala_args += ['--pkg=linux']
+endif
 
 payload = static_library('frida-payload', payload_sources,
   c_args: frida_component_cflags,
