@@ -14,27 +14,101 @@
 #undef snprintf
 #undef vsnprintf
 
-static gboolean shim_deinitialized = FALSE;
+typedef enum _FridaShimState FridaShimState;
+
+enum _FridaShimState
+{
+  FRIDA_SHIM_UNINITIALIZED,
+  FRIDA_SHIM_INITIALIZED,
+  FRIDA_SHIM_DEINITIALIZED,
+};
+
+static FridaShimState shim_state = FRIDA_SHIM_UNINITIALIZED;
 
 void
 frida_init_libc_shim (void)
 {
+  gum_memory_init ();
+
+  shim_state = FRIDA_SHIM_INITIALIZED;
 }
 
 void
 frida_deinit_libc_shim (void)
 {
-  shim_deinitialized = TRUE;
+  shim_state = FRIDA_SHIM_DEINITIALIZED;
 }
 
 #if !defined (HAVE_WINDOWS) && !defined (HAVE_ASAN)
 
+#define FRIDA_FIXED_BLOCK_CAPACITY (256 - sizeof (gboolean))
+
+typedef struct _FridaFixedBlock FridaFixedBlock;
+
+struct _FridaFixedBlock
+{
+  guint8 buf[FRIDA_FIXED_BLOCK_CAPACITY];
+  gboolean in_use;
+};
+
+static FridaFixedBlock frida_fallback_blocks[8] __attribute__((aligned(16)));
+
+static gpointer
+frida_fallback_allocator_request (gsize size)
+{
+  guint i;
+
+  if (size > FRIDA_FIXED_BLOCK_CAPACITY)
+  {
+    if (shim_state == FRIDA_SHIM_DEINITIALIZED)
+    {
+      /* This would result in a memory leak. */
+      abort ();
+    }
+
+    gum_memory_init ();
+
+    return gum_calloc (1, size);
+  }
+
+  for (i = 0; i != G_N_ELEMENTS (frida_fallback_blocks); i++)
+  {
+    FridaFixedBlock * block = &frida_fallback_blocks[i];
+
+    if (!block->in_use)
+    {
+      block->in_use = TRUE;
+      return block->buf;
+    }
+  }
+
+  abort ();
+}
+
+static gboolean
+frida_fallback_allocator_try_release (gpointer mem)
+{
+  FridaFixedBlock * block = mem;
+
+  if (block == NULL)
+    return TRUE;
+
+  if (block < frida_fallback_blocks ||
+      block >= frida_fallback_blocks + G_N_ELEMENTS (frida_fallback_blocks))
+  {
+    return FALSE;
+  }
+
+  memset (block, 0, sizeof (FridaFixedBlock));
+
+  return TRUE;
+}
+
 void *
 malloc (size_t size)
 {
-  g_assert (!shim_deinitialized);
-
-  gum_memory_init ();
+  if (shim_state != FRIDA_SHIM_INITIALIZED)
+    return frida_fallback_allocator_request (size);
 
   return gum_malloc (size);
 }
@@ -42,9 +116,8 @@ malloc (size_t size)
 void *
 calloc (size_t count, size_t size)
 {
-  g_assert (!shim_deinitialized);
-
-  gum_memory_init ();
+  if (shim_state != FRIDA_SHIM_INITIALIZED)
+    return frida_fallback_allocator_request (count * size);
 
   return gum_calloc (count, size);
 }
@@ -52,9 +125,8 @@ calloc (size_t count, size_t size)
 void *
 realloc (void * ptr, size_t size)
 {
-  g_assert (!shim_deinitialized);
-
-  gum_memory_init ();
+  if (shim_state != FRIDA_SHIM_INITIALIZED)
+    abort ();
 
   return gum_realloc (ptr, size);
 }
@@ -64,9 +136,8 @@ posix_memalign (void ** memptr, size_t alignment, size_t size)
 {
   gpointer result;
 
-  g_assert (!shim_deinitialized);
-
-  gum_memory_init ();
+  if (shim_state != FRIDA_SHIM_INITIALIZED)
+    abort ();
 
   result = gum_memalign (alignment, size);
   if (result == NULL)
@@ -79,12 +150,23 @@ posix_memalign (void ** memptr, size_t alignment, size_t size)
 void
 free (void * ptr)
 {
-  if (shim_deinitialized)
+  if (frida_fallback_allocator_try_release (ptr))
     return;
 
-  gum_memory_init ();
-
-  gum_free (ptr);
+  switch (shim_state)
+  {
+    case FRIDA_SHIM_UNINITIALIZED:
+    case FRIDA_SHIM_INITIALIZED:
+      gum_free (ptr);
+      break;
+    case FRIDA_SHIM_DEINITIALIZED:
+      /*
+       * Memory has already been released. We assume that it is not touched after deinit.
+       * This assumption needs to be re-verified whenever the toolchain changes significantly,
+       * i.e. when libc++ internals change.
+       */
+      break;
+  }
 }
 
 void *
@@ -96,6 +178,9 @@ memcpy (void * dst, const void * src, size_t n)
 char *
 strdup (const char * s)
 {
+  if (shim_state != FRIDA_SHIM_INITIALIZED)
+    abort ();
+
   return g_strdup (s);
 }
 
