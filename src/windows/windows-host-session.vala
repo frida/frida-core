@@ -134,7 +134,7 @@ namespace Frida {
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
 			var winjector = injector as Winjector;
-			var path_template = winjector.normal_resource_store.ensure_copy_of (agent_desc);
+			var path_template = winjector.get_normal_resource_store ().ensure_copy_of (agent_desc);
 			var agent_path = path_template.printf (sizeof (void *) == 8 ? 64 : 32);
 
 			system_session_container = yield AgentContainer.create (agent_path);

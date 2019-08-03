@@ -1,49 +1,9 @@
 namespace Frida {
 	public class Winjector : Object, Injector {
-		public ResourceStore normal_resource_store {
-			get {
-				if (_normal_resource_store == null) {
-					try {
-						_normal_resource_store = new ResourceStore ();
-					} catch (Error e) {
-						assert_not_reached ();
-					}
-				}
-				return _normal_resource_store;
-			}
-		}
 		private ResourceStore _normal_resource_store;
-
-		public ResourceStore elevated_resource_store {
-			get {
-				if (_elevated_resource_store == null) {
-					try {
-						_elevated_resource_store = new ResourceStore ();
-					} catch (Error e) {
-						assert_not_reached ();
-					}
-				}
-				return _elevated_resource_store;
-			}
-		}
 		private ResourceStore _elevated_resource_store;
 
-		private HelperFactory normal_helper_factory {
-			get {
-				if (_normal_helper_factory.resource_store == null)
-					_normal_helper_factory.resource_store = normal_resource_store;
-				return _normal_helper_factory;
-			}
-		}
 		private HelperFactory _normal_helper_factory = new HelperFactory (PrivilegeLevel.NORMAL);
-
-		private HelperFactory elevated_helper_factory {
-			get {
-				if (_elevated_helper_factory.resource_store == null)
-					_elevated_helper_factory.resource_store = elevated_resource_store;
-				return _elevated_helper_factory;
-			}
-		}
 		private HelperFactory _elevated_helper_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
 
 		private Gee.HashMap<uint, uint> pid_by_id = new Gee.HashMap<uint, uint> ();
@@ -66,10 +26,35 @@ namespace Frida {
 			_elevated_resource_store = null;
 		}
 
+		public ResourceStore get_normal_resource_store () throws Error {
+			if (_normal_resource_store == null)
+				_normal_resource_store = new ResourceStore ();
+			return _normal_resource_store;
+		}
+
+		public ResourceStore get_elevated_resource_store () throws Error {
+			if (_elevated_resource_store == null)
+				_elevated_resource_store = new ResourceStore ();
+			return _elevated_resource_store;
+		}
+
+		private HelperFactory get_normal_helper_factory () throws Error {
+			if (_normal_helper_factory.resource_store == null)
+				_normal_helper_factory.resource_store = get_normal_resource_store ();
+			return _normal_helper_factory;
+		}
+
+		private HelperFactory get_elevated_helper_factory () throws Error {
+			if (_elevated_helper_factory.resource_store == null)
+				_elevated_helper_factory.resource_store = get_elevated_resource_store ();
+			return _elevated_helper_factory;
+		}
+
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
 			uint id = 0;
 
-			var normal_helper = yield normal_helper_factory.obtain ();
+			var normal_factory = get_normal_helper_factory ();
+			var normal_helper = yield normal_factory.obtain ();
 			bool injected = false;
 			try {
 				id = yield normal_helper.inject_library_file (pid, path, entrypoint, data);
@@ -80,9 +65,10 @@ namespace Frida {
 			}
 
 			if (!injected) {
+				var elevated_factory = get_elevated_helper_factory ();
 				HelperInstance elevated_helper;
 				try {
-					elevated_helper = yield elevated_helper_factory.obtain ();
+					elevated_helper = yield elevated_factory.obtain ();
 				} catch (Error elevate_error) {
 					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
 				}
@@ -98,9 +84,10 @@ namespace Frida {
 			uint id = 0;
 
 			var name = "blob%u.dll".printf (next_blob_id++);
-			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), normal_resource_store.tempdir);
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_normal_resource_store ().tempdir);
 
-			var normal_helper = yield normal_helper_factory.obtain ();
+			var normal_factory = get_normal_helper_factory ();
+			var normal_helper = yield normal_factory.obtain ();
 			bool injected = false;
 			try {
 				id = yield normal_helper.inject_library_file (pid, file.path, entrypoint, data);
@@ -111,11 +98,12 @@ namespace Frida {
 			}
 
 			if (!injected) {
-				file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), elevated_resource_store.tempdir);
+				file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_elevated_resource_store ().tempdir);
 
+				var elevated_factory = get_elevated_helper_factory ();
 				HelperInstance elevated_helper;
 				try {
-					elevated_helper = yield elevated_helper_factory.obtain ();
+					elevated_helper = yield elevated_factory.obtain ();
 				} catch (Error elevate_error) {
 					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
 				}
@@ -131,9 +119,10 @@ namespace Frida {
 		public async uint inject_library_resource (uint pid, AgentDescriptor resource, string entrypoint, string data) throws Error {
 			uint id = 0;
 
-			var path = normal_resource_store.ensure_copy_of (resource);
+			var path = get_normal_resource_store ().ensure_copy_of (resource);
 
-			var normal_helper = yield normal_helper_factory.obtain ();
+			var normal_factory = get_normal_helper_factory ();
+			var normal_helper = yield normal_factory.obtain ();
 			bool injected = false;
 			try {
 				id = yield normal_helper.inject_library_file (pid, path, entrypoint, data);
@@ -144,11 +133,12 @@ namespace Frida {
 			}
 
 			if (!injected) {
-				path = elevated_resource_store.ensure_copy_of (resource);
+				path = get_elevated_resource_store ().ensure_copy_of (resource);
 
+				var elevated_factory = get_elevated_helper_factory ();
 				HelperInstance elevated_helper;
 				try {
-					elevated_helper = yield elevated_helper_factory.obtain ();
+					elevated_helper = yield elevated_factory.obtain ();
 				} catch (Error elevate_error) {
 					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
 				}
