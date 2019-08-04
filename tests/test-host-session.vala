@@ -2748,41 +2748,43 @@ namespace Frida.HostSessionTest {
 		namespace Plist {
 
 			private static void can_construct_from_xml_document () {
-				var xml =
-					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-					"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
-					"<plist version=\"1.0\">\n" +
-					"<dict>\n" +
-					"	<key>DeviceID</key>\n" +
-					"	<integer>2</integer>\n" +
-					"	<key>MessageType</key>\n" +
-					"	<string>Attached</string>\n" +
-					"	<key>Properties</key>\n" +
-					"	<dict>\n" +
-					"		<key>ConnectionType</key>\n" +
-					"		<string>USB</string>\n" +
-					"		<key>DeviceID</key>\n" +
-					"		<integer>2</integer>\n" +
-					"		<key>LocationID</key>\n" +
-					"		<integer>0</integer>\n" +
-					"		<key>ProductID</key>\n" +
-					"		<integer>4759</integer>\n" +
-					"		<key>SerialNumber</key>\n" +
-					"		<string>220f889780dda462091a65df48b9b6aedb05490f</string>\n" +
-					"		<key>ExtraBoolTrue</key>\n" +
-					"		<true/>\n" +
-					"		<key>ExtraBoolFalse</key>\n" +
-					"		<false/>\n" +
-					"		<key>ExtraData</key>\n" +
-					"		<data>AQID</data>\n" +
-					"		<key>ExtraStrings</key>\n" +
-					"		<array>\n" +
-					"			<string>A</string>\n" +
-					"			<string>B</string>\n" +
-					"		</array>\n" +
-					"	</dict>\n" +
-					"</dict>\n" +
-					"</plist>\n";
+				var xml = """
+					<?xml version="1.0" encoding="UTF-8"?>
+					<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+					<plist version="1.0">
+					<dict>
+						<key>DeviceID</key>
+						<integer>2</integer>
+						<key>MessageType</key>
+						<string>Attached</string>
+						<key>Properties</key>
+						<dict>
+							<key>ConnectionType</key>
+							<string>USB</string>
+							<key>DeviceID</key>
+							<integer>2</integer>
+							<key>LocationID</key>
+							<integer>0</integer>
+							<key>ProductID</key>
+							<integer>4759</integer>
+							<key>SerialNumber</key>
+							<string>220f889780dda462091a65df48b9b6aedb05490f</string>
+							<key>ExtraBoolTrue</key>
+							<true/>
+							<key>ExtraBoolFalse</key>
+							<false/>
+							<key>ExtraData</key>
+							<data>AQID</data>
+							<key>ExtraStrings</key>
+							<array>
+								<string>A</string>
+								<string>B</string>
+							</array>
+						</dict>
+					</dict>
+					</plist>
+				""";
+
 				try {
 					var plist = new Frida.Fruity.Plist.from_xml (xml);
 					assert_true (plist.size == 3);
