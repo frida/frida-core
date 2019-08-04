@@ -3,24 +3,6 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
-		public TemporaryDirectory tempdir {
-			get {
-				return resource_store.tempdir;
-			}
-		}
-
-		private ResourceStore resource_store {
-			get {
-				if (_resource_store == null) {
-					try {
-						_resource_store = new ResourceStore ();
-					} catch (Error e) {
-						assert_not_reached ();
-					}
-				}
-				return _resource_store;
-			}
-		}
 		private ResourceStore _resource_store;
 
 		private MainContext main_context;
@@ -43,6 +25,16 @@ namespace Frida {
 			}
 
 			_resource_store = null;
+		}
+
+		public TemporaryDirectory get_tempdir () throws Error {
+			return get_resource_store ().tempdir;
+		}
+
+		private ResourceStore get_resource_store () throws Error {
+			if (_resource_store == null)
+				_resource_store = new ResourceStore ();
+			return _resource_store;
 		}
 
 		public async uint spawn (string path, HostSpawnOptions options) throws Error {
@@ -117,7 +109,7 @@ namespace Frida {
 
 			var helper = yield obtain_for_cpu_type (cpu_type);
 			try {
-				return yield helper.inject_library_file (pid, path, entrypoint, data, resource_store.tempdir.path);
+				return yield helper.inject_library_file (pid, path, entrypoint, data, get_tempdir ().path);
 			} catch (GLib.Error e) {
 				throw Marshal.from_dbus (e);
 			}
@@ -174,9 +166,10 @@ namespace Frida {
 
 		private async LinuxHelper obtain_for_32bit () throws Error {
 			if (factory32 == null) {
-				if (sizeof (void *) != 4 && resource_store.helper32 == null)
+				var store = get_resource_store ();
+				if (sizeof (void *) != 4 && store.helper32 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
-				factory32 = new HelperFactory (resource_store.helper32, resource_store, main_context);
+				factory32 = new HelperFactory (store.helper32, store, main_context);
 				factory32.output.connect (on_factory_output);
 				factory32.uninjected.connect (on_factory_uninjected);
 			}
@@ -186,9 +179,10 @@ namespace Frida {
 
 		private async LinuxHelper obtain_for_64bit () throws Error {
 			if (factory64 == null) {
-				if (sizeof (void *) != 8 && resource_store.helper64 == null)
+				var store = get_resource_store ();
+				if (sizeof (void *) != 8 && store.helper64 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 64-bit processes due to build configuration");
-				factory64 = new HelperFactory (resource_store.helper64, resource_store, main_context);
+				factory64 = new HelperFactory (store.helper64, store, main_context);
 				factory64.output.connect (on_factory_output);
 				factory64.uninjected.connect (on_factory_uninjected);
 			}

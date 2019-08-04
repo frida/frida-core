@@ -44,7 +44,7 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data) throws Error {
 			var name = "blob%u.so".printf (next_blob_id++);
-			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_helper ().tempdir);
+			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), get_helper ().get_tempdir ());
 			var path = file.path;
 			FileUtils.chmod (path, 0755);
 #if ANDROID
@@ -59,7 +59,7 @@ namespace Frida {
 		}
 
 		public async uint inject_library_resource (uint pid, AgentResource resource, string entrypoint, string data) throws Error {
-			return yield inject_library_file (pid, resource.path_template, entrypoint, data);
+			return yield inject_library_file (pid, resource.get_path_template (), entrypoint, data);
 		}
 
 		public async uint demonitor_and_clone_state (uint id) throws Error {
@@ -131,43 +131,7 @@ namespace Frida {
 			construct;
 		}
 
-		public string path_template {
-			get {
-				if (_path_template == null) {
-					try {
-						var name32 = name_template.printf (32);
-						var name64 = name_template.printf (64);
-
-						if (so32 != null) {
-							var so = (mode == AgentMode.INSTANCED) ? _clone_so (so32) : so32;
-							var temp_agent = new TemporaryFile.from_stream (name32, so, tempdir);
-							FileUtils.chmod (temp_agent.path, 0755);
-#if ANDROID
-							SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
-#endif
-							_file32 = temp_agent;
-						}
-
-						if (so64 != null) {
-							var so = (mode == AgentMode.INSTANCED) ? _clone_so (so64) : so64;
-							var temp_agent = new TemporaryFile.from_stream (name64, so, tempdir);
-							FileUtils.chmod (temp_agent.path, 0755);
-#if ANDROID
-							SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
-#endif
-							_file64 = temp_agent;
-						}
-					} catch (Error e) {
-						assert_not_reached ();
-					}
-
-					_path_template = Path.build_filename (tempdir.path, name_template);
-				}
-
-				return _path_template;
-			}
-		}
-		private string _path_template;
+		private string? _path_template;
 		private TemporaryFile _file32;
 		private TemporaryFile _file64;
 
@@ -181,8 +145,35 @@ namespace Frida {
 			);
 		}
 
-		public void ensure_written_to_disk () {
-			(void) path_template;
+		public string get_path_template () throws Error {
+			if (_path_template == null) {
+				var name32 = name_template.printf (32);
+				var name64 = name_template.printf (64);
+
+				if (so32 != null) {
+					var so = (mode == AgentMode.INSTANCED) ? _clone_so (so32) : so32;
+					var temp_agent = new TemporaryFile.from_stream (name32, so, tempdir);
+					FileUtils.chmod (temp_agent.path, 0755);
+#if ANDROID
+					SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
+#endif
+					_file32 = temp_agent;
+				}
+
+				if (so64 != null) {
+					var so = (mode == AgentMode.INSTANCED) ? _clone_so (so64) : so64;
+					var temp_agent = new TemporaryFile.from_stream (name64, so, tempdir);
+					FileUtils.chmod (temp_agent.path, 0755);
+#if ANDROID
+					SELinux.setfilecon (temp_agent.path, "u:object_r:frida_file:s0");
+#endif
+					_file64 = temp_agent;
+				}
+
+				_path_template = Path.build_filename (tempdir.path, name_template);
+			}
+
+			return _path_template;
 		}
 
 		private void reset_stream (InputStream stream) {
