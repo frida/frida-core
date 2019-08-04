@@ -14,18 +14,6 @@ namespace Frida {
 			construct;
 		}
 
-		private ResourceStore resource_store {
-			get {
-				if (_resource_store == null) {
-					try {
-						_resource_store = new ResourceStore (tempdir);
-					} catch (Error e) {
-						assert_not_reached ();
-					}
-				}
-				return _resource_store;
-			}
-		}
 		private ResourceStore _resource_store;
 
 		private MainContext main_context;
@@ -61,6 +49,12 @@ namespace Frida {
 			process = null;
 
 			_resource_store = null;
+		}
+
+		private ResourceStore get_resource_store () throws Error {
+			if (_resource_store == null)
+				_resource_store = new ResourceStore (tempdir);
+			return _resource_store;
 		}
 
 		public async void preload () throws Error {
@@ -264,7 +258,7 @@ namespace Frida {
 			try {
 				var handshake_port = new HandshakePort.local (service_name);
 
-				string[] argv = { resource_store.helper.path, service_name };
+				string[] argv = { get_resource_store ().helper.path, service_name };
 				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
 
 				var peer_pid = (uint) uint64.parse (pending_process.get_identifier ());

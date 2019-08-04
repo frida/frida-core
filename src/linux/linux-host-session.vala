@@ -75,7 +75,7 @@ namespace Frida {
 		private AgentContainer system_session_container;
 
 		private LinuxHelperProcess helper;
-		private AgentResource agent;
+		private AgentResource? agent_resource = null;
 
 #if ANDROID
 		private RoboLauncher robo_launcher;
@@ -89,14 +89,6 @@ namespace Frida {
 
 			injector = new Linjector.with_helper (helper);
 			injector.uninjected.connect (on_uninjected);
-
-			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
-			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
-			agent = new AgentResource ("frida-agent-%u.so",
-				new MemoryInputStream.from_data (blob32.data, null),
-				new MemoryInputStream.from_data (blob64.data, null),
-				AgentMode.INSTANCED,
-				helper.tempdir);
 
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
@@ -157,9 +149,9 @@ namespace Frida {
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
-			PipeTransport.set_temp_directory (helper.tempdir.path);
+			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
 
-			var agent_filename = agent.path_template.printf (sizeof (void *) == 8 ? 64 : 32);
+			var agent_filename = get_agent_resource ().path_template.printf (sizeof (void *) == 8 ? 64 : 32);
 			system_session_container = yield AgentContainer.create (agent_filename);
 
 			connection = system_session_container.connection;
@@ -277,7 +269,9 @@ namespace Frida {
 		}
 
 		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
-			PipeTransport.set_temp_directory (helper.tempdir.path);
+			var agent_resource = get_agent_resource ();
+
+			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
 
 			PipeTransport t;
 			try {
@@ -294,7 +288,7 @@ namespace Frida {
 			injector.disconnect (uninjected_handler);
 
 			var linjector = injector as Linjector;
-			var id = yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address);
+			var id = yield linjector.inject_library_resource (pid, agent_resource, "frida_agent_main", t.remote_address);
 			injectee_by_pid[pid] = id;
 
 			transport = t;
@@ -342,6 +336,20 @@ namespace Frida {
 
 			uninjected (InjectorPayloadId (id));
 		}
+
+		private AgentResource get_agent_resource () throws Error {
+			if (agent_resource == null) {
+				var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
+				var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
+				agent_resource = new AgentResource ("frida-agent-%u.so",
+					new MemoryInputStream.from_data (blob32.data, null),
+					new MemoryInputStream.from_data (blob64.data, null),
+					AgentMode.INSTANCED,
+					helper.get_tempdir ());
+			}
+			return agent_resource;
+		}
+
 	}
 
 #if ANDROID
