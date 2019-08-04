@@ -752,8 +752,8 @@ namespace Frida.Fruity {
 			set_value (key, gval);
 		}
 
-		public unowned string get_string (string key) throws PlistError {
-			return get_value (key, typeof (string)).get_string ();
+		public string get_string (string key) throws PlistError {
+			return get_value (key, typeof (string)).dup_string ();
 		}
 
 		public void set_string (string key, string str) {
@@ -865,8 +865,8 @@ namespace Frida.Fruity {
 			add_value (gval);
 		}
 
-		public unowned string get_string (int index) throws PlistError {
-			return get_value (index, typeof (string)).get_string ();
+		public string get_string (int index) throws PlistError {
+			return get_value (index, typeof (string)).dup_string ();
 		}
 
 		public void add_string (string str) {
