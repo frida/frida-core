@@ -11,13 +11,6 @@ static gpointer run_main_loop (gpointer data);
 static gboolean dummy_callback (gpointer data);
 static gboolean stop_main_loop (gpointer data);
 
-#ifdef HAVE_GLIB_SCHANNEL_STATIC
-extern void g_io_module_schannel_register (void);
-#endif
-#ifdef HAVE_GLIB_OPENSSL_STATIC
-extern void g_io_module_openssl_register (void);
-#endif
-
 void
 frida_init (void)
 {
@@ -40,13 +33,6 @@ frida_init_with_runtime (FridaRuntime rt)
   if (g_once_init_enter (&frida_initialized))
   {
     g_set_prgname ("frida");
-
-#ifdef HAVE_GLIB_SCHANNEL_STATIC
-    g_io_module_schannel_register ();
-#endif
-#ifdef HAVE_GLIB_OPENSSL_STATIC
-    g_io_module_openssl_register ();
-#endif
 
     if (runtime == FRIDA_RUNTIME_OTHER)
     {

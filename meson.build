@@ -38,6 +38,8 @@ endif
 
 cc = meson.get_compiler('c')
 
+vala_flags = []
+
 frida_component_cflags = []
 buildtype = get_option('buildtype')
 if buildtype == 'release' or buildtype == 'minsize'
@@ -158,6 +160,7 @@ if host_os_family == 'windows'
   tls_provider_dep = dependency('glib-schannel-static', required: false)
   if tls_provider_dep.found()
     cdata.set('HAVE_GLIB_SCHANNEL_STATIC', 1)
+    vala_flags += ['--define=HAVE_GLIB_SCHANNEL_STATIC']
   endif
 else
   gio_unix_dep = dependency('gio-unix-2.0')
@@ -165,7 +168,13 @@ else
   tls_provider_dep = dependency('glib-openssl-static', required: false)
   if tls_provider_dep.found()
     cdata.set('HAVE_GLIB_OPENSSL_STATIC', 1)
+    vala_flags += ['--define=HAVE_GLIB_OPENSSL_STATIC']
   endif
+endif
+
+backend_deps_private = []
+if tls_provider_dep.found()
+  backend_deps_private += tls_provider_dep
 endif
 
 backend_libs_private = []
@@ -204,7 +213,7 @@ if host_os_family == 'linux'
   add_project_arguments('-D_GNU_SOURCE=1', language: c_languages)
 endif
 
-vala_flags = ['--define=' + host_os_family.to_upper()]
+vala_flags += ['--define=' + host_os_family.to_upper()]
 if host_os != host_os_family
   vala_flags += ['--define=' + host_os.to_upper()]
 endif

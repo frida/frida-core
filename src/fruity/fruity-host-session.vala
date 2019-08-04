@@ -10,6 +10,15 @@ namespace Frida {
 		private StartedHandler started_handler;
 		private delegate void StartedHandler ();
 
+		static construct {
+#if HAVE_GLIB_SCHANNEL_STATIC
+			GLibSChannelStatic.register ();
+#endif
+#if HAVE_GLIB_OPENSSL_STATIC
+			GLibOpenSSLStatic.register ();
+#endif
+		}
+
 		public async void start () {
 			started_handler = () => start.callback ();
 			var timeout_source = new TimeoutSource (100);
