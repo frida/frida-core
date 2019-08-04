@@ -11,6 +11,8 @@ static gpointer run_main_loop (gpointer data);
 static gboolean dummy_callback (gpointer data);
 static gboolean stop_main_loop (gpointer data);
 
+static void frida_on_openssl_warning (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
+
 void
 frida_init (void)
 {
@@ -33,6 +35,8 @@ frida_init_with_runtime (FridaRuntime rt)
   if (g_once_init_enter (&frida_initialized))
   {
     g_set_prgname ("frida");
+
+    g_log_set_handler ("GLib-OpenSSL", G_LOG_LEVEL_WARNING, frida_on_openssl_warning, NULL);
 
     if (runtime == FRIDA_RUNTIME_OTHER)
     {
@@ -170,4 +174,13 @@ stop_main_loop (gpointer data)
   g_main_loop_quit (main_loop);
 
   return FALSE;
+}
+
+static void
+frida_on_openssl_warning (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data)
+{
+  /*
+   * Suppressed by default as the Fruity backend does not depend on the default database.
+   * Application is free to override this handler.
+   */
 }
