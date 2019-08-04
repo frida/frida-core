@@ -241,6 +241,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/start-stop-fast", () => {
+			var h = new Harness ((h) => start_stop_fast.begin (h as Harness));
+			h.run ();
+		});
+
 	}
 
 	namespace Service {
@@ -843,6 +848,19 @@ namespace Frida.HostSessionTest {
 			return false;
 		});
 		yield;
+	}
+
+	private static async void start_stop_fast (Harness h) {
+		var device_manager = new DeviceManager ();
+		device_manager.enumerate_devices.begin ();
+
+		var timer = new Timer ();
+		yield device_manager.close ();
+		if (GLib.Test.verbose ()) {
+			printerr ("close() took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+		}
+
+		h.done ();
 	}
 
 #if LINUX
