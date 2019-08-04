@@ -151,7 +151,7 @@ namespace Frida {
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
 			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
 
-			var agent_filename = get_agent_resource ().path_template.printf (sizeof (void *) == 8 ? 64 : 32);
+			var agent_filename = get_agent_resource ().get_path_template ().printf (sizeof (void *) == 8 ? 64 : 32);
 			system_session_container = yield AgentContainer.create (agent_filename);
 
 			connection = system_session_container.connection;
