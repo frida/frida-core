@@ -18,18 +18,16 @@ typedef enum _FridaShimState FridaShimState;
 
 enum _FridaShimState
 {
-  FRIDA_SHIM_UNINITIALIZED,
+  FRIDA_SHIM_CREATED,
   FRIDA_SHIM_INITIALIZED,
   FRIDA_SHIM_DEINITIALIZED,
 };
 
-static FridaShimState shim_state = FRIDA_SHIM_UNINITIALIZED;
+static FridaShimState shim_state = FRIDA_SHIM_CREATED;
 
 void
 frida_init_libc_shim (void)
 {
-  gum_memory_init ();
-
   shim_state = FRIDA_SHIM_INITIALIZED;
 }
 
@@ -40,6 +38,15 @@ frida_deinit_libc_shim (void)
 }
 
 #if !defined (HAVE_WINDOWS) && !defined (HAVE_ASAN)
+
+/*
+ * The thread-local storage emulation in libgcc results in three early
+ * allocations, and unlike libc++ it does actually use this memory in
+ * its destructor function after we have been deinitialized.
+ *
+ * We work around this by attempting to satisfy these tiny allocations
+ * with a dumb fallback allocator.
+ */
 
 #define FRIDA_FIXED_BLOCK_CAPACITY (256 - sizeof (gboolean))
 
@@ -53,23 +60,19 @@ struct _FridaFixedBlock
 
 static FridaFixedBlock frida_fallback_blocks[8] __attribute__((aligned(16)));
 
+__attribute__ ((constructor)) static void
+frida_preinit_libc_shim (void)
+{
+  gum_memory_init ();
+}
+
 static gpointer
 frida_fallback_allocator_request (gsize size)
 {
   guint i;
 
   if (size > FRIDA_FIXED_BLOCK_CAPACITY)
-  {
-    if (shim_state == FRIDA_SHIM_DEINITIALIZED)
-    {
-      /* This would result in a memory leak. */
-      abort ();
-    }
-
-    gum_memory_init ();
-
-    return gum_calloc (1, size);
-  }
+    return NULL;
 
   for (i = 0; i != G_N_ELEMENTS (frida_fallback_blocks); i++)
   {
@@ -107,27 +110,34 @@ frida_fallback_allocator_try_release (gpointer mem)
 void *
 malloc (size_t size)
 {
-  if (shim_state != FRIDA_SHIM_INITIALIZED)
-    return frida_fallback_allocator_request (size);
+  void * result = NULL;
 
-  return gum_malloc (size);
+  if (shim_state == FRIDA_SHIM_CREATED)
+    result = frida_fallback_allocator_request (size);
+
+  if (result == NULL)
+    result = gum_malloc (size);
+
+  return result;
 }
 
 void *
 calloc (size_t count, size_t size)
 {
-  if (shim_state != FRIDA_SHIM_INITIALIZED)
-    return frida_fallback_allocator_request (count * size);
+  void * result = NULL;
 
-  return gum_calloc (count, size);
+  if (shim_state == FRIDA_SHIM_CREATED)
+    result = frida_fallback_allocator_request (count * size);
+
+  if (result == NULL)
+    result = gum_calloc (count, size);
+
+  return result;
 }
 
 void *
 realloc (void * ptr, size_t size)
 {
-  if (shim_state != FRIDA_SHIM_INITIALIZED)
-    abort ();
-
   return gum_realloc (ptr, size);
 }
 
@@ -135,9 +145,6 @@ int
 posix_memalign (void ** memptr, size_t alignment, size_t size)
 {
   gpointer result;
-
-  if (shim_state != FRIDA_SHIM_INITIALIZED)
-    abort ();
 
   result = gum_memalign (alignment, size);
   if (result == NULL)
@@ -155,7 +162,7 @@ free (void * ptr)
 
   switch (shim_state)
   {
-    case FRIDA_SHIM_UNINITIALIZED:
+    case FRIDA_SHIM_CREATED:
     case FRIDA_SHIM_INITIALIZED:
       gum_free (ptr);
       break;
@@ -178,9 +185,6 @@ memcpy (void * dst, const void * src, size_t n)
 char *
 strdup (const char * s)
 {
-  if (shim_state != FRIDA_SHIM_INITIALIZED)
-    abort ();
-
   return g_strdup (s);
 }
 
