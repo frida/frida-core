@@ -62,7 +62,7 @@ namespace Frida.Inject {
 		}
 
 		var parameters = new Json.Node (Json.NodeType.OBJECT);
-		parameters.set_object (new Json.Object ()); 
+		parameters.set_object (new Json.Object ());
 		if (parameters_str != null) {
 			if (parameters_str == "") {
 				printerr ("Parameters argument must be specified as JSON if present\n");
