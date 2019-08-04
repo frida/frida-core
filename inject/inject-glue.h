@@ -6,7 +6,6 @@
 G_BEGIN_DECLS
 
 G_GNUC_INTERNAL void frida_inject_environment_init (void);
-G_GNUC_INTERNAL void frida_inject_environment_deinit (void);
 
 G_END_DECLS
 

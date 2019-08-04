@@ -100,8 +100,11 @@ frida_deinit (void)
     main_context = NULL;
   }
 
+  gum_shutdown ();
   gio_shutdown ();
   glib_shutdown ();
+
+  gum_deinit ();
   gio_deinit ();
   glib_deinit ();
 }

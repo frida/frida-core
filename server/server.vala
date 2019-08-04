@@ -170,8 +170,6 @@ namespace Frida.Server {
 			return 1;
 		}
 
-		application = null;
-
 		return 0;
 	}
 

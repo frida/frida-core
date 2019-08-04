@@ -1,5 +1,6 @@
 #include "server-glue.h"
 
+#include "frida-core.h"
 #ifdef HAVE_IOS
 # include "server-ios.h"
 #endif
@@ -7,8 +8,6 @@
 # include "frida-selinux.h"
 #endif
 
-#include <gio/gio.h>
-#include <gum/gum.h>
 #include <stdlib.h>
 
 #if defined (HAVE_DARWIN)
@@ -44,11 +43,10 @@ static gboolean frida_verbose_logging_enabled = FALSE;
 void
 frida_server_environment_init (void)
 {
+  frida_init_with_runtime (FRIDA_RUNTIME_GLIB);
+
   g_assertion_set_handler (frida_server_on_assert_failure, NULL);
   g_log_set_default_handler (frida_server_on_log_message, NULL);
-  g_log_set_always_fatal (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING);
-  gio_init ();
-  gum_init ();
 }
 
 void

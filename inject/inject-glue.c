@@ -1,28 +1,16 @@
 #include "inject-glue.h"
 
+#include "frida-core.h"
 #ifdef HAVE_ANDROID
 # include "frida-selinux.h"
 #endif
 
-#include <gio/gio.h>
-#include <gum/gum.h>
-
 void
 frida_inject_environment_init (void)
 {
-  gio_init ();
-
-  gum_init ();
+  frida_init_with_runtime (FRIDA_RUNTIME_GLIB);
 
 #ifdef HAVE_ANDROID
   frida_selinux_patch_policy ();
 #endif
-}
-
-void
-frida_inject_environment_deinit (void)
-{
-  gum_deinit ();
-
-  gio_deinit ();
 }

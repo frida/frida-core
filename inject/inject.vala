@@ -90,13 +90,7 @@ namespace Frida.Inject {
 		});
 #endif
 
-		int exit_code = application.run ();
-
-		application = null;
-
-		Environment.deinit ();
-
-		return exit_code;
+		return application.run ();
 	}
 
 	private static string read_stdin () {
@@ -113,7 +107,6 @@ namespace Frida.Inject {
 
 	namespace Environment {
 		public extern void init ();
-		public extern void deinit ();
 	}
 
 	public class Application : Object {
