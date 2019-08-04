@@ -165,7 +165,6 @@ namespace Frida {
 				}
 			} catch (GLib.Error e) {
 				request.set_exception (e);
-				return request;
 			}
 
 			return request;
