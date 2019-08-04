@@ -46,8 +46,11 @@ namespace Frida {
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
 				provider.opened.connect (container.on_session_opened);
 				provider.closed.connect (container.on_session_closed);
-			} catch (GLib.Error dbus_error) {
-				assert_not_reached ();
+			} catch (Gee.FutureError e) {
+				var stream_error = (Error) stream_request.future.exception;
+				throw new Error.PERMISSION_DENIED ("%s", stream_error.message);
+			} catch (GLib.Error e) {
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 
 			container.connection = connection;
