@@ -48,7 +48,7 @@ namespace Frida {
 			try {
 				stream = SocketConnection.factory_create_connection (new Socket.from_fd (fd));
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT (e.message);
+				throw new Error.TRANSPORT ("%s", e.message);
 			}
 		}
 

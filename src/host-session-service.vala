@@ -37,7 +37,7 @@ namespace Frida {
 #endif
 		}
 
-		public async void start () {
+		public async void start (Cancellable? cancellable = null) throws IOError {
 			var remaining = backends.size;
 
 			NotifyCompleteFunc on_complete = () => {
@@ -47,12 +47,12 @@ namespace Frida {
 			};
 
 			foreach (var backend in backends)
-				perform_start.begin (backend, on_complete);
+				perform_start.begin (backend, cancellable, on_complete);
 
 			yield;
 		}
 
-		public async void stop () {
+		public async void stop (Cancellable? cancellable = null) throws IOError {
 			var remaining = backends.size;
 
 			NotifyCompleteFunc on_complete = () => {
@@ -62,18 +62,26 @@ namespace Frida {
 			};
 
 			foreach (var backend in backends)
-				perform_stop.begin (backend, on_complete);
+				perform_stop.begin (backend, cancellable, on_complete);
 
 			yield;
 		}
 
-		private async void perform_start (HostSessionBackend backend, NotifyCompleteFunc on_complete) {
-			yield backend.start ();
+		private async void perform_start (HostSessionBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				yield backend.start (cancellable);
+			} catch (IOError e) {
+			}
+
 			on_complete ();
 		}
 
-		private async void perform_stop (HostSessionBackend backend, NotifyCompleteFunc on_complete) {
-			yield backend.stop ();
+		private async void perform_stop (HostSessionBackend backend, Cancellable? cancellable, NotifyCompleteFunc on_complete) {
+			try {
+				yield backend.stop (cancellable);
+			} catch (IOError e) {
+			}
+
 			on_complete ();
 		}
 
@@ -109,11 +117,11 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create (string? location = null) throws Error;
-		public abstract async void destroy (HostSession session) throws Error;
+		public abstract async HostSession create (string? location = null, Cancellable? cancellable = null) throws Error, IOError;
+		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void host_session_closed (HostSession session);
 
-		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error;
+		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
 	}
 
@@ -127,15 +135,15 @@ namespace Frida {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);
 
-		public abstract async void start ();
-		public abstract async void stop ();
+		public abstract async void start (Cancellable? cancellable = null) throws IOError;
+		public abstract async void stop (Cancellable? cancellable = null) throws IOError;
 	}
 
 	public abstract class BaseDBusHostSession : Object, HostSession, AgentController {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
 		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash);
 
-		private Gee.HashMap<uint, Gee.Promise<AgentEntry>> agent_entries = new Gee.HashMap<uint, Gee.Promise<AgentEntry>> ();
+		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
 
 		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
@@ -148,23 +156,25 @@ namespace Frida {
 #endif
 		private Gee.HashMap<uint, HostChildInfo?> pending_children = new Gee.HashMap<uint, HostChildInfo?> ();
 		private Gee.HashMap<uint, SpawnAckRequest> pending_acks = new Gee.HashMap<uint, SpawnAckRequest> ();
-		private Gee.Promise<bool> pending_children_gc_request;
+		private Promise<bool> pending_children_gc_request;
 		private Source pending_children_gc_timer;
 
 		protected Injector injector;
 		protected Gee.HashMap<uint, uint> injectee_by_pid = new Gee.HashMap<uint, uint> ();
 
-		public virtual async void preload () throws Error {
+		protected Cancellable io_cancellable = new Cancellable ();
+
+		public virtual async void preload (Cancellable? cancellable) throws Error, IOError {
 		}
 
-		public virtual async void close () {
+		public virtual async void close (Cancellable? cancellable) throws IOError {
 			if (pending_children_gc_timer != null) {
 				pending_children_gc_timer.destroy ();
 				pending_children_gc_timer = null;
 			}
 
 			if (pending_children_gc_request != null)
-				yield garbage_collect_pending_children ();
+				yield garbage_collect_pending_children (cancellable);
 
 			foreach (var ack_request in pending_acks)
 				ack_request.complete ();
@@ -173,37 +183,40 @@ namespace Frida {
 			while (!agent_entries.is_empty) {
 				var iterator = agent_entries.values.iterator ();
 				iterator.next ();
-				var entry_request = iterator.get ();
+				var entry_future = iterator.get ();
 				try {
-					var entry = yield entry_request.future.wait_async ();
+					var entry = yield entry_future.wait_async (cancellable);
 
 					var resume_request = entry.resume_request;
 					if (resume_request != null) {
-						resume_request.set_value (true);
+						resume_request.resolve (true);
 						entry.resume_request = null;
 					}
 
-					yield destroy (entry, SessionDetachReason.APPLICATION_REQUESTED);
-				} catch (Gee.FutureError e) {
+					yield destroy (entry, APPLICATION_REQUESTED, cancellable);
+				} catch (Error e) {
 				}
 			}
+
+			io_cancellable.cancel ();
 		}
 
-		protected abstract async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error;
+		protected abstract async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
+			out DBusConnection connection) throws Error, IOError;
 
-		public abstract async HostApplicationInfo get_frontmost_application () throws Error;
+		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async HostApplicationInfo[] enumerate_applications () throws Error;
+		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async HostProcessInfo[] enumerate_processes () throws Error;
+		public abstract async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async void enable_spawn_gating () throws Error;
+		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async void disable_spawn_gating () throws Error;
+		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError;
 
-		public async HostChildInfo[] enumerate_pending_children () throws Error {
+		public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws Error, IOError {
 			var result = new HostChildInfo[pending_children.size];
 			var index = 0;
 			foreach (var child in pending_children.values)
@@ -211,7 +224,7 @@ namespace Frida {
 			return result;
 		}
 
-		public abstract async uint spawn (string program, HostSpawnOptions options) throws Error;
+		public abstract async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError;
 
 		protected virtual bool try_handle_child (HostChildInfo info) {
 			return false;
@@ -223,29 +236,29 @@ namespace Frida {
 		protected virtual void notify_child_gating_changed (uint pid, uint subscriber_count) {
 		}
 
-		protected virtual async void prepare_exec_transition (uint pid) throws Error {
+		protected virtual async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 		}
 
-		protected virtual async void await_exec_transition (uint pid) throws Error {
+		protected virtual async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
 		}
 
-		protected virtual async void cancel_exec_transition (uint pid) throws Error {
+		protected virtual async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not supported on this OS");
 		}
 
 		protected abstract bool process_is_alive (uint pid);
 
-		public abstract async void input (uint pid, uint8[] data) throws Error;
+		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError;
 
-		public async void resume (uint pid) throws Error {
-			if (yield try_resume_child (pid))
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			if (yield try_resume_child (pid, cancellable))
 				return;
 
-			yield perform_resume (pid);
+			yield perform_resume (pid, cancellable);
 		}
 
-		private async bool try_resume_child (uint pid) throws Error {
+		private async bool try_resume_child (uint pid, Cancellable? cancellable) throws Error, IOError {
 			HostChildInfo? info;
 			if (pending_children.unset (pid, out info))
 				child_removed (info);
@@ -254,7 +267,7 @@ namespace Frida {
 			if (pending_acks.unset (pid, out ack_request)) {
 				try {
 					if (ack_request.start_state == RUNNING)
-						yield perform_resume (pid);
+						yield perform_resume (pid, cancellable);
 				} finally {
 					ack_request.complete ();
 				}
@@ -264,12 +277,8 @@ namespace Frida {
 				return true;
 			}
 
-			var entry_request = agent_entries[pid];
-			if (entry_request == null)
-				return false;
-
-			var entry_future = entry_request.future;
-			if (!entry_future.ready)
+			var entry_future = agent_entries[pid];
+			if (entry_future == null || !entry_future.ready)
 				return false;
 
 			var entry = entry_future.value;
@@ -278,11 +287,11 @@ namespace Frida {
 			if (resume_request == null)
 				return false;
 
-			resume_request.set_value (true);
+			resume_request.resolve (true);
 			entry.resume_request = null;
 
 			if (entry.sessions.is_empty) {
-				unload_and_destroy.begin (entry, SessionDetachReason.APPLICATION_REQUESTED);
+				unload_and_destroy.begin (entry, APPLICATION_REQUESTED);
 			}
 
 			notify_child_resumed (pid);
@@ -290,16 +299,16 @@ namespace Frida {
 			return true;
 		}
 
-		protected abstract async void perform_resume (uint pid) throws Error;
+		protected abstract async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError;
 
 		protected bool still_attached_to (uint pid) {
 			return agent_entries.has_key (pid);
 		}
 
-		public abstract async void kill (uint pid) throws Error;
+		public abstract async void kill (uint pid, Cancellable? cancellable) throws Error, IOError;
 
-		public async Frida.AgentSessionId attach_to (uint pid) throws Error {
-			var entry = yield establish (pid);
+		public async Frida.AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var entry = yield establish (pid, cancellable);
 
 			var id = AgentSessionId (next_agent_session_id++);
 			AgentSession session;
@@ -307,13 +316,14 @@ namespace Frida {
 			entry.sessions.add (id);
 
 			try {
-				yield entry.provider.open (id);
+				yield entry.provider.open (id, cancellable);
 
-				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id), DBusProxyFlags.NONE, null);
+				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
+					DBusProxyFlags.NONE, cancellable);
 			} catch (GLib.Error e) {
 				entry.sessions.remove (id);
 
-				throw new Error.PROTOCOL (e.message);
+				throw new Error.PROTOCOL ("%s", e.message);
 			}
 
 			agent_sessions[id] = session;
@@ -323,18 +333,19 @@ namespace Frida {
 			return id;
 		}
 
-		private async AgentEntry establish (uint pid) throws Error {
-			var promise = agent_entries[pid];
-			if (promise != null) {
-				var future = promise.future;
+		private async AgentEntry establish (uint pid, Cancellable? cancellable) throws Error, IOError {
+			while (agent_entries.has_key (pid)) {
+				var future = agent_entries[pid];
 				try {
-					return yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
+					return yield future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
 				}
 			}
-			promise = new Gee.Promise<AgentEntry> ();
-			agent_entries[pid] = promise;
+			var promise = new Promise<AgentEntry> ();
+			agent_entries[pid] = promise.future;
 
 			AgentEntry entry;
 			try {
@@ -342,47 +353,31 @@ namespace Frida {
 				AgentSessionProvider provider;
 
 				if (pid == 0) {
-					provider = yield create_system_session_provider (out connection);
+					provider = yield create_system_session_provider (cancellable, out connection);
 					entry = new AgentEntry (pid, null, connection, provider);
 				} else {
 					Object transport;
-					var stream_request = yield perform_attach_to (pid, out transport);
+					var stream_request = yield perform_attach_to (pid, cancellable, out transport);
 
-					IOStream stream;
-					try {
-						stream = yield stream_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
-						throw new Error.TRANSPORT (e.message);
-					}
-
-					var cancellable = new Cancellable ();
-					var timeout_source = new TimeoutSource.seconds (10);
-					timeout_source.set_callback (() => {
-						cancellable.cancel ();
-						return false;
-					});
-					timeout_source.attach (MainContext.get_thread_default ());
+					IOStream stream = yield stream_request.wait_async (cancellable);
 
 					uint controller_registration_id;
 					try {
-						connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING, null, cancellable);
+						connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+							AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+							null, cancellable);
 
 						AgentController controller = this;
-						controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
+						controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
+							controller);
 
 						connection.start_message_processing ();
 
-						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
-					} catch (GLib.Error establish_error) {
-						if (establish_error is IOError.CANCELLED)
-							throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
-						else
-							throw new Error.PROCESS_NOT_RESPONDING (establish_error.message);
+						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
+							DBusProxyFlags.NONE, cancellable);
+					} catch (GLib.Error e) {
+						throw new Error.PROCESS_NOT_RESPONDING ("%s", e.message);
 					}
-					if (cancellable.is_cancelled ())
-						throw new Error.PROCESS_NOT_RESPONDING ("Timed out while waiting for session to establish");
-
-					timeout_source.destroy ();
 
 					entry = new AgentEntry (pid, transport, connection, provider, controller_registration_id);
 				}
@@ -391,20 +386,21 @@ namespace Frida {
 				provider.closed.connect (on_agent_session_provider_closed);
 				entry.child_gating_changed.connect (on_child_gating_changed);
 
-				promise.set_value (entry);
-			} catch (Error e) {
+				promise.resolve (entry);
+			} catch (GLib.Error e) {
 				agent_entries.unset (pid);
 
-				promise.set_exception (e);
-				throw e;
+				promise.reject (e);
+				throw_api_error (e);
 			}
 
 			return entry;
 		}
 
-		protected abstract async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error;
+		protected abstract async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
+			throws Error, IOError;
 
-		public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+		public AgentSession obtain_agent_session (AgentSessionId id) throws Error {
 			var session = agent_sessions[id];
 			if (session == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
@@ -417,9 +413,7 @@ namespace Frida {
 				return;
 
 			AgentEntry entry_to_remove = null;
-			foreach (var promise in agent_entries.values) {
-				var future = promise.future;
-
+			foreach (var future in agent_entries.values) {
 				if (!future.ready)
 					continue;
 
@@ -431,7 +425,7 @@ namespace Frida {
 			}
 			assert (entry_to_remove != null);
 
-			destroy.begin (entry_to_remove, entry_to_remove.disconnect_reason);
+			destroy.begin (entry_to_remove, entry_to_remove.disconnect_reason, io_cancellable);
 		}
 
 		private void on_agent_session_provider_closed (AgentSessionId id) {
@@ -443,9 +437,7 @@ namespace Frida {
 			agent_session_closed (id, session, reason, null);
 			agent_session_destroyed (id, reason);
 
-			foreach (var promise in agent_entries.values) {
-				var future = promise.future;
-
+			foreach (var future in agent_entries.values) {
 				if (!future.ready)
 					continue;
 
@@ -470,30 +462,32 @@ namespace Frida {
 			if (subscriber_count == 0) {
 				foreach (var child in pending_children.values.to_array ()) {
 					if (child.parent_pid == pid)
-						resume.begin (child.pid);
+						resume.begin (child.pid, null);
 				}
 			}
 
 			notify_child_gating_changed (pid, subscriber_count);
 		}
 
-		private async void unload_and_destroy (AgentEntry entry, SessionDetachReason reason) {
+		private async void unload_and_destroy (AgentEntry entry, SessionDetachReason reason) throws IOError {
 			if (!prepare_teardown (entry))
 				return;
 
 			try {
-				yield entry.provider.unload ();
+				yield entry.provider.unload (io_cancellable);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					return;
 			}
 
-			yield teardown (entry, reason);
+			yield teardown (entry, reason, io_cancellable);
 		}
 
-		private async void destroy (AgentEntry entry, SessionDetachReason reason) {
+		private async void destroy (AgentEntry entry, SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 			if (!prepare_teardown (entry))
 				return;
 
-			yield teardown (entry, reason);
+			yield teardown (entry, reason, cancellable);
 		}
 
 		private bool prepare_teardown (AgentEntry entry) {
@@ -507,10 +501,10 @@ namespace Frida {
 			return true;
 		}
 
-		private async void teardown (AgentEntry entry, SessionDetachReason reason) {
+		private async void teardown (AgentEntry entry, SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 			CrashInfo? crash = null;
 			if (reason == PROCESS_TERMINATED)
-				crash = yield try_collect_crash (entry.pid);
+				crash = yield try_collect_crash (entry.pid, cancellable);
 
 			foreach (var id in entry.sessions) {
 				AgentSession session;
@@ -522,32 +516,35 @@ namespace Frida {
 				}
 			}
 
-			yield entry.close ();
+			yield entry.close (cancellable);
 		}
 
-		protected virtual async CrashInfo? try_collect_crash (uint pid) {
+		protected virtual async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
 			return null;
 		}
 
-		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			var raw_id = yield injector.inject_library_file (pid, path, entrypoint, data);
+		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
+			var raw_id = yield injector.inject_library_file (pid, path, entrypoint, data, cancellable);
 			return InjectorPayloadId (raw_id);
 		}
 
-		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
+		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
 			var blob_bytes = new Bytes (blob);
-			var raw_id = yield injector.inject_library_blob (pid, blob_bytes, entrypoint, data);
+			var raw_id = yield injector.inject_library_blob (pid, blob_bytes, entrypoint, data, cancellable);
 			return InjectorPayloadId (raw_id);
 		}
 
 #if !WINDOWS
-		public async HostChildId prepare_to_fork (uint parent_pid, out uint parent_injectee_id, out uint child_injectee_id, out GLib.Socket child_socket) throws Error {
+		public async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
+				out uint child_injectee_id, out GLib.Socket child_socket) throws Error, IOError {
 			var id = HostChildId (next_host_child_id++);
 
 			if (!injectee_by_pid.has_key (parent_pid))
 				throw new Error.INVALID_ARGUMENT ("No injectee found for PID %u", parent_pid);
 			parent_injectee_id = injectee_by_pid[parent_pid];
-			child_injectee_id = yield injector.demonitor_and_clone_state (parent_injectee_id);
+			child_injectee_id = yield injector.demonitor_and_clone_state (parent_injectee_id, cancellable);
 
 			var fds = new int[2];
 			Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds);
@@ -560,19 +557,21 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
-			start_child_connection.begin (id, local_socket);
+			start_child_connection.begin (id, local_socket, cancellable);
 
 			child_socket = remote_socket;
 
 			return id;
 		}
 
-		private async void start_child_connection (HostChildId id, Socket local_socket) {
+		private async void start_child_connection (HostChildId id, Socket local_socket, Cancellable? cancellable) throws IOError {
 			DBusConnection connection;
 			uint controller_registration_id;
 			try {
 				var stream = SocketConnection.factory_create_connection (local_socket);
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING, null, null);
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+					null, cancellable);
 
 				AgentController controller = this;
 				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
@@ -604,16 +603,17 @@ namespace Frida {
 			connection.on_closed.disconnect (on_child_connection_closed);
 			child_entries.unset (child_id);
 
-			entry_to_remove.close.begin ();
+			entry_to_remove.close.begin (io_cancellable);
 		}
 
-		public async void recreate_agent_thread (uint pid, uint injectee_id) throws Error {
+		public async void recreate_agent_thread (uint pid, uint injectee_id, Cancellable? cancellable) throws Error, IOError {
 			injectee_by_pid[pid] = injectee_id;
 
-			yield injector.recreate_thread (pid, injectee_id);
+			yield injector.recreate_thread (pid, injectee_id, cancellable);
 		}
 
-		public async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws Error {
+		public async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info, Cancellable? cancellable)
+				throws Error, IOError {
 			var child_entry = child_entries[id];
 			if (child_entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
@@ -621,15 +621,16 @@ namespace Frida {
 			var pid = info.pid;
 			var connection = child_entry.connection;
 
-			var promise = new Gee.Promise<AgentEntry> ();
-			agent_entries[pid] = promise;
+			var promise = new Promise<AgentEntry> ();
+			agent_entries[pid] = promise.future;
 
 			AgentSessionProvider provider;
 			try {
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, null);
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+					cancellable);
 			} catch (GLib.Error e) {
 				agent_entries.unset (pid);
-				promise.set_exception (new Error.TRANSPORT (e.message));
+				promise.reject (new Error.TRANSPORT (e.message));
 
 				child_entry.close_soon ();
 
@@ -639,11 +640,11 @@ namespace Frida {
 			connection.on_closed.disconnect (on_child_connection_closed);
 			child_entries.unset (id);
 
-			var resume_request = new Gee.Promise<bool> ();
+			var resume_request = new Promise<bool> ();
 
 			var agent_entry = new AgentEntry (pid, null, connection, provider, child_entry.controller_registration_id);
 			agent_entry.resume_request = resume_request;
-			promise.set_value (agent_entry);
+			promise.resolve (agent_entry);
 
 			connection.on_closed.connect (on_agent_connection_closed);
 			provider.closed.connect (on_agent_session_provider_closed);
@@ -652,61 +653,59 @@ namespace Frida {
 			if (!try_handle_child (info))
 				add_pending_child (info);
 
-			try {
-				yield resume_request.future.wait_async ();
-			} catch (Gee.FutureError e) {
-				assert_not_reached ();
-			}
+			yield resume_request.future.wait_async (cancellable);
 		}
 
-		public async void prepare_to_exec (HostChildInfo info) throws Error {
+		public async void prepare_to_exec (HostChildInfo info, Cancellable? cancellable) throws Error, IOError {
 			var pid = info.pid;
 
 			AgentEntry? entry_to_wait_for = null;
-			var entry_promise = agent_entries[pid];
-			if (entry_promise != null) {
+			var entry_future = agent_entries[pid];
+			if (entry_future != null) {
 				try {
-					var entry = yield entry_promise.future.wait_async ();
+					var entry = yield entry_future.wait_async (cancellable);
 					entry.disconnect_reason = PROCESS_REPLACED;
 					entry_to_wait_for = entry;
-				} catch (Gee.FutureError e) {
+				} catch (GLib.Error e) {
 				}
 			}
 
-			yield prepare_exec_transition (pid);
+			yield prepare_exec_transition (pid, cancellable);
 
-			wait_for_exec_and_deliver.begin (info, entry_to_wait_for);
+			wait_for_exec_and_deliver.begin (info, entry_to_wait_for, cancellable);
 		}
 
-		private async void wait_for_exec_and_deliver (HostChildInfo info, AgentEntry? entry_to_wait_for) {
+		private async void wait_for_exec_and_deliver (HostChildInfo info, AgentEntry? entry_to_wait_for, Cancellable? cancellable)
+				throws IOError {
 			var pid = info.pid;
 
 			try {
-				yield await_exec_transition (pid);
-			} catch (Error e) {
+				yield await_exec_transition (pid, cancellable);
+			} catch (GLib.Error e) {
 				return;
 			}
 
 			if (entry_to_wait_for != null)
-				yield entry_to_wait_for.wait_until_closed ();
+				yield entry_to_wait_for.wait_until_closed (cancellable);
 
 			add_pending_child (info);
 		}
 
-		public async void cancel_exec (uint pid) throws Error {
-			yield cancel_exec_transition (pid);
+		public async void cancel_exec (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield cancel_exec_transition (pid, cancellable);
 
-			var entry_promise = agent_entries[pid];
-			if (entry_promise != null) {
+			var entry_future = agent_entries[pid];
+			if (entry_future != null) {
 				try {
-					var entry = yield entry_promise.future.wait_async ();
+					var entry = yield entry_future.wait_async (cancellable);
 					entry.disconnect_reason = PROCESS_TERMINATED;
-				} catch (Gee.FutureError e) {
+				} catch (GLib.Error e) {
 				}
 			}
 		}
 
-		public async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state) throws Error {
+		public async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state, Cancellable? cancellable)
+				throws Error, IOError {
 			var pid = info.pid;
 
 			var request = new SpawnAckRequest (start_state);
@@ -715,7 +714,7 @@ namespace Frida {
 
 			add_pending_child (info);
 
-			yield request.await ();
+			yield request.await (cancellable);
 		}
 
 		private void add_pending_child (HostChildInfo info) {
@@ -732,34 +731,35 @@ namespace Frida {
 			var timer = new TimeoutSource.seconds (1);
 			timer.set_callback (() => {
 				pending_children_gc_timer = null;
-				garbage_collect_pending_children.begin ();
+				garbage_collect_pending_children.begin (io_cancellable);
 				return false;
 			});
 			timer.attach (MainContext.get_thread_default ());
 			pending_children_gc_timer = timer;
 		}
 
-		private async void garbage_collect_pending_children () {
-			if (pending_children_gc_request != null) {
+		private async void garbage_collect_pending_children (Cancellable? cancellable) throws IOError {
+			while (pending_children_gc_request != null) {
 				try {
-					yield pending_children_gc_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					assert_not_reached ();
+					yield pending_children_gc_request.future.wait_async (cancellable);
+					return;
+				} catch (GLib.Error e) {
+					assert (e is IOError.CANCELLED);
+					cancellable.set_error_if_cancelled ();
 				}
-				return;
 			}
-			pending_children_gc_request = new Gee.Promise<bool> ();
+			pending_children_gc_request = new Promise<bool> ();
 
 			foreach (var pid in pending_children.keys.to_array ()) {
 				if (!process_is_alive (pid)) {
 					try {
-						yield resume (pid);
+						yield resume (pid, cancellable);
 					} catch (GLib.Error e) {
 					}
 				}
 			}
 
-			pending_children_gc_request.set_value (true);
+			pending_children_gc_request.resolve (true);
 			pending_children_gc_request = null;
 
 			if (!pending_children.is_empty)
@@ -805,13 +805,13 @@ namespace Frida {
 				default = PROCESS_TERMINATED;
 			}
 
-			public Gee.Promise<bool>? resume_request {
+			public Promise<bool>? resume_request {
 				get;
 				set;
 			}
 
 			private bool closing = false;
-			private Gee.Promise<bool> close_request = new Gee.Promise<bool> ();
+			private Promise<bool> close_request = new Promise<bool> ();
 
 			public AgentEntry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider, uint controller_registration_id = 0) {
 				Object (
@@ -827,9 +827,9 @@ namespace Frida {
 				provider.child_gating_changed.connect (on_child_gating_changed);
 			}
 
-			public async void close () {
+			public async void close (Cancellable? cancellable) throws IOError {
 				if (closing) {
-					yield wait_until_closed ();
+					yield wait_until_closed (cancellable);
 					return;
 				}
 				closing = true;
@@ -838,23 +838,22 @@ namespace Frida {
 
 				if (connection != null) {
 					try {
-						yield connection.close ();
+						yield connection.close (cancellable);
 					} catch (GLib.Error e) {
 					}
 				}
 
 				var id = controller_registration_id;
-				if (id != 0) {
+				if (id != 0)
 					connection.unregister_object (id);
-				}
 
-				close_request.set_value (true);
+				close_request.resolve (true);
 			}
 
-			public async void wait_until_closed () {
+			public async void wait_until_closed (Cancellable? cancellable) throws IOError {
 				try {
-					yield close_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
+					yield close_request.future.wait_async (cancellable);
+				} catch (Error e) {
 					assert_not_reached ();
 				}
 			}
@@ -875,7 +874,7 @@ namespace Frida {
 				construct;
 			}
 
-			private Gee.Promise<bool> close_request;
+			private Promise<bool> close_request;
 
 			public ChildEntry (DBusConnection connection, uint controller_registration_id = 0) {
 				Object (
@@ -884,19 +883,20 @@ namespace Frida {
 				);
 			}
 
-			public async void close () {
-				if (close_request != null) {
+			public async void close (Cancellable? cancellable) throws IOError {
+				while (close_request != null) {
 					try {
-						yield close_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
-						assert_not_reached ();
+						yield close_request.future.wait_async (cancellable);
+						return;
+					} catch (GLib.Error e) {
+						assert (e is IOError.CANCELLED);
+						cancellable.set_error_if_cancelled ();
 					}
-					return;
 				}
-				close_request = new Gee.Promise<bool> ();
+				close_request = new Promise<bool> ();
 
 				try {
-					yield connection.close ();
+					yield connection.close (cancellable);
 				} catch (GLib.Error e) {
 				}
 
@@ -905,14 +905,14 @@ namespace Frida {
 					connection.unregister_object (id);
 				}
 
-				close_request.set_value (true);
+				close_request.resolve (true);
 			}
 
 			public void close_soon () {
 				var source = new IdleSource ();
 				source.set_priority (Priority.LOW);
 				source.set_callback (() => {
-					close.begin ();
+					close.begin (null);
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
@@ -925,22 +925,22 @@ namespace Frida {
 				construct;
 			}
 
-			private Gee.Promise<bool> promise = new Gee.Promise<bool> ();
+			private Promise<bool> promise = new Promise<bool> ();
 
 			public SpawnAckRequest (SpawnStartState start_state) {
 				Object (start_state: start_state);
 			}
 
-			public async void await () {
+			public async void await (Cancellable? cancellable) throws IOError {
 				try {
-					yield promise.future.wait_async ();
-				} catch (Gee.FutureError e) {
+					yield promise.future.wait_async (cancellable);
+				} catch (Error e) {
 					assert_not_reached ();
 				}
 			}
 
 			public void complete () {
-				promise.set_value (true);
+				promise.resolve (true);
 			}
 		}
 	}
@@ -958,14 +958,14 @@ namespace Frida {
 			construct;
 		}
 
-		public bool enable_jit {
+		public ScriptRuntime script_runtime {
 			get;
 			construct;
-			default = false;
+			default = DEFAULT;
 		}
 
-		private Gee.Promise<bool> ensure_request;
-		private Gee.Promise<bool> _unloaded = new Gee.Promise<bool> ();
+		private Promise<bool> ensure_request;
+		private Promise<bool> _unloaded = new Promise<bool> ();
 
 		protected AgentSession session;
 		protected AgentScriptId script;
@@ -981,100 +981,112 @@ namespace Frida {
 			host_session.agent_session_closed.disconnect (on_agent_session_closed);
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (ensure_request != null) {
 				try {
-					yield ensure_loaded ();
+					yield ensure_loaded (cancellable);
 				} catch (Error e) {
 				}
 			}
 
-			yield ensure_unloaded ();
+			yield ensure_unloaded (cancellable);
 		}
 
-		protected abstract async uint get_target_pid () throws Error;
+		protected abstract async uint get_target_pid (Cancellable? cancellable) throws Error, IOError;
 
 		protected virtual void on_event (string type, Json.Array event) {
 		}
 
-		protected async Json.Node call (string method, Json.Node[] args) throws Error {
-			yield ensure_loaded ();
+		protected async Json.Node call (string method, Json.Node[] args, Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
 
-			return yield rpc_client.call (method, args);
+			return yield rpc_client.call (method, args, cancellable);
 		}
 
-		protected async void ensure_loaded () throws Error {
-			if (ensure_request != null) {
-				var future = ensure_request.future;
+		protected async void ensure_loaded (Cancellable? cancellable) throws Error, IOError {
+			while (ensure_request != null) {
 				try {
-					yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
+					yield ensure_request.future.wait_async (cancellable);
+					return;
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
 				}
-				return;
 			}
-			ensure_request = new Gee.Promise<bool> ();
-
-			uint target_pid;
-			try {
-				target_pid = yield get_target_pid ();
-			} catch (Error e) {
-				ensure_request.set_exception (e);
-				ensure_request = null;
-
-				throw e;
-			}
+			ensure_request = new Promise<bool> ();
 
 			try {
-				var id = yield host_session.attach_to (target_pid);
+				yield ensure_unloaded (cancellable);
 
-				session = yield host_session.obtain_agent_session (id);
-				session.message_from_script.connect (on_message_from_script);
+				uint target_pid = yield get_target_pid (cancellable);
 
-				if (enable_jit) {
-					yield session.enable_jit ();
+				try {
+					var id = yield host_session.attach_to (target_pid, cancellable);
+
+					session = host_session.obtain_agent_session (id);
+					session.message_from_script.connect (on_message_from_script);
+
+					if (script_source != null) {
+						var options = new ScriptOptions ();
+						options.name = "internal-agent";
+						options.runtime = script_runtime;
+
+						var raw_options = AgentScriptOptions ();
+						raw_options.data = options._serialize ().get_data ();
+
+						script = yield session.create_script_with_options (script_source, raw_options, cancellable);
+
+						yield session.load_script (script, cancellable);
+					}
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
 				}
 
-				if (script_source != null) {
-					script = yield session.create_script ("internal-agent", script_source);
-					yield session.load_script (script);
+				ensure_request.resolve (true);
+			} catch (GLib.Error e) {
+				ensure_request.reject (e);
+			}
+
+			var pending_error = ensure_request.future.error;
+			if (pending_error != null) {
+				try {
+					yield ensure_unloaded (cancellable);
+				} finally {
+					ensure_request = null;
 				}
 
-				ensure_request.set_value (true);
-			} catch (GLib.Error raw_error) {
-				yield ensure_unloaded ();
-
-				var error = Marshal.from_dbus (raw_error);
-				ensure_request.set_exception (error);
-				ensure_request = null;
-
-				throw error;
+				throw_api_error (pending_error);
 			}
 		}
 
-		private async void ensure_unloaded () {
+		private async void ensure_unloaded (Cancellable? cancellable) throws IOError {
 			if (script.handle != 0) {
 				try {
-					yield session.destroy_script (script);
+					yield session.destroy_script (script, cancellable);
 				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						return;
 				}
 				script = AgentScriptId (0);
 			}
 
 			if (session != null) {
 				try {
-					yield session.close ();
+					yield session.close (cancellable);
 				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						return;
 				}
 				session.message_from_script.disconnect (on_message_from_script);
 				session = null;
 			}
 		}
 
-		protected async void wait_for_unload () {
+		protected async void wait_for_unload (Cancellable? cancellable) throws IOError {
 			try {
-				yield _unloaded.future.wait_async ();
-			} catch (Gee.FutureError e) {
+				yield _unloaded.future.wait_async (cancellable);
+			} catch (Error e) {
 				assert_not_reached ();
 			}
 		}
@@ -1083,7 +1095,7 @@ namespace Frida {
 			if (session != this.session)
 				return;
 
-			_unloaded.set_value (true);
+			_unloaded.resolve (true);
 			unloaded ();
 		}
 
@@ -1121,12 +1133,37 @@ namespace Frida {
 				printerr ("%s\n", raw_message);
 		}
 
-		private async void post_rpc_message (string raw_message) throws Error {
+		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield session.post_to_script (script, raw_message, false, new uint8[0]);
+				yield session.post_to_script (script, raw_message, false, new uint8[0], cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 	}
+
+	internal async void wait_for_uninject (Injector injector, Cancellable? cancellable, UninjectPredicate is_injected) throws IOError {
+		if (!is_injected ())
+			return;
+
+		var uninjected_handler = injector.uninjected.connect ((id) => {
+			wait_for_uninject.callback ();
+		});
+
+		var cancel_source = new CancellableSource (cancellable);
+		cancel_source.set_callback (() => {
+			wait_for_uninject.callback ();
+			return false;
+		});
+		cancel_source.attach (MainContext.get_thread_default ());
+
+		while (is_injected () && !cancellable.is_cancelled ())
+			yield;
+
+		cancel_source.destroy ();
+
+		injector.disconnect (uninjected_handler);
+	}
+
+	internal delegate bool UninjectPredicate ();
 }

@@ -31,13 +31,14 @@ namespace Frida.AgentTest {
 
 			AgentScriptId script_id;
 			try {
+				Cancellable? cancellable = null;
 				script_id = yield session.create_script ("load-and-receive-messages",
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter: function(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: args[1].readUtf8String() });" +
 					 "  }" +
-					 "});").printf ((size_t) func));
-				yield session.load_script (script_id);
+					 "});").printf ((size_t) func), cancellable);
+				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
@@ -61,6 +62,7 @@ namespace Frida.AgentTest {
 
 			AgentScriptId script_id;
 			try {
+				Cancellable? cancellable = null;
 				script_id = yield session.create_script ("performance",
 					("var buf = ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\").readByteArray(%d);" +
 					 "var startTime = new Date();" +
@@ -74,8 +76,8 @@ namespace Frida.AgentTest {
 					 "  }" +
 					 "};" +
 					 "sendNext();"
-					).printf ((size_t) buf, size));
-				yield session.load_script (script_id);
+					).printf ((size_t) buf, size), cancellable);
+				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
@@ -113,6 +115,7 @@ namespace Frida.AgentTest {
 
 			AgentScriptId script_id;
 			try {
+				Cancellable? cancellable = null;
 				script_id = yield session.create_script ("launch-scenario", """
 var pointerSize = Process.pointerSize;
 
@@ -205,8 +208,8 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     send([event, identifier, this.pidPtr.readU32()]);
   }
 });
-""");
-				yield session.load_script (script_id);
+""", cancellable);
+				yield session.load_script (script_id, cancellable);
 
 				h.disable_timeout ();
 
@@ -229,7 +232,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 						.end_array ()
 						.end_array ();
 					var raw_request = Json.to_string (request.get_root (), false);
-					yield session.post_to_script (script_id, raw_request, false, new uint8[0] {});
+					yield session.post_to_script (script_id, raw_request, false, new uint8[0] {}, cancellable);
 
 					while (true) {
 						var message = yield h.wait_for_message ();
@@ -270,7 +273,9 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 						break;
 					}
 
-					var child = Frida.Test.Process.start ("/bin/ls", new string[] { "UIKitApplication:foo.bar.Baz[0x1234]" });
+					var child = Frida.Test.Process.start ("/bin/ls", new string[] {
+						"UIKitApplication:foo.bar.Baz[0x1234]"
+					});
 
 					while (true) {
 						var message = yield h.wait_for_message ();
@@ -333,15 +338,15 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 			var session = yield h.load_agent ();
 
 			try {
-				// yield session.enable_jit ();
+				Cancellable? cancellable = null;
 
 				var script_id = yield session.create_script ("thread-suspend-scenario", """
 console.log('Script runtime is: ' + Script.runtime);
 
 Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), function () {
 });
-""");
-				yield session.load_script (script_id);
+""", cancellable);
+				yield session.load_script (script_id, cancellable);
 
 				var thread_id = get_current_thread_id ();
 
@@ -414,6 +419,8 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), fun
 		}
 
 		public async AgentSession load_agent () {
+			Cancellable? cancellable = null;
+
 			string agent_filename;
 #if WINDOWS
 			var intermediate_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
@@ -447,46 +454,50 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), fun
 			assert_true (main_func_found);
 			main_impl = (AgentMainFunc) main_func_symbol;
 
-			Gee.Promise<IOStream> stream_request;
+			Future<IOStream> stream_request;
 			try {
 				transport = new PipeTransport ();
-				stream_request = Pipe.open (transport.local_address);
-			} catch (IOError transport_error) {
-				printerr ("Unable to create transport: %s\n", transport_error.message);
+				stream_request = Pipe.open (transport.local_address, cancellable);
+			} catch (Error e) {
+				printerr ("Unable to create transport: %s\n", e.message);
 				assert_not_reached ();
 			}
 
 			main_thread = new Thread<bool> ("frida-test-agent-worker", agent_main_worker);
 
 			try {
-				var stream = yield stream_request.future.wait_async ();
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING);
+				var stream = yield stream_request.wait_async (cancellable);
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+					null, cancellable);
 
 				AgentController controller = this;
 				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
 
 				connection.start_message_processing ();
 
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+					cancellable);
 
 				var session_id = AgentSessionId (1);
-				yield provider.open (session_id);
+				yield provider.open (session_id, cancellable);
 
-				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id));
-
-				yield session.enable_jit ();
-			} catch (GLib.Error dbus_error) {
+				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id),
+					DBusProxyFlags.NONE, cancellable);
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
-			session.message_from_script.connect ((script_id, message, has_data, data) => message_queue.add (new ScriptMessage (script_id, message)));
+			session.message_from_script.connect ((script_id, message, has_data, data) => {
+				message_queue.add (new ScriptMessage (script_id, message));
+			});
 
 			return session;
 		}
 
 		public async void unload_agent () {
 			try {
-				yield session.close ();
+				yield session.close (null);
 			} catch (GLib.Error session_error) {
 				assert_not_reached ();
 			}
@@ -527,28 +538,31 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), fun
 		}
 
 #if !WINDOWS
-		private async HostChildId prepare_to_fork (uint parent_pid, out uint parent_injectee_id, out uint child_injectee_id, out GLib.Socket child_socket) throws Error {
+		private async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
+				out uint child_injectee_id, out GLib.Socket child_socket) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 #endif
 
-		private async void recreate_agent_thread (uint pid, uint injectee_id) throws Error {
+		private async void recreate_agent_thread (uint pid, uint injectee_id, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		private async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws Error {
+		private async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info, Cancellable? cancellable)
+				throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		private async void prepare_to_exec (HostChildInfo info) throws Error {
+		private async void prepare_to_exec (HostChildInfo info, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		private async void cancel_exec (uint pid) throws Error {
+		private async void cancel_exec (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		private async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state) throws Error {
+		private async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state, Cancellable? cancellable)
+				throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 

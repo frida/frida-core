@@ -13,7 +13,7 @@ namespace Frida {
 		private Thread<bool> thread;
 		private AgentSessionProvider provider;
 
-		public static async AgentContainer create (string agent_filename) throws Error {
+		public static async AgentContainer create (string agent_filename, Cancellable? cancellable) throws Error, IOError {
 			var container = new AgentContainer ();
 
 			container.module = Module.open (agent_filename, 0);
@@ -24,31 +24,25 @@ namespace Frida {
 			assert (main_func_found);
 			container.main_impl = (AgentMainFunc) main_func_symbol;
 
-			PipeTransport transport;
-			try {
-				transport = new PipeTransport ();
-			} catch (IOError transport_error) {
-				assert_not_reached ();
-			}
+			var transport = new PipeTransport ();
 			container.transport = transport;
 
-			var stream_request = Pipe.open (transport.local_address);
+			var stream_request = Pipe.open (transport.local_address, cancellable);
 
 			container.start_worker_thread ();
 
 			DBusConnection connection;
 			AgentSessionProvider provider;
 			try {
-				var stream = yield stream_request.future.wait_async ();
+				var stream = yield stream_request.wait_async (cancellable);
 
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS);
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
 
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+					cancellable);
 				provider.opened.connect (container.on_session_opened);
 				provider.closed.connect (container.on_session_closed);
-			} catch (Gee.FutureError e) {
-				var stream_error = (Error) stream_request.future.exception;
-				throw new Error.PERMISSION_DENIED ("%s", stream_error.message);
 			} catch (GLib.Error e) {
 				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
@@ -59,13 +53,13 @@ namespace Frida {
 			return container;
 		}
 
-		public async void destroy () {
+		public async void destroy (Cancellable? cancellable) throws IOError {
 			provider.opened.disconnect (on_session_opened);
 			provider.closed.disconnect (on_session_closed);
 			provider = null;
 
 			try {
-				yield connection.close ();
+				yield connection.close (cancellable);
 			} catch (GLib.Error connection_error) {
 			}
 			connection = null;
@@ -92,12 +86,12 @@ namespace Frida {
 			return true;
 		}
 
-		public async void open (AgentSessionId id) throws GLib.Error {
-			yield provider.open (id);
+		public async void open (AgentSessionId id, Cancellable? cancellable) throws GLib.Error {
+			yield provider.open (id, cancellable);
 		}
 
-		public async void unload () throws GLib.Error {
-			yield provider.unload ();
+		public async void unload (Cancellable? cancellable) throws GLib.Error {
+			yield provider.unload (cancellable);
 		}
 
 		private void on_session_opened (AgentSessionId id) {

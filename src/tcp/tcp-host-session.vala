@@ -2,14 +2,14 @@ namespace Frida {
 	public class TcpHostSessionBackend : Object, HostSessionBackend {
 		private TcpHostSessionProvider provider;
 
-		public async void start () {
+		public async void start (Cancellable? cancellable) throws IOError {
 			provider = new TcpHostSessionProvider ();
 			provider_available (provider);
 		}
 
-		public async void stop () {
+		public async void stop (Cancellable? cancellable) throws IOError {
 			provider_unavailable (provider);
-			yield provider.close ();
+			yield provider.close (cancellable);
 			provider = null;
 		}
 	}
@@ -37,29 +37,39 @@ namespace Frida {
 		private const uint16 DEFAULT_SERVER_PORT = 27042;
 
 		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
+		private Cancellable io_cancellable = new Cancellable ();
 
-		public async void close () {
-			foreach (var entry in entries)
-				yield destroy_entry (entry, SessionDetachReason.APPLICATION_REQUESTED);
-			entries.clear ();
+		public async void close (Cancellable? cancellable) throws IOError {
+			while (!entries.is_empty) {
+				var iterator = entries.iterator ();
+				iterator.next ();
+				var entry = iterator.get ();
+
+				entries.remove (entry);
+
+				yield destroy_entry (entry, APPLICATION_REQUESTED, cancellable);
+			}
+
+			io_cancellable.cancel ();
 		}
 
-		public async HostSession create (string? location = null) throws Error {
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 			string address;
 			try {
 				var raw_address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
 				var enumerator = NetworkAddress.parse (raw_address, DEFAULT_SERVER_PORT).enumerate ();
-				var socket_address = yield enumerator.next_async ();
+				var socket_address = yield enumerator.next_async (cancellable);
 				if (socket_address is InetSocketAddress) {
 					var inet_socket_address = socket_address as InetSocketAddress;
 					var inet_address = inet_socket_address.get_address ();
 					var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-					address = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (), inet_socket_address.get_port ());
+					address = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (),
+						inet_socket_address.get_port ());
 				} else {
 					throw new Error.INVALID_ARGUMENT ("Invalid server address");
 				}
 			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT (e.message);
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
 			foreach (var entry in entries) {
@@ -69,17 +79,17 @@ namespace Frida {
 
 			DBusConnection connection;
 			try {
-				connection = yield new DBusConnection.for_address (address, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				connection = yield new DBusConnection.for_address (address, AUTHENTICATION_CLIENT, null, cancellable);
 			} catch (GLib.Error e) {
 				if (e is IOError.CONNECTION_REFUSED)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 				else
-					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: " + e.message);
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: %s", e.message);
 			}
 
 			HostSession host_session;
 			try {
-				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
 			} catch (IOError e) {
 				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
@@ -93,21 +103,22 @@ namespace Frida {
 			return host_session;
 		}
 
-		public async void destroy (HostSession host_session) throws Error {
+		public async void destroy (HostSession host_session, Cancellable? cancellable) throws Error, IOError {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session) {
 					entries.remove (entry);
-					yield destroy_entry (entry, SessionDetachReason.APPLICATION_REQUESTED);
+					yield destroy_entry (entry, APPLICATION_REQUESTED, cancellable);
 					return;
 				}
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session)
-					return yield entry.obtain_agent_session (agent_session_id);
+					return yield entry.obtain_agent_session (agent_session_id, cancellable);
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
@@ -127,16 +138,16 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			entries.remove (entry_to_remove);
-			destroy_entry.begin (entry_to_remove, SessionDetachReason.SERVER_TERMINATED);
+			destroy_entry.begin (entry_to_remove, SERVER_TERMINATED, io_cancellable);
 		}
 
 		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
 			agent_session_closed (id, reason, crash);
 		}
 
-		private async void destroy_entry (Entry entry, SessionDetachReason reason) {
+		private async void destroy_entry (Entry entry, SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 			entry.connection.on_closed.disconnect (on_connection_closed);
-			yield entry.destroy (reason);
+			yield entry.destroy (reason, cancellable);
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
 			host_session_closed (entry.host_session);
 		}
@@ -169,7 +180,7 @@ namespace Frida {
 				host_session.agent_session_crashed.connect (on_agent_session_crashed);
 			}
 
-			public async void destroy (SessionDetachReason reason) {
+			public async void destroy (SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 				host_session.agent_session_crashed.disconnect (on_agent_session_crashed);
 				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
 
@@ -178,19 +189,20 @@ namespace Frida {
 				agent_session_by_id.clear ();
 
 				try {
-					yield connection.close ();
+					yield connection.close (cancellable);
 				} catch (GLib.Error e) {
 				}
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+			public async AgentSession obtain_agent_session (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
 				AgentSession session = agent_session_by_id[id];
 				if (session == null) {
 					try {
-						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id));
+						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
+							DBusProxyFlags.NONE, cancellable);
 						agent_session_by_id[id] = session;
-					} catch (IOError proxy_error) {
-						throw new Error.INVALID_ARGUMENT (proxy_error.message);
+					} catch (IOError e) {
+						throw new Error.INVALID_ARGUMENT ("%s", e.message);
 					}
 				}
 				return session;

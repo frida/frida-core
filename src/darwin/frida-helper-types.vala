@@ -10,32 +10,37 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async void close ();
+		public abstract async void close (Cancellable? cancellable) throws IOError;
 
-		public abstract async void preload () throws Error;
+		public abstract async void preload (Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async void enable_spawn_gating () throws Error;
-		public abstract async void disable_spawn_gating () throws Error;
-		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws Error;
-		public abstract async uint spawn (string path, HostSpawnOptions options) throws Error;
-		public abstract async void launch (string identifier, HostSpawnOptions options) throws Error;
-		public abstract async void notify_launch_completed (string identifier, uint pid) throws Error;
-		public abstract async void notify_exec_completed (uint pid) throws Error;
-		public abstract async void wait_until_suspended (uint pid) throws Error;
-		public abstract async void cancel_pending_waits (uint pid) throws Error;
-		public abstract async void input (uint pid, uint8[] data) throws Error;
-		public abstract async void resume (uint pid) throws Error;
-		public abstract async void kill_process (uint pid) throws Error;
-		public abstract async void kill_application (string identifier) throws Error;
+		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
+		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void launch (string identifier, HostSpawnOptions options,
+			Cancellable? cancellable) throws Error, IOError;
+		public abstract async void notify_launch_completed (string identifier, uint pid,
+			Cancellable? cancellable) throws Error, IOError;
+		public abstract async void notify_exec_completed (uint pid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void wait_until_suspended (uint pid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void resume (uint pid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void kill_process (uint pid, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void kill_application (string identifier, Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error;
-		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error;
-		public abstract async uint demonitor_and_clone_injectee_state (uint id) throws Error;
-		public abstract async void recreate_injectee_thread (uint pid, uint id) throws Error;
+		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data,
+			Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint,
+			string data, Cancellable? cancellable) throws Error, IOError;
+		public abstract async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError;
+		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError;
 
-		public abstract async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error;
+		public abstract async Future<IOStream> open_pipe_stream (uint remote_pid, Cancellable? cancellable,
+			out string remote_address) throws Error, IOError;
 
-		public abstract async MappedLibraryBlob? try_mmap (Bytes blob) throws Error;
+		public abstract async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError;
 	}
 
 	[DBus (name = "re.frida.Helper")]
@@ -46,28 +51,31 @@ namespace Frida {
 		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
 		public signal void uninjected (uint id);
 
-		public abstract async void stop () throws GLib.Error;
+		public abstract async void stop (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void enable_spawn_gating () throws GLib.Error;
-		public abstract async void disable_spawn_gating () throws GLib.Error;
-		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws GLib.Error;
-		public abstract async uint spawn (string path, HostSpawnOptions options) throws GLib.Error;
-		public abstract async void launch (string identifier, HostSpawnOptions options) throws GLib.Error;
-		public abstract async void notify_launch_completed (string identifier, uint pid) throws GLib.Error;
-		public abstract async void notify_exec_completed (uint pid) throws GLib.Error;
-		public abstract async void wait_until_suspended (uint pid) throws GLib.Error;
-		public abstract async void cancel_pending_waits (uint pid) throws GLib.Error;
-		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
-		public abstract async void resume (uint pid) throws GLib.Error;
-		public abstract async void kill_process (uint pid) throws GLib.Error;
-		public abstract async void kill_application (string identifier) throws GLib.Error;
+		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void launch (string identifier, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void notify_launch_completed (string identifier, uint pid,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async void notify_exec_completed (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void wait_until_suspended (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void kill_process (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void kill_application (string identifier, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws GLib.Error;
-		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws GLib.Error;
-		public abstract async uint demonitor_and_clone_injectee_state (uint id) throws GLib.Error;
-		public abstract async void recreate_injectee_thread (uint pid, uint id) throws GLib.Error;
+		public abstract async uint inject_library_file (uint pid, string path, string entrypoint, string data,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint,
+			string data, Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async PipeEndpoints make_pipe_endpoints (uint remote_pid) throws GLib.Error;
+		public abstract async PipeEndpoints make_pipe_endpoints (uint remote_pid, Cancellable? cancellable) throws GLib.Error;
 	}
 
 	public struct PipeEndpoints {

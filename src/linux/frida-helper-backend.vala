@@ -22,6 +22,8 @@ namespace Frida {
 
 		public uint next_id = 0;
 
+		private Cancellable io_cancellable = new Cancellable ();
+
 		~LinuxHelperBackend () {
 			foreach (var instance in spawn_instances.values)
 				_free_spawn_instance (instance);
@@ -31,10 +33,11 @@ namespace Frida {
 				_free_inject_instance (instance, RESIDENT);
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
+			io_cancellable.cancel ();
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			if (!FileUtils.test (path, EXISTS))
 				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
 
@@ -75,7 +78,7 @@ namespace Frida {
 		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
 			try {
 				var buf = new uint8[4096];
-				var n = yield stream.read_async (buf);
+				var n = yield stream.read_async (buf, Priority.DEFAULT, io_cancellable);
 
 				var data = buf[0:n];
 				output (pid, fd, data);
@@ -83,11 +86,12 @@ namespace Frida {
 				if (n > 0)
 					process_next_output_from.begin (stream, pid, fd, resource);
 			} catch (GLib.Error e) {
-				output (pid, fd, new uint8[0]);
+				if (!(e is IOError.CANCELLED))
+					output (pid, fd, new uint8[0]);
 			}
 		}
 
-		public async void prepare_exec_transition (uint pid) throws Error {
+		public async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			bool is_child = spawn_instances.has_key (pid);
 			if (is_child)
 				demonitor_child (pid);
@@ -103,7 +107,7 @@ namespace Frida {
 			_notify_exec_pending (pid, true);
 		}
 
-		public async void await_exec_transition (uint pid) throws Error {
+		public async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var instance = exec_instances[pid];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
@@ -158,7 +162,7 @@ namespace Frida {
 				monitor_child (pid);
 		}
 
-		public async void cancel_exec_transition (uint pid) throws Error {
+		public async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			void * instance;
 			if (!exec_instances.unset (pid, out instance))
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
@@ -174,18 +178,18 @@ namespace Frida {
 			_notify_exec_pending (pid, false);
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			var stream = stdin_streams[pid];
 			if (stream == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 			try {
 				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT (e.message);
+				throw new Error.TRANSPORT ("%s", e.message);
 			}
 		}
 
-		public async void resume (uint pid) throws Error {
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			void * instance;
 			bool instance_found;
 
@@ -209,11 +213,12 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Invalid PID");
 		}
 
-		public async void kill (uint pid) throws Error {
+		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 			Posix.kill ((Posix.pid_t) pid, Posix.Signal.KILL);
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path,
+				Cancellable? cancellable) throws Error, IOError {
 			var id = _do_inject (pid, path, entrypoint, data, temp_path);
 
 			yield establish_session (id, pid);
@@ -221,7 +226,7 @@ namespace Frida {
 			return id;
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
@@ -240,7 +245,7 @@ namespace Frida {
 			return clone_id;
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
@@ -351,7 +356,7 @@ namespace Frida {
 			construct;
 		}
 
-		private Gee.Promise<bool> cancel_request = new Gee.Promise<bool> ();
+		private Promise<bool> cancel_request = new Promise<bool> ();
 		private Cancellable cancellable = new Cancellable ();
 
 		public RemoteThreadSession (uint id, uint pid, InputStream input) {
@@ -370,11 +375,12 @@ namespace Frida {
 				size = yield input.read_async (byte_buf, Priority.DEFAULT, cancellable);
 			} catch (IOError e) {
 				if (e is IOError.CANCELLED) {
-					throw new Error.PROCESS_NOT_RESPONDING ("Unexpectedly timed out while waiting for FIFO to establish");
+					throw new Error.PROCESS_NOT_RESPONDING (
+						"Unexpectedly timed out while waiting for FIFO to establish");
 				} else {
 					Source.remove (timeout);
 
-					throw new Error.PROCESS_NOT_RESPONDING (e.message);
+					throw new Error.PROCESS_NOT_RESPONDING ("%s", e.message);
 				}
 			}
 
@@ -384,7 +390,7 @@ namespace Frida {
 				throw new Error.PROTOCOL ("Unexpected message received");
 
 			if (size == 0) {
-				cancel_request.set_value (true);
+				cancel_request.resolve (true);
 
 				Idle.add (() => {
 					ended (IMMEDIATE);
@@ -399,8 +405,8 @@ namespace Frida {
 			cancellable.cancel ();
 
 			try {
-				yield cancel_request.future.wait_async ();
-			} catch (Gee.FutureError e) {
+				yield cancel_request.future.wait_async (null);
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}
@@ -436,7 +442,7 @@ namespace Frida {
 					ended (IMMEDIATE);
 			}
 
-			cancel_request.set_value (true);
+			cancel_request.resolve (true);
 		}
 	}
 

@@ -398,7 +398,7 @@ namespace Frida.Fruity {
 					var context = new MarkupParseContext (parser, 0, this, null);
 					context.parse (xml, -1);
 				} catch (MarkupError e) {
-					throw new PlistError.INVALID_DATA (e.message);
+					throw new PlistError.INVALID_DATA ("%s", e.message);
 				}
 			}
 

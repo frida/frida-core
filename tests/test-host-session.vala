@@ -251,35 +251,43 @@ namespace Frida.HostSessionTest {
 	namespace Service {
 
 		private static async void provider_available (Harness h) {
-			h.assert_no_providers_available ();
-			var backend = new StubBackend ();
-			h.service.add_backend (backend);
-			yield h.process_events ();
-			h.assert_no_providers_available ();
+			try {
+				h.assert_no_providers_available ();
+				var backend = new StubBackend ();
+				h.service.add_backend (backend);
+				yield h.process_events ();
+				h.assert_no_providers_available ();
 
-			yield h.service.start ();
-			h.assert_no_providers_available ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
+				yield h.service.start ();
+				h.assert_no_providers_available ();
+				yield h.process_events ();
+				h.assert_n_providers_available (1);
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+				yield h.service.stop ();
+				h.service.remove_backend (backend);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 
 			h.done ();
 		}
 
 		private static async void provider_unavailable (Harness h) {
-			var backend = new StubBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
+			try {
+				var backend = new StubBackend ();
+				h.service.add_backend (backend);
+				yield h.service.start ();
+				yield h.process_events ();
+				h.assert_n_providers_available (1);
 
-			backend.disable_provider ();
-			h.assert_n_providers_available (0);
+				backend.disable_provider ();
+				h.assert_n_providers_available (0);
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+				yield h.service.stop ();
+				h.service.remove_backend (backend);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 
 			h.done ();
 		}
@@ -287,7 +295,7 @@ namespace Frida.HostSessionTest {
 		private class StubBackend : Object, HostSessionBackend {
 			private StubProvider provider = new StubProvider ();
 
-			public async void start () {
+			public async void start (Cancellable? cancellable) {
 				var source = new IdleSource ();
 				source.set_callback (() => {
 					provider_available (provider);
@@ -296,7 +304,7 @@ namespace Frida.HostSessionTest {
 				source.attach (MainContext.get_thread_default ());
 			}
 
-			public async void stop () {
+			public async void stop (Cancellable? cancellable) {
 			}
 
 			public void disable_provider () {
@@ -321,15 +329,16 @@ namespace Frida.HostSessionTest {
 				get { return HostSessionProviderKind.LOCAL; }
 			}
 
-			public async HostSession create (string? location = null) throws Error {
+			public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async void destroy (HostSession session) throws Error {
+			public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 		}
@@ -449,7 +458,7 @@ namespace Frida.HostSessionTest {
 						yield h.process_events ();
 
 					h.done ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
@@ -470,7 +479,7 @@ namespace Frida.HostSessionTest {
 					script.message.connect ((message, data) => {
 						print ("Got message: %s\n", message);
 					});
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("Unable to add script: %s\n", e.message);
 					return null;
 				}
@@ -490,7 +499,7 @@ namespace Frida.HostSessionTest {
 
 				try {
 					yield script.load ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("Unable to remove script: %s\n", e.message);
 				}
 			}
@@ -505,7 +514,7 @@ namespace Frida.HostSessionTest {
 
 				try {
 					yield script.unload ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("Unable to remove script: %s\n", e.message);
 				}
 			}
@@ -513,7 +522,7 @@ namespace Frida.HostSessionTest {
 			private static async void enable_debugger (Session session) {
 				try {
 					yield session.enable_debugger (5858);
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("Unable to enable debugger: %s\n", e.message);
 				}
 			}
@@ -521,7 +530,7 @@ namespace Frida.HostSessionTest {
 			private static async void disable_debugger (Session session) {
 				try {
 					yield session.disable_debugger ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("Unable to disable debugger: %s\n", e.message);
 				}
 			}
@@ -529,7 +538,7 @@ namespace Frida.HostSessionTest {
 			private static async void enable_jit (Session session) {
 				try {
 					yield session.enable_jit ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("Unable to enable JIT: %s\n", e.message);
 				}
 			}
@@ -578,7 +587,7 @@ namespace Frida.HostSessionTest {
 					print ("manager closed in %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 					h.done ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
@@ -587,7 +596,7 @@ namespace Frida.HostSessionTest {
 			private static async void perform_resume (Device device, uint pid) {
 				try {
 					yield device.resume (pid);
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("perform_resume(%u) failed: %s\n", pid, e.message);
 				}
 			}
@@ -632,7 +641,7 @@ namespace Frida.HostSessionTest {
 						stdout.printf ("Trying to spawn program at inexistent path '%s'...", inexistent_path);
 						yield device.spawn (inexistent_path);
 						assert_not_reached ();
-					} catch (Error e) {
+					} catch (GLib.Error e) {
 						stdout.printf ("\nResult: \"%s\"\n", e.message);
 						assert_true (e is Error.EXECUTABLE_NOT_FOUND);
 						assert_true (e.message == "Unable to find executable at '%s'".printf (inexistent_path));
@@ -695,7 +704,7 @@ namespace Frida.HostSessionTest {
 					yield device_manager.close ();
 
 					h.done ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
@@ -741,7 +750,7 @@ namespace Frida.HostSessionTest {
 					yield device_manager.close ();
 
 					h.done ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
@@ -784,7 +793,7 @@ namespace Frida.HostSessionTest {
 					yield device_manager.close ();
 
 					h.done ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("\nFAIL: %s\n\n", e.message);
 					assert_not_reached ();
 				}
@@ -833,13 +842,13 @@ namespace Frida.HostSessionTest {
 			yield device_manager.close ();
 
 			h.done ();
-		} catch (Error e) {
+		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 			assert_not_reached ();
 		}
 	}
 
-	private static async void detach_and_wait_for_cleanup (Session session) throws Error {
+	private static async void detach_and_wait_for_cleanup (Session session) throws Error, IOError {
 		yield session.detach ();
 
 		/* The Darwin injector does cleanup 50ms after detecting that the remote thread is dead */
@@ -855,7 +864,11 @@ namespace Frida.HostSessionTest {
 		device_manager.enumerate_devices.begin ();
 
 		var timer = new Timer ();
-		yield device_manager.close ();
+		try {
+			yield device_manager.close ();
+		} catch (IOError e) {
+			assert_not_reached ();
+		}
 		if (GLib.Test.verbose ()) {
 			printerr ("close() took %u ms\n", (uint) (timer.elapsed () * 1000.0));
 		}
@@ -868,18 +881,18 @@ namespace Frida.HostSessionTest {
 
 		private static async void backend (Harness h) {
 			var backend = new LinuxHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			assert_true (prov.name == "Local System");
 
 			try {
-				var session = yield prov.create ();
-				var applications = yield session.enumerate_applications ();
-				var processes = yield session.enumerate_processes ();
+				Cancellable? cancellable = null;
+
+				var session = yield prov.create (null, cancellable);
+
+				var applications = yield session.enumerate_applications (cancellable);
+				var processes = yield session.enumerate_processes (cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -894,27 +907,27 @@ namespace Frida.HostSessionTest {
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
+
 			h.done ();
 		}
 
 		private static async void spawn (Harness h) {
-			if ((Frida.Test.os () == Frida.Test.OS.ANDROID || Frida.Test.os_arch_suffix () == "-linux-arm") && !GLib.Test.slow ()) {
+			if ((Frida.Test.os () == Frida.Test.OS.ANDROID || Frida.Test.os_arch_suffix () == "-linux-arm") &&
+					!GLib.Test.slow ()) {
 				stdout.printf ("<skipping, run in slow mode> ");
 				h.done ();
 				return;
 			}
 
 			var backend = new LinuxHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			try {
-				var host_session = yield prov.create ();
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (null, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -936,10 +949,10 @@ namespace Frida.HostSessionTest {
 
 				var options = HostSpawnOptions ();
 				options.stdio = PIPE;
-				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options);
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (host_session, session_id);
+				var session_id = yield host_session.attach_to (pid, cancellable);
+				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
@@ -964,8 +977,8 @@ namespace Frida.HostSessionTest {
 					  },
 					  onComplete: function () {}
 					});
-					""", AgentScriptOptions ());
-				yield session.load_script (script_id);
+					""", AgentScriptOptions (), cancellable);
+				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
 					waiting = true;
@@ -975,7 +988,7 @@ namespace Frida.HostSessionTest {
 				assert_true (received_output == "Hello stdout");
 				host_session.disconnect (output_handler);
 
-				yield host_session.resume (pid);
+				yield host_session.resume (pid, cancellable);
 
 				if (received_message == null) {
 					waiting = true;
@@ -985,14 +998,14 @@ namespace Frida.HostSessionTest {
 				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60}}");
 				session.disconnect (message_handler);
 
-				yield host_session.kill (pid);
+				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
 				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
+
 			h.done ();
 		}
 
@@ -1093,11 +1106,8 @@ namespace Frida.HostSessionTest {
 
 		private static async void backend (Harness h) {
 			var backend = new DarwinHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			assert_true (prov.name == "Local System");
 
@@ -1111,9 +1121,12 @@ namespace Frida.HostSessionTest {
 			}
 
 			try {
-				var session = yield prov.create ();
-				var applications = yield session.enumerate_applications ();
-				var processes = yield session.enumerate_processes ();
+				Cancellable? cancellable = null;
+
+				var session = yield prov.create (null, cancellable);
+
+				var applications = yield session.enumerate_applications (cancellable);
+				var processes = yield session.enumerate_processes (cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -1127,8 +1140,8 @@ namespace Frida.HostSessionTest {
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
+
 			h.done ();
 		}
 
@@ -1144,14 +1157,13 @@ namespace Frida.HostSessionTest {
 
 		private static async void run_spawn_scenario (Harness h, string target_name) {
 			var backend = new DarwinHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			try {
-				var host_session = yield prov.create ();
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (null, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -1173,10 +1185,10 @@ namespace Frida.HostSessionTest {
 
 				var options = HostSpawnOptions ();
 				options.stdio = PIPE;
-				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options);
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (host_session, session_id);
+				var session_id = yield host_session.attach_to (pid, cancellable);
+				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
@@ -1197,8 +1209,8 @@ namespace Frida.HostSessionTest {
 					    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });
 					  }
 					});
-					""", AgentScriptOptions ());
-				yield session.load_script (script_id);
+					""", AgentScriptOptions (), cancellable);
+				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
 					waiting = true;
@@ -1208,7 +1220,7 @@ namespace Frida.HostSessionTest {
 				assert_true (received_output == "Hello stdout");
 				host_session.disconnect (output_handler);
 
-				yield host_session.resume (pid);
+				yield host_session.resume (pid, cancellable);
 
 				if (received_message == null) {
 					waiting = true;
@@ -1218,14 +1230,14 @@ namespace Frida.HostSessionTest {
 				assert_true (received_message == "{\"type\":\"send\",\"payload\":{\"seconds\":60,\"initialized\":true}}");
 				session.disconnect (message_handler);
 
-				yield host_session.kill (pid);
+				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
 				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
+
 			h.done ();
 		}
 
@@ -1241,14 +1253,13 @@ namespace Frida.HostSessionTest {
 
 		private static async void run_spawn_scenario_with_stdio (Harness h, string target_name) {
 			var backend = new DarwinHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			try {
-				var host_session = yield prov.create ();
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (null, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -1286,9 +1297,9 @@ namespace Frida.HostSessionTest {
 
 				var options = HostSpawnOptions ();
 				options.stdio = PIPE;
-				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options);
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options, cancellable);
 
-				yield host_session.resume (pid);
+				yield host_session.resume (pid, cancellable);
 
 				while (received_stdout == null || received_stderr == null) {
 					waiting = true;
@@ -1299,14 +1310,14 @@ namespace Frida.HostSessionTest {
 				assert_true (received_stderr == "Hello stderr");
 				host_session.disconnect (output_handler);
 
-				yield host_session.kill (pid);
+				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
 				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
+
 			h.done ();
 		}
 
@@ -1493,7 +1504,7 @@ namespace Frida.HostSessionTest {
 					assert_true (detach_reason == "FRIDA_SESSION_DETACH_REASON_PROCESS_TERMINATED");
 
 					h.done ();
-				} catch (Error e) {
+				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 				}
 			}
@@ -1542,7 +1553,8 @@ namespace Frida.HostSessionTest {
 
 				try {
 					string pgrep_output;
-					GLib.Process.spawn_sync (null, new string[] { "/usr/bin/pgrep", "Safari" }, null, 0, null, out pgrep_output, null, null);
+					GLib.Process.spawn_sync (null, new string[] { "/usr/bin/pgrep", "Safari" }, null, 0, null,
+						out pgrep_output, null, null);
 					pid = (uint) int.parse (pgrep_output);
 				} catch (SpawnError spawn_error) {
 					printerr ("ERROR: %s\n", spawn_error.message);
@@ -1550,15 +1562,17 @@ namespace Frida.HostSessionTest {
 				}
 
 				var backend = new DarwinHostSessionBackend ();
-				h.service.add_backend (backend);
-				yield h.service.start ();
-				yield h.process_events ();
-				var prov = h.first_provider ();
+
+				var prov = yield h.setup_local_backend (backend);
 
 				try {
-					var host_session = yield prov.create ();
-					var id = yield host_session.attach_to (pid);
-					var session = yield prov.obtain_agent_session (host_session, id);
+					Cancellable? cancellable = null;
+
+					var host_session = yield prov.create (null, cancellable);
+
+					var id = yield host_session.attach_to (pid, cancellable);
+					var session = yield prov.obtain_agent_session (host_session, id, cancellable);
+
 					string received_message = null;
 					bool waiting = false;
 					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
@@ -1566,22 +1580,26 @@ namespace Frida.HostSessionTest {
 						if (waiting)
 							cross_arch.callback ();
 					});
-					var script_id = yield session.create_script_with_options ("send('hello');", AgentScriptOptions ());
-					yield session.load_script (script_id);
+
+					var script_id = yield session.create_script_with_options ("send('hello');", AgentScriptOptions (),
+						cancellable);
+					yield session.load_script (script_id, cancellable);
+
 					if (received_message == null) {
 						waiting = true;
 						yield;
 						waiting = false;
 					}
+
 					assert_true (received_message == "{\"type\":\"send\",\"payload\":\"hello\"}");
+
 					session.disconnect (message_handler);
 				} catch (GLib.Error e) {
 					printerr ("ERROR: %s\n", e.message);
 					assert_not_reached ();
 				}
 
-				yield h.service.stop ();
-				h.service.remove_backend (backend);
+				yield h.teardown_backend (backend);
 
 				h.done ();
 			}
@@ -1673,7 +1691,11 @@ namespace Frida.HostSessionTest {
 
 				yield h.prompt_for_key ("Hit a key to exit: ");
 
-				yield device_manager.close ();
+				try {
+					yield device_manager.close ();
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 
 				h.done ();
 			}
@@ -2295,11 +2317,8 @@ namespace Frida.HostSessionTest {
 
 		private static async void backend (Harness h) {
 			var backend = new WindowsHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			assert_true (prov.name == "Local System");
 
@@ -2311,8 +2330,11 @@ namespace Frida.HostSessionTest {
 			assert_true (icon_data.pixels.length > 0);
 
 			try {
-				var session = yield prov.create ();
-				var processes = yield session.enumerate_processes ();
+				Cancellable? cancellable = null;
+
+				var session = yield prov.create (null, cancellable);
+
+				var processes = yield session.enumerate_processes (cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -2323,22 +2345,20 @@ namespace Frida.HostSessionTest {
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
 
 			h.done ();
 		}
 
 		private static async void spawn (Harness h) {
 			var backend = new WindowsHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			yield h.process_events ();
-			h.assert_n_providers_available (1);
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_local_backend (backend);
 
 			try {
-				var host_session = yield prov.create ();
+				Cancellable? cancellable = null;
+
+				var host_session = yield prov.create (null, cancellable);
 
 				uint pid = 0;
 				bool waiting = false;
@@ -2360,10 +2380,10 @@ namespace Frida.HostSessionTest {
 
 				var options = HostSpawnOptions ();
 				options.stdio = PIPE;
-				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options);
+				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid);
-				var session = yield prov.obtain_agent_session (host_session, session_id);
+				var session_id = yield host_session.attach_to (pid, cancellable);
+				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
@@ -2385,8 +2405,8 @@ namespace Frida.HostSessionTest {
 					    send('GetMessage');
 					  }
 					});
-					""", AgentScriptOptions ());
-				yield session.load_script (script_id);
+					""", AgentScriptOptions (), cancellable);
+				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
 					waiting = true;
@@ -2396,7 +2416,7 @@ namespace Frida.HostSessionTest {
 				assert_true (received_output == "Hello stdout");
 				host_session.disconnect (output_handler);
 
-				yield host_session.resume (pid);
+				yield host_session.resume (pid, cancellable);
 
 				if (received_message == null) {
 					waiting = true;
@@ -2406,14 +2426,14 @@ namespace Frida.HostSessionTest {
 				assert_true (received_message == "{\"type\":\"send\",\"payload\":\"GetMessage\"}");
 				session.disconnect (message_handler);
 
-				yield host_session.kill (pid);
+				yield host_session.kill (pid, cancellable);
 			} catch (GLib.Error e) {
 				printerr ("Unexpected error: %s\n", e.message);
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
+
 			h.done ();
 		}
 
@@ -2563,11 +2583,8 @@ namespace Frida.HostSessionTest {
 			}
 
 			var backend = new FruityHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			h.disable_timeout (); /* this is a manual test after all */
-			yield h.wait_for_provider ();
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_remote_backend (backend);
 
 #if WINDOWS
 			assert_true (prov.name != "iOS Device"); /* should manage to extract a user-defined name */
@@ -2581,8 +2598,10 @@ namespace Frida.HostSessionTest {
 			assert_true (icon_data.pixels.length > 0);
 
 			try {
-				var session = yield prov.create ();
-				var processes = yield session.enumerate_processes ();
+				Cancellable? cancellable = null;
+
+				var session = yield prov.create (null, cancellable);
+				var processes = yield session.enumerate_processes (cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -2594,8 +2613,7 @@ namespace Frida.HostSessionTest {
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
 
 			h.done ();
 		}
@@ -2608,17 +2626,16 @@ namespace Frida.HostSessionTest {
 			}
 
 			var backend = new FruityHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			h.disable_timeout (); /* this is a manual test after all */
-			yield h.wait_for_provider ();
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_remote_backend (backend);
 
 			try {
+				Cancellable? cancellable = null;
+
 				stdout.printf ("connecting to frida-server\n");
-				var host_session = yield prov.create ();
+				var host_session = yield prov.create (null, cancellable);
 				stdout.printf ("enumerating processes\n");
-				var processes = yield host_session.enumerate_processes ();
+				var processes = yield host_session.enumerate_processes (cancellable);
 				assert_true (processes.length > 0);
 
 				HostProcessInfo? process = null;
@@ -2631,8 +2648,8 @@ namespace Frida.HostSessionTest {
 				assert_nonnull ((void *) process);
 
 				stdout.printf ("attaching to target process\n");
-				var session_id = yield host_session.attach_to (process.pid);
-				var session = yield prov.obtain_agent_session (host_session, session_id);
+				var session_id = yield host_session.attach_to (process.pid, cancellable);
+				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
 					received_message = message;
@@ -2645,9 +2662,9 @@ namespace Frida.HostSessionTest {
 					  recv(onMessage);
 					}
 					recv(onMessage);
-					""", AgentScriptOptions ());
+					""", AgentScriptOptions (), cancellable);
 				stdout.printf ("loading script\n");
-				yield session.load_script (script_id);
+				yield session.load_script (script_id, cancellable);
 				var steps = new uint[] { 1024, 4096, 8192, 16384, 32768 };
 				var transport_overhead = 163;
 				foreach (var step in steps) {
@@ -2657,21 +2674,20 @@ namespace Frida.HostSessionTest {
 						builder.append ("s");
 					}
 					builder.append ("\"");
-					yield session.post_to_script (script_id, builder.str, false, new uint8[0]);
+					yield session.post_to_script (script_id, builder.str, false, new uint8[0], cancellable);
 					yield;
 					stdout.printf ("received message: '%s'\n", received_message);
 				}
 				session.disconnect (message_handler);
 
-				yield session.destroy_script (script_id);
-				yield session.close ();
+				yield session.destroy_script (script_id, cancellable);
+				yield session.close (cancellable);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
 
 			h.done ();
 		}
@@ -2714,6 +2730,7 @@ namespace Frida.HostSessionTest {
 					var timer = new Timer ();
 
 					printerr ("enumerate_applications()");
+					stderr.flush ();
 					timer.reset ();
 					var apps = yield device.enumerate_applications ();
 					printerr (" => got %d apps, took %u ms\n", apps.size (), (uint) (timer.elapsed () * 1000.0));
@@ -2726,11 +2743,13 @@ namespace Frida.HostSessionTest {
 					}
 
 					printerr ("spawn()");
+					stderr.flush ();
 					timer.reset ();
 					var pid = yield device.spawn (app_id);
 					printerr (" => pid=%u, took %u ms\n", pid, (uint) (timer.elapsed () * 1000.0));
 
 					printerr ("resume(pid=%u)", pid);
+					stderr.flush ();
 					timer.reset ();
 					yield device.resume (pid);
 					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
@@ -2882,11 +2901,8 @@ namespace Frida.HostSessionTest {
 			}
 
 			var backend = new DroidyHostSessionBackend ();
-			h.service.add_backend (backend);
-			yield h.service.start ();
-			h.disable_timeout (); /* this is a manual test after all */
-			yield h.wait_for_provider ();
-			var prov = h.first_provider ();
+
+			var prov = yield h.setup_remote_backend (backend);
 
 			assert_true (prov.name != "Android Device");
 
@@ -2898,8 +2914,10 @@ namespace Frida.HostSessionTest {
 			assert_true (icon_data.pixels.length > 0);
 
 			try {
-				var session = yield prov.create ();
-				var processes = yield session.enumerate_processes ();
+				Cancellable? cancellable = null;
+
+				var session = yield prov.create (null, cancellable);
+				var processes = yield session.enumerate_processes (cancellable);
 				assert_true (processes.length > 0);
 
 				if (GLib.Test.verbose ()) {
@@ -2911,8 +2929,7 @@ namespace Frida.HostSessionTest {
 				assert_not_reached ();
 			}
 
-			yield h.service.stop ();
-			h.service.remove_backend (backend);
+			yield h.teardown_backend (backend);
 
 			h.done ();
 		}
@@ -2963,6 +2980,44 @@ namespace Frida.HostSessionTest {
 
 		protected override uint provide_timeout () {
 			return timeout;
+		}
+
+		public async HostSessionProvider setup_local_backend (HostSessionBackend backend) {
+			yield add_backend_and_start (backend);
+
+			yield process_events ();
+			assert_n_providers_available (1);
+
+			return first_provider ();
+		}
+
+		public async HostSessionProvider setup_remote_backend (HostSessionBackend backend) {
+			yield add_backend_and_start (backend);
+
+			disable_timeout ();
+			yield wait_for_provider ();
+
+			return first_provider ();
+		}
+
+		private async void add_backend_and_start (HostSessionBackend backend) {
+			service.add_backend (backend);
+
+			try {
+				yield service.start ();
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+		}
+
+		public async void teardown_backend (HostSessionBackend backend) {
+			try {
+				yield service.stop ();
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+
+			service.remove_backend (backend);
 		}
 
 		public async void wait_for_provider () {

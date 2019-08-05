@@ -2,16 +2,16 @@ namespace Frida {
 	public class QnxHostSessionBackend : Object, HostSessionBackend {
 		private QnxHostSessionProvider local_provider;
 
-		public async void start () {
+		public async void start (Cancellable? cancellable) throws IOError {
 			assert (local_provider == null);
 			local_provider = new QnxHostSessionProvider ();
 			provider_available (local_provider);
 		}
 
-		public async void stop () {
+		public async void stop (Cancellable? cancellable) throws IOError {
 			assert (local_provider != null);
 			provider_unavailable (local_provider);
-			yield local_provider.close ();
+			yield local_provider.close (cancellable);
 			local_provider = null;
 		}
 	}
@@ -35,15 +35,15 @@ namespace Frida {
 
 		private QnxHostSession host_session;
 
-		public async void close () {
-			if (host_session != null) {
-				host_session.agent_session_closed.disconnect (on_agent_session_closed);
-				yield host_session.close ();
-				host_session = null;
-			}
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (host_session == null)
+				return;
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			yield host_session.close (cancellable);
+			host_session = null;
 		}
 
-		public async HostSession create (string? location = null) throws Error {
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 			assert (location == null);
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
@@ -52,21 +52,23 @@ namespace Frida {
 			return host_session;
 		}
 
-		public async void destroy (HostSession session) throws Error {
+		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 			host_session.agent_session_closed.disconnect (on_agent_session_closed);
-			yield host_session.close ();
+			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return yield this.host_session.obtain_agent_session (agent_session_id);
+			return this.host_session.obtain_agent_session (agent_session_id);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash) {
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
+				CrashInfo? crash) {
 			agent_session_closed (id, reason, crash);
 		}
 	}
@@ -84,63 +86,64 @@ namespace Frida {
 			agent_desc = new AgentDescriptor (blob.name, new MemoryInputStream.from_data (blob.data, null));
 		}
 
-		public override async void close () {
-			yield base.close ();
+		public override async void close (Cancellable? cancellable) throws IOError {
+			yield base.close (cancellable);
 
 			var qinjector = injector as Qinjector;
 
-			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (qinjector.any_still_injected ())
-				yield;
-			injector.disconnect (uninjected_handler);
+			yield wait_for_uninject (injector, cancellable, () => {
+				return qinjector.any_still_injected ();
+			});
 
 			injector.uninjected.disconnect (on_uninjected);
-			injector = null;
+			yield injector.close (cancellable);
 
 			if (system_session_container != null) {
-				yield system_session_container.destroy ();
+				yield system_session_container.destroy (cancellable);
 				system_session_container = null;
 			}
 		}
 
-		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
+		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
+				out DBusConnection connection) throws Error, IOError {
 			var qinjector = injector as Qinjector;
 
 			PipeTransport.set_temp_directory (qinjector.temp_directory);
 
 			var agent_filename = qinjector.resource_store.ensure_copy_of (agent_desc);
-			system_session_container = yield AgentContainer.create (agent_filename);
+			system_session_container = yield AgentContainer.create (agent_filename, cancellable);
 
 			connection = system_session_container.connection;
 
 			return system_session_container;
 		}
 
-		public override async HostApplicationInfo get_frontmost_application () throws Error {
+		public override async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			return System.get_frontmost_application ();
 		}
 
-		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+		public override async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
 			return System.enumerate_applications ();
 		}
 
-		public override async Frida.HostProcessInfo[] enumerate_processes () throws Error {
+		public override async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
 			return System.enumerate_processes ();
 		}
 
-		public override async void enable_spawn_gating () throws Error {
+		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async void disable_spawn_gating () throws Error {
+		public override async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
+		public override async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
+				throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
@@ -148,38 +151,34 @@ namespace Frida {
 			return Posix.kill ((Posix.pid_t) pid, 0) == 0 || Posix.errno == Posix.EPERM;
 		}
 
-		public override async void input (uint pid, uint8[] data) throws Error {
+		public override async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		protected override async void perform_resume (uint pid) throws Error {
+		protected override async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 		}
 
-		public override async void kill (uint pid) throws Error {
+		public override async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 			System.kill (pid);
 		}
 
-		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
+		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
+				throws Error, IOError {
 			var qinjector = injector as Qinjector;
 
 			PipeTransport.set_temp_directory (qinjector.temp_directory);
 
-			PipeTransport t;
-			try {
-				t = new PipeTransport ();
-			} catch (IOError e) {
-				throw new Error.NOT_SUPPORTED (e.message);
-			}
+			var t = new PipeTransport ();
 
-			var stream_request = Pipe.open (t.local_address);
+			var stream_request = Pipe.open (t.local_address, cancellable);
 
-			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
-			while (injectee_by_pid.has_key (pid))
-				yield;
-			injector.disconnect (uninjected_handler);
+			yield wait_for_uninject (injector, cancellable, () => {
+				return injectee_by_pid.has_key (pid);
+			});
 
-			var id = yield qinjector.inject_library_resource (pid, agent_desc, "frida_agent_main", t.remote_address);
+			var id = yield qinjector.inject_library_resource (pid, agent_desc, "frida_agent_main", t.remote_address,
+				cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;

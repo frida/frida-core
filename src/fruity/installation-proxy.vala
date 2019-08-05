@@ -11,47 +11,46 @@ namespace Frida.Fruity {
 			Object (lockdown: lockdown);
 		}
 
-		public static async InstallationProxyClient open (LockdownClient lockdown, Cancellable? cancellable = null) throws InstallationProxyError {
+		public static async InstallationProxyClient open (LockdownClient lockdown, Cancellable? cancellable = null) throws InstallationProxyError, IOError {
 			var client = new InstallationProxyClient (lockdown);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				assert (e is InstallationProxyError);
-				throw (InstallationProxyError) e;
+				throw_local_error (e);
 			}
 
 			return client;
 		}
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws InstallationProxyError {
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws InstallationProxyError, IOError {
 			try {
-				var stream = yield lockdown.start_service ("com.apple.mobile.installation_proxy");
+				var stream = yield lockdown.start_service ("com.apple.mobile.installation_proxy", cancellable);
 
 				service = new PlistServiceClient (stream);
 			} catch (LockdownError e) {
-				throw new InstallationProxyError.FAILED ("%s", e.message);
+				throw new InstallationProxyError.PROTOCOL ("%s", e.message);
 			}
 
 			return true;
 		}
 
-		public async void close () {
-			yield service.close ();
+		public async void close (Cancellable? cancellable = null) throws IOError {
+			yield service.close (cancellable);
 		}
 
-		public async Gee.ArrayList<ApplicationDetails> browse () throws InstallationProxyError {
+		public async Gee.ArrayList<ApplicationDetails> browse (Cancellable? cancellable = null) throws InstallationProxyError, IOError {
 			try {
 				var result = new Gee.ArrayList<ApplicationDetails> ();
 
-				var request = create_request ("Browse");
+				var request = make_request ("Browse");
 
-				request.set_dict ("ClientOptions", create_client_options ());
+				request.set_dict ("ClientOptions", make_client_options ());
 
-				var reader = yield service.begin_query (request);
+				var reader = yield service.begin_query (request, cancellable);
 				string status = "";
 				do {
-					var response = yield reader.read ();
+					var response = yield reader.read (cancellable);
 
 					status = response.get_string ("Status");
 					if (status == "BrowsingApplications") {
@@ -70,23 +69,23 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async Gee.HashMap<string, ApplicationDetails> lookup (string[] identifiers) throws InstallationProxyError {
+		public async Gee.HashMap<string, ApplicationDetails> lookup (string[] identifiers, Cancellable? cancellable = null) throws InstallationProxyError, IOError {
 			try {
 				var result = new Gee.HashMap<string, ApplicationDetails> ();
 
-				var request = create_request ("Lookup");
+				var request = make_request ("Lookup");
 
-				var options = create_client_options ();
+				var options = make_client_options ();
 				request.set_dict ("ClientOptions", options);
 				var ids = new PlistArray ();
 				options.set_array ("BundleIDs", ids);
 				foreach (var bundle_id in identifiers)
 					ids.add_string (bundle_id);
 
-				var reader = yield service.begin_query (request);
+				var reader = yield service.begin_query (request, cancellable);
 				string status = "";
 				do {
-					var response = yield reader.read ();
+					var response = yield reader.read (cancellable);
 
 					var result_dict = response.get_dict ("LookupResult");
 					foreach (var identifier in result_dict.keys)
@@ -103,18 +102,18 @@ namespace Frida.Fruity {
 			}
 		}
 
-		public async ApplicationDetails? lookup_one (string identifier) throws InstallationProxyError {
-			var matches = yield lookup ({ identifier });
+		public async ApplicationDetails? lookup_one (string identifier, Cancellable? cancellable = null) throws InstallationProxyError, IOError {
+			var matches = yield lookup ({ identifier }, cancellable);
 			return matches[identifier];
 		}
 
-		private static Plist create_request (string command) {
+		private static Plist make_request (string command) {
 			var request = new Plist ();
 			request.set_string ("Command", command);
 			return request;
 		}
 
-		private static PlistDict create_client_options () {
+		private static PlistDict make_client_options () {
 			var options = new PlistDict ();
 
 			var attributes = new PlistArray ();
@@ -144,10 +143,18 @@ namespace Frida.Fruity {
 			return new ApplicationDetails (identifier, name, path, container, debuggable);
 		}
 
+		private static void throw_local_error (GLib.Error e) throws InstallationProxyError, IOError {
+			if (e is InstallationProxyError)
+				throw (InstallationProxyError) e;
+
+			if (e is IOError)
+				throw (IOError) e;
+
+			assert_not_reached ();
+		}
+
 		private static InstallationProxyError error_from_service (PlistServiceError e) {
-			if (e is PlistServiceError.CONNECTION_CLOSED)
-				return new InstallationProxyError.CONNECTION_CLOSED ("%s", e.message);
-			return new InstallationProxyError.FAILED ("%s", e.message);
+			return new InstallationProxyError.PROTOCOL ("%s", e.message);
 		}
 
 		private static InstallationProxyError error_from_plist (PlistError e) {
@@ -156,8 +163,6 @@ namespace Frida.Fruity {
 	}
 
 	public errordomain InstallationProxyError {
-		FAILED,
-		CONNECTION_CLOSED,
 		PROTOCOL
 	}
 

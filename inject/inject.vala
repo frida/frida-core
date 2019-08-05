@@ -4,9 +4,9 @@ namespace Frida.Inject {
 	private static int target_pid = -1;
 	private static string? target_name;
 	private static string? script_path;
+	private static string? script_runtime_str;
 	private static string? parameters_str;
 	private static bool eternalize;
-	private static bool enable_jit;
 	private static bool enable_development;
 	private static bool output_version;
 
@@ -14,9 +14,9 @@ namespace Frida.Inject {
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, null, "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, null, "PID" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
-		{ "parameters",  'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
+		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "duk|v8" },
+		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
-		{ "enable-jit", 0, 0, OptionArg.NONE, ref enable_jit, "Enable the JIT runtime", null },
 		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ null }
@@ -61,12 +61,23 @@ namespace Frida.Inject {
 			script_source = read_stdin ();
 		}
 
+		ScriptRuntime script_runtime = DEFAULT;
+		if (script_runtime_str != null) {
+			var klass = (EnumClass) typeof (ScriptRuntime).class_ref ();
+			var v = klass.get_value_by_nick (script_runtime_str);
+			if (v == null) {
+				printerr ("Invalid script runtime\n");
+				return 4;
+			}
+			script_runtime = (ScriptRuntime) v.value;
+		}
+
 		var parameters = new Json.Node (Json.NodeType.OBJECT);
 		parameters.set_object (new Json.Object ());
 		if (parameters_str != null) {
 			if (parameters_str == "") {
 				printerr ("Parameters argument must be specified as JSON if present\n");
-				return 4;
+				return 5;
 			}
 
 			try {
@@ -75,11 +86,12 @@ namespace Frida.Inject {
 				parameters.set_object (parser.get_root ().get_object ());
 			} catch (GLib.Error e) {
 				printerr ("Failed to parse parameters argument as JSON: %s\n", e.message);
-				return 5;
+				return 6;
 			}
 		}
 
-		application = new Application (target_pid, target_name, script_path, script_source, parameters, enable_jit, enable_development);
+		application = new Application (target_pid, target_name, script_path, script_source, script_runtime, parameters,
+			enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -130,12 +142,12 @@ namespace Frida.Inject {
 			construct;
 		}
 
-		public Json.Node parameters {
+		public ScriptRuntime script_runtime {
 			get;
 			construct;
 		}
 
-		public bool enable_jit {
+		public Json.Node parameters {
 			get;
 			construct;
 		}
@@ -147,19 +159,21 @@ namespace Frida.Inject {
 
 		private DeviceManager device_manager;
 		private ScriptRunner script_runner;
+		private Cancellable io_cancellable = new Cancellable ();
+		private Cancellable stop_cancellable;
 
 		private int exit_code;
 		private MainLoop loop;
-		private bool stopping;
 
-		public Application (int target_pid, string? target_name, string? script_path, string? script_source, Json.Node parameters, bool enable_jit, bool enable_development) {
+		public Application (int target_pid, string? target_name, string? script_path, string? script_source,
+				ScriptRuntime script_runtime, Json.Node parameters, bool enable_development) {
 			Object (
 				target_pid: target_pid,
 				target_name: target_name,
 				script_path: script_path,
 				script_source: script_source,
+				script_runtime: script_runtime,
 				parameters: parameters,
-				enable_jit: enable_jit,
 				enable_development: enable_development
 			);
 		}
@@ -182,25 +196,26 @@ namespace Frida.Inject {
 			device_manager = new DeviceManager ();
 
 			try {
-				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
+				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL, 0, io_cancellable);
 
 				uint pid;
 				if (target_name != null) {
-					var proc = yield device.get_process_by_name (target_name);
+					var proc = yield device.get_process_by_name (target_name, 0, io_cancellable);
 					pid = proc.pid;
 				} else {
 					pid = (uint) target_pid;
 				}
 
-				var session = yield device.attach (pid);
+				var session = yield device.attach (pid, io_cancellable);
 
-				var r = new ScriptRunner (session, script_path, script_source, parameters, enable_jit, enable_development);
+				var r = new ScriptRunner (session, script_path, script_source, script_runtime, parameters,
+					enable_development, io_cancellable);
 				yield r.start ();
 				script_runner = r;
 
 				if (eternalize)
 					stop.begin ();
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("%s\n", e.message);
 				exit_code = 4;
 				stop.begin ();
@@ -216,17 +231,25 @@ namespace Frida.Inject {
 		}
 
 		private async void stop () {
-			if (stopping)
+			if (stop_cancellable != null) {
+				stop_cancellable.cancel ();
 				return;
-			stopping = true;
-
-			if (script_runner != null) {
-				yield script_runner.stop ();
-				script_runner = null;
 			}
+			stop_cancellable = new Cancellable ();
 
-			yield device_manager.close ();
-			device_manager = null;
+			io_cancellable.cancel ();
+
+			try {
+				if (script_runner != null) {
+					yield script_runner.stop (stop_cancellable);
+					script_runner = null;
+				}
+
+				yield device_manager.close (stop_cancellable);
+				device_manager = null;
+			} catch (IOError e) {
+				assert (e is IOError.CANCELLED);
+			}
 
 			Idle.add (() => {
 				loop.quit ();
@@ -239,6 +262,7 @@ namespace Frida.Inject {
 		private Script script;
 		private string? script_path;
 		private string? script_source;
+		private ScriptRuntime script_runtime;
 		private Json.Node parameters;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
@@ -246,23 +270,24 @@ namespace Frida.Inject {
 		private Session session;
 		private bool load_in_progress = false;
 		private bool enable_development = false;
+		private Cancellable io_cancellable;
 
-		public ScriptRunner (Session session, string? script_path, string? script_source, Json.Node parameters, bool enable_jit, bool enable_development) {
+		public ScriptRunner (Session session, string? script_path, string? script_source, ScriptRuntime script_runtime,
+				Json.Node parameters, bool enable_development, Cancellable io_cancellable) {
 			this.session = session;
 			this.script_path = script_path;
 			this.script_source = script_source;
+			this.script_runtime = script_runtime;
 			this.parameters = parameters;
 			this.enable_development = enable_development;
-
-			if (enable_jit)
-				session.enable_jit.begin ();
+			this.io_cancellable = io_cancellable;
 		}
 
 		construct {
 			rpc_client = new RpcClient (this);
 		}
 
-		public async void start () throws Error {
+		public async void start () throws Error, IOError {
 			yield load ();
 
 			if (enable_development && script_path != null) {
@@ -275,17 +300,17 @@ namespace Frida.Inject {
 			}
 		}
 
-		public async void flush () {
+		public async void flush (Cancellable? cancellable) throws IOError {
 			if (script != null && !eternalize) {
 				try {
-					yield rpc_client.call ("dispose", new Json.Node[] {});
+					yield rpc_client.call ("dispose", new Json.Node[] {}, cancellable);
 				} catch (Error e) {
 				}
 			}
 		}
 
-		public async void stop () {
-			yield flush ();
+		public async void stop (Cancellable? cancellable) throws IOError {
+			yield flush (cancellable);
 
 			if (script_monitor != null) {
 				script_monitor.changed.disconnect (on_script_file_changed);
@@ -293,18 +318,18 @@ namespace Frida.Inject {
 				script_monitor = null;
 			}
 
-			yield session.detach ();
+			yield session.detach (cancellable);
 		}
 
 		private async void try_reload () {
 			try {
 				yield load ();
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("Failed to reload script: %s\n", e.message);
 			}
 		}
 
-		private async void load () throws Error {
+		private async void load () throws Error, IOError {
 			load_in_progress = true;
 
 			try {
@@ -316,7 +341,7 @@ namespace Frida.Inject {
 					try {
 						FileUtils.get_contents (script_path, out source);
 					} catch (FileError e) {
-						throw new Error.INVALID_ARGUMENT (e.message);
+						throw new Error.INVALID_ARGUMENT ("%s", e.message);
 					}
 
 					options.name = Path.get_basename (script_path).split (".", 2)[0];
@@ -326,26 +351,28 @@ namespace Frida.Inject {
 					options.name = "frida";
 				}
 
-				var s = yield session.create_script (source, options);
+				options.runtime = script_runtime;
+
+				var s = yield session.create_script (source, options, io_cancellable);
 
 				if (script != null) {
 					try {
-						yield rpc_client.call ("dispose", new Json.Node[] {});
-					} catch (Error e) {
+						yield rpc_client.call ("dispose", new Json.Node[] {}, io_cancellable);
+					} catch (GLib.Error e) {
 					}
 
-					yield script.unload ();
+					yield script.unload (io_cancellable);
 					script = null;
 				}
 				script = s;
 
 				script.message.connect (on_message);
-				yield script.load ();
+				yield script.load (io_cancellable);
 
 				yield call_init ();
 
 				if (eternalize)
-					yield script.eternalize ();
+					yield script.eternalize (io_cancellable);
 			} finally {
 				load_in_progress = false;
 			}
@@ -356,8 +383,8 @@ namespace Frida.Inject {
 			stage.set_string ("early");
 
 			try {
-				yield rpc_client.call ("init", new Json.Node[] { stage, parameters });
-			} catch (Error e) {
+				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, io_cancellable);
+			} catch (GLib.Error e) {
 			}
 		}
 
@@ -421,8 +448,8 @@ namespace Frida.Inject {
 			return true;
 		}
 
-		private async void post_rpc_message (string raw_message) throws Error {
-			yield script.post (raw_message);
+		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
+			yield script.post (raw_message, null, cancellable);
 		}
 	}
 }

@@ -109,7 +109,7 @@ namespace Frida {
 				else
 					script = yield backend.create_from_bytes (bytes);
 			} catch (IOError e) {
-				throw new Error.INVALID_ARGUMENT (e.message);
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 			script.get_stalker ().exclude (invader.get_memory_range ());
 
@@ -139,7 +139,7 @@ namespace Frida {
 			try {
 				return yield backend.compile (name, source);
 			} catch (IOError e) {
-				throw new Error.INVALID_ARGUMENT (e.message);
+				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 		}
 
@@ -267,10 +267,10 @@ namespace Frida {
 				DESTROYED
 			}
 
-			private Gee.Promise<bool> load_request;
-			private Gee.Promise<bool> close_request;
-			private Gee.Promise<bool> dispose_request;
-			private Gee.Promise<bool> flush_complete = new Gee.Promise<bool> ();
+			private Promise<bool> load_request;
+			private Promise<bool> close_request;
+			private Promise<bool> dispose_request;
+			private Promise<bool> flush_complete = new Promise<bool> ();
 
 			private RpcClient rpc_client;
 
@@ -285,13 +285,13 @@ namespace Frida {
 			public async void close () {
 				if (close_request != null) {
 					try {
-						yield close_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
+						yield close_request.future.wait_async (null);
+					} catch (GLib.Error e) {
 						assert_not_reached ();
 					}
 					return;
 				}
-				close_request = new Gee.Promise<bool> ();
+				close_request = new Promise<bool> ();
 
 				var main_context = MainContext.get_thread_default ();
 
@@ -313,17 +313,17 @@ namespace Frida {
 					js_source.attach (Gum.ScriptBackend.get_scheduler ().get_js_context ());
 					yield;
 
-					flush_complete.set_value (true);
+					flush_complete.resolve (true);
 
 					try {
-						yield unload_operation.future.wait_async ();
-					} catch (Gee.FutureError e) {
+						yield unload_operation.future.wait_async (null);
+					} catch (GLib.Error e) {
 						assert_not_reached ();
 					}
 
 					state = UNLOADED;
 				} else {
-					flush_complete.set_value (true);
+					flush_complete.resolve (true);
 				}
 
 				script.weak_ref (() => {
@@ -341,7 +341,7 @@ namespace Frida {
 
 				closed ();
 
-				close_request.set_value (true);
+				close_request.resolve (true);
 			}
 
 			public async void flush () {
@@ -349,8 +349,8 @@ namespace Frida {
 					close.begin ();
 
 				try {
-					yield flush_complete.future.wait_async ();
-				} catch (Gee.FutureError e) {
+					yield flush_complete.future.wait_async (null);
+				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
 			}
@@ -359,27 +359,27 @@ namespace Frida {
 				if (state != CREATED)
 					throw new Error.INVALID_OPERATION ("Script cannot be loaded in its current state");
 
-				load_request = new Gee.Promise<bool> ();
+				load_request = new Promise<bool> ();
 				state = LOADING;
 
 				yield script.load ();
 
 				state = LOADED;
-				load_request.set_value (true);
+				load_request.resolve (true);
 			}
 
-			private Gee.Promise<bool> unload () {
-				var request = new Gee.Promise<bool> ();
+			private Promise<bool> unload () {
+				var request = new Promise<bool> ();
 
 				perform_unload.begin (request);
 
 				return request;
 			}
 
-			private async void perform_unload (Gee.Promise<bool> request) {
+			private async void perform_unload (Promise<bool> request) {
 				yield script.unload ();
 
-				request.set_value (true);
+				request.resolve (true);
 			}
 
 			public Gum.Script eternalize () throws Error {
@@ -403,32 +403,32 @@ namespace Frida {
 			private async void ensure_dispose_called () {
 				if (dispose_request != null) {
 					try {
-						yield dispose_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
+						yield dispose_request.future.wait_async (null);
+					} catch (GLib.Error e) {
 						assert_not_reached ();
 					}
 					return;
 				}
-				dispose_request = new Gee.Promise<bool> ();
+				dispose_request = new Promise<bool> ();
 
 				if (state == LOADING) {
 					try {
-						yield load_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
+						yield load_request.future.wait_async (null);
+					} catch (GLib.Error e) {
 						assert_not_reached ();
 					}
 				}
 
 				if (state == LOADED) {
 					try {
-						yield rpc_client.call ("dispose", new Json.Node[] {});
-					} catch (Error e) {
+						yield rpc_client.call ("dispose", new Json.Node[] {}, null);
+					} catch (GLib.Error e) {
 					}
 
 					state = DISPOSED;
 				}
 
-				dispose_request.set_value (true);
+				dispose_request.resolve (true);
 			}
 
 			public void post (string message, Bytes? data) throws Error {
@@ -444,7 +444,7 @@ namespace Frida {
 					this.message (raw_message, data);
 			}
 
-			private async void post_rpc_message (string raw_message) throws Error {
+			private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
 				if (script == null)
 					throw new Error.INVALID_OPERATION ("Script is destroyed");
 

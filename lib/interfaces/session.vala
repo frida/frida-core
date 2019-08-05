@@ -1,21 +1,23 @@
 namespace Frida {
 	[DBus (name = "re.frida.HostSession12")]
 	public interface HostSession : Object {
-		public abstract async HostApplicationInfo get_frontmost_application () throws GLib.Error;
-		public abstract async HostApplicationInfo[] enumerate_applications () throws GLib.Error;
-		public abstract async HostProcessInfo[] enumerate_processes () throws GLib.Error;
+		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void enable_spawn_gating () throws GLib.Error;
-		public abstract async void disable_spawn_gating () throws GLib.Error;
-		public abstract async HostSpawnInfo[] enumerate_pending_spawn () throws GLib.Error;
-		public abstract async HostChildInfo[] enumerate_pending_children () throws GLib.Error;
-		public abstract async uint spawn (string program, HostSpawnOptions options) throws GLib.Error;
-		public abstract async void input (uint pid, uint8[] data) throws GLib.Error;
-		public abstract async void resume (uint pid) throws GLib.Error;
-		public abstract async void kill (uint pid) throws GLib.Error;
-		public abstract async AgentSessionId attach_to (uint pid) throws GLib.Error;
-		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws GLib.Error;
-		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws GLib.Error;
+		public abstract async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws GLib.Error;
+		public abstract async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
+			Cancellable? cancellable) throws GLib.Error;
 
 		public signal void spawn_added (HostSpawnInfo info);
 		public signal void spawn_removed (HostSpawnInfo info);
@@ -30,8 +32,8 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentSessionProvider12")]
 	public interface AgentSessionProvider : Object {
-		public abstract async void open (AgentSessionId id) throws GLib.Error;
-		public abstract async void unload () throws GLib.Error;
+		public abstract async void open (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void unload (Cancellable? cancellable) throws GLib.Error;
 
 		public signal void opened (AgentSessionId id);
 		public signal void closed (AgentSessionId id);
@@ -40,43 +42,50 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentSession12")]
 	public interface AgentSession : Object {
-		public abstract async void close () throws GLib.Error;
+		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void enable_child_gating () throws GLib.Error;
-		public abstract async void disable_child_gating () throws GLib.Error;
+		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async AgentScriptId create_script (string name, string source) throws GLib.Error;
-		public abstract async AgentScriptId create_script_with_options (string source, AgentScriptOptions options) throws GLib.Error;
-		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes) throws GLib.Error;
-		public abstract async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options) throws GLib.Error;
-		public abstract async uint8[] compile_script (string name, string source) throws GLib.Error;
-		public abstract async uint8[] compile_script_with_options (string source, AgentScriptOptions options) throws GLib.Error;
-		public abstract async void destroy_script (AgentScriptId script_id) throws GLib.Error;
-		public abstract async void load_script (AgentScriptId script_id) throws GLib.Error;
-		public abstract async void eternalize_script (AgentScriptId script_id) throws GLib.Error;
-		public abstract async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) throws GLib.Error;
+		public abstract async AgentScriptId create_script (string name, string source, Cancellable? cancellable) throws GLib.Error;
+		public abstract async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable) throws GLib.Error;
+		public abstract async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws GLib.Error;
+		public abstract async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
+			Cancellable? cancellable) throws GLib.Error;
 		public signal void message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data);
 
-		public abstract async void enable_debugger () throws GLib.Error;
-		public abstract async void disable_debugger () throws GLib.Error;
-		public abstract async void post_message_to_debugger (string message) throws GLib.Error;
+		public abstract async void enable_debugger (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_message_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
 		public signal void message_from_debugger (string message);
 
-		public abstract async void enable_jit () throws GLib.Error;
+		public abstract async void enable_jit (Cancellable? cancellable) throws GLib.Error;
 	}
 
 	[DBus (name = "re.frida.AgentController12")]
 	public interface AgentController : Object {
 #if !WINDOWS
-		public abstract async HostChildId prepare_to_fork (uint parent_pid, out uint parent_injectee_id, out uint child_injectee_id, out GLib.Socket child_socket) throws GLib.Error;
+		public abstract async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
+			out uint child_injectee_id, out GLib.Socket child_socket) throws GLib.Error;
 #endif
-		public abstract async void recreate_agent_thread (uint pid, uint injectee_id) throws GLib.Error;
-		public abstract async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info) throws GLib.Error;
+		public abstract async void recreate_agent_thread (uint pid, uint injectee_id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void wait_for_permission_to_resume (HostChildId id, HostChildInfo info,
+			Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void prepare_to_exec (HostChildInfo info) throws GLib.Error;
-		public abstract async void cancel_exec (uint pid) throws GLib.Error;
+		public abstract async void prepare_to_exec (HostChildInfo info, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void cancel_exec (uint pid, Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state) throws GLib.Error;
+		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state,
+			Cancellable? cancellable) throws GLib.Error;
 	}
 
 	public enum SpawnStartState {
@@ -127,29 +136,34 @@ namespace Frida {
 		TRANSPORT
 	}
 
-	namespace Marshal {
-		public static Frida.Error from_dbus (GLib.Error e) {
-			DBusError.strip_remote_error (e);
-			if (e is Frida.Error) {
-				return (Frida.Error) e;
-			} else if (e is DBusError.UNKNOWN_METHOD) {
-				return new Frida.Error.PROTOCOL ("Unable to communicate with remote frida-server; " +
-					"please ensure that major versions match and that the remote Frida has the feature you are trying to use");
-			} else {
-				return new Frida.Error.TRANSPORT (e.message);
-			}
+	[NoReturn]
+	public static void throw_api_error (GLib.Error e) throws Frida.Error, IOError {
+		if (e is Frida.Error)
+			throw (Frida.Error) e;
+
+		if (e is IOError.CANCELLED)
+			throw (IOError) e;
+
+		assert_not_reached ();
+	}
+
+	[NoReturn]
+	public static void throw_dbus_error (GLib.Error e) throws Frida.Error, IOError {
+		DBusError.strip_remote_error (e);
+
+		if (e is Frida.Error)
+			throw (Frida.Error) e;
+
+		if (e is IOError.CANCELLED)
+			throw (IOError) e;
+
+		if (e is DBusError.UNKNOWN_METHOD) {
+			throw new Frida.Error.PROTOCOL ("Unable to communicate with remote frida-server; " +
+				"please ensure that major versions match and that the remote Frida has the " +
+				"feature you are trying to use");
 		}
 
-		public static void throw_if_cancelled (Cancellable? cancellable) throws Error {
-			if (cancellable == null)
-				return;
-
-			try {
-				cancellable.set_error_if_cancelled ();
-			} catch (IOError e) {
-				throw new Error.INVALID_OPERATION (e.message);
-			}
-		}
+		throw new Frida.Error.TRANSPORT ("%s", e.message);
 	}
 
 	public struct HostApplicationInfo {
@@ -645,6 +659,147 @@ namespace Frida {
 		}
 	}
 
+	public class Promise<T> {
+		private Impl<T> impl;
+
+		public Future<T> future {
+			get {
+				return impl;
+			}
+		}
+
+		public Promise () {
+			impl = new Impl<T> ();
+		}
+
+		~Promise () {
+			impl.abandon ();
+		}
+
+		public void resolve (T result) {
+			impl.resolve (result);
+		}
+
+		public void reject (GLib.Error error) {
+			impl.reject (error);
+		}
+
+		private class Impl<T> : Object, Future<T> {
+			public bool ready {
+				get {
+					return _ready;
+				}
+			}
+			private bool _ready = false;
+
+			public T? value {
+				get {
+					return _value;
+				}
+			}
+			private T? _value;
+
+			public GLib.Error? error {
+				get {
+					return _error;
+				}
+			}
+			private GLib.Error? _error;
+
+			private Gee.ArrayList<CompletionFuncEntry> on_complete;
+
+			public async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError {
+				if (_ready)
+					return get_result ();
+
+				var entry = new CompletionFuncEntry (wait_async.callback);
+				if (on_complete == null)
+					on_complete = new Gee.ArrayList<CompletionFuncEntry> ();
+				on_complete.add (entry);
+
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (() => {
+					on_complete.remove (entry);
+					wait_async.callback ();
+					return false;
+				});
+				cancel_source.attach (MainContext.get_thread_default ());
+
+				yield;
+
+				cancel_source.destroy ();
+
+				cancellable.set_error_if_cancelled ();
+
+				return get_result ();
+			}
+
+			private T get_result () throws Frida.Error, IOError {
+				if (error != null) {
+					if (error is Frida.Error)
+						throw (Frida.Error) error;
+
+					if (error is IOError.CANCELLED)
+						throw (IOError) error;
+
+					throw new Frida.Error.TRANSPORT ("%s", error.message);
+				}
+
+				return _value;
+			}
+
+			internal void resolve (T value) {
+				assert (!_ready);
+
+				_value = value;
+				transition_to_ready ();
+			}
+
+			internal void reject (GLib.Error error) {
+				assert (!_ready);
+
+				_error = error;
+				transition_to_ready ();
+			}
+
+			internal void abandon () {
+				if (!_ready) {
+					reject (new Frida.Error.INVALID_OPERATION ("Promise abandoned"));
+				}
+			}
+
+			internal void transition_to_ready () {
+				_ready = true;
+
+				var entries = (owned) on_complete;
+				if (entries != null) {
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						foreach (var entry in entries)
+							entry.func ();
+						return false;
+					});
+					source.attach (MainContext.get_thread_default ());
+				}
+			}
+		}
+
+		private class CompletionFuncEntry {
+			public SourceFunc func;
+
+			public CompletionFuncEntry (owned SourceFunc func) {
+				this.func = (owned) func;
+			}
+		}
+	}
+
+	public interface Future<T> : Object {
+		public abstract bool ready { get; }
+		public abstract T? value { get; }
+		public abstract GLib.Error? error { get; }
+		public abstract async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError;
+	}
+
 	public class RpcClient : Object {
 		public weak RpcPeer peer {
 			get;
@@ -657,7 +812,7 @@ namespace Frida {
 			Object (peer: peer);
 		}
 
-		public async Json.Node call (string method, Json.Node[] args) throws Error {
+		public async Json.Node call (string method, Json.Node[] args, Cancellable? cancellable) throws Error, IOError {
 			string request_id = Uuid.string_random ();
 
 			var request = new Json.Builder ();
@@ -675,22 +830,40 @@ namespace Frida {
 				.end_array ();
 			string raw_request = Json.to_string (request.get_root (), false);
 
-			var response = new PendingResponse (() => call.callback ());
-			pending_responses[request_id] = response;
+			var pending = new PendingResponse (() => call.callback ());
+			pending_responses[request_id] = pending;
 
 			try {
-				yield peer.post_rpc_message (raw_request);
+				yield peer.post_rpc_message (raw_request, cancellable);
 			} catch (Error e) {
 				pending_responses.unset (request_id);
-				throw e;
+				pending.complete_with_error (e);
 			}
 
-			yield;
+			if (!pending.completed) {
+				ulong cancel_handler = 0;
+				if (cancellable != null) {
+					var main_context = MainContext.get_thread_default ();
+					cancel_handler = cancellable.connect (() => {
+						var source = new IdleSource ();
+						source.set_callback (() => {
+							pending.complete_with_error (new IOError.CANCELLED ("Cancelled"));
+							return false;
+						});
+						source.attach (main_context);
+					});
+				}
 
-			if (response.error != null)
-				throw response.error;
+				yield;
 
-			return response.result;
+				if (cancellable != null)
+					cancellable.disconnect (cancel_handler);
+			}
+
+			if (pending.error != null)
+				throw_api_error (pending.error);
+
+			return pending.result;
 		}
 
 		public bool try_handle_message (string raw_message) {
@@ -748,12 +921,18 @@ namespace Frida {
 			public delegate void CompletionHandler ();
 			private CompletionHandler handler;
 
+			public bool completed {
+				get {
+					return result != null || error != null;
+				}
+			}
+
 			public Json.Node? result {
 				get;
 				private set;
 			}
 
-			public Error? error {
+			public GLib.Error? error {
 				get;
 				private set;
 			}
@@ -762,20 +941,26 @@ namespace Frida {
 				this.handler = (owned) handler;
 			}
 
-			public void complete_with_result (Json.Node r) {
-				result = r;
+			public void complete_with_result (Json.Node result) {
+				if (handler == null)
+					return;
+				this.result = result;
 				handler ();
+				handler = null;
 			}
 
-			public void complete_with_error (Error e) {
-				error = e;
+			public void complete_with_error (GLib.Error error) {
+				if (handler == null)
+					return;
+				this.error = error;
 				handler ();
+				handler = null;
 			}
 		}
 	}
 
 	public interface RpcPeer : Object {
-		public abstract async void post_rpc_message (string raw_message) throws Error;
+		public abstract async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError;
 	}
 
 	namespace ServerGuid {

@@ -657,15 +657,19 @@ namespace Frida.Gadget {
 				case DUK:
 					if (duk_backend == null) {
 						duk_backend = Gum.ScriptBackend.obtain_duk ();
-						if (duk_backend == null)
-							throw new Error.NOT_SUPPORTED ("Duktape runtime not available due to build configuration");
+						if (duk_backend == null) {
+							throw new Error.NOT_SUPPORTED (
+								"Duktape runtime not available due to build configuration");
+						}
 					}
 					return duk_backend;
 				case V8:
 					if (v8_backend == null) {
 						v8_backend = Gum.ScriptBackend.obtain_v8 ();
-						if (v8_backend == null)
-							throw new Error.NOT_SUPPORTED ("V8 runtime not available due to build configuration");
+						if (v8_backend == null) {
+							throw new Error.NOT_SUPPORTED (
+								"V8 runtime not available due to build configuration");
+						}
 					}
 					return v8_backend;
 			}
@@ -823,7 +827,8 @@ namespace Frida.Gadget {
 							var parameters = config.parameters;
 							var on_change = config.on_change;
 
-							if (script != null && (!script.parameters.equal (parameters) || script.on_change != on_change)) {
+							if (script != null && (!script.parameters.equal (parameters) ||
+									script.on_change != on_change)) {
 								yield script.stop ();
 								script = null;
 							}
@@ -1058,7 +1063,7 @@ namespace Frida.Gadget {
 				try {
 					FileUtils.get_data (path, out contents);
 				} catch (FileError e) {
-					throw new Error.INVALID_ARGUMENT (e.message);
+					throw new Error.INVALID_ARGUMENT ("%s", e.message);
 				}
 
 				var options = new ScriptOptions ();
@@ -1089,15 +1094,15 @@ namespace Frida.Gadget {
 			stage.set_string ((peek_state () == State.CREATED) ? "early" : "late");
 
 			try {
-				yield rpc_client.call ("init", new Json.Node[] { stage, parameters });
-			} catch (Error e) {
+				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, null);
+			} catch (GLib.Error e) {
 			}
 		}
 
 		private async void call_dispose () {
 			try {
-				yield rpc_client.call ("dispose", new Json.Node[] {});
-			} catch (Error e) {
+				yield rpc_client.call ("dispose", new Json.Node[] {}, null);
+			} catch (GLib.Error e) {
 			}
 		}
 
@@ -1164,7 +1169,7 @@ namespace Frida.Gadget {
 			return true;
 		}
 
-		private async void post_rpc_message (string raw_message) throws Error {
+		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
 			engine.post_to_script (id, raw_message);
 		}
 	}
@@ -1214,9 +1219,10 @@ namespace Frida.Gadget {
 
 		protected override async void on_start () throws Error {
 			try {
-				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS,
+					DBus.generate_guid ());
 			} catch (GLib.Error listen_error) {
-				throw new Error.ADDRESS_IN_USE (listen_error.message);
+				throw new Error.ADDRESS_IN_USE ("%s", listen_error.message);
 			}
 
 			server.new_connection.connect ((connection) => {
@@ -1303,7 +1309,8 @@ namespace Frida.Gadget {
 				connection = c;
 
 				try {
-					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION, this as HostSession);
+					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION,
+						this as HostSession);
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
@@ -1319,7 +1326,7 @@ namespace Frida.Gadget {
 			public async void shutdown () {
 				foreach (var session in sessions.to_array ()) {
 					try {
-						yield session.close ();
+						yield session.close (null);
 					} catch (GLib.Error e) {
 						assert_not_reached ();
 					}
@@ -1337,35 +1344,35 @@ namespace Frida.Gadget {
 					yield session.prepare_for_termination ();
 			}
 
-			public async HostApplicationInfo get_frontmost_application () throws Error {
+			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 				return this_app;
 			}
 
-			public async HostApplicationInfo[] enumerate_applications () throws Error {
+			public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
 				return new HostApplicationInfo[] { this_app };
 			}
 
-			public async HostProcessInfo[] enumerate_processes () throws Error {
+			public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
 				return new HostProcessInfo[] { this_process };
 			}
 
-			public async void enable_spawn_gating () throws Error {
+			public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
-			public async void disable_spawn_gating () throws Error {
+			public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
-			public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+			public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
-			public async HostChildInfo[] enumerate_pending_children () throws Error {
+			public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not yet implemented");
 			}
 
-			public async uint spawn (string program, HostSpawnOptions options) throws Error {
+			public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 				if (program != this_app.identifier)
 					throw new Error.NOT_SUPPORTED ("Unable to spawn other apps when embedded");
 
@@ -1374,23 +1381,23 @@ namespace Frida.Gadget {
 				return this_process.pid;
 			}
 
-			public async void input (uint pid, uint8[] data) throws Error {
+			public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not possible when embedded");
 			}
 
-			public async void resume (uint pid) throws Error {
+			public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
 				Frida.Gadget.resume ();
 			}
 
-			public async void kill (uint pid) throws Error {
+			public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
 				_kill (this_process.pid);
 			}
 
-			public async AgentSessionId attach_to (uint pid) throws Error {
+			public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
 				if (resume_on_attach)
@@ -1413,11 +1420,13 @@ namespace Frida.Gadget {
 				return id;
 			}
 
-			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
+					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");
 			}
 
-			public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
+			public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
+					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");
 			}
 
@@ -1428,7 +1437,7 @@ namespace Frida.Gadget {
 				session.closed.disconnect (on_session_closed);
 				sessions.remove (session);
 
-				agent_session_destroyed (session.id, SessionDetachReason.APPLICATION_REQUESTED);
+				agent_session_destroyed (session.id, APPLICATION_REQUESTED);
 			}
 
 			private void on_script_eternalized (Gum.Script script) {
@@ -1460,7 +1469,7 @@ namespace Frida.Gadget {
 				set;
 			}
 
-			private Gee.Promise<bool> close_request;
+			private Promise<bool> close_request;
 
 			private ScriptEngine script_engine;
 
@@ -1474,16 +1483,17 @@ namespace Frida.Gadget {
 				script_engine.message_from_debugger.connect (on_message_from_debugger);
 			}
 
-			public async void close () throws Error {
-				if (close_request != null) {
+			public async void close (Cancellable? cancellable) throws IOError {
+				while (close_request != null) {
 					try {
-						yield close_request.future.wait_async ();
-					} catch (Gee.FutureError e) {
-						assert_not_reached ();
+						yield close_request.future.wait_async (cancellable);
+						return;
+					} catch (GLib.Error e) {
+						assert (e is IOError.CANCELLED);
+						cancellable.set_error_if_cancelled ();
 					}
-					return;
 				}
-				close_request = new Gee.Promise<bool> ();
+				close_request = new Promise<bool> ();
 
 				yield script_engine.close ();
 				script_engine.message_from_script.disconnect (on_message_from_script);
@@ -1491,24 +1501,25 @@ namespace Frida.Gadget {
 
 				closed ();
 
-				close_request.set_value (true);
+				close_request.resolve (true);
 			}
 
 			public async void prepare_for_termination () {
 				yield script_engine.prepare_for_termination ();
 			}
 
-			public async void enable_child_gating () throws Error {
+			public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				throw new Error.NOT_SUPPORTED ("Not yet implemented");
 			}
 
-			public async void disable_child_gating () throws Error {
+			public async void disable_child_gating (Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not yet implemented");
 			}
 
-			public async AgentScriptId create_script (string name, string source) throws Error {
+			public async AgentScriptId create_script (string name, string source,
+					Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				var options = new ScriptOptions ();
@@ -1519,28 +1530,32 @@ namespace Frida.Gadget {
 				return instance.script_id;
 			}
 
-			public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options) throws Error {
+			public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
+					Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
 				return instance.script_id;
 			}
 
-			public async AgentScriptId create_script_from_bytes (uint8[] bytes) throws Error {
+			public async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable)
+					throws Error, IOError {
 				check_open ();
 
 				var instance = yield script_engine.create_script (null, new Bytes (bytes), new ScriptOptions ());
 				return instance.script_id;
 			}
 
-			public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options) throws Error {
+			public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
+					Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
-				var instance = yield script_engine.create_script (null, new Bytes (bytes), ScriptOptions._deserialize (options.data));
+				var instance = yield script_engine.create_script (null, new Bytes (bytes),
+					ScriptOptions._deserialize (options.data));
 				return instance.script_id;
 			}
 
-			public async uint8[] compile_script (string name, string source) throws Error {
+			public async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				var options = new ScriptOptions ();
@@ -1551,57 +1566,59 @@ namespace Frida.Gadget {
 				return bytes.get_data ();
 			}
 
-			public async uint8[] compile_script_with_options (string source, AgentScriptOptions options) throws Error {
+			public async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
+					Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options.data));
 				return bytes.get_data ();
 			}
 
-			public async void destroy_script (AgentScriptId script_id) throws Error {
+			public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				yield script_engine.destroy_script (script_id);
 			}
 
-			public async void load_script (AgentScriptId script_id) throws Error {
+			public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				yield script_engine.load_script (script_id);
 			}
 
-			public async void eternalize_script (AgentScriptId script_id) throws Error {
+			public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				var script = script_engine.eternalize_script (script_id);
 				script_eternalized (script);
 			}
 
-			public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) throws Error {
+			public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
+					Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				script_engine.post_to_script (script_id, message, has_data ? new Bytes (data) : null);
 			}
 
-			public async void enable_debugger () throws Error {
+			public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				script_engine.enable_debugger ();
 			}
 
-			public async void disable_debugger () throws Error {
+			public async void disable_debugger (Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				script_engine.disable_debugger ();
 			}
 
-			public async void post_message_to_debugger (string message) throws Error {
+			public async void post_message_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				script_engine.post_message_to_debugger (message);
 			}
 
-			public async void enable_jit () throws GLib.Error {
+			public async void enable_jit (Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
 				script_engine.enable_jit ();

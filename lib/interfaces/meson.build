@@ -16,7 +16,7 @@ interfaces = static_library('frida-interfaces', interfaces_sources,
 interfaces_dep = declare_dependency(
   include_directories: include_directories('.'),
   link_with: interfaces,
-  dependencies: [json_glib_dep],
+  dependencies: [json_glib_dep, gum_dep],
 )
 
 interfaces_build_dir = meson.current_build_dir()

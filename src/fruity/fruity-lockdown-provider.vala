@@ -44,12 +44,12 @@ namespace Frida {
 			_id = device_details.udid.raw_value + ":lockdown";
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 		}
 
-		public async HostSession create (string? location = null) throws Error {
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 			try {
-				var lockdown = yield Fruity.LockdownClient.open (device_details);
+				var lockdown = yield Fruity.LockdownClient.open (device_details, cancellable);
 
 				return new FruityLockdownSession (lockdown);
 			} catch (Fruity.LockdownError e) {
@@ -57,13 +57,14 @@ namespace Frida {
 			}
 		}
 
-		public async void destroy (HostSession host_session) throws Error {
+		public async void destroy (HostSession host_session, Cancellable? cancellable) throws Error, IOError {
 			var session = host_session as FruityLockdownSession;
 
-			yield session.close ();
+			yield session.close (cancellable);
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 	}
@@ -80,19 +81,19 @@ namespace Frida {
 			Object (lockdown: lockdown);
 		}
 
-		public async void close () {
-			yield lockdown.close ();
+		public async void close (Cancellable? cancellable) throws IOError {
+			yield lockdown.close (cancellable);
 		}
 
-		public async HostApplicationInfo get_frontmost_application () throws Error {
+		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async HostApplicationInfo[] enumerate_applications () throws Error {
+		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
 			try {
-				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown);
+				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
 
-				var apps = yield installation_proxy.browse ();
+				var apps = yield installation_proxy.browse (cancellable);
 
 				uint no_pid = 0;
 				var no_icon = ImageData (0, 0, 0, "");
@@ -110,27 +111,27 @@ namespace Frida {
 			}
 		}
 
-		public async HostProcessInfo[] enumerate_processes () throws Error {
+		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async void enable_spawn_gating () throws Error {
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async void disable_spawn_gating () throws Error {
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async HostChildInfo[] enumerate_pending_children () throws Error {
+		public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async uint spawn (string program, HostSpawnOptions options) throws Error {
+		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			if (program[0] == '/')
 				throw new Error.NOT_SUPPORTED ("Only able to spawn apps");
 
@@ -149,22 +150,24 @@ namespace Frida {
 
 			if (aux_options.contains ("aslr")) {
 				string? aslr = null;
-				if (!aux_options.lookup ("aslr", "s", out aslr) || (aslr != "auto" && aslr != "disable"))
-					throw new Error.INVALID_ARGUMENT ("The 'aslr' option must be a string set to either 'auto' or 'disable'");
+				if (!aux_options.lookup ("aslr", "s", out aslr) || (aslr != "auto" && aslr != "disable")) {
+					throw new Error.INVALID_ARGUMENT (
+						"The 'aslr' option must be a string set to either 'auto' or 'disable'");
+				}
 				launch_options.aslr = (aslr == "auto") ? Fruity.Aslr.AUTO : Fruity.Aslr.DISABLE;
 			}
 
 			try {
-				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown);
+				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
 
-				var app = yield installation_proxy.lookup_one (program);
+				var app = yield installation_proxy.lookup_one (program, cancellable);
 				if (app == null)
 					throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier '%s'", program);
 
 				if (!app.debuggable)
 					throw new Error.INVALID_ARGUMENT ("Application '%s' is not debuggable", program);
 
-				var lldb = yield Fruity.LLDBClient.open (lockdown);
+				var lldb = yield Fruity.LLDBClient.open (lockdown, cancellable);
 
 				string[] argv = { app.path };
 				if (options.has_argv) {
@@ -174,7 +177,7 @@ namespace Frida {
 						argv += provided_argv[i];
 				}
 
-				var process = yield lldb.launch (argv, launch_options);
+				var process = yield lldb.launch (argv, launch_options, cancellable);
 
 				var pid = process.pid;
 
@@ -191,31 +194,33 @@ namespace Frida {
 			}
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async void resume (uint pid) throws Error {
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var entry = spawn_entries[pid];
 			if (entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 
-			yield entry.resume ();
+			yield entry.resume (cancellable);
 		}
 
-		public async void kill (uint pid) throws Error {
+		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async AgentSessionId attach_to (uint pid) throws Error {
+		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
+		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
-		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data) throws Error {
+		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Not yet implemented");
 		}
 
@@ -261,9 +266,9 @@ namespace Frida {
 				lldb.console_output.disconnect (on_lldb_console_output);
 			}
 
-			public async void resume () throws Error {
+			public async void resume (Cancellable? cancellable) throws Error, IOError {
 				try {
-					yield lldb.continue ();
+					yield lldb.continue (cancellable);
 				} catch (Fruity.LLDBError e) {
 					throw new Error.NOT_SUPPORTED ("%s", e.message);
 				}

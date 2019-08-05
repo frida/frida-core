@@ -104,8 +104,8 @@ _frida_pipe_transport_create_backend (gchar ** local_address, gchar ** remote_ad
 mach_failure:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_SUPPORTED,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while setting up mach ports (%s returned '%s')",
         failed_operation, mach_error_string (kr));
     goto beach;
@@ -113,8 +113,8 @@ mach_failure:
 bsd_failure:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_SUPPORTED,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while setting up mach ports (%s returned '%s')",
         failed_operation, strerror (errno));
     goto beach;
@@ -180,8 +180,8 @@ _frida_darwin_pipe_consume_stashed_file_descriptor (const gchar * address, GErro
 mach_failure:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_SUPPORTED,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while setting up pipe (%s returned '%s')",
         failed_operation, mach_error_string (kr));
     goto beach;
@@ -189,8 +189,8 @@ mach_failure:
 bsd_failure:
   {
     g_set_error (error,
-        G_IO_ERROR,
-        G_IO_ERROR_NOT_SUPPORTED,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while setting up pipe (%s returned '%s')",
         failed_operation, strerror (errno));
     goto beach;

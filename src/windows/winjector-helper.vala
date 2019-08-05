@@ -119,10 +119,10 @@ namespace Winjector {
 					helper64.proxy.uninjected.connect (on_uninjected);
 				}
 
-				var stream_request = Pipe.open (parent_address);
-				var stream = yield stream_request.future.wait_async ();
+				var stream_request = Pipe.open (parent_address, null);
+				var stream = yield stream_request.wait_async (null);
 
-				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
 				WinjectorHelper helper = this;
@@ -136,16 +136,20 @@ namespace Winjector {
 			}
 		}
 
-		public async void stop () throws Frida.Error {
+		public async void stop (Cancellable? cancellable) throws Frida.Error, IOError {
 			if (System.is_x64 ()) {
 				try {
-					yield helper64.proxy.stop ();
+					yield helper64.proxy.stop (cancellable);
 				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
 				}
 			}
 			try {
-				yield helper32.proxy.stop ();
+				yield helper32.proxy.stop (cancellable);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
 			}
 
 			Timeout.add (20, () => {
@@ -154,19 +158,23 @@ namespace Winjector {
 			});
 		}
 
-		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data) throws Frida.Error {
+		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data,
+				Cancellable? cancellable) throws Frida.Error, IOError {
 			try {
-				if (Process.is_x64 (pid))
-					return yield helper64.proxy.inject_library_file (pid, path_template.printf (64), entrypoint, data);
-				else
-					return yield helper32.proxy.inject_library_file (pid, path_template.printf (32), entrypoint, data);
+				if (Process.is_x64 (pid)) {
+					return yield helper64.proxy.inject_library_file (pid, path_template.printf (64), entrypoint, data,
+						cancellable);
+				} else {
+					return yield helper32.proxy.inject_library_file (pid, path_template.printf (32), entrypoint, data,
+						cancellable);
+				}
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			stop.begin ();
+			stop.begin (null);
 		}
 
 		private void on_uninjected (uint id) {
@@ -180,27 +188,27 @@ namespace Winjector {
 			}
 
 			private string name;
-			private Gee.Promise<IOStream> stream_request;
+			private Future<IOStream> stream_request;
 			private DBusConnection connection;
 
 			public HelperService (string name) {
 				this.name = name;
-				this.stream_request = Pipe.open ("pipe:role=server,name=" + name);
+				this.stream_request = Pipe.open ("pipe:role=server,name=" + name, null);
 			}
 
 			public async void start () throws Frida.Error {
 				try {
-					var stream = yield this.stream_request.future.wait_async ();
+					var stream = yield this.stream_request.wait_async (null);
 
-					connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE);
+					connection = yield new DBusConnection (stream, null, NONE);
 				} catch (GLib.Error e) {
-					throw new Frida.Error.PERMISSION_DENIED (e.message);
+					throw new Frida.Error.PERMISSION_DENIED ("%s", e.message);
 				}
 
 				try {
 					proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
 				} catch (IOError e) {
-					throw new Frida.Error.PROTOCOL (e.message);
+					throw new Frida.Error.PROTOCOL ("%s", e.message);
 				}
 			}
 		}
@@ -229,10 +237,10 @@ namespace Winjector {
 
 		private async void start () {
 			try {
-				var stream_request = Pipe.open ("pipe:role=client,name=" + derive_svcname_for_self ());
-				var stream = yield stream_request.future.wait_async ();
+				var stream_request = Pipe.open ("pipe:role=client,name=" + derive_svcname_for_self (), null);
+				var stream = yield stream_request.wait_async (null);
 
-				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
 				WinjectorHelper helper = this;
@@ -245,7 +253,7 @@ namespace Winjector {
 			}
 		}
 
-		public async void stop () throws Frida.Error {
+		public async void stop (Cancellable? cancellable) throws Frida.Error, IOError {
 			Timeout.add (20, () => {
 				do_stop.begin ();
 				return false;
@@ -264,7 +272,8 @@ namespace Winjector {
 				shutdown ();
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Frida.Error {
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
+				throws Frida.Error {
 			if (next_id == 0 || next_id >= int.MAX) {
 				/* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
 				next_id = (sizeof (void *) == 4) ? 1 : 2;

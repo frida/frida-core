@@ -25,7 +25,7 @@ namespace Frida {
 		private Gee.HashMap<uint, OutputStream> stdin_streams = new Gee.HashMap<uint, OutputStream> ();
 		private Gee.HashMap<string, PendingLaunch> pending_launches = new Gee.HashMap<string, PendingLaunch> ();
 
-		private Gee.HashMap<uint, Gee.Promise<bool>> suspension_waiters = new Gee.HashMap<uint, Gee.Promise<bool>> ();
+		private Gee.HashMap<uint, Promise<bool>> suspension_waiters = new Gee.HashMap<uint, Promise<bool>> ();
 
 		public Gee.HashMap<uint, void *> inject_instances = new Gee.HashMap<uint, void *> ();
 		private Gee.HashMap<void *, uint> inject_cleaner_by_instance = new Gee.HashMap<void *, uint> ();
@@ -38,6 +38,8 @@ namespace Frida {
 
 		private PolicySoftener policy_softener;
 		private KernelAgent kernel_agent;
+
+		private Cancellable io_cancellable = new Cancellable ();
 
 		construct {
 			_create_context ();
@@ -66,7 +68,9 @@ namespace Frida {
 			_destroy_context ();
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
+			io_cancellable.cancel ();
+
 			foreach (var pending in pending_launches.values.to_array ())
 				pending.complete ();
 
@@ -92,18 +96,18 @@ namespace Frida {
 			}
 		}
 
-		public async void preload () throws Error {
+		public async void preload (Cancellable? cancellable) throws Error, IOError {
 		}
 
-		public async void enable_spawn_gating () throws Error {
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			get_kernel_agent ().enable_spawn_gating ();
 		}
 
-		public async void disable_spawn_gating () throws Error {
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			get_kernel_agent ().disable_spawn_gating ();
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 			return get_kernel_agent ().enumerate_pending_spawn ();
 		}
 
@@ -113,7 +117,7 @@ namespace Frida {
 			return kernel_agent;
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			if (!FileUtils.test (path, EXISTS))
 				throw new Error.EXECUTABLE_NOT_FOUND ("Unable to find executable at '%s'", path);
 
@@ -131,7 +135,7 @@ namespace Frida {
 			return child_pid;
 		}
 
-		public async void launch (string identifier, HostSpawnOptions options) throws Error {
+		public async void launch (string identifier, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			var pending = pending_launches[identifier];
 			if (pending != null)
 				pending.complete ();
@@ -158,7 +162,7 @@ namespace Frida {
 			pending_launches[identifier] = pending;
 		}
 
-		public async void notify_launch_completed (string identifier, uint pid) throws Error {
+		public async void notify_launch_completed (string identifier, uint pid, Cancellable? cancellable) throws Error, IOError {
 			var pending = pending_launches[identifier];
 			if (pending == null)
 				return;
@@ -174,7 +178,7 @@ namespace Frida {
 			}
 		}
 
-		public async void notify_exec_completed (uint pid) throws Error {
+		public async void notify_exec_completed (uint pid, Cancellable? cancellable) throws Error, IOError {
 			yield flush_dispatch_queue ();
 
 			var dead_instances = new Gee.ArrayList<void *> ();
@@ -211,21 +215,21 @@ namespace Frida {
 			child_dead (pid);
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			var stream = stdin_streams[pid];
 			if (stream == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid PID");
 			try {
 				yield stream.write_all_async (data, Priority.DEFAULT, null, null);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT (e.message);
+				throw new Error.TRANSPORT ("%s", e.message);
 			}
 		}
 
 		private async void process_next_output_from (InputStream stream, uint pid, int fd, Object resource) {
 			try {
 				var buf = new uint8[4096];
-				var n = yield stream.read_async (buf);
+				var n = yield stream.read_async (buf, Priority.DEFAULT, io_cancellable);
 
 				var data = buf[0:n];
 				output (pid, fd, data);
@@ -233,23 +237,19 @@ namespace Frida {
 				if (n > 0)
 					process_next_output_from.begin (stream, pid, fd, resource);
 			} catch (GLib.Error e) {
-				output (pid, fd, new uint8[0]);
+				if (!(e is IOError.CANCELLED))
+					output (pid, fd, new uint8[0]);
 			}
 		}
 
-		public async void wait_until_suspended (uint pid) throws Error {
+		public async void wait_until_suspended (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var wait_request = suspension_waiters[pid];
 			if (wait_request != null) {
-				var future = wait_request.future;
-				try {
-					yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
-				}
+				yield wait_request.future.wait_async (cancellable);
 				return;
 			}
 
-			wait_request = new Gee.Promise<bool> ();
+			wait_request = new Promise<bool> ();
 			suspension_waiters[pid] = wait_request;
 
 			try {
@@ -260,7 +260,7 @@ namespace Frida {
 
 					try {
 						if (_is_suspended (task)) {
-							wait_request.set_value (true);
+							wait_request.resolve (true);
 							return;
 						}
 					} catch (Error e) {
@@ -286,7 +286,7 @@ namespace Frida {
 
 				throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process to suspend");
 			} catch (Error e) {
-				wait_request.set_exception (e);
+				wait_request.reject (e);
 				throw e;
 			} finally {
 				if (suspension_waiters.has (pid, wait_request))
@@ -294,11 +294,11 @@ namespace Frida {
 			}
 		}
 
-		public async void cancel_pending_waits (uint pid) throws Error {
+		public async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws Error, IOError {
 			suspension_waiters.unset (pid);
 		}
 
-		public async void resume (uint pid) throws Error {
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			if (kernel_agent != null && kernel_agent.try_resume (pid))
 				return;
 
@@ -311,23 +311,26 @@ namespace Frida {
 			}
 		}
 
-		public async void kill_process (uint pid) throws Error {
+		public async void kill_process (uint pid, Cancellable? cancellable) throws Error, IOError {
 			_kill_process (pid);
 		}
 
-		public async void kill_application (string identifier) throws Error {
+		public async void kill_application (string identifier, Cancellable? cancellable) throws Error, IOError {
 			_kill_application (identifier);
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			return yield _inject (pid, path, null, entrypoint, data);
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
+				throws Error, IOError {
+			return yield _inject (pid, path, null, entrypoint, data, cancellable);
 		}
 
-		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
-			return yield _inject (pid, name, blob, entrypoint, data);
+		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield _inject (pid, name, blob, entrypoint, data, cancellable);
 		}
 
-		private async uint _inject (uint pid, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data) throws Error {
+		private async uint _inject (uint pid, string path_or_name, MappedLibraryBlob? blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
 			policy_softener.soften (pid);
 
 			var task = borrow_task_for_remote_pid (pid);
@@ -366,7 +369,7 @@ namespace Frida {
 			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
@@ -379,7 +382,7 @@ namespace Frida {
 			return clone_id;
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
@@ -391,7 +394,8 @@ namespace Frida {
 			_recreate_injectee_thread (instance, pid, task);
 		}
 
-		public async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error {
+		public async Future<IOStream> open_pipe_stream (uint remote_pid, Cancellable? cancellable, out string remote_address)
+				throws Error, IOError {
 			policy_softener.soften (remote_pid);
 
 			var remote_task = borrow_task_for_remote_pid (remote_pid);
@@ -400,10 +404,10 @@ namespace Frida {
 
 			remote_address = endpoints.remote_address;
 
-			return Pipe.open (endpoints.local_address);
+			return Pipe.open (endpoints.local_address, cancellable);
 		}
 
-		public async MappedLibraryBlob? try_mmap (Bytes blob) throws Error {
+		public async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError {
 			if (!is_mmap_available ())
 				return null;
 

@@ -21,7 +21,7 @@ namespace Frida {
 		private TaskPort task;
 		private DBusConnection connection;
 		private DarwinRemoteHelper proxy;
-		private Gee.Promise<DarwinRemoteHelper> obtain_request;
+		private Promise<DarwinRemoteHelper> obtain_request;
 
 		public DarwinHelperProcess (TemporaryDirectory tempdir) {
 			Object (tempdir: tempdir);
@@ -31,18 +31,22 @@ namespace Frida {
 			main_context = MainContext.get_thread_default ();
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (proxy != null) {
 				try {
-					yield proxy.stop ();
+					yield proxy.stop (cancellable);
 				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
 				}
 			}
 
 			if (connection != null) {
 				try {
-					yield connection.close ();
+					yield connection.close (cancellable);
 				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
 				}
 			}
 
@@ -57,201 +61,205 @@ namespace Frida {
 			return _resource_store;
 		}
 
-		public async void preload () throws Error {
-			yield obtain ();
+		public async void preload (Cancellable? cancellable) throws Error, IOError {
+			yield obtain (cancellable);
 		}
 
-		public async void enable_spawn_gating () throws Error {
-			var helper = yield obtain ();
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.enable_spawn_gating ();
+				yield helper.enable_spawn_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void disable_spawn_gating () throws Error {
-			var helper = yield obtain ();
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.disable_spawn_gating ();
+				yield helper.disable_spawn_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
-			var helper = yield obtain ();
+		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				return yield helper.enumerate_pending_spawn ();
+				return yield helper.enumerate_pending_spawn (cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
-			var helper = yield obtain ();
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				return yield helper.spawn (path, options);
+				return yield helper.spawn (path, options, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void launch (string identifier, HostSpawnOptions options) throws Error {
-			var helper = yield obtain ();
+		public async void launch (string identifier, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.launch (identifier, options);
+				yield helper.launch (identifier, options, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void notify_launch_completed (string identifier, uint pid) throws Error {
-			var helper = yield obtain ();
+		public async void notify_launch_completed (string identifier, uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.notify_launch_completed (identifier, pid);
+				yield helper.notify_launch_completed (identifier, pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void notify_exec_completed (uint pid) throws Error {
-			var helper = yield obtain ();
+		public async void notify_exec_completed (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.notify_exec_completed (pid);
+				yield helper.notify_exec_completed (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void wait_until_suspended (uint pid) throws Error {
-			var helper = yield obtain ();
+		public async void wait_until_suspended (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.wait_until_suspended (pid);
+				yield helper.wait_until_suspended (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void cancel_pending_waits (uint pid) throws Error {
-			var helper = yield obtain ();
+		public async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.cancel_pending_waits (pid);
+				yield helper.cancel_pending_waits (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
-			var helper = yield obtain ();
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.input (pid, data);
+				yield helper.input (pid, data, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void resume (uint pid) throws Error {
-			var helper = yield obtain ();
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.resume (pid);
+				yield helper.resume (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void kill_process (uint pid) throws Error {
-			var helper = yield obtain ();
+		public async void kill_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.kill_process (pid);
+				yield helper.kill_process (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void kill_application (string identifier) throws Error {
-			var helper = yield obtain ();
+		public async void kill_application (string identifier, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.kill_application (identifier);
+				yield helper.kill_application (identifier, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			var helper = yield obtain ();
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
+				throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				return yield helper.inject_library_file (pid, path, entrypoint, data);
+				return yield helper.inject_library_file (pid, path, entrypoint, data, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
-			var helper = yield obtain ();
+		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				return yield helper.inject_library_blob (pid, name, blob, entrypoint, data);
+				return yield helper.inject_library_blob (pid, name, blob, entrypoint, data, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
-			var helper = yield obtain ();
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				return yield helper.demonitor_and_clone_injectee_state (id);
+				return yield helper.demonitor_and_clone_injectee_state (id, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
-			var helper = yield obtain ();
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				yield helper.recreate_injectee_thread (pid, id);
+				yield helper.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async Gee.Promise<IOStream> open_pipe_stream (uint remote_pid, out string remote_address) throws Error {
-			var helper = yield obtain ();
+		public async Future<IOStream> open_pipe_stream (uint remote_pid, Cancellable? cancellable, out string remote_address)
+				throws Error, IOError {
+			var helper = yield obtain (cancellable);
 			try {
-				var endpoints = yield helper.make_pipe_endpoints (remote_pid);
+				var endpoints = yield helper.make_pipe_endpoints (remote_pid, cancellable);
 
 				remote_address = endpoints.remote_address;
 
-				return Pipe.open (endpoints.local_address);
+				return Pipe.open (endpoints.local_address, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async MappedLibraryBlob? try_mmap (Bytes blob) throws Error {
+		public async MappedLibraryBlob? try_mmap (Bytes blob, Cancellable? cancellable) throws Error, IOError {
 			if (!DarwinHelperBackend.is_mmap_available ())
 				return null;
 
-			yield obtain ();
+			yield obtain (cancellable);
 
 			return DarwinHelperBackend.mmap (task.mach_port, blob);
 		}
 
-		private async DarwinRemoteHelper obtain () throws Error {
-			if (obtain_request != null) {
-				var future = obtain_request.future;
+		private async DarwinRemoteHelper obtain (Cancellable? cancellable) throws Error, IOError {
+			while (obtain_request != null) {
 				try {
-					return yield future.wait_async ();
-				} catch (Gee.FutureError future_error) {
-					throw (Error) future.exception;
+					return yield obtain_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
 				}
 			}
-			obtain_request = new Gee.Promise<DarwinRemoteHelper> ();
+			obtain_request = new Promise<DarwinRemoteHelper> ();
 
 			Subprocess pending_process = null;
 			TaskPort pending_task_port = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
-			Error pending_error = null;
+			GLib.Error? pending_error = null;
 
 			var service_name = make_service_name ();
 
@@ -265,10 +273,14 @@ namespace Frida {
 				IOStream stream;
 				yield handshake_port.exchange (peer_pid, out pending_task_port, out stream);
 
-				pending_connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, null);
-				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
+				pending_connection = yield new DBusConnection (stream, null, NONE, null, cancellable);
+				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
+					cancellable);
 			} catch (GLib.Error e) {
-				pending_error = new Error.PERMISSION_DENIED (e.message);
+				if (e is IOError.CANCELLED)
+					pending_error = e;
+				else
+					pending_error = new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 
 			if (pending_error == null) {
@@ -285,14 +297,16 @@ namespace Frida {
 				proxy.injected.connect (on_injected);
 				proxy.uninjected.connect (on_uninjected);
 
-				obtain_request.set_value (proxy);
+				obtain_request.resolve (proxy);
 				return proxy;
 			} else {
 				if (pending_process != null)
 					pending_process.force_exit ();
-				obtain_request.set_exception (pending_error);
+
+				obtain_request.reject (pending_error);
 				obtain_request = null;
-				throw pending_error;
+
+				throw_api_error (pending_error);
 			}
 		}
 

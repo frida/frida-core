@@ -188,6 +188,7 @@ namespace Frida.Server {
 			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+		private Cancellable io_cancellable = new Cancellable ();
 
 		private MainLoop loop;
 		private bool stopping;
@@ -213,9 +214,10 @@ namespace Frida.Server {
 
 		public void run (string listen_uri) throws Error {
 			try {
-				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
-			} catch (GLib.Error listen_error) {
-				throw new Error.ADDRESS_IN_USE (listen_error.message);
+				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS,
+					DBus.generate_guid (), null, io_cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.ADDRESS_IN_USE ("%s", e.message);
 			}
 			server.new_connection.connect (on_connection_opened);
 			server.start ();
@@ -231,10 +233,11 @@ namespace Frida.Server {
 
 		private async void start () {
 			try {
-				yield host_session.preload ();
+				yield host_session.preload (io_cancellable);
 			} catch (Error e) {
 				if (verbose)
 					printerr ("Unable to preload: %s\n", e.message);
+			} catch (IOError e) {
 			}
 		}
 
@@ -278,16 +281,21 @@ namespace Frida.Server {
 					var session = entry.value;
 					agent_sessions.unset (id);
 					try {
-						yield session.close ();
+						yield session.close (null);
 					} catch (GLib.Error e) {
 					}
 					break;
 				}
 			}
 
-			yield host_session.close ();
+			try {
+				yield host_session.close (null);
+			} catch (IOError e) {
+			}
 
 			agent_sessions.clear ();
+
+			io_cancellable.cancel ();
 
 			Idle.add (() => {
 				loop.quit ();
@@ -339,7 +347,7 @@ namespace Frida.Server {
 			client.close ();
 
 			if (client.is_spawn_gating)
-				host_session.disable_spawn_gating.begin ();
+				host_session.disable_spawn_gating.begin (io_cancellable);
 
 			foreach (var session_id in client.sessions)
 				close_session.begin (session_id);
@@ -347,8 +355,8 @@ namespace Frida.Server {
 
 		private async void close_session (AgentSessionId id) {
 			try {
-				var session = yield host_session.obtain_agent_session (id);
-				yield session.close ();
+				var session = host_session.obtain_agent_session (id);
+				yield session.close (io_cancellable);
 			} catch (GLib.Error e) {
 			}
 		}

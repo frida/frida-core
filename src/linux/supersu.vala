@@ -1,19 +1,17 @@
 namespace Frida.SuperSU {
-	public async Process spawn (string working_directory, string[] argv, string[]? envp = null, bool capture_output = false, Cancellable? cancellable = null) throws Error {
-		var connection = new Connection ();
-
-		yield connection.open (cancellable);
-
+	public async Process spawn (string working_directory, string[] argv, string[]? envp = null, bool capture_output = false,
+			Cancellable? cancellable = null) throws Error, IOError {
 		try {
+			var connection = yield Connection.open (cancellable);
 			yield connection.write_strv (argv, cancellable);
 			yield connection.write_strv ((envp != null) ? envp : Environ.get (), cancellable);
 			yield connection.write_string (working_directory, cancellable);
 			yield connection.write_string ("", cancellable);
-		} catch (GLib.Error e) {
-			throw new Error.PROTOCOL ("Unable to spawn: " + e.message);
-		}
 
-		return new Process (connection, capture_output);
+			return new Process (connection, capture_output);
+		} catch (GLib.Error e) {
+			throw new Error.PROTOCOL ("Unable to spawn: %s", e.message);
+		}
 	}
 
 	public class Process : Object {
@@ -33,9 +31,9 @@ namespace Frida.SuperSU {
 			}
 		}
 
-		private Gee.Promise<int> exit_promise;
+		private Promise<int> exit_promise;
 
-		private Cancellable cancellable = new Cancellable ();
+		private Cancellable io_cancellable = new Cancellable ();
 
 		internal Process (Connection connection, bool capture_output) {
 			this.connection = connection;
@@ -54,21 +52,21 @@ namespace Frida.SuperSU {
 				output_out = new UnixOutputStream (fds[1], true);
 			}
 
-			this.exit_promise = new Gee.Promise<int> ();
+			exit_promise = new Promise<int> ();
 
 			read_until_exit.begin ();
 		}
 
-		public async void detach () {
-			cancellable.cancel ();
+		public async void detach (Cancellable? cancellable = null) throws IOError {
+			io_cancellable.cancel ();
 
-			yield wait ();
+			yield wait (cancellable);
 		}
 
-		public async void wait () {
+		public async void wait (Cancellable? cancellable = null) throws IOError {
 			try {
-				yield exit_promise.future.wait_async ();
-			} catch (Gee.FutureError e) {
+				yield exit_promise.future.wait_async (cancellable);
+			} catch (Error e) {
 			}
 		}
 
@@ -78,21 +76,21 @@ namespace Frida.SuperSU {
 				int status = int.MIN;
 
 				while (!done) {
-					var command = yield connection.read_size (cancellable);
+					var command = yield connection.read_size (io_cancellable);
 					switch (command) {
 						case 1: {
-							var data = yield connection.read_byte_array (cancellable);
+							var data = yield connection.read_byte_array (io_cancellable);
 							if (output_out != null)
-								yield output_out.write_bytes_async (data, Priority.DEFAULT, cancellable);
+								yield output_out.write_bytes_async (data, Priority.DEFAULT, io_cancellable);
 							else
 								stdout.write (data.get_data ());
 							break;
 						}
 
 						case 2: {
-							var data = yield connection.read_byte_array (cancellable);
+							var data = yield connection.read_byte_array (io_cancellable);
 							if (output_out != null)
-								yield output_out.write_bytes_async (data, Priority.DEFAULT, cancellable);
+								yield output_out.write_bytes_async (data, Priority.DEFAULT, io_cancellable);
 							else
 								stderr.write (data.get_data ());
 							break;
@@ -100,9 +98,9 @@ namespace Frida.SuperSU {
 
 						case 3: {
 							done = true;
-							var type = yield connection.read_size (cancellable);
+							var type = yield connection.read_size (io_cancellable);
 							if (type == 4)
-								status = (int) yield connection.read_ssize (cancellable);
+								status = (int) yield connection.read_ssize (io_cancellable);
 							break;
 						}
 
@@ -112,36 +110,59 @@ namespace Frida.SuperSU {
 					}
 				}
 
-				yield connection.close (cancellable);
-				exit_promise.set_value (status);
+				try {
+					yield connection.close (null);
+				} catch (IOError e) {
+				}
+				exit_promise.resolve (status);
 			} catch (GLib.Error e) {
-				yield connection.close (cancellable);
-				exit_promise.set_exception (e);
+				try {
+					yield connection.close (null);
+				} catch (IOError e) {
+				}
+				exit_promise.reject (e);
 			}
 		}
 	}
 
-	private class Connection : Object {
-		private SocketConnection connection;
-		private DataInputStream input;
-		private DataOutputStream output;
-		private Socket socket;
+	private class Connection : Object, AsyncInitable {
+		private SocketConnection? connection;
+		private DataInputStream? input;
+		private DataOutputStream? output;
+		private Socket? socket;
 
-		public async void open (Cancellable cancellable) throws Error {
-			var address = "eu.chainfire.supersu";
-			while (true) {
-				var redirect = yield establish (address, cancellable);
-				if (redirect == null)
-					break;
-				address = redirect;
+		public static async Connection open (Cancellable? cancellable = null) throws Error, IOError {
+			var connection = new Connection ();
+
+			try {
+				yield connection.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
 			}
+
+			return connection;
 		}
 
-		public async void close (Cancellable cancellable) {
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
+			string address = "eu.chainfire.supersu";
+			while (true) {
+				string? redirect = yield establish (address, cancellable);
+				if (redirect == null)
+					break;
+
+				address = redirect;
+			}
+
+			return true;
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (connection != null) {
 				try {
 					yield connection.close_async (Priority.DEFAULT, cancellable);
 				} catch (IOError e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
 				}
 				connection = null;
 			}
@@ -149,10 +170,11 @@ namespace Frida.SuperSU {
 			output = null;
 		}
 
-		private async string? establish (string address, Cancellable cancellable) throws Error {
+		private async string? establish (string address, Cancellable cancellable) throws Error, IOError {
 			try {
 				var client = new SocketClient ();
-				connection = yield client.connect_async (new UnixSocketAddress.with_type (address, -1, UnixSocketAddressType.ABSTRACT), cancellable);
+				connection = yield client.connect_async (new UnixSocketAddress.with_type (address, -1, ABSTRACT),
+					cancellable);
 
 				input = new DataInputStream (connection.get_input_stream ());
 				input.set_byte_order (DataStreamByteOrder.HOST_ENDIAN);

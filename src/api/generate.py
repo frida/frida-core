@@ -259,7 +259,8 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
                 if stripped_line == "}":
                     ignoring = False
             else:
-                if stripped_line.startswith("public abstract"):
+                if stripped_line.startswith("public abstract") or stripped_line.startswith("public class Promise") \
+                        or stripped_line.startswith("public interface Future"):
                     ignoring = True
                 elif stripped_line.startswith("public enum"):
                     name = re.match(r"^public enum (\w+) ", stripped_line).group(1)

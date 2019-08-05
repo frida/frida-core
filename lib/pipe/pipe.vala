@@ -12,7 +12,7 @@ namespace Frida {
 
 		public void * _backend;
 
-		public PipeTransport () throws IOError {
+		public PipeTransport () throws Error {
 			string local_address, remote_address;
 			var backend = _create_backend (out local_address, out remote_address);
 			Object (local_address: local_address, remote_address: remote_address);
@@ -25,18 +25,18 @@ namespace Frida {
 
 		public extern static void set_temp_directory (string path);
 
-		public extern static void * _create_backend (out string local_address, out string remote_address) throws IOError;
+		public extern static void * _create_backend (out string local_address, out string remote_address) throws Error;
 		public extern static void _destroy_backend (void * backend);
 	}
 
 	namespace Pipe {
-		public Gee.Promise<IOStream> open (string address) {
+		public Future<IOStream> open (string address, Cancellable? cancellable) {
 #if WINDOWS
-			return WindowsPipe.open (address);
+			return WindowsPipe.open (address, cancellable);
 #elif DARWIN
-			return DarwinPipe.open (address);
+			return DarwinPipe.open (address, cancellable);
 #else
-			return UnixPipe.open (address);
+			return UnixPipe.open (address, cancellable);
 #endif
 		}
 	}
@@ -73,17 +73,17 @@ namespace Frida {
 		private InputStream input;
 		private OutputStream output;
 
-		public static Gee.Promise<WindowsPipe> open (string address) {
-			var request = new Gee.Promise<WindowsPipe> ();
+		public static Future<WindowsPipe> open (string address, Cancellable? cancellable) {
+			var promise = new Promise<WindowsPipe> ();
 
 			try {
 				var pipe = new WindowsPipe (address);
-				request.set_value (pipe);
+				promise.resolve (pipe);
 			} catch (IOError e) {
-				request.set_exception (e);
+				promise.reject (e);
 			}
 
-			return request;
+			return promise.future;
 		}
 
 		public WindowsPipe (string address) throws IOError {
@@ -118,27 +118,27 @@ namespace Frida {
 	}
 #elif DARWIN
 	namespace DarwinPipe {
-		public static Gee.Promise<SocketConnection> open (string address) {
-			var request = new Gee.Promise<SocketConnection> ();
+		public static Future<SocketConnection> open (string address, Cancellable? cancellable) {
+			var promise = new Promise<SocketConnection> ();
 
 			try {
 				var fd = _consume_stashed_file_descriptor (address);
 				var socket = new Socket.from_fd (fd);
 				var connection = SocketConnection.factory_create_connection (socket);
-				request.set_value (connection);
+				promise.resolve (connection);
 			} catch (GLib.Error e) {
-				request.set_exception (e);
+				promise.reject (e);
 			}
 
-			return request;
+			return promise.future;
 		}
 
-		public extern int _consume_stashed_file_descriptor (string address) throws IOError;
+		public extern int _consume_stashed_file_descriptor (string address) throws Error;
 	}
 #else
 	namespace UnixPipe {
-		public static Gee.Promise<SocketConnection> open (string address) {
-			var request = new Gee.Promise<SocketConnection> ();
+		public static Future<SocketConnection> open (string address, Cancellable? cancellable) {
+			var promise = new Promise<SocketConnection> ();
 
 			MatchInfo info;
 			var valid_address = /^pipe:role=(.+?),path=(.+?)$/.match (address, 0, out info);
@@ -159,38 +159,38 @@ namespace Frida {
 					SELinux.setfilecon (path, "u:object_r:frida_file:s0");
 #endif
 
-					establish_server.begin (socket, request);
+					establish_server.begin (socket, promise, cancellable);
 				} else {
-					establish_client.begin (server_address, request);
+					establish_client.begin (server_address, promise, cancellable);
 				}
 			} catch (GLib.Error e) {
-				request.set_exception (e);
+				promise.reject (e);
 			}
 
-			return request;
+			return promise.future;
 		}
 
-		private async void establish_server (Socket socket, Gee.Promise<SocketConnection> request) {
+		private async void establish_server (Socket socket, Promise<SocketConnection> promise, Cancellable? cancellable) {
 			var listener = new SocketListener ();
 			try {
 				listener.add_socket (socket, null);
 
-				var connection = yield listener.accept_async ();
-				request.set_value (connection);
+				var connection = yield listener.accept_async (cancellable);
+				promise.resolve (connection);
 			} catch (GLib.Error e) {
-				request.set_exception (e);
+				promise.reject (e);
 			} finally {
 				listener.close ();
 			}
 		}
 
-		private async void establish_client (UnixSocketAddress address, Gee.Promise<SocketConnection> request) {
+		private async void establish_client (UnixSocketAddress address, Promise<SocketConnection> promise, Cancellable? cancellable) {
 			var client = new SocketClient ();
 			try {
-				var connection = yield client.connect_async (address);
-				request.set_value (connection);
+				var connection = yield client.connect_async (address, cancellable);
+				promise.resolve (connection);
 			} catch (GLib.Error e) {
-				request.set_exception (e);
+				promise.reject (e);
 			}
 		}
 	}

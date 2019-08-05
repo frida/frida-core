@@ -209,7 +209,11 @@ namespace Frida.InjectorTest {
 
 		private async void do_close (MainLoop loop) {
 			if (injector != null) {
-				yield injector.close ();
+				try {
+					yield injector.close ();
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 				injector = null;
 			}
 			process = null;
@@ -239,7 +243,7 @@ namespace Frida.InjectorTest {
 				assert_true (FileUtils.test (path, FileTest.EXISTS));
 
 				yield injector.inject_library_file (process.id, path, "frida_agent_main", data);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}

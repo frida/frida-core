@@ -1,17 +1,22 @@
 namespace Frida.Fruity {
 	public class UsbmuxClient : Object, AsyncInitable {
-		public SocketConnection connection {
+		public SocketConnection? connection {
 			get;
 			private set;
 		}
-		private InputStream input;
-		private OutputStream output;
-		private Cancellable cancellable = new Cancellable ();
+		private InputStream? input;
+		private OutputStream? output;
+		private Cancellable io_cancellable = new Cancellable ();
 
 		private bool is_processing_messages;
-		private uint last_tag;
+		private uint last_tag = 1;
 		private uint mode_switch_tag;
-		private Gee.ArrayList<PendingResponse> pending_responses;
+		private Gee.ArrayList<PendingResponse> pending_responses = new Gee.ArrayList<PendingResponse> ();
+
+		private enum QueryType {
+			REGULAR,
+			MODE_SWITCH
+		}
 
 		private const uint16 USBMUX_SERVER_PORT = 27015;
 		private const uint USBMUX_PROTOCOL_VERSION = 1;
@@ -20,35 +25,19 @@ namespace Frida.Fruity {
 		public signal void device_attached (DeviceDetails details);
 		public signal void device_detached (DeviceId id);
 
-		public static async UsbmuxClient open (Cancellable? cancellable = null) throws UsbmuxError {
+		public static async UsbmuxClient open (Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			var client = new UsbmuxClient ();
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				assert (e is UsbmuxError);
-				throw (UsbmuxError) e;
+				throw_local_error (e);
 			}
 
 			return client;
 		}
 
-		construct {
-			reset ();
-		}
-
-		private void reset () {
-			connection = null;
-			input = null;
-			output = null;
-
-			is_processing_messages = false;
-			last_tag = 1;
-			mode_switch_tag = 0;
-			pending_responses = new Gee.ArrayList<PendingResponse> ();
-		}
-
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws UsbmuxError {
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws UsbmuxError, IOError {
 			assert (!is_processing_messages);
 
 			var client = new SocketClient ();
@@ -66,66 +55,68 @@ namespace Frida.Fruity {
 				output = connection.get_output_stream ();
 
 				is_processing_messages = true;
+
 				process_incoming_messages.begin ();
 			} catch (GLib.Error e) {
-				reset ();
 				throw new UsbmuxError.DAEMON_NOT_RUNNING ("%s", e.message);
 			}
 
 			return true;
 		}
 
-		public async void close () {
-			if (!is_processing_messages)
-				return;
-			is_processing_messages = false;
+		public async void close (Cancellable? cancellable = null) throws IOError {
+			if (is_processing_messages) {
+				is_processing_messages = false;
 
-			cancellable.cancel ();
+				io_cancellable.cancel ();
 
-			var source = new IdleSource ();
-			source.set_priority (Priority.LOW);
-			source.set_callback (() => {
-				close.callback ();
-				return false;
-			});
-			source.attach (MainContext.get_thread_default ());
-			yield;
+				var source = new IdleSource ();
+				source.set_priority (Priority.LOW);
+				source.set_callback (() => {
+					close.callback ();
+					return false;
+				});
+				source.attach (MainContext.get_thread_default ());
+				yield;
+			}
 
 			try {
 				var conn = this.connection;
 				if (conn != null)
-					yield conn.close_async (Priority.DEFAULT);
+					yield conn.close_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
 			}
 			connection = null;
 			input = null;
 			output = null;
 		}
 
-		public async void enable_listen_mode () throws UsbmuxError {
+		public async void enable_listen_mode (Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			assert (is_processing_messages);
 
-			var response = yield query (create_request ("Listen"));
+			var response = yield query (create_request ("Listen"), REGULAR, cancellable);
 			try {
 				if (response.get_string ("MessageType") != "Result")
 					throw new UsbmuxError.PROTOCOL ("Unexpected response message type");
 
 				var result = (int) response.get_integer ("Number");
 				if (result != ResultCode.SUCCESS)
-					throw new UsbmuxError.FAILED ("Unexpected result while trying to enable listen mode: %d", result);
+					throw new UsbmuxError.PROTOCOL ("Unexpected result while trying to enable listen mode: %d", result);
 			} catch (PlistError e) {
 				throw new UsbmuxError.PROTOCOL ("Unexpected response: %s", e.message);
 			}
 		}
 
-		public async void connect_to_port (DeviceId device_id, uint16 port) throws UsbmuxError {
+		public async void connect_to_port (DeviceId device_id, uint16 port, Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			assert (is_processing_messages);
 
 			var request = create_request ("Connect");
 			request.set_integer ("DeviceID", device_id.raw_value);
 			request.set_integer ("PortNumber", ((uint32) port << 16).to_big_endian ());
 
-			var response = yield query (request, true);
+			var response = yield query (request, MODE_SWITCH, cancellable);
 			try {
 				if (response.get_string ("MessageType") != "Result")
 					throw new UsbmuxError.PROTOCOL ("Unexpected response message type");
@@ -135,29 +126,29 @@ namespace Frida.Fruity {
 					case ResultCode.SUCCESS:
 						break;
 					case ResultCode.CONNECTION_REFUSED:
-						throw new UsbmuxError.CONNECTION_REFUSED ("Unable to connect (connection refused)");
+						throw new IOError.CONNECTION_REFUSED ("Unable to connect (connection refused)");
 					case ResultCode.INVALID_REQUEST:
 						throw new UsbmuxError.INVALID_ARGUMENT ("Unable to connect (invalid argument)");
 					default:
-						throw new UsbmuxError.FAILED ("Unable to connect (error code: %d)", result);
+						throw new UsbmuxError.PROTOCOL ("Unable to connect (error code: %d)", result);
 				}
 			} catch (PlistError e) {
 				throw new UsbmuxError.PROTOCOL ("Unexpected response: %s", e.message);
 			}
 		}
 
-		public async Plist read_pair_record (Udid udid) throws UsbmuxError {
+		public async Plist read_pair_record (Udid udid, Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			var request = create_request ("ReadPairRecord");
 			request.set_string ("PairRecordID", udid.raw_value);
 
-			var response = yield query (request);
+			var response = yield query (request, REGULAR, cancellable);
 			try {
 				if (response.has ("MessageType")) {
 					if (response.get_string ("MessageType") != "Result")
 						throw new UsbmuxError.PROTOCOL ("Unexpected ReadPairRecord response");
 					var result = (int) response.get_integer ("Number");
 					if (result != 0)
-						throw new UsbmuxError.FAILED ("Unexpected result while trying to read pair record: %d", result);
+						throw new UsbmuxError.PROTOCOL ("Unexpected result while trying to read pair record: %d", result);
 				}
 
 				var raw_record = response.get_bytes ("PairRecordData");
@@ -169,10 +160,10 @@ namespace Frida.Fruity {
 			}
 		}
 
-		private async Plist query (Plist request, bool is_mode_switch_request = false) throws UsbmuxError {
+		private async Plist query (Plist request, QueryType query_type, Cancellable? cancellable) throws UsbmuxError, IOError {
 			uint32 tag = last_tag++;
 
-			if (is_mode_switch_request)
+			if (query_type == MODE_SWITCH)
 				mode_switch_tag = tag;
 
 			var body_xml = request.to_xml ();
@@ -182,13 +173,29 @@ namespace Frida.Fruity {
 			var pending = new PendingResponse (tag, () => query.callback ());
 			pending_responses.add (pending);
 			write_message.begin (msg);
+
+			ulong cancel_handler = 0;
+			if (cancellable != null) {
+				var main_context = MainContext.get_thread_default ();
+				cancel_handler = cancellable.connect (() => {
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						if (pending_responses.remove (pending))
+							query.callback ();
+						return false;
+					});
+					source.attach (main_context);
+				});
+			}
+
 			yield;
 
-			var response = pending.response;
-			if (response == null)
-				throw pending.error;
+			if (cancellable != null) {
+				cancellable.disconnect (cancel_handler);
+				cancellable.set_error_if_cancelled ();
+			}
 
-			return response;
+			return pending.get_response ();
 		}
 
 		private Plist create_request (string message_type) {
@@ -205,10 +212,10 @@ namespace Frida.Fruity {
 				try {
 					var msg = yield read_message ();
 					dispatch_message (msg);
-				} catch (UsbmuxError error) {
+				} catch (GLib.Error error) {
 					foreach (var pending_response in pending_responses)
 						pending_response.complete_with_error (error);
-					reset ();
+					is_processing_messages = false;
 				}
 			}
 		}
@@ -253,8 +260,9 @@ namespace Frida.Fruity {
 					break;
 				}
 			}
-			if (match == null)
-				throw new UsbmuxError.PROTOCOL ("Unexpected response with unknown tag");
+			bool query_was_cancelled = match == null;
+			if (query_was_cancelled)
+				return;
 
 			pending_responses.remove (match);
 			match.complete_with_response (response);
@@ -294,7 +302,7 @@ namespace Frida.Fruity {
 			return blob;
 		}
 
-		private async Message read_message () throws UsbmuxError {
+		private async Message read_message () throws GLib.Error {
 			var header_buf = new uint8[16];
 			yield read (header_buf);
 			var header = (uint32 *) header_buf;
@@ -317,24 +325,26 @@ namespace Frida.Fruity {
 			return msg;
 		}
 
-		private async void read (uint8[] buffer) throws UsbmuxError {
+		private async void read (uint8[] buffer) throws GLib.Error {
 			size_t bytes_read;
-			try {
-				yield input.read_all_async (buffer, Priority.DEFAULT, cancellable, out bytes_read);
-			} catch (GLib.Error e) {
-				throw new UsbmuxError.CONNECTION_CLOSED ("%s", e.message);
-			}
+			yield input.read_all_async (buffer, Priority.DEFAULT, io_cancellable, out bytes_read);
 			if (bytes_read == 0)
-				throw new UsbmuxError.CONNECTION_CLOSED ("Connection closed");
+				throw new IOError.CONNECTION_CLOSED ("Connection closed");
 		}
 
-		private async void write_message (uint8[] blob) throws UsbmuxError {
-			try {
-				size_t bytes_written;
-				yield output.write_all_async (blob, Priority.DEFAULT, cancellable, out bytes_written);
-			} catch (GLib.Error e) {
-				throw new UsbmuxError.CONNECTION_CLOSED ("%s", e.message);
-			}
+		private async void write_message (uint8[] blob) throws GLib.Error {
+			size_t bytes_written;
+			yield output.write_all_async (blob, Priority.DEFAULT, io_cancellable, out bytes_written);
+		}
+
+		private static void throw_local_error (GLib.Error e) throws UsbmuxError, IOError {
+			if (e is UsbmuxError)
+				throw (UsbmuxError) e;
+
+			if (e is IOError)
+				throw (IOError) e;
+
+			assert_not_reached ();
 		}
 
 		private enum MessageType {
@@ -381,15 +391,8 @@ namespace Frida.Fruity {
 			public delegate void CompletionHandler ();
 			private CompletionHandler handler;
 
-			public Plist? response {
-				get;
-				private set;
-			}
-
-			public UsbmuxError? error {
-				get;
-				private set;
-			}
+			private Plist? response;
+			private GLib.Error? error;
 
 			public PendingResponse (uint32 tag, owned CompletionHandler handler) {
 				this.tag = tag;
@@ -401,20 +404,30 @@ namespace Frida.Fruity {
 				handler ();
 			}
 
-			public void complete_with_error (UsbmuxError? error) {
+			public void complete_with_error (GLib.Error error) {
 				this.error = error;
 				handler ();
+			}
+
+			public Plist get_response () throws UsbmuxError, IOError {
+				if (response == null) {
+					if (error is UsbmuxError)
+						throw (UsbmuxError) error;
+					else if (error is IOError)
+						throw (IOError) error;
+					else
+						assert_not_reached ();
+				}
+
+				return response;
 			}
 		}
 	}
 
 	public errordomain UsbmuxError {
-		FAILED,
 		DAEMON_NOT_RUNNING,
-		CONNECTION_CLOSED,
-		CONNECTION_REFUSED,
 		INVALID_ARGUMENT,
-		PROTOCOL
+		PROTOCOL,
 	}
 
 	public class DeviceDetails : Object {

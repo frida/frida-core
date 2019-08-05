@@ -30,7 +30,7 @@ namespace Frida {
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
-		private Gee.Promise<bool> shutdown_request;
+		private Promise<bool> shutdown_request;
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
@@ -65,13 +65,13 @@ namespace Frida {
 		private async void shutdown () {
 			if (shutdown_request != null) {
 				try {
-					yield shutdown_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
+					yield shutdown_request.future.wait_async (null);
+				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
 				return;
 			}
-			shutdown_request = new Gee.Promise<bool> ();
+			shutdown_request = new Promise<bool> ();
 
 			if (connection != null) {
 				if (helper_registration_id != 0)
@@ -85,7 +85,11 @@ namespace Frida {
 				connection = null;
 			}
 
-			yield backend.close ();
+			try {
+				yield backend.close (null);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 			backend.idle.disconnect (on_backend_idle);
 			backend.output.disconnect (on_backend_output);
 			backend.spawn_added.disconnect (on_backend_spawn_added);
@@ -94,7 +98,7 @@ namespace Frida {
 			backend.uninjected.disconnect (on_backend_uninjected);
 			backend = null;
 
-			shutdown_request.set_value (true);
+			shutdown_request.resolve (true);
 
 			Idle.add (() => {
 				loop.quit ();
@@ -109,7 +113,7 @@ namespace Frida {
 
 				yield handshake_port.exchange (0, out parent_task, out stream);
 
-				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
 				DarwinRemoteHelper helper = this;
@@ -123,7 +127,7 @@ namespace Frida {
 			}
 		}
 
-		public async void stop () throws Error {
+		public async void stop (Cancellable? cancellable) throws Error, IOError {
 			Timeout.add (20, () => {
 				shutdown.begin ();
 				return false;
@@ -140,75 +144,77 @@ namespace Frida {
 				shutdown.begin ();
 		}
 
-		public async void enable_spawn_gating () throws Error {
-			yield backend.enable_spawn_gating ();
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield backend.enable_spawn_gating (cancellable);
 		}
 
-		public async void disable_spawn_gating () throws Error {
-			yield backend.disable_spawn_gating ();
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield backend.disable_spawn_gating (cancellable);
 		}
 
-		public async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
-			return yield backend.enumerate_pending_spawn ();
+		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
+			return yield backend.enumerate_pending_spawn (cancellable);
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
-			return yield backend.spawn (path, options);
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			return yield backend.spawn (path, options, cancellable);
 		}
 
-		public async void launch (string identifier, HostSpawnOptions options) throws Error {
-			yield backend.launch (identifier, options);
+		public async void launch (string identifier, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			yield backend.launch (identifier, options, cancellable);
 		}
 
-		public async void notify_launch_completed (string identifier, uint pid) throws Error {
-			yield backend.notify_launch_completed (identifier, pid);
+		public async void notify_launch_completed (string identifier, uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.notify_launch_completed (identifier, pid, cancellable);
 		}
 
-		public async void notify_exec_completed (uint pid) throws Error {
-			yield backend.notify_exec_completed (pid);
+		public async void notify_exec_completed (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.notify_exec_completed (pid, cancellable);
 		}
 
-		public async void wait_until_suspended (uint pid) throws Error {
-			yield backend.wait_until_suspended (pid);
+		public async void wait_until_suspended (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.wait_until_suspended (pid, cancellable);
 		}
 
-		public async void cancel_pending_waits (uint pid) throws Error {
-			yield backend.cancel_pending_waits (pid);
+		public async void cancel_pending_waits (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.cancel_pending_waits (pid, cancellable);
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
-			yield backend.input (pid, data);
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			yield backend.input (pid, data, cancellable);
 		}
 
-		public async void resume (uint pid) throws Error {
-			yield backend.resume (pid);
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.resume (pid, cancellable);
 		}
 
-		public async void kill_process (uint pid) throws Error {
-			yield backend.kill_process (pid);
+		public async void kill_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.kill_process (pid, cancellable);
 		}
 
-		public async void kill_application (string identifier) throws Error {
-			yield backend.kill_application (identifier);
+		public async void kill_application (string identifier, Cancellable? cancellable) throws Error, IOError {
+			yield backend.kill_application (identifier, cancellable);
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data) throws Error {
-			return yield backend.inject_library_file (pid, path, entrypoint, data);
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
+				throws Error, IOError {
+			return yield backend.inject_library_file (pid, path, entrypoint, data, cancellable);
 		}
 
-		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data) throws Error {
-			return yield backend.inject_library_blob (pid, name, blob, entrypoint, data);
+		public async uint inject_library_blob (uint pid, string name, MappedLibraryBlob blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield backend.inject_library_blob (pid, name, blob, entrypoint, data, cancellable);
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
-			return yield backend.demonitor_and_clone_injectee_state (id);
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
+			return yield backend.demonitor_and_clone_injectee_state (id, cancellable);
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
-			yield backend.recreate_injectee_thread (pid, id);
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.recreate_injectee_thread (pid, id, cancellable);
 		}
 
-		public async PipeEndpoints make_pipe_endpoints (uint remote_pid) throws Error {
+		public async PipeEndpoints make_pipe_endpoints (uint remote_pid, Cancellable? cancellable) throws Error, IOError {
 			var remote_task = backend.borrow_task_for_remote_pid (remote_pid);
 
 			return DarwinHelperBackend.make_pipe_endpoints (parent_task.mach_port, remote_pid, remote_task);

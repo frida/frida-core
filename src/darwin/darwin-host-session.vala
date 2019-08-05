@@ -2,16 +2,16 @@ namespace Frida {
 	public class DarwinHostSessionBackend : Object, HostSessionBackend {
 		private DarwinHostSessionProvider local_provider;
 
-		public async void start () {
+		public async void start (Cancellable? cancellable) throws IOError {
 			assert (local_provider == null);
 			local_provider = new DarwinHostSessionProvider ();
 			provider_available (local_provider);
 		}
 
-		public async void stop () {
+		public async void stop (Cancellable? cancellable) throws IOError {
 			assert (local_provider != null);
 			provider_unavailable (local_provider);
-			yield local_provider.close ();
+			yield local_provider.close (cancellable);
 			local_provider = null;
 		}
 	}
@@ -40,15 +40,15 @@ namespace Frida {
 			_icon = Image.from_data (_try_extract_icon ());
 		}
 
-		public async void close () {
-			if (host_session != null) {
-				host_session.agent_session_closed.disconnect (on_agent_session_closed);
-				yield host_session.close ();
-				host_session = null;
-			}
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (host_session == null)
+				return;
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			yield host_session.close (cancellable);
+			host_session = null;
 		}
 
-		public async HostSession create (string? location = null) throws Error {
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 			assert (location == null);
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
@@ -58,21 +58,23 @@ namespace Frida {
 			return host_session;
 		}
 
-		public async void destroy (HostSession session) throws Error {
+		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 			host_session.agent_session_closed.disconnect (on_agent_session_closed);
-			yield host_session.close ();
+			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return yield this.host_session.obtain_agent_session (agent_session_id);
+			return this.host_session.obtain_agent_session (agent_session_id);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash) {
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
+				CrashInfo? crash) {
 			agent_session_closed (id, reason, crash);
 		}
 
@@ -91,7 +93,7 @@ namespace Frida {
 		}
 
 		private Fruitjector fruitjector;
-		private AgentResource agent;
+		private AgentResource? agent;
 #if IOS
 		private FruitController fruit_controller;
 #endif
@@ -117,18 +119,18 @@ namespace Frida {
 			agent = new AgentResource (blob.name, new Bytes.static (blob.data), tempdir);
 
 #if IOS
-			fruit_controller = new FruitController (this);
+			fruit_controller = new FruitController (this, io_cancellable);
 			fruit_controller.spawn_added.connect (on_spawn_added);
 			fruit_controller.spawn_removed.connect (on_spawn_removed);
 			fruit_controller.process_crashed.connect (on_process_crashed);
 #endif
 		}
 
-		public override async void close () {
-			yield base.close ();
+		public override async void close (Cancellable? cancellable) throws IOError {
+			yield base.close (cancellable);
 
 #if IOS
-			yield fruit_controller.close ();
+			yield fruit_controller.close (cancellable);
 			fruit_controller.spawn_added.disconnect (on_spawn_added);
 			fruit_controller.spawn_removed.disconnect (on_spawn_removed);
 			fruit_controller.process_crashed.disconnect (on_process_crashed);
@@ -136,24 +138,17 @@ namespace Frida {
 
 			var fruitjector = injector as Fruitjector;
 
-			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (fruitjector.any_still_injected ())
-				yield;
-			injector.disconnect (uninjected_handler);
+			yield wait_for_uninject (injector, cancellable, () => {
+				return fruitjector.any_still_injected ();
+			});
 
 			agent = null;
 
 			fruitjector.injected.disconnect (on_injected);
 			injector.uninjected.disconnect (on_uninjected);
-			yield fruitjector.close ();
-			fruitjector = null;
-			injector = null;
+			yield injector.close (cancellable);
 
-#if IOS
-			fruit_controller = null;
-#endif
-
-			yield helper.close ();
+			yield helper.close (cancellable);
 			helper.output.disconnect (on_output);
 			helper.spawn_added.disconnect (on_spawn_added);
 			helper.spawn_removed.disconnect (on_spawn_removed);
@@ -161,33 +156,30 @@ namespace Frida {
 			tempdir.destroy ();
 		}
 
-		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
-			yield helper.preload ();
+		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
+				out DBusConnection connection) throws Error, IOError {
+			yield helper.preload (cancellable);
 
 			var pid = helper.pid;
 
 			string remote_address;
-			var stream_request = yield helper.open_pipe_stream (pid, out remote_address);
+			var stream_request = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
 			var fruitjector = injector as Fruitjector;
-			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address);
+			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
-			IOStream stream;
-			try {
-				stream = yield stream_request.future.wait_async ();
-			} catch (Gee.FutureError e) {
-				throw new Error.TRANSPORT (e.message);
-			}
+			IOStream stream = yield stream_request.wait_async (cancellable);
 
 			DBusConnection conn;
 			AgentSessionProvider provider;
 			try {
-				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS);
+				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
 
-				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER);
+				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 
 			connection = conn;
@@ -195,97 +187,98 @@ namespace Frida {
 			return provider;
 		}
 
-		public override async HostApplicationInfo get_frontmost_application () throws Error {
+		public override async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			return System.get_frontmost_application ();
 		}
 
-		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+		public override async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
 			return yield application_enumerator.enumerate_applications ();
 		}
 
-		public override async HostProcessInfo[] enumerate_processes () throws Error {
+		public override async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
 			return yield process_enumerator.enumerate_processes ();
 		}
 
-		public override async void enable_spawn_gating () throws Error {
+		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 #if IOS
-			yield fruit_controller.enable_spawn_gating ();
+			yield fruit_controller.enable_spawn_gating (cancellable);
 #else
-			yield helper.enable_spawn_gating ();
+			yield helper.enable_spawn_gating (cancellable);
 #endif
 		}
 
-		public override async void disable_spawn_gating () throws Error {
+		public override async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 #if IOS
-			yield fruit_controller.disable_spawn_gating ();
+			yield fruit_controller.disable_spawn_gating (cancellable);
 #else
-			yield helper.disable_spawn_gating ();
+			yield helper.disable_spawn_gating (cancellable);
 #endif
 		}
 
-		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 #if IOS
 			return fruit_controller.enumerate_pending_spawn ();
 #else
-			return yield helper.enumerate_pending_spawn ();
+			return yield helper.enumerate_pending_spawn (cancellable);
 #endif
 		}
 
-		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
+		public override async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
+				throws Error, IOError {
 #if IOS
 			if (!program.has_prefix ("/"))
-				return yield fruit_controller.spawn (program, options);
+				return yield fruit_controller.spawn (program, options, cancellable);
 #endif
 
-			return yield helper.spawn (program, options);
+			return yield helper.spawn (program, options, cancellable);
 		}
 
-		protected override async void await_exec_transition (uint pid) throws Error {
-			yield helper.wait_until_suspended (pid);
-			yield helper.notify_exec_completed (pid);
+		protected override async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.wait_until_suspended (pid, cancellable);
+			yield helper.notify_exec_completed (pid, cancellable);
 		}
 
-		protected override async void cancel_exec_transition (uint pid) throws Error {
-			yield helper.cancel_pending_waits (pid);
+		protected override async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.cancel_pending_waits (pid, cancellable);
 		}
 
 		protected override bool process_is_alive (uint pid) {
 			return Posix.kill ((Posix.pid_t) pid, 0) == 0 || Posix.errno == Posix.EPERM;
 		}
 
-		public override async void input (uint pid, uint8[] data) throws Error {
-			yield helper.input (pid, data);
+		public override async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			yield helper.input (pid, data, cancellable);
 		}
 
-		protected override async void perform_resume (uint pid) throws Error {
+		protected override async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 #if IOS
-			if (yield fruit_controller.try_resume (pid))
+			if (yield fruit_controller.try_resume (pid, cancellable))
 				return;
 #endif
 
-			yield helper.resume (pid);
+			yield helper.resume (pid, cancellable);
 		}
 
-		public override async void kill (uint pid) throws Error {
-			yield helper.kill_process (pid);
+		public override async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.kill_process (pid, cancellable);
 		}
 
-		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
+		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
+				throws Error, IOError {
 			transport = null;
 
-			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
-			while (injectee_by_pid.has_key (pid))
-				yield;
-			injector.disconnect (uninjected_handler);
+			yield wait_for_uninject (injector, cancellable, () => {
+				return injectee_by_pid.has_key (pid);
+			});
 
 			string remote_address;
-			var stream_request = yield helper.open_pipe_stream (pid, out remote_address);
+			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
 			var fruitjector = injector as Fruitjector;
-			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address);
+			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
-			return stream_request;
+			return stream_future;
 		}
 
 #if IOS
@@ -293,8 +286,8 @@ namespace Frida {
 			fruit_controller.activate_crash_reporter_integration ();
 		}
 
-		protected override async CrashInfo? try_collect_crash (uint pid) {
-			return yield fruit_controller.try_collect_crash (pid);
+		protected override async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
+			return yield fruit_controller.try_collect_crash (pid, cancellable);
 		}
 #endif
 
@@ -357,9 +350,14 @@ namespace Frida {
 			construct;
 		}
 
+		public Cancellable io_cancellable {
+			get;
+			construct;
+		}
+
 		private LaunchdAgent launchd_agent;
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
+		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
@@ -367,12 +365,16 @@ namespace Frida {
 		private Gee.HashMap<MappedAgent, Source> mapped_agents_dying = new Gee.HashMap<MappedAgent, Source> ();
 		private Gee.HashSet<uint> xpcproxies = new Gee.HashSet<uint> ();
 
-		public FruitController (DarwinHostSession host_session) {
-			Object (host_session: host_session, helper: host_session.helper);
+		public FruitController (DarwinHostSession host_session, Cancellable io_cancellable) {
+			Object (
+				host_session: host_session,
+				helper: host_session.helper,
+				io_cancellable: io_cancellable
+			);
 		}
 
 		construct {
-			launchd_agent = new LaunchdAgent (host_session);
+			launchd_agent = new LaunchdAgent (host_session, io_cancellable);
 			launchd_agent.app_launch_started.connect (on_app_launch_started);
 			launchd_agent.app_launch_completed.connect (on_app_launch_completed);
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
@@ -388,38 +390,38 @@ namespace Frida {
 			launchd_agent.app_launch_started.disconnect (on_app_launch_started);
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (spawn_gating_enabled) {
 				try {
-					yield disable_spawn_gating ();
+					yield disable_spawn_gating (cancellable);
 				} catch (Error e) {
 				}
 			}
 
-			yield launchd_agent.close ();
+			yield launchd_agent.close (cancellable);
 		}
 
-		public async void enable_spawn_gating () throws Error {
-			yield launchd_agent.enable_spawn_gating ();
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield launchd_agent.enable_spawn_gating (cancellable);
 
 			spawn_gating_enabled = true;
 		}
 
-		public async void disable_spawn_gating () throws Error {
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			spawn_gating_enabled = false;
 
-			yield launchd_agent.disable_spawn_gating ();
+			yield launchd_agent.disable_spawn_gating (cancellable);
 
 			var pending = pending_spawn.values.to_array ();
 			pending_spawn.clear ();
 			foreach (var spawn in pending) {
 				spawn_removed (spawn);
 
-				helper.resume.begin (spawn.pid);
+				helper.resume.begin (spawn.pid, io_cancellable);
 			}
 		}
 
-		public HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public HostSpawnInfo[] enumerate_pending_spawn () {
 			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
 			foreach (var spawn in pending_spawn.values)
@@ -427,62 +429,54 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string identifier, HostSpawnOptions options) throws Error {
+		public async uint spawn (string identifier, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			if (spawn_requests.has_key (identifier))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified identifier");
 
-			var request = new Gee.Promise<uint> ();
+			var request = new Promise<uint> ();
 			spawn_requests[identifier] = request;
 
-			yield launchd_agent.prepare_for_launch (identifier);
-
+			uint pid = 0;
 			try {
-				yield helper.launch (identifier, options);
-			} catch (Error e) {
-				launchd_agent.cancel_launch.begin (identifier);
-				if (!spawn_requests.unset (identifier)) {
-					var pid = request.future.value;
-					if (pid != 0)
-						helper.resume.begin (pid);
-				}
-				throw e;
-			}
+				yield launchd_agent.prepare_for_launch (identifier, cancellable);
 
-			var timeout = new TimeoutSource.seconds (20);
-			timeout.set_callback (() => {
-				spawn_requests.unset (identifier);
-				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
-				return false;
-			});
-			timeout.attach (MainContext.get_thread_default ());
+				yield helper.launch (identifier, options, cancellable);
 
-			uint pid;
-			try {
-				var future = request.future;
+				var timeout = new TimeoutSource.seconds (20);
+				timeout.set_callback (() => {
+					request.reject (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
+					return false;
+				});
+				timeout.attach (MainContext.get_thread_default ());
 				try {
-					pid = yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
+					pid = yield request.future.wait_async (cancellable);
+				} finally {
+					timeout.destroy ();
 				}
-			} catch (Error e) {
-				launchd_agent.cancel_launch.begin (identifier);
-				throw e;
-			} finally {
-				timeout.destroy ();
-			}
 
-			yield helper.notify_launch_completed (identifier, pid);
+				helper.notify_launch_completed.begin (identifier, pid, io_cancellable);
+			} catch (GLib.Error e) {
+				launchd_agent.cancel_launch.begin (identifier, io_cancellable);
+
+				if (!spawn_requests.unset (identifier)) {
+					var pending_pid = request.future.value;
+					if (pending_pid != 0)
+						helper.resume.begin (pending_pid, io_cancellable);
+				}
+
+				throw_api_error (e);
+			}
 
 			return pid;
 		}
 
-		public async bool try_resume (uint pid) throws Error {
+		public async bool try_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			HostSpawnInfo? info;
 			if (!pending_spawn.unset (pid, out info))
 				return false;
 			spawn_removed (info);
 
-			yield helper.resume (pid);
+			yield helper.resume (pid, cancellable);
 
 			return true;
 		}
@@ -491,14 +485,14 @@ namespace Frida {
 			launchd_agent.activate_crash_reporter_integration ();
 		}
 
-		public async CrashInfo? try_collect_crash (uint pid) {
+		public async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
 			if (crash_agents.has_key (pid) || xpcproxies.contains (pid))
 				return null;
 
 			var delivery = get_crash_delivery_for_pid (pid);
 			try {
-				return yield delivery.future.wait_async ();
-			} catch (Gee.FutureError future_error) {
+				return yield delivery.future.wait_async (cancellable);
+			} catch (Error e) {
 				return null;
 			}
 		}
@@ -546,19 +540,18 @@ namespace Frida {
 			xpcproxies.add (pid);
 		}
 
-		private void on_app_launch_completed (string identifier, uint pid, Error? error) {
-			Gee.Promise<uint> request;
-
+		private void on_app_launch_completed (string identifier, uint pid, GLib.Error? error) {
 			xpcproxies.remove (pid);
 
+			Promise<uint> request;
 			if (spawn_requests.unset (identifier, out request)) {
 				if (error == null)
-					request.set_value (pid);
+					request.resolve (pid);
 				else
-					request.set_exception (error);
+					request.reject (error);
 			} else {
 				if (error == null)
-					helper.resume.begin (pid);
+					helper.resume.begin (pid, io_cancellable);
 			}
 		}
 
@@ -586,14 +579,14 @@ namespace Frida {
 				var crash_agent = crash_agents[pid];
 				if (crash_agent != null) {
 					try {
-						yield crash_agent.start ();
-					} catch (Error e) {
+						yield crash_agent.start (io_cancellable);
+					} catch (GLib.Error e) {
 						crash_agents.unset (pid);
 					}
 				}
 
 				if (!spawn_gating_enabled) {
-					yield helper.resume (pid);
+					yield helper.resume (pid, io_cancellable);
 					return;
 				}
 
@@ -607,7 +600,7 @@ namespace Frida {
 			foreach (var delivery in crash_deliveries.values)
 				delivery.extend_timeout (5000);
 
-			var agent = new ReportCrashAgent (host_session, pid, this);
+			var agent = new ReportCrashAgent (host_session, pid, this, io_cancellable);
 			crash_agents[pid] = agent;
 
 			agent.unloaded.connect (on_crash_agent_unloaded);
@@ -660,13 +653,13 @@ namespace Frida {
 				construct;
 			}
 
-			public Gee.Future<CrashInfo?> future {
+			public Future<CrashInfo?> future {
 				get {
 					return promise.future;
 				}
 			}
 
-			private Gee.Promise<CrashInfo?> promise = new Gee.Promise <CrashInfo?> ();
+			private Promise<CrashInfo?> promise = new Promise <CrashInfo?> ();
 			private TimeoutSource expiry_source;
 
 			public CrashDelivery (uint pid) {
@@ -696,7 +689,7 @@ namespace Frida {
 				if (future.ready)
 					return;
 
-				promise.set_value (crash);
+				promise.resolve (crash);
 
 				expiry_source.destroy ();
 				expiry_source = make_expiry_source (1000);
@@ -704,7 +697,7 @@ namespace Frida {
 
 			private bool on_timeout () {
 				if (!future.ready)
-					promise.set_exception (new Error.TIMED_OUT ("Crash delivery timed out"));
+					promise.reject (new Error.TIMED_OUT ("Crash delivery timed out"));
 
 				expired ();
 
@@ -744,34 +737,43 @@ namespace Frida {
 
 	private class LaunchdAgent : InternalAgent {
 		public signal void app_launch_started (string identifier, uint pid);
-		public signal void app_launch_completed (string identifier, uint pid, Error? error);
+		public signal void app_launch_completed (string identifier, uint pid, GLib.Error? error);
 		public signal void spawn_preparation_started (HostSpawnInfo info);
 		public signal void spawn_preparation_aborted (HostSpawnInfo info);
 		public signal void spawn_captured (HostSpawnInfo info);
 
-		public LaunchdAgent (DarwinHostSession host_session) {
+		public Cancellable io_cancellable {
+			get;
+			construct;
+		}
+
+		public LaunchdAgent (DarwinHostSession host_session, Cancellable io_cancellable) {
 			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
-			Object (host_session: host_session, script_source: source);
+			Object (
+				host_session: host_session,
+				script_source: source,
+				io_cancellable: io_cancellable
+			);
 		}
 
 		public void activate_crash_reporter_integration () {
-			ensure_loaded.begin ();
+			ensure_loaded.begin (io_cancellable);
 		}
 
-		public async void prepare_for_launch (string identifier) throws Error {
-			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) });
+		public async void prepare_for_launch (string identifier, Cancellable? cancellable) throws Error, IOError {
+			yield call ("prepareForLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) }, cancellable);
 		}
 
-		public async void cancel_launch (string identifier) throws Error {
-			yield call ("cancelLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) });
+		public async void cancel_launch (string identifier, Cancellable? cancellable) throws Error, IOError {
+			yield call ("cancelLaunch", new Json.Node[] { new Json.Node.alloc ().init_string (identifier) }, cancellable);
 		}
 
-		public async void enable_spawn_gating () throws Error {
-			yield call ("enableSpawnGating", new Json.Node[] {});
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield call ("enableSpawnGating", new Json.Node[] {}, cancellable);
 		}
 
-		public async void disable_spawn_gating () throws Error {
-			yield call ("disableSpawnGating", new Json.Node[] {});
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield call ("disableSpawnGating", new Json.Node[] {}, cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {
@@ -795,9 +797,9 @@ namespace Frida {
 
 			try {
 				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
-				yield agent.run_until_exec ();
+				yield agent.run_until_exec (io_cancellable);
 				app_launch_completed (identifier, pid, null);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				app_launch_completed (identifier, pid, e);
 			}
 		}
@@ -808,14 +810,14 @@ namespace Frida {
 
 			try {
 				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
-				yield agent.run_until_exec ();
+				yield agent.run_until_exec (io_cancellable);
 				spawn_captured (info);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				spawn_preparation_aborted (info);
 			}
 		}
 
-		protected override async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return 1;
 		}
 	}
@@ -836,19 +838,19 @@ namespace Frida {
 			Object (host_session: host_session, script_source: source, identifier: identifier, pid: pid);
 		}
 
-		public async void run_until_exec () throws Error {
-			yield ensure_loaded ();
+		public async void run_until_exec (Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
 
 			var helper = (host_session as DarwinHostSession).helper;
-			yield helper.resume (pid);
+			yield helper.resume (pid, cancellable);
 
-			yield wait_for_unload ();
+			yield wait_for_unload (cancellable);
 
-			yield helper.wait_until_suspended (pid);
-			yield helper.notify_exec_completed (pid);
+			yield helper.wait_until_suspended (pid, cancellable);
+			yield helper.notify_exec_completed (pid, cancellable);
 		}
 
-		protected override async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
 	}
@@ -867,18 +869,25 @@ namespace Frida {
 			construct;
 		}
 
-		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container) {
+		public Cancellable io_cancellable {
+			get;
+			construct;
+		}
+
+		public ReportCrashAgent (DarwinHostSession host_session, uint pid, MappedAgentContainer mapped_agent_container,
+				Cancellable io_cancellable) {
 			string * source = Frida.Data.Darwin.get_reportcrash_js_blob ().data;
 			Object (
 				host_session: host_session,
 				script_source: source,
 				pid: pid,
-				mapped_agent_container: mapped_agent_container
+				mapped_agent_container: mapped_agent_container,
+				io_cancellable: io_cancellable
 			);
 		}
 
-		public async void start () throws Error {
-			yield ensure_loaded ();
+		public async void start (Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {
@@ -1031,7 +1040,7 @@ namespace Frida {
 				.end_object ();
 			string raw_stanza = Json.to_string (stanza.get_root (), false);
 
-			session.post_to_script.begin (script, raw_stanza, false, new uint8[0]);
+			session.post_to_script.begin (script, raw_stanza, false, new uint8[0], io_cancellable);
 		}
 
 		private static string canonicalize_parameter_name (string name) {
@@ -1057,7 +1066,7 @@ namespace Frida {
 			return result.str;
 		}
 
-		protected override async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
 	}

@@ -240,7 +240,7 @@ namespace Frida {
 
 				ostream.close (null);
 			} catch (GLib.Error e) {
-				throw new Error.PERMISSION_DENIED (e.message);
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 		}
 

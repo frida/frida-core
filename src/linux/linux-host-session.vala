@@ -2,16 +2,16 @@ namespace Frida {
 	public class LinuxHostSessionBackend : Object, HostSessionBackend {
 		private LinuxHostSessionProvider local_provider;
 
-		public async void start () {
+		public async void start (Cancellable? cancellable) throws IOError {
 			assert (local_provider == null);
 			local_provider = new LinuxHostSessionProvider ();
 			provider_available (local_provider);
 		}
 
-		public async void stop () {
+		public async void stop (Cancellable? cancellable) throws IOError {
 			assert (local_provider != null);
 			provider_unavailable (local_provider);
-			yield local_provider.close ();
+			yield local_provider.close (cancellable);
 			local_provider = null;
 		}
 	}
@@ -35,15 +35,15 @@ namespace Frida {
 
 		private LinuxHostSession host_session;
 
-		public async void close () {
-			if (host_session != null) {
-				host_session.agent_session_closed.disconnect (on_agent_session_closed);
-				yield host_session.close ();
-				host_session = null;
-			}
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (host_session == null)
+				return;
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			yield host_session.close (cancellable);
+			host_session = null;
 		}
 
-		public async HostSession create (string? location = null) throws Error {
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 			assert (location == null);
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
@@ -52,21 +52,23 @@ namespace Frida {
 			return host_session;
 		}
 
-		public async void destroy (HostSession session) throws Error {
+		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 			host_session.agent_session_closed.disconnect (on_agent_session_closed);
-			yield host_session.close ();
+			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return yield this.host_session.obtain_agent_session (agent_session_id);
+			return this.host_session.obtain_agent_session (agent_session_id);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash) {
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
+				CrashInfo? crash) {
 			agent_session_closed (id, reason, crash);
 		}
 	}
@@ -93,7 +95,7 @@ namespace Frida {
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
 
-			robo_launcher = new RoboLauncher (this, system_server_agent);
+			robo_launcher = new RoboLauncher (this, system_server_agent, io_cancellable);
 			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
 
@@ -102,102 +104,97 @@ namespace Frida {
 #endif
 		}
 
-		public override async void preload () throws Error {
+		public override async void preload (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			yield system_server_agent.preload ();
+			yield system_server_agent.preload (cancellable);
 
-			yield robo_launcher.preload ();
+			yield robo_launcher.preload (cancellable);
 #endif
 		}
 
-		public override async void close () {
-			yield base.close ();
+		public override async void close (Cancellable? cancellable) throws IOError {
+			yield base.close (cancellable);
 
 #if ANDROID
-			yield robo_launcher.close ();
+			yield robo_launcher.close (cancellable);
 			robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
-			robo_launcher = null;
 
-			yield system_server_agent.close ();
-			system_server_agent = null;
+			yield system_server_agent.close (cancellable);
 
 			crash_monitor.process_crashed.disconnect (on_process_crashed);
-			yield crash_monitor.close ();
-			crash_monitor = null;
+			yield crash_monitor.close (cancellable);
 #endif
 
 			var linjector = injector as Linjector;
 
-			var uninjected_handler = injector.uninjected.connect ((id) => close.callback ());
-			while (linjector.any_still_injected ())
-				yield;
-			injector.disconnect (uninjected_handler);
+			yield wait_for_uninject (injector, cancellable, () => {
+				return linjector.any_still_injected ();
+			});
 
 			injector.uninjected.disconnect (on_uninjected);
-			yield linjector.close ();
-			injector = null;
+			yield injector.close (cancellable);
 
-			yield helper.close ();
+			yield helper.close (cancellable);
 			helper.output.disconnect (on_output);
-			helper = null;
 
 			if (system_session_container != null) {
-				yield system_session_container.destroy ();
+				yield system_session_container.destroy (cancellable);
 				system_session_container = null;
 			}
 
 			agent_resource = null;
 		}
 
-		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {
+		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
+				out DBusConnection connection) throws Error, IOError {
 			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
 
 			var agent_filename = get_agent_resource ().get_path_template ().printf (sizeof (void *) == 8 ? 64 : 32);
-			system_session_container = yield AgentContainer.create (agent_filename);
+			system_session_container = yield AgentContainer.create (agent_filename, cancellable);
 
 			connection = system_session_container.connection;
 
 			return system_session_container;
 		}
 
-		public override async HostApplicationInfo get_frontmost_application () throws Error {
+		public override async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			return yield system_server_agent.get_frontmost_application ();
+			return yield system_server_agent.get_frontmost_application (cancellable);
 #else
 			return System.get_frontmost_application ();
 #endif
 		}
 
-		public override async HostApplicationInfo[] enumerate_applications () throws Error {
+		public override async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			return yield system_server_agent.enumerate_applications ();
+			return yield system_server_agent.enumerate_applications (cancellable);
 #else
 			return System.enumerate_applications ();
 #endif
 		}
 
-		public override async HostProcessInfo[] enumerate_processes () throws Error {
+		public override async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
 			return System.enumerate_processes ();
 		}
 
-		public override async void enable_spawn_gating () throws Error {
+		public override async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			yield robo_launcher.enable_spawn_gating ();
+			yield robo_launcher.enable_spawn_gating (cancellable);
 #else
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
 		}
 
-		public override async void disable_spawn_gating () throws Error {
+		public override async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			yield robo_launcher.disable_spawn_gating ();
+			yield robo_launcher.disable_spawn_gating (cancellable);
 #else
 			throw new Error.NOT_SUPPORTED ("Not yet supported on this OS");
 #endif
 		}
 
-		public override async HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public override async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
 			return robo_launcher.enumerate_pending_spawn ();
 #else
@@ -205,16 +202,14 @@ namespace Frida {
 #endif
 		}
 
-		public override async uint spawn (string program, HostSpawnOptions options) throws Error {
+		public override async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable)
+				throws Error, IOError {
 #if ANDROID
-			if (!program.has_prefix ("/")) {
-				return yield robo_launcher.spawn (program, options);
-			} else {
-				return yield helper.spawn (program, options);
-			}
-#else
-			return yield helper.spawn (program, options);
+			if (!program.has_prefix ("/"))
+				return yield robo_launcher.spawn (program, options, cancellable);
 #endif
+
+			return yield helper.spawn (program, options, cancellable);
 		}
 
 		protected override bool try_handle_child (HostChildInfo info) {
@@ -237,60 +232,56 @@ namespace Frida {
 #endif
 		}
 
-		protected override async void prepare_exec_transition (uint pid) throws Error {
-			yield helper.prepare_exec_transition (pid);
+		protected override async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.prepare_exec_transition (pid, cancellable);
 		}
 
-		protected override async void await_exec_transition (uint pid) throws Error {
-			yield helper.await_exec_transition (pid);
+		protected override async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.await_exec_transition (pid, cancellable);
 		}
 
-		protected override async void cancel_exec_transition (uint pid) throws Error {
-			yield helper.cancel_exec_transition (pid);
+		protected override async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.cancel_exec_transition (pid, cancellable);
 		}
 
 		protected override bool process_is_alive (uint pid) {
 			return Posix.kill ((Posix.pid_t) pid, 0) == 0 || Posix.errno == Posix.EPERM;
 		}
 
-		public override async void input (uint pid, uint8[] data) throws Error {
-			yield helper.input (pid, data);
+		public override async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			yield helper.input (pid, data, cancellable);
 		}
 
-		protected override async void perform_resume (uint pid) throws Error {
-			yield helper.resume (pid);
+		protected override async void perform_resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield helper.resume (pid, cancellable);
 		}
 
-		public override async void kill (uint pid) throws Error {
+		public override async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 #if ANDROID
-			if (yield system_server_agent.try_stop_package_by_pid (pid))
+			if (yield system_server_agent.try_stop_package_by_pid (pid, cancellable))
 				return;
 #endif
 
-			yield helper.kill (pid);
+			yield helper.kill (pid, cancellable);
 		}
 
-		protected override async Gee.Promise<IOStream> perform_attach_to (uint pid, out Object? transport) throws Error {
+		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
+				throws Error, IOError {
 			var agent_resource = get_agent_resource ();
 
 			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
 
-			PipeTransport t;
-			try {
-				t = new PipeTransport ();
-			} catch (IOError e) {
-				throw new Error.NOT_SUPPORTED (e.message);
-			}
+			var t = new PipeTransport ();
 
-			var stream_request = Pipe.open (t.local_address);
+			var stream_request = Pipe.open (t.local_address, cancellable);
 
-			var uninjected_handler = injector.uninjected.connect ((id) => perform_attach_to.callback ());
-			while (injectee_by_pid.has_key (pid))
-				yield;
-			injector.disconnect (uninjected_handler);
+			yield wait_for_uninject (injector, cancellable, () => {
+				return injectee_by_pid.has_key (pid);
+			});
 
 			var linjector = injector as Linjector;
-			var id = yield linjector.inject_library_resource (pid, agent_resource, "frida_agent_main", t.remote_address);
+			var id = yield linjector.inject_library_resource (pid, agent_resource, "frida_agent_main", t.remote_address,
+				cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;
@@ -307,8 +298,8 @@ namespace Frida {
 			spawn_removed (info);
 		}
 
-		protected override async CrashInfo? try_collect_crash (uint pid) {
-			return yield crash_monitor.try_collect_crash (pid);
+		protected override async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
+			return yield crash_monitor.try_collect_crash (pid, cancellable);
 		}
 
 		private void on_process_crashed (CrashInfo info) {
@@ -369,45 +360,55 @@ namespace Frida {
 			construct;
 		}
 
-		private Gee.Promise<bool> ensure_request;
+		public Cancellable io_cancellable {
+			get;
+			construct;
+		}
+
+		private Promise<bool> ensure_request;
 
 		private Gee.HashMap<uint, ZygoteAgent> zygote_agents = new Gee.HashMap<uint, ZygoteAgent> ();
 
 		private bool spawn_gating_enabled = false;
-		private Gee.HashMap<string, Gee.Promise<uint>> spawn_requests = new Gee.HashMap<string, Gee.Promise<uint>> ();
+		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		public RoboLauncher (LinuxHostSession host_session, SystemServerAgent system_server_agent) {
-			Object (host_session: host_session, system_server_agent: system_server_agent);
+		public RoboLauncher (LinuxHostSession host_session, SystemServerAgent system_server_agent, Cancellable io_cancellable) {
+			Object (
+				host_session: host_session,
+				system_server_agent: system_server_agent,
+				io_cancellable: io_cancellable
+			);
 		}
 
-		public async void preload () throws Error {
-			yield ensure_loaded ();
+		public async void preload (Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (ensure_request != null) {
 				try {
-					yield ensure_loaded ();
-				} catch (Error e) {
+					yield ensure_loaded (cancellable);
+				} catch (GLib.Error e) {
 				}
 			}
 
 			foreach (var request in spawn_requests.values)
-				request.set_exception (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
+				request.reject (new Error.INVALID_OPERATION ("Cancelled by shutdown"));
 			spawn_requests.clear ();
 
 			foreach (var agent in zygote_agents.values)
-				yield agent.close ();
+				yield agent.close (cancellable);
 			zygote_agents.clear ();
 		}
 
-		public async void enable_spawn_gating () throws Error {
-			yield ensure_loaded ();
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
+
 			spawn_gating_enabled = true;
 		}
 
-		public async void disable_spawn_gating () throws Error {
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			spawn_gating_enabled = false;
 
 			var pending = pending_spawn.values.to_array ();
@@ -415,11 +416,11 @@ namespace Frida {
 			foreach (var spawn in pending) {
 				spawn_removed (spawn);
 
-				host_session.resume.begin (spawn.pid);
+				host_session.resume.begin (spawn.pid, io_cancellable);
 			}
 		}
 
-		public HostSpawnInfo[] enumerate_pending_spawn () throws Error {
+		public HostSpawnInfo[] enumerate_pending_spawn () {
 			var result = new HostSpawnInfo[pending_spawn.size];
 			var index = 0;
 			foreach (var spawn in pending_spawn.values)
@@ -427,7 +428,7 @@ namespace Frida {
 			return result;
 		}
 
-		public async uint spawn (string program, HostSpawnOptions options) throws Error {
+		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			string package = program;
 
 			if (options.has_argv)
@@ -445,78 +446,44 @@ namespace Frida {
 			if (options.stdio != INHERIT)
 				throw new Error.NOT_SUPPORTED ("Redirected stdio is not supported when spawning Android apps");
 
-			PackageEntrypoint? entrypoint = null;
+			var entrypoint = PackageEntrypoint.parse (package, options);
 
-			var aux_options = options.load_aux ();
+			yield ensure_loaded (cancellable);
 
-			if (aux_options.contains ("activity")) {
-				string? activity = null;
-				if (!aux_options.lookup ("activity", "s", out activity))
-					throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
-				activity = canonicalize_class_name (activity, package);
-
-				if (aux_options.contains ("action"))
-					throw new Error.INVALID_ARGUMENT ("The 'action' option should only be specified when a 'receiver' is specified");
-
-				entrypoint = new ActivityEntrypoint (activity);
-			}
-
-			if (aux_options.contains ("receiver")) {
-				if (entrypoint != null)
-					throw new Error.INVALID_ARGUMENT ("Only one of 'activity' or 'receiver' (with 'action') may be specified");
-
-				string? receiver = null;
-				if (!aux_options.lookup ("receiver", "s", out receiver))
-					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
-				receiver = canonicalize_class_name (receiver, package);
-
-				string? action = null;
-				if (!aux_options.contains ("action"))
-					throw new Error.INVALID_ARGUMENT ("The 'action' option is required when 'receiver' is specified");
-				if (!aux_options.lookup ("action", "s", out action))
-					throw new Error.INVALID_ARGUMENT ("The 'action' option must be a string");
-
-				entrypoint = new BroadcastReceiverEntrypoint (receiver, action);
-			}
-
-			if (entrypoint == null)
-				entrypoint = new DefaultActivityEntrypoint ();
-
-			yield ensure_loaded ();
-
-			var process_name = yield system_server_agent.get_process_name (package);
+			var process_name = yield system_server_agent.get_process_name (package, cancellable);
 			if (spawn_requests.has_key (process_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
 
-			var request = new Gee.Promise<uint> ();
+			var request = new Promise<uint> ();
 			spawn_requests[process_name] = request;
 
+			uint pid = 0;
 			try {
-				yield system_server_agent.stop_package (package);
-				yield system_server_agent.start_package (package, entrypoint);
-			} catch (Error e) {
-				spawn_requests.unset (process_name);
-				throw e;
-			}
+				yield system_server_agent.stop_package (package, cancellable);
+				yield system_server_agent.start_package (package, entrypoint, cancellable);
 
-			var timeout = new TimeoutSource.seconds (20);
-			timeout.set_callback (() => {
-				spawn_requests.unset (process_name);
-				request.set_exception (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
-				return false;
-			});
-			timeout.attach (MainContext.get_thread_default ());
-
-			try {
-				var future = request.future;
+				var timeout = new TimeoutSource.seconds (20);
+				timeout.set_callback (() => {
+					request.reject (new Error.TIMED_OUT ("Unexpectedly timed out while waiting for app to launch"));
+					return false;
+				});
+				timeout.attach (MainContext.get_thread_default ());
 				try {
-					return yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
+					pid = yield request.future.wait_async (cancellable);
+				} finally {
+					timeout.destroy ();
 				}
-			} finally {
-				timeout.destroy ();
+			} catch (GLib.Error e) {
+				if (!spawn_requests.unset (process_name)) {
+					var pending_pid = request.future.value;
+					if (pending_pid != 0)
+						host_session.resume.begin (pending_pid, io_cancellable);
+				}
+
+				throw_api_error (e);
 			}
+
+			return pid;
 		}
 
 		public bool try_handle_child (HostChildInfo info) {
@@ -526,9 +493,9 @@ namespace Frida {
 
 			var pid = info.pid;
 
-			Gee.Promise<uint> spawn_request;
+			Promise<uint> spawn_request;
 			if (spawn_requests.unset (info.identifier, out spawn_request)) {
-				spawn_request.set_value (pid);
+				spawn_request.resolve (pid);
 				return true;
 			}
 
@@ -543,7 +510,7 @@ namespace Frida {
 				var source = new IdleSource ();
 				var host_session = this.host_session;
 				source.set_callback (() => {
-					host_session.resume.begin (pid);
+					host_session.resume.begin (pid, io_cancellable);
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
@@ -565,35 +532,40 @@ namespace Frida {
 				agent.child_gating_only_used_by_us = subscriber_count == 1;
 		}
 
-		private async void ensure_loaded () throws Error {
-			if (ensure_request != null) {
-				var future = ensure_request.future;
+		private async void ensure_loaded (Cancellable? cancellable) throws Error, IOError {
+			while (ensure_request != null) {
 				try {
-					yield future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
+					yield ensure_request.future.wait_async (cancellable);
+					return;
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
 				}
-				return;
 			}
-			ensure_request = new Gee.Promise<bool> ();
+			ensure_request = new Promise<bool> ();
 
 			try {
 				foreach (HostProcessInfo info in System.enumerate_processes ()) {
 					var name = info.name;
 					if (name == "zygote" || name == "zygote64") {
 						var pid = info.pid;
+						if (zygote_agents.has_key (pid))
+							continue;
 
 						var agent = new ZygoteAgent (host_session, pid);
 						zygote_agents[pid] = agent;
 
 						try {
-							yield agent.load ();
-						} catch (Error e) {
+							yield agent.load (cancellable);
+						} catch (GLib.Error e) {
 							zygote_agents.unset (pid);
 
 							if (e is Error.PERMISSION_DENIED) {
-								throw new Error.NOT_SUPPORTED ("Unable to access %s while preparing for app launch;" +
-									" try disabling Magisk Hide in case it is active", name);
+								throw new Error.NOT_SUPPORTED (
+									"Unable to access %s while preparing for app launch; " +
+									"try disabling Magisk Hide in case it is active",
+									name);
 							} else {
 								throw e;
 							}
@@ -601,12 +573,12 @@ namespace Frida {
 					}
 				}
 
-				ensure_request.set_value (true);
-			} catch (Error e) {
-				ensure_request.set_exception (e);
+				ensure_request.resolve (true);
+			} catch (GLib.Error e) {
+				ensure_request.reject (e);
 				ensure_request = null;
 
-				throw e;
+				throw_api_error (e);
 			}
 		}
 	}
@@ -626,17 +598,17 @@ namespace Frida {
 			Object (host_session: host_session, script_source: null, pid: pid);
 		}
 
-		public async void load () throws Error {
-			yield ensure_loaded ();
+		public async void load (Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
 
 			try {
-				yield session.enable_child_gating ();
+				yield session.enable_child_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		protected override async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return pid;
 		}
 	}
@@ -647,26 +619,26 @@ namespace Frida {
 			Object (
 				host_session: host_session,
 				script_source: source,
-				enable_jit: true
+				script_runtime: ScriptRuntime.V8
 			);
 		}
 
-		public async void preload () throws Error {
-			yield enumerate_applications ();
+		public async void preload (Cancellable? cancellable) throws Error, IOError {
+			yield enumerate_applications (cancellable);
 
 			try {
-				yield get_process_name ("");
+				yield get_process_name ("", cancellable);
 			} catch (Error e) {
 			}
 
 			try {
-				yield start_package ("", new DefaultActivityEntrypoint ());
+				yield start_package ("", new DefaultActivityEntrypoint (), cancellable);
 			} catch (Error e) {
 			}
 		}
 
-		public async HostApplicationInfo[] enumerate_applications () throws Error {
-			var apps = yield call ("enumerateApplications", new Json.Node[] {});
+		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+			var apps = yield call ("enumerateApplications", new Json.Node[] {}, cancellable);
 
 			var items = apps.get_array ();
 			var length = items.get_length ();
@@ -685,8 +657,8 @@ namespace Frida {
 			return result;
 		}
 
-		public async HostApplicationInfo get_frontmost_application () throws Error {
-			var app = yield call ("getFrontmostApplication", new Json.Node[] {});
+		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+			var app = yield call ("getFrontmostApplication", new Json.Node[] {}, cancellable);
 			var no_icon = ImageData (0, 0, 0, "");
 			if (app != null) {
 				var item = app.get_array ();
@@ -699,29 +671,30 @@ namespace Frida {
 			}
 		}
 
-		public async string get_process_name (string package) throws Error {
+		public async string get_process_name (string package, Cancellable? cancellable) throws Error, IOError {
 			var package_name_value = new Json.Node.alloc ().init_string (package);
 
-			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value });
+			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value }, cancellable);
 
 			return process_name.get_string ();
 		}
 
-		public async void start_package (string package, PackageEntrypoint entrypoint) throws Error {
+		public async void start_package (string package, PackageEntrypoint entrypoint, Cancellable? cancellable)
+				throws Error, IOError {
 			var package_value = new Json.Node.alloc ().init_string (package);
 
 			if (entrypoint is DefaultActivityEntrypoint) {
 				var activity_value = new Json.Node.alloc ();
 				activity_value.init_null ();
 
-				yield call ("startActivity", new Json.Node[] { package_value, activity_value });
+				yield call ("startActivity", new Json.Node[] { package_value, activity_value }, cancellable);
 			} else if (entrypoint is ActivityEntrypoint) {
 				var e = entrypoint as ActivityEntrypoint;
 
 				var activity_value = new Json.Node.alloc ();
 				activity_value.init_string (e.activity);
 
-				yield call ("startActivity", new Json.Node[] { package_value, activity_value });
+				yield call ("startActivity", new Json.Node[] { package_value, activity_value }, cancellable);
 			} else if (entrypoint is BroadcastReceiverEntrypoint) {
 				var e = entrypoint as BroadcastReceiverEntrypoint;
 
@@ -731,27 +704,27 @@ namespace Frida {
 				var action_value = new Json.Node.alloc ();
 				action_value.init_string (e.action);
 
-				yield call ("sendBroadcast", new Json.Node[] { package_value, receiver_value, action_value });
+				yield call ("sendBroadcast", new Json.Node[] { package_value, receiver_value, action_value }, cancellable);
 			} else {
 				assert_not_reached ();
 			}
 		}
 
-		public async void stop_package (string package) throws Error {
+		public async void stop_package (string package, Cancellable? cancellable) throws Error, IOError {
 			var package_value = new Json.Node.alloc ().init_string (package);
 
-			yield call ("stopPackage", new Json.Node[] { package_value });
+			yield call ("stopPackage", new Json.Node[] { package_value }, cancellable);
 		}
 
-		public async bool try_stop_package_by_pid (uint pid) throws Error {
+		public async bool try_stop_package_by_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var pid_value = new Json.Node.alloc ().init_int (pid);
 
-			var success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_value });
+			var success = yield call ("tryStopPackageByPid", new Json.Node[] { pid_value }, cancellable);
 
 			return success.get_boolean ();
 		}
 
-		protected override async uint get_target_pid () throws Error {
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
 			return LocalProcesses.get_pid ("system_server");
 		}
 	}
@@ -760,10 +733,13 @@ namespace Frida {
 		public signal void process_crashed (CrashInfo crash);
 
 		private Object logcat;
+
 		private DataInputStream input;
-		private Cancellable cancellable = new Cancellable ();
+		private Cancellable io_cancellable = new Cancellable ();
+
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
 		private Gee.HashMap<uint, CrashBuilder> crash_builders = new Gee.HashMap<uint, CrashBuilder> ();
+
 		private Timer since_start;
 
 		construct {
@@ -772,8 +748,8 @@ namespace Frida {
 			start_monitoring.begin ();
 		}
 
-		public async void close () {
-			cancellable.cancel ();
+		public async void close (Cancellable? cancellable) throws IOError {
+			io_cancellable.cancel ();
 
 			if (logcat != null) {
 				if (logcat is Subprocess) {
@@ -781,17 +757,17 @@ namespace Frida {
 					process.send_signal (Posix.Signal.TERM);
 				} else if (logcat is SuperSU.Process) {
 					var process = logcat as SuperSU.Process;
-					yield process.detach (); // TODO: Figure out how we can terminate it.
+					yield process.detach (cancellable); // TODO: Figure out how we can terminate it.
 				}
 				logcat = null;
 			}
 		}
 
-		public async CrashInfo? try_collect_crash (uint pid) {
+		public async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
 			var delivery = get_crash_delivery_for_pid (pid);
 			try {
-				return yield delivery.future.wait_async ();
-			} catch (Gee.FutureError future_error) {
+				return yield delivery.future.wait_async (cancellable);
+			} catch (Error e) {
 				return null;
 			}
 		}
@@ -947,19 +923,24 @@ namespace Frida {
 		}
 
 		private async void start_monitoring () {
-			InputStream stdout_pipe = null;
+			InputStream? stdout_pipe = null;
 
 			try {
-				var process = yield SuperSU.spawn ("/", new string[] { "su", "-c", "logcat", "-b", "crash", "-B" }, null, true);
+				string cwd = "/";
+				string[] argv = new string[] { "su", "-c", "logcat", "-b", "crash", "-B" };
+				string[]? envp = null;
+				bool capture_output = true;
+				var process = yield SuperSU.spawn (cwd, argv, envp, capture_output, io_cancellable);
 
 				logcat = process;
 				stdout_pipe = process.output;
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 			}
 
 			if (stdout_pipe == null) {
 				try {
-					var process = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" }, STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
+					var process = new Subprocess.newv ({ "logcat", "-b", "crash", "-B" },
+						STDIN_INHERIT | STDOUT_PIPE | STDERR_SILENCE);
 
 					logcat = process;
 					stdout_pipe = process.get_stdout_pipe ();
@@ -980,25 +961,25 @@ namespace Frida {
 			try {
 				while (true) {
 					yield prepare_to_read (2 * sizeof (uint16));
-					size_t payload_size = input.read_uint16 (cancellable);
-					size_t header_size = input.read_uint16 (cancellable);
+					size_t payload_size = input.read_uint16 (io_cancellable);
+					size_t header_size = input.read_uint16 (io_cancellable);
 					if (header_size < 24)
 						throw new Error.PROTOCOL ("Header too short");
 					yield prepare_to_read (header_size + payload_size - 4);
 
 					var entry = new LogEntry ();
 
-					entry.pid = input.read_int32 (cancellable);
-					entry.tid = input.read_uint32 (cancellable);
-					entry.sec = input.read_uint32 (cancellable);
-					entry.nsec = input.read_uint32 (cancellable);
-					entry.lid = input.read_uint32 (cancellable);
+					entry.pid = input.read_int32 (io_cancellable);
+					entry.tid = input.read_uint32 (io_cancellable);
+					entry.sec = input.read_uint32 (io_cancellable);
+					entry.nsec = input.read_uint32 (io_cancellable);
+					entry.lid = input.read_uint32 (io_cancellable);
 					size_t ignored_size = header_size - 24;
 					if (ignored_size > 0)
-						input.skip (ignored_size, cancellable);
+						input.skip (ignored_size, io_cancellable);
 
 					var payload_buf = new uint8[payload_size + 1];
-					input.read (payload_buf[0:payload_size], cancellable);
+					input.read (payload_buf[0:payload_size], io_cancellable);
 					payload_buf[payload_size] = 0;
 
 					uint8 * payload_start = payload_buf;
@@ -1020,7 +1001,7 @@ namespace Frida {
 				size_t available = input.get_available ();
 				if (available >= required)
 					return;
-				ssize_t n = yield input.fill_async ((ssize_t) (required - available));
+				ssize_t n = yield input.fill_async ((ssize_t) (required - available), Priority.DEFAULT, io_cancellable);
 				if (n == 0)
 					throw new Error.TRANSPORT ("Disconnected");
 			}
@@ -1045,13 +1026,13 @@ namespace Frida {
 				construct;
 			}
 
-			public Gee.Future<CrashInfo?> future {
+			public Future<CrashInfo?> future {
 				get {
 					return promise.future;
 				}
 			}
 
-			private Gee.Promise<CrashInfo?> promise = new Gee.Promise <CrashInfo?> ();
+			private Promise<CrashInfo?> promise = new Promise <CrashInfo?> ();
 			private TimeoutSource expiry_source;
 
 			public CrashDelivery (uint pid) {
@@ -1086,7 +1067,7 @@ namespace Frida {
 				if (future.ready)
 					return;
 
-				promise.set_value (crash);
+				promise.resolve (crash);
 
 				expiry_source.destroy ();
 				expiry_source = make_expiry_source (1000);
@@ -1094,7 +1075,7 @@ namespace Frida {
 
 			private bool on_timeout () {
 				if (!future.ready)
-					promise.set_exception (new Error.TIMED_OUT ("Crash delivery timed out"));
+					promise.reject (new Error.TIMED_OUT ("Crash delivery timed out"));
 
 				expired ();
 
@@ -1181,6 +1162,50 @@ namespace Frida {
 	}
 
 	private class PackageEntrypoint : Object {
+		public static PackageEntrypoint parse (string package, HostSpawnOptions options) throws Error {
+			PackageEntrypoint? entrypoint = null;
+
+			var aux_options = options.load_aux ();
+
+			if (aux_options.contains ("activity")) {
+				string? activity = null;
+				if (!aux_options.lookup ("activity", "s", out activity))
+					throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
+				activity = canonicalize_class_name (activity, package);
+
+				if (aux_options.contains ("action")) {
+					throw new Error.INVALID_ARGUMENT (
+						"The 'action' option should only be specified when a 'receiver' is specified");
+				}
+
+				entrypoint = new ActivityEntrypoint (activity);
+			}
+
+			if (aux_options.contains ("receiver")) {
+				if (entrypoint != null) {
+					throw new Error.INVALID_ARGUMENT (
+						"Only one of 'activity' or 'receiver' (with 'action') may be specified");
+				}
+
+				string? receiver = null;
+				if (!aux_options.lookup ("receiver", "s", out receiver))
+					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
+				receiver = canonicalize_class_name (receiver, package);
+
+				string? action = null;
+				if (!aux_options.contains ("action"))
+					throw new Error.INVALID_ARGUMENT ("The 'action' option is required when 'receiver' is specified");
+				if (!aux_options.lookup ("action", "s", out action))
+					throw new Error.INVALID_ARGUMENT ("The 'action' option must be a string");
+
+				entrypoint = new BroadcastReceiverEntrypoint (receiver, action);
+			}
+
+			if (entrypoint == null)
+				entrypoint = new DefaultActivityEntrypoint ();
+
+			return entrypoint;
+		}
 	}
 
 	private class DefaultActivityEntrypoint : PackageEntrypoint {

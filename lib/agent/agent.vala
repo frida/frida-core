@@ -43,7 +43,7 @@ namespace Frida.Agent {
 		private uint filter_id = 0;
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
-		private Gee.Promise<bool> pending_close;
+		private Promise<bool> pending_close;
 		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
@@ -83,7 +83,8 @@ namespace Frida.Agent {
 			CHILD
 		}
 
-		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state) {
+		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy,
+				void * opaque_injector_state) {
 			Environment._init ();
 
 			{
@@ -309,7 +310,8 @@ namespace Frida.Agent {
 			if (controller != null) {
 				try {
 					fork_parent_pid = get_process_id ();
-					fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
+					fork_child_id = yield controller.prepare_to_fork (fork_parent_pid, null,
+						out fork_parent_injectee_id, out fork_child_injectee_id, out fork_child_socket);
 				} catch (GLib.Error e) {
 #if ANDROID
 					error ("Oops, SELinux rule probably missing for your system. Symptom: %s", e.message);
@@ -403,7 +405,7 @@ namespace Frida.Agent {
 
 			if (controller != null) {
 				try {
-					yield controller.recreate_agent_thread (pid, injectee_id);
+					yield controller.recreate_agent_thread (pid, injectee_id, null);
 				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
@@ -430,7 +432,7 @@ namespace Frida.Agent {
 				var previous_timeout = controller_proxy.get_default_timeout ();
 				controller_proxy.set_default_timeout (int.MAX);
 				try {
-					yield controller.wait_for_permission_to_resume (fork_child_id, info);
+					yield controller.wait_for_permission_to_resume (fork_child_id, info, null);
 				} catch (GLib.Error e) {
 					// The connection will/did get closed and we will unload...
 				}
@@ -460,7 +462,7 @@ namespace Frida.Agent {
 				return;
 
 			try {
-				yield controller.prepare_to_exec (*info);
+				yield controller.prepare_to_exec (*info, null);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -470,7 +472,7 @@ namespace Frida.Agent {
 				return;
 
 			try {
-				yield controller.cancel_exec (pid);
+				yield controller.cancel_exec (pid, null);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -480,7 +482,7 @@ namespace Frida.Agent {
 				return;
 
 			try {
-				yield controller.acknowledge_spawn (*info, start_state);
+				yield controller.acknowledge_spawn (*info, start_state, null);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -496,15 +498,19 @@ namespace Frida.Agent {
 				case DUK:
 					if (duk_backend == null) {
 						duk_backend = Gum.ScriptBackend.obtain_duk ();
-						if (duk_backend == null)
-							throw new Error.NOT_SUPPORTED ("Duktape runtime not available due to build configuration");
+						if (duk_backend == null) {
+							throw new Error.NOT_SUPPORTED (
+								"Duktape runtime not available due to build configuration");
+						}
 					}
 					return duk_backend;
 				case V8:
 					if (v8_backend == null) {
 						v8_backend = Gum.ScriptBackend.obtain_v8 ();
-						if (v8_backend == null)
-							throw new Error.NOT_SUPPORTED ("V8 runtime not available due to build configuration");
+						if (v8_backend == null) {
+							throw new Error.NOT_SUPPORTED (
+								"V8 runtime not available due to build configuration");
+						}
 					}
 					return v8_backend;
 			}
@@ -520,7 +526,7 @@ namespace Frida.Agent {
 			return (v8_backend != null) ? v8_backend : duk_backend;
 		}
 
-		private async void open (AgentSessionId id) throws Error {
+		private async void open (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
@@ -566,7 +572,7 @@ namespace Frida.Agent {
 
 		private async void close_client (AgentClient client, CompletionNotify on_complete) {
 			try {
-				yield client.close ();
+				yield client.close (null);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -621,7 +627,7 @@ namespace Frida.Agent {
 			eternalized_scripts.add (script);
 		}
 
-		private async void unload () throws Error {
+		private async void unload (Cancellable? cancellable) throws Error, IOError {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is already unloading");
 			unloading = true;
@@ -629,19 +635,19 @@ namespace Frida.Agent {
 		}
 
 		private async void perform_unload () {
-			Gee.Promise<bool> operation = null;
+			Promise<bool> operation = null;
 
 			lock (pending_calls) {
 				if (pending_calls > 0) {
-					pending_close = new Gee.Promise<bool> ();
+					pending_close = new Promise<bool> ();
 					operation = pending_close;
 				}
 			}
 
 			if (operation != null) {
 				try {
-					yield operation.future.wait_async ();
-				} catch (Gee.FutureError e) {
+					yield operation.future.wait_async (null);
+				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
 			}
@@ -721,8 +727,8 @@ namespace Frida.Agent {
 		private async void setup_connection_with_pipe_address (string pipe_address) {
 			IOStream stream;
 			try {
-				stream = yield Pipe.open (pipe_address).future.wait_async ();
-			} catch (Gee.FutureError e) {
+				stream = yield Pipe.open (pipe_address, null).wait_async (null);
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
@@ -811,16 +817,16 @@ namespace Frida.Agent {
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (!closed_by_us)
-				unload.begin ();
+				unload.begin (null);
 
-			Gee.Promise<bool> operation = null;
+			Promise<bool> operation = null;
 			lock (pending_calls) {
 				pending_calls = 0;
 				operation = pending_close;
 				pending_close = null;
 			}
 			if (operation != null)
-				operation.set_value (true);
+				operation.resolve (true);
 		}
 
 		private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
@@ -841,7 +847,7 @@ namespace Frida.Agent {
 							if (pending_calls == 0 && operation != null) {
 								pending_close = null;
 								schedule_idle (() => {
-									operation.set_value (true);
+									operation.resolve (true);
 									return false;
 								});
 							}
@@ -888,8 +894,8 @@ namespace Frida.Agent {
 			set;
 		}
 
-		private Gee.Promise<bool> close_request;
-		private Gee.Promise<bool> flush_complete = new Gee.Promise<bool> ();
+		private Promise<bool> close_request;
+		private Promise<bool> flush_complete = new Promise<bool> ();
 
 		private bool child_gating_enabled = false;
 		private ScriptEngine script_engine;
@@ -904,25 +910,26 @@ namespace Frida.Agent {
 			script_engine.message_from_debugger.connect (on_message_from_debugger);
 		}
 
-		public async void close () throws Error {
-			if (close_request != null) {
+		public async void close (Cancellable? cancellable) throws Error, IOError {
+			while (close_request != null) {
 				try {
-					yield close_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					assert_not_reached ();
+					yield close_request.future.wait_async (cancellable);
+					return;
+				} catch (GLib.Error e) {
+					assert (e is IOError.CANCELLED);
+					cancellable.set_error_if_cancelled ();
 				}
-				return;
 			}
-			close_request = new Gee.Promise<bool> ();
+			close_request = new Promise<bool> ();
 
 			try {
-				yield disable_child_gating ();
+				yield disable_child_gating (cancellable);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 
 			yield script_engine.flush ();
-			flush_complete.set_value (true);
+			flush_complete.resolve (true);
 
 			yield script_engine.close ();
 			script_engine.message_from_script.disconnect (on_message_from_script);
@@ -930,16 +937,16 @@ namespace Frida.Agent {
 
 			closed ();
 
-			close_request.set_value (true);
+			close_request.resolve (true);
 		}
 
 		public async void flush () {
 			if (close_request == null)
-				close.begin ();
+				close.begin (null);
 
 			try {
-				yield flush_complete.future.wait_async ();
-			} catch (Gee.FutureError e) {
+				yield flush_complete.future.wait_async (null);
+			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
 		}
@@ -948,7 +955,7 @@ namespace Frida.Agent {
 			yield script_engine.prepare_for_termination ();
 		}
 
-		public async void enable_child_gating () throws Error {
+		public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			if (child_gating_enabled)
@@ -959,7 +966,7 @@ namespace Frida.Agent {
 			child_gating_enabled = true;
 		}
 
-		public async void disable_child_gating () throws Error {
+		public async void disable_child_gating (Cancellable? cancellable) throws Error, IOError {
 			if (!child_gating_enabled)
 				return;
 
@@ -968,7 +975,7 @@ namespace Frida.Agent {
 			child_gating_enabled = false;
 		}
 
-		public async AgentScriptId create_script (string name, string source) throws Error {
+		public async AgentScriptId create_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			var options = new ScriptOptions ();
@@ -979,28 +986,31 @@ namespace Frida.Agent {
 			return instance.script_id;
 		}
 
-		public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options) throws Error {
+		public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
+				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
 			return instance.script_id;
 		}
 
-		public async AgentScriptId create_script_from_bytes (uint8[] bytes) throws Error {
+		public async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			var instance = yield script_engine.create_script (null, new Bytes (bytes), new ScriptOptions ());
 			return instance.script_id;
 		}
 
-		public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options) throws Error {
+		public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
+				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
-			var instance = yield script_engine.create_script (null, new Bytes (bytes), ScriptOptions._deserialize (options.data));
+			var instance = yield script_engine.create_script (null, new Bytes (bytes),
+				ScriptOptions._deserialize (options.data));
 			return instance.script_id;
 		}
 
-		public async uint8[] compile_script (string name, string source) throws Error {
+		public async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			var options = new ScriptOptions ();
@@ -1011,57 +1021,59 @@ namespace Frida.Agent {
 			return bytes.get_data ();
 		}
 
-		public async uint8[] compile_script_with_options (string source, AgentScriptOptions options) throws Error {
+		public async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
+				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options.data));
 			return bytes.get_data ();
 		}
 
-		public async void destroy_script (AgentScriptId script_id) throws Error {
+		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			yield script_engine.destroy_script (script_id);
 		}
 
-		public async void load_script (AgentScriptId script_id) throws Error {
+		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			yield script_engine.load_script (script_id);
 		}
 
-		public async void eternalize_script (AgentScriptId script_id) throws Error {
+		public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			var script = script_engine.eternalize_script (script_id);
 			script_eternalized (script);
 		}
 
-		public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) throws Error {
+		public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
+				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			script_engine.post_to_script (script_id, message, has_data ? new Bytes (data) : null);
 		}
 
-		public async void enable_debugger () throws Error {
+		public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			script_engine.enable_debugger ();
 		}
 
-		public async void disable_debugger () throws Error {
+		public async void disable_debugger (Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			script_engine.disable_debugger ();
 		}
 
-		public async void post_message_to_debugger (string message) throws Error {
+		public async void post_message_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			script_engine.post_message_to_debugger (message);
 		}
 
-		public async void enable_jit () throws GLib.Error {
+		public async void enable_jit (Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
 			script_engine.enable_jit ();

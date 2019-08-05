@@ -299,7 +299,7 @@ frida_test_process_backend_join (void * handle, guint timeout_msec,
     FridaSuperSUProcess * process = handle;
     guint timeout;
 
-    frida_super_su_process_wait (process, frida_test_process_backend_on_wait_ready, frida_test_wait_context_ref (context));
+    frida_super_su_process_wait (process, NULL, frida_test_process_backend_on_wait_ready, frida_test_wait_context_ref (context));
     timeout = g_timeout_add (timeout_msec, frida_test_process_backend_on_wait_timeout, frida_test_wait_context_ref (context));
 
     g_main_loop_run (context->loop);

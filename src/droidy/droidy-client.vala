@@ -3,27 +3,36 @@ namespace Frida.Droidy {
 		public signal void device_attached (string serial, string name);
 		public signal void device_detached (string serial);
 
-		private Client client = new Client ();
+		private Client? client;
 		private Gee.HashMap<string, DeviceInfo> devices = new Gee.HashMap<string, DeviceInfo> ();
+		private Cancellable io_cancellable = new Cancellable ();
 
-		construct {
+		public async void open (Cancellable? cancellable = null) throws Error, IOError {
+			client = yield Client.open (cancellable);
 			client.message.connect (on_message);
+
+			try {
+				var devices_encoded = yield client.request_data ("host:track-devices", cancellable);
+				yield update_devices (devices_encoded, cancellable);
+			} catch (GLib.Error e) {
+				yield client.close (cancellable);
+			}
 		}
 
-		public async void open () throws Error {
-			var devices_encoded = yield client.request_data ("host:track-devices");
-			yield update_devices (devices_encoded);
-		}
+		public async void close (Cancellable? cancellable = null) throws IOError {
+			if (client == null)
+				return;
 
-		public async void close () {
-			yield client.close ();
+			io_cancellable.cancel ();
+
+			yield client.close (cancellable);
 		}
 
 		private void on_message (string devices_encoded) {
-			update_devices.begin (devices_encoded);
+			update_devices.begin (devices_encoded, io_cancellable);
 		}
 
-		private async void update_devices (string devices_encoded) {
+		private async void update_devices (string devices_encoded, Cancellable? cancellable) throws IOError {
 			var detached = new Gee.ArrayList<DeviceInfo> ();
 			var attached = new Gee.ArrayList<DeviceInfo> ();
 
@@ -58,10 +67,10 @@ namespace Frida.Droidy {
 					device_detached (info.serial);
 			}
 			foreach (var info in attached)
-				yield announce_device (info);
+				yield announce_device (info, cancellable);
 		}
 
-		private async void announce_device (DeviceInfo info) {
+		private async void announce_device (DeviceInfo info, Cancellable? cancellable) throws IOError {
 			var serial = info.serial;
 			uint port = 0;
 			serial.scanf ("emulator-%u", out port);
@@ -69,8 +78,8 @@ namespace Frida.Droidy {
 				info.name = "Android Emulator %u".printf (port);
 			} else {
 				try {
-					var manufacturer = yield get_manufacturer (info.serial);
-					var model = yield get_model (info.serial);
+					var manufacturer = yield get_manufacturer (info.serial, cancellable);
+					var model = yield get_model (info.serial, cancellable);
 					info.name = manufacturer + " " + model;
 				} catch (Error e) {
 					info.name = "Android Device";
@@ -84,9 +93,8 @@ namespace Frida.Droidy {
 			}
 		}
 
-		private async string get_manufacturer (string device_serial) throws Error {
-			var command = new ShellCommand ("getprop ro.product.manufacturer");
-			var output = yield command.run (device_serial);
+		private async string get_manufacturer (string device_serial, Cancellable? cancellable) throws Error, IOError {
+			var output = yield ShellCommand.run ("getprop ro.product.manufacturer", device_serial, cancellable);
 			var manufacturer = output.strip ();
 			var length = manufacturer.char_count ();
 			if (length == 0)
@@ -97,9 +105,8 @@ namespace Frida.Droidy {
 			return result;
 		}
 
-		private async string get_model (string device_serial) throws Error {
-			var command = new ShellCommand ("getprop ro.product.model");
-			var output = yield command.run (device_serial);
+		private async string get_model (string device_serial, Cancellable? cancellable) throws Error, IOError {
+			var output = yield ShellCommand.run ("getprop ro.product.model", device_serial, cancellable);
 			var model = output.strip ();
 			if (model.char_count () == 0)
 				throw new Error.NOT_SUPPORTED ("Unable to determine device model");
@@ -128,23 +135,15 @@ namespace Frida.Droidy {
 		}
 	}
 
-	public class ShellCommand : Object {
-		public string command {
-			get;
-			construct;
-		}
-
+	namespace ShellCommand {
 		private const int CHUNK_SIZE = 4096;
 
-		public ShellCommand (string command) {
-			Object (command: command);
-		}
+		public static async string run (string command, string device_serial, Cancellable? cancellable = null) throws Error, IOError {
+			var client = yield Client.open (cancellable);
 
-		public async string run (string device_serial) throws Error {
-			var client = new Client ();
 			try {
-				yield client.request ("host:transport:" + device_serial);
-				yield client.request_protocol_change ("shell:" + command);
+				yield client.request ("host:transport:" + device_serial, cancellable);
+				yield client.request_protocol_change ("shell:" + command, cancellable);
 
 				var input = client.connection.get_input_stream ();
 				var buf = new uint8[CHUNK_SIZE];
@@ -153,14 +152,17 @@ namespace Frida.Droidy {
 					var capacity = buf.length - offset;
 					if (capacity < CHUNK_SIZE)
 						buf.resize (buf.length + CHUNK_SIZE - capacity);
+
 					ssize_t n;
 					try {
-						n = yield input.read_async (buf[offset:buf.length - 1]);
+						n = yield input.read_async (buf[offset:buf.length - 1], Priority.DEFAULT, cancellable);
 					} catch (IOError e) {
-						throw new Error.TRANSPORT (e.message);
+						throw new Error.TRANSPORT ("%s", e.message);
 					}
+
 					if (n == 0)
 						break;
+
 					offset += (int) n;
 				}
 				buf[offset] = '\0';
@@ -168,26 +170,24 @@ namespace Frida.Droidy {
 				char * chars = buf;
 				return (string) chars;
 			} finally {
-				client.close.begin ();
+				client.close.begin (cancellable);
 			}
 		}
 	}
 
-	public class Client : Object {
+	public class Client : Object, AsyncInitable {
 		public signal void message (string payload);
 
-		public SocketConnection connection {
+		public SocketConnection? connection {
 			get;
 			private set;
 		}
-		private Gee.Promise<bool> open_request;
-		private InputStream input;
-		private Cancellable input_cancellable = new Cancellable ();
-		private OutputStream output;
-		private Cancellable output_cancellable = new Cancellable ();
+		private InputStream? input;
+		private OutputStream? output;
+		private Cancellable io_cancellable = new Cancellable ();
 
 		protected bool is_processing_messages;
-		private Gee.ArrayQueue<PendingResponse> pending_responses;
+		private Gee.ArrayQueue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
 
 		private enum RequestType {
 			ACK,
@@ -198,69 +198,44 @@ namespace Frida.Droidy {
 		private const uint16 ADB_SERVER_PORT = 5037;
 		private const uint16 MAX_MESSAGE_LENGTH = 1024;
 
-		construct {
-			reset ();
-		}
+		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
+			var client = new Client ();
 
-		private void reset () {
-			connection = null;
-			input = null;
-			output = null;
-
-			is_processing_messages = false;
-			pending_responses = new Gee.ArrayQueue<PendingResponse> ();
-		}
-
-		private async void ensure_open () throws Error {
-			if (open_request != null) {
-				var future = open_request.future;
-				try {
-					yield open_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
-					throw (Error) future.exception;
-				}
-				return;
+			try {
+				yield client.init_async (Priority.DEFAULT, cancellable);
+			} catch (GLib.Error e) {
+				throw_api_error (e);
 			}
-			open_request = new Gee.Promise<bool> ();
 
+			return client;
+		}
+
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var client = new SocketClient ();
 
 			SocketConnectable connectable;
 			connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), ADB_SERVER_PORT);
 
 			try {
-				connection = yield client.connect_async (connectable);
+				connection = yield client.connect_async (connectable, cancellable);
 				input = connection.get_input_stream ();
 				output = connection.get_output_stream ();
 
 				is_processing_messages = true;
 
 				process_incoming_messages.begin ();
-
-				open_request.set_value (true);
 			} catch (GLib.Error e) {
-				reset ();
-				var error = new Error.NOT_SUPPORTED (e.message);
-				open_request.set_exception (error);
-				open_request = null;
-				throw error;
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
+
+			return true;
 		}
 
-		public async void close () {
-			if (open_request != null) {
-				try {
-					yield ensure_open ();
-				} catch (Error e) {
-					return;
-				}
-			}
-
+		public async void close (Cancellable? cancellable = null) throws IOError {
 			if (is_processing_messages) {
 				is_processing_messages = false;
 
-				input_cancellable.cancel ();
-				output_cancellable.cancel ();
+				io_cancellable.cancel ();
 
 				var source = new IdleSource ();
 				source.set_priority (Priority.LOW);
@@ -275,54 +250,81 @@ namespace Frida.Droidy {
 			try {
 				var conn = this.connection;
 				if (conn != null)
-					yield conn.close_async (Priority.DEFAULT);
+					yield conn.close_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
 			}
 			connection = null;
 			input = null;
 			output = null;
 		}
 
-		public async void request (string message) throws Error {
-			yield request_with_type (message, RequestType.ACK);
+		public async void request (string message, Cancellable? cancellable = null) throws Error, IOError {
+			yield request_with_type (message, RequestType.ACK, cancellable);
 		}
 
-		public async string request_data (string message) throws Error {
-			return yield request_with_type (message, RequestType.DATA);
+		public async string request_data (string message, Cancellable? cancellable = null) throws Error, IOError {
+			return yield request_with_type (message, RequestType.DATA, cancellable);
 		}
 
-		public async void request_protocol_change (string message) throws Error {
-			yield request_with_type (message, RequestType.PROTOCOL_CHANGE);
+		public async void request_protocol_change (string message, Cancellable? cancellable = null) throws Error, IOError {
+			yield request_with_type (message, RequestType.PROTOCOL_CHANGE, cancellable);
 		}
 
-		private async string request_with_type (string message, RequestType request_type) throws Error {
-			yield ensure_open ();
+		private async string request_with_type (string message, RequestType request_type, Cancellable? cancellable)
+				throws Error, IOError {
+			bool waiting = false;
 
-			var waiting = false;
 			var pending = new PendingResponse (request_type, () => {
 				if (waiting)
 					request_with_type.callback ();
 			});
 			pending_responses.offer_tail (pending);
-			var message_str = "%04x%s".printf (message.length, message);
-			unowned uint8[] message_buf = (uint8[]) message_str;
-			size_t bytes_written;
+
+			ulong cancel_handler = 0;
+			if (cancellable != null) {
+				var main_context = MainContext.get_thread_default ();
+				cancel_handler = cancellable.connect (() => {
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						pending.complete_with_error (new IOError.CANCELLED ("Cancelled"));
+						return false;
+					});
+					source.attach (main_context);
+				});
+			}
+
 			try {
-				yield output.write_all_async (message_buf[0:message_str.length], Priority.DEFAULT, output_cancellable, out bytes_written);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to write message: " + e.message);
+				var message_str = "%04x%s".printf (message.length, message);
+				unowned uint8[] message_buf = (uint8[]) message_str;
+				size_t bytes_written;
+				try {
+					yield output.write_all_async (message_buf[0:message_str.length], Priority.DEFAULT, cancellable,
+						out bytes_written);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to write message: %s", e.message);
+				}
+				if (bytes_written != message_str.length) {
+					pending_responses.remove (pending);
+					throw new Error.TRANSPORT ("Unable to write message");
+				}
+
+				if (!pending.completed) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+			} finally {
+				if (cancellable != null)
+					cancellable.disconnect (cancel_handler);
 			}
-			if (bytes_written != message_str.length) {
-				pending_responses.remove (pending);
-				throw new Error.TRANSPORT ("Unable to write message");
-			}
-			if (!pending.completed) {
-				waiting = true;
-				yield;
-				waiting = false;
-			}
+
+			cancellable.set_error_if_cancelled ();
+
 			if (pending.error != null)
-				throw pending.error;
+				throw_api_error (pending.error);
+
 			return pending.result;
 		}
 
@@ -350,7 +352,8 @@ namespace Frida.Droidy {
 									}
 								} else {
 									var error_message = yield read_string ();
-									pending.complete_with_error (new Error.NOT_SUPPORTED (error_message));
+									pending.complete_with_error (
+										new Error.NOT_SUPPORTED (error_message));
 								}
 							} else {
 								throw new Error.PROTOCOL ("Reply to unknown request");
@@ -374,7 +377,7 @@ namespace Frida.Droidy {
 				} catch (Error e) {
 					foreach (var pending_response in pending_responses)
 						pending_response.complete_with_error (e);
-					reset ();
+					is_processing_messages = false;
 				}
 			}
 		}
@@ -389,9 +392,9 @@ namespace Frida.Droidy {
 			var buf = new uint8[length + 1];
 			size_t bytes_read;
 			try {
-				yield input.read_all_async (buf[0:length], Priority.DEFAULT, input_cancellable, out bytes_read);
+				yield input.read_all_async (buf[0:length], Priority.DEFAULT, io_cancellable, out bytes_read);
 			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to read string: " + e.message);
+				throw new Error.TRANSPORT ("Unable to read string: %s", e.message);
 			}
 			if (bytes_read != length)
 				throw new Error.TRANSPORT ("Unable to read string");
@@ -428,7 +431,7 @@ namespace Frida.Droidy {
 				private set;
 			}
 
-			public Error? error {
+			public GLib.Error? error {
 				get;
 				private set;
 			}
@@ -438,14 +441,20 @@ namespace Frida.Droidy {
 				this.handler = (owned) handler;
 			}
 
-			public void complete_with_result (string r) {
-				result = r;
+			public void complete_with_result (string result) {
+				if (handler == null)
+					return;
+				this.result = result;
 				handler ();
+				handler = null;
 			}
 
-			public void complete_with_error (Error e) {
-				error = e;
+			public void complete_with_error (GLib.Error e) {
+				if (handler == null)
+					return;
+				this.error = error;
 				handler ();
+				handler = null;
 			}
 		}
 	}

@@ -32,6 +32,7 @@ namespace Frida {
 		}
 
 		private Gee.HashSet<Entry> entries = new Gee.HashSet<Entry> ();
+		private Cancellable io_cancellable = new Cancellable ();
 
 		private const uint16 DEFAULT_SERVER_PORT = 27042;
 
@@ -43,7 +44,7 @@ namespace Frida {
 			);
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			while (!entries.is_empty) {
 				var iterator = entries.iterator ();
 				iterator.next ();
@@ -51,33 +52,39 @@ namespace Frida {
 
 				entries.remove (entry);
 
-				yield destroy_entry (entry, SessionDetachReason.APPLICATION_REQUESTED);
+				yield destroy_entry (entry, APPLICATION_REQUESTED, cancellable);
 			}
+
+			io_cancellable.cancel ();
 		}
 
-		public async HostSession create (string? location = null) throws Error {
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
 			uint16 port = (location != null) ? (uint16) int.parse (location) : DEFAULT_SERVER_PORT;
 			foreach (var entry in entries) {
 				if (entry.port == port)
 					throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
 			}
 
-			Fruity.UsbmuxClient client;
+			Fruity.UsbmuxClient client = null;
 			DBusConnection connection;
 			try {
-				client = yield Fruity.UsbmuxClient.open ();
-				yield client.connect_to_port (device_details.id, port);
-				connection = yield new DBusConnection (client.connection, null, DBusConnectionFlags.AUTHENTICATION_CLIENT);
+				client = yield Fruity.UsbmuxClient.open (cancellable);
+				yield client.connect_to_port (device_details.id, port, cancellable);
+
+				connection = yield new DBusConnection (client.connection, null, AUTHENTICATION_CLIENT, null, cancellable);
 			} catch (GLib.Error e) {
+				if (client != null)
+					client.close.begin ();
+
 				if (e is IOError.CONNECTION_REFUSED)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 				else
-					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: " + e.message);
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: %s", e.message);
 			}
 
 			HostSession session;
 			try {
-				session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION);
+				session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
 			} catch (IOError e) {
 				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
@@ -91,21 +98,22 @@ namespace Frida {
 			return session;
 		}
 
-		public async void destroy (HostSession host_session) throws Error {
+		public async void destroy (HostSession host_session, Cancellable? cancellable) throws Error, IOError {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session) {
 					entries.remove (entry);
-					yield destroy_entry (entry, SessionDetachReason.APPLICATION_REQUESTED);
+					yield destroy_entry (entry, APPLICATION_REQUESTED, cancellable);
 					return;
 				}
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id) throws Error {
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session)
-					return yield entry.obtain_agent_session (agent_session_id);
+					return yield entry.obtain_agent_session (agent_session_id, cancellable);
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
@@ -125,16 +133,16 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			entries.remove (entry_to_remove);
-			destroy_entry.begin (entry_to_remove, SessionDetachReason.SERVER_TERMINATED);
+			destroy_entry.begin (entry_to_remove, SERVER_TERMINATED, io_cancellable);
 		}
 
 		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
 			agent_session_closed (id, reason, crash);
 		}
 
-		private async void destroy_entry (Entry entry, SessionDetachReason reason) {
+		private async void destroy_entry (Entry entry, SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 			entry.connection.on_closed.disconnect (on_connection_closed);
-			yield entry.destroy (reason);
+			yield entry.destroy (reason, cancellable);
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
 			host_session_closed (entry.host_session);
 		}
@@ -172,7 +180,7 @@ namespace Frida {
 				host_session.agent_session_crashed.connect (on_agent_session_crashed);
 			}
 
-			public async void destroy (SessionDetachReason reason) {
+			public async void destroy (SessionDetachReason reason, Cancellable? cancellable) throws IOError {
 				host_session.agent_session_crashed.disconnect (on_agent_session_crashed);
 				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
 
@@ -181,19 +189,20 @@ namespace Frida {
 				agent_session_by_id.clear ();
 
 				try {
-					yield connection.close ();
+					yield connection.close (cancellable);
 				} catch (GLib.Error e) {
 				}
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+			public async AgentSession obtain_agent_session (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
 				AgentSession session = agent_session_by_id[id];
 				if (session == null) {
 					try {
-						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id));
+						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
+							DBusProxyFlags.NONE, cancellable);
 						agent_session_by_id[id] = session;
-					} catch (IOError proxy_error) {
-						throw new Error.INVALID_ARGUMENT (proxy_error.message);
+					} catch (IOError e) {
+						throw new Error.INVALID_ARGUMENT ("%s", e.message);
 					}
 				}
 				return session;

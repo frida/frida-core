@@ -13,14 +13,14 @@ namespace Frida {
 			main_context = MainContext.get_thread_default ();
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (factory32 != null) {
-				yield factory32.close ();
+				yield factory32.close (cancellable);
 				factory32 = null;
 			}
 
 			if (factory64 != null) {
-				yield factory64.close ();
+				yield factory64.close (cancellable);
 				factory64 = null;
 			}
 
@@ -37,57 +37,58 @@ namespace Frida {
 			return _resource_store;
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
-			var helper = yield obtain_for_path (path);
-			return yield helper.spawn (path, options);
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_path (path, cancellable);
+			return yield helper.spawn (path, options, cancellable);
 		}
 
-		public async void prepare_exec_transition (uint pid) throws Error {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.prepare_exec_transition (pid);
+		public async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
+			yield helper.prepare_exec_transition (pid, cancellable);
 		}
 
-		public async void await_exec_transition (uint pid) throws Error {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.await_exec_transition (pid);
+		public async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
+			yield helper.await_exec_transition (pid, cancellable);
 		}
 
-		public async void cancel_exec_transition (uint pid) throws Error {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.cancel_exec_transition (pid);
+		public async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
+			yield helper.cancel_exec_transition (pid, cancellable);
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
-			var helper = yield obtain_for_pid (pid);
-			yield helper.input (pid, data);
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
+			yield helper.input (pid, data, cancellable);
 		}
 
-		public async void resume (uint pid) throws Error {
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			var cpu_type = cpu_type_from_pid (pid);
-			var helper = yield obtain_for_cpu_type (cpu_type);
+			var helper = yield obtain_for_cpu_type (cpu_type, cancellable);
 			try {
-				yield helper.resume (pid);
+				yield helper.resume (pid, cancellable);
 			} catch (Error e) {
 				if (!(e is Error.INVALID_ARGUMENT))
 					throw e;
 				if (cpu_type == Gum.CpuType.AMD64 || cpu_type == Gum.CpuType.ARM64)
-					helper = yield obtain_for_32bit ();
+					helper = yield obtain_for_32bit (cancellable);
 				else
-					helper = yield obtain_for_64bit ();
-				yield helper.resume (pid);
+					helper = yield obtain_for_64bit (cancellable);
+				yield helper.resume (pid, cancellable);
 			}
 		}
 
-		public async void kill (uint pid) throws Error {
-			var helper = yield obtain_for_pid (pid);
+		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_pid (pid, cancellable);
 			try {
-				yield helper.kill (pid);
+				yield helper.kill (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data) throws Error {
+		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
 			var cpu_type = cpu_type_from_pid (pid);
 
 			string path;
@@ -107,64 +108,64 @@ namespace Frida {
 					assert_not_reached ();
 			}
 
-			var helper = yield obtain_for_cpu_type (cpu_type);
+			var helper = yield obtain_for_cpu_type (cpu_type, cancellable);
 			try {
-				return yield helper.inject_library_file (pid, path, entrypoint, data, get_tempdir ().path);
+				return yield helper.inject_library_file (pid, path, entrypoint, data, get_tempdir ().path, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
-			var helper = yield obtain_for_injectee_id (id);
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_injectee_id (id, cancellable);
 			try {
-				return yield helper.demonitor_and_clone_injectee_state (id);
+				return yield helper.demonitor_and_clone_injectee_state (id, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
-			var helper = yield obtain_for_injectee_id (id);
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_injectee_id (id, cancellable);
 			try {
-				yield helper.recreate_injectee_thread (pid, id);
+				yield helper.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		private async LinuxHelper obtain_for_path (string path) throws Error {
-			return yield obtain_for_cpu_type (cpu_type_from_file (path));
+		private async LinuxHelper obtain_for_path (string path, Cancellable? cancellable) throws Error, IOError {
+			return yield obtain_for_cpu_type (cpu_type_from_file (path), cancellable);
 		}
 
-		private async LinuxHelper obtain_for_pid (uint pid) throws Error {
-			return yield obtain_for_cpu_type (cpu_type_from_pid (pid));
+		private async LinuxHelper obtain_for_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
+			return yield obtain_for_cpu_type (cpu_type_from_pid (pid), cancellable);
 		}
 
-		private async LinuxHelper obtain_for_cpu_type (Gum.CpuType cpu_type) throws Error {
+		private async LinuxHelper obtain_for_cpu_type (Gum.CpuType cpu_type, Cancellable? cancellable) throws Error, IOError {
 			switch (cpu_type) {
 				case Gum.CpuType.IA32:
 				case Gum.CpuType.ARM:
 				case Gum.CpuType.MIPS:
-					return yield obtain_for_32bit ();
+					return yield obtain_for_32bit (cancellable);
 
 				case Gum.CpuType.AMD64:
 				case Gum.CpuType.ARM64:
-					return yield obtain_for_64bit ();
+					return yield obtain_for_64bit (cancellable);
 
 				default:
 					assert_not_reached ();
 			}
 		}
 
-		private async LinuxHelper obtain_for_injectee_id (uint id) throws Error {
+		private async LinuxHelper obtain_for_injectee_id (uint id, Cancellable? cancellable) throws Error, IOError {
 			if (id % 2 != 0)
-				return yield obtain_for_32bit ();
+				return yield obtain_for_32bit (cancellable);
 			else
-				return yield obtain_for_64bit ();
+				return yield obtain_for_64bit (cancellable);
 		}
 
-		private async LinuxHelper obtain_for_32bit () throws Error {
+		private async LinuxHelper obtain_for_32bit (Cancellable? cancellable) throws Error, IOError {
 			if (factory32 == null) {
 				var store = get_resource_store ();
 				if (sizeof (void *) != 4 && store.helper32 == null)
@@ -174,10 +175,10 @@ namespace Frida {
 				factory32.uninjected.connect (on_factory_uninjected);
 			}
 
-			return yield factory32.obtain ();
+			return yield factory32.obtain (cancellable);
 		}
 
-		private async LinuxHelper obtain_for_64bit () throws Error {
+		private async LinuxHelper obtain_for_64bit (Cancellable? cancellable) throws Error, IOError {
 			if (factory64 == null) {
 				var store = get_resource_store ();
 				if (sizeof (void *) != 8 && store.helper64 == null)
@@ -187,7 +188,7 @@ namespace Frida {
 				factory64.uninjected.connect (on_factory_uninjected);
 			}
 
-			return yield factory64.obtain ();
+			return yield factory64.obtain (cancellable);
 		}
 
 		private void on_factory_output (uint pid, int fd, uint8[] data) {
@@ -207,7 +208,7 @@ namespace Frida {
 				else if (e is IOError.NOT_SUPPORTED)
 					throw new Error.EXECUTABLE_NOT_SUPPORTED ("Unable to spawn executable at '%s': unsupported file format".printf (path));
 				else
-					throw new Error.PERMISSION_DENIED (e.message);
+					throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 		}
 
@@ -220,7 +221,7 @@ namespace Frida {
 				else if (e is FileError.ACCES)
 					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
 				else
-					throw new Error.NOT_SUPPORTED (e.message);
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 	}
@@ -235,7 +236,7 @@ namespace Frida {
 		private Object process;
 		private DBusConnection connection;
 		private LinuxHelper helper;
-		private Gee.Promise<LinuxHelper> obtain_request;
+		private Promise<LinuxHelper> obtain_request;
 
 		public HelperFactory (TemporaryFile? helper_file, ResourceStore resource_store, MainContext? main_context) {
 			this.helper_file = helper_file;
@@ -243,42 +244,45 @@ namespace Frida {
 			this.main_context = main_context;
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			if (helper != null) {
-				yield helper.close ();
+				yield helper.close (cancellable);
 
 				discard_helper ();
 			}
 
 			if (connection != null) {
 				try {
-					yield connection.close ();
+					yield connection.close (cancellable);
 				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
 				}
 			}
 
 			if (process != null && process is SuperSU.Process) {
 				var process = process as SuperSU.Process;
-				yield process.detach ();
+				yield process.detach (cancellable);
 			}
 			process = null;
 		}
 
-		public async LinuxHelper obtain () throws Error {
-			if (obtain_request != null) {
-				var future = obtain_request.future;
+		public async LinuxHelper obtain (Cancellable? cancellable) throws Error, IOError {
+			while (obtain_request != null) {
 				try {
-					return yield future.wait_async ();
-				} catch (Gee.FutureError future_error) {
-					throw (Error) future.exception;
+					return yield obtain_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
 				}
 			}
-			obtain_request = new Gee.Promise<LinuxHelper> ();
+			obtain_request = new Promise<LinuxHelper> ();
 
 			if (helper_file == null) {
 				assign_helper (new LinuxHelperBackend ());
 
-				obtain_request.set_value (helper);
+				obtain_request.resolve (helper);
 				return helper;
 			}
 
@@ -286,13 +290,14 @@ namespace Frida {
 			Subprocess pending_subprocess = null;
 			DBusConnection pending_connection = null;
 			LinuxRemoteHelper pending_proxy = null;
-			Error pending_error = null;
+			GLib.Error? pending_error = null;
 
 			DBusServer server = null;
 			TimeoutSource timeout_source = null;
 
 			try {
-				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid ());
+				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path,
+					AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid (), null, cancellable);
 				server.start ();
 
 				var idle_source = new IdleSource ();
@@ -323,7 +328,11 @@ namespace Frida {
 				timeout_source.attach (main_context);
 
 				try {
-					pending_superprocess = yield SuperSU.spawn ("/", new string[] { "su", "-c", helper_file.path, server.client_address });
+					string cwd = "/";
+					string[] argv = new string[] { "su", "-c", helper_file.path, server.client_address };
+					string[]? envp = null;
+					bool capture_output = false;
+					pending_superprocess = yield SuperSU.spawn (cwd, argv, envp, capture_output, cancellable);
 				} catch (Error e) {
 					string[] argv = { helper_file.path, server.client_address };
 					pending_subprocess = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
@@ -338,14 +347,20 @@ namespace Frida {
 				timeout_source = null;
 
 				if (pending_error == null) {
-					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER);
+					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
+						cancellable);
 				}
 			} catch (GLib.Error e) {
 				if (timeout_source != null)
 					timeout_source.destroy ();
+
 				if (server != null)
 					server.stop ();
-				pending_error = new Error.PERMISSION_DENIED (e.message);
+
+				if (e is IOError.CANCELLED)
+					pending_error = e;
+				else
+					pending_error = new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 
 			if (pending_error == null) {
@@ -359,14 +374,16 @@ namespace Frida {
 
 				assign_helper (new HelperSession (pending_proxy));
 
-				obtain_request.set_value (helper);
+				obtain_request.resolve (helper);
 				return helper;
 			} else {
 				if (pending_subprocess != null)
 					pending_subprocess.force_exit ();
-				obtain_request.set_exception (pending_error);
+
+				obtain_request.reject (pending_error);
 				obtain_request = null;
-				throw pending_error;
+
+				throw_api_error (pending_error);
 			}
 		}
 
@@ -419,9 +436,9 @@ namespace Frida {
 			proxy.uninjected.connect (on_uninjected);
 		}
 
-		public async void close () {
+		public async void close (Cancellable? cancellable) throws IOError {
 			try {
-				yield proxy.stop ();
+				yield proxy.stop (cancellable);
 			} catch (GLib.Error e) {
 			}
 
@@ -429,83 +446,84 @@ namespace Frida {
 			proxy.uninjected.disconnect (on_uninjected);
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
 			try {
-				return yield proxy.spawn (path, options);
+				return yield proxy.spawn (path, options, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void prepare_exec_transition (uint pid) throws Error {
+		public async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.prepare_exec_transition (pid);
+				yield proxy.prepare_exec_transition (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void await_exec_transition (uint pid) throws Error {
+		public async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.await_exec_transition (pid);
+				yield proxy.await_exec_transition (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void cancel_exec_transition (uint pid) throws Error {
+		public async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.cancel_exec_transition (pid);
+				yield proxy.cancel_exec_transition (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.input (pid, data);
+				yield proxy.input (pid, data, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void resume (uint pid) throws Error {
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.resume (pid);
+				yield proxy.resume (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void kill (uint pid) throws Error {
+		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.kill (pid);
+				yield proxy.kill (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path,
+				Cancellable? cancellable) throws Error, IOError {
 			try {
-				return yield proxy.inject_library_file (pid, path, entrypoint, data, temp_path);
+				return yield proxy.inject_library_file (pid, path, entrypoint, data, temp_path, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				return yield proxy.demonitor_and_clone_injectee_state (id);
+				return yield proxy.demonitor_and_clone_injectee_state (id, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.recreate_injectee_thread (pid, id);
+				yield proxy.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 		}
 

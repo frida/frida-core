@@ -17,7 +17,7 @@ namespace Frida {
 
 		private MainLoop loop = new MainLoop ();
 		private int run_result = 0;
-		private Gee.Promise<bool> shutdown_request;
+		private Promise<bool> shutdown_request;
 
 		private DBusConnection connection;
 		private uint helper_registration_id = 0;
@@ -48,13 +48,13 @@ namespace Frida {
 		private async void shutdown () {
 			if (shutdown_request != null) {
 				try {
-					yield shutdown_request.future.wait_async ();
-				} catch (Gee.FutureError e) {
+					yield shutdown_request.future.wait_async (null);
+				} catch (GLib.Error e) {
 					assert_not_reached ();
 				}
 				return;
 			}
-			shutdown_request = new Gee.Promise<bool> ();
+			shutdown_request = new Promise<bool> ();
 
 			if (connection != null) {
 				if (helper_registration_id != 0)
@@ -68,13 +68,17 @@ namespace Frida {
 				connection = null;
 			}
 
-			yield backend.close ();
+			try {
+				yield backend.close (null);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 			backend.idle.disconnect (on_backend_idle);
 			backend.output.disconnect (on_backend_output);
 			backend.uninjected.disconnect (on_backend_uninjected);
 			backend = null;
 
-			shutdown_request.set_value (true);
+			shutdown_request.resolve (true);
 
 			Idle.add (() => {
 				loop.quit ();
@@ -84,7 +88,7 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				connection = yield new DBusConnection.for_address (parent_address, DBusConnectionFlags.AUTHENTICATION_CLIENT | DBusConnectionFlags.DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection.for_address (parent_address, AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
 				LinuxRemoteHelper helper = this;
@@ -98,7 +102,7 @@ namespace Frida {
 			}
 		}
 
-		public async void stop () throws Error {
+		public async void stop (Cancellable? cancellable) throws IOError {
 			Timeout.add (20, () => {
 				shutdown.begin ();
 				return false;
@@ -115,44 +119,45 @@ namespace Frida {
 				shutdown.begin ();
 		}
 
-		public async uint spawn (string path, HostSpawnOptions options) throws Error {
-			return yield backend.spawn (path, options);
+		public async uint spawn (string path, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			return yield backend.spawn (path, options, cancellable);
 		}
 
-		public async void prepare_exec_transition (uint pid) throws Error {
-			yield backend.prepare_exec_transition (pid);
+		public async void prepare_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.prepare_exec_transition (pid, cancellable);
 		}
 
-		public async void await_exec_transition (uint pid) throws Error {
-			yield backend.await_exec_transition (pid);
+		public async void await_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.await_exec_transition (pid, cancellable);
 		}
 
-		public async void cancel_exec_transition (uint pid) throws Error {
-			yield backend.cancel_exec_transition (pid);
+		public async void cancel_exec_transition (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.cancel_exec_transition (pid, cancellable);
 		}
 
-		public async void input (uint pid, uint8[] data) throws Error {
-			yield backend.input (pid, data);
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			yield backend.input (pid, data, cancellable);
 		}
 
-		public async void resume (uint pid) throws Error {
-			yield backend.resume (pid);
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.resume (pid, cancellable);
 		}
 
-		public async void kill (uint pid) throws Error {
-			yield backend.kill (pid);
+		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield backend.kill (pid, cancellable);
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path) throws Error {
-			return yield backend.inject_library_file (pid, path, entrypoint, data, temp_path);
+		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path,
+				Cancellable? cancellable) throws Error, IOError {
+			return yield backend.inject_library_file (pid, path, entrypoint, data, temp_path, cancellable);
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id) throws Error {
-			return yield backend.demonitor_and_clone_injectee_state (id);
+		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
+			return yield backend.demonitor_and_clone_injectee_state (id, cancellable);
 		}
 
-		public async void recreate_injectee_thread (uint pid, uint id) throws Error {
-			yield backend.recreate_injectee_thread (pid, id);
+		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.recreate_injectee_thread (pid, id, cancellable);
 		}
 
 		private void on_backend_output (uint pid, int fd, uint8[] data) {

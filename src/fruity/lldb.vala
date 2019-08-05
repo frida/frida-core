@@ -11,7 +11,7 @@ namespace Frida.Fruity {
 		private IOStream stream;
 		private DataInputStream input;
 		private OutputStream output;
-		private Cancellable cancellable = new Cancellable ();
+		private Cancellable io_cancellable = new Cancellable ();
 
 		private State state = STOPPED;
 		private AckMode ack_mode = SEND_ACKS;
@@ -52,46 +52,47 @@ namespace Frida.Fruity {
 			Object (lockdown: lockdown);
 		}
 
-		public static async LLDBClient open (LockdownClient lockdown, Cancellable? cancellable = null) throws LLDBError {
+		public static async LLDBClient open (LockdownClient lockdown, Cancellable? cancellable = null) throws LLDBError, IOError {
 			var client = new LLDBClient (lockdown);
 
 			try {
 				yield client.init_async (Priority.DEFAULT, cancellable);
 			} catch (GLib.Error e) {
-				assert (e is LLDBError);
-				throw (LLDBError) e;
+				throw_local_error (e);
 			}
 
 			return client;
 		}
 
-		private async bool init_async (int io_priority, Cancellable? cancellable) throws LLDBError {
+		private async bool init_async (int io_priority, Cancellable? cancellable) throws LLDBError, IOError {
 			try {
-				stream = yield lockdown.start_service ("com.apple.debugserver");
+				stream = yield lockdown.start_service ("com.apple.debugserver", cancellable);
 				input = new DataInputStream (stream.get_input_stream ());
 				output = stream.get_output_stream ();
 
 				process_incoming_packets.begin ();
 				write_string (ACK_NOTIFICATION);
 
-				yield execute ("QStartNoAckMode");
+				yield execute ("QStartNoAckMode", cancellable);
 				ack_mode = SKIP_ACKS;
 
-				yield execute ("QThreadSuffixSupported");
-				yield execute ("QListThreadsInStopReply");
-				yield execute ("QSetDetachOnError:0");
-			} catch (LockdownError e) {
+				yield execute ("QThreadSuffixSupported", cancellable);
+				yield execute ("QListThreadsInStopReply", cancellable);
+				yield execute ("QSetDetachOnError:0", cancellable);
+			} catch (GLib.Error e) {
+				io_cancellable.cancel ();
+
 				if (e is LockdownError.INVALID_SERVICE)
 					throw new LLDBError.DDI_NOT_MOUNTED ("Developer Disk Image not mounted");
-				else
-					throw new LLDBError.FAILED ("%s", e.message);
+
+				throw new LLDBError.PROTOCOL ("%s", e.message);
 			}
 
 			return true;
 		}
 
-		public async void close () {
-			cancellable.cancel ();
+		public async void close (Cancellable? cancellable = null) throws IOError {
+			io_cancellable.cancel ();
 
 			var source = new IdleSource ();
 			source.set_callback (() => {
@@ -102,24 +103,24 @@ namespace Frida.Fruity {
 			yield;
 
 			try {
-				yield stream.close_async ();
+				yield stream.close_async (Priority.DEFAULT, cancellable);
 			} catch (IOError e) {
 			}
 
 			closed ();
 		}
 
-		public async ProcessInfo launch (string[] argv, LaunchOptions? options = null) throws LLDBError {
+		public async ProcessInfo launch (string[] argv, LaunchOptions? options = null, Cancellable? cancellable = null) throws LLDBError, IOError {
 			if (options != null) {
 				foreach (var env in options.env)
-					yield execute ("QEnvironment:" + env);
+					yield execute ("QEnvironment:" + env, cancellable);
 
 				var arch = options.arch;
 				if (arch != null)
-					yield execute ("QLaunchArch:" + arch);
+					yield execute ("QLaunchArch:" + arch, cancellable);
 
 				if (options.aslr == DISABLE)
-					yield execute ("QSetDisableASLR:1");
+					yield execute ("QSetDisableASLR:1", cancellable);
 			}
 
 			var set_args_request = new StringBuilder ("A");
@@ -137,29 +138,29 @@ namespace Frida.Fruity {
 
 				arg_index++;
 			}
-			yield execute (set_args_request.str);
+			yield execute (set_args_request.str, cancellable);
 
 			try {
-				yield execute ("qLaunchSuccess");
+				yield execute ("qLaunchSuccess", cancellable);
 			} catch (LLDBError e) {
-				if (e is LLDBError.FAILED && e.message == "Locked")
+				if (e is LLDBError.REQUEST_REJECTED && e.message == "Locked")
 					throw new LLDBError.DEVICE_LOCKED ("Device is locked");
 				else
 					throw e;
 			}
 
-			return yield get_process_info ();
+			return yield get_process_info (cancellable);
 		}
 
-		public async void continue () throws LLDBError {
+		public async void continue (Cancellable? cancellable = null) throws LLDBError, IOError {
 			check_stopped ();
 
 			state = RUNNING;
 			write_packet ("c");
 		}
 
-		private async ProcessInfo get_process_info () throws LLDBError {
-			var response = yield query ("qProcessInfo");
+		private async ProcessInfo get_process_info (Cancellable? cancellable = null) throws LLDBError, IOError {
+			var response = yield query ("qProcessInfo", cancellable);
 
 			var raw_info = PropertyDictionary.parse (response.payload);
 
@@ -182,29 +183,47 @@ namespace Frida.Fruity {
 
 		private void check_stopped () throws LLDBError {
 			if (state != STOPPED)
-				throw new LLDBError.FAILED ("Invalid operation when not STOPPED, current state is %s", state.to_string ());
+				throw new LLDBError.INVALID_OPERATION ("Invalid operation when not STOPPED, current state is %s", state.to_string ());
 		}
 
-		private async void execute (string payload) throws LLDBError {
-			var response_packet = yield query (payload);
+		private async void execute (string payload, Cancellable? cancellable) throws LLDBError, IOError {
+			var response_packet = yield query (payload, cancellable);
 
 			var response = response_packet.payload;
 			if (response[0] == 'E')
-				throw new LLDBError.FAILED ("%s", response[1:response.length]);
+				throw new LLDBError.REQUEST_REJECTED ("%s", response[1:response.length]);
 
 			if (response != "OK")
 				throw new LLDBError.PROTOCOL ("Unexpected response: %s", response);
 		}
 
-		private async Packet query (string payload) throws LLDBError {
+		private async Packet query (string payload, Cancellable? cancellable) throws LLDBError, IOError {
 			var pending = new PendingResponse (() => query.callback ());
 			pending_responses.offer_tail (pending);
+
+			ulong cancel_handler = 0;
+			if (cancellable != null) {
+				var main_context = MainContext.get_thread_default ();
+				cancel_handler = cancellable.connect (() => {
+					var source = new IdleSource ();
+					source.set_callback (() => {
+						pending.complete_with_error (new IOError.CANCELLED ("Cancelled"));
+						return false;
+					});
+					source.attach (main_context);
+				});
+			}
+
 			write_packet (payload);
+
 			yield;
+
+			if (cancellable != null)
+				cancellable.disconnect (cancel_handler);
 
 			var response = pending.response;
 			if (response == null)
-				throw pending.error;
+				throw_local_error (pending.error);
 
 			return response;
 		}
@@ -214,12 +233,10 @@ namespace Frida.Fruity {
 				try {
 					var packet = yield read_packet ();
 					dispatch_packet (packet);
-				} catch (LLDBError error) {
+				} catch (GLib.Error error) {
 					foreach (var pending_response in pending_responses)
 						pending_response.complete_with_error (error);
 					pending_responses.clear ();
-
-					yield close ();
 
 					return;
 				}
@@ -232,7 +249,7 @@ namespace Frida.Fruity {
 
 				size_t bytes_written;
 				try {
-					yield output.write_all_async (current.get_data (), Priority.DEFAULT, cancellable, out bytes_written);
+					yield output.write_all_async (current.get_data (), Priority.DEFAULT, io_cancellable, out bytes_written);
 				} catch (GLib.Error e) {
 					return;
 				}
@@ -278,7 +295,7 @@ namespace Frida.Fruity {
 			console_output (bytes);
 		}
 
-		private async Packet read_packet () throws LLDBError {
+		private async Packet read_packet () throws LLDBError, IOError {
 			string first = yield read_string (1);
 			if (first == ACK_NOTIFICATION || first == NACK_NOTIFICATION)
 				return yield read_packet ();
@@ -286,10 +303,12 @@ namespace Frida.Fruity {
 			string rest;
 			try {
 				size_t rest_length;
-				rest = yield input.read_upto_async (CHECKSUM_MARKER, 1, Priority.DEFAULT, cancellable, out rest_length);
+				rest = yield input.read_upto_async (CHECKSUM_MARKER, 1, Priority.DEFAULT, io_cancellable, out rest_length);
 				if (rest_length == 0)
 					rest = "";
 			} catch (IOError e) {
+				if (e is IOError.CANCELLED)
+					throw e;
 				throw new LLDBError.CONNECTION_CLOSED ("%s", e.message);
 			}
 
@@ -308,14 +327,16 @@ namespace Frida.Fruity {
 			write_bytes (packetize (payload, checksum_type));
 		}
 
-		private async string read_string (uint length) throws LLDBError {
+		private async string read_string (uint length) throws LLDBError, IOError {
 			var buf = new uint8[length + 1];
 			buf[length] = 0;
 
 			ssize_t n;
 			try {
-				n = yield input.read_async (buf[0:length], Priority.DEFAULT, cancellable);
+				n = yield input.read_async (buf[0:length], Priority.DEFAULT, io_cancellable);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
 				throw new LLDBError.CONNECTION_CLOSED ("%s", e.message);
 			}
 
@@ -393,6 +414,16 @@ namespace Frida.Fruity {
 			return new Packet.from_bytes (StringBuilder.free_to_bytes ((owned) result));
 		}
 
+		private static void throw_local_error (GLib.Error e) throws LLDBError, IOError {
+			if (e is LLDBError)
+				throw (LLDBError) e;
+
+			if (e is IOError)
+				throw (IOError) e;
+
+			assert_not_reached ();
+		}
+
 		private static uint8 compute_checksum (string data) {
 			uint8 sum = 0;
 
@@ -448,14 +479,14 @@ namespace Frida.Fruity {
 
 		private class PendingResponse {
 			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
+			private CompletionHandler? handler;
 
 			public Packet? response {
 				get;
 				private set;
 			}
 
-			public LLDBError? error {
+			public GLib.Error? error {
 				get;
 				private set;
 			}
@@ -465,13 +496,19 @@ namespace Frida.Fruity {
 			}
 
 			public void complete_with_response (Packet? response) {
+				if (handler == null)
+					return;
 				this.response = response;
 				handler ();
+				handler = null;
 			}
 
-			public void complete_with_error (LLDBError? error) {
+			public void complete_with_error (GLib.Error error) {
+				if (handler == null)
+					return;
 				this.error = error;
 				handler ();
+				handler = null;
 			}
 		}
 
@@ -523,10 +560,11 @@ namespace Frida.Fruity {
 	}
 
 	public errordomain LLDBError {
-		FAILED,
 		CONNECTION_CLOSED,
 		DDI_NOT_MOUNTED,
 		DEVICE_LOCKED,
+		REQUEST_REJECTED,
+		INVALID_OPERATION,
 		PROTOCOL
 	}
 

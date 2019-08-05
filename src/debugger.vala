@@ -16,27 +16,34 @@ namespace Frida {
 			Object (port: port, agent_session: agent_session);
 		}
 
-		public async void enable () throws Error {
+		public async void enable (Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield agent_session.enable_debugger ();
+				yield agent_session.enable_debugger (cancellable);
 			} catch (GLib.Error e) {
-				throw Marshal.from_dbus (e);
+				throw_dbus_error (e);
 			}
 
 			try {
 				server = new DebugServer (port, agent_session);
 				server.start ();
 			} catch (Error e) {
-				agent_session.disable_debugger.begin ();
+				try {
+					yield agent_session.disable_debugger (cancellable);
+				} catch (GLib.Error e) {
+				}
 				throw e;
 			}
 		}
 
-		public void disable () {
+		public async void disable (Cancellable? cancellable) throws Error, IOError {
 			server.stop ();
 			server = null;
 
-			agent_session.disable_debugger.begin ();
+			try {
+				yield agent_session.disable_debugger (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
 		}
 	}
 
@@ -51,6 +58,8 @@ namespace Frida {
 			construct;
 		}
 
+		private Cancellable io_cancellable = new Cancellable ();
+
 		public DebugServer (uint port, AgentSession agent_session) {
 			Object (
 				server: (port != 0) ? new Gum.InspectorServer.with_port (port) : new Gum.InspectorServer (),
@@ -62,7 +71,7 @@ namespace Frida {
 			try {
 				server.start ();
 			} catch (GLib.IOError e) {
-				throw new Error.ADDRESS_IN_USE (e.message);
+				throw new Error.ADDRESS_IN_USE ("%s", e.message);
 			}
 
 			server.message.connect (on_message_from_frontend);
@@ -74,10 +83,12 @@ namespace Frida {
 			server.message.disconnect (on_message_from_frontend);
 
 			server.stop ();
+
+			io_cancellable.cancel ();
 		}
 
 		private void on_message_from_frontend (string message) {
-			agent_session.post_message_to_debugger.begin (message);
+			agent_session.post_message_to_debugger.begin (message, io_cancellable);
 		}
 
 		private void on_message_from_backend (string message) {
