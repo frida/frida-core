@@ -171,6 +171,8 @@ class Layout(object):
             output = subprocess.check_output([toolchain.otool, "-l", binary_path]).decode('utf-8')
 
             arch_name = subprocess.check_output(["file", binary_path]).decode('utf-8').rstrip().split(" ")[-1]
+            if arch_name.startswith("arm_"):
+                arch_name = 'arm'
             pointer_size = 8 if "64" in arch_name else 4
 
             sections = {}
