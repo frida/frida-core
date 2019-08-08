@@ -1,8 +1,50 @@
 #!/usr/bin/env python3
 
+import argparse
 import os
 import re
 import sys
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
+    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi'], default='bundle')
+    parser.add_argument('api_version', metavar='api-version', type=str)
+    parser.add_argument('api_vala', metavar='/path/to/frida.vala', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('interfaces_vapi', metavar='/path/to/frida-interfaces.vapi', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('interfaces_header', metavar='/path/to/frida-interfaces.h', type=argparse.FileType('r', encoding='utf-8'))
+    parser.add_argument('output_dir', metavar='/output/dir')
+
+    args = parser.parse_args()
+
+    api_version = args.api_version
+    api_vala = args.api_vala.read()
+    core_vapi = args.core_vapi.read()
+    core_header = args.core_header.read()
+    interfaces_vapi = args.interfaces_vapi.read()
+    interfaces_header = args.interfaces_header.read()
+    output_dir = args.output_dir
+
+    enable_header = False
+    enable_vapi = False
+    output_type = args.output_type
+    if output_type == 'bundle':
+        enable_header = True
+        enable_vapi = True
+    elif output_type == 'header':
+        enable_header = True
+    elif output_type == 'vapi':
+        enable_vapi = True
+
+    api = parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header)
+
+    if enable_header:
+        emit_header(api, output_dir)
+
+    if enable_vapi:
+        emit_vapi(api, output_dir)
 
 def emit_header(api, output_dir):
     with open(os.path.join(output_dir, 'frida-core.h'), 'wt') as output_header_file:
@@ -352,44 +394,6 @@ def fuzzysort(items, keys):
     result.extend(remaining)
     return result
 
+
 if __name__ == '__main__':
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Generate refined Frida API definitions")
-    parser.add_argument('--output', dest='output_type', choices=['bundle', 'header', 'vapi'], default='bundle')
-    parser.add_argument('api_version', metavar='api-version', type=str)
-    parser.add_argument('api_vala', metavar='/path/to/frida.vala', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('core_vapi', metavar='/path/to/frida-core.vapi', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('core_header', metavar='/path/to/frida-core.h', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('interfaces_vapi', metavar='/path/to/frida-interfaces.vapi', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('interfaces_header', metavar='/path/to/frida-interfaces.h', type=argparse.FileType('r', encoding='utf-8'))
-    parser.add_argument('output_dir', metavar='/output/dir')
-
-    args = parser.parse_args()
-
-    api_version = args.api_version
-    api_vala = args.api_vala.read()
-    core_vapi = args.core_vapi.read()
-    core_header = args.core_header.read()
-    interfaces_vapi = args.interfaces_vapi.read()
-    interfaces_header = args.interfaces_header.read()
-    output_dir = args.output_dir
-
-    enable_header = False
-    enable_vapi = False
-    output_type = args.output_type
-    if output_type == 'bundle':
-        enable_header = True
-        enable_vapi = True
-    elif output_type == 'header':
-        enable_header = True
-    elif output_type == 'vapi':
-        enable_vapi = True
-
-    api = parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, interfaces_header)
-
-    if enable_header:
-        emit_header(api, output_dir)
-
-    if enable_vapi:
-        emit_vapi(api, output_dir)
+    main()
