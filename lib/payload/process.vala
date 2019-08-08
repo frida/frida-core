@@ -1,7 +1,4 @@
 namespace Frida {
-	public extern void init_libc_shim ();
-	public extern void deinit_libc_shim ();
-
 	public extern uint get_process_id ();
 
 	public extern void * get_current_pthread ();

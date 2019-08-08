@@ -30,6 +30,14 @@ else
   host_abi = host_arch
 endif
 
+if host_os_family == 'windows'
+  shlib_suffix = '.dll'
+elif host_os_family == 'darwin'
+  shlib_suffix = '.dylib'
+else
+  shlib_suffix = '.so'
+endif
+
 c_languages = ['c', 'cpp']
 if host_os_family == 'darwin'
   c_languages += ['objc', 'objcpp']
@@ -189,6 +197,8 @@ if host_os == 'ios'
 endif
 
 resource_compiler = find_program('frida-resource-compiler')
+
+modulate = find_program('tools/modulate.py')
 
 mapper_opt = get_option('mapper')
 if mapper_opt.auto()

@@ -15,12 +15,27 @@ elif host_os_family != 'windows'
   extra_link_args += ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), 'frida-agent.version')]
 endif
 
-agent = shared_library('frida-agent', agent_sources,
-  name_prefix: '',
+raw_agent = shared_library('frida-agent', agent_sources,
+  name_prefix: '_',
   c_args: frida_component_cflags,
   link_args: extra_link_args,
   vs_module_defs: 'frida-agent.def',
   dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep, tls_provider_dep, payload_dep],
+)
+
+agent = custom_target('frida-agent',
+  input: raw_agent,
+  output: 'frida-agent' + shlib_suffix,
+  command: [
+    modulate,
+    '@INPUT@',
+    '--move', 'constructor', 'frida_init_memory', 'first',
+    '--move', 'destructor', 'frida_deinit_memory', 'first',
+    '--output', '@OUTPUT@',
+    '--nm', meson.get_cross_binary('nm', 'nm'),
+    '--objdump', meson.get_cross_binary('objdump', 'objdump'),
+    '--otool', meson.get_cross_binary('otool', 'otool'),
+  ],
 )
 
 agent_dep = declare_dependency(link_with: agent)

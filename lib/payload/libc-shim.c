@@ -14,125 +14,30 @@
 #undef snprintf
 #undef vsnprintf
 
-typedef enum _FridaShimState FridaShimState;
-
-enum _FridaShimState
-{
-  FRIDA_SHIM_CREATED,
-  FRIDA_SHIM_INITIALIZED,
-  FRIDA_SHIM_DEINITIALIZED,
-};
-
-static FridaShimState shim_state = FRIDA_SHIM_CREATED;
-
-void
-frida_init_libc_shim (void)
-{
-  shim_state = FRIDA_SHIM_INITIALIZED;
-}
-
-void
-frida_deinit_libc_shim (void)
-{
-  shim_state = FRIDA_SHIM_DEINITIALIZED;
-}
-
 #if !defined (HAVE_WINDOWS) && !defined (HAVE_ASAN)
 
-/*
- * The thread-local storage emulation in libgcc results in three early
- * allocations, and unlike libc++ it does actually use this memory in
- * its destructor function after we have been deinitialized.
- *
- * We work around this by attempting to satisfy these tiny allocations
- * with a dumb fallback allocator.
- */
-
-#define FRIDA_FIXED_BLOCK_CAPACITY (256 - sizeof (gboolean))
-
-typedef struct _FridaFixedBlock FridaFixedBlock;
-
-struct _FridaFixedBlock
-{
-  guint8 buf[FRIDA_FIXED_BLOCK_CAPACITY];
-  gboolean in_use;
-};
-
-static FridaFixedBlock frida_fallback_blocks[8] __attribute__((aligned(16)));
-
 __attribute__ ((constructor)) static void
-frida_preinit_libc_shim (void)
+frida_init_memory (void)
 {
-  gum_memory_init ();
+  gum_internal_heap_ref ();
 }
 
-static gpointer
-frida_fallback_allocator_request (gsize size)
+__attribute__ ((destructor)) static void
+frida_deinit_memory (void)
 {
-  guint i;
-
-  if (size > FRIDA_FIXED_BLOCK_CAPACITY)
-    return NULL;
-
-  for (i = 0; i != G_N_ELEMENTS (frida_fallback_blocks); i++)
-  {
-    FridaFixedBlock * block = &frida_fallback_blocks[i];
-
-    if (!block->in_use)
-    {
-      block->in_use = TRUE;
-      return block->buf;
-    }
-  }
-
-  abort ();
-}
-
-static gboolean
-frida_fallback_allocator_try_release (gpointer mem)
-{
-  FridaFixedBlock * block = mem;
-
-  if (block == NULL)
-    return TRUE;
-
-  if (block < frida_fallback_blocks ||
-      block >= frida_fallback_blocks + G_N_ELEMENTS (frida_fallback_blocks))
-  {
-    return FALSE;
-  }
-
-  memset (block, 0, sizeof (FridaFixedBlock));
-
-  return TRUE;
+  gum_internal_heap_unref ();
 }
 
 void *
 malloc (size_t size)
 {
-  void * result = NULL;
-
-  if (shim_state == FRIDA_SHIM_CREATED)
-    result = frida_fallback_allocator_request (size);
-
-  if (result == NULL)
-    result = gum_malloc (size);
-
-  return result;
+  return gum_malloc (size);
 }
 
 void *
 calloc (size_t count, size_t size)
 {
-  void * result = NULL;
-
-  if (shim_state == FRIDA_SHIM_CREATED)
-    result = frida_fallback_allocator_request (count * size);
-
-  if (result == NULL)
-    result = gum_calloc (count, size);
-
-  return result;
+  return gum_calloc (count, size);
 }
 
 void *
@@ -157,23 +62,7 @@ posix_memalign (void ** memptr, size_t alignment, size_t size)
 void
 free (void * ptr)
 {
-  if (frida_fallback_allocator_try_release (ptr))
-    return;
-
-  switch (shim_state)
-  {
-    case FRIDA_SHIM_CREATED:
-    case FRIDA_SHIM_INITIALIZED:
-      gum_free (ptr);
-      break;
-    case FRIDA_SHIM_DEINITIALIZED:
-      /*
-       * Memory has already been released. We assume that it is not touched after deinit.
-       * This assumption needs to be re-verified whenever the toolchain changes significantly,
-       * i.e. when libc++ internals change.
-       */
-      break;
-  }
+  gum_free (ptr);
 }
 
 void *

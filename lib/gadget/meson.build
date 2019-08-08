@@ -1,6 +1,5 @@
 gadget_sources = [
   'gadget.vala',
-  'gadget-entrypoint-unix.c',
   'gadget-glue.c',
 ]
 
@@ -21,12 +20,30 @@ elif host_os_family != 'windows'
   extra_link_depends += [symscript]
 endif
 
-shared_library('frida-gadget', gadget_sources,
-  name_prefix: '',
+raw_gadget = shared_library('frida-gadget', gadget_sources,
+  name_prefix: '_',
   c_args: frida_component_cflags,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-gadget.def',
   dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, tls_provider_dep, payload_dep],
+)
+
+custom_target('frida-gadget',
+  input: raw_gadget,
+  output: 'frida-gadget' + shlib_suffix,
+  command: [
+    modulate,
+    '@INPUT@',
+    '--move', 'constructor', 'frida_init_memory', 'first',
+    '--move', 'constructor', 'frida_on_load', 'last',
+    '--move', 'destructor', 'frida_deinit_memory', 'first',
+    '--output', '@OUTPUT@',
+    '--nm', meson.get_cross_binary('nm', 'nm'),
+    '--objdump', meson.get_cross_binary('objdump', 'objdump'),
+    '--otool', meson.get_cross_binary('otool', 'otool'),
+  ],
+  build_by_default: true,
   install: true,
+  install_dir: get_option('libdir'),
 )
