@@ -59,8 +59,10 @@ def main():
         move = getattr(function_pointers, "move_" + where)
         try:
             move(function_name)
-        except Exception as e:
-            parser.error(e)
+        except FunctionNotFound as e:
+            using_cxa_atexit = editor.layout.file_format == 'mach-o' and what == 'destructor' and len(e.searched_function_names) == 0
+            if not using_cxa_atexit:
+                parser.error(e)
 
     if len(args.moves) == 0:
         editor.dump()
@@ -131,6 +133,9 @@ class ModuleEditor(object):
         return self.module.read(section.size)
 
     def _write_function_pointer_vector(self, vector, destination):
+        if vector.file_offset is None:
+            return
+
         layout = self.layout
         pointer_size = layout.pointer_size
         pointer_format = layout.pointer_format
@@ -269,15 +274,22 @@ class FunctionPointerVector(object):
         self.elements.append(e)
 
     def _index_of(self, name):
+        function_names = [e.name for e in self.elements]
+
         if len(self.elements) == 0:
-            raise ValueError("no {} functions defined".format(self.label))
+            raise FunctionNotFound("no {} functions defined".format(self.label), function_names)
 
         matches = [i for i, e in enumerate(self.elements) if e.name == name]
         if len(matches) == 0:
-            function_names = [e.name for e in self.elements]
-            raise ValueError("no {} named {}; possible options: {}".format(self.label, name, ", ".join(function_names)))
+            raise FunctionNotFound("no {} named {}; possible options: {}".format(self.label, name, ", ".join(function_names)), function_names)
 
         return matches[0]
+
+
+class FunctionNotFound(ValueError):
+    def __init__(self, message, searched_function_names):
+        super().__init__(message)
+        self.searched_function_names = searched_function_names
 
 
 class FunctionPointer(object):
