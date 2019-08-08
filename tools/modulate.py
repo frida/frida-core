@@ -158,7 +158,7 @@ class Layout(object):
         file_format = 'elf' if magic == b"\x7fELF" else 'mach-o'
 
         if file_format == 'elf':
-            output = subprocess.check_output([toolchain.objdump, "-fh", binary_path], encoding='utf-8')
+            output = subprocess.check_output([toolchain.objdump, "-fh", binary_path]).decode('utf-8')
 
             elf_format, arch_name = elf_format_pattern.search(output).groups()
             pointer_size = 4 if elf_format.startswith("elf32") else 8
@@ -168,9 +168,9 @@ class Layout(object):
                 name, size, vma, lma, file_offset, alignment = m.groups()
                 sections[name] = Section(name, int(size, 16), int(vma, 16), int(lma, 16), int(file_offset, 16))
         else:
-            output = subprocess.check_output([toolchain.otool, "-l", binary_path], encoding='utf-8')
+            output = subprocess.check_output([toolchain.otool, "-l", binary_path]).decode('utf-8')
 
-            arch_name = subprocess.check_output(["file", binary_path], encoding='utf-8').rstrip().split(" ")[-1]
+            arch_name = subprocess.check_output(["file", binary_path]).decode('utf-8').rstrip().split(" ")[-1]
             pointer_size = 8 if "64" in arch_name else 4
 
             sections = {}
@@ -212,7 +212,7 @@ class Symbols(object):
     def from_file(cls, binary_path, toolchain):
         items = {}
 
-        for line in subprocess.check_output([toolchain.nm, binary_path], encoding='utf-8').split("\n"):
+        for line in subprocess.check_output([toolchain.nm, binary_path]).decode('utf-8').split("\n"):
             tokens = line.split(" ", 2)
             if len(tokens) < 3:
                 continue
