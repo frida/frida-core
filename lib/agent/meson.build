@@ -23,14 +23,18 @@ raw_agent = shared_library('frida-agent', agent_sources,
   dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep, tls_provider_dep, payload_dep],
 )
 
+operations = ['--move', 'constructor', 'frida_init_memory', 'first']
+if host_os_family != 'darwin'
+  operations += ['--move', 'destructor', 'frida_deinit_memory', 'first']
+endif
+
 agent = custom_target('frida-agent',
   input: raw_agent,
   output: 'frida-agent' + shlib_suffix,
   command: [
     modulate,
     '@INPUT@',
-    '--move', 'constructor', 'frida_init_memory', 'first',
-    '--move', 'destructor', 'frida_deinit_memory', 'first',
+    ] + operations + [
     '--output', '@OUTPUT@',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),

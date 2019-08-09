@@ -45,4 +45,9 @@ _frida_agent_environment_deinit (void)
   gum_deinit_embedded ();
 
   frida_run_atexit_handlers ();
+
+#ifdef HAVE_DARWIN
+  /* Do what frida_deinit_memory() does on the other platforms. */
+  gum_internal_heap_unref ();
+#endif
 }

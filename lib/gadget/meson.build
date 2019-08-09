@@ -29,15 +29,21 @@ raw_gadget = shared_library('frida-gadget', gadget_sources,
   dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, tls_provider_dep, payload_dep],
 )
 
+operations = [
+  '--move', 'constructor', 'frida_init_memory', 'first',
+  '--move', 'constructor', 'frida_on_load', 'last',
+]
+if host_os_family != 'darwin'
+  operations += ['--move', 'destructor', 'frida_deinit_memory', 'first']
+endif
+
 custom_target('frida-gadget',
   input: raw_gadget,
   output: 'frida-gadget' + shlib_suffix,
   command: [
     modulate,
     '@INPUT@',
-    '--move', 'constructor', 'frida_init_memory', 'first',
-    '--move', 'constructor', 'frida_on_load', 'last',
-    '--move', 'destructor', 'frida_deinit_memory', 'first',
+    ] + operations + [
     '--output', '@OUTPUT@',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),

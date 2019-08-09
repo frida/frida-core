@@ -39,11 +39,24 @@ frida_init_memory (void)
   gum_internal_heap_ref ();
 }
 
+#ifndef HAVE_DARWIN
+
+/*
+ * Avoid destructors on i/macOS as modern toolchain versions now emit a
+ * constructor per destructor, each calling __cxa_atexit().
+ *
+ * We want to make sure we release our heap as the very last thing we do,
+ * so we shim __cxa_atexit() to make sure any destructors registered that
+ * way will be run before we deallocate our internal heap.
+ */
+
 __attribute__ ((destructor)) static void
 frida_deinit_memory (void)
 {
   gum_internal_heap_unref ();
 }
+
+#endif
 
 void
 frida_run_atexit_handlers (void)
