@@ -148,13 +148,13 @@ frida_on_load (void)
   frida_gadget_load (NULL);
 }
 
-# endif
-
 __attribute__ ((destructor)) static void
 frida_on_unload (void)
 {
   frida_gadget_unload ();
 }
+
+# endif
 
 void
 _frida_gadget_kill (guint pid)

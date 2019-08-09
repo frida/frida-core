@@ -34,7 +34,10 @@ operations = [
   '--move', 'constructor', 'frida_on_load', 'last',
 ]
 if host_os_family != 'darwin'
-  operations += ['--move', 'destructor', 'frida_deinit_memory', 'first']
+  operations += [
+    '--move', 'destructor', 'frida_deinit_memory', 'first',
+    '--move', 'destructor', 'frida_on_unload', 'last',
+  ]
 endif
 
 custom_target('frida-gadget',
