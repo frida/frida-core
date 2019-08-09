@@ -92,14 +92,6 @@ __cxa_atexit (void (* func) (void *), void * arg, void * dso_handle)
   return 0;
 }
 
-int
-atexit (void (* func) (void))
-{
-  __cxa_atexit ((FridaExitFunc) func, NULL, NULL);
-
-  return 0;
-}
-
 void *
 malloc (size_t size)
 {
