@@ -14,7 +14,14 @@
 #undef snprintf
 #undef vsnprintf
 
-#if !defined (HAVE_WINDOWS) && !defined (HAVE_ASAN)
+#if defined (HAVE_WINDOWS) || defined (HAVE_ASAN)
+
+void
+frida_run_atexit_handlers (void)
+{
+}
+
+#else
 
 #define FRIDA_SHIM_LOCK() gum_spinlock_acquire (&shim_lock)
 #define FRIDA_SHIM_UNLOCK() gum_spinlock_release (&shim_lock)
