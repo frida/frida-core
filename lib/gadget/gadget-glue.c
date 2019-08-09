@@ -232,6 +232,8 @@ frida_gadget_environment_deinit (void)
   main_context = NULL;
 
   gum_deinit_embedded ();
+
+  frida_run_atexit_handlers ();
 }
 
 gboolean

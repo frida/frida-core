@@ -16,6 +16,23 @@
 
 #if !defined (HAVE_WINDOWS) && !defined (HAVE_ASAN)
 
+#define FRIDA_SHIM_LOCK() gum_spinlock_acquire (&shim_lock)
+#define FRIDA_SHIM_UNLOCK() gum_spinlock_release (&shim_lock)
+
+typedef struct _FridaExitEntry FridaExitEntry;
+typedef void (* FridaExitFunc) (gpointer user_data);
+
+struct _FridaExitEntry
+{
+  FridaExitFunc func;
+  gpointer user_data;
+};
+
+static FridaExitEntry * atexit_entries = NULL;
+static guint atexit_count = 0;
+
+static GumSpinlock shim_lock = GUM_SPINLOCK_INIT;
+
 __attribute__ ((constructor)) static void
 frida_init_memory (void)
 {
@@ -26,6 +43,48 @@ __attribute__ ((destructor)) static void
 frida_deinit_memory (void)
 {
   gum_internal_heap_unref ();
+}
+
+void
+frida_run_atexit_handlers (void)
+{
+  gint i;
+
+  for (i = (gint) atexit_count - 1; i >= 0; i--)
+  {
+    const FridaExitEntry * entry = &atexit_entries[i];
+
+    entry->func (entry->user_data);
+  }
+
+  gum_free (atexit_entries);
+  atexit_entries = 0;
+  atexit_count = 0;
+}
+
+int
+__cxa_atexit (void (* func) (void *), void * arg, void * dso_handle)
+{
+  FridaExitEntry * entry;
+
+  FRIDA_SHIM_LOCK ();
+  atexit_count++;
+  atexit_entries = gum_realloc (atexit_entries, atexit_count * sizeof (FridaExitEntry));
+  entry = &atexit_entries[atexit_count - 1];
+  FRIDA_SHIM_UNLOCK ();
+
+  entry->func = func;
+  entry->user_data = arg;
+
+  return 0;
+}
+
+int
+atexit (void (* func) (void))
+{
+  __cxa_atexit ((FridaExitFunc) func, NULL, NULL);
+
+  return 0;
 }
 
 void *

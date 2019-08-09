@@ -1,4 +1,6 @@
 namespace Frida {
+	public extern void run_atexit_handlers ();
+
 	public extern uint get_process_id ();
 
 	public extern void * get_current_pthread ();

@@ -43,4 +43,6 @@ void
 _frida_agent_environment_deinit (void)
 {
   gum_deinit_embedded ();
+
+  frida_run_atexit_handlers ();
 }
