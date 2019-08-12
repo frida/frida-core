@@ -139,14 +139,12 @@ namespace Frida.Server {
 	private static int run_application (string listen_uri, ReadyHandler on_ready) {
 		application = new Application ();
 
-#if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
 			application.stop ();
 		});
 		Posix.signal (Posix.Signal.TERM, (sig) => {
 			application.stop ();
 		});
-#endif
 
 		try {
 			Idle.add (() => {
