@@ -75,7 +75,7 @@ namespace Frida {
 		private AgentContainer system_session_container;
 
 		private LinuxHelperProcess helper;
-		private AgentResource? agent_resource = null;
+		private AgentResource? agent_resource;
 
 #if ANDROID
 		private RoboLauncher robo_launcher;
@@ -146,6 +146,8 @@ namespace Frida {
 				yield system_session_container.destroy ();
 				system_session_container = null;
 			}
+
+			agent_resource = null;
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (out DBusConnection connection) throws Error {

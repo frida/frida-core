@@ -948,7 +948,7 @@ namespace Frida {
 	public abstract class InternalAgent : Object, RpcPeer {
 		public signal void unloaded ();
 
-		public BaseDBusHostSession host_session {
+		public weak BaseDBusHostSession host_session {
 			get;
 			construct;
 		}
