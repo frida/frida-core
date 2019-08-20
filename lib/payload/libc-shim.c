@@ -383,6 +383,27 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 
 #ifdef HAVE_LINUX
 
+#include <sys/syscall.h>
+#include <unistd.h>
+
+int
+dup (int oldfd)
+{
+  return syscall (__NR_dup, oldfd);
+}
+
+int
+dup2 (int oldfd, int newfd)
+{
+  return syscall (__NR_dup2, oldfd, newfd);
+}
+
+int
+dup3 (int oldfd, int newfd, int flags)
+{
+  return syscall (__NR_dup3, oldfd, newfd, flags);
+}
+
 G_GNUC_INTERNAL long
 _frida_set_errno (int n)
 {
