@@ -1805,6 +1805,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   FridaInjectInstance * instance;
   GumDarwinModuleResolver * resolver = NULL;
   GumDarwinMapper * mapper = NULL;
+  GError * mapper_error = NULL;
   FridaDarwinModuleDetails mapped_module;
   FridaAgentDetails details = { 0, };
   guint page_size;
@@ -1842,12 +1843,14 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     mapper = gum_darwin_mapper_new_take_blob (path_or_name,
         g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->_address), blob->_size,
             (GDestroyNotify) frida_mapper_library_blob_deallocate, frida_mapped_library_blob_dup (blob)),
-        resolver);
+        resolver, &mapper_error);
   }
   else
   {
-    mapper = gum_darwin_mapper_new_from_file (path_or_name, resolver);
+    mapper = gum_darwin_mapper_new_from_file (path_or_name, resolver, &mapper_error);
   }
+  if (mapper_error != NULL)
+    goto cannot_map;
 #else
   (void) frida_mapper_library_blob_deallocate;
 #endif
@@ -1889,7 +1892,9 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   {
     GumDarwinModule * module;
 
-    gum_darwin_mapper_map (mapper, payload_address + base_payload_size);
+    gum_darwin_mapper_map (mapper, payload_address + base_payload_size, &mapper_error);
+    if (mapper_error != NULL)
+      goto cannot_map;
 
     g_object_get (mapper, "module", &module, NULL);
     mapped_module._mach_header_address = module->base_address;
@@ -2045,6 +2050,16 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   result = instance->id;
   goto beach;
 
+cannot_map:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "%s",
+        mapper_error->message);
+    g_error_free (mapper_error);
+    goto failure;
+  }
 mach_failure:
   {
     g_set_error (error,
