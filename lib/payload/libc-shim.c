@@ -383,25 +383,35 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 
 #ifdef HAVE_LINUX
 
+#include <fcntl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
+int dup3 (int old_fd, int new_fd, int flags);
+
 int
-dup (int oldfd)
+dup (int old_fd)
 {
-  return syscall (__NR_dup, oldfd);
+  return syscall (__NR_dup, old_fd);
 }
 
 int
-dup2 (int oldfd, int newfd)
+dup2 (int old_fd, int new_fd)
 {
-  return syscall (__NR_dup2, oldfd, newfd);
+  if (new_fd == old_fd)
+  {
+    if (fcntl (new_fd, F_GETFD) == -1)
+      return -1;
+    return new_fd;
+  }
+
+  return dup3 (old_fd, new_fd, 0);
 }
 
 int
-dup3 (int oldfd, int newfd, int flags)
+dup3 (int old_fd, int new_fd, int flags)
 {
-  return syscall (__NR_dup3, oldfd, newfd, flags);
+  return syscall (__NR_dup3, old_fd, new_fd, flags);
 }
 
 G_GNUC_INTERNAL long
