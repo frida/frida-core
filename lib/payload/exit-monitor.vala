@@ -32,18 +32,18 @@ namespace Frida {
 			Gum.InvocationListener listener = this;
 
 #if WINDOWS
-			interceptor.attach_listener (Gum.Module.find_export_by_name ("kernel32.dll", "ExitProcess"), listener);
+			interceptor.attach (Gum.Module.find_export_by_name ("kernel32.dll", "ExitProcess"), listener);
 #else
-			interceptor.attach_listener ((void *) Posix.exit, listener);
-			interceptor.attach_listener ((void *) Posix._exit, listener);
-			interceptor.attach_listener ((void *) Posix.abort, listener);
+			interceptor.attach ((void *) Posix.exit, listener);
+			interceptor.attach ((void *) Posix._exit, listener);
+			interceptor.attach ((void *) Posix.abort, listener);
 #endif
 		}
 
 		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			interceptor.detach_listener (this);
+			interceptor.detach (this);
 
 			base.dispose ();
 		}

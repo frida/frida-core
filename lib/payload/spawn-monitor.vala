@@ -42,7 +42,7 @@ namespace Frida {
 			if (create_process_internal == null)
 				create_process_internal = Gum.Module.find_export_by_name ("kernel32.dll", "CreateProcessInternalW");
 			assert (create_process_internal != null);
-			interceptor.attach_listener (create_process_internal, this);
+			interceptor.attach (create_process_internal, this);
 #else
 			var libc_name = detect_libc_name ();
 #if DARWIN
@@ -54,11 +54,11 @@ namespace Frida {
 
 			execve = Gum.Module.find_export_by_name (libc_name, "execve");
 
-			interceptor.attach_listener ((void *) posix_spawn, this);
+			interceptor.attach ((void *) posix_spawn, this);
 
-			interceptor.replace_function (execve, (void *) replacement_execve, this);
+			interceptor.replace (execve, (void *) replacement_execve, this);
 #else
-			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "execve"), this);
+			interceptor.attach (Gum.Module.find_export_by_name (libc_name, "execve"), this);
 #endif
 #endif
 		}
@@ -67,10 +67,10 @@ namespace Frida {
 			var interceptor = Gum.Interceptor.obtain ();
 
 #if DARWIN
-			interceptor.revert_function (execve);
+			interceptor.revert (execve);
 #endif
 
-			interceptor.detach_listener (this);
+			interceptor.detach (this);
 
 			base.dispose ();
 		}
@@ -153,7 +153,7 @@ namespace Frida {
 
 #if WINDOWS
 		private void on_enter (Gum.InvocationContext context) {
-			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 			invocation.application_name = (string16?) context.get_nth_argument (1);
 			invocation.command_line = (string16?) context.get_nth_argument (2);
@@ -171,7 +171,7 @@ namespace Frida {
 			if (!success)
 				return;
 
-			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 			var pid = invocation.process_info.process_id;
 			var parent_pid = get_process_id ();
@@ -252,7 +252,7 @@ namespace Frida {
 			if (caller_is_internal)
 				return;
 
-			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 			invocation.pid = context.get_nth_argument (0);
 			if (invocation.pid == null) {
@@ -293,7 +293,7 @@ namespace Frida {
 			if (caller_is_internal)
 				return;
 
-			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 			int result = (int) context.get_return_value ();
 
@@ -317,7 +317,7 @@ namespace Frida {
 
 		private static int replacement_execve (string? path, string ** argv, string ** envp) {
 			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
-			var monitor = (SpawnMonitor) context.get_replacement_function_data ();
+			var monitor = (SpawnMonitor) context.get_replacement_data ();
 
 			return monitor.handle_execve (path, argv, envp);
 		}
@@ -391,7 +391,7 @@ namespace Frida {
 		}
 #else
 		private void on_enter (Gum.InvocationContext context) {
-			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 			invocation.pid = Posix.getpid ();
 
 			var parent_pid = invocation.pid;
@@ -405,7 +405,7 @@ namespace Frida {
 		}
 
 		private void on_leave (Gum.InvocationContext context) {
-			Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+			Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 			on_exec_cancelled (invocation.pid);
 		}
 

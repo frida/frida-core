@@ -30,22 +30,22 @@ namespace Frida {
 			thread_suspend = (ThreadSuspendFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "thread_suspend");
 			thread_resume = (ThreadResumeFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "thread_resume");
 
-			interceptor.replace_function ((void *) task_threads, (void *) replacement_task_threads, this);
-			interceptor.replace_function ((void *) thread_suspend, (void *) replacement_thread_suspend, this);
-			interceptor.replace_function ((void *) thread_resume, (void *) replacement_thread_resume, this);
+			interceptor.replace ((void *) task_threads, (void *) replacement_task_threads, this);
+			interceptor.replace ((void *) thread_suspend, (void *) replacement_thread_suspend, this);
+			interceptor.replace ((void *) thread_resume, (void *) replacement_thread_resume, this);
 		}
 
 		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			interceptor.revert_function ((void *) thread_suspend);
+			interceptor.revert ((void *) thread_suspend);
 
 			base.dispose ();
 		}
 
 		private static int replacement_task_threads (uint task_id, uint ** threads, uint * count) {
 			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
-			unowned ThreadSuspendMonitor monitor = (ThreadSuspendMonitor) context.get_replacement_function_data ();
+			unowned ThreadSuspendMonitor monitor = (ThreadSuspendMonitor) context.get_replacement_data ();
 
 			return monitor.handle_task_threads (task_id, threads, count);
 		}
@@ -62,7 +62,7 @@ namespace Frida {
 
 		private static int replacement_thread_suspend (uint thread_id) {
 			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
-			unowned ThreadSuspendMonitor monitor = (ThreadSuspendMonitor) context.get_replacement_function_data ();
+			unowned ThreadSuspendMonitor monitor = (ThreadSuspendMonitor) context.get_replacement_data ();
 
 			return monitor.handle_thread_suspend (thread_id);
 		}
@@ -95,7 +95,7 @@ namespace Frida {
 
 		private static int replacement_thread_resume (uint thread_id) {
 			unowned Gum.InvocationContext context = Gum.Interceptor.get_current_invocation ();
-			unowned ThreadSuspendMonitor monitor = (ThreadSuspendMonitor) context.get_replacement_function_data ();
+			unowned ThreadSuspendMonitor monitor = (ThreadSuspendMonitor) context.get_replacement_data ();
 
 			return monitor.handle_thread_resume (thread_id);
 		}

@@ -88,34 +88,34 @@ namespace Frida {
 
 			var open_listener = new OpenDirListener (this);
 			listeners.add (open_listener);
-			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "opendir"), open_listener);
+			interceptor.attach (Gum.Module.find_export_by_name (libc_name, "opendir"), open_listener);
 
 			var close_listener = new CloseDirListener (this);
 			listeners.add (close_listener);
-			interceptor.attach_listener (Gum.Module.find_export_by_name (libc_name, "closedir"), close_listener);
+			interceptor.attach (Gum.Module.find_export_by_name (libc_name, "closedir"), close_listener);
 
 			var readdir = Gum.Module.find_export_by_name (libc_name, "readdir");
 			var readdir_listener = new ReadDirListener (this, LEGACY);
 			listeners.add (readdir_listener);
-			interceptor.attach_listener (readdir, readdir_listener);
+			interceptor.attach (readdir, readdir_listener);
 
 			var readdir64 = Gum.Module.find_export_by_name (libc_name, "readdir64");
 			if (readdir64 != null && readdir64 != readdir) {
 				var listener = new ReadDirListener (this, MODERN);
 				listeners.add (listener);
-				interceptor.attach_listener (readdir64, listener);
+				interceptor.attach (readdir64, listener);
 			}
 
 			var readdir_r = Gum.Module.find_export_by_name (libc_name, "readdir_r");
 			var readdir_r_listener = new ReadDirRListener (this, LEGACY);
 			listeners.add (readdir_r_listener);
-			interceptor.attach_listener (readdir_r, readdir_r_listener);
+			interceptor.attach (readdir_r, readdir_r_listener);
 
 			var readdir64_r = Gum.Module.find_export_by_name (libc_name, "readdir64_r");
 			if (readdir64_r != null && readdir64_r != readdir_r) {
 				var listener = new ReadDirRListener (this, MODERN);
 				listeners.add (listener);
-				interceptor.attach_listener (readdir64_r, listener);
+				interceptor.attach (readdir64_r, listener);
 			}
 		}
 
@@ -123,7 +123,7 @@ namespace Frida {
 			var interceptor = Gum.Interceptor.obtain ();
 
 			foreach (var listener in listeners)
-				interceptor.detach_listener (listener);
+				interceptor.detach (listener);
 		}
 
 		public void start_tracking (Posix.Dir handle) {
@@ -152,13 +152,13 @@ namespace Frida {
 			}
 
 			public void on_enter (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 				invocation.path = (string *) context.get_nth_argument (0);
 			}
 
 			public void on_leave (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 				if (!parent.filter.matches_directory (invocation.path))
 					return;
 
@@ -205,12 +205,12 @@ namespace Frida {
 			}
 
 			public void on_enter (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 				invocation.handle = (Posix.Dir?) context.get_nth_argument (0);
 			}
 
 			public void on_leave (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 				if (!parent.is_tracking (invocation.handle))
 					return;
 
@@ -258,14 +258,14 @@ namespace Frida {
 			}
 
 			public void on_enter (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 				invocation.handle = (Posix.Dir?) context.get_nth_argument (0);
 				invocation.entry = context.get_nth_argument (1);
 				invocation.result = context.get_nth_argument (2);
 			}
 
 			public void on_leave (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 				if (!parent.is_tracking (invocation.handle))
 					return;
 

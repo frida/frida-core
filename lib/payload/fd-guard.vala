@@ -28,13 +28,13 @@ namespace Frida {
 
 			var close = Gum.Module.find_export_by_name (detect_libc_name (), "close");
 			close_listener = new CloseListener (this);
-			interceptor.attach_listener (close, close_listener);
+			interceptor.attach (close, close_listener);
 		}
 
 		~FileDescriptorGuard () {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			interceptor.detach_listener (close_listener);
+			interceptor.detach (close_listener);
 		}
 
 		private class CloseListener : Object, Gum.InvocationListener {
@@ -48,7 +48,7 @@ namespace Frida {
 			}
 
 			private void on_enter (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 
 				var caller = (Gum.Address) context.get_return_address ();
 				var range = parent.agent_range;
@@ -67,7 +67,7 @@ namespace Frida {
 			}
 
 			private void on_leave (Gum.InvocationContext context) {
-				Invocation * invocation = context.get_listener_function_invocation_data (sizeof (Invocation));
+				Invocation * invocation = context.get_listener_invocation_data (sizeof (Invocation));
 				if (invocation.is_cloaked) {
 					context.replace_return_value ((void *) 0);
 					context.system_error = 0;

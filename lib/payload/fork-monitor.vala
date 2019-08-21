@@ -52,7 +52,7 @@ namespace Frida {
 					if (cmdline == "zygote" || cmdline == "zygote64") {
 						var set_argv0 = Gum.Module.find_export_by_name ("libandroid_runtime.so", "_Z27android_os_Process_setArgV0P7_JNIEnvP8_jobjectP8_jstring");
 						if (set_argv0 != null) {
-							interceptor.attach_listener (set_argv0, listener, (void *) HookId.SET_ARGV0);
+							interceptor.attach (set_argv0, listener, (void *) HookId.SET_ARGV0);
 							child_recovery_behavior = DEFERRED_UNTIL_SET_ARGV0;
 						}
 					}
@@ -61,15 +61,15 @@ namespace Frida {
 			}
 #endif
 
-			interceptor.attach_listener ((void *) Posix.fork, listener, (void *) HookId.FORK);
-			interceptor.replace_function ((void *) Posix.vfork, (void *) Posix.fork);
+			interceptor.attach ((void *) Posix.fork, listener, (void *) HookId.FORK);
+			interceptor.replace ((void *) Posix.vfork, (void *) Posix.fork);
 		}
 
 		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			interceptor.revert_function ((void *) Posix.vfork);
-			interceptor.detach_listener (this);
+			interceptor.revert ((void *) Posix.vfork);
+			interceptor.detach (this);
 
 			base.dispose ();
 		}
@@ -113,13 +113,13 @@ namespace Frida {
 		}
 
 		public void on_set_argv0_enter (Gum.InvocationContext context) {
-			SetArgV0Invocation * invocation = context.get_listener_function_invocation_data (sizeof (SetArgV0Invocation));
+			SetArgV0Invocation * invocation = context.get_listener_invocation_data (sizeof (SetArgV0Invocation));
 			invocation.env = context.get_nth_argument (0);
 			invocation.name_obj = context.get_nth_argument (2);
 		}
 
 		public void on_set_argv0_leave (Gum.InvocationContext context) {
-			SetArgV0Invocation * invocation = context.get_listener_function_invocation_data (sizeof (SetArgV0Invocation));
+			SetArgV0Invocation * invocation = context.get_listener_invocation_data (sizeof (SetArgV0Invocation));
 
 			if (state != FORKING)
 				return;
