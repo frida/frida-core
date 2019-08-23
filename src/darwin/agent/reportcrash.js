@@ -233,7 +233,6 @@ if (libdyld !== null) {
       var realSize = count * imageElementSize;
 
       procInfoInvocations[this.threadId] = {
-        count: count,
         array: array,
         realSize: realSize,
         fakeSize: realSize + (extraCount * imageElementSize),
