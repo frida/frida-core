@@ -1,7 +1,6 @@
 var LIBSYSTEM_KERNEL_PATH = '/usr/lib/system/libsystem_kernel.dylib';
 var CORESYMBOLICATION_PATH = '/System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication';
 var CRASH_REPORTER_SUPPORT_PATH = '/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport';
-var TASK_DYLD_INFO = 17;
 var YES = ptr(1);
 
 var CSTypeRef = ['pointer', 'pointer'];
@@ -59,11 +58,6 @@ var logPath;
 var logFd;
 var logChunks;
 var mappedAgents;
-var allImageInfoAddr;
-var imageArrayAddress;
-var imageElementSize;
-var imageTrailerSize;
-var imageTrailerPaths;
 
 function reset() {
   crashedPid = -1;
@@ -73,11 +67,6 @@ function reset() {
   logFd = null;
   logChunks = [];
   mappedAgents = [];
-  allImageInfoAddr = null;
-  imageArrayAddress = null;
-  imageElementSize = null;
-  imageTrailerSize = null;
-  imageTrailerPaths = {};
 }
 
 reset();
@@ -209,131 +198,146 @@ Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPrefe
   }
 });
 
-Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'task_info'), {
-  onEnter: function (args) {
-    this.pid = pidForTask(args[0].toUInt32());
-    this.flavor = args[1].toUInt32();
-    this.info = args[2];
-    this.count = args[3];
-  },
-  onLeave: function (retval) {
-    if (this.pid !== crashedPid || this.flavor !== TASK_DYLD_INFO || retval.toUInt32() !== 0)
-      return;
+var libdyld = findLibdyldInternals();
+if (libdyld !== null) {
+  var allImageInfoSizes = {
+    15: 320,
+  };
+  var imageElementSize = 3 * Process.pointerSize;
 
-    var info = this.info;
-    switch (this.count.readUInt()) {
-      case 1:
-      case 3:
-        allImageInfoAddr = uint64(info.readU32());
-        break;
-      case 5:
-        allImageInfoAddr = info.readU64();
-        break;
-      default:
-        throw new Error('Unexpected TASK_DYLD_INFO count');
-    }
-  }
-});
+  var procInfoInvocations = {};
 
-[
-  ['mach_vm_read', false, 32],
-  ['mach_vm_read_overwrite', true, 64],
-].forEach(function (entry) {
-  var name = entry[0];
-  var inplace = entry[1];
-  var sizeWidth = entry[2];
-
-  var readSize = (sizeWidth !== 32) ? Memory['readU' + sizeWidth].bind(Memory) : readSizeFromU32;
-  var writeSize = Memory['writeU' + sizeWidth].bind(Memory);
-
-  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, name), {
+  Interceptor.attach(libdyld['dyld_process_info_base::make'], {
     onEnter: function (args) {
       var pid = pidForTask(args[0].toUInt32());
       if (pid !== crashedPid)
         return;
-      this.instrumented = true;
+      var allImageInfo = args[1];
 
-      var address = uint64(args[1].toString());
-      this.address = address;
-      var size = uint64(args[2].toString());
-      this.size = size;
-      this.data = args[3];
-      this.dataSize = args[4];
+      var version = allImageInfo.readU32();
+      var count = allImageInfo.add(4).readU32();
+      var array = allImageInfo.add(8).readU64();
 
-      if (imageArrayAddress !== null && address.equals(imageArrayAddress)) {
-        args[2] = ptr(size.sub(imageTrailerSize));
+      var size = allImageInfoSizes[version];
+      if (size === undefined) {
+        console.error('Unsupported dyld_all_image_infos_64; please add support for version ' + version);
+        return;
       }
+
+      var extraCount = mappedAgents.length;
+      var copy = Memory.dup(allImageInfo, size);
+      copy.add(4).writeU32(count + extraCount);
+      this.allImageInfo = copy;
+      args[1] = copy;
+
+      var realSize = count * imageElementSize;
+
+      procInfoInvocations[this.threadId] = {
+        count: count,
+        array: array,
+        realSize: realSize,
+        fakeSize: realSize + (extraCount * imageElementSize),
+        agents: mappedAgents,
+        paths: {}
+      };
     },
     onLeave: function (retval) {
-      if (!this.instrumented || retval.toUInt32() !== 0)
-        return;
-
-      var startAddress = this.address;
-
-      if (allImageInfoAddr !== null && startAddress.equals(allImageInfoAddr)) {
-        var allImageInfos = getData(this);
-
-        imageArrayAddress = readRemotePointer(allImageInfos.add(8));
-
-        var extraImageCount = mappedAgents.length;
-
-        var imageArrayCountPtr = allImageInfos.add(4);
-        var imageArrayCount = imageArrayCountPtr.readU32();
-        imageArrayCountPtr.writeU32(imageArrayCount + extraImageCount);
-
-        imageElementSize = 3 * (is64Bit ? 8 : 4);
-        imageTrailerSize = extraImageCount * imageElementSize;
-      } else if (imageArrayAddress !== null && startAddress.equals(imageArrayAddress)) {
-        var imageTrailerStart = getData(this).add(this.size).sub(imageTrailerSize);
-        mappedAgents.forEach(function (agent, index) {
-          var element = imageTrailerStart.add(index * imageElementSize);
-
-          var loadAddress = agent.machHeaderAddress;
-          var filePath = loadAddress.sub(4096);
-          var modDate = 0;
-
-          if (is64Bit) {
-            element
-                .writeU64(loadAddress).add(8)
-                .writeU64(filePath).add(8)
-                .writeU64(modDate);
-          } else {
-            element
-                .writeU32(loadAddress).add(4)
-                .writeU32(filePath).add(4)
-                .writeU32(modDate);
-          }
-
-          imageTrailerPaths[filePath.toString()] = agent;
-        });
-
-        var dataSize = readSize(this.dataSize);
-        writeSize(this.dataSize, dataSize.add(imageTrailerSize));
-      } else {
-        var agent = imageTrailerPaths[startAddress.toString()];
-        if (agent !== undefined)
-          getData(this).writeUtf8String(agent.path);
-      }
+      delete procInfoInvocations[this.threadId];
     }
   });
 
-  function getData(invocationContext) {
-    return inplace ? invocationContext.data : invocationContext.data.readPointer();
+  Interceptor.attach(libdyld.withRemoteBuffer, {
+    onEnter: function (args) {
+      var invocation = procInfoInvocations[this.threadId];
+      if (invocation === undefined)
+        return;
+
+      var remoteAddress = uint64(args[1].toString());
+
+      if (remoteAddress.equals(invocation.array)) {
+        var realSize = invocation.realSize;
+
+        args[2] = ptr(realSize);
+
+        this.block = wrapBlock(args[6], function (impl, buffer, size) {
+          var copy = Memory.alloc(invocation.fakeSize);
+          Memory.copy(copy, buffer, realSize);
+
+          var element = copy.add(realSize);
+          var paths = invocation.paths;
+          invocation.agents.forEach(function (agent) {
+            var loadAddress = agent.machHeaderAddress;
+            var filePath = loadAddress.sub(4096);
+            var modDate = 0;
+
+            if (is64Bit) {
+              element
+                  .writeU64(loadAddress).add(8)
+                  .writeU64(filePath).add(8)
+                  .writeU64(modDate);
+            } else {
+              element
+                  .writeU32(loadAddress).add(4)
+                  .writeU32(filePath).add(4)
+                  .writeU32(modDate);
+            }
+
+            paths[filePath.toString()] = agent;
+
+            element = element.add(imageElementSize);
+          });
+
+          impl(copy, size);
+        });
+
+        return;
+      }
+
+      var agent = invocation.paths[remoteAddress.toString()];
+      if (agent !== undefined) {
+        this.block = wrapBlock(args[6], function (impl, buffer, size) {
+          var copy = Memory.dup(buffer, size);
+          copy.writeUtf8String(agent.path);
+          impl(copy, size);
+        });
+      }
+    }
+  });
+}
+
+function findLibdyldInternals() {
+  if (Process.arch !== 'arm64')
+    return null;
+
+  var m = Process.getModuleByName('/usr/lib/system/libdyld.dylib');
+  var base = m.base;
+  var size = m.size;
+
+  var signatures = {
+    'dyld_process_info_base::make': 'ff c3 04 d1 ' + '?? ?? ?? ?? '.repeat(33) + '28 e0 02 91',
+    'withRemoteBuffer': 'ff 03 01 d1 f4 4f 02 a9 fd 7b 03 a9 fd c3 00 91 f3 03 06 aa',
+  };
+
+  var result = Object.keys(signatures)
+      .reduce(function (result, name) {
+        var matches = Memory.scanSync(base, size, signatures[name]);
+        if (matches.length === 1)
+          result.api[name] = matches[0].address;
+        else
+          result.missing.push(name);
+        return result;
+      }, { api: {}, missing: [] });
+  if (result.missing.length !== 0) {
+    console.error('Unsupported version of libdyld.dylib; missing:\n\t' + result.missing.join('\n\t'));
+    return null;
   }
-});
+  return result.api;
+}
 
 function pidForTask(task) {
   var pidBuf = Memory.alloc(4);
   _pidForTask(task, pidBuf);
   return pidBuf.readU32();
-}
-
-function readRemotePointer(address) {
-  return is64Bit ? address.readU64() : uint64(address.readU32());
-}
-
-function readSizeFromU32(address) {
-  return uint64(address.readU32());
 }
 
 if (Process.arch === 'arm64') {
@@ -480,4 +484,22 @@ function tryParseLdrRegAddress(instruction, pc) {
   var imm = pc.add(distance * 4);
 
   return ['x' + reg, imm];
+}
+
+function wrapBlock(handle, wrapper) {
+  var block = new ObjC.Block(handle);
+
+  var impl = block.implementation;
+
+  block.implementation = function () {
+    var n = arguments.length;
+    var args = new Array(n + 1);
+    args[0] = impl;
+    for (var i = 0; i !== n; i++)
+      args[1 + i] = arguments[i];
+
+    wrapper.apply(null, args);
+  };
+
+  return block;
 }
