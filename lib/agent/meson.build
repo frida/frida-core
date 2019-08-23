@@ -39,6 +39,7 @@ agent = custom_target('frida-agent',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),
     '--otool', meson.get_cross_binary('otool', 'otool'),
+    '--install-name-tool', meson.get_cross_binary('install_name_tool', 'install_name_tool'),
   ],
 )
 

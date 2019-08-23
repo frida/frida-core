@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 import re
 import shutil
 import struct
@@ -23,11 +24,12 @@ def main():
 
     parser.add_argument("--move", dest="moves", action='append', nargs=3,
         metavar=("|".join(the_whats), 'function_name', "|".join(the_wheres)), type=str, default=[])
-    parser.add_argument("--output", metavar="/path/to/output/module", type=argparse.FileType("wb"))
+    parser.add_argument("--output", metavar="/path/to/output/module", type=str)
 
     parser.add_argument("--nm", metavar="/path/to/nm", type=str, default=None)
     parser.add_argument("--objdump", metavar="/path/to/objdump", type=str, default=None)
     parser.add_argument("--otool", metavar="/path/to/otool", type=str, default=None)
+    parser.add_argument("--install-name-tool", metavar="/path/to/install_name_tool", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -73,6 +75,7 @@ def main():
 class ModuleEditor(object):
     def __init__(self, module, toolchain):
         self.module = module
+        self.toolchain = toolchain
 
         layout = Layout.from_file(module.name, toolchain)
         self.layout = layout
@@ -90,14 +93,19 @@ class ModuleEditor(object):
                 descriptions.append("(none)")
             print("# {}S\n\t{}".format(vector.label.upper(), "\n\t".join(descriptions)))
 
-    def save(self, destination):
-        self.module.seek(0)
-        shutil.copyfileobj(self.module, destination)
+    def save(self, destination_path):
+        temp_destination_path = destination_path + ".tmp"
+        with open(temp_destination_path, "wb") as destination:
+            self.module.seek(0)
+            shutil.copyfileobj(self.module, destination)
 
-        self._write_function_pointer_vector(self.constructors, destination)
-        self._write_function_pointer_vector(self.destructors, destination)
+            self._write_function_pointer_vector(self.constructors, destination)
+            self._write_function_pointer_vector(self.destructors, destination)
 
-        destination.flush()
+        if self.layout.file_format == 'mach-o':
+            subprocess.check_call([self.toolchain.install_name_tool, "-id", make_darwin_module_name(destination_path), temp_destination_path])
+
+        shutil.move(temp_destination_path, destination_path)
 
     def _read_function_pointer_section(self, section, label):
         layout = self.layout
@@ -150,6 +158,7 @@ class Toolchain(object):
         self.nm = "nm"
         self.objdump = "objdump"
         self.otool = "otool"
+        self.install_name_tool = "install_name_tool"
 
     def __repr__(self):
         return "Toolchain({})".format(", ".join([k + "=" + repr(v) for k, v in vars(self).items()]))
@@ -299,6 +308,11 @@ class FunctionPointer(object):
 
     def __repr__(self):
         return "FunctionPointer(value=0x{:x}, name=\"{}\")".format(self.value, self.name)
+
+
+def make_darwin_module_name(path):
+    name, ext = os.path.splitext(os.path.basename(path))
+    return name.replace("-", " ").title().replace(" ", "")
 
 
 main()
