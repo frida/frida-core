@@ -1188,7 +1188,7 @@ namespace Frida.HostSessionTest {
 				var script_id = yield session.create_script_with_options ("""
 					var write = new NativeFunction(Module.getExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);
 					var message = Memory.allocUtf8String('Hello stdout');
-					var cout = Memory.readPointer(Module.findExportByName('libc++.1.dylib', '_ZNSt3__14coutE'));
+					var cout = Module.getExportByName('libc++.1.dylib', '_ZNSt3__14coutE').readPointer();
 					var properlyInitialized = !cout.isNull();
 					write(1, message, 12);
 					var sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';
@@ -1734,7 +1734,7 @@ namespace Frida.HostSessionTest {
 				var parent_script = yield parent_session.create_script ("""
 					Interceptor.attach(Module.getExportByName(null, 'puts'), {
 					  onEnter: function (args) {
-					    send('[PARENT] ' + Memory.readUtf8String(args[0]));
+					    send('[PARENT] ' + args[0].readUtf8String());
 					  }
 					});
 					""");
@@ -1778,7 +1778,7 @@ namespace Frida.HostSessionTest {
 				var child_script = yield child_session.create_script ("""
 					Interceptor.attach(Module.getExportByName(null, 'puts'), {
 					  onEnter: function (args) {
-					    send('[CHILD] ' + Memory.readUtf8String(args[0]));
+					    send('[CHILD] ' + args[0].readUtf8String());
 					  }
 					});
 					""");
@@ -1931,7 +1931,7 @@ namespace Frida.HostSessionTest {
 				var script = yield child_session_post_exec.create_script ("""
 					Interceptor.attach(Module.getExportByName(null, 'puts'), {
 					  onEnter: function (args) {
-					    send(Memory.readUtf8String(args[0]));
+					    send(args[0].readUtf8String());
 					  }
 					});
 					""");
@@ -2060,7 +2060,7 @@ namespace Frida.HostSessionTest {
 				var script = yield post_exec_session.create_script ("""
 					Interceptor.attach(Module.getExportByName(null, 'puts'), {
 					  onEnter: function (args) {
-					    send(Memory.readUtf8String(args[0]));
+					    send(args[0].readUtf8String());
 					  }
 					});
 					""");
@@ -2238,7 +2238,7 @@ namespace Frida.HostSessionTest {
 				var script = yield child_session.create_script ("""
 					Interceptor.attach(Module.getExportByName(null, 'puts'), {
 					  onEnter: function (args) {
-					    send(Memory.readUtf8String(args[0]));
+					    send(args[0].readUtf8String());
 					  }
 					});
 					""");
@@ -2501,7 +2501,7 @@ namespace Frida.HostSessionTest {
 				var script = yield child_session.create_script ("""
 					Interceptor.attach(Module.getExportByName('kernel32.dll', 'OutputDebugStringW'), {
 					  onEnter: function (args) {
-					    send(Memory.readUtf16String(args[0]));
+					    send(args[0].readUtf16String());
 					  }
 					});
 					""");

@@ -34,7 +34,7 @@ namespace Frida.AgentTest {
 				script_id = yield session.create_script ("load-and-receive-messages",
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter: function(args) {" +
-					 "    send({ first_argument: args[0].toInt32(), second_argument: Memory.readUtf8String(args[1]) });" +
+					 "    send({ first_argument: args[0].toInt32(), second_argument: args[1].readUtf8String() });" +
 					 "  }" +
 					 "});").printf ((size_t) func));
 				yield session.load_script (script_id);
@@ -62,7 +62,7 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				script_id = yield session.create_script ("performance",
-					("var buf = Memory.readByteArray(ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), %d);" +
+					("var buf = ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\").readByteArray(%d);" +
 					 "var startTime = new Date();" +
 					 "var iterations = 0;" +
 					 "var sendNext = function sendNext() {" +
@@ -114,12 +114,6 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				script_id = yield session.create_script ("launch-scenario", """
-var readU16 = Memory.readU16;
-var writeU16 = Memory.writeU16;
-var readU32 = Memory.readU32;
-var readPointer = Memory.readPointer;
-var readString = Memory.readUtf8String;
-
 var pointerSize = Process.pointerSize;
 
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
@@ -158,11 +152,11 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     if (active === 0)
       return;
 
-    var path = readString(args[1]);
+    var path = args[1].readUtf8String();
     if (path !== '/bin/ls')
       return;
 
-    var rawIdentifier = readString(readPointer(args[3].add(pointerSize)));
+    var rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
 
     var identifier, event;
     if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
@@ -180,11 +174,11 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
       return;
     }
 
-    var attrs = readPointer(args[2].add(pointerSize));
+    var attrs = args[2].add(pointerSize).readPointer();
 
-    var flags = readU16(attrs);
+    var flags = attrs.readU16();
     flags |= POSIX_SPAWN_START_SUSPENDED;
-    writeU16(attrs, flags);
+    attrs.writeU16(flags);
 
     this.event = event;
     this.identifier = identifier;
@@ -208,7 +202,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     if (retval.toInt32() < 0)
       return;
 
-    send([event, identifier, readU32(this.pidPtr)]);
+    send([event, identifier, this.pidPtr.readU32()]);
   }
 });
 """);
