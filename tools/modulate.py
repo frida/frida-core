@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--objdump", metavar="/path/to/objdump", type=str, default=None)
     parser.add_argument("--otool", metavar="/path/to/otool", type=str, default=None)
     parser.add_argument("--install-name-tool", metavar="/path/to/install_name_tool", type=str, default=None)
+    parser.add_argument("--strip", metavar="/path/to/strip", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -105,6 +106,10 @@ class ModuleEditor(object):
         if self.layout.file_format == 'mach-o':
             subprocess.check_call([self.toolchain.install_name_tool, "-id", make_darwin_module_name(destination_path), temp_destination_path])
 
+        strip = self.toolchain.strip
+        if strip is not None:
+            subprocess.check_call([strip, temp_destination_path])
+
         shutil.move(temp_destination_path, destination_path)
 
     def _read_function_pointer_section(self, section, label):
@@ -159,6 +164,7 @@ class Toolchain(object):
         self.objdump = "objdump"
         self.otool = "otool"
         self.install_name_tool = "install_name_tool"
+        self.strip = None
 
     def __repr__(self):
         return "Toolchain({})".format(", ".join([k + "=" + repr(v) for k, v in vars(self).items()]))

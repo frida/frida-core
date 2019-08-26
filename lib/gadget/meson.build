@@ -39,6 +39,9 @@ if host_os_family != 'darwin'
     '--move', 'destructor', 'frida_on_unload', 'last',
   ]
 endif
+if get_option('strip')
+  operations += ['--strip', meson.get_cross_binary('strip', 'strip')]
+endif
 
 custom_target('frida-gadget',
   input: raw_gadget,
@@ -51,6 +54,7 @@ custom_target('frida-gadget',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),
     '--otool', meson.get_cross_binary('otool', 'otool'),
+    '--install-name-tool', meson.get_cross_binary('install_name_tool', 'install_name_tool'),
   ],
   build_by_default: true,
   install: true,
