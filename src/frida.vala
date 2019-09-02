@@ -27,18 +27,20 @@ namespace Frida {
 
 		public delegate bool Predicate (Device device);
 
-		private Promise<bool> ensure_request;
-		private Promise<bool> close_request;
+		private Promise<bool> start_request;
+		private Promise<bool> stop_request;
 
 		private HostSessionService service = null;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
+
+		private Cancellable io_cancellable = new Cancellable ();
 
 		public DeviceManager () {
 			Object (main_context: get_main_context ());
 		}
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
-			yield _do_close (cancellable);
+			yield stop_service (cancellable);
 		}
 
 		public void close_sync (Cancellable? cancellable = null) throws IOError {
@@ -192,27 +194,18 @@ namespace Frida {
 		public async Device add_remote_device (string host, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_service (cancellable);
+			var tcp_device = yield get_device ((device) => {
+					return device.provider is TcpHostSessionProvider;
+				}, 0, cancellable);
 
-			var id = "tcp@" + host;
+			string id = "tcp@" + host;
 
 			foreach (var device in devices) {
 				if (device.id == id)
-					throw new Error.INVALID_ARGUMENT ("Device already exists");
+					return device;
 			}
 
-			HostSessionProvider tcp_provider = null;
-			foreach (var device in devices) {
-				var p = device.provider;
-				if (p is TcpHostSessionProvider) {
-					tcp_provider = p;
-					break;
-				}
-			}
-			if (tcp_provider == null)
-				throw new Error.NOT_SUPPORTED ("TCP backend not available");
-
-			var device = new Device (this, id, host, HostSessionProviderKind.REMOTE, tcp_provider, host);
+			var device = new Device (this, id, host, HostSessionProviderKind.REMOTE, tcp_device.provider, host);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -239,7 +232,7 @@ namespace Frida {
 
 			yield ensure_service (cancellable);
 
-			var id = "tcp@" + host;
+			string id = "tcp@" + host;
 
 			foreach (var device in devices) {
 				if (device.id == id) {
@@ -272,34 +265,38 @@ namespace Frida {
 			assert (device_did_exist);
 		}
 
-		private async void ensure_service (Cancellable? cancellable) throws IOError {
-			while (ensure_request != null) {
-				try {
-					yield ensure_request.future.wait_async (cancellable);
-					return;
-				} catch (GLib.Error e) {
-					assert (e is IOError.CANCELLED);
-					cancellable.set_error_if_cancelled ();
-				}
+		private async void ensure_service (Cancellable? cancellable) throws Error, IOError {
+			if (start_request == null) {
+				start_request = new Promise<bool> ();
+				start_service.begin ();
 			}
-			ensure_request = new Promise<bool> ();
 
+			try {
+				yield start_request.future.wait_async (cancellable);
+			} catch (Error e) {
+				assert_not_reached ();
+			} catch (IOError e) {
+				cancellable.set_error_if_cancelled ();
+				throw new Error.INVALID_OPERATION ("DeviceManager is closing");
+			}
+		}
+
+		private async void start_service () {
 			service = new HostSessionService.with_default_backends ();
 			try {
 				service.provider_available.connect (on_provider_available);
 				service.provider_unavailable.connect (on_provider_unavailable);
 
-				yield service.start (cancellable);
+				yield service.start (io_cancellable);
 
-				ensure_request.resolve (true);
+				start_request.resolve (true);
 			} catch (IOError e) {
 				service.provider_available.disconnect (on_provider_available);
 				service.provider_unavailable.disconnect (on_provider_unavailable);
 				service = null;
 
-				ensure_request.reject (e);
-				ensure_request = null;
-				throw e;
+				start_request.reject (e);
+				start_request = null;
 			}
 		}
 
@@ -315,13 +312,13 @@ namespace Frida {
 		}
 
 		private void on_provider_unavailable (HostSessionProvider provider) {
-			var started = ensure_request.future.ready;
+			var started = start_request.future.ready;
 
 			foreach (var device in devices) {
 				if (device.provider == provider) {
 					if (started)
 						removed (device);
-					device._do_close.begin (DEVICE_LOST, false, null);
+					device._do_close.begin (DEVICE_LOST, false, io_cancellable);
 					break;
 				}
 			}
@@ -331,25 +328,32 @@ namespace Frida {
 		}
 
 		private void check_open () throws Error {
-			if (close_request != null)
+			if (stop_request != null)
 				throw new Error.INVALID_OPERATION ("Device manager is closed");
 		}
 
-		private async void _do_close (Cancellable? cancellable) throws IOError {
-			while (close_request != null) {
+		private async void stop_service (Cancellable? cancellable) throws IOError {
+			while (stop_request != null) {
 				try {
-					yield close_request.future.wait_async (cancellable);
+					yield stop_request.future.wait_async (cancellable);
 					return;
 				} catch (GLib.Error e) {
 					assert (e is IOError.CANCELLED);
 					cancellable.set_error_if_cancelled ();
 				}
 			}
-			close_request = new Promise<bool> ();
+			stop_request = new Promise<bool> ();
+
+			io_cancellable.cancel ();
 
 			try {
-				if (ensure_request != null)
-					yield ensure_service (cancellable);
+				if (start_request != null) {
+					try {
+						yield ensure_service (cancellable);
+					} catch (GLib.Error e) {
+						cancellable.set_error_if_cancelled ();
+					}
+				}
 
 				foreach (var device in devices.to_array ())
 					yield device._do_close (APPLICATION_REQUESTED, true, cancellable);
@@ -362,10 +366,10 @@ namespace Frida {
 					service = null;
 				}
 
-				close_request.resolve (true);
+				stop_request.resolve (true);
 			} catch (IOError e) {
-				close_request.reject (e);
-				close_request = null;
+				stop_request.reject (e);
+				stop_request = null;
 				throw e;
 			}
 		}
