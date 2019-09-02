@@ -32,6 +32,7 @@ namespace Frida {
 
 		private HostSessionService service = null;
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
+		private Gee.ArrayList<DeviceObserverEntry> on_device_added = new Gee.ArrayList<DeviceObserverEntry> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -113,29 +114,35 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			yield ensure_service (cancellable);
-
 			foreach (var device in devices) {
 				if (predicate (device))
 					return device;
 			}
 
-			if (timeout == 0)
+			if (timeout == 0 && start_request != null && start_request.future.ready)
 				return null;
 
 			Device? added_device = null;
-			var added_handler = added.connect ((device) => {
+			var addition_observer = new DeviceObserverEntry ((device) => {
 				if (predicate (device)) {
 					added_device = device;
 					find_device.callback ();
 				}
 			});
+			on_device_added.add (addition_observer);
 
-			Source timeout_source = null;
-			if (timeout > 0) {
-				timeout_source = new TimeoutSource (timeout);
-				timeout_source.set_callback (find_device.callback);
-				timeout_source.attach (MainContext.get_thread_default ());
+			var ensure_cancellable = new Cancellable ();
+			Source? timeout_source = null;
+			if (timeout == 0) {
+				once_ensure_service_completes.begin (ensure_cancellable, find_device.callback);
+			} else {
+				ensure_service.begin (ensure_cancellable);
+
+				if (timeout > 0) {
+					timeout_source = new TimeoutSource (timeout);
+					timeout_source.set_callback (find_device.callback);
+					timeout_source.attach (MainContext.get_thread_default ());
+				}
 			}
 
 			var cancel_source = new CancellableSource (cancellable);
@@ -148,8 +155,9 @@ namespace Frida {
 
 			if (timeout_source != null)
 				timeout_source.destroy ();
+			ensure_cancellable.cancel ();
 
-			disconnect (added_handler);
+			on_device_added.remove (addition_observer);
 
 			return added_device;
 		}
@@ -281,6 +289,18 @@ namespace Frida {
 			}
 		}
 
+		private async void once_ensure_service_completes (Cancellable? cancellable, owned SourceFunc func) {
+			try {
+				yield ensure_service (cancellable);
+			} catch (GLib.Error e) {
+			}
+
+			if (cancellable.is_cancelled ())
+				return;
+
+			func ();
+		}
+
 		private async void start_service () {
 			service = new HostSessionService.with_default_backends ();
 			try {
@@ -304,7 +324,10 @@ namespace Frida {
 			var device = new Device (this, provider.id, provider.name, provider.kind, provider);
 			devices.add (device);
 
-			var started = ensure_request.future.ready;
+			foreach (var observer in on_device_added.to_array ())
+				observer.func (device);
+
+			var started = start_request.future.ready;
 			if (started) {
 				added (device);
 				changed ();
@@ -382,6 +405,16 @@ namespace Frida {
 			public weak DeviceManager parent {
 				get;
 				construct;
+			}
+		}
+
+		private delegate void DeviceObserverFunc (Device device);
+
+		private class DeviceObserverEntry {
+			public DeviceObserverFunc func;
+
+			public DeviceObserverEntry (owned DeviceObserverFunc func) {
+				this.func = (owned) func;
 			}
 		}
 	}
