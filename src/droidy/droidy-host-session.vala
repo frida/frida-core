@@ -1,38 +1,38 @@
 namespace Frida {
 	public class DroidyHostSessionBackend : Object, HostSessionBackend {
-		private Droidy.DeviceTracker tracker = new Droidy.DeviceTracker ();
+		private Droidy.DeviceTracker tracker;
 		private Gee.HashMap<string, DroidyHostSessionProvider> provider_by_serial = new Gee.HashMap<string, DroidyHostSessionProvider> ();
 
-		private Future<bool> start_request;
-		private StartedHandler started_handler;
+		private Promise<bool> start_request;
 		private Cancellable start_cancellable;
-		private delegate void StartedHandler ();
+		private SourceFunc on_start_completed;
 
 		public async void start (Cancellable? cancellable) throws IOError {
-			started_handler = () => start.callback ();
-			start_cancellable = (cancellable != null) ? cancellable : new Cancellable ();
+			start_request = new Promise<bool> ();
+			start_cancellable = new Cancellable ();
+			on_start_completed = start.callback;
 
 			var timeout_source = new TimeoutSource (500);
-			timeout_source.set_callback (() => {
-				start.callback ();
-				return false;
-			});
+			timeout_source.set_callback (start.callback);
 			timeout_source.attach (MainContext.get_thread_default ());
 
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (start.callback);
+			cancel_source.attach (MainContext.get_thread_default ());
+
 			do_start.begin ();
+
 			yield;
 
-			started_handler = null;
-
+			cancel_source.destroy ();
 			timeout_source.destroy ();
+			on_start_completed = null;
 		}
 
 		private async void do_start () {
-			var promise = new Promise<bool> ();
-			start_request = promise.future;
-
 			bool success = true;
 
+			tracker = new Droidy.DeviceTracker ();
 			tracker.device_attached.connect ((serial, name) => {
 				var provider = new DroidyHostSessionProvider (this, serial, name);
 				provider_by_serial[serial] = provider;
@@ -50,22 +50,25 @@ namespace Frida {
 				success = false;
 			}
 
-			promise.resolve (success);
+			start_request.resolve (success);
 
-			if (started_handler != null)
-				started_handler ();
+			if (on_start_completed != null)
+				on_start_completed ();
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
 			start_cancellable.cancel ();
 
 			try {
-				yield start_request.wait_async (cancellable);
+				yield start_request.future.wait_async (cancellable);
 			} catch (Error e) {
 				assert_not_reached ();
 			}
 
-			yield tracker.close (cancellable);
+			if (tracker != null) {
+				yield tracker.close (cancellable);
+				tracker = null;
+			}
 
 			foreach (var provider in provider_by_serial.values) {
 				provider_unavailable (provider);

@@ -6,10 +6,9 @@ namespace Frida {
 		private Gee.HashMap<uint, FruityRemoteProvider> remote_providers = new Gee.HashMap<uint, FruityRemoteProvider> ();
 		private Gee.HashMap<uint, FruityLockdownProvider> lockdown_providers = new Gee.HashMap<uint, FruityLockdownProvider> ();
 
-		private Future<bool> start_request;
-		private StartedHandler started_handler;
+		private Promise<bool> start_request;
 		private Cancellable start_cancellable;
-		private delegate void StartedHandler ();
+		private SourceFunc on_start_completed;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -23,28 +22,30 @@ namespace Frida {
 		}
 
 		public async void start (Cancellable? cancellable) throws IOError {
-			started_handler = () => start.callback ();
-			start_cancellable = (cancellable != null) ? cancellable : new Cancellable ();
+			start_request = new Promise<bool> ();
+			start_cancellable = new Cancellable ();
+			on_start_completed = start.callback;
+
+			var main_context = MainContext.get_thread_default ();
 
 			var timeout_source = new TimeoutSource (500);
-			timeout_source.set_callback (() => {
-				start.callback ();
-				return false;
-			});
-			timeout_source.attach (MainContext.get_thread_default ());
+			timeout_source.set_callback (start.callback);
+			timeout_source.attach (main_context);
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (start.callback);
+			cancel_source.attach (main_context);
 
 			do_start.begin ();
+
 			yield;
 
-			started_handler = null;
-
+			cancel_source.destroy ();
 			timeout_source.destroy ();
+			on_start_completed = null;
 		}
 
 		private async void do_start () {
-			var promise = new Promise<bool> ();
-			start_request = promise.future;
-
 			bool success = true;
 
 			try {
@@ -74,17 +75,17 @@ namespace Frida {
 				control_client = null;
 			}
 
-			promise.resolve (success);
+			start_request.resolve (success);
 
-			if (started_handler != null)
-				started_handler ();
+			if (on_start_completed != null)
+				on_start_completed ();
 		}
 
 		public async void stop (Cancellable? cancellable) throws IOError {
 			start_cancellable.cancel ();
 
 			try {
-				yield start_request.wait_async (cancellable);
+				yield start_request.future.wait_async (cancellable);
 			} catch (Error e) {
 				assert_not_reached ();
 			}
@@ -93,6 +94,8 @@ namespace Frida {
 				yield control_client.close (cancellable);
 				control_client = null;
 			}
+
+			io_cancellable.cancel ();
 
 			devices.clear ();
 
@@ -107,8 +110,6 @@ namespace Frida {
 				yield provider.close (cancellable);
 			}
 			remote_providers.clear ();
-
-			io_cancellable.cancel ();
 		}
 
 		private async void add_device (Fruity.DeviceDetails details) {
@@ -135,9 +136,17 @@ namespace Frida {
 						delay_source.set_callback (add_device.callback);
 						delay_source.attach (main_context);
 
+						var cancel_source = new CancellableSource (io_cancellable);
+						cancel_source.set_callback (add_device.callback);
+						cancel_source.attach (main_context);
+
 						yield;
 
+						cancel_source.destroy ();
 						delay_source.destroy ();
+
+						if (io_cancellable.is_cancelled ())
+							return;
 					} else {
 						break;
 					}
