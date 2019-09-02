@@ -134,7 +134,7 @@ namespace Frida {
 			var ensure_cancellable = new Cancellable ();
 			Source? timeout_source = null;
 			if (timeout == 0) {
-				once_ensure_service_completes.begin (ensure_cancellable, find_device.callback);
+				ensure_service_and_then_call.begin (find_device.callback, ensure_cancellable);
 			} else {
 				ensure_service.begin (ensure_cancellable);
 
@@ -289,7 +289,7 @@ namespace Frida {
 			}
 		}
 
-		private async void once_ensure_service_completes (Cancellable? cancellable, owned SourceFunc func) {
+		private async void ensure_service_and_then_call (owned SourceFunc callback, Cancellable? cancellable) {
 			try {
 				yield ensure_service (cancellable);
 			} catch (GLib.Error e) {
@@ -298,7 +298,7 @@ namespace Frida {
 			if (cancellable.is_cancelled ())
 				return;
 
-			func ();
+			callback ();
 		}
 
 		private async void start_service () {
