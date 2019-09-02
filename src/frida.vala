@@ -626,7 +626,7 @@ namespace Frida {
 			bool waiting = false;
 			var main_context = MainContext.get_thread_default ();
 
-			Source timeout_source = null;
+			Source? timeout_source = null;
 			if (timeout > 0) {
 				timeout_source = new TimeoutSource (timeout);
 				timeout_source.set_callback (() => {
