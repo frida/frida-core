@@ -1151,10 +1151,7 @@ namespace Frida {
 		});
 
 		var cancel_source = new CancellableSource (cancellable);
-		cancel_source.set_callback (() => {
-			wait_for_uninject.callback ();
-			return false;
-		});
+		cancel_source.set_callback (wait_for_uninject.callback);
 		cancel_source.attach (MainContext.get_thread_default ());
 
 		while (is_injected () && !cancellable.is_cancelled ())

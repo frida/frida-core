@@ -32,10 +32,7 @@ namespace Frida {
 					error = e;
 				}
 
-				Idle.add (() => {
-					exchange.callback ();
-					return false;
-				});
+				Idle.add (exchange.callback);
 
 				return true;
 			});

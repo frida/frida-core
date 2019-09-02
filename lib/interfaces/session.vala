@@ -830,7 +830,7 @@ namespace Frida {
 				.end_array ();
 			string raw_request = Json.to_string (request.get_root (), false);
 
-			var pending = new PendingResponse (() => call.callback ());
+			var pending = new PendingResponse (call.callback);
 			pending_responses[request_id] = pending;
 
 			try {
@@ -918,8 +918,7 @@ namespace Frida {
 		}
 
 		private class PendingResponse {
-			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
+			private SourceFunc handler;
 
 			public bool completed {
 				get {
@@ -937,7 +936,7 @@ namespace Frida {
 				private set;
 			}
 
-			public PendingResponse (owned CompletionHandler handler) {
+			public PendingResponse (owned SourceFunc handler) {
 				this.handler = (owned) handler;
 			}
 

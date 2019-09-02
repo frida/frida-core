@@ -316,10 +316,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 					child.resume ();
 					child.join (5000);
 
-					Timeout.add (20 * 1000, () => {
-						launch_scenario.callback ();
-						return false;
-					});
+					Timeout.add (20 * 1000, launch_scenario.callback);
 					print ("waiting 20s\n");
 					yield;
 					print ("waited 20s\n");

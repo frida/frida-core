@@ -13,7 +13,7 @@ namespace Frida {
 		public async HostApplicationInfo[] enumerate_applications () {
 			bool is_first_request = pending_requests.is_empty;
 
-			var request = new EnumerateRequest (() => enumerate_applications.callback ());
+			var request = new EnumerateRequest (enumerate_applications.callback);
 			if (is_first_request) {
 				current_main_context = MainContext.get_thread_default ();
 				new Thread<bool> ("frida-enumerate-applications", enumerate_applications_worker);
@@ -44,15 +44,14 @@ namespace Frida {
 		}
 
 		private class EnumerateRequest {
-			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
+			private SourceFunc handler;
 
 			public HostApplicationInfo[] result {
 				get;
 				private set;
 			}
 
-			public EnumerateRequest (owned CompletionHandler handler) {
+			public EnumerateRequest (owned SourceFunc handler) {
 				this.handler = (owned) handler;
 			}
 
@@ -70,7 +69,7 @@ namespace Frida {
 		public async HostProcessInfo[] enumerate_processes () {
 			bool is_first_request = pending_requests.is_empty;
 
-			var request = new EnumerateRequest (() => enumerate_processes.callback ());
+			var request = new EnumerateRequest (enumerate_processes.callback);
 			if (is_first_request) {
 				current_main_context = MainContext.get_thread_default ();
 				new Thread<bool> ("frida-enumerate-processes", enumerate_processes_worker);
@@ -101,15 +100,14 @@ namespace Frida {
 		}
 
 		private class EnumerateRequest {
-			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
+			private SourceFunc handler;
 
 			public HostProcessInfo[] result {
 				get;
 				private set;
 			}
 
-			public EnumerateRequest (owned CompletionHandler handler) {
+			public EnumerateRequest (owned SourceFunc handler) {
 				this.handler = (owned) handler;
 			}
 

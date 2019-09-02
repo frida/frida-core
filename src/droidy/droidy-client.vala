@@ -239,10 +239,7 @@ namespace Frida.Droidy {
 
 				var source = new IdleSource ();
 				source.set_priority (Priority.LOW);
-				source.set_callback (() => {
-					close.callback ();
-					return false;
-				});
+				source.set_callback (close.callback);
 				source.attach (MainContext.get_thread_default ());
 				yield;
 			}

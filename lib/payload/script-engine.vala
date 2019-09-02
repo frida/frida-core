@@ -26,12 +26,8 @@ namespace Frida {
 
 			CompletionNotify on_complete = () => {
 				pending--;
-				if (pending == 0) {
-					schedule_idle (() => {
-						close.callback ();
-						return false;
-					});
-				}
+				if (pending == 0)
+					schedule_idle (close.callback);
 			};
 
 			foreach (var instance in instances.values.to_array ()) {
@@ -64,12 +60,8 @@ namespace Frida {
 
 			CompletionNotify on_complete = () => {
 				pending--;
-				if (pending == 0) {
-					schedule_idle (() => {
-						flush.callback ();
-						return false;
-					});
-				}
+				if (pending == 0)
+					schedule_idle (flush.callback);
 			};
 
 			foreach (var instance in instances.values.to_array ()) {
@@ -303,10 +295,7 @@ namespace Frida {
 					var js_source = new IdleSource ();
 					js_source.set_callback (() => {
 						var agent_source = new IdleSource ();
-						agent_source.set_callback (() => {
-							close.callback ();
-							return false;
-						});
+						agent_source.set_callback (close.callback);
 						agent_source.attach (main_context);
 						return false;
 					});
@@ -328,10 +317,7 @@ namespace Frida {
 
 				script.weak_ref (() => {
 					var source = new IdleSource ();
-					source.set_callback (() => {
-						close.callback ();
-						return false;
-					});
+					source.set_callback (close.callback);
 					source.attach (main_context);
 				});
 				script = null;

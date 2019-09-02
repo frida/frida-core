@@ -72,10 +72,7 @@ namespace Frida.Fruity {
 
 				var source = new IdleSource ();
 				source.set_priority (Priority.LOW);
-				source.set_callback (() => {
-					close.callback ();
-					return false;
-				});
+				source.set_callback (close.callback);
 				source.attach (MainContext.get_thread_default ());
 				yield;
 			}
@@ -170,7 +167,7 @@ namespace Frida.Fruity {
 			unowned uint8[] body = ((uint8[]) body_xml)[0:body_xml.length];
 
 			var msg = create_message (MessageType.PROPERTY_LIST, tag, body);
-			var pending = new PendingResponse (tag, () => query.callback ());
+			var pending = new PendingResponse (tag, query.callback);
 			pending_responses.add (pending);
 			write_message.begin (msg);
 
@@ -388,13 +385,12 @@ namespace Frida.Fruity {
 				private set;
 			}
 
-			public delegate void CompletionHandler ();
-			private CompletionHandler handler;
+			private SourceFunc handler;
 
 			private Plist? response;
 			private GLib.Error? error;
 
-			public PendingResponse (uint32 tag, owned CompletionHandler handler) {
+			public PendingResponse (uint32 tag, owned SourceFunc handler) {
 				this.tag = tag;
 				this.handler = (owned) handler;
 			}

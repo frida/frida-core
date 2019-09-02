@@ -43,10 +43,7 @@ namespace Frida.Test {
 		}
 
 		public async void process_events () {
-			Timeout.add (10, () => {
-				process_events.callback ();
-				return false;
-			});
+			Timeout.add (10, process_events.callback);
 			yield;
 		}
 

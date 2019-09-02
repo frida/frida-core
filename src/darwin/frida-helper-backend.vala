@@ -272,10 +272,7 @@ namespace Frida {
 					}
 
 					var delay_source = new TimeoutSource (20);
-					delay_source.set_callback (() => {
-						wait_until_suspended.callback ();
-						return false;
-					});
+					delay_source.set_callback (wait_until_suspended.callback);
 					delay_source.attach (MainContext.get_thread_default ());
 
 					yield;
@@ -580,10 +577,7 @@ namespace Frida {
 
 		private async void flush_dispatch_queue () {
 			_schedule_on_dispatch_queue (() => {
-				Idle.add (() => {
-					flush_dispatch_queue.callback ();
-					return false;
-				});
+				Idle.add (flush_dispatch_queue.callback);
 			});
 			yield;
 		}

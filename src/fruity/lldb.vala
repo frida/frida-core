@@ -95,10 +95,7 @@ namespace Frida.Fruity {
 			io_cancellable.cancel ();
 
 			var source = new IdleSource ();
-			source.set_callback (() => {
-				close.callback ();
-				return false;
-			});
+			source.set_callback (close.callback);
 			source.attach (MainContext.get_thread_default ());
 			yield;
 
@@ -198,7 +195,7 @@ namespace Frida.Fruity {
 		}
 
 		private async Packet query (string payload, Cancellable? cancellable) throws LLDBError, IOError {
-			var pending = new PendingResponse (() => query.callback ());
+			var pending = new PendingResponse (query.callback);
 			pending_responses.offer_tail (pending);
 
 			ulong cancel_handler = 0;
@@ -478,8 +475,7 @@ namespace Frida.Fruity {
 		}
 
 		private class PendingResponse {
-			public delegate void CompletionHandler ();
-			private CompletionHandler? handler;
+			private SourceFunc? handler;
 
 			public Packet? response {
 				get;
@@ -491,7 +487,7 @@ namespace Frida.Fruity {
 				private set;
 			}
 
-			public PendingResponse (owned CompletionHandler handler) {
+			public PendingResponse (owned SourceFunc handler) {
 				this.handler = (owned) handler;
 			}
 

@@ -237,10 +237,7 @@ namespace Frida.Agent {
 			yield setup_connection_with_pipe_address (pipe_address);
 
 			Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () => {
-				schedule_idle (() => {
-					start.callback ();
-					return false;
-				});
+				schedule_idle (start.callback);
 			});
 			yield;
 
@@ -550,12 +547,8 @@ namespace Frida.Agent {
 
 			CompletionNotify on_complete = () => {
 				pending--;
-				if (pending == 0) {
-					schedule_idle (() => {
-						close_all_clients.callback ();
-						return false;
-					});
-				}
+				if (pending == 0)
+					schedule_idle (close_all_clients.callback);
 			};
 
 			foreach (var client in clients.to_array ()) {
@@ -585,12 +578,8 @@ namespace Frida.Agent {
 
 			CompletionNotify on_complete = () => {
 				pending--;
-				if (pending == 0) {
-					schedule_idle (() => {
-						flush_all_clients.callback ();
-						return false;
-					});
-				}
+				if (pending == 0)
+					schedule_idle (flush_all_clients.callback);
 			};
 
 			foreach (var client in clients.to_array ()) {

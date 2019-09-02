@@ -132,27 +132,17 @@ namespace Frida {
 			Source timeout_source = null;
 			if (timeout > 0) {
 				timeout_source = new TimeoutSource (timeout);
-				timeout_source.set_callback (() => {
-					find_device.callback ();
-					return false;
-				});
+				timeout_source.set_callback (find_device.callback);
 				timeout_source.attach (MainContext.get_thread_default ());
 			}
 
-			CancellableSource cancellable_source = null;
-			if (cancellable != null) {
-				cancellable_source = new CancellableSource (cancellable);
-				cancellable_source.set_callback (() => {
-					find_device.callback ();
-					return false;
-				});
-				cancellable_source.attach (MainContext.get_thread_default ());
-			}
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (find_device.callback);
+			cancel_source.attach (MainContext.get_thread_default ());
 
 			yield;
 
-			if (cancellable_source != null)
-				cancellable_source.destroy ();
+			cancel_source.destroy ();
 
 			if (timeout_source != null)
 				timeout_source.destroy ();
@@ -644,17 +634,14 @@ namespace Frida {
 				timeout_source.attach (main_context);
 			}
 
-			CancellableSource cancellable_source = null;
-			if (cancellable != null) {
-				cancellable_source = new CancellableSource (cancellable);
-				cancellable_source.set_callback (() => {
-					done = true;
-					if (waiting)
-						find_process.callback ();
-					return false;
-				});
-				cancellable_source.attach (main_context);
-			}
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				done = true;
+				if (waiting)
+					find_process.callback ();
+				return false;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
 
 			try {
 				while (!done) {
@@ -672,22 +659,18 @@ namespace Frida {
 					if (process != null || done || timeout == 0)
 						break;
 
-					var poll_again_source = new TimeoutSource (500);
-					poll_again_source.set_callback (() => {
-						find_process.callback ();
-						return false;
-					});
-					poll_again_source.attach (main_context);
+					var delay_source = new TimeoutSource (500);
+					delay_source.set_callback (find_process.callback);
+					delay_source.attach (main_context);
 
 					waiting = true;
 					yield;
 					waiting = false;
 
-					poll_again_source.destroy ();
+					delay_source.destroy ();
 				}
 			} finally {
-				if (cancellable_source != null)
-					cancellable_source.destroy ();
+				cancel_source.destroy ();
 
 				if (timeout_source != null)
 					timeout_source.destroy ();

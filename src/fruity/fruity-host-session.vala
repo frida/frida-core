@@ -129,13 +129,15 @@ namespace Frida {
 					got_details = true;
 				} catch (Error e) {
 					if (i != 20) {
-						var source = new TimeoutSource.seconds (1);
-						source.set_callback (() => {
-							add_device.callback ();
-							return false;
-						});
-						source.attach (MainContext.get_thread_default ());
+						var main_context = MainContext.get_thread_default ();
+
+						var delay_source = new TimeoutSource.seconds (1);
+						delay_source.set_callback (add_device.callback);
+						delay_source.attach (main_context);
+
 						yield;
+
+						delay_source.destroy ();
 					} else {
 						break;
 					}

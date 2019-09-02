@@ -740,10 +740,7 @@ namespace Frida.HostSessionTest {
 						yield script.unload ();
 						yield session.detach ();
 
-						Timeout.add (250, () => {
-							performance.callback ();
-							return false;
-						});
+						Timeout.add (250, performance.callback);
 						yield;
 					}
 
@@ -852,10 +849,7 @@ namespace Frida.HostSessionTest {
 		yield session.detach ();
 
 		/* The Darwin injector does cleanup 50ms after detecting that the remote thread is dead */
-		Timeout.add (100, () => {
-			detach_and_wait_for_cleanup.callback ();
-			return false;
-		});
+		Timeout.add (100, detach_and_wait_for_cleanup.callback);
 		yield;
 	}
 
@@ -1336,10 +1330,7 @@ namespace Frida.HostSessionTest {
 				session = null;
 
 				/* The injector does cleanup 50ms after detecting that the remote thread is dead */
-				Timeout.add (100, () => {
-					own_memory_ranges_should_be_cloaked.callback ();
-					return false;
-				});
+				Timeout.add (100, own_memory_ranges_should_be_cloaked.callback);
 				yield;
 
 				var original_ranges = dump_ranges (process.id);
