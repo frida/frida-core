@@ -198,25 +198,20 @@ namespace Frida.Fruity {
 			var pending = new PendingResponse (query.callback);
 			pending_responses.offer_tail (pending);
 
-			ulong cancel_handler = 0;
-			if (cancellable != null) {
-				var main_context = MainContext.get_thread_default ();
-				cancel_handler = cancellable.connect (() => {
-					var source = new IdleSource ();
-					source.set_callback (() => {
-						pending.complete_with_error (new IOError.CANCELLED ("Cancelled"));
-						return false;
-					});
-					source.attach (main_context);
-				});
-			}
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
+				return false;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
 
 			write_packet (payload);
 
 			yield;
 
-			if (cancellable != null)
-				cancellable.disconnect (cancel_handler);
+			cancel_source.destroy ();
+
+			cancellable.set_error_if_cancelled ();
 
 			var response = pending.response;
 			if (response == null)

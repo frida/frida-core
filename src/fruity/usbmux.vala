@@ -171,26 +171,19 @@ namespace Frida.Fruity {
 			pending_responses.add (pending);
 			write_message.begin (msg);
 
-			ulong cancel_handler = 0;
-			if (cancellable != null) {
-				var main_context = MainContext.get_thread_default ();
-				cancel_handler = cancellable.connect (() => {
-					var source = new IdleSource ();
-					source.set_callback (() => {
-						if (pending_responses.remove (pending))
-							query.callback ();
-						return false;
-					});
-					source.attach (main_context);
-				});
-			}
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				if (pending_responses.remove (pending))
+					query.callback ();
+				return false;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
 
 			yield;
 
-			if (cancellable != null) {
-				cancellable.disconnect (cancel_handler);
-				cancellable.set_error_if_cancelled ();
-			}
+			cancel_source.destroy ();
+
+			cancellable.set_error_if_cancelled ();
 
 			return pending.get_response ();
 		}
