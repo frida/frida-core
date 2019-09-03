@@ -119,7 +119,8 @@ namespace Frida {
 					return device;
 			}
 
-			if (timeout == 0 && start_request != null && start_request.future.ready)
+			bool started = start_request != null && start_request.future.ready;
+			if (timeout == 0 && started)
 				return null;
 
 			Device? added_device = null;
@@ -131,33 +132,47 @@ namespace Frida {
 			});
 			on_device_added.add (addition_observer);
 
-			var ensure_cancellable = new Cancellable ();
 			Source? timeout_source = null;
-			if (timeout == 0) {
-				ensure_service_and_then_call.begin (find_device.callback, ensure_cancellable);
-			} else {
-				ensure_service.begin (ensure_cancellable);
-
-				if (timeout > 0) {
-					timeout_source = new TimeoutSource (timeout);
-					timeout_source.set_callback (find_device.callback);
-					timeout_source.attach (MainContext.get_thread_default ());
-				}
+			if (timeout > 0) {
+				timeout_source = new TimeoutSource (timeout);
+				timeout_source.set_callback (find_device.callback);
+				timeout_source.attach (MainContext.get_thread_default ());
 			}
 
 			var cancel_source = new CancellableSource (cancellable);
 			cancel_source.set_callback (find_device.callback);
 			cancel_source.attach (MainContext.get_thread_default ());
 
+			Cancellable? ensure_cancellable = null;
+			bool ensure_pending = false;
+			bool waiting_for_ensure = false;
+			if (!started) {
+				ensure_cancellable = new Cancellable ();
+				ensure_pending = true;
+				ensure_service_and_then_call.begin (() => {
+						ensure_pending = false;
+						if (waiting_for_ensure)
+							find_device.callback ();
+						return false;
+					}, ensure_cancellable);
+			}
+
 			yield;
+
+			ensure_cancellable.cancel ();
 
 			cancel_source.destroy ();
 
 			if (timeout_source != null)
 				timeout_source.destroy ();
-			ensure_cancellable.cancel ();
 
 			on_device_added.remove (addition_observer);
+
+			if (ensure_pending) {
+				waiting_for_ensure = true;
+				yield;
+				waiting_for_ensure = false;
+			}
 
 			return added_device;
 		}
@@ -289,14 +304,11 @@ namespace Frida {
 			}
 		}
 
-		private async void ensure_service_and_then_call (owned SourceFunc callback, Cancellable? cancellable) {
+		private async void ensure_service_and_then_call (owned SourceFunc callback, Cancellable cancellable) {
 			try {
 				yield ensure_service (cancellable);
 			} catch (GLib.Error e) {
 			}
-
-			if (cancellable.is_cancelled ())
-				return;
 
 			callback ();
 		}
