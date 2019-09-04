@@ -12,13 +12,15 @@ namespace Frida {
 			start_cancellable = new Cancellable ();
 			on_start_completed = start.callback;
 
+			var main_context = MainContext.get_thread_default ();
+
 			var timeout_source = new TimeoutSource (500);
 			timeout_source.set_callback (start.callback);
-			timeout_source.attach (MainContext.get_thread_default ());
+			timeout_source.attach (main_context);
 
 			var cancel_source = new CancellableSource (cancellable);
 			cancel_source.set_callback (start.callback);
-			cancel_source.attach (MainContext.get_thread_default ());
+			cancel_source.attach (main_context);
 
 			do_start.begin ();
 
