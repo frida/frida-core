@@ -706,7 +706,7 @@ namespace Frida {
 			}
 			private GLib.Error? _error;
 
-			private Gee.ArrayList<CompletionFuncEntry> on_complete;
+			private Gee.ArrayQueue<CompletionFuncEntry> on_complete;
 
 			public async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError {
 				if (_ready)
@@ -714,8 +714,8 @@ namespace Frida {
 
 				var entry = new CompletionFuncEntry (wait_async.callback);
 				if (on_complete == null)
-					on_complete = new Gee.ArrayList<CompletionFuncEntry> ();
-				on_complete.add (entry);
+					on_complete = new Gee.ArrayQueue<CompletionFuncEntry> ();
+				on_complete.offer (entry);
 
 				var cancel_source = new CancellableSource (cancellable);
 				cancel_source.set_callback (() => {
@@ -771,12 +771,14 @@ namespace Frida {
 			internal void transition_to_ready () {
 				_ready = true;
 
-				var entries = (owned) on_complete;
-				if (entries != null) {
+				if (on_complete != null && !on_complete.is_empty) {
 					var source = new IdleSource ();
+					source.set_priority (Priority.HIGH);
 					source.set_callback (() => {
-						foreach (var entry in entries)
+						CompletionFuncEntry? entry;
+						while ((entry = on_complete.poll ()) != null)
 							entry.func ();
+						on_complete = null;
 						return false;
 					});
 					source.attach (MainContext.get_thread_default ());
