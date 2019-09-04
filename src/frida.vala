@@ -305,6 +305,11 @@ namespace Frida {
 		}
 
 		private async void ensure_service_and_then_call (owned SourceFunc callback, Cancellable cancellable) {
+			var source = new IdleSource ();
+			source.set_callback (ensure_service_and_then_call.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
 			try {
 				yield ensure_service (cancellable);
 			} catch (GLib.Error e) {
