@@ -856,29 +856,34 @@ namespace Frida {
 				.end_array ();
 			string raw_request = Json.to_string (request.get_root (), false);
 
-			var pending = new PendingResponse (call.callback);
+			bool waiting = false;
+
+			var pending = new PendingResponse (() => {
+				if (waiting)
+					call.callback ();
+				return false;
+			});
 			pending_responses[request_id] = pending;
 
 			try {
 				yield peer.post_rpc_message (raw_request, cancellable);
 			} catch (Error e) {
-				pending_responses.unset (request_id);
-				pending.complete_with_error (e);
+				if (pending_responses.unset (request_id))
+					pending.complete_with_error (e);
 			}
 
 			if (!pending.completed) {
 				var cancel_source = new CancellableSource (cancellable);
 				cancel_source.set_callback (() => {
-					/*
-					 * We still leave it in pending_responses so a future response gets consumed here
-					 * and not propagated further.
-					 */
-					pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
+					if (pending_responses.unset (request_id))
+						pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
 					return false;
 				});
 				cancel_source.attach (MainContext.get_thread_default ());
 
+				waiting = true;
 				yield;
+				waiting = false;
 
 				cancel_source.destroy ();
 			}
@@ -966,19 +971,13 @@ namespace Frida {
 			}
 
 			public void complete_with_result (Json.Node result) {
-				if (handler == null)
-					return;
 				this.result = result;
 				handler ();
-				handler = null;
 			}
 
 			public void complete_with_error (GLib.Error error) {
-				if (handler == null)
-					return;
 				this.error = error;
 				handler ();
-				handler = null;
 			}
 		}
 	}
