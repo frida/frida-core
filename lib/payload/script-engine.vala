@@ -369,7 +369,7 @@ namespace Frida {
 			}
 
 			public Gum.Script eternalize () throws Error {
-				if (state != LOADED)
+				if (state != LOADED && state != DISPOSED)
 					throw new Error.INVALID_OPERATION ("Only loaded scripts may be eternalized");
 
 				state = ETERNALIZED;
@@ -418,7 +418,7 @@ namespace Frida {
 			}
 
 			public void post (string message, Bytes? data) throws Error {
-				if (state != LOADED)
+				if (state != LOADED && state != DISPOSED)
 					throw new Error.INVALID_OPERATION ("Only loaded scripts may be posted to");
 
 				script.post (message, data);
