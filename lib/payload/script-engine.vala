@@ -80,9 +80,9 @@ namespace Frida {
 			on_complete ();
 		}
 
-		public async void prepare_for_termination () {
+		public async void prepare_for_termination (TerminationReason reason) {
 			foreach (var instance in instances.values.to_array ())
-				yield instance.prepare_for_termination ();
+				yield instance.prepare_for_termination (reason);
 		}
 
 		public async ScriptInstance create_script (string? source, Bytes? bytes, ScriptOptions options) throws Error {
@@ -287,7 +287,7 @@ namespace Frida {
 
 				var main_context = MainContext.get_thread_default ();
 
-				yield ensure_dispose_called ();
+				yield ensure_dispose_called (TerminationReason.UNLOAD);
 
 				if (state == DISPOSED) {
 					var unload_operation = unload ();
@@ -379,14 +379,14 @@ namespace Frida {
 				return result;
 			}
 
-			public async void prepare_for_termination () {
+			public async void prepare_for_termination (TerminationReason reason) {
 				if (state == LOADED)
 					script.get_stalker ().flush ();
 
-				yield ensure_dispose_called ();
+				yield ensure_dispose_called (reason);
 			}
 
-			private async void ensure_dispose_called () {
+			private async void ensure_dispose_called (TerminationReason reason) {
 				if (dispose_request != null) {
 					try {
 						yield dispose_request.future.wait_async (null);
@@ -406,8 +406,10 @@ namespace Frida {
 				}
 
 				if (state == LOADED) {
+					var reason_value = new Json.Node.alloc ().init_string (reason.to_nick ());
+
 					try {
-						yield rpc_client.call ("dispose", new Json.Node[] {}, null);
+						yield rpc_client.call ("dispose", new Json.Node[] { reason_value }, null);
 					} catch (GLib.Error e) {
 					}
 

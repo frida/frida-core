@@ -80,4 +80,14 @@ namespace Frida {
 		public abstract Gum.ScriptBackend get_script_backend (ScriptRuntime runtime) throws Error;
 		public abstract Gum.ScriptBackend? get_active_script_backend ();
 	}
+
+	public enum TerminationReason {
+		UNLOAD,
+		EXIT,
+		EXEC;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<TerminationReason> (this);
+		}
+	}
 }

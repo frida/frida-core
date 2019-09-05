@@ -523,7 +523,7 @@ namespace Frida.Gadget {
 	private async void stop () {
 		if (controller != null) {
 			if (config.teardown == TeardownRequirement.MINIMAL) {
-				yield controller.prepare_for_termination ();
+				yield controller.prepare_for_termination (TerminationReason.EXIT);
 			} else {
 				yield controller.stop ();
 				controller = null;
@@ -610,7 +610,7 @@ namespace Frida.Gadget {
 
 	private interface Controller : Object {
 		public abstract async void start () throws Error;
-		public abstract async void prepare_for_termination ();
+		public abstract async void prepare_for_termination (TerminationReason reason);
 		public abstract async void stop ();
 	}
 
@@ -634,11 +634,11 @@ namespace Frida.Gadget {
 
 		protected abstract async void on_start () throws Error;
 
-		public async void prepare_for_termination () {
-			yield on_terminate ();
+		public async void prepare_for_termination (TerminationReason reason) {
+			yield on_terminate (reason);
 		}
 
-		protected abstract async void on_terminate ();
+		protected abstract async void on_terminate (TerminationReason reason);
 
 		public async void stop () {
 			yield on_stop ();
@@ -705,8 +705,8 @@ namespace Frida.Gadget {
 			yield script.start ();
 		}
 
-		protected override async void on_terminate () {
-			yield script.prepare_for_termination ();
+		protected override async void on_terminate (TerminationReason reason) {
+			yield script.prepare_for_termination (reason);
 		}
 
 		protected override async void on_stop () {
@@ -775,9 +775,9 @@ namespace Frida.Gadget {
 			yield scan ();
 		}
 
-		protected override async void on_terminate () {
+		protected override async void on_terminate (TerminationReason reason) {
 			foreach (var script in scripts.values.to_array ())
-				yield script.prepare_for_termination ();
+				yield script.prepare_for_termination (reason);
 		}
 
 		protected override async void on_stop () {
@@ -1020,9 +1020,8 @@ namespace Frida.Gadget {
 			}
 		}
 
-		public async void prepare_for_termination () {
-			if (id.handle != 0)
-				yield call_dispose ();
+		public async void prepare_for_termination (TerminationReason reason) {
+			yield engine.prepare_for_termination (reason);
 		}
 
 		public async void stop () {
@@ -1031,8 +1030,6 @@ namespace Frida.Gadget {
 				monitor.cancel ();
 				monitor = null;
 			}
-
-			yield prepare_for_termination ();
 
 			if (id.handle != 0) {
 				try {
@@ -1076,10 +1073,8 @@ namespace Frida.Gadget {
 					instance = yield engine.create_script ((string) contents, null, options);
 				}
 
-				if (id.handle != 0) {
-					yield call_dispose ();
+				if (id.handle != 0)
 					yield engine.destroy_script (id);
-				}
 				id = instance.script_id;
 
 				yield engine.load_script (id);
@@ -1094,13 +1089,6 @@ namespace Frida.Gadget {
 
 			try {
 				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, null);
-			} catch (GLib.Error e) {
-			}
-		}
-
-		private async void call_dispose () {
-			try {
-				yield rpc_client.call ("dispose", new Json.Node[] {}, null);
 			} catch (GLib.Error e) {
 			}
 		}
@@ -1235,9 +1223,9 @@ namespace Frida.Gadget {
 			server.start ();
 		}
 
-		protected override async void on_terminate () {
+		protected override async void on_terminate (TerminationReason reason) {
 			foreach (var client in clients.values.to_array ())
-				yield client.prepare_for_termination ();
+				yield client.prepare_for_termination (reason);
 
 			foreach (var connection in clients.keys.to_array ()) {
 				try {
@@ -1338,9 +1326,9 @@ namespace Frida.Gadget {
 				}
 			}
 
-			public async void prepare_for_termination () {
+			public async void prepare_for_termination (TerminationReason reason) {
 				foreach (var session in sessions.to_array ())
-					yield session.prepare_for_termination ();
+					yield session.prepare_for_termination (reason);
 			}
 
 			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
@@ -1503,8 +1491,8 @@ namespace Frida.Gadget {
 				close_request.resolve (true);
 			}
 
-			public async void prepare_for_termination () {
-				yield script_engine.prepare_for_termination ();
+			public async void prepare_for_termination (TerminationReason reason) {
+				yield script_engine.prepare_for_termination (reason);
 			}
 
 			public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {

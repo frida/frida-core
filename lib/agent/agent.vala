@@ -259,7 +259,7 @@ namespace Frida.Agent {
 		}
 
 		private async void prepare_to_exit () {
-			yield prepare_for_termination ();
+			yield prepare_for_termination (TerminationReason.EXIT);
 		}
 
 		private void run_after_fork () {
@@ -453,7 +453,7 @@ namespace Frida.Agent {
 		}
 
 		private async void prepare_to_exec (HostChildInfo * info) {
-			yield prepare_for_termination ();
+			yield prepare_for_termination (TerminationReason.EXEC);
 
 			if (controller == null)
 				return;
@@ -464,7 +464,7 @@ namespace Frida.Agent {
 			}
 		}
 
-		private async async void cancel_exec (uint pid) {
+		private async void cancel_exec (uint pid) {
 			if (controller == null)
 				return;
 
@@ -850,9 +850,9 @@ namespace Frida.Agent {
 			return message;
 		}
 
-		private async void prepare_for_termination () {
+		private async void prepare_for_termination (TerminationReason reason) {
 			foreach (var client in clients.to_array ())
-				yield client.prepare_for_termination ();
+				yield client.prepare_for_termination (reason);
 
 			var connection = this.connection;
 			if (connection != null) {
@@ -940,8 +940,8 @@ namespace Frida.Agent {
 			}
 		}
 
-		public async void prepare_for_termination () {
-			yield script_engine.prepare_for_termination ();
+		public async void prepare_for_termination (TerminationReason reason) {
+			yield script_engine.prepare_for_termination (reason);
 		}
 
 		public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {

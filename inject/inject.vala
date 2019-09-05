@@ -262,7 +262,7 @@ namespace Frida.Inject {
 	}
 
 	private class ScriptRunner : Object, RpcPeer {
-		private Script script;
+		private Script? script;
 		private string? script_path;
 		private string? script_source;
 		private ScriptRuntime script_runtime;
@@ -303,18 +303,7 @@ namespace Frida.Inject {
 			}
 		}
 
-		public async void flush (Cancellable? cancellable) throws IOError {
-			if (script != null && !eternalize) {
-				try {
-					yield rpc_client.call ("dispose", new Json.Node[] {}, cancellable);
-				} catch (Error e) {
-				}
-			}
-		}
-
 		public async void stop (Cancellable? cancellable) throws IOError {
-			yield flush (cancellable);
-
 			if (script_monitor != null) {
 				script_monitor.changed.disconnect (on_script_file_changed);
 				script_monitor.cancel ();
@@ -359,11 +348,6 @@ namespace Frida.Inject {
 				var s = yield session.create_script (source, options, io_cancellable);
 
 				if (script != null) {
-					try {
-						yield rpc_client.call ("dispose", new Json.Node[] {}, io_cancellable);
-					} catch (GLib.Error e) {
-					}
-
 					yield script.unload (io_cancellable);
 					script = null;
 				}
