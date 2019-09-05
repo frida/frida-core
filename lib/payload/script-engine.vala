@@ -85,6 +85,11 @@ namespace Frida {
 				yield instance.prepare_for_termination (reason);
 		}
 
+		public void unprepare_for_termination () {
+			foreach (var instance in instances.values.to_array ())
+				instance.unprepare_for_termination ();
+		}
+
 		public async ScriptInstance create_script (string? source, Bytes? bytes, ScriptOptions options) throws Error {
 			var script_id = AgentScriptId (next_script_id++);
 
@@ -384,6 +389,13 @@ namespace Frida {
 					script.get_stalker ().flush ();
 
 				yield ensure_dispose_called (reason);
+			}
+
+			public void unprepare_for_termination () {
+				if (state == DISPOSED) {
+					state = LOADED;
+					dispose_request = null;
+				}
 			}
 
 			private async void ensure_dispose_called (TerminationReason reason) {

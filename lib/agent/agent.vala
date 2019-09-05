@@ -465,6 +465,8 @@ namespace Frida.Agent {
 		}
 
 		private async void cancel_exec (uint pid) {
+			unprepare_for_termination ();
+
 			if (controller == null)
 				return;
 
@@ -862,6 +864,11 @@ namespace Frida.Agent {
 				}
 			}
 		}
+
+		private void unprepare_for_termination () {
+			foreach (var client in clients.to_array ())
+				client.unprepare_for_termination ();
+		}
 	}
 
 	private class AgentClient : Object, AgentSession {
@@ -942,6 +949,10 @@ namespace Frida.Agent {
 
 		public async void prepare_for_termination (TerminationReason reason) {
 			yield script_engine.prepare_for_termination (reason);
+		}
+
+		public void unprepare_for_termination () {
+			script_engine.unprepare_for_termination ();
 		}
 
 		public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {
