@@ -504,10 +504,10 @@ namespace Frida {
 		public delegate bool ProcessPredicate (Process process);
 
 		private string? location;
-		private Promise<bool> ensure_request;
-		private Promise<bool> close_request;
+		private Promise<HostSession>? host_session_request;
+		private Promise<bool>? close_request;
 
-		protected HostSession host_session;
+		private HostSession? current_host_session;
 		private Gee.HashMap<AgentSessionId?, Session> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, Session> (AgentSessionId.hash, AgentSessionId.equal);
 		private Gee.HashSet<Promise<Session>> pending_attach_requests = new Gee.HashSet<Promise<Session>> ();
@@ -556,7 +556,7 @@ namespace Frida {
 		public async Application? get_frontmost_application (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				var app = yield host_session.get_frontmost_application (cancellable);
@@ -588,7 +588,7 @@ namespace Frida {
 		public async ApplicationList enumerate_applications (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			HostApplicationInfo[] applications;
 			try {
@@ -759,7 +759,7 @@ namespace Frida {
 		public async ProcessList enumerate_processes (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			HostProcessInfo[] processes;
 			try {
@@ -804,7 +804,7 @@ namespace Frida {
 		public async void enable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				yield host_session.enable_spawn_gating (cancellable);
@@ -826,7 +826,7 @@ namespace Frida {
 		public async void disable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				yield host_session.disable_spawn_gating (cancellable);
@@ -848,7 +848,7 @@ namespace Frida {
 		public async SpawnList enumerate_pending_spawn (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			HostSpawnInfo[] pending_spawn;
 			try {
@@ -876,7 +876,7 @@ namespace Frida {
 		public async ChildList enumerate_pending_children (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			HostChildInfo[] pending_children;
 			try {
@@ -934,7 +934,7 @@ namespace Frida {
 				raw_options.aux = options.get_aux_bytes ().get_data ();
 			}
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			uint pid;
 			try {
@@ -966,7 +966,7 @@ namespace Frida {
 		public async void input (uint pid, Bytes data, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				yield host_session.input (pid, data.get_data (), cancellable);
@@ -994,7 +994,7 @@ namespace Frida {
 		public async void resume (uint pid, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				yield host_session.resume (pid, cancellable);
@@ -1020,7 +1020,7 @@ namespace Frida {
 		public async void kill (uint pid, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				yield host_session.kill (pid, cancellable);
@@ -1053,7 +1053,7 @@ namespace Frida {
 
 			Session session = null;
 			try {
-				yield ensure_host_session (cancellable);
+				var host_session = yield get_host_session (cancellable);
 
 				try {
 					var agent_session_id = yield host_session.attach_to (pid, cancellable);
@@ -1097,7 +1097,7 @@ namespace Frida {
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				var id = yield host_session.inject_library_file (pid, path, entrypoint, data, cancellable);
@@ -1133,7 +1133,7 @@ namespace Frida {
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			yield ensure_host_session (cancellable);
+			var host_session = yield get_host_session (cancellable);
 
 			try {
 				var id = yield host_session.inject_library_blob (pid, blob.get_data (), entrypoint, data, cancellable);
@@ -1168,6 +1168,64 @@ namespace Frida {
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Device is gone");
+		}
+
+		private async HostSession get_host_session (Cancellable? cancellable) throws Error, IOError {
+			while (host_session_request != null) {
+				try {
+					return yield host_session_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			host_session_request = new Promise<HostSession> ();
+
+			try {
+				var session = yield provider.create (location, cancellable);
+				attach_host_session (session);
+
+				current_host_session = session;
+				host_session_request.resolve (session);
+
+				return session;
+			} catch (GLib.Error e) {
+				host_session_request.reject (e);
+				host_session_request = null;
+
+				throw_api_error (e);
+			}
+		}
+
+		private void on_host_session_closed (HostSession session) {
+			if (session != current_host_session)
+				return;
+
+			detach_host_session (session);
+
+			current_host_session = null;
+			host_session_request = null;
+		}
+
+		private void attach_host_session (HostSession session) {
+			session.spawn_added.connect (on_spawn_added);
+			session.spawn_removed.connect (on_spawn_removed);
+			session.child_added.connect (on_child_added);
+			session.child_removed.connect (on_child_removed);
+			session.process_crashed.connect (on_process_crashed);
+			session.output.connect (on_output);
+			session.uninjected.connect (on_uninjected);
+		}
+
+		private void detach_host_session (HostSession session) {
+			session.spawn_added.disconnect (on_spawn_added);
+			session.spawn_removed.disconnect (on_spawn_removed);
+			session.child_added.disconnect (on_child_added);
+			session.child_removed.disconnect (on_child_removed);
+			session.process_crashed.disconnect (on_process_crashed);
+			session.output.disconnect (on_output);
+			session.uninjected.disconnect (on_uninjected);
 		}
 
 		public async void _do_close (SessionDetachReason reason, bool may_block, Cancellable? cancellable) throws IOError {
@@ -1206,10 +1264,10 @@ namespace Frida {
 					}
 				}
 
-				if (ensure_request != null) {
+				if (host_session_request != null) {
 					try {
-						yield ensure_host_session (cancellable);
-					} catch (Error ensure_error) {
+						yield get_host_session (cancellable);
+					} catch (Error e) {
 					}
 				}
 
@@ -1220,21 +1278,18 @@ namespace Frida {
 				provider.host_session_closed.disconnect (on_host_session_closed);
 				provider.agent_session_closed.disconnect (on_agent_session_closed);
 
-				if (host_session != null) {
-					host_session.spawn_added.disconnect (on_spawn_added);
-					host_session.spawn_removed.disconnect (on_spawn_removed);
-					host_session.child_added.disconnect (on_child_added);
-					host_session.child_removed.disconnect (on_child_removed);
-					host_session.process_crashed.disconnect (on_process_crashed);
-					host_session.output.disconnect (on_output);
-					host_session.uninjected.disconnect (on_uninjected);
+				if (current_host_session != null) {
+					detach_host_session (current_host_session);
+
 					if (may_block) {
 						try {
-							yield provider.destroy (host_session, cancellable);
+							yield provider.destroy (current_host_session, cancellable);
 						} catch (Error e) {
 						}
 					}
-					host_session = null;
+
+					current_host_session = null;
+					host_session_request = null;
 				}
 
 				manager._release_device (this);
@@ -1273,35 +1328,14 @@ namespace Frida {
 			}
 		}
 
-		private async void ensure_host_session (Cancellable? cancellable) throws Error, IOError {
-			while (ensure_request != null) {
-				try {
-					yield ensure_request.future.wait_async (cancellable);
-					return;
-				} catch (Error e) {
-					throw e;
-				} catch (IOError e) {
-					cancellable.set_error_if_cancelled ();
-				}
-			}
-			ensure_request = new Promise<bool> ();
+		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
+			var session = agent_sessions[id];
+			if (session != null)
+				session._do_close.begin (reason, crash, false, null);
 
-			try {
-				host_session = yield provider.create (location, cancellable);
-				host_session.spawn_added.connect (on_spawn_added);
-				host_session.spawn_removed.connect (on_spawn_removed);
-				host_session.child_added.connect (on_child_added);
-				host_session.child_removed.connect (on_child_removed);
-				host_session.process_crashed.connect (on_process_crashed);
-				host_session.output.connect (on_output);
-				host_session.uninjected.connect (on_uninjected);
-
-				ensure_request.resolve (true);
-			} catch (GLib.Error e) {
-				ensure_request.reject (e);
-				ensure_request = null;
-				throw_api_error (e);
-			}
+			Promise<bool> detach_request;
+			if (pending_detach_requests.unset (id, out detach_request))
+				detach_request.resolve (true);
 		}
 
 		private void on_spawn_added (HostSpawnInfo info) {
@@ -1330,29 +1364,6 @@ namespace Frida {
 
 		private void on_uninjected (InjectorPayloadId id) {
 			uninjected (id.handle);
-		}
-
-		private void on_host_session_closed (HostSession session) {
-			if (session != host_session)
-				return;
-
-			host_session.spawn_added.disconnect (on_spawn_added);
-			host_session.spawn_removed.disconnect (on_spawn_removed);
-			host_session.output.disconnect (on_output);
-			host_session.uninjected.disconnect (on_uninjected);
-			host_session = null;
-
-			ensure_request = null;
-		}
-
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
-			var session = agent_sessions[id];
-			if (session != null)
-				session._do_close.begin (reason, crash, false, null);
-
-			Promise<bool> detach_request;
-			if (pending_detach_requests.unset (id, out detach_request))
-				detach_request.resolve (true);
 		}
 
 		private Object create<T> () {
