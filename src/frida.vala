@@ -12,7 +12,11 @@ namespace Frida {
 
 	public enum Runtime {
 		GLIB,
-		OTHER
+		OTHER;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<Runtime> (this);
+		}
 	}
 
 	public class DeviceManager : Object {
@@ -1366,7 +1370,11 @@ namespace Frida {
 	public enum DeviceType {
 		LOCAL,
 		REMOTE,
-		USB
+		USB;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<DeviceType> (this);
+		}
 	}
 
 	public class ApplicationList : Object {

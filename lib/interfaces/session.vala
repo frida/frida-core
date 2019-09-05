@@ -90,13 +90,21 @@ namespace Frida {
 
 	public enum SpawnStartState {
 		RUNNING,
-		SUSPENDED,
+		SUSPENDED;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<SpawnStartState> (this);
+		}
 	}
 
 	public enum UnloadPolicy {
 		IMMEDIATE,
 		RESIDENT,
-		DEFERRED
+		DEFERRED;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<UnloadPolicy> (this);
+		}
 	}
 
 #if DARWIN
@@ -116,7 +124,11 @@ namespace Frida {
 		PROCESS_REPLACED,
 		PROCESS_TERMINATED,
 		SERVER_TERMINATED,
-		DEVICE_LOST
+		DEVICE_LOST;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<SessionDetachReason> (this);
+		}
 	}
 
 	[DBus (name = "re.frida.Error")]
@@ -336,7 +348,11 @@ namespace Frida {
 
 	public enum Stdio {
 		INHERIT,
-		PIPE
+		PIPE;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<Stdio> (this);
+		}
 	}
 
 	public struct HostSpawnInfo {
@@ -435,7 +451,11 @@ namespace Frida {
 	public enum ChildOrigin {
 		FORK,
 		EXEC,
-		SPAWN
+		SPAWN;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<ChildOrigin> (this);
+		}
 	}
 
 	public struct CrashInfo {
@@ -571,7 +591,11 @@ namespace Frida {
 	public enum ScriptRuntime {
 		DEFAULT,
 		DUK,
-		V8
+		V8;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<ScriptRuntime> (this);
+		}
 	}
 
 	public struct InjectorPayloadId {
@@ -976,6 +1000,13 @@ namespace Frida {
 
 		public static string from_agent_session_id (AgentSessionId id) {
 			return "%s/%u".printf (AGENT_SESSION, id.handle);
+		}
+	}
+
+	namespace Marshal {
+		public static string enum_to_nick<T> (int val) {
+			var klass = (EnumClass) typeof (T).class_ref ();
+			return klass.get_value (val).value_nick;
 		}
 	}
 }
