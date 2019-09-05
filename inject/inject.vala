@@ -210,6 +210,7 @@ namespace Frida.Inject {
 				}
 
 				var session = yield device.attach (pid, io_cancellable);
+				session.detached.connect (on_detached);
 
 				var r = new ScriptRunner (session, script_path, script_source, script_runtime, parameters,
 					enable_development, io_cancellable);
@@ -258,6 +259,33 @@ namespace Frida.Inject {
 				loop.quit ();
 				return false;
 			});
+		}
+
+		private void on_detached (SessionDetachReason reason, Crash? crash) {
+			if (reason == APPLICATION_REQUESTED)
+				return;
+
+			var message = new StringBuilder ();
+
+			message.append ("\033[0;31m");
+			if (crash == null) {
+				var nick = reason.to_nick ();
+				message.append_c (nick[0].toupper ());
+				message.append (nick.substring (1).replace ("-", " "));
+			} else {
+				message.append_printf ("Process crashed: %s", crash.summary);
+			}
+			message.append ("\033[0m\n");
+
+			if (crash != null) {
+				message.append ("\n***\n");
+				message.append (crash.report.strip ());
+				message.append ("\n***\n");
+			}
+
+			printerr ("%s", message.str);
+
+			shutdown ();
 		}
 	}
 
