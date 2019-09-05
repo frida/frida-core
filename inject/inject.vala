@@ -81,6 +81,10 @@ namespace Frida.Inject {
 
 			try {
 				var root = Json.from_string (parameters_str);
+				if (root.get_node_type () != OBJECT) {
+					printerr ("Failed to parse parameters argument as JSON: not an object\n");
+					return 6;
+				}
 
 				parameters.take_object (root.get_object ());
 			} catch (GLib.Error e) {
