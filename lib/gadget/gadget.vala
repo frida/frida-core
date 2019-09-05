@@ -1090,8 +1090,7 @@ namespace Frida.Gadget {
 		}
 
 		private async void call_init () {
-			var stage = new Json.Node (Json.NodeType.VALUE);
-			stage.set_string ((peek_state () == State.CREATED) ? "early" : "late");
+			var stage = new Json.Node.alloc ().init_string ((peek_state () == State.CREATED) ? "early" : "late");
 
 			try {
 				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, null);
@@ -1666,9 +1665,7 @@ namespace Frida.Gadget {
 	}
 
 	private static Json.Node make_empty_json_object () {
-		var parameters = new Json.Node (Json.NodeType.OBJECT);
-		parameters.set_object (new Json.Object ());
-		return parameters;
+		return new Json.Node.alloc ().init_object (new Json.Object ());
 	}
 
 	namespace Environment {

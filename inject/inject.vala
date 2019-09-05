@@ -72,8 +72,7 @@ namespace Frida.Inject {
 			script_runtime = (ScriptRuntime) v.value;
 		}
 
-		var parameters = new Json.Node (Json.NodeType.OBJECT);
-		parameters.set_object (new Json.Object ());
+		var parameters = new Json.Node.alloc ().init_object (new Json.Object ());
 		if (parameters_str != null) {
 			if (parameters_str == "") {
 				printerr ("Parameters argument must be specified as JSON if present\n");
@@ -81,9 +80,9 @@ namespace Frida.Inject {
 			}
 
 			try {
-				var parser = new Json.Parser ();
-				parser.load_from_data (parameters_str, -1);
-				parameters.set_object (parser.get_root ().get_object ());
+				var root = Json.from_string (parameters_str);
+
+				parameters.take_object (root.get_object ());
 			} catch (GLib.Error e) {
 				printerr ("Failed to parse parameters argument as JSON: %s\n", e.message);
 				return 6;
@@ -379,8 +378,7 @@ namespace Frida.Inject {
 		}
 
 		private async void call_init () {
-			var stage = new Json.Node (Json.NodeType.VALUE);
-			stage.set_string ("early");
+			var stage = new Json.Node.alloc ().init_string ("early");
 
 			try {
 				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, io_cancellable);
