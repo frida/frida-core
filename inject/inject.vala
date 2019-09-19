@@ -1,9 +1,9 @@
 namespace Frida.Inject {
 	private static Application application;
 
+	private static string? spawn_file;
 	private static int target_pid = -1;
 	private static string? target_name;
-	private static string? spawn_file;
 	private static string? script_path;
 	private static string? script_runtime_str;
 	private static string? parameters_str;
@@ -12,9 +12,9 @@ namespace Frida.Inject {
 	private static bool output_version;
 
 	const OptionEntry[] options = {
+		{ "file", 'f', 0, OptionArg.STRING, ref spawn_file, "spawn FILE", "FILE" },
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, "attach to PID", "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, "attach to NAME", "NAME" },
-		{ "file", 'f', 0, OptionArg.STRING, ref spawn_file, "spawn FILE", "FILE" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
 		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "duk|v8" },
 		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
@@ -47,7 +47,7 @@ namespace Frida.Inject {
 			return 1;
 		}
 
-		if (target_pid == -1 && target_name == null && spawn_file == null) {
+		if (spawn_file == null && target_pid == -1 && target_name == null) {
 			printerr ("PID or name must be specified\n");
 			return 2;
 		}
@@ -95,7 +95,7 @@ namespace Frida.Inject {
 			}
 		}
 
-		application = new Application (target_pid, target_name, spawn_file, script_path, script_source, script_runtime, parameters,
+		application = new Application (spawn_file, target_pid, target_name, script_path, script_source, script_runtime, parameters,
 			enable_development);
 
 #if !WINDOWS
@@ -127,17 +127,17 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
+		public string? spawn_file {
+			get;
+			construct;
+		}
+
 		public int target_pid {
 			get;
 			construct;
 		}
 
 		public string? target_name {
-			get;
-			construct;
-		}
-
-		public string? spawn_file {
 			get;
 			construct;
 		}
@@ -175,12 +175,12 @@ namespace Frida.Inject {
 		private int exit_code;
 		private MainLoop loop;
 
-		public Application (int target_pid, string? target_name, string? spawn_file, string? script_path, string? script_source,
+		public Application (string? spawn_file, int target_pid, string? target_name, string? script_path, string? script_source,
 				ScriptRuntime script_runtime, Json.Node parameters, bool enable_development) {
 			Object (
+				spawn_file: spawn_file,
 				target_pid: target_pid,
 				target_name: target_name,
-				spawn_file: spawn_file,
 				script_path: script_path,
 				script_source: script_source,
 				script_runtime: script_runtime,
@@ -226,6 +226,10 @@ namespace Frida.Inject {
 					enable_development, io_cancellable);
 				yield r.start ();
 				script_runner = r;
+
+				if (spawn_file != null) {
+					yield device.resume (pid);
+				}
 
 				if (eternalize)
 					stop.begin ();
