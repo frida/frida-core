@@ -211,7 +211,7 @@ namespace Frida.Inject {
 
 				uint pid;
 				if (spawn_file != null) {
-					pid = yield device.spawn(spawn_file, null, io_cancellable);
+					pid = yield device.spawn (spawn_file, null, io_cancellable);
 				} else if (target_name != null) {
 					var proc = yield device.get_process_by_name (target_name, 0, io_cancellable);
 					pid = proc.pid;
