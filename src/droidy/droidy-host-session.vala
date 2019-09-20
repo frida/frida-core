@@ -80,7 +80,7 @@ namespace Frida {
 		}
 	}
 
-	public class DroidyHostSessionProvider : Object, HostSessionProvider {
+	public class DroidyHostSessionProvider : Object, HostSessionProvider, ChannelProvider {
 		public string id {
 			get { return device_serial; }
 		}
@@ -224,6 +224,30 @@ namespace Frida {
 			yield entry.destroy (reason, cancellable);
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
 			host_session_closed (entry.host_session);
+		}
+
+		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
+			if (address.has_prefix ("tcp:")) {
+				ulong raw_port;
+				if (!ulong.try_parse (address.substring (4), out raw_port) || raw_port == 0 || raw_port > uint16.MAX)
+					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
+				uint16 port = (uint16) raw_port;
+
+				Droidy.Client client = null;
+				try {
+					client = yield Droidy.Client.open (cancellable);
+					yield client.request ("host:transport:" + device_serial, cancellable);
+					yield client.request_protocol_change ("tcp:%u".printf (port), cancellable);
+					return client.connection;
+				} catch (GLib.Error e) {
+					if (client != null)
+						client.close.begin ();
+
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
 		}
 
 		private class Entry : Object {

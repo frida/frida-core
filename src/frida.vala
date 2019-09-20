@@ -1165,6 +1165,30 @@ namespace Frida {
 			}
 		}
 
+		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			var channel_provider = provider as ChannelProvider;
+			if (channel_provider == null)
+				throw new Error.NOT_SUPPORTED ("Channels are not supported by this device");
+
+			return yield channel_provider.open_channel (address, cancellable);
+		}
+
+		public IOStream open_channel_sync (string address, Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<OpenChannelTask> () as OpenChannelTask;
+			task.address = address;
+			return task.execute (cancellable);
+		}
+
+		private class OpenChannelTask : DeviceTask<IOStream> {
+			public string address;
+
+			protected override async IOStream perform_operation () throws Error, IOError {
+				return yield parent.open_channel (address, cancellable);
+			}
+		}
+
 		private void check_open () throws Error {
 			if (close_request != null)
 				throw new Error.INVALID_OPERATION ("Device is gone");

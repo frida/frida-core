@@ -133,6 +133,10 @@ namespace Frida {
 		USB
 	}
 
+	public interface ChannelProvider : Object {
+		public abstract async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError;
+	}
+
 	public interface HostSessionBackend : Object {
 		public signal void provider_available (HostSessionProvider provider);
 		public signal void provider_unavailable (HostSessionProvider provider);

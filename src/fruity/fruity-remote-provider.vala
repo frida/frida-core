@@ -1,5 +1,5 @@
 namespace Frida {
-	public class FruityRemoteProvider : Object, HostSessionProvider {
+	public class FruityRemoteProvider : Object, HostSessionProvider, ChannelProvider {
 		public string id {
 			get { return device_details.udid.raw_value; }
 		}
@@ -33,6 +33,8 @@ namespace Frida {
 
 		private Gee.HashSet<Entry> entries = new Gee.HashSet<Entry> ();
 		private Cancellable io_cancellable = new Cancellable ();
+
+		private Promise<Fruity.LockdownClient>? lockdown_client_request;
 
 		private const uint16 DEFAULT_SERVER_PORT = 27042;
 
@@ -145,6 +147,71 @@ namespace Frida {
 			yield entry.destroy (reason, cancellable);
 			entry.agent_session_closed.disconnect (on_agent_session_closed);
 			host_session_closed (entry.host_session);
+		}
+
+		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
+			if (address.has_prefix ("tcp:")) {
+				ulong raw_port;
+				if (!ulong.try_parse (address.substring (4), out raw_port) || raw_port == 0 || raw_port > uint16.MAX)
+					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
+				uint16 port = (uint16) raw_port;
+
+				Fruity.UsbmuxClient client = null;
+				try {
+					client = yield Fruity.UsbmuxClient.open (cancellable);
+
+					yield client.connect_to_port (device_details.id, port, cancellable);
+
+					return client.connection;
+				} catch (GLib.Error e) {
+					if (client != null)
+						client.close.begin ();
+
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			if (address.has_prefix ("lockdown:")) {
+				string service_name = address.substring (9);
+
+				var client = yield get_lockdown_client (cancellable);
+
+				try {
+					return yield client.start_service (service_name, cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
+		}
+
+		private async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError {
+			while (lockdown_client_request != null) {
+				try {
+					return yield lockdown_client_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			lockdown_client_request = new Promise<Fruity.LockdownClient> ();
+
+			try {
+				var client = yield Fruity.LockdownClient.open (device_details, cancellable);
+
+				lockdown_client_request.resolve (client);
+
+				return client;
+			} catch (GLib.Error e) {
+				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
+
+				lockdown_client_request.reject (api_error);
+				lockdown_client_request = null;
+
+				throw_api_error (api_error);
+			}
 		}
 
 		private class Entry : Object {
