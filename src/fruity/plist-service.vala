@@ -1,10 +1,16 @@
 namespace Frida.Fruity {
 	public class PlistServiceClient : Object {
 		public IOStream stream {
-			get;
-			construct;
+			get {
+				return _stream;
+			}
+			set {
+				_stream = value;
+				input = stream.get_input_stream ();
+				output = stream.get_output_stream ();
+			}
 		}
-		private TlsClientConnection? tls_connection;
+		private IOStream _stream;
 		private InputStream input;
 		private OutputStream output;
 
@@ -16,20 +22,7 @@ namespace Frida.Fruity {
 			Object (stream: stream);
 		}
 
-		construct {
-			input = stream.get_input_stream ();
-			output = stream.get_output_stream ();
-		}
-
 		public async void close (Cancellable? cancellable) throws IOError {
-			if (tls_connection != null) {
-				try {
-					yield tls_connection.close_async (Priority.DEFAULT, cancellable);
-				} catch (IOError e) {
-				}
-				tls_connection = null;
-			}
-
 			try {
 				yield stream.close_async (Priority.DEFAULT, cancellable);
 			} catch (IOError e) {
@@ -60,32 +53,6 @@ namespace Frida.Fruity {
 
 			query.ended.disconnect (on_query_ended);
 			pending_query = null;
-		}
-
-		public async void enable_encryption (Plist pair_record, Cancellable? cancellable) throws PlistServiceError, IOError {
-			assert (pending_query == null);
-
-			try {
-				var connection = TlsClientConnection.new (stream, null);
-				connection.accept_certificate.connect (on_accept_certificate);
-
-				var host_cert = pair_record.get_bytes_as_string ("HostCertificate");
-				var host_key = pair_record.get_bytes_as_string ("HostPrivateKey");
-				var host_certificate = new TlsCertificate.from_pem (string.join ("\n", host_cert, host_key), -1);
-				connection.set_certificate (host_certificate);
-
-				yield connection.handshake_async (Priority.DEFAULT, cancellable);
-
-				this.tls_connection = connection;
-				this.input = connection.get_input_stream ();
-				this.output = connection.get_output_stream ();
-			} catch (GLib.Error e) {
-				throw new PlistServiceError.PROTOCOL ("%s", e.message);
-			}
-		}
-
-		private bool on_accept_certificate (TlsCertificate peer_cert, TlsCertificateFlags errors) {
-			return true;
 		}
 
 		private async Plist read_message (Cancellable? cancellable) throws PlistServiceError, IOError {
