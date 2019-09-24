@@ -124,7 +124,7 @@ namespace Frida {
 			}
 
 			bool started = start_request != null && start_request.future.ready;
-			if (timeout == 0 && started)
+			if (started && timeout == 0)
 				return null;
 
 			Device? added_device = null;
@@ -147,23 +147,19 @@ namespace Frida {
 			cancel_source.set_callback (find_device.callback);
 			cancel_source.attach (MainContext.get_thread_default ());
 
-			Cancellable? ensure_cancellable = null;
-			bool ensure_pending = false;
-			bool waiting_for_ensure = false;
+			bool waiting = false;
+
 			if (!started) {
-				ensure_cancellable = new Cancellable ();
-				ensure_pending = true;
 				ensure_service_and_then_call.begin (() => {
-						ensure_pending = false;
-						if (waiting_for_ensure)
+						if (waiting && timeout == 0)
 							find_device.callback ();
 						return false;
-					}, ensure_cancellable);
+					}, io_cancellable);
 			}
 
+			waiting = true;
 			yield;
-
-			ensure_cancellable.cancel ();
+			waiting = false;
 
 			cancel_source.destroy ();
 
@@ -171,12 +167,6 @@ namespace Frida {
 				timeout_source.destroy ();
 
 			on_device_added.remove (addition_observer);
-
-			if (ensure_pending) {
-				waiting_for_ensure = true;
-				yield;
-				waiting_for_ensure = false;
-			}
 
 			return added_device;
 		}
