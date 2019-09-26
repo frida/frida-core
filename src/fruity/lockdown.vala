@@ -47,7 +47,7 @@ namespace Frida.Fruity {
 					var key = pair_record.get_bytes_as_string ("HostPrivateKey");
 					tls_certificate = new TlsCertificate.from_pem (string.join ("\n", cert, key), -1);
 				} catch (GLib.Error e) {
-					throw new IOError.FAILED ("Invalid pair record: %s", e.message);
+					throw new LockdownError.UNSUPPORTED ("Invalid pair record: %s", e.message);
 				}
 
 				yield usbmux.connect_to_port (device.id, LOCKDOWN_PORT, cancellable);
@@ -58,7 +58,7 @@ namespace Frida.Fruity {
 
 				yield start_session (cancellable);
 			} catch (UsbmuxError e) {
-				throw new IOError.FAILED ("%s", e.message);
+				throw new LockdownError.UNSUPPORTED ("%s", e.message);
 			}
 
 			return true;
@@ -130,7 +130,7 @@ namespace Frida.Fruity {
 			} catch (PlistError e) {
 				throw error_from_plist (e);
 			} catch (UsbmuxError e) {
-				throw new IOError.FAILED ("%s", e.message);
+				throw new LockdownError.UNSUPPORTED ("%s", e.message);
 			}
 		}
 
@@ -213,6 +213,7 @@ namespace Frida.Fruity {
 
 	public errordomain LockdownError {
 		INVALID_SERVICE,
+		UNSUPPORTED,
 		PROTOCOL
 	}
 }

@@ -123,7 +123,7 @@ namespace Frida.Fruity {
 					case ResultCode.SUCCESS:
 						break;
 					case ResultCode.CONNECTION_REFUSED:
-						throw new IOError.CONNECTION_REFUSED ("Unable to connect (connection refused)");
+						throw new UsbmuxError.CONNECTION_REFUSED ("Unable to connect (connection refused)");
 					case ResultCode.INVALID_REQUEST:
 						throw new UsbmuxError.INVALID_ARGUMENT ("Unable to connect (invalid argument)");
 					default:
@@ -415,8 +415,9 @@ namespace Frida.Fruity {
 
 	public errordomain UsbmuxError {
 		DAEMON_NOT_RUNNING,
+		CONNECTION_REFUSED,
 		INVALID_ARGUMENT,
-		PROTOCOL,
+		PROTOCOL
 	}
 
 	public class DeviceDetails : Object {

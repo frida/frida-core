@@ -78,7 +78,7 @@ namespace Frida {
 				if (client != null)
 					client.close.begin ();
 
-				if (e is IOError.CONNECTION_REFUSED)
+				if (e is Fruity.UsbmuxError.CONNECTION_REFUSED)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 				else
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: %s", e.message);
