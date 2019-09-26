@@ -1,6 +1,7 @@
 namespace Frida.Inject {
 	private static Application application;
 
+	private static string? device_id;
 	private static string? spawn_file;
 	private static int target_pid = -1;
 	private static string? target_name;
@@ -12,6 +13,7 @@ namespace Frida.Inject {
 	private static bool output_version;
 
 	const OptionEntry[] options = {
+		{ "device", 'D', 0, OptionArg.STRING, ref device_id, "connect to device with the given ID", "ID" },
 		{ "file", 'f', 0, OptionArg.STRING, ref spawn_file, "spawn FILE", "FILE" },
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, "attach to PID", "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, "attach to NAME", "NAME" },
@@ -19,7 +21,7 @@ namespace Frida.Inject {
 		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "duk|v8" },
 		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
-		{ "development", 'D', 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
+		{ "development", 0, 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ null }
 	};
@@ -95,8 +97,8 @@ namespace Frida.Inject {
 			}
 		}
 
-		application = new Application (spawn_file, target_pid, target_name, script_path, script_source, script_runtime, parameters,
-			enable_development);
+		application = new Application (device_id, spawn_file, target_pid, target_name, script_path, script_source, script_runtime,
+			parameters, enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -127,6 +129,11 @@ namespace Frida.Inject {
 	}
 
 	public class Application : Object {
+		public string? device_id {
+			get;
+			construct;
+		}
+
 		public string? spawn_file {
 			get;
 			construct;
@@ -175,9 +182,10 @@ namespace Frida.Inject {
 		private int exit_code;
 		private MainLoop loop;
 
-		public Application (string? spawn_file, int target_pid, string? target_name, string? script_path, string? script_source,
-				ScriptRuntime script_runtime, Json.Node parameters, bool enable_development) {
+		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name, string? script_path,
+				string? script_source, ScriptRuntime script_runtime, Json.Node parameters, bool enable_development) {
 			Object (
+				device_id: device_id,
 				spawn_file: spawn_file,
 				target_pid: target_pid,
 				target_name: target_name,
@@ -207,7 +215,11 @@ namespace Frida.Inject {
 			device_manager = new DeviceManager ();
 
 			try {
-				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL, 0, io_cancellable);
+				Device device;
+				if (device_id != null)
+					device = yield device_manager.get_device_by_id (device_id, 0, io_cancellable);
+				else
+					device = yield device_manager.get_device_by_type (DeviceType.LOCAL, 0, io_cancellable);
 
 				uint pid;
 				if (spawn_file != null) {
