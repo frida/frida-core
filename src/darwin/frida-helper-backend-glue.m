@@ -1347,7 +1347,7 @@ frida_darwin_helper_backend_is_application_process (guint pid)
     return FALSE;
 
   is_app = FALSE;
-  gum_darwin_module_enumerate_dependencies (module, (GumDarwinFoundDependencyFunc) frida_find_uikit, &is_app);
+  gum_darwin_module_enumerate_dependencies (module, (GumFoundDarwinDependencyFunc) frida_find_uikit, &is_app);
 
   g_object_unref (module);
 
