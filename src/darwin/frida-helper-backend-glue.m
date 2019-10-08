@@ -303,7 +303,7 @@ static void frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance 
 static void frida_spawn_instance_send_breakpoint_response (FridaSpawnInstance * self);
 static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * self);
 static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self);
-static void frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
+static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
@@ -1700,7 +1700,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   instance->ret_state = FRIDA_RET_FROM_HELPER;
 
-  frida_spawn_instance_create_dyld_data (instance);
+  kr = frida_spawn_instance_create_dyld_data (instance);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "create_dyld_data");
 
   kr = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "frida_get_debug_state");
@@ -2383,7 +2384,8 @@ frida_spawn_instance_on_server_recv (void * context)
   frida_spawn_instance_receive_breakpoint_request (self);
 
   kr = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
-  g_assert (kr == KERN_SUCCESS);
+  if (kr != KERN_SUCCESS)
+    return;
 
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
@@ -2414,13 +2416,12 @@ frida_spawn_instance_on_server_recv (void * context)
         frida_spawn_instance_set_nth_breakpoint (self, i, bp->address, bp->repeat);
     }
 
-    kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-    g_assert (kr == KERN_SUCCESS);
+    thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
 
-    kr = frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
-    g_assert (kr == KERN_SUCCESS);
+    frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
 
     frida_spawn_instance_send_breakpoint_response (self);
+
     return;
   }
 
@@ -2466,11 +2467,9 @@ frida_spawn_instance_on_server_recv (void * context)
     frida_spawn_instance_unset_nth_breakpoint (self, current_bp_index);
   }
 
-  kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-  g_assert (kr == KERN_SUCCESS);
+  thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
 
-  kr = frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
-  g_assert (kr == KERN_SUCCESS);
+  frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
 
   frida_spawn_instance_send_breakpoint_response (self);
 }
@@ -2606,7 +2605,8 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       previous_ports->count = 0;
 
       kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &self->previous_thread_state, state_count);
-      g_assert (kr == KERN_SUCCESS);
+      if (kr != KERN_SUCCESS)
+        return FALSE;
 
       frida_spawn_instance_destroy_dyld_data (self);
 
@@ -2712,15 +2712,13 @@ frida_spawn_instance_receive_breakpoint_request (FridaSpawnInstance * self)
 {
   __Request__exception_raise_state_identity_t * request = &self->pending_request;
   mach_msg_header_t * header = &request->Head;
-  kern_return_t kr;
 
   mach_msg_destroy (header);
 
   bzero (request, sizeof (*request));
   header->msgh_size = sizeof (*request);
   header->msgh_local_port = self->server_port;
-  kr = mach_msg_receive (header);
-  g_assert (kr == 0);
+  mach_msg_receive (header);
 }
 
 static void
@@ -2831,7 +2829,7 @@ frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self)
   g_assert (write_succeeded);
 }
 
-static void
+static kern_return_t
 frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 {
   kern_return_t kr;
@@ -2879,26 +2877,27 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
   }
 
   kr = mach_vm_allocate (self->task, &self->dyld_data, sizeof (data), VM_FLAGS_ANYWHERE);
-  g_assert (kr == KERN_SUCCESS);
+  if (kr != KERN_SUCCESS)
+    return kr;
 
   write_succeeded = gum_darwin_write (self->task, self->dyld_data, (const guint8 *) &data, sizeof (data));
-  g_assert (write_succeeded);
+  if (!write_succeeded)
+    return KERN_FAILURE;
 
   self->fake_helpers = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, helpers);
   self->lib_name = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, libc);
   self->fake_error_buf = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, error_buf);
+
+  return KERN_SUCCESS;
 }
 
 static void
 frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
 {
-  kern_return_t kr;
-
   if (self->dyld_data == 0)
     return;
 
-  kr = vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
-  g_assert (kr == KERN_SUCCESS);
+  vm_deallocate (self->task, (vm_address_t) self->dyld_data, sizeof (FridaSpawnInstanceDyldData));
 
   self->dyld_data = 0;
 }
@@ -3152,10 +3151,12 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   if (scratch_page == 0)
   {
     kr = mach_vm_allocate (self->task, (mach_vm_address_t *) &scratch_page, page_size, VM_FLAGS_ANYWHERE);
-    g_assert (kr == KERN_SUCCESS);
+    if (kr != KERN_SUCCESS)
+      return 0;
 
     kr = mach_vm_copy (self->task, page_start, page_size, scratch_page);
-    g_assert (kr == KERN_SUCCESS);
+    if (kr != KERN_SUCCESS)
+      return 0;
 
     for (i = 0; i != FRIDA_MAX_PAGE_POOL; i++)
     {
@@ -3170,7 +3171,8 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   else
   {
     kr = mach_vm_protect (self->task, scratch_page, page_size, FALSE, PROT_READ | PROT_WRITE);
-    g_assert (kr == KERN_SUCCESS);
+    if (kr != KERN_SUCCESS)
+      return 0;
   }
 
   original_instruction_ptr = (guint32 *) gum_darwin_read (self->task, address, 4, NULL);
@@ -3178,17 +3180,20 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
   g_free (original_instruction_ptr);
 
   write_succeeded = gum_darwin_write (self->task, scratch_page + page_offset, (const guint8 *) &new_instruction, 4);
-  g_assert (write_succeeded);
+  if (!write_succeeded)
+    return 0;
 
   kr = mach_vm_protect (self->task, scratch_page, page_size, FALSE, PROT_READ | PROT_EXEC);
-  g_assert (kr == KERN_SUCCESS);
+  if (kr != KERN_SUCCESS)
+    return 0;
 
   target_address = address - page_offset;
 
   kr = mach_vm_remap (self->task, (mach_vm_address_t *) &target_address, page_size, 0,
       VM_FLAGS_OVERWRITE | VM_FLAGS_FIXED, self->task, scratch_page, TRUE,
       &cur_protection, &max_protection, VM_INHERIT_COPY);
-  g_assert (kr == KERN_SUCCESS);
+  if (kr != KERN_SUCCESS)
+    return 0;
 
   return original_instruction;
 }
