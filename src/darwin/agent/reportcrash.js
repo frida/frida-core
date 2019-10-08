@@ -51,10 +51,10 @@ var AppleErrorReport = ObjC.classes.AppleErrorReport;
 var CrashReport = ObjC.classes.CrashReport;
 var NSMutableDictionary = ObjC.classes.NSMutableDictionary;
 
-const state = {};
+var threadStates = {};
 
 function reset(threadId) {
-  const localState = {
+  var state = {
     crashedPid: -1,
     is64Bit: null,
     forcedByUs: false,
@@ -64,23 +64,31 @@ function reset(threadId) {
     mappedAgents: []
   };
 
-  state[threadId] = localState;
+  threadStates[threadId] = state;
 
-  return localState;
+  return state;
+}
+
+function getState(threadId, operation) {
+  var state = threadStates[threadId];
+  if (state === undefined) {
+    throw new Error(operation + ': missing state for thread ' + threadId);
+  }
+  return state;
 }
 
 Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'].implementation, {
   onEnter: function (args) {
-    const localState = reset(this.threadId);
+    var state = reset(this.threadId);
 
     var task = args[2].toUInt32();
 
-    const crashedPid = pidForTask(task);
-    localState.crashedPid = crashedPid;
+    var crashedPid = pidForTask(task);
+    state.crashedPid = crashedPid;
 
     send(['crash-detected', crashedPid]);
     var op = recv('mapped-agents', function (message) {
-      localState.mappedAgents = message.payload.map(function (agent) {
+      state.mappedAgents = message.payload.map(function (agent) {
         return {
           machHeaderAddress: uint64(agent.machHeaderAddress),
           uuid: agent.uuid,
@@ -97,27 +105,19 @@ Interceptor.attach(Module.getExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit
     this.pid = pidForTask(args[0].toUInt32());
   },
   onLeave: function (retval) {
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('task_is_64bit: missing state for thread', this.threadId);
-      return;
-    }
-    if (this.pid === localState.crashedPid)
-      localState.is64Bit = !!retval.toUInt32();
+    var state = getState(this.threadId, 'task_is_64bit');
+    if (this.pid === state.crashedPid)
+      state.is64Bit = !!retval.toUInt32();
   }
 });
 
 Interceptor.attach(CrashReport['- isActionable'].implementation, {
   onLeave: function (retval) {
     var isActionable = !!retval.toInt32();
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('- isActionable: missing state for thread', this.threadId);
-      return;
-    }
+    var state = getState(this.threadId, '- isActionable');
     if (!isActionable) {
       retval.replace(ptr(1));
-      localState.forcedByUs = true;
+      state.forcedByUs = true;
     }
   },
 });
@@ -125,14 +125,10 @@ Interceptor.attach(CrashReport['- isActionable'].implementation, {
 Interceptor.attach(NSMutableDictionary['- logCounter_isLog:byKey:count:withinLimit:withOptions:'].implementation, {
   onLeave: function (retval) {
     var isLogWithinLimit = !!retval.toInt32();
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('- logCounter_isLog: missing state for thread', this.threadId);
-      return;
-    }
+    var state = getState(this.threadId, '- logCounter_isLog');
     if (!isLogWithinLimit) {
       retval.replace(ptr(1));
-      localState.forcedByUs = true;
+      state.forcedByUs = true;
     }
   },
 });
@@ -140,28 +136,19 @@ Interceptor.attach(NSMutableDictionary['- logCounter_isLog:byKey:count:withinLim
 Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
   onEnter: function (args) {
     var newPath = args[1].readUtf8String();
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('rename: missing state for thread', this.threadId);
-      return;
-    }
-    if (/\.ips$/.test(newPath)) {
-      localState.logPath = newPath;
-    }
+    var state = getState(this.threadId, 'rename');
+    if (/\.ips$/.test(newPath))
+      state.logPath = newPath;
   },
 });
 
 Interceptor.attach(AppleErrorReport['- saveToDir:'].implementation, {
   onLeave: function (retval) {
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('- saveToDir: missing state for thread', this.threadId);
-      return;
-    }
-    if (localState.forcedByUs) {
-      unlink(Memory.allocUtf8String(localState.logPath));
-      delete state[this.threadId];
-    }
+    var state = getState(this.threadId, '- saveToDir');
+    if (state.forcedByUs)
+      unlink(Memory.allocUtf8String(state.logPath));
+
+    delete threadStates[this.threadId];
   },
 });
 
@@ -171,49 +158,37 @@ Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotecte
     this.isCrashLog = /\.ips$/.test(path);
   },
   onLeave: function (retval) {
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('open_dprotected_np: missing state for thread', this.threadId);
-      return;
-    }
-    if (this.isCrashLog) {
-      localState.logFd = retval.toInt32();
-    }
+    var state = getState(this.threadId, 'open_dprotected_np');
+    if (this.isCrashLog)
+      state.logFd = retval.toInt32();
   },
 });
 
 Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      return;
-    }
-    if (fd !== localState.logFd)
+    var state = getState(this.threadId, 'close');
+    if (fd !== state.logFd)
       return;
 
-    const crashedPid = localState.crashedPid;
+    var crashedPid = state.crashedPid;
 
     if (crashedPid !== -1) {
-      send(['crash-received', crashedPid, localState.logChunks.join('')]);
-      localState.crashedPid = -1;
+      send(['crash-received', crashedPid, state.logChunks.join('')]);
+      state.crashedPid = -1;
     }
 
-    localState.logFd = null;
-    localState.logChunks = [];
+    state.logFd = null;
+    state.logChunks = [];
   },
 });
 
 Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
-    const localState = state[this.threadId];
-    if (localState === undefined) {
-      console.error('write: missing state for thread', this.threadId);
-      return;
-    }
-    this.localState = localState;
-    this.isCrashLog = (fd === localState.logFd);
+    var state = getState(this.threadId, 'write');
+    this.theState = state;
+    this.isCrashLog = (fd === state.logFd);
     this.buf = args[1];
   },
   onLeave: function (retval) {
@@ -225,9 +200,9 @@ Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
       return;
 
     var chunk = this.buf.readUtf8String(n);
-    const localState = this.localState;
-    if (localState !== undefined)
-      localState.logChunks.push(chunk);
+    var state = this.theState;
+    if (state !== undefined)
+      state.logChunks.push(chunk);
   }
 });
 
@@ -257,14 +232,10 @@ if (libdyld !== null) {
 
   Interceptor.attach(libdyld['dyld_process_info_base::make'], {
     onEnter: function (args) {
-      const localState = state[this.threadId];
-      if (localState === undefined) {
-        console.error('dyld_process_info_base::make: missing state for thread', this.threadId);
-        return;
-      }
+      var state = getState(this.threadId, 'dyld_process_info_base::make');
 
       var pid = pidForTask(args[0].toUInt32());
-      if (pid !== localState.crashedPid)
+      if (pid !== state.crashedPid)
         return;
       var allImageInfo = args[1];
 
@@ -278,7 +249,7 @@ if (libdyld !== null) {
         return;
       }
 
-      var extraCount = localState.mappedAgents.length;
+      var extraCount = state.mappedAgents.length;
       var copy = Memory.dup(allImageInfo, size);
       copy.add(4).writeU32(count + extraCount);
       this.allImageInfo = copy;
@@ -290,7 +261,7 @@ if (libdyld !== null) {
         array: array,
         realSize: realSize,
         fakeSize: realSize + (extraCount * imageElementSize),
-        agents: localState.mappedAgents,
+        agents: state.mappedAgents,
         paths: {}
       };
     },
@@ -305,11 +276,7 @@ if (libdyld !== null) {
       if (invocation === undefined)
         return;
 
-      const localState = state[this.threadId];
-      if (localState === undefined) {
-        console.error('withRemoteBuffer: missing state for thread', this.threadId);
-        return;
-      }
+      var state = getState(this.threadId, 'withRemoteBuffer');
 
       var remoteAddress = uint64(args[1].toString());
 
@@ -329,7 +296,7 @@ if (libdyld !== null) {
             var filePath = loadAddress.sub(4096);
             var modDate = 0;
 
-            if (localState.is64Bit) {
+            if (state.is64Bit) {
               element
                   .writeU64(loadAddress).add(8)
                   .writeU64(filePath).add(8)
@@ -413,12 +380,8 @@ if (Process.arch === 'arm64') {
       this.symbolicator = [args[3], args[4]];
     },
     onLeave: function () {
-      const localState = state[this.threadId];
-      if (localState === undefined) {
-        console.error('- fixupStackWithSamplingContext: missing state for thread', this.threadId);
-        return;
-      }
-      if (!localState.is64Bit)
+      var state = getState(this.threadId, '- fixupStackWithSamplingContext');
+      if (!state.is64Bit)
         return;
 
       var callstack = this.self.$ivars._callstack;
