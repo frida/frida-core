@@ -37,6 +37,29 @@
 #define FRIDA_MAX_BREAKPOINTS            4
 #define FRIDA_MAX_PAGE_POOL              8
 
+#if (defined (HAVE_ARM) || defined (HAVE_ARM64)) && !defined (__DARWIN_OPAQUE_ARM_THREAD_STATE64)
+# define __darwin_arm_thread_state64_get_pc(ts) \
+    ((ts).__pc)
+# define __darwin_arm_thread_state64_get_pc_fptr(ts) \
+    ((void *) (uintptr_t) ((ts).__pc))
+# define __darwin_arm_thread_state64_set_pc_fptr(ts, fptr) \
+    ((ts).__pc = (uintptr_t) (fptr))
+# define __darwin_arm_thread_state64_get_lr(ts) \
+    ((ts).__lr)
+# define __darwin_arm_thread_state64_get_lr_fptr(ts) \
+    ((void *) (uintptr_t) ((ts).__lr))
+# define __darwin_arm_thread_state64_set_lr_fptr(ts, fptr) \
+    ((ts).__lr = (uintptr_t) (fptr))
+# define __darwin_arm_thread_state64_get_sp(ts) \
+    ((ts).__sp)
+# define __darwin_arm_thread_state64_set_sp(ts, ptr) \
+    ((ts).__sp = (uintptr_t) (ptr))
+# define __darwin_arm_thread_state64_get_fp(ts) \
+    ((ts).__fp)
+# define __darwin_arm_thread_state64_set_fp(ts, ptr) \
+    ((ts).__fp = (uintptr_t) (ptr))
+#endif
+
 #define CHECK_MACH_RESULT(n1, cmp, n2, op) \
   if (!(n1 cmp n2)) \
   { \
@@ -1625,7 +1648,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 #ifdef HAVE_I386
   dyld_start = (instance->cpu_type == GUM_CPU_AMD64) ? state.uts.ts64.__rip : state.uts.ts32.__eip;
 #else
-  dyld_start = (instance->cpu_type == GUM_CPU_ARM64) ? state.ts_64.__pc : state.ts_32.__pc;
+  dyld_start = (instance->cpu_type == GUM_CPU_ARM64) ? __darwin_arm_thread_state64_get_pc (state.ts_64) : state.ts_32.__pc;
 #endif
 
   dyld_header = 0;
@@ -2015,9 +2038,9 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
     ts->__x[20] = payload_address + layout.data_offset;
 
-    ts->__sp = payload_address + layout.stack_top_offset;
-    ts->__lr = 0xcafebabe;
-    ts->__pc = payload_address + layout.mach_code_offset;
+    __darwin_arm_thread_state64_set_sp (*ts, payload_address + layout.stack_top_offset);
+    __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (0xcafebabe));
+    __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (payload_address + layout.mach_code_offset));
 
     instance->thread_state_data = (thread_state_t) state64;
     instance->thread_state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
@@ -2394,7 +2417,7 @@ frida_spawn_instance_on_server_recv (void * context)
     pc = state.uts.ts32.__eip;
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
-    pc = state.ts_64.__pc;
+    pc = __darwin_arm_thread_state64_get_pc (state.ts_64);
   else
     pc = state.ts_32.__pc;
 #endif
@@ -2427,7 +2450,7 @@ frida_spawn_instance_on_server_recv (void * context)
 
   for (i = 0; i != FRIDA_MAX_BREAKPOINTS; i++)
   {
-    if ((self->breakpoints[i].address & ~1) == (pc & ~1))
+    if ((self->breakpoints[i].address & ~1) == (pc & ~GUM_ADDRESS (1)))
     {
       current_bp_index = i;
       breakpoint = &self->breakpoints[i];
@@ -2448,7 +2471,7 @@ frida_spawn_instance_on_server_recv (void * context)
     pc_changed = state.uts.ts32.__eip != pc;
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
-    pc_changed = state.ts_64.__pc != pc;
+    pc_changed = __darwin_arm_thread_state64_get_pc (state.ts_64) != pc;
   else
     pc_changed = state.ts_32.__pc != pc;
 #endif
@@ -2507,7 +2530,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
 #else
     if (self->cpu_type == GUM_CPU_ARM64)
     {
-      state->ts_64.__pc = state->ts_64.__lr;
+      __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, __darwin_arm_thread_state64_get_lr_fptr (state->ts_64));
       if (self->ret_state == FRIDA_RET_FROM_HELPER)
         state->ts_64.__x[0] = self->fake_error_buf;
     }
@@ -2569,7 +2592,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
         state->uts.ts32.__eip = self->ret_gadget;
 #else
       if (self->cpu_type == GUM_CPU_ARM64)
-        state->ts_64.__pc = state->ts_64.__lr;
+        __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, __darwin_arm_thread_state64_get_lr_fptr (state->ts_64));
       else
         state->ts_32.__pc = state->ts_32.__lr;
 #endif
@@ -2678,11 +2701,11 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
 #else
     if (self->cpu_type == GUM_CPU_ARM64)
     {
-      ret_address = state->ts_64.__lr;
+      ret_address = __darwin_arm_thread_state64_get_lr (state->ts_64);
       if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
       {
         state->ts_64.__x[0] = 0;
-        state->ts_64.__pc = ret_address;
+        __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, __darwin_arm_thread_state64_get_lr_fptr (state->ts_64));
 
         self->ret_state = FRIDA_RET_FROM_STRCMP;
       }
@@ -2971,9 +2994,9 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
   {
-    current_pc = state->ts_64.__pc;
-    state->ts_64.__pc = self->register_helpers_address;
-    state->ts_64.__lr = current_pc;
+    void * pc = __darwin_arm_thread_state64_get_pc_fptr (state->ts_64);
+    __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, (void *) self->register_helpers_address);
+    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, pc);
     state->ts_64.__x[0] = helpers;
   }
   else
@@ -3025,9 +3048,9 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
   {
-    current_pc = state->ts_64.__pc;
-    state->ts_64.__pc = self->dlopen_address;
-    state->ts_64.__lr = current_pc;
+    void * pc = __darwin_arm_thread_state64_get_pc_fptr (state->ts_64);
+    __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, (void *) self->dlopen_address);
+    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, pc);
     state->ts_64.__x[0] = lib_name;
     state->ts_64.__x[1] = mode;
     state->ts_64.__x[2] = 0;
