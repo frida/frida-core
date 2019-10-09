@@ -38,7 +38,9 @@ namespace Frida {
 		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
+			interceptor.revert ((void *) task_threads);
 			interceptor.revert ((void *) thread_suspend);
+			interceptor.revert ((void *) thread_resume);
 
 			base.dispose ();
 		}
