@@ -201,7 +201,7 @@ class Layout(object):
                 name = segment_name + "." + section_name
                 sections[name] = Section(name, int(size, 16), int(address, 16), None, int(offset, 10))
 
-        symbols = Symbols.from_file(binary_path, toolchain)
+        symbols = Symbols.from_file(binary_path, pointer_size, toolchain)
 
         return Layout(file_format, arch_name, pointer_size, sections, symbols)
 
@@ -231,7 +231,7 @@ class Layout(object):
 
 class Symbols(object):
     @classmethod
-    def from_file(cls, binary_path, toolchain):
+    def from_file(cls, binary_path, pointer_size, toolchain):
         items = {}
 
         for line in subprocess.check_output([toolchain.nm, binary_path]).decode('utf-8').split("\n"):
@@ -245,16 +245,25 @@ class Symbols(object):
 
             items[address] = name
 
-        return Symbols(items)
+        return Symbols(items, pointer_size)
 
-    def __init__(self, items):
+    def __init__(self, items, pointer_size):
         self.items = items
+        self._pointer_size = pointer_size
 
     def __repr__(self):
         return "Symbols(items=<{} objects>".format(len(self.items))
 
     def resolve(self, address):
-        return self.items[address]
+        result = self.items.get(address, None)
+        if result is None:
+            raise SymbolNotFound("unable to resolve address 0x{address:0{width}x}".format(address=address, width=self._pointer_size * 2))
+        return result
+
+
+class SymbolNotFound(ValueError):
+    def __init__(self, message):
+        super().__init__(message)
 
 
 class Section(object):
