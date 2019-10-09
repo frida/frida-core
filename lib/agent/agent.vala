@@ -616,6 +616,7 @@ namespace Frida.Agent {
 
 		private void on_script_eternalized (Gum.Script script) {
 			eternalized_scripts.add (script);
+			eternalized ();
 		}
 
 		private async void unload (Cancellable? cancellable) throws Error, IOError {
