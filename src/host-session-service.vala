@@ -390,6 +390,7 @@ namespace Frida {
 
 				connection.on_closed.connect (on_agent_connection_closed);
 				provider.closed.connect (on_agent_session_provider_closed);
+				provider.eternalized.connect (on_agent_session_provider_eternalized);
 				entry.child_gating_changed.connect (on_child_gating_changed);
 
 				promise.resolve (entry);
@@ -453,10 +454,23 @@ namespace Frida {
 				if (sessions.remove (id)) {
 					if (sessions.is_empty) {
 						var is_system_session = entry.pid == 0;
-						if (!is_system_session)
+						if (!is_system_session && !entry.eternalized)
 							unload_and_destroy.begin (entry, reason);
 					}
 
+					break;
+				}
+			}
+		}
+
+		private void on_agent_session_provider_eternalized (AgentSessionProvider provider) {
+			foreach (var future in agent_entries.values) {
+				if (!future.ready)
+					continue;
+
+				var entry = future.value;
+				if (entry.provider == provider) {
+					entry.eternalized = true;
 					break;
 				}
 			}
@@ -502,6 +516,7 @@ namespace Frida {
 
 			entry.child_gating_changed.disconnect (on_child_gating_changed);
 			entry.provider.closed.disconnect (on_agent_session_provider_closed);
+			entry.provider.eternalized.disconnect (on_agent_session_provider_eternalized);
 			entry.connection.on_closed.disconnect (on_agent_connection_closed);
 
 			return true;
@@ -654,6 +669,7 @@ namespace Frida {
 
 			connection.on_closed.connect (on_agent_connection_closed);
 			provider.closed.connect (on_agent_session_provider_closed);
+			provider.eternalized.connect (on_agent_session_provider_eternalized);
 			agent_entry.child_gating_changed.connect (on_child_gating_changed);
 
 			if (!try_handle_child (info))
@@ -814,6 +830,12 @@ namespace Frida {
 			public Promise<bool>? resume_request {
 				get;
 				set;
+			}
+
+			public bool eternalized {
+				get;
+				set;
+				default = false;
 			}
 
 			private bool closing = false;
