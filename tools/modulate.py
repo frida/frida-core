@@ -96,7 +96,7 @@ class ModuleEditor(object):
 
     def save(self, destination_path):
         temp_destination_path = destination_path + ".tmp"
-        with open(temp_destination_path, "wb") as destination:
+        with open(temp_destination_path, "w+b") as destination:
             self.module.seek(0)
             shutil.copyfileobj(self.module, destination)
 
@@ -129,9 +129,26 @@ class ModuleEditor(object):
         elements = []
         is_macho = layout.file_format == 'mach-o'
         is_arm = layout.arch_name == 'arm'
+        is_apple_arm64 = is_macho and layout.arch_name == 'arm64'
         symbols = layout.symbols
         for value in values:
-            address = value & ~1 if is_arm else value
+            if is_arm:
+                address = value & ~1
+            elif is_apple_arm64:
+                # Starting with arm64e, Apple uses the 13 upper bits to encode
+                # pointer authentication properties, rebase vs bind, etc.
+                top_8_bits     = (value << 13) & 0xff00000000000000
+                bottom_43_bits =  value        & 0x000007ffffffffff
+
+                sign_bit_set = (value & (1 << 42)) != 0
+                if sign_bit_set:
+                    sign_bits = 0x00fff80000000000
+                else:
+                    sign_bits = 0
+
+                address = top_8_bits | sign_bits | bottom_43_bits
+            else:
+                address = value
 
             name = symbols.resolve(address)
             if is_macho and name.startswith("_"):
@@ -154,8 +171,28 @@ class ModuleEditor(object):
         pointer_format = layout.pointer_format
 
         destination.seek(vector.file_offset)
-        for pointer in vector.elements:
-            destination.write(struct.pack(pointer_format, pointer.value))
+
+        is_apple_arm64 = layout.file_format == 'mach-o' and layout.arch_name == 'arm64'
+        if is_apple_arm64:
+            # Due to Apple's stateful rebasing logic we have to be careful so the upper 13 bits
+            # are preserved, and we only reorder the values' lower 51 bits.
+            for pointer in vector.elements:
+                address = pointer.value
+
+                (old_value,) = struct.unpack(pointer_format, destination.read(pointer_size))
+                destination.seek(-pointer_size, os.SEEK_CUR)
+
+                meta_bits = old_value & 0xfff8000000000000
+
+                top_8_bits     = (address & 0xff00000000000000) >> 13
+                bottom_43_bits =  address & 0x000007ffffffffff
+
+                new_value = meta_bits | top_8_bits | bottom_43_bits
+
+                destination.write(struct.pack(pointer_format, new_value))
+        else:
+            for pointer in vector.elements:
+                destination.write(struct.pack(pointer_format, pointer.value))
 
 
 class Toolchain(object):
