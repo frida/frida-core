@@ -254,7 +254,7 @@ frida_ensure_type (policydb_t * db, const gchar * type_name, guint n_attributes,
     }
     else if (pending_error == NULL)
     {
-      g_set_error (&pending_error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "attribute type %s does not exist", attribute_name);
+      g_set_error (&pending_error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "attribute type “%s” does not exist", attribute_name);
     }
   }
 
@@ -329,7 +329,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
   source = hashtab_search (db->p_types.table, (char *) s);
   if (source == NULL)
   {
-    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "source type %s does not exist", s);
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "source type “%s” does not exist", s);
     return NULL;
   }
 
@@ -356,14 +356,14 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
 
   if (target == NULL)
   {
-    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "target type %s does not exist", t);
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_TYPE_NOT_FOUND, "target type “%s” does not exist", t);
     return NULL;
   }
 
   klass = hashtab_search (db->p_classes.table, (char *) c);
   if (klass == NULL)
   {
-    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_CLASS_NOT_FOUND, "class %s does not exist", c);
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_CLASS_NOT_FOUND, "class “%s” does not exist", c);
     return NULL;
   }
 
@@ -372,7 +372,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
     perm = hashtab_search (klass->comdatum->permissions.table, (char *) p);
   if (perm == NULL)
   {
-    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND, "perm %s does not exist in class %s", p, c);
+    g_set_error (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND, "perm “%s” does not exist on the “%s” class", p, c);
     return NULL;
   }
   perm_bit = 1U << (perm->s.value - 1);
