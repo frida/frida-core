@@ -46,7 +46,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "domain", "process", { "execmem", NULL } },
   { { "domain", NULL }, "frida_file", "dir", { "search", NULL } },
   { { "domain", NULL }, "frida_file", "fifo_file", { "open", "write", NULL } },
-  { { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", "map", NULL } },
+  { { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", "?map", NULL } },
   { { "domain", NULL }, "frida_file", "sock_file", { "write", NULL } },
   { { "domain", NULL }, "shell_data_file", "dir", { "search", NULL } },
   { { "domain", NULL }, "zygote_exec", "file", { "execute", NULL } },
@@ -96,15 +96,25 @@ frida_selinux_apply_policy_patch (void)
   {
     const FridaSELinuxRule * rule = &frida_selinux_rules[rule_index];
     const gchar * const * source;
-    const gchar * const * perm;
+    const gchar * const * perm_entry;
 
     for (source = rule->sources; *source != NULL; source++)
     {
-      for (perm = rule->permissions; *perm != NULL; perm++)
+      for (perm_entry = rule->permissions; *perm_entry != NULL; perm_entry++)
       {
-        if (frida_ensure_rule (&db, *source, rule->target, rule->klass, *perm, &error) == NULL)
+        const gchar * perm = *perm_entry;
+        gboolean is_important = TRUE;
+
+        if (perm[0] == '?')
         {
-          g_printerr ("Unable to add SELinux rule: %s\n", error->message);
+          is_important = FALSE;
+          perm++;
+        }
+
+        if (frida_ensure_rule (&db, *source, rule->target, rule->klass, perm, &error) == NULL)
+        {
+          if (!g_error_matches (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND) || is_important)
+            g_printerr ("Unable to add SELinux rule: %s\n", error->message);
           g_clear_error (&error);
         }
       }
