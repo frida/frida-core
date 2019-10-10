@@ -1,4 +1,4 @@
-var ApplicationInfo, ComponentName, Intent, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA;
+var ApplicationInfo, ComponentName, Intent, RunningAppProcessInfo, RunningTaskInfo, GET_META_DATA, GET_ACTIVITIES;
 var context, packageManager, activityManager;
 
 var pendingLaunches = {};
@@ -15,6 +15,7 @@ function init() {
   RunningTaskInfo = Java.use('android.app.ActivityManager$RunningTaskInfo');
   var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
   GET_META_DATA = PackageManager.GET_META_DATA.value;
+  GET_ACTIVITIES = PackageManager.GET_ACTIVITIES.value;
 
   context = ActivityThread.currentApplication();
 
@@ -85,12 +86,35 @@ rpc.exports = {
   },
   startActivity: function (pkg, activity) {
     return performOnJavaVM(function () {
-      var intent = packageManager.getLaunchIntentForPackage(pkg);
-      if (intent === null)
+      var appInstalled = false;
+      var apps = packageManager.getInstalledApplications(GET_META_DATA);
+      for (var i = 0; i < apps.size(); i++) {
+        var appInfo = Java.cast(apps.get(i), ApplicationInfo);
+        if (appInfo.packageName.value === pkg) {
+          appInstalled = true;
+          break;
+        }
+      }
+      if (!appInstalled)
         throw new Error("Unable to find application with identifier '" + pkg + "'");
 
-      if (activity !== null)
+      var intent = packageManager.getLaunchIntentForPackage(pkg);
+      if (intent === null && activity === null)
+        throw new Error("Unable to find a front-door activity");
+
+      if (intent === null) {
+        intent = Intent.$new();
+        intent.setAction("android.intent.action.MAIN");
+      }
+
+      if (activity !== null) {
+        var pkgInfo = packageManager.getPackageInfo(pkg, GET_ACTIVITIES);
+        var activities = pkgInfo.activities.value.map((activityInfo) => activityInfo.name.value);
+        if (activities.indexOf(activity) < 0)
+          throw new Error("Unable to find activity with identifier '" + activity + "'");
+
         intent.setClassName(pkg, activity);
+      }
 
       performLaunchOperation(pkg, function () {
         context.startActivity(intent);
