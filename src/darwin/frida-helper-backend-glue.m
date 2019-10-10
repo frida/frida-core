@@ -795,7 +795,7 @@ static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier,
     FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 
-static void frida_kill_application (NSString * identifier);
+static guint frida_kill_application (NSString * identifier);
 
 static NSArray * frida_argv_to_arguments_array (gchar * const * argv, gint argv_length);
 static NSDictionary * frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length);
@@ -1193,21 +1193,25 @@ _frida_darwin_helper_backend_kill_process (guint pid)
   [pool release];
 }
 
-void
+guint
 _frida_darwin_helper_backend_kill_application (const gchar * identifier)
 {
+  guint killed_pid;
   NSAutoreleasePool * pool;
 
   pool = [[NSAutoreleasePool alloc] init];
 
-  frida_kill_application ([NSString stringWithUTF8String:identifier]);
+  killed_pid = frida_kill_application ([NSString stringWithUTF8String:identifier]);
 
   [pool release];
+
+  return killed_pid;
 }
 
-static void
+static guint
 frida_kill_application (NSString * identifier)
 {
+  guint killed_pid = 0;
   FridaSpringboardApi * api;
   GTimer * timer;
   const double kill_timeout = 3.0;
@@ -1219,6 +1223,8 @@ frida_kill_application (NSString * identifier)
     FBSSystemService * service;
 
     service = [api->FBSSystemService sharedService];
+
+    killed_pid = [service pidForApplication:identifier];
 
     [service terminateApplication:identifier
                         forReason:FBProcessKillReasonUser
@@ -1263,6 +1269,7 @@ frida_kill_application (NSString * identifier)
       {
         kill (pid, SIGKILL);
 
+        killed_pid = pid;
         timer = g_timer_new ();
 
         while (g_timer_elapsed (timer, NULL) < kill_timeout)
@@ -1284,6 +1291,8 @@ frida_kill_application (NSString * identifier)
 
     g_free (entries);
   }
+
+  return killed_pid;
 }
 
 static NSArray *

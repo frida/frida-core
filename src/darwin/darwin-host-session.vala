@@ -380,6 +380,8 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
+			helper.resumed.connect (on_resumed);
+			helper.killed.connect (on_killed);
 		}
 
 		~FruitController () {
@@ -388,6 +390,8 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.disconnect (on_spawn_preparation_started);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 			launchd_agent.app_launch_started.disconnect (on_app_launch_started);
+			helper.resumed.disconnect (on_resumed);
+			helper.killed.disconnect (on_killed);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -570,6 +574,14 @@ namespace Frida {
 		private void on_spawn_captured (HostSpawnInfo info) {
 			xpcproxies.remove (info.pid);
 			handle_spawn.begin (info);
+		}
+
+		private void on_resumed (uint pid) {
+			launchd_agent.forget_pid.begin (pid, io_cancellable);
+		}
+
+		private void on_killed (uint pid) {
+			launchd_agent.forget_pid.begin (pid, io_cancellable);
 		}
 
 		private async void handle_spawn (HostSpawnInfo info) {
@@ -774,6 +786,10 @@ namespace Frida {
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			yield call ("disableSpawnGating", new Json.Node[] {}, cancellable);
+		}
+
+		public async void forget_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield call ("forgetPid", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {

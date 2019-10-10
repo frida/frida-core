@@ -296,6 +296,8 @@ namespace Frida {
 				proxy.spawn_removed.connect (on_spawn_removed);
 				proxy.injected.connect (on_injected);
 				proxy.uninjected.connect (on_uninjected);
+				proxy.resumed.connect (on_resumed);
+				proxy.killed.connect (on_killed);
 
 				obtain_request.resolve (proxy);
 				return proxy;
@@ -329,6 +331,8 @@ namespace Frida {
 			proxy.spawn_removed.disconnect (on_spawn_removed);
 			proxy.injected.disconnect (on_injected);
 			proxy.uninjected.disconnect (on_uninjected);
+			proxy.resumed.disconnect (on_resumed);
+			proxy.killed.disconnect (on_killed);
 			proxy = null;
 
 			connection.on_closed.disconnect (on_connection_closed);
@@ -356,6 +360,14 @@ namespace Frida {
 
 		private void on_uninjected (uint id) {
 			uninjected (id);
+		}
+
+		private void on_resumed (uint pid) {
+			resumed (pid);
+		}
+
+		private void on_killed (uint pid) {
+			killed (pid);
 		}
 	}
 

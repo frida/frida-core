@@ -1,6 +1,7 @@
 var pointerSize = Process.pointerSize;
 
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
+var SIGKILL = 9;
 
 var upcoming = {};
 var gating = false;
@@ -9,6 +10,8 @@ var jbdPidsToIgnore = null;
 
 var substrateInvocations = {};
 var substratePidsPending = {};
+
+var suspendedPids = {};
 
 rpc.exports = {
   prepareForLaunch: function (identifier) {
@@ -24,6 +27,16 @@ rpc.exports = {
   disableSpawnGating: function () {
     gating = false;
   },
+  forgetPid: function (pid) {
+    delete suspendedPids[pid];
+  },
+  dispose: function () {
+    var kill = new NativeFunction(Module.getExportByName(null, 'kill'));
+    Object.keys(suspendedPids)
+      .forEach(function (pid) {
+        kill (pid, SIGKILL);
+      });
+  }
 };
 
 applyJailbreakQuirks();
@@ -76,6 +89,8 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
       return;
 
     var pid = this.pidPtr.readU32();
+
+    suspendedPids[pid] = true;
 
     if (jbdPidsToIgnore !== null)
       jbdPidsToIgnore[pid] = true;
