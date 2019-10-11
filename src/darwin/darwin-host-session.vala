@@ -573,6 +573,7 @@ namespace Frida {
 
 		private void on_spawn_captured (HostSpawnInfo info) {
 			xpcproxies.remove (info.pid);
+			launchd_agent.unacknowledge_process.begin (info.pid, io_cancellable);
 			handle_spawn.begin (info);
 		}
 
@@ -790,6 +791,10 @@ namespace Frida {
 
 		public async void acknowledge_process (uint pid, Cancellable? cancellable) throws Error, IOError {
 			yield call ("acknowledgeProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
+		}
+
+		public async void unacknowledge_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield call ("unacknowledgeProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {

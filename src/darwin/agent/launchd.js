@@ -37,6 +37,9 @@ rpc.exports = {
   acknowledgeProcess: function (pid) {
     delete suspendedPids[pid];
   },
+  unacknowledgeProcess: function (pid) {
+    suspendedPids[pid] = pid;
+  },
 };
 
 applyJailbreakQuirks();
