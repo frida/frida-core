@@ -573,16 +573,16 @@ namespace Frida {
 
 		private void on_spawn_captured (HostSpawnInfo info) {
 			xpcproxies.remove (info.pid);
-			launchd_agent.unacknowledge_process.begin (info.pid, io_cancellable);
+			launchd_agent.unclaim_process.begin (info.pid, io_cancellable);
 			handle_spawn.begin (info);
 		}
 
 		private void on_process_resumed (uint pid) {
-			launchd_agent.acknowledge_process.begin (pid, io_cancellable);
+			launchd_agent.claim_process.begin (pid, io_cancellable);
 		}
 
 		private void on_process_killed (uint pid) {
-			launchd_agent.acknowledge_process.begin (pid, io_cancellable);
+			launchd_agent.claim_process.begin (pid, io_cancellable);
 		}
 
 		private async void handle_spawn (HostSpawnInfo info) {
@@ -789,12 +789,12 @@ namespace Frida {
 			yield call ("disableSpawnGating", new Json.Node[] {}, cancellable);
 		}
 
-		public async void acknowledge_process (uint pid, Cancellable? cancellable) throws Error, IOError {
-			yield call ("acknowledgeProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
+		public async void claim_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield call ("claimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
 		}
 
-		public async void unacknowledge_process (uint pid, Cancellable? cancellable) throws Error, IOError {
-			yield call ("unacknowledgeProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
+		public async void unclaim_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield call ("unclaimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {

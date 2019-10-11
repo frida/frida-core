@@ -34,10 +34,10 @@ rpc.exports = {
   disableSpawnGating: function () {
     gating = false;
   },
-  acknowledgeProcess: function (pid) {
+  claimProcess: function (pid) {
     delete suspendedPids[pid];
   },
-  unacknowledgeProcess: function (pid) {
+  unclaimProcess: function (pid) {
     suspendedPids[pid] = pid;
   },
 };
