@@ -5,13 +5,12 @@ var SIGKILL = 9;
 
 var upcoming = {};
 var gating = false;
+var suspendedPids = {};
 
 var jbdPidsToIgnore = null;
 
 var substrateInvocations = {};
 var substratePidsPending = {};
-
-var suspendedPids = {};
 
 rpc.exports = {
   dispose: function () {
