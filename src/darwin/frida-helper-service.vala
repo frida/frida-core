@@ -49,8 +49,8 @@ namespace Frida {
 			backend.spawn_removed.connect (on_backend_spawn_removed);
 			backend.injected.connect (on_backend_injected);
 			backend.uninjected.connect (on_backend_uninjected);
-			backend.resumed.connect (on_backend_resumed);
-			backend.killed.connect (on_backend_killed);
+			backend.process_resumed.connect (on_backend_process_resumed);
+			backend.process_killed.connect (on_backend_process_killed);
 		}
 
 		public int run () {
@@ -98,8 +98,8 @@ namespace Frida {
 			backend.spawn_removed.disconnect (on_backend_spawn_removed);
 			backend.injected.disconnect (on_backend_injected);
 			backend.uninjected.disconnect (on_backend_uninjected);
-			backend.resumed.disconnect (on_backend_resumed);
-			backend.killed.disconnect (on_backend_killed);
+			backend.process_resumed.disconnect (on_backend_process_resumed);
+			backend.process_killed.disconnect (on_backend_process_killed);
 			backend = null;
 
 			shutdown_request.resolve (true);
@@ -244,12 +244,12 @@ namespace Frida {
 			uninjected (id);
 		}
 
-		private void on_backend_resumed (uint pid) {
-			resumed (pid);
+		private void on_backend_process_resumed (uint pid) {
+			process_resumed (pid);
 		}
 
-		private void on_backend_killed (uint pid) {
-			killed (pid);
+		private void on_backend_process_killed (uint pid) {
+			process_killed (pid);
 		}
 	}
 }

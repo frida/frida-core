@@ -307,18 +307,18 @@ namespace Frida {
 				_resume_process (borrow_task_for_remote_pid (pid));
 			}
 
-			resumed (pid);
+			process_resumed (pid);
 		}
 
 		public async void kill_process (uint pid, Cancellable? cancellable) throws Error, IOError {
 			_kill_process (pid);
-			killed (pid);
+			process_killed (pid);
 		}
 
 		public async void kill_application (string identifier, Cancellable? cancellable) throws Error, IOError {
 			var killed_pid = _kill_application (identifier);
 			if (killed_pid > 0)
-				killed (killed_pid);
+				process_killed (killed_pid);
 		}
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)

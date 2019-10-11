@@ -14,6 +14,13 @@ var substratePidsPending = {};
 var suspendedPids = {};
 
 rpc.exports = {
+  dispose: function () {
+    var kill = new NativeFunction(Module.getExportByName(null, 'kill'), 'int', ['int', 'int']);
+    Object.keys(suspendedPids)
+      .forEach(function (pid) {
+        kill(suspendedPids[pid], SIGKILL);
+      });
+  },
   prepareForLaunch: function (identifier) {
     upcoming[identifier] = true;
   },
@@ -27,16 +34,9 @@ rpc.exports = {
   disableSpawnGating: function () {
     gating = false;
   },
-  forgetPid: function (pid) {
+  acknowledgeProcess: function (pid) {
     delete suspendedPids[pid];
   },
-  dispose: function () {
-    var kill = new NativeFunction(Module.getExportByName(null, 'kill'));
-    Object.keys(suspendedPids)
-      .forEach(function (pid) {
-        kill (pid, SIGKILL);
-      });
-  }
 };
 
 applyJailbreakQuirks();
@@ -90,7 +90,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 
     var pid = this.pidPtr.readU32();
 
-    suspendedPids[pid] = true;
+    suspendedPids[pid] = pid;
 
     if (jbdPidsToIgnore !== null)
       jbdPidsToIgnore[pid] = true;
