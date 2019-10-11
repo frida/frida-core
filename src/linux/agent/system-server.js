@@ -88,7 +88,8 @@ rpc.exports = {
     return performOnJavaVM(function () {
       var appInstalled = false;
       var apps = packageManager.getInstalledApplications(GET_META_DATA);
-      for (var i = 0; i < apps.size(); i++) {
+      var numApps = apps.size();
+      for (var i = 0; i !== numApps; i++) {
         var appInfo = Java.cast(apps.get(i), ApplicationInfo);
         if (appInfo.packageName.value === pkg) {
           appInstalled = true;
@@ -100,17 +101,20 @@ rpc.exports = {
 
       var intent = packageManager.getLaunchIntentForPackage(pkg);
       if (intent === null && activity === null)
-        throw new Error("Unable to find a front-door activity");
+        throw new Error('Unable to find a front-door activity');
 
       if (intent === null) {
         intent = Intent.$new();
-        intent.setAction("android.intent.action.MAIN");
+        intent.setAction('android.intent.action.MAIN');
       }
 
       if (activity !== null) {
+        var activities = [];
         var pkgInfo = packageManager.getPackageInfo(pkg, GET_ACTIVITIES);
-        var activities = pkgInfo.activities.value.map((activityInfo) => activityInfo.name.value);
-        if (activities.indexOf(activity) < 0)
+        pkgInfo.activities.value.forEach(function (activityInfo) {
+          activities.push(activityInfo.name.value);
+        });
+        if (activities.indexOf(activity) === -1)
           throw new Error("Unable to find activity with identifier '" + activity + "'");
 
         intent.setClassName(pkg, activity);
