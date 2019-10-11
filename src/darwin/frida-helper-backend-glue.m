@@ -1415,9 +1415,10 @@ _frida_darwin_helper_backend_kill_process (guint pid)
   kill (pid, SIGKILL);
 }
 
-void
+guint
 _frida_darwin_helper_backend_kill_application (const gchar * identifier)
 {
+  return 0;
 }
 
 gboolean
