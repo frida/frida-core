@@ -43,18 +43,6 @@ struct _FridaFoundationApi
 
 struct _FridaCFApi
 {
-  const CFAllocatorRef * kCFAllocatorDefault;
-  const CFStringRef * kCFRunLoopCommonModes;
-
-  void (* CFRelease) (CFTypeRef cf);
-
-  CFRunLoopRef (* CFRunLoopGetMain) (void);
-  void (* CFRunLoopRun) (void);
-  void (* CFRunLoopStop) (CFRunLoopRef loop);
-  CFRunLoopTimerRef (* CFRunLoopTimerCreate) (CFAllocatorRef allocator, CFAbsoluteTime fire_date, CFTimeInterval interval, CFOptionFlags flags, CFIndex order, CFRunLoopTimerCallBack callout, CFRunLoopTimerContext * context);
-  void (* CFRunLoopAddTimer) (CFRunLoopRef loop, CFRunLoopTimerRef timer, CFStringRef mode);
-  void (* CFRunLoopTimerInvalidate) (CFRunLoopTimerRef timer);
-
   CFBundleRef (* CFBundleGetMainBundle) (void);
   CFStringRef (* CFBundleGetIdentifier) (CFBundleRef bundle);
 
@@ -71,8 +59,6 @@ struct _FridaObjCApi
   void (* objc_msgSend_void_void) (gpointer self, SEL op);
   gpointer (* objc_msgSend_pointer_void) (gpointer self, SEL op);
 };
-
-static void on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info);
 
 static FridaFoundationApi * frida_foundation_api_try_get (void);
 static FridaCFApi * frida_cf_api_try_get (void);
@@ -93,9 +79,6 @@ static GMainContext * main_context;
 BOOL WINAPI
 DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
-  (void) instance;
-  (void) reserved;
-
   switch (reason)
   {
     case DLL_PROCESS_ATTACH:
@@ -160,15 +143,6 @@ void
 _frida_gadget_kill (guint pid)
 {
   kill (pid, SIGKILL);
-}
-
-#endif
-
-#ifdef HAVE_DARWIN
-
-static void
-on_keep_alive_timer_fire (CFRunLoopTimerRef timer, void * info)
-{
 }
 
 #endif
@@ -248,55 +222,6 @@ frida_gadget_environment_can_block_at_load_time (void)
   return FALSE;
 #else
   return TRUE;
-#endif
-}
-
-gboolean
-frida_gadget_environment_has_system_loop (void)
-{
-#ifdef HAVE_DARWIN
-  return frida_cf_api_try_get () != NULL;
-#else
-  return FALSE;
-#endif
-}
-
-void
-frida_gadget_environment_run_system_loop (void)
-{
-#ifdef HAVE_DARWIN
-  FridaCFApi * api;
-  CFAbsoluteTime distant_future;
-  CFRunLoopTimerRef timer;
-
-  api = frida_cf_api_try_get ();
-  g_assert (api != NULL);
-
-  distant_future = DBL_MAX;
-  timer = api->CFRunLoopTimerCreate (*(api->kCFAllocatorDefault), distant_future, 0, 0, 0, on_keep_alive_timer_fire, NULL);
-  api->CFRunLoopAddTimer (api->CFRunLoopGetMain (), timer, *(api->kCFRunLoopCommonModes));
-
-  api->CFRunLoopRun ();
-
-  api->CFRunLoopTimerInvalidate (timer);
-  api->CFRelease (timer);
-#else
-  g_assert_not_reached ();
-#endif
-}
-
-void
-frida_gadget_environment_stop_system_loop (void)
-{
-#ifdef HAVE_DARWIN
-  FridaCFApi * api;
-
-  api = frida_cf_api_try_get ();
-  g_assert (api != NULL);
-
-  api->CFRunLoopStop (api->CFRunLoopGetMain ());
-#else
-  g_assert_not_reached ();
 #endif
 }
 
@@ -395,8 +320,6 @@ frida_gadget_environment_has_objc_class (const gchar * name)
 static gpointer
 run_main_loop (gpointer data)
 {
-  (void) data;
-
   g_main_context_push_thread_default (main_context);
   g_main_loop_run (main_loop);
   g_main_context_pop_thread_default (main_context);
@@ -407,8 +330,6 @@ run_main_loop (gpointer data)
 static gboolean
 stop_main_loop (gpointer data)
 {
-  (void) data;
-
   g_main_loop_quit (main_loop);
 
   return FALSE;
@@ -505,18 +426,6 @@ frida_cf_api_try_get (void)
 #define FRIDA_ASSIGN_CF_SYMBOL(n) \
     api->n = dlsym (cf, G_STRINGIFY (n)); \
     g_assert (api->n != NULL)
-
-      FRIDA_ASSIGN_CF_SYMBOL (kCFAllocatorDefault);
-      FRIDA_ASSIGN_CF_SYMBOL (kCFRunLoopCommonModes);
-
-      FRIDA_ASSIGN_CF_SYMBOL (CFRelease);
-
-      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopGetMain);
-      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopRun);
-      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopStop);
-      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerCreate);
-      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopAddTimer);
-      FRIDA_ASSIGN_CF_SYMBOL (CFRunLoopTimerInvalidate);
 
       FRIDA_ASSIGN_CF_SYMBOL (CFBundleGetMainBundle);
       FRIDA_ASSIGN_CF_SYMBOL (CFBundleGetIdentifier);

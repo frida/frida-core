@@ -377,29 +377,22 @@ namespace Frida.Gadget {
 		if (wait_for_resume_needed && Environment.can_block_at_load_time ()) {
 			var scheduler = Gum.ScriptBackend.get_scheduler ();
 
-			if (!Environment.has_system_loop ()) {
-				scheduler.disable_background_thread ();
+			scheduler.disable_background_thread ();
 
-				wait_for_resume_context = scheduler.get_js_context ();
-			}
+			wait_for_resume_context = scheduler.get_js_context ();
 
 			var ignore_scope = new ThreadIgnoreScope ();
 
 			schedule_start ();
 
-			var context = wait_for_resume_context;
-			if (context != null) {
-				var loop = new MainLoop (context, true);
-				wait_for_resume_loop = loop;
+			var loop = new MainLoop (wait_for_resume_context, true);
+			wait_for_resume_loop = loop;
 
-				context.push_thread_default ();
-				loop.run ();
-				context.pop_thread_default ();
+			wait_for_resume_context.push_thread_default ();
+			loop.run ();
+			wait_for_resume_context.pop_thread_default ();
 
-				scheduler.enable_background_thread ();
-			} else {
-				Environment.run_system_loop ();
-			}
+			scheduler.enable_background_thread ();
 
 			ignore_scope = null;
 		} else {
@@ -450,17 +443,13 @@ namespace Frida.Gadget {
 		cond.signal ();
 		mutex.unlock ();
 
-		if (wait_for_resume_needed) {
-			if (wait_for_resume_context != null) {
-				var source = new IdleSource ();
-				source.set_callback (() => {
-					wait_for_resume_loop.quit ();
-					return false;
-				});
-				source.attach (wait_for_resume_context);
-			} else if (Environment.has_system_loop ()) {
-				Environment.stop_system_loop ();
-			}
+		if (wait_for_resume_context != null) {
+			var source = new IdleSource ();
+			source.set_callback (() => {
+				wait_for_resume_loop.quit ();
+				return false;
+			});
+			source.attach (wait_for_resume_context);
 		}
 	}
 
@@ -1661,10 +1650,6 @@ namespace Frida.Gadget {
 		private extern void deinit ();
 
 		private extern bool can_block_at_load_time ();
-
-		private extern bool has_system_loop ();
-		private extern void run_system_loop ();
-		private extern void stop_system_loop ();
 
 		private extern unowned MainContext get_main_context ();
 
