@@ -1,9 +1,11 @@
 var pointerSize = Process.pointerSize;
 
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
+var SIGKILL = 9;
 
 var upcoming = {};
 var gating = false;
+var suspendedPids = {};
 
 var jbdPidsToIgnore = null;
 
@@ -11,6 +13,13 @@ var substrateInvocations = {};
 var substratePidsPending = {};
 
 rpc.exports = {
+  dispose: function () {
+    var kill = new NativeFunction(Module.getExportByName(null, 'kill'), 'int', ['int', 'int']);
+    Object.keys(suspendedPids)
+      .forEach(function (pid) {
+        kill(suspendedPids[pid], SIGKILL);
+      });
+  },
   prepareForLaunch: function (identifier) {
     upcoming[identifier] = true;
   },
@@ -23,6 +32,12 @@ rpc.exports = {
   },
   disableSpawnGating: function () {
     gating = false;
+  },
+  claimProcess: function (pid) {
+    delete suspendedPids[pid];
+  },
+  unclaimProcess: function (pid) {
+    suspendedPids[pid] = pid;
   },
 };
 
@@ -76,6 +91,8 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
       return;
 
     var pid = this.pidPtr.readU32();
+
+    suspendedPids[pid] = pid;
 
     if (jbdPidsToIgnore !== null)
       jbdPidsToIgnore[pid] = true;

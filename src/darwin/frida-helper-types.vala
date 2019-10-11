@@ -5,6 +5,8 @@ namespace Frida {
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
 		public signal void uninjected (uint id);
+		public signal void process_resumed (uint pid);
+		public signal void process_killed (uint pid);
 
 		public abstract uint pid {
 			get;
@@ -50,6 +52,8 @@ namespace Frida {
 		public signal void spawn_removed (HostSpawnInfo info);
 		public signal void injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module);
 		public signal void uninjected (uint id);
+		public signal void process_resumed (uint pid);
+		public signal void process_killed (uint pid);
 
 		public abstract async void stop (Cancellable? cancellable) throws GLib.Error;
 

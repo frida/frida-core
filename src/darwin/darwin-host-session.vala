@@ -380,6 +380,8 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
+			helper.process_resumed.connect (on_process_resumed);
+			helper.process_killed.connect (on_process_killed);
 		}
 
 		~FruitController () {
@@ -388,6 +390,8 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.disconnect (on_spawn_preparation_started);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 			launchd_agent.app_launch_started.disconnect (on_app_launch_started);
+			helper.process_resumed.disconnect (on_process_resumed);
+			helper.process_killed.disconnect (on_process_killed);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -569,7 +573,16 @@ namespace Frida {
 
 		private void on_spawn_captured (HostSpawnInfo info) {
 			xpcproxies.remove (info.pid);
+			launchd_agent.unclaim_process.begin (info.pid, io_cancellable);
 			handle_spawn.begin (info);
+		}
+
+		private void on_process_resumed (uint pid) {
+			launchd_agent.claim_process.begin (pid, io_cancellable);
+		}
+
+		private void on_process_killed (uint pid) {
+			launchd_agent.claim_process.begin (pid, io_cancellable);
 		}
 
 		private async void handle_spawn (HostSpawnInfo info) {
@@ -774,6 +787,14 @@ namespace Frida {
 
 		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
 			yield call ("disableSpawnGating", new Json.Node[] {}, cancellable);
+		}
+
+		public async void claim_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield call ("claimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
+		}
+
+		public async void unclaim_process (uint pid, Cancellable? cancellable) throws Error, IOError {
+			yield call ("unclaimProcess", new Json.Node[] { new Json.Node.alloc ().init_int (pid) }, cancellable);
 		}
 
 		protected override void on_event (string type, Json.Array event) {
