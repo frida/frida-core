@@ -109,10 +109,9 @@ rpc.exports = {
       }
 
       if (activity !== null) {
-        var activities = [];
         var pkgInfo = packageManager.getPackageInfo(pkg, GET_ACTIVITIES);
-        pkgInfo.activities.value.forEach(function (activityInfo) {
-          activities.push(activityInfo.name.value);
+        var activities = pkgInfo.activities.value.map(function (activityInfo) {
+          return activityInfo.name.value;
         });
         if (activities.indexOf(activity) === -1)
           throw new Error("Unable to find activity with identifier '" + activity + "'");
