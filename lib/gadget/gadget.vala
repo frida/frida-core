@@ -341,7 +341,7 @@ namespace Frida.Gadget {
 	private Mutex mutex;
 	private Cond cond;
 
-	public void load (Gum.MemoryRange? mapped_range) {
+	public void load (Gum.MemoryRange? mapped_range, string? config_data) {
 		if (loaded)
 			return;
 		loaded = true;
@@ -351,7 +351,9 @@ namespace Frida.Gadget {
 		location = detect_location (mapped_range);
 
 		try {
-			config = load_config (location);
+			config = (config_data != null)
+				? parse_config (config_data)
+				: load_config (location);
 		} catch (Error e) {
 			log_warning (e.message);
 			return;
@@ -553,6 +555,14 @@ namespace Frida.Gadget {
 			throw new Error.PERMISSION_DENIED ("%s", e.message);
 		}
 
+		try {
+			return Json.gobject_from_data (typeof (Config), config_data) as Config;
+		} catch (GLib.Error e) {
+			throw new Error.INVALID_ARGUMENT ("Invalid config: %s", e.message);
+		}
+	}
+
+	private Config parse_config (string config_data) throws Error {
 		try {
 			return Json.gobject_from_data (typeof (Config), config_data) as Config;
 		} catch (GLib.Error e) {

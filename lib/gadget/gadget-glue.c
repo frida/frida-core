@@ -63,7 +63,7 @@ struct _FridaObjCApi
 static FridaFoundationApi * frida_foundation_api_try_get (void);
 static FridaCFApi * frida_cf_api_try_get (void);
 static FridaObjCApi * frida_objc_api_try_get (void);
-static gboolean frida_dylib_range_try_get (const gchar * apple[], GumMemoryRange * range);
+static void frida_parse_apple_parameters (const gchar * apple[], gboolean * found_range, GumMemoryRange * range, gchar ** config_data);
 
 #endif
 
@@ -82,7 +82,7 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
   switch (reason)
   {
     case DLL_PROCESS_ATTACH:
-      frida_gadget_load (NULL);
+      frida_gadget_load (NULL, NULL);
       break;
     case DLL_PROCESS_DETACH:
       frida_gadget_unload ();
@@ -115,12 +115,15 @@ _frida_gadget_kill (guint pid)
 __attribute__ ((constructor)) static void
 frida_on_load (int argc, const char * argv[], const char * envp[], const char * apple[])
 {
-  GumMemoryRange frida_dylib_range;
+  gboolean found_range;
+  GumMemoryRange range;
+  gchar * config_data;
 
-  if (frida_dylib_range_try_get (apple, &frida_dylib_range))
-    frida_gadget_load (&frida_dylib_range);
-  else
-    frida_gadget_load (NULL);
+  frida_parse_apple_parameters (apple, &found_range, &range, &config_data);
+
+  frida_gadget_load (found_range ? &range : NULL, config_data);
+
+  g_free (config_data);
 }
 
 # else
@@ -128,7 +131,7 @@ frida_on_load (int argc, const char * argv[], const char * envp[], const char * 
 __attribute__ ((constructor)) static void
 frida_on_load (void)
 {
-  frida_gadget_load (NULL);
+  frida_gadget_load (NULL, NULL);
 }
 
 __attribute__ ((destructor)) static void
@@ -502,23 +505,35 @@ frida_objc_api_try_get (void)
   return api;
 }
 
-static gboolean
-frida_dylib_range_try_get (const gchar * apple[], GumMemoryRange * range)
+static void
+frida_parse_apple_parameters (const gchar * apple[], gboolean * found_range, GumMemoryRange * range, gchar ** config_data)
 {
   const gchar * entry;
   guint i = 0;
+
+  *found_range = FALSE;
+  *config_data = NULL;
 
   while ((entry = apple[i++]) != NULL)
   {
     if (g_str_has_prefix (entry, "frida_dylib_range="))
     {
-      if (sscanf (entry, "frida_dylib_range=0x%" G_GINT64_MODIFIER "x,0x%" G_GSIZE_MODIFIER "x",
-          &range->base_address, &range->size) == 2)
-        return TRUE;
+      *found_range = sscanf (entry, "frida_dylib_range=0x%" G_GINT64_MODIFIER "x,0x%" G_GSIZE_MODIFIER "x",
+          &range->base_address, &range->size) == 2;
+    }
+    else if (g_str_has_prefix (entry, "frida_gadget_config="))
+    {
+      guchar * data;
+      gsize size;
+
+      data = g_base64_decode (entry + 20, &size);
+      if (data != NULL)
+      {
+        *config_data = g_strndup ((const gchar *) data, size);
+        g_free (data);
+      }
     }
   }
-
-  return FALSE;
 }
 
 #endif
