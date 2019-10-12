@@ -285,7 +285,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		public string path {
+		public string? path {
 			get;
 			construct;
 		}
@@ -297,7 +297,7 @@ namespace Frida.Gadget {
 
 		private string? cached_bundle_id = null;
 
-		public Location (string executable_name, string path, Gum.MemoryRange range) {
+		public Location (string executable_name, string? path, Gum.MemoryRange range) {
 			Object (
 				executable_name: executable_name,
 				path: path,
@@ -348,7 +348,7 @@ namespace Frida.Gadget {
 
 		Environment.init ();
 
-		location = detect_location ();
+		location = detect_location (mapped_range);
 
 		try {
 			config = load_config (location);
@@ -359,10 +359,7 @@ namespace Frida.Gadget {
 
 		Gum.Process.set_code_signing_policy (config.code_signing);
 
-		if (mapped_range != null)
-			Gum.Cloak.add_range (mapped_range);
-		else
-			Gum.Cloak.add_range (location.range);
+		Gum.Cloak.add_range (location.range);
 
 		wait_for_resume_needed = true;
 
@@ -530,7 +527,11 @@ namespace Frida.Gadget {
 	}
 
 	private Config load_config (Location location) throws Error {
-		var config_path = derive_config_path_from_file_path (location.path);
+		unowned string? gadget_path = location.path;
+		if (gadget_path == null)
+			return new Config ();
+
+		var config_path = derive_config_path_from_file_path (gadget_path);
 
 #if ANDROID
 		if (!FileUtils.test (config_path, FileTest.EXISTS)) {
@@ -559,12 +560,12 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private Location detect_location () {
+	private Location detect_location (Gum.MemoryRange? mapped_range) {
 		string? executable_name = null;
 		string? executable_path = null;
 		Gum.MemoryRange? executable_range = null;
 		string? our_path = null;
-		Gum.MemoryRange? our_range = null;
+		Gum.MemoryRange? our_range = mapped_range;
 
 		Gum.Address our_address = Gum.Address.from_pointer ((void *) detect_location);
 
@@ -578,6 +579,9 @@ namespace Frida.Gadget {
 				executable_range = details.range;
 			}
 
+			if (mapped_range != null)
+				return false;
+
 			if (our_address >= range.base_address && our_address < range.base_address + range.size) {
 				our_path = details.path;
 				our_range = range;
@@ -589,10 +593,7 @@ namespace Frida.Gadget {
 			return true;
 		});
 
-		if (our_path == null) {
-			our_path = executable_path;
-			our_range = executable_range;
-		}
+		assert (our_range != null);
 
 		return new Location (executable_name, our_path, our_range);
 	}
@@ -708,15 +709,18 @@ namespace Frida.Gadget {
 			var raw_path = (config.interaction as ScriptInteraction).path;
 
 			if (!Path.is_absolute (raw_path)) {
-				var documents_dir = Environment.detect_documents_dir ();
+				string? documents_dir = Environment.detect_documents_dir ();
 				if (documents_dir != null) {
 					var script_path = Path.build_filename (documents_dir, raw_path);
 					if (FileUtils.test (script_path, FileTest.EXISTS))
 						return script_path;
 				}
 
-				var base_dir = Path.get_dirname (location.path);
-				return Path.build_filename (base_dir, raw_path);
+				unowned string? gadget_path = location.path;
+				if (gadget_path != null) {
+					var base_dir = Path.get_dirname (gadget_path);
+					return Path.build_filename (base_dir, raw_path);
+				}
 			}
 
 			return raw_path;
@@ -912,8 +916,11 @@ namespace Frida.Gadget {
 			var raw_path = (config.interaction as ScriptDirectoryInteraction).path;
 
 			if (!Path.is_absolute (raw_path)) {
-				var base_dir = Path.get_dirname (location.path);
-				return Path.build_filename (base_dir, raw_path);
+				unowned string? gadget_path = location.path;
+				if (gadget_path != null) {
+					var base_dir = Path.get_dirname (gadget_path);
+					return Path.build_filename (base_dir, raw_path);
+				}
 			}
 
 			return raw_path;
