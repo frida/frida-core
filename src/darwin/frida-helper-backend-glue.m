@@ -37,7 +37,7 @@
 #define FRIDA_MAX_BREAKPOINTS            4
 #define FRIDA_MAX_PAGE_POOL              8
 
-#if (defined (HAVE_ARM) || defined (HAVE_ARM64)) && !defined (__DARWIN_OPAQUE_ARM_THREAD_STATE64)
+#if (defined (HAVE_ARM) || defined (HAVE_ARM64)) && !defined (__darwin_arm_thread_state64_get_pc)
 # define __darwin_arm_thread_state64_get_pc(ts) \
     ((ts).__pc)
 # define __darwin_arm_thread_state64_get_pc_fptr(ts) \
