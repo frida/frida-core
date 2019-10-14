@@ -167,8 +167,8 @@ Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotecte
 Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
   onEnter: function (args) {
     var fd = args[0].toInt32();
-    var state = getState(this.threadId, 'close');
-    if (fd !== state.logFd)
+    var state = threadStates[this.threadId];
+    if (state === undefined || fd !== state.logFd)
       return;
 
     var crashedPid = state.crashedPid;
