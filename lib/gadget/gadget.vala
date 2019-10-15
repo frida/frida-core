@@ -259,10 +259,21 @@ namespace Frida.Gadget {
 			default = DEFAULT_LISTEN_PORT;
 		}
 
+		public PortConflictBehavior on_port_conflict {
+			get;
+			set;
+			default = PortConflictBehavior.FAIL;
+		}
+
 		public LoadBehavior on_load {
 			get;
 			set;
 			default = LoadBehavior.WAIT;
+		}
+
+		public enum PortConflictBehavior {
+			FAIL,
+			PICK_NEXT
 		}
 
 		public enum LoadBehavior {
@@ -1170,7 +1181,7 @@ namespace Frida.Gadget {
 	private class Server : BaseController {
 		public InetSocketAddress listen_address {
 			get;
-			construct;
+			set;
 		}
 
 		public string listen_host {
@@ -1198,7 +1209,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private DBusServer server;
+		private DBusServer? server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
@@ -1211,12 +1222,32 @@ namespace Frida.Gadget {
 		}
 
 		protected override async void on_start () throws Error {
-			try {
-				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS,
-					DBus.generate_guid ());
-			} catch (GLib.Error listen_error) {
-				throw new Error.ADDRESS_IN_USE ("%s", listen_error.message);
-			}
+			var on_port_conflict = (config.interaction as ListenInteraction).on_port_conflict;
+
+			uint16 start_port = listen_port;
+			uint16 candidate_port = start_port;
+			do {
+				try {
+					server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS,
+						DBus.generate_guid ());
+				} catch (GLib.Error e) {
+					if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
+						candidate_port++;
+						if (candidate_port == start_port)
+							throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
+						else if (candidate_port == 0)
+							candidate_port = 1024;
+						listen_address = new InetSocketAddress (listen_address.address, candidate_port);
+					} else {
+						if (e is IOError.ADDRESS_IN_USE)
+							throw new Error.ADDRESS_IN_USE ("%s", e.message);
+						else if (e is IOError.PERMISSION_DENIED)
+							throw new Error.PERMISSION_DENIED ("%s", e.message);
+						else
+							throw new Error.NOT_SUPPORTED ("%s", e.message);
+					}
+				}
+			} while (server == null);
 
 			server.new_connection.connect ((connection) => {
 				if (server == null)
