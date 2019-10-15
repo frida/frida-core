@@ -352,12 +352,16 @@ namespace Frida.Gadget {
 	private Mutex mutex;
 	private Cond cond;
 
-	public void load (Gum.MemoryRange? mapped_range, string? config_data) {
+	public void load (Gum.MemoryRange? mapped_range, string? config_data, int * result) {
 		if (loaded)
 			return;
 		loaded = true;
 
 		Environment.init ();
+
+		Gee.Promise<int>? request = null;
+		if (result != null)
+			request = new Gee.Promise<int> ();
 
 		location = detect_location (mapped_range);
 
@@ -393,7 +397,7 @@ namespace Frida.Gadget {
 
 			var ignore_scope = new ThreadIgnoreScope ();
 
-			schedule_start ();
+			start (request);
 
 			var loop = new MainLoop (wait_for_resume_context, true);
 			wait_for_resume_loop = loop;
@@ -406,7 +410,15 @@ namespace Frida.Gadget {
 
 			ignore_scope = null;
 		} else {
-			schedule_start ();
+			start (request);
+		}
+
+		if (result != null) {
+			try {
+				*result = request.future.wait ();
+			} catch (Gee.FutureError e) {
+				*result = -1;
+			}
 		}
 	}
 
@@ -473,16 +485,16 @@ namespace Frida.Gadget {
 		return result;
 	}
 
-	private void schedule_start () {
+	private void start (Gee.Promise<int>? request) {
 		var source = new IdleSource ();
 		source.set_callback (() => {
-			start.begin ();
+			perform_start.begin (request);
 			return false;
 		});
 		source.attach (Environment.get_main_context ());
 	}
 
-	private async void start () {
+	private async void perform_start (Gee.Promise<int>? request) {
 		worker_ignore_scope = new ThreadIgnoreScope ();
 
 		exceptor = Gum.Exceptor.obtain ();
@@ -496,25 +508,45 @@ namespace Frida.Gadget {
 				ctrl = runner;
 
 				resume ();
+
+				if (request != null)
+					request.set_value (0);
 			} else if (interaction is ScriptDirectoryInteraction) {
 				var runner = new ScriptDirectoryRunner (config, location);
 				yield runner.start ();
 				ctrl = runner;
 
 				resume ();
+
+				if (request != null)
+					request.set_value (0);
 			} else if (interaction is ListenInteraction) {
 				var server = new Server (config, location);
 				yield server.start ();
 				ctrl = server;
 
-				log_info ("Listening on %s TCP port %hu".printf (server.listen_host, server.listen_port));
+				if (request != null) {
+					request.set_value (server.listen_port);
+				} else {
+					log_info ("Listening on %s TCP port %hu".printf (server.listen_host, server.listen_port));
+				}
 			} else {
-				log_warning ("Failed to start: invalid interaction specified");
 				resume ();
+
+				if (request != null) {
+					request.set_exception (new Error.NOT_SUPPORTED ("Invalid interaction specified"));
+				} else {
+					log_warning ("Failed to start: invalid interaction specified");
+				}
 			}
 		} catch (Error e) {
-			log_warning ("Failed to start: " + e.message);
 			resume ();
+
+			if (request != null) {
+				request.set_exception (e);
+			} else {
+				log_warning ("Failed to start: " + e.message);
+			}
 		}
 		controller = ctrl;
 	}

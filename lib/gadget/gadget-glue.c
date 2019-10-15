@@ -82,7 +82,7 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
   switch (reason)
   {
     case DLL_PROCESS_ATTACH:
-      frida_gadget_load (NULL, NULL);
+      frida_gadget_load (NULL, NULL, NULL);
       break;
     case DLL_PROCESS_DETACH:
       frida_gadget_unload ();
@@ -113,7 +113,7 @@ _frida_gadget_kill (guint pid)
 # ifdef HAVE_DARWIN
 
 __attribute__ ((constructor)) static void
-frida_on_load (int argc, const char * argv[], const char * envp[], const char * apple[])
+frida_on_load (int argc, const char * argv[], const char * envp[], const char * apple[], int * result)
 {
   gboolean found_range;
   GumMemoryRange range;
@@ -121,7 +121,7 @@ frida_on_load (int argc, const char * argv[], const char * envp[], const char * 
 
   frida_parse_apple_parameters (apple, &found_range, &range, &config_data);
 
-  frida_gadget_load (found_range ? &range : NULL, config_data);
+  frida_gadget_load (found_range ? &range : NULL, config_data, (config_data != NULL) ? result : NULL);
 
   g_free (config_data);
 }
@@ -131,7 +131,7 @@ frida_on_load (int argc, const char * argv[], const char * envp[], const char * 
 __attribute__ ((constructor)) static void
 frida_on_load (void)
 {
-  frida_gadget_load (NULL, NULL);
+  frida_gadget_load (NULL, NULL, NULL);
 }
 
 __attribute__ ((destructor)) static void
