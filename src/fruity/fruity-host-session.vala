@@ -759,8 +759,6 @@ namespace Frida {
 					last_server_check_error = (Error) api_error;
 				}
 
-				printerr ("NOPE: %s\n", api_error.message);
-
 				remote_server_request.reject (api_error);
 				remote_server_request = null;
 
