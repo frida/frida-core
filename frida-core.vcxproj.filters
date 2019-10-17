@@ -105,6 +105,9 @@
     <None Include="src\fruity\lldb.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
+    <None Include="src\fruity\injector.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
     <None Include="src\fruity\usbmux.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
@@ -195,6 +198,9 @@
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\lldb.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\injector.c">
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\usbmux.c">
