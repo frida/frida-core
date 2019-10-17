@@ -832,7 +832,7 @@ namespace Frida {
 		}
 
 		private void on_remote_agent_session_destroyed (AgentSessionId remote_id, SessionDetachReason reason) {
-			AgentSessionId local_id;
+			AgentSessionId? local_id;
 			if (!remote_agent_sessions.unset (remote_id, out local_id))
 				return;
 
@@ -847,7 +847,7 @@ namespace Frida {
 		}
 
 		private void on_remote_agent_session_crashed (AgentSessionId remote_id, CrashInfo crash) {
-			AgentSessionId local_id;
+			AgentSessionId? local_id;
 			if (!remote_agent_sessions.unset (remote_id, out local_id))
 				return;
 
