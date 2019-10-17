@@ -3,8 +3,7 @@ namespace Frida {
 		private Fruity.UsbmuxClient control_client;
 
 		private Gee.HashSet<uint> devices = new Gee.HashSet<uint> ();
-		private Gee.HashMap<uint, FruityRemoteProvider> remote_providers = new Gee.HashMap<uint, FruityRemoteProvider> ();
-		private Gee.HashMap<uint, FruityLockdownProvider> lockdown_providers = new Gee.HashMap<uint, FruityLockdownProvider> ();
+		private Gee.HashMap<uint, FruityHostSessionProvider> providers = new Gee.HashMap<uint, FruityHostSessionProvider> ();
 
 		private Promise<bool> start_request;
 		private Cancellable start_cancellable;
@@ -99,17 +98,11 @@ namespace Frida {
 
 			devices.clear ();
 
-			foreach (var provider in lockdown_providers.values) {
+			foreach (var provider in providers.values) {
 				provider_unavailable (provider);
 				yield provider.close (cancellable);
 			}
-			lockdown_providers.clear ();
-
-			foreach (var provider in remote_providers.values) {
-				provider_unavailable (provider);
-				yield provider.close (cancellable);
-			}
-			remote_providers.clear ();
+			providers.clear ();
 		}
 
 		private async void add_device (Fruity.DeviceDetails details) {
@@ -161,14 +154,10 @@ namespace Frida {
 
 			var icon = Image.from_data (icon_data);
 
-			var remote_provider = new FruityRemoteProvider (name, icon, details);
-			remote_providers[raw_id] = remote_provider;
+			var provider = new FruityHostSessionProvider (name, icon, details);
+			providers[raw_id] = provider;
 
-			var lockdown_provider = new FruityLockdownProvider (name, icon, details);
-			lockdown_providers[raw_id] = lockdown_provider;
-
-			provider_available (remote_provider);
-			provider_available (lockdown_provider);
+			provider_available (provider);
 		}
 
 		private void remove_device (Fruity.DeviceId id) {
@@ -177,16 +166,933 @@ namespace Frida {
 				return;
 			devices.remove (raw_id);
 
-			FruityLockdownProvider lockdown_provider;
-			if (lockdown_providers.unset (raw_id, out lockdown_provider))
-				lockdown_provider.close.begin (io_cancellable);
-
-			FruityRemoteProvider remote_provider;
-			if (remote_providers.unset (raw_id, out remote_provider))
-				remote_provider.close.begin (io_cancellable);
+			FruityHostSessionProvider provider;
+			if (providers.unset (raw_id, out provider))
+				provider.close.begin (io_cancellable);
 		}
 
 		public extern static void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon)
 			throws Error;
+	}
+
+	public class FruityHostSessionProvider : Object, HostSessionProvider, ChannelProvider, FruityLockdownProvider {
+		public string id {
+			get { return device_details.udid.raw_value; }
+		}
+
+		public string name {
+			get { return device_name; }
+		}
+
+		public Image? icon {
+			get { return device_icon; }
+		}
+
+		public HostSessionProviderKind kind {
+			get { return HostSessionProviderKind.USB; }
+		}
+
+		public string device_name {
+			get;
+			construct;
+		}
+
+		public Image? device_icon {
+			get;
+			construct;
+		}
+
+		public Fruity.DeviceDetails device_details {
+			get;
+			construct;
+		}
+
+		private FruityHostSession? host_session;
+		private Promise<Fruity.LockdownClient>? lockdown_client_request;
+
+		public FruityHostSessionProvider (string name, Image? icon, Fruity.DeviceDetails details) {
+			Object (
+				device_name: name,
+				device_icon: icon,
+				device_details: details
+			);
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (lockdown_client_request != null) {
+				Fruity.LockdownClient? lockdown = null;
+				try {
+					lockdown = yield get_lockdown_client (cancellable);
+				} catch (Error e) {
+				}
+
+				if (lockdown != null)
+					yield lockdown.close (cancellable);
+
+				lockdown_client_request = null;
+			}
+		}
+
+		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
+			if (host_session != null)
+				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+
+			host_session = new FruityHostSession (this, this);
+			host_session.agent_session_closed.connect (on_agent_session_closed);
+
+			return host_session;
+		}
+
+		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
+			if (session != host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			yield host_session.close (cancellable);
+			host_session = null;
+		}
+
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+				Cancellable? cancellable) throws Error, IOError {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+			return this.host_session.obtain_agent_session (agent_session_id);
+		}
+
+		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
+				CrashInfo? crash) {
+			agent_session_closed (id, reason, crash);
+		}
+
+		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
+			if (address.has_prefix ("tcp:")) {
+				ulong raw_port;
+				if (!ulong.try_parse (address.substring (4), out raw_port) || raw_port == 0 || raw_port > uint16.MAX)
+					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
+				uint16 port = (uint16) raw_port;
+
+				Fruity.UsbmuxClient client = null;
+				try {
+					client = yield Fruity.UsbmuxClient.open (cancellable);
+
+					yield client.connect_to_port (device_details.id, port, cancellable);
+
+					return client.connection;
+				} catch (GLib.Error e) {
+					if (client != null)
+						client.close.begin ();
+
+					if (e is Fruity.UsbmuxError.CONNECTION_REFUSED)
+						throw new Error.SERVER_NOT_RUNNING ("%s", e.message);
+
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			if (address.has_prefix ("lockdown:")) {
+				string service_name = address.substring (9);
+
+				var client = yield get_lockdown_client (cancellable);
+
+				try {
+					return yield client.start_service (service_name, cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
+
+			throw new Error.NOT_SUPPORTED ("Unsupported channel address");
+		}
+
+		private async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError {
+			while (lockdown_client_request != null) {
+				try {
+					return yield lockdown_client_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			lockdown_client_request = new Promise<Fruity.LockdownClient> ();
+
+			try {
+				var client = yield Fruity.LockdownClient.open (device_details, cancellable);
+
+				lockdown_client_request.resolve (client);
+
+				return client;
+			} catch (GLib.Error e) {
+				var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
+
+				lockdown_client_request.reject (api_error);
+				lockdown_client_request = null;
+
+				throw_api_error (api_error);
+			}
+		}
+	}
+
+	public interface FruityLockdownProvider : Object {
+		public abstract async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError;
+	}
+
+	public class FruityHostSession : Object, HostSession {
+		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
+			CrashInfo? crash);
+
+		public weak ChannelProvider channel_provider {
+			get;
+			construct;
+		}
+
+		public weak FruityLockdownProvider lockdown_provider {
+			get;
+			construct;
+		}
+
+		private Gee.HashMap<uint, SpawnEntry> spawn_entries = new Gee.HashMap<uint, SpawnEntry> ();
+		private Gee.HashMap<AgentSessionId?, AgentEntry> agent_entries =
+			new Gee.HashMap<AgentSessionId?, AgentEntry> (AgentSessionId.hash, AgentSessionId.equal);
+
+		private Promise<RemoteServer>? remote_server_request;
+		private RemoteServer? current_remote_server;
+		private int64 last_server_check_time = -1;
+		private Error? last_server_check_error = null;
+		private Gee.HashMap<AgentSessionId?, AgentSessionId?> remote_agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
+
+		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+		private uint next_agent_session_id = 1;
+
+		private Cancellable io_cancellable = new Cancellable ();
+
+		private const uint16 DEFAULT_SERVER_PORT = 27042;
+		private const string GADGET_APP_ID = "re.frida.Gadget";
+		private const string DEBUGSERVER_SERVICE_NAME = "com.apple.debugserver";
+
+		public FruityHostSession (ChannelProvider channel_provider, FruityLockdownProvider lockdown_provider) {
+			Object (
+				channel_provider: channel_provider,
+				lockdown_provider: lockdown_provider
+			);
+		}
+
+		public async void close (Cancellable? cancellable) throws IOError {
+			if (remote_server_request != null) {
+				var server = yield try_get_remote_server (cancellable);
+				if (server != null) {
+					try {
+						yield server.connection.close (cancellable);
+					} catch (GLib.Error e) {
+					}
+				}
+			}
+
+			while (!agent_entries.is_empty) {
+				var iterator = agent_entries.values.iterator ();
+				iterator.next ();
+				var entry = iterator.get ();
+				yield entry.close (cancellable);
+			}
+
+			while (!spawn_entries.is_empty) {
+				var iterator = spawn_entries.values.iterator ();
+				iterator.next ();
+				var entry = iterator.get ();
+				yield entry.close (cancellable);
+			}
+
+			io_cancellable.cancel ();
+		}
+
+		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.get_frontmost_application (cancellable);
+		}
+
+		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error {
+			var server = yield try_get_remote_server (cancellable);
+			if (server != null && server.flavor == REGULAR)
+				return yield server.session.enumerate_applications (cancellable);
+
+			try {
+				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+
+				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
+
+				var apps = yield installation_proxy.browse (cancellable);
+
+				uint no_pid = 0;
+				var no_icon = ImageData (0, 0, 0, "");
+
+				var result = new HostApplicationInfo[apps.size];
+				int i = 0;
+				foreach (var app in apps) {
+					result[i] = HostApplicationInfo (app.identifier, app.name, no_pid, no_icon, no_icon);
+					i++;
+				}
+
+				if (server != null && server.flavor == GADGET) {
+					foreach (var app in yield server.session.enumerate_applications (cancellable))
+						result += app;
+				}
+
+				return result;
+			} catch (Fruity.InstallationProxyError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+
+		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.enumerate_processes (cancellable);
+		}
+
+		public async void enable_spawn_gating (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			yield server.session.enable_spawn_gating (cancellable);
+		}
+
+		public async void disable_spawn_gating (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			yield server.session.disable_spawn_gating (cancellable);
+		}
+
+		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.enumerate_pending_spawn (cancellable);
+		}
+
+		public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.enumerate_pending_children (cancellable);
+		}
+
+		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws GLib.Error {
+			var server = yield try_get_remote_server (cancellable);
+			if (server != null && (server.flavor != GADGET || program == GADGET_APP_ID))
+				return yield server.session.spawn (program, options, cancellable);
+
+			if (program[0] == '/')
+				throw new Error.NOT_SUPPORTED ("Only able to spawn apps");
+
+			var launch_options = new LLDB.LaunchOptions ();
+
+			if (options.has_envp)
+				throw new Error.NOT_SUPPORTED ("The 'envp' option is not supported when spawning iOS apps");
+
+			if (options.has_env)
+				launch_options.env = options.env;
+
+			if (options.cwd.length > 0)
+				throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning iOS apps");
+
+			var aux_options = options.load_aux ();
+
+			if (aux_options.contains ("aslr")) {
+				string? aslr = null;
+				if (!aux_options.lookup ("aslr", "s", out aslr) || (aslr != "auto" && aslr != "disable")) {
+					throw new Error.INVALID_ARGUMENT (
+						"The 'aslr' option must be a string set to either 'auto' or 'disable'");
+				}
+				launch_options.aslr = (aslr == "auto") ? LLDB.ASLR.AUTO : LLDB.ASLR.DISABLE;
+			}
+
+			string? gadget_path = null;
+			if (aux_options.contains ("gadget")) {
+				if (!aux_options.lookup ("gadget", "s", out gadget_path)) {
+					throw new Error.INVALID_ARGUMENT (
+						"The 'gadget' option must be a string pointing at the frida-gadget.dylib to use");
+				}
+			}
+
+			try {
+				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+
+				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
+
+				var app = yield installation_proxy.lookup_one (program, cancellable);
+				if (app == null)
+					throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier '%s'", program);
+
+				string[] argv = { app.path };
+				if (options.has_argv) {
+					var provided_argv = options.argv;
+					var length = provided_argv.length;
+					for (int i = 1; i < length; i++)
+						argv += provided_argv[i];
+				}
+
+				var lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME, cancellable);
+				var lldb = yield LLDB.Client.open (lldb_stream, cancellable);
+				var process = yield lldb.launch (argv, launch_options, cancellable);
+				if (process.observed_state == ALREADY_RUNNING) {
+					yield lldb.kill (cancellable);
+					yield lldb.close (cancellable);
+
+					lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME, cancellable);
+					lldb = yield LLDB.Client.open (lldb_stream, cancellable);
+					process = yield lldb.launch (argv, launch_options, cancellable);
+				}
+
+				var pid = process.pid;
+
+				var entry = new SpawnEntry (lldb, process, gadget_path, channel_provider);
+				entry.closed.connect (on_spawn_entry_closed);
+				entry.output.connect (on_spawn_entry_output);
+				spawn_entries[pid] = entry;
+
+				return pid;
+			} catch (Fruity.InstallationProxyError e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			} catch (Fruity.LockdownError e) {
+				if (e is Fruity.LockdownError.INVALID_SERVICE)
+					throw new Error.NOT_SUPPORTED ("Developer Disk Image not mounted");
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			} catch (LLDB.Error e) {
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+		}
+
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			yield server.session.input (pid, data, cancellable);
+		}
+
+		public async void resume (uint pid, Cancellable? cancellable) throws GLib.Error {
+			var entry = spawn_entries[pid];
+			if (entry != null) {
+				yield entry.resume (cancellable);
+				return;
+			}
+
+			var server = yield get_remote_server (cancellable);
+			yield server.session.resume (pid, cancellable);
+		}
+
+		public async void kill (uint pid, Cancellable? cancellable) throws GLib.Error {
+			var spawn_entry = spawn_entries[pid];
+			if (spawn_entry != null) {
+				yield spawn_entry.kill (cancellable);
+				return;
+			}
+
+			var server = yield get_remote_server (cancellable);
+			yield server.session.kill (pid, cancellable);
+		}
+
+		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws GLib.Error {
+			var spawn_entry = spawn_entries[pid];
+			if (spawn_entry != null) {
+				var gadget_details = yield spawn_entry.query_gadget_details (cancellable);
+
+				try {
+					var stream = yield channel_provider.open_channel (
+						("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (gadget_details.port),
+						cancellable);
+
+					var connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+
+					HostSession host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION,
+						DBusProxyFlags.NONE, cancellable);
+
+					AgentSessionId remote_session_id = yield host_session.attach_to (pid, cancellable);
+
+					AgentSession agent_session = yield connection.get_proxy (null,
+						ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
+
+					var local_session_id = AgentSessionId (next_agent_session_id++);
+					var agent_entry = new AgentEntry (local_session_id, agent_session, host_session, connection);
+					agent_entry.detached.connect (on_agent_entry_detached);
+					agent_entries[local_session_id] = agent_entry;
+					agent_sessions[local_session_id] = agent_session;
+
+					return local_session_id;
+				} catch (GLib.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+			}
+
+			var server = yield get_remote_server (cancellable);
+
+			var remote_session_id = yield server.session.attach_to (pid, cancellable);
+			var local_session_id = AgentSessionId (next_agent_session_id++);
+
+			AgentSession agent_session;
+			try {
+				agent_session = yield server.connection.get_proxy (null,
+					ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+
+			remote_agent_sessions[remote_session_id] = local_session_id;
+			agent_sessions[local_session_id] = agent_session;
+
+			return local_session_id;
+		}
+
+		public AgentSession obtain_agent_session (AgentSessionId id) throws Error {
+			var session = agent_sessions[id];
+			if (session == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+			return session;
+		}
+
+		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
+				Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.inject_library_file (pid, path, entrypoint, data, cancellable);
+		}
+
+		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
+				Cancellable? cancellable) throws GLib.Error {
+			var server = yield get_remote_server (cancellable);
+			return yield server.session.inject_library_blob (pid, blob, entrypoint, data, cancellable);
+		}
+
+		private void on_spawn_entry_closed (SpawnEntry entry) {
+			spawn_entries.unset (entry.process.pid);
+
+			entry.closed.disconnect (on_spawn_entry_closed);
+			entry.output.disconnect (on_spawn_entry_output);
+		}
+
+		private void on_spawn_entry_output (SpawnEntry entry, Bytes bytes) {
+			output (entry.process.pid, 1, bytes.get_data ());
+		}
+
+		private void on_agent_entry_detached (AgentEntry entry, SessionDetachReason reason) {
+			var id = AgentSessionId (entry.id);
+			CrashInfo? crash = null;
+
+			agent_entries.unset (id);
+			agent_sessions.unset (id);
+
+			entry.detached.disconnect (on_agent_entry_detached);
+
+			agent_session_closed (id, entry.agent_session, reason, crash);
+			agent_session_destroyed (id, reason);
+
+			entry.close.begin (io_cancellable);
+		}
+
+		private async RemoteServer? try_get_remote_server (Cancellable? cancellable) throws IOError {
+			try {
+				return yield get_remote_server (cancellable);
+			} catch (Error e) {
+				return null;
+			}
+		}
+
+		private async RemoteServer get_remote_server (Cancellable? cancellable) throws Error, IOError {
+			if (current_remote_server != null)
+				return current_remote_server;
+
+			while (remote_server_request != null) {
+				try {
+					return yield remote_server_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+
+			var now = get_monotonic_time ();
+			if (last_server_check_time != -1 && now - last_server_check_time < 5000000)
+				throw last_server_check_error;
+			last_server_check_time = now;
+
+			remote_server_request = new Promise<RemoteServer> ();
+
+			DBusConnection? connection = null;
+			try {
+				var stream = yield channel_provider.open_channel (
+					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_SERVER_PORT),
+					cancellable);
+
+				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+
+				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE,
+					cancellable);
+
+				RemoteServer.Flavor flavor = REGULAR;
+				try {
+					var app = yield session.get_frontmost_application (cancellable);
+					if (app.identifier == GADGET_APP_ID)
+						flavor = GADGET;
+				} catch (GLib.Error e) {
+				}
+
+				if (connection.closed)
+					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
+
+				var server = new RemoteServer (session, connection, flavor);
+				attach_remote_server (server);
+				current_remote_server = server;
+				last_server_check_time = -1;
+				last_server_check_error = null;
+
+				remote_server_request.resolve (server);
+
+				return server;
+			} catch (GLib.Error e) {
+				GLib.Error api_error;
+
+				if (e is IOError.CANCELLED) {
+					api_error = new IOError.CANCELLED ("%s", e.message);
+
+					last_server_check_time = -1;
+					last_server_check_error = null;
+				} else {
+					if (e is Error.SERVER_NOT_RUNNING) {
+						api_error = new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
+					} else if (connection != null) {
+						api_error = new Error.PROTOCOL ("Incompatible frida-server version");
+					} else {
+						api_error = new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: %s",
+							e.message);
+					}
+
+					last_server_check_error = (Error) api_error;
+				}
+
+				printerr ("NOPE: %s\n", api_error.message);
+
+				remote_server_request.reject (api_error);
+				remote_server_request = null;
+
+				throw_api_error (api_error);
+			}
+		}
+
+		private void attach_remote_server (RemoteServer server) {
+			server.connection.on_closed.connect (on_remote_connection_closed);
+
+			var session = server.session;
+			session.spawn_added.connect (on_remote_spawn_added);
+			session.spawn_removed.connect (on_remote_spawn_removed);
+			session.child_added.connect (on_remote_child_added);
+			session.child_removed.connect (on_remote_child_removed);
+			session.process_crashed.connect (on_remote_process_crashed);
+			session.output.connect (on_remote_output);
+			session.agent_session_destroyed.connect (on_remote_agent_session_destroyed);
+			session.agent_session_crashed.connect (on_remote_agent_session_crashed);
+			session.uninjected.connect (on_remote_uninjected);
+		}
+
+		private void detach_remote_server (RemoteServer server) {
+			server.connection.on_closed.disconnect (on_remote_connection_closed);
+
+			var session = server.session;
+			session.spawn_added.disconnect (on_remote_spawn_added);
+			session.spawn_removed.disconnect (on_remote_spawn_removed);
+			session.child_added.disconnect (on_remote_child_added);
+			session.child_removed.disconnect (on_remote_child_removed);
+			session.process_crashed.disconnect (on_remote_process_crashed);
+			session.output.disconnect (on_remote_output);
+			session.agent_session_destroyed.disconnect (on_remote_agent_session_destroyed);
+			session.agent_session_crashed.disconnect (on_remote_agent_session_crashed);
+			session.uninjected.disconnect (on_remote_uninjected);
+		}
+
+		private void on_remote_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			detach_remote_server (current_remote_server);
+			current_remote_server = null;
+			remote_server_request = null;
+
+			foreach (var remote_id in remote_agent_sessions.keys.to_array ())
+				on_remote_agent_session_destroyed (remote_id, SERVER_TERMINATED);
+		}
+
+		private void on_remote_spawn_added (HostSpawnInfo info) {
+			spawn_added (info);
+		}
+
+		private void on_remote_spawn_removed (HostSpawnInfo info) {
+			spawn_removed (info);
+		}
+
+		private void on_remote_child_added (HostChildInfo info) {
+			child_added (info);
+		}
+
+		private void on_remote_child_removed (HostChildInfo info) {
+			child_removed (info);
+		}
+
+		private void on_remote_process_crashed (CrashInfo crash) {
+			process_crashed (crash);
+		}
+
+		private void on_remote_output (uint pid, int fd, uint8[] data) {
+			output (pid, fd, data);
+		}
+
+		private void on_remote_agent_session_destroyed (AgentSessionId remote_id, SessionDetachReason reason) {
+			AgentSessionId local_id;
+			if (!remote_agent_sessions.unset (remote_id, out local_id))
+				return;
+
+			AgentSession agent_session = null;
+			agent_sessions.unset (local_id, out agent_session);
+			assert (agent_session != null);
+
+			CrashInfo? crash = null;
+
+			agent_session_closed (local_id, agent_session, reason, crash);
+			agent_session_destroyed (local_id, reason);
+		}
+
+		private void on_remote_agent_session_crashed (AgentSessionId remote_id, CrashInfo crash) {
+			AgentSessionId local_id;
+			if (!remote_agent_sessions.unset (remote_id, out local_id))
+				return;
+
+			AgentSession agent_session = null;
+			agent_sessions.unset (local_id, out agent_session);
+			assert (agent_session != null);
+
+			SessionDetachReason reason = PROCESS_TERMINATED;
+
+			agent_session_closed (local_id, agent_session, reason, crash);
+			agent_session_crashed (local_id, crash);
+		}
+
+		private void on_remote_uninjected (InjectorPayloadId id) {
+			uninjected (id);
+		}
+
+		private class SpawnEntry : Object {
+			public signal void closed ();
+			public signal void output (Bytes bytes);
+
+			public LLDB.Client lldb {
+				get;
+				construct;
+			}
+
+			public LLDB.Process process {
+				get;
+				construct;
+			}
+
+			public string? gadget_path {
+				get;
+				construct;
+			}
+
+			public ChannelProvider channel_provider {
+				get;
+				construct;
+			}
+
+			private Promise<Fruity.Injector.GadgetDetails>? gadget_request;
+
+			public SpawnEntry (LLDB.Client lldb, LLDB.Process process, string? gadget_path, ChannelProvider channel_provider) {
+				Object (
+					lldb: lldb,
+					process: process,
+					gadget_path: gadget_path,
+					channel_provider: channel_provider
+				);
+			}
+
+			construct {
+				lldb.closed.connect (on_lldb_closed);
+				lldb.console_output.connect (on_lldb_console_output);
+			}
+
+			~SpawnEntry () {
+				lldb.closed.disconnect (on_lldb_closed);
+				lldb.console_output.disconnect (on_lldb_console_output);
+			}
+
+			public async void close (Cancellable? cancellable) throws IOError {
+				yield lldb.close (cancellable);
+			}
+
+			public async void resume (Cancellable? cancellable) throws Error, IOError {
+				try {
+					yield lldb.detach (cancellable);
+				} catch (LLDB.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+			}
+
+			public async void kill (Cancellable? cancellable) throws Error, IOError {
+				try {
+					yield lldb.kill (cancellable);
+				} catch (LLDB.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+			}
+
+			public async Fruity.Injector.GadgetDetails query_gadget_details (Cancellable? cancellable) throws Error, IOError {
+				while (gadget_request != null) {
+					try {
+						return yield gadget_request.future.wait_async (cancellable);
+					} catch (Error e) {
+						throw e;
+					} catch (IOError e) {
+						cancellable.set_error_if_cancelled ();
+					}
+				}
+				gadget_request = new Promise<Fruity.Injector.GadgetDetails> ();
+
+				try {
+					string? path = gadget_path;
+					if (path == null) {
+						path = Path.build_filename (Environment.get_user_cache_dir (), "frida", "gadget-ios.dylib");
+						if (!FileUtils.test (path, FileTest.EXISTS)) {
+							throw new Error.NOT_SUPPORTED ("Need gadget to attach; its default location is: %s",
+								path);
+						}
+					}
+
+					const uint page_size = 16384;
+					var module = new Gum.DarwinModule.from_file (path, 0, ARM64, page_size);
+
+					var details = yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
+
+					gadget_request.resolve (details);
+
+					return details;
+				} catch (GLib.Error e) {
+					var api_error = new Error.NOT_SUPPORTED ("%s", e.message);
+
+					gadget_request.reject (api_error);
+					gadget_request = null;
+
+					throw api_error;
+				}
+			}
+
+			private void on_lldb_closed () {
+				closed ();
+			}
+
+			private void on_lldb_console_output (Bytes bytes) {
+				output (bytes);
+			}
+		}
+
+		private class AgentEntry : Object {
+			public signal void detached (SessionDetachReason reason);
+
+			public uint id {
+				get;
+				construct;
+			}
+
+			public AgentSession agent_session {
+				get;
+				construct;
+			}
+
+			public HostSession host_session {
+				get;
+				construct;
+			}
+
+			public DBusConnection connection {
+				get;
+				construct;
+			}
+
+			private Promise<bool>? close_request;
+
+			public AgentEntry (AgentSessionId? id, AgentSession agent_session, HostSession host_session,
+					DBusConnection connection) {
+				Object (
+					id: id.handle,
+					agent_session: agent_session,
+					host_session: host_session,
+					connection: connection
+				);
+			}
+
+			construct {
+				connection.on_closed.connect (on_connection_closed);
+				host_session.agent_session_destroyed.connect (on_session_destroyed);
+			}
+
+			~AgentEntry () {
+				connection.on_closed.disconnect (on_connection_closed);
+				host_session.agent_session_destroyed.disconnect (on_session_destroyed);
+			}
+
+			public async void close (Cancellable? cancellable) throws IOError {
+				while (close_request != null) {
+					try {
+						yield close_request.future.wait_async (cancellable);
+						return;
+					} catch (Error e) {
+						assert_not_reached ();
+					} catch (IOError e) {
+						cancellable.set_error_if_cancelled ();
+					}
+				}
+				close_request = new Promise<bool> ();
+
+				try {
+					yield connection.close (cancellable);
+				} catch (GLib.Error e) {
+					if (e is IOError.CANCELLED) {
+						close_request.reject (e);
+						close_request = null;
+
+						throw (IOError) e;
+					}
+				}
+
+				close_request.resolve (true);
+			}
+
+			private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+				if (close_request == null) {
+					close_request = new Promise<bool> ();
+					close_request.resolve (true);
+				}
+
+				detached (PROCESS_TERMINATED);
+			}
+
+			private void on_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
+				detached (reason);
+			}
+		}
+
+		private class RemoteServer : Object {
+			public HostSession session {
+				get;
+				construct;
+			}
+
+			public DBusConnection connection {
+				get;
+				construct;
+			}
+
+			public Flavor flavor {
+				get;
+				construct;
+			}
+
+			public enum Flavor {
+				REGULAR,
+				GADGET
+			}
+
+			public RemoteServer (HostSession session, DBusConnection connection, Flavor flavor) {
+				Object (
+					session: session,
+					connection: connection,
+					flavor: flavor
+				);
+			}
+		}
 	}
 }

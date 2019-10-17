@@ -276,8 +276,6 @@ tcp_sources = [
 
 fruity_sources = [
   'fruity/fruity-host-session.vala',
-  'fruity/fruity-remote-provider.vala',
-  'fruity/fruity-lockdown-provider.vala',
   'fruity/lockdown.vala',
   'fruity/installation-proxy.vala',
   'fruity/lldb.vala',
