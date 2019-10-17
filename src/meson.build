@@ -276,11 +276,13 @@ tcp_sources = [
 
 fruity_sources = [
   'fruity/fruity-host-session.vala',
+  'fruity/dtx.vala',
   'fruity/lockdown.vala',
   'fruity/installation-proxy.vala',
   'fruity/lldb.vala',
   'fruity/injector.vala',
   'fruity/usbmux.vala',
+  'fruity/keyed-archive.vala',
   'fruity/plist.vala',
   'fruity/plist-service.vala',
 ]
