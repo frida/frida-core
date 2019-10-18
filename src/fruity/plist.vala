@@ -659,6 +659,17 @@ namespace Frida.Fruity {
 				write_line ("</array>");
 			}
 
+			public void write_uid (PlistUid val) {
+				write_line ("<dict>");
+				level++;
+
+				write_tag ("key", "CF$UID");
+				write_tag ("integer", val.uid.to_string ());
+
+				level--;
+				write_line ("</dict>");
+			}
+
 			public void write_value (Value val) {
 				var type = val.type ();
 				if (type == typeof (bool)) {
@@ -674,6 +685,8 @@ namespace Frida.Fruity {
 					write_dict (val.get_object () as PlistDict);
 				} else if (type == typeof (PlistArray)) {
 					write_array (val.get_object () as PlistArray);
+				} else if (type == typeof (PlistUid)) {
+					write_uid (val.get_object () as PlistUid);
 				}
 			}
 
