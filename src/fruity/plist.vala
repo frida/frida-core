@@ -864,7 +864,9 @@ namespace Frida.Fruity {
 			storage.clear ();
 		}
 
-		public void remove_at (int index) {
+		public void remove_at (int index) throws PlistError {
+			check_index (index);
+
 			storage.remove_at (index);
 		}
 
@@ -945,14 +947,22 @@ namespace Frida.Fruity {
 		}
 
 		public Value get_value (int index, GLib.Type expected_type = GLib.Type.INVALID) throws PlistError {
+			check_index (index);
+
 			var val = storage[index];
 			if (expected_type != Type.INVALID && !val.holds (expected_type))
 				throw new PlistError.TYPE_MISMATCH ("Array element does not have the expected type");
+
 			return val;
 		}
 
 		public void add_value (Value val) {
 			storage.add (val);
+		}
+
+		private void check_index (int index) throws PlistError {
+			if (index < 0 || index >= storage.size)
+				throw new PlistError.INVALID_INDEX ("Array element does not exist");
 		}
 	}
 
