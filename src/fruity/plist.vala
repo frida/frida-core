@@ -811,6 +811,16 @@ namespace Frida.Fruity {
 			set_value (key, gval);
 		}
 
+		public unowned PlistUid get_uid (string key) throws PlistError {
+			return get_value (key, typeof (PlistUid)).get_object () as PlistUid;
+		}
+
+		public void set_uid (string key, PlistUid uid) {
+			var gval = Value (typeof (PlistUid));
+			gval.set_object (uid);
+			set_value (key, gval);
+		}
+
 		public Value get_value (string key, GLib.Type expected_type = GLib.Type.INVALID) throws PlistError {
 			var val = storage[key];
 			if (val == null)
@@ -921,6 +931,16 @@ namespace Frida.Fruity {
 		public void add_array (PlistArray array) {
 			var gval = Value (typeof (PlistArray));
 			gval.set_object (array);
+			add_value (gval);
+		}
+
+		public unowned PlistUid get_uid (int index) throws PlistError {
+			return get_value (index, typeof (PlistUid)).get_object () as PlistUid;
+		}
+
+		public void add_uid (PlistUid uid) {
+			var gval = Value (typeof (PlistUid));
+			gval.set_object (uid);
 			add_value (gval);
 		}
 
