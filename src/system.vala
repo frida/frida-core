@@ -4,6 +4,19 @@ namespace Frida {
 		public extern static Frida.HostApplicationInfo[] enumerate_applications ();
 		public extern static Frida.HostProcessInfo[] enumerate_processes ();
 		public extern static void kill (uint pid);
+
+#if LINUX
+		// memfd_create(2)
+		[CCode (cprefix = "MFD_", has_type_id = false, cheader_filename = "sys/mman.h")]
+		public enum MemfdFlags {
+			CLOEXEC,
+			ALLOW_SEALING,
+			HUGETLB
+		}
+
+		[CCode (cheader_filename = "sys/mman.h", cname="memfd_create")]
+		public extern static int memfd_create (string name, MemfdFlags flags);
+#endif
 	}
 
 	public class ApplicationEnumerator {
@@ -208,20 +221,46 @@ namespace Frida {
 		private TemporaryDirectory directory;
 
 		public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory? directory = null) throws Error {
-			if (directory != null)
+			
+			if (directory != null) {
 				this.directory = directory;
-			else
-				this.directory = TemporaryDirectory.system_default;
-			this.file = File.new_for_path (Path.build_filename (this.directory.path, name));
+				this.file = File.new_for_path (Path.build_filename (this.directory.path, name));
+			}
+			else {
+				//  this.directory = TemporaryDirectory.system_default;
+				
+				int fd = System.memfd_create(name, ALLOW_SEALING);
+				if(fd >= 0) {
+					//  string ugh = fd.to_string("%d");
+					//  name = ugh;
+					
+					//  this.file = File.new_for_path (Path.build_filename ("/proc/self/fd", name));
+					//  this.file = File.new_for_path (Path.build_filename ("/proc/self/fd", fd.to_string("%d")));
+					this.file = File.new_for_path (Path.build_filename ("/proc", ((int)Posix.getpid()).to_string("%d"), "fd", fd.to_string("%d")));
+					this.directory = new TemporaryDirectory.with_file (this.file, false);
+					FileUtils.chmod (this.file.get_path(), 0777);
+				}
+			}
 
 			try {
 				// FIXME: REPLACE_DESTINATION doesn't work?!
-				file.delete ();
+				if(directory != null) {
+					file.delete ();
+				}
 			} catch (GLib.Error delete_error) {
 			}
 
 			try {
-				var ostream = file.create (FileCreateFlags.REPLACE_DESTINATION, null);
+				IOStream iostream;
+				OutputStream ostream;
+				if(directory == null) {
+					iostream = file.open_readwrite (null);
+					ostream = iostream.output_stream;
+				}
+				else {
+					ostream = file.create (FileCreateFlags.REPLACE_DESTINATION, null);
+				}
+				
 
 				var buf_size = 128 * 1024;
 				var buf = new uint8[buf_size];
@@ -238,7 +277,7 @@ namespace Frida {
 
 				ostream.close (null);
 			} catch (GLib.Error e) {
-				throw new Error.PERMISSION_DENIED ("%s", e.message);
+				throw new Error.PERMISSION_DENIED ("%s for %s", e.message, this.file.get_path());
 			}
 		}
 

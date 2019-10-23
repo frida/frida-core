@@ -555,17 +555,18 @@ namespace Frida {
 		private Gee.ArrayList<TemporaryFile> files = new Gee.ArrayList<TemporaryFile> ();
 
 		public ResourceStore () throws Error {
+			//  throw new Error.NOT_SUPPORTED ("THIS IS A TEST");
 			tempdir = new TemporaryDirectory ();
-			FileUtils.chmod (tempdir.path, 0755);
-#if ANDROID
-			SELinux.setfilecon (tempdir.path, "u:object_r:frida_file:s0");
-#endif
+			//  FileUtils.chmod (tempdir.path, 0755);
+//  #if ANDROID
+//  			SELinux.setfilecon (tempdir.path, "u:object_r:frida_file:s0");
+//  #endif
 
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
 			if (blob32.data.length > 0) {
 				helper32 = new TemporaryFile.from_stream ("frida-helper-32",
 					new MemoryInputStream.from_data (blob32.data, null),
-					tempdir);
+					null);
 				FileUtils.chmod (helper32.path, 0700);
 			}
 
@@ -573,7 +574,7 @@ namespace Frida {
 			if (blob64.data.length > 0) {
 				helper64 = new TemporaryFile.from_stream ("frida-helper-64",
 					new MemoryInputStream.from_data (blob64.data, null),
-					tempdir);
+					null);
 				FileUtils.chmod (helper64.path, 0700);
 			}
 		}
