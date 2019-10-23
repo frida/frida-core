@@ -827,7 +827,8 @@ namespace Frida.LLDB {
 
 				size_t bytes_written;
 				try {
-					yield output.write_all_async (current.get_data (), Priority.DEFAULT, io_cancellable, out bytes_written);
+					yield output.write_all_async (current.get_data (), Priority.DEFAULT, io_cancellable,
+						out bytes_written);
 				} catch (GLib.Error e) {
 					return;
 				}
