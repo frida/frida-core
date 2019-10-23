@@ -23,6 +23,7 @@
 # include <CoreFoundation/CoreFoundation.h>
 # include <dlfcn.h>
 # include <objc/runtime.h>
+# include <pthread.h>
 
 # define NSDocumentDirectory 9
 # define NSUserDomainMask 1
@@ -184,7 +185,7 @@ frida_gadget_environment_init (void)
 
   main_context = g_main_context_ref (g_main_context_default ());
   main_loop = g_main_loop_new (main_context, FALSE);
-  main_thread = g_thread_new ("gadget-main-loop", run_main_loop, NULL);
+  main_thread = g_thread_new ("frida-gadget", run_main_loop, NULL);
 }
 
 void
@@ -317,6 +318,15 @@ frida_gadget_environment_has_objc_class (const gchar * name)
   return api->objc_getClass (name) != NULL;
 #else
   return FALSE;
+#endif
+}
+
+void
+frida_gadget_environment_set_thread_name (const gchar * name)
+{
+  /* For now only implemented on i/macOS as Fruity.Injector relies on it there. */
+#ifdef HAVE_DARWIN
+  pthread_setname_np (name);
 #endif
 }
 

@@ -525,10 +525,12 @@ namespace Frida.Gadget {
 				yield server.start ();
 				ctrl = server;
 
+				uint16 listen_port = server.listen_port;
+				Environment.set_thread_name ("frida-gadget-tcp-%u".printf (listen_port));
 				if (request != null) {
-					request.set_value (server.listen_port);
+					request.set_value (listen_port);
 				} else {
-					log_info ("Listening on %s TCP port %hu".printf (server.listen_host, server.listen_port));
+					log_info ("Listening on %s TCP port %u".printf (server.listen_host, listen_port));
 				}
 			} else {
 				resume ();
@@ -1736,6 +1738,8 @@ namespace Frida.Gadget {
 		private extern string? detect_bundle_id ();
 		private extern string? detect_documents_dir ();
 		private extern bool has_objc_class (string name);
+
+		private extern void set_thread_name (string name);
 	}
 
 	public extern void _kill (uint pid);
