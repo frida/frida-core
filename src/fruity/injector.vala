@@ -79,7 +79,11 @@ namespace Frida.Fruity.Injector {
 
 		public async GadgetDetails run (Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield setup (cancellable);
+				var existing_gadget = yield setup (cancellable);
+				if (existing_gadget != null) {
+					yield lldb.detach (cancellable);
+					return existing_gadget;
+				}
 
 				bool is_early_instrumentation = !libsystem_initialized;
 
@@ -106,11 +110,36 @@ namespace Frida.Fruity.Injector {
 			}
 		}
 
-		private async void setup (Cancellable? cancellable) throws GLib.Error {
+		private async GadgetDetails? setup (Cancellable? cancellable) throws GLib.Error {
+			GadgetDetails? existing_gadget = null;
 			yield lldb.enumerate_threads (thread => {
-				main_thread = thread;
-				return false;
+				if (main_thread == null)
+					main_thread = thread;
+
+				unowned string? name = thread.name;
+				if (name == null)
+					return true;
+
+				MatchInfo info;
+				if (/^frida-gadget-tcp-(\d+)$/.match (name, 0, out info)) {
+					string raw_port = info.fetch (1);
+
+					try {
+						uint64 port;
+						const uint radix = 10;
+						uint64.from_string (raw_port, out port, radix, 1, uint16.MAX);
+
+						existing_gadget = new GadgetDetails ((uint16) port);
+
+						return false;
+					} catch (NumberParserError e) {
+					}
+				}
+
+				return true;
 			}, cancellable);
+			if (existing_gadget != null)
+				return existing_gadget;
 			yield save_main_thread_state (cancellable);
 
 			jit_page = yield lldb.allocate (page_size, "rx", cancellable);
@@ -131,6 +160,8 @@ namespace Frida.Fruity.Injector {
 				}, cancellable);
 			}
 			dyld_symbols = yield fetch_dyld_symbols (cancellable);
+
+			return null;
 		}
 
 		private async void teardown (Cancellable? cancellable) throws GLib.Error {
