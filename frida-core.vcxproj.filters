@@ -90,6 +90,9 @@
     <None Include="src\fruity\fruity-host-session.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
+    <None Include="src\fruity\dtx.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
     <None Include="src\fruity\lockdown.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
@@ -103,6 +106,9 @@
       <Filter>Source Files\fruity</Filter>
     </None>
     <None Include="src\fruity\usbmux.vala">
+      <Filter>Source Files\fruity</Filter>
+    </None>
+    <None Include="src\fruity\keyed-archive.vala">
       <Filter>Source Files\fruity</Filter>
     </None>
     <None Include="src\fruity\plist.vala">
@@ -176,6 +182,9 @@
     <ClCompile Include="$(IntDir)src\fruity\fruity-host-session.c">
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\dtx.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
     <ClCompile Include="src\fruity\fruity-host-session-windows.c">
       <Filter>Source Files\fruity</Filter>
     </ClCompile>
@@ -192,6 +201,9 @@
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\usbmux.c">
+      <Filter>Source Files\generated\fruity</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\fruity\keyed-archive.c">
       <Filter>Source Files\generated\fruity</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\fruity\plist.c">
