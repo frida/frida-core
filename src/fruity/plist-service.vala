@@ -16,7 +16,7 @@ namespace Frida.Fruity {
 
 		private weak PendingQuery pending_query;
 
-		private const uint32 MAX_MESSAGE_SIZE = 128 * 1024;
+		private const uint32 MAX_MESSAGE_SIZE = 1024 * 1024;
 
 		public PlistServiceClient (IOStream stream) {
 			Object (stream: stream);
