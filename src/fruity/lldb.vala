@@ -443,7 +443,12 @@ namespace Frida.LLDB {
 					break;
 				reader.end_member ();
 
-				var thread = new Thread ((uint) tid, this);
+				string? name = null;
+				if (reader.read_member ("name"))
+					name = reader.get_string_value ();
+				reader.end_member ();
+
+				var thread = new Thread ((uint) tid, name, this);
 				bool carry_on = func (thread);
 				if (!carry_on)
 					return;
@@ -908,7 +913,12 @@ namespace Frida.LLDB {
 				}
 			}
 
-			var thread = new Thread (properties.get_uint ("thread"), this);
+			string? thread_name = null;
+			if (properties.has ("hexname")) {
+				thread_name = Protocol.parse_hex_encoded_utf8_string (properties.get_string ("hexname"));
+			}
+
+			var thread = new Thread (properties.get_uint ("thread"), thread_name, this);
 
 			var thread_ids = properties.get_uint_array ("threads");
 			var thread_pcs = properties.get_uint64_array ("thread-pcs");
@@ -1511,6 +1521,11 @@ namespace Frida.LLDB {
 			construct;
 		}
 
+		public string? name {
+			get;
+			construct;
+		}
+
 		public weak Client client {
 			get;
 			construct;
@@ -1520,9 +1535,10 @@ namespace Frida.LLDB {
 		private const uint32 THREAD_MAGIC = 0x54485244U;
 		private const uint64 PAC_REMOVAL_MASK = 0x0000000fffffffffUL; /* TODO: verify */
 
-		public Thread (uint id, Client client) {
+		public Thread (uint id, string? name, Client client) {
 			Object (
 				id: id,
+				name: name,
 				client: client
 			);
 		}
@@ -2310,6 +2326,12 @@ namespace Frida.LLDB {
 			result[hex_offset] = '\0';
 
 			return (string) (owned) result;
+		}
+
+		internal static string parse_hex_encoded_utf8_string (string hex_str) throws Error {
+			Bytes bytes = parse_hex_bytes (hex_str);
+			unowned string str = (string) bytes.get_data ();
+			return str.make_valid ((ssize_t) bytes.get_size ());
 		}
 
 		internal static Bytes parse_hex_bytes (string hex_bytes) throws Error {
