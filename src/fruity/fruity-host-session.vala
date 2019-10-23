@@ -512,9 +512,15 @@ namespace Frida {
 
 				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
 
-				var app = yield installation_proxy.lookup_one (program, cancellable);
+				var query = new Fruity.PlistDict ();
+				var ids = new Fruity.PlistArray ();
+				ids.add_string (program);
+				query.set_array ("BundleIDs", ids);
+
+				var matches = yield installation_proxy.lookup (query, cancellable);
+				var app = matches[program];
 				if (app == null)
-					throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier '%s'", program);
+					throw new Error.INVALID_ARGUMENT ("Unable to find app with bundle identifier “%s”", program);
 
 				string[] argv = { app.path };
 				if (options.has_argv) {
