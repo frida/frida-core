@@ -1,5 +1,7 @@
 namespace Frida.Fruity {
 	public class PlistServiceClient : Object {
+		public signal void closed ();
+
 		public IOStream stream {
 			get {
 				return _stream;
@@ -14,7 +16,14 @@ namespace Frida.Fruity {
 		private InputStream input;
 		private OutputStream output;
 
+		private State state = OPEN;
+
 		private weak PendingQuery pending_query;
+
+		private enum State {
+			OPEN,
+			CLOSED
+		}
 
 		private const uint32 MAX_MESSAGE_SIZE = 1024 * 1024;
 
@@ -84,10 +93,13 @@ namespace Frida.Fruity {
 			try {
 				yield input.read_all_async (buffer, Priority.DEFAULT, cancellable, out bytes_read);
 			} catch (GLib.Error e) {
+				ensure_closed ();
 				throw new PlistServiceError.CONNECTION_CLOSED ("%s", e.message);
 			}
-			if (bytes_read == 0)
+			if (bytes_read == 0) {
+				ensure_closed ();
 				throw new PlistServiceError.CONNECTION_CLOSED ("Connection closed");
+			}
 		}
 
 		private async void write_message (Plist message, Cancellable? cancellable) throws PlistServiceError, IOError {
@@ -106,8 +118,16 @@ namespace Frida.Fruity {
 			try {
 				yield output.write_all_async (blob, Priority.DEFAULT, cancellable, out bytes_written);
 			} catch (GLib.Error e) {
+				ensure_closed ();
 				throw new PlistServiceError.CONNECTION_CLOSED ("%s", e.message);
 			}
+		}
+
+		private void ensure_closed () {
+			if (state == CLOSED)
+				return;
+			state = CLOSED;
+			closed ();
 		}
 
 		private class PendingQuery : Object, PlistResponseReader {

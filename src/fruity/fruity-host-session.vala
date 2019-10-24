@@ -209,6 +209,9 @@ namespace Frida {
 
 		private FruityHostSession? host_session;
 		private Promise<Fruity.LockdownClient>? lockdown_client_request;
+		private Timer? lockdown_client_timer;
+
+		private const double MAX_LOCKDOWN_CLIENT_AGE = 30.0;
 
 		public FruityHostSessionProvider (string name, Image? icon, Fruity.DeviceDetails details) {
 			Object (
@@ -228,10 +231,10 @@ namespace Frida {
 				} catch (Error e) {
 				}
 
-				if (lockdown != null)
+				if (lockdown != null) {
+					on_lockdown_client_closed (lockdown);
 					yield lockdown.close (cancellable);
-
-				lockdown_client_request = null;
+				}
 			}
 		}
 
@@ -306,6 +309,13 @@ namespace Frida {
 		}
 
 		private async Fruity.LockdownClient get_lockdown_client (Cancellable? cancellable) throws Error, IOError {
+			if (lockdown_client_timer != null) {
+				if (lockdown_client_timer.elapsed () > MAX_LOCKDOWN_CLIENT_AGE)
+					on_lockdown_client_closed (lockdown_client_request.future.value);
+				else
+					lockdown_client_timer.start ();
+			}
+
 			while (lockdown_client_request != null) {
 				try {
 					return yield lockdown_client_request.future.wait_async (cancellable);
@@ -319,8 +329,10 @@ namespace Frida {
 
 			try {
 				var client = yield Fruity.LockdownClient.open (device_details, cancellable);
+				client.closed.connect (on_lockdown_client_closed);
 
 				lockdown_client_request.resolve (client);
+				lockdown_client_timer = new Timer ();
 
 				return client;
 			} catch (GLib.Error e) {
@@ -328,9 +340,16 @@ namespace Frida {
 
 				lockdown_client_request.reject (api_error);
 				lockdown_client_request = null;
+				lockdown_client_timer = null;
 
 				throw_api_error (api_error);
 			}
+		}
+
+		private void on_lockdown_client_closed (Fruity.LockdownClient client) {
+			client.closed.disconnect (on_lockdown_client_closed);
+			lockdown_client_request = null;
+			lockdown_client_timer = null;
 		}
 	}
 

@@ -1,5 +1,7 @@
 namespace Frida.Fruity {
 	public class LockdownClient : Object, AsyncInitable {
+		public signal void closed ();
+
 		public DeviceDetails device_details {
 			get;
 			construct;
@@ -53,6 +55,7 @@ namespace Frida.Fruity {
 				yield usbmux.connect_to_port (device.id, LOCKDOWN_PORT, cancellable);
 
 				service = new PlistServiceClient (usbmux.connection);
+				service.closed.connect (on_service_closed);
 
 				yield query_type (cancellable);
 
@@ -66,6 +69,10 @@ namespace Frida.Fruity {
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
 			yield service.close (cancellable);
+		}
+
+		private void on_service_closed () {
+			closed ();
 		}
 
 		public async IOStream start_service (string name, Cancellable? cancellable = null) throws LockdownError, IOError {
