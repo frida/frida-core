@@ -74,14 +74,22 @@ void
 _frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, FridaImageData ** icon, GError ** error)
 {
   gboolean result = FALSE;
+  GString * udid_plain;
+  const gchar * cursor;
   WCHAR * udid_utf16 = NULL;
   FridaMobileDeviceInfo * mdev = NULL;
   FridaImageDeviceInfo * idev = NULL;
   FridaImageData * idev_icon = NULL;
 
-  (void) product_id;
+  udid_plain = g_string_sized_new (40);
+  for (cursor = udid; *cursor != '\0'; cursor++)
+  {
+    gchar ch = *cursor;
+    if (ch != '-')
+      g_string_append_c (udid_plain, ch);
+  }
 
-  udid_utf16 = (WCHAR *) g_utf8_to_utf16 (udid, -1, NULL, NULL, NULL);
+  udid_utf16 = (WCHAR *) g_utf8_to_utf16 (udid_plain->str, udid_plain->len, NULL, NULL, NULL);
 
   mdev = find_mobile_device_by_udid (udid_utf16);
   if (mdev == NULL)
@@ -118,6 +126,7 @@ beach:
   frida_image_device_info_free (idev);
   frida_mobile_device_info_free (mdev);
   g_free (udid_utf16);
+  g_string_free (udid_plain, TRUE);
 }
 
 static FridaMobileDeviceInfo *
