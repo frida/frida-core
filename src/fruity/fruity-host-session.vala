@@ -358,8 +358,8 @@ namespace Frida {
 
 		private Promise<RemoteServer>? remote_server_request;
 		private RemoteServer? current_remote_server;
-		private int64 last_server_check_time = -1;
-		private Error? last_server_check_error = null;
+		private Timer? last_server_check_timer;
+		private Error? last_server_check_error;
 		private Gee.HashMap<AgentSessionId?, AgentSessionId?> remote_agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 
@@ -370,6 +370,7 @@ namespace Frida {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private const uint16 DEFAULT_SERVER_PORT = 27042;
+		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
 		private const string DEBUGSERVER_SERVICE_NAME = "com.apple.debugserver";
 		private const string SPRINGBOARD_PATH = "/System/Library/CoreServices/SpringBoard.app/SpringBoard";
@@ -927,10 +928,9 @@ namespace Frida {
 				}
 			}
 
-			var now = get_monotonic_time ();
-			if (last_server_check_time != -1 && now - last_server_check_time < 5000000)
+			if (last_server_check_timer != null && last_server_check_timer.elapsed () < MIN_SERVER_CHECK_INTERVAL)
 				throw last_server_check_error;
-			last_server_check_time = now;
+			last_server_check_timer = new Timer ();
 
 			remote_server_request = new Promise<RemoteServer> ();
 
@@ -959,7 +959,7 @@ namespace Frida {
 				var server = new RemoteServer (session, connection, flavor);
 				attach_remote_server (server);
 				current_remote_server = server;
-				last_server_check_time = -1;
+				last_server_check_timer = null;
 				last_server_check_error = null;
 
 				remote_server_request.resolve (server);
@@ -971,7 +971,7 @@ namespace Frida {
 				if (e is IOError.CANCELLED) {
 					api_error = new IOError.CANCELLED ("%s", e.message);
 
-					last_server_check_time = -1;
+					last_server_check_timer = null;
 					last_server_check_error = null;
 				} else {
 					if (e is Error.SERVER_NOT_RUNNING) {
