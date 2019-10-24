@@ -206,10 +206,15 @@ namespace Frida.Fruity {
 
 				return connection;
 			} catch (Error e) {
-				request.reject (e);
+				Error api_error = (e is Error.NOT_SUPPORTED)
+					? new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
+						"run Xcode briefly or use ideviceimagemounter to mount one manually")
+					: e;
+
+				request.reject (api_error);
 				connections.unset (channel_provider);
 
-				throw e;
+				throw api_error;
 			}
 		}
 

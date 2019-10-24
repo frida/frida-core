@@ -301,6 +301,8 @@ namespace Frida {
 				try {
 					return yield client.start_service (service_name, cancellable);
 				} catch (GLib.Error e) {
+					if (e is Fruity.LockdownError.INVALID_SERVICE)
+						throw new Error.NOT_SUPPORTED ("%s", e.message);
 					throw new Error.TRANSPORT ("%s", e.message);
 				}
 			}
@@ -712,8 +714,10 @@ namespace Frida {
 			} catch (Fruity.InstallationProxyError e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			} catch (Fruity.LockdownError e) {
-				if (e is Fruity.LockdownError.INVALID_SERVICE)
-					throw new Error.NOT_SUPPORTED ("A Developer Disk Image is not mounted");
+				if (e is Fruity.LockdownError.INVALID_SERVICE) {
+					throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
+						"run Xcode briefly or use ideviceimagemounter to mount one manually");
+				}
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			} catch (LLDB.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
