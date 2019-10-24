@@ -442,7 +442,6 @@ namespace Frida {
 			}
 
 			var device_info = yield Fruity.DeviceInfoService.open (channel_provider, cancellable);
-
 			var processes = yield device_info.enumerate_processes (cancellable);
 
 			var no_icon = ImageData (0, 0, 0, "");
@@ -453,16 +452,13 @@ namespace Frida {
 
 			string app_path = compute_app_path_from_executable_path (process.real_app_name);
 
-			var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
-
-			string identifier;
-			try {
-				var installation_proxy = yield Fruity.InstallationProxyClient.open (lockdown, cancellable);
-
-				identifier = yield installation_proxy.resolve_id_from_path (app_path, cancellable);
-			} catch (Fruity.InstallationProxyError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			}
+			var application_listing = yield Fruity.ApplicationListingService.open (channel_provider, cancellable);
+			var query = new Fruity.NSDictionary ();
+			query.set_value ("BundlePath", new Fruity.NSString (app_path));
+			var apps = yield application_listing.enumerate_applications (query, cancellable);
+			if (apps.is_empty)
+				throw new Error.NOT_SUPPORTED ("Unable to resolve bundle path to bundle ID");
+			unowned string identifier = apps[0].bundle_identifier;
 
 			return HostApplicationInfo (identifier, process.name, process.pid, no_icon, no_icon);
 		}
