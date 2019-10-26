@@ -785,6 +785,9 @@ namespace Frida {
 				}
 			}
 
+			if (pid == 0)
+				throw new Error.NOT_SUPPORTED ("The Frida system session is not available on jailed iOS");
+
 			try {
 				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
 				var lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME, cancellable);
