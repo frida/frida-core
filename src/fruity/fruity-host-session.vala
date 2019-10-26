@@ -796,8 +796,10 @@ namespace Frida {
 				lldb_session = new LLDBSession (lldb, process, gadget_path, channel_provider);
 				add_lldb_session (lldb_session);
 			} catch (Fruity.LockdownError e) {
-				if (e is Fruity.LockdownError.INVALID_SERVICE)
-					throw new Error.NOT_SUPPORTED ("A Developer Disk Image is not mounted");
+				if (e is Fruity.LockdownError.INVALID_SERVICE) {
+					throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
+						"run Xcode briefly or use ideviceimagemounter to mount one manually");
+				}
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			} catch (LLDB.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
