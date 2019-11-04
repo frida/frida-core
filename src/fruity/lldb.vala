@@ -398,6 +398,8 @@ namespace Frida.LLDB {
 		}
 
 		public async void kill (Cancellable? cancellable = null) throws Error, IOError {
+			yield stop (cancellable);
+
 			var kill_response = yield _query_simple ("k", cancellable);
 			if (kill_response.payload != "X09")
 				throw new Error.REQUEST_REJECTED ("Unable to kill existing process");
