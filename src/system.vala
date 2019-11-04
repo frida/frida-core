@@ -221,30 +221,28 @@ namespace Frida {
 		private TemporaryDirectory directory;
 
 		public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory? directory = null) throws Error {
-			
+			int memfd_fd = -1;
+
 			if (directory != null) {
 				this.directory = directory;
 				this.file = File.new_for_path (Path.build_filename (this.directory.path, name));
 			}
 			else {
-				//  this.directory = TemporaryDirectory.system_default;
-				
-				int fd = System.memfd_create(name, ALLOW_SEALING);
-				if(fd >= 0) {
-					//  string ugh = fd.to_string("%d");
-					//  name = ugh;
-					
-					//  this.file = File.new_for_path (Path.build_filename ("/proc/self/fd", name));
-					//  this.file = File.new_for_path (Path.build_filename ("/proc/self/fd", fd.to_string("%d")));
-					this.file = File.new_for_path (Path.build_filename ("/proc", ((int)Posix.getpid()).to_string("%d"), "fd", fd.to_string("%d")));
+				memfd_fd = System.memfd_create(name, ALLOW_SEALING);
+				//  memfd_fd = -1;
+				if(memfd_fd >= 0) {
+					this.file = File.new_for_path (Path.build_filename ("/proc", ((int)Posix.getpid()).to_string("%d"), "fd", memfd_fd.to_string("%d")));
 					this.directory = new TemporaryDirectory.with_file (this.file, false);
-					FileUtils.chmod (this.file.get_path(), 0777);
+				}
+				else {
+					this.directory = TemporaryDirectory.system_default;
+					this.file = File.new_for_path (Path.build_filename (this.directory.path, name));
 				}
 			}
 
 			try {
 				// FIXME: REPLACE_DESTINATION doesn't work?!
-				if(directory != null) {
+				if(memfd_fd < 0) {
 					file.delete ();
 				}
 			} catch (GLib.Error delete_error) {
@@ -253,7 +251,7 @@ namespace Frida {
 			try {
 				IOStream iostream;
 				OutputStream ostream;
-				if(directory == null) {
+				if(memfd_fd >= 0) {
 					iostream = file.open_readwrite (null);
 					ostream = iostream.output_stream;
 				}
@@ -277,7 +275,7 @@ namespace Frida {
 
 				ostream.close (null);
 			} catch (GLib.Error e) {
-				throw new Error.PERMISSION_DENIED ("%s for %s", e.message, this.file.get_path());
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 		}
 
