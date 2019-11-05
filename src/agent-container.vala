@@ -90,6 +90,12 @@ namespace Frida {
 			yield provider.open (id, cancellable);
 		}
 
+#if !WINDOWS
+		private async void migrate (AgentSessionId id, Socket to_socket, Cancellable? cancellable) throws GLib.Error {
+			yield provider.migrate (id, to_socket, cancellable);
+		}
+#endif
+
 		public async void unload (Cancellable? cancellable) throws GLib.Error {
 			yield provider.unload (cancellable);
 		}

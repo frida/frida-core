@@ -44,7 +44,10 @@ namespace Frida.Agent {
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
 		private Promise<bool> pending_close;
-		private Gee.HashSet<AgentClient> clients = new Gee.HashSet<AgentClient> ();
+		private Gee.HashMap<AgentSessionId?, AgentClient> clients =
+			new Gee.HashMap<AgentSessionId?, AgentClient> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.HashMap<DBusConnection, DirectConnection> direct_connections =
+			new Gee.HashMap<DBusConnection, DirectConnection> ();
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
 		private Gum.MemoryRange agent_range;
@@ -352,7 +355,7 @@ namespace Frida.Agent {
 
 				acquire_child_gating ();
 
-				discard_connection ();
+				discard_connections ();
 			}
 
 			fork_mutex.lock ();
@@ -530,7 +533,7 @@ namespace Frida.Agent {
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
 			var client = new AgentClient (this, id);
-			clients.add (client);
+			clients[id] = client;
 			client.closed.connect (on_client_closed);
 			client.script_eternalized.connect (on_script_eternalized);
 
@@ -553,7 +556,7 @@ namespace Frida.Agent {
 					schedule_idle (close_all_clients.callback);
 			};
 
-			foreach (var client in clients.to_array ()) {
+			foreach (var client in clients.values.to_array ()) {
 				pending++;
 				close_client.begin (client, on_complete);
 			}
@@ -584,7 +587,7 @@ namespace Frida.Agent {
 					schedule_idle (flush_all_clients.callback);
 			};
 
-			foreach (var client in clients.to_array ()) {
+			foreach (var client in clients.values.to_array ()) {
 				pending++;
 				flush_client.begin (client, on_complete);
 			}
@@ -611,12 +614,72 @@ namespace Frida.Agent {
 
 			client.script_eternalized.disconnect (on_script_eternalized);
 			client.closed.disconnect (on_client_closed);
-			clients.remove (client);
+			clients.unset (client.id);
+
+			foreach (var dc in direct_connections.values) {
+				if (dc.client == client) {
+					detach_and_steal_direct_dbus_connection (dc.connection);
+					break;
+				}
+			}
 		}
 
 		private void on_script_eternalized (Gum.Script script) {
 			eternalized_scripts.add (script);
 			eternalized ();
+		}
+
+#if !WINDOWS
+		private async void migrate (AgentSessionId id, Socket to_socket, Cancellable? cancellable) throws Error, IOError {
+			if (!clients.has_key (id))
+				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+			var client = clients[id];
+
+			var dc = new DirectConnection (client);
+
+			DBusConnection connection;
+			try {
+				connection = yield new DBusConnection (SocketConnection.factory_create_connection (to_socket),
+					ServerGuid.AGENT_SESSION, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS |
+					DELAY_MESSAGE_PROCESSING, null, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+			dc.connection = connection;
+
+			try {
+				AgentSession session = client;
+				dc.registration_id = connection.register_object (ObjectPath.AGENT_SESSION, session);
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+
+			connection.start_message_processing ();
+
+			this.connection.unregister_object (client.registration_id);
+			client.registration_id = 0;
+
+			direct_connections[connection] = dc;
+			connection.on_closed.connect (on_direct_connection_closed);
+		}
+#endif
+
+		private void on_direct_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			var dc = detach_and_steal_direct_dbus_connection (connection);
+
+			dc.client.close.begin (null);
+		}
+
+		private DirectConnection detach_and_steal_direct_dbus_connection (DBusConnection connection) {
+			connection.on_closed.disconnect (on_direct_connection_closed);
+
+			DirectConnection dc;
+			bool found = direct_connections.unset (connection, out dc);
+			assert (found);
+
+			connection.unregister_object (dc.registration_id);
+
+			return dc;
 		}
 
 		private async void unload (Cancellable? cancellable) throws Error, IOError {
@@ -775,7 +838,13 @@ namespace Frida.Agent {
 			connection = null;
 		}
 
-		private void discard_connection () {
+		private void discard_connections () {
+			foreach (var dc in direct_connections.values.to_array ()) {
+				detach_and_steal_direct_dbus_connection (dc.connection);
+
+				dc.connection.dispose ();
+			}
+
 			if (connection == null)
 				return;
 
@@ -788,8 +857,10 @@ namespace Frida.Agent {
 		}
 
 		private void unregister_connection () {
-			foreach (var client in clients) {
-				connection.unregister_object (client.registration_id);
+			foreach (var client in clients.values) {
+				var id = client.registration_id;
+				if (id != 0)
+					connection.unregister_object (id);
 				client.registration_id = 0;
 			}
 
@@ -854,7 +925,7 @@ namespace Frida.Agent {
 		}
 
 		private async void prepare_for_termination (TerminationReason reason) {
-			foreach (var client in clients.to_array ())
+			foreach (var client in clients.values.to_array ())
 				yield client.prepare_for_termination (reason);
 
 			var connection = this.connection;
@@ -867,7 +938,7 @@ namespace Frida.Agent {
 		}
 
 		private void unprepare_for_termination () {
-			foreach (var client in clients.to_array ())
+			foreach (var client in clients.values.to_array ())
 				client.unprepare_for_termination ();
 		}
 	}
@@ -1093,6 +1164,17 @@ namespace Frida.Agent {
 
 		private void on_message_from_debugger (string message) {
 			this.message_from_debugger (message);
+		}
+	}
+
+	private class DirectConnection {
+		public AgentClient client;
+
+		public DBusConnection connection;
+		public uint registration_id;
+
+		public DirectConnection (AgentClient client) {
+			this.client = client;
 		}
 	}
 

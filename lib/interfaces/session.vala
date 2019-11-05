@@ -33,6 +33,9 @@ namespace Frida {
 	[DBus (name = "re.frida.AgentSessionProvider12")]
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
+#if !WINDOWS
+		public abstract async void migrate (AgentSessionId id, GLib.Socket to_socket, Cancellable? cancellable) throws GLib.Error;
+#endif
 		public abstract async void unload (Cancellable? cancellable) throws GLib.Error;
 
 		public signal void opened (AgentSessionId id);
@@ -87,6 +90,12 @@ namespace Frida {
 
 		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state,
 			Cancellable? cancellable) throws GLib.Error;
+	}
+
+	[DBus (name = "re.frida.TransportBroker12")]
+	public interface TransportBroker : Object {
+		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
+			out string token) throws GLib.Error;
 	}
 
 	public enum SpawnStartState {
@@ -989,6 +998,7 @@ namespace Frida {
 
 	namespace ServerGuid {
 		public const string HOST_SESSION_SERVICE = "6769746875622e636f6d2f6672696461";
+		public const string AGENT_SESSION = "6167656e742d732e66726964612e7265";
 	}
 
 	namespace ObjectPath {
@@ -997,6 +1007,7 @@ namespace Frida {
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string CHILD_SESSION = "/re/frida/ChildSession";
+		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";
 
 		public static string from_agent_session_id (AgentSessionId id) {
 			return "%s/%u".printf (AGENT_SESSION, id.handle);

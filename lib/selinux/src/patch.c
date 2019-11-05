@@ -53,6 +53,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "$self", "process", { "sigchld", NULL } },
   { { "domain", NULL }, "$self", "fd", { "use", NULL } },
   { { "domain", NULL }, "$self", "unix_stream_socket", { "connectto", "read", "write", "getattr", "getopt", NULL } },
+  { { "domain", NULL }, "$self", "tcp_socket", { "read", "write", "getattr", "getopt", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
 };
 

@@ -168,7 +168,10 @@ namespace Frida {
 				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
 
-			var entry = new Entry (port, client, connection, session);
+			TransportBroker transport_broker = yield connection.get_proxy (null, ObjectPath.TRANSPORT_BROKER,
+				DBusProxyFlags.NONE, cancellable);
+
+			var entry = new Entry (port, client, connection, session, transport_broker);
 			entry.agent_session_closed.connect (on_agent_session_closed);
 			entries.add (entry);
 
@@ -192,7 +195,7 @@ namespace Frida {
 				Cancellable? cancellable) throws Error, IOError {
 			foreach (var entry in entries) {
 				if (entry.host_session == host_session)
-					return yield entry.obtain_agent_session (agent_session_id, cancellable);
+					return yield entry.obtain_agent_session (agent_session_id, this, cancellable);
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
@@ -273,11 +276,23 @@ namespace Frida {
 				construct;
 			}
 
+			public TransportBroker? transport_broker {
+				get;
+				set;
+			}
+
 			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id =
 				new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-			public Entry (uint16 port, Droidy.Client client, DBusConnection connection, HostSession host_session) {
-				Object (port: port, client: client, connection: connection, host_session: host_session);
+			public Entry (uint16 port, Droidy.Client client, DBusConnection connection, HostSession host_session,
+					TransportBroker transport_broker) {
+				Object (
+					port: port,
+					client: client,
+					connection: connection,
+					host_session: host_session,
+					transport_broker: transport_broker
+				);
 
 				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
 				host_session.agent_session_crashed.connect (on_agent_session_crashed);
@@ -297,7 +312,8 @@ namespace Frida {
 				}
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			public async AgentSession obtain_agent_session (AgentSessionId id, ChannelProvider channel_provider,
+					Cancellable? cancellable) throws Error, IOError {
 				AgentSession session = agent_session_by_id[id];
 				if (session == null) {
 					try {
@@ -307,7 +323,19 @@ namespace Frida {
 					} catch (IOError e) {
 						throw new Error.INVALID_ARGUMENT ("%s", e.message);
 					}
+
+					if (transport_broker != null) {
+						try {
+							session = yield establish_direct_session (transport_broker, id, channel_provider,
+								cancellable);
+							agent_session_by_id[id] = session;
+						} catch (Error e) {
+							if (e is Error.NOT_SUPPORTED)
+								transport_broker = null;
+						}
+					}
 				}
+
 				return session;
 			}
 

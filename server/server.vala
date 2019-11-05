@@ -54,7 +54,8 @@ namespace Frida.Server {
 				var inet_socket_address = socket_address as InetSocketAddress;
 				var inet_address = inet_socket_address.get_address ();
 				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-				listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (), inet_socket_address.get_port ());
+				listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (),
+					inet_socket_address.get_port ());
 			} else {
 				printerr ("Invalid listen address\n");
 				return 1;
@@ -182,12 +183,18 @@ namespace Frida.Server {
 	public extern void _stop_run_loop ();
 #endif
 
-	public class Application : Object {
+	public class Application : Object, TransportBroker {
 		private BaseDBusHostSession host_session;
 		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+
 		private DBusServer server;
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+
+		private SocketService? broker_service;
+		private uint16 broker_port;
+		private Gee.HashMap<string, Transport> transports = new Gee.HashMap<string, Transport> ();
+
 		private Cancellable io_cancellable = new Cancellable ();
 
 		private MainLoop loop;
@@ -252,6 +259,14 @@ namespace Frida.Server {
 			if (stopping)
 				return;
 			stopping = true;
+
+			transports.clear ();
+
+			if (broker_service != null) {
+				broker_service.incoming.disconnect (on_broker_service_connection);
+				broker_service.stop ();
+				broker_service = null;
+			}
 
 			server.new_connection.disconnect (on_connection_opened);
 
@@ -332,6 +347,7 @@ namespace Frida.Server {
 			client.register_host_session (host_session);
 			foreach (var entry in agent_sessions.entries)
 				client.register_agent_session (entry.key, entry.value);
+			client.register_transport_broker (this);
 			clients.set (connection, client);
 
 			return true;
@@ -359,6 +375,75 @@ namespace Frida.Server {
 				yield session.close (io_cancellable);
 			} catch (GLib.Error e) {
 			}
+		}
+
+		private async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port, out string token)
+				throws Error {
+#if WINDOWS
+			throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
+#else
+			if (broker_service == null) {
+				var service = new SocketService ();
+				try {
+					broker_port = service.add_any_inet_port (null);
+				} catch (GLib.Error e) {
+					throw new Error.NOT_SUPPORTED ("Unable to listen: %s", e.message);
+				}
+				broker_service = service;
+
+				service.incoming.connect (on_broker_service_connection);
+				service.start ();
+			}
+
+			string transport_id = Uuid.string_random ();
+
+			var expiry_source = new TimeoutSource.seconds (20);
+			expiry_source.set_callback (() => {
+				transports.unset (transport_id);
+				return false;
+			});
+			expiry_source.attach (MainContext.get_thread_default ());
+
+			transports[transport_id] = new Transport (id, expiry_source);
+
+			port = broker_port;
+			token = transport_id;
+#endif
+		}
+
+		private bool on_broker_service_connection (SocketConnection connection, Object? source_object) {
+			handle_broker_connection.begin (connection);
+			return true;
+		}
+
+		private async void handle_broker_connection (SocketConnection connection) throws GLib.Error {
+			const size_t uuid_length = 36;
+
+			var raw_token = new uint8[uuid_length + 1];
+			size_t bytes_read;
+			yield connection.input_stream.read_all_async (raw_token[0:uuid_length], Priority.DEFAULT, io_cancellable,
+				out bytes_read);
+			unowned string token = (string) raw_token;
+
+			Transport transport;
+			if (!transports.unset (token, out transport))
+				return;
+
+			transport.expiry_source.destroy ();
+
+			AgentSessionId session_id = transport.session_id;
+
+#if !WINDOWS
+			AgentSessionProvider provider = host_session.obtain_session_provider (session_id);
+
+			yield provider.migrate (session_id, connection.socket, io_cancellable);
+#endif
+
+			if (!agent_sessions.has_key (session_id))
+				return;
+			var session = agent_sessions[session_id];
+			foreach (var client in clients.values)
+				client.unregister_agent_session (session_id, session);
 		}
 
 		private class Client : Object {
@@ -424,6 +509,14 @@ namespace Frida.Server {
 				agent_registrations.unset (id, out registration_id);
 				registrations.remove (registration_id);
 				connection.unregister_object (registration_id);
+			}
+
+			public void register_transport_broker (TransportBroker transport_broker) {
+				try {
+					registrations.add (connection.register_object (ObjectPath.TRANSPORT_BROKER, transport_broker));
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 			}
 
 			private void schedule_idle (owned ScheduledFunc func) {
@@ -500,6 +593,16 @@ namespace Frida.Server {
 				}
 
 				return result;
+			}
+		}
+
+		private class Transport {
+			public AgentSessionId session_id;
+			public Source expiry_source;
+
+			public Transport (AgentSessionId session_id, Source expiry_source) {
+				this.session_id = session_id;
+				this.expiry_source = expiry_source;
 			}
 		}
 	}

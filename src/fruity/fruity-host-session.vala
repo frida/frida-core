@@ -863,6 +863,18 @@ namespace Frida {
 			remote_agent_sessions[remote_session_id] = local_session_id;
 			agent_sessions[local_session_id] = agent_session;
 
+			var transport_broker = server.transport_broker;
+			if (transport_broker != null) {
+				try {
+					AgentSession direct_session = yield establish_direct_session (transport_broker, remote_session_id,
+						channel_provider, cancellable);
+					agent_sessions[local_session_id] = direct_session;
+				} catch (Error e) {
+					if (e is Error.NOT_SUPPORTED)
+						server.transport_broker = null;
+				}
+			}
+
 			return local_session_id;
 		}
 
@@ -977,10 +989,16 @@ namespace Frida {
 				} catch (GLib.Error e) {
 				}
 
+				TransportBroker? transport_broker = null;
+				if (flavor == REGULAR) {
+					transport_broker = yield connection.get_proxy (null, ObjectPath.TRANSPORT_BROKER,
+						DBusProxyFlags.NONE, cancellable);
+				}
+
 				if (connection.closed)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 
-				var server = new RemoteServer (session, connection, flavor);
+				var server = new RemoteServer (session, connection, flavor, transport_broker);
 				attach_remote_server (server);
 				current_remote_server = server;
 				last_server_check_timer = null;
@@ -1133,7 +1151,7 @@ namespace Frida {
 				construct;
 			}
 
-			public ChannelProvider channel_provider {
+			public weak ChannelProvider channel_provider {
 				get;
 				construct;
 			}
@@ -1335,11 +1353,18 @@ namespace Frida {
 				GADGET
 			}
 
-			public RemoteServer (HostSession session, DBusConnection connection, Flavor flavor) {
+			public TransportBroker? transport_broker {
+				get;
+				set;
+			}
+
+			public RemoteServer (HostSession session, DBusConnection connection, Flavor flavor,
+					TransportBroker? transport_broker) {
 				Object (
 					session: session,
 					connection: connection,
-					flavor: flavor
+					flavor: flavor,
+					transport_broker: transport_broker
 				);
 			}
 		}

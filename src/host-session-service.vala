@@ -414,6 +414,19 @@ namespace Frida {
 			return session;
 		}
 
+		public AgentSessionProvider obtain_session_provider (AgentSessionId id) throws Error {
+			foreach (var future in agent_entries.values) {
+				if (!future.ready)
+					continue;
+
+				var entry = future.value;
+				if (entry.sessions.contains (id))
+					return entry.provider;
+			}
+
+			throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+		}
+
 		private void on_agent_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (closed_by_us)
@@ -1191,4 +1204,35 @@ namespace Frida {
 	}
 
 	internal delegate bool UninjectPredicate ();
+
+	internal async AgentSession establish_direct_session (TransportBroker broker, AgentSessionId id, ChannelProvider channel_provider,
+			Cancellable? cancellable) throws Error, IOError {
+		uint16 port;
+		string token;
+		try {
+			yield broker.open_tcp_transport (id, cancellable, out port, out token);
+		} catch (GLib.Error e) {
+			if (e is Error.NOT_SUPPORTED)
+				throw (Error) e;
+			if (e is DBusError.UNKNOWN_METHOD)
+				throw new Error.NOT_SUPPORTED ("Not supported by the remote frida-server");
+			throw new Error.TRANSPORT ("%s", e.message);
+		}
+
+		var stream = yield channel_provider.open_channel (("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (port), cancellable);
+
+		try {
+			size_t bytes_written;
+			yield stream.output_stream.write_all_async (token.data, Priority.DEFAULT, cancellable, out bytes_written);
+
+			var connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+
+			AgentSession agent_session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE,
+				cancellable);
+
+			return agent_session;
+		} catch (GLib.Error e) {
+			throw new Error.TRANSPORT ("%s", e.message);
+		}
+	}
 }
