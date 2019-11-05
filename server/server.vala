@@ -365,6 +365,9 @@ namespace Frida.Server {
 			if (client.is_spawn_gating)
 				host_session.disable_spawn_gating.begin (io_cancellable);
 
+			foreach (var pid in client.orphans)
+				host_session.kill.begin (pid, io_cancellable);
+
 			foreach (var session_id in client.sessions)
 				close_session.begin (session_id);
 		}
@@ -455,6 +458,11 @@ namespace Frida.Server {
 			public bool is_spawn_gating {
 				get;
 				private set;
+			}
+
+			public Gee.HashSet<uint> orphans {
+				get;
+				default = new Gee.HashSet<uint> ();
 			}
 
 			public Gee.HashSet<AgentSessionId?> sessions {
@@ -572,6 +580,18 @@ namespace Frida.Server {
 					} else if (member == "DisableSpawnGating" && type == DBusMessageType.METHOD_RETURN) {
 						schedule_idle (() => {
 							is_spawn_gating = false;
+						});
+					} else if (member == "Spawn" && type == DBusMessageType.METHOD_RETURN) {
+						uint32 pid;
+						message.get_body ().get ("(u)", out pid);
+						schedule_idle (() => {
+							orphans.add (pid);
+						});
+					} else if ((member == "Resume" || member == "Kill") && type == DBusMessageType.METHOD_RETURN) {
+						uint32 pid;
+						call.get_body ().get ("(u)", out pid);
+						schedule_idle (() => {
+							orphans.remove (pid);
 						});
 					} else if (member == "AttachTo" && type == DBusMessageType.METHOD_RETURN) {
 						uint32 raw_id;
