@@ -55,6 +55,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
   { { "domain", NULL }, "$self", "unix_stream_socket", { "connectto", "read", "write", "getattr", "getopt", NULL } },
   { { "domain", NULL }, "$self", "tcp_socket", { "read", "write", "getattr", "getopt", NULL } },
   { { "zygote", NULL }, "zygote", "capability", { "sys_ptrace", NULL } },
+  { { "?app_zygote", NULL }, "zygote_exec", "file", { "read", NULL } },
 };
 
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
@@ -101,6 +102,16 @@ frida_selinux_apply_policy_patch (void)
 
     for (source = rule->sources; *source != NULL; source++)
     {
+      const gchar * s = *source;
+
+      if (s[0] == '?')
+      {
+        s++;
+
+        if (hashtab_search (db.p_types.table, (char *) s) == NULL)
+          continue;
+      }
+
       for (perm_entry = rule->permissions; *perm_entry != NULL; perm_entry++)
       {
         const gchar * perm = *perm_entry;
@@ -112,7 +123,7 @@ frida_selinux_apply_policy_patch (void)
           perm++;
         }
 
-        if (frida_ensure_rule (&db, *source, rule->target, rule->klass, perm, &error) == NULL)
+        if (frida_ensure_rule (&db, s, rule->target, rule->klass, perm, &error) == NULL)
         {
           if (!g_error_matches (error, FRIDA_SELINUX_ERROR, FRIDA_SELINUX_ERROR_PERMISSION_NOT_FOUND) || is_important)
             g_printerr ("Unable to add SELinux rule: %s\n", error->message);
