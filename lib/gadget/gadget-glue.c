@@ -3,11 +3,11 @@
 #include "frida-interfaces.h"
 #include "frida-payload.h"
 
-#ifdef G_OS_WIN32
-# define VC_EXTRALEAN
+#ifdef HAVE_WINDOWS
 # include <windows.h>
-# undef VC_EXTRALEAN
 #else
+# include <netinet/in.h>
+# include <netinet/tcp.h>
 # include <signal.h>
 # include <unistd.h>
 #endif
@@ -75,7 +75,7 @@ static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
 
-#ifdef G_OS_WIN32
+#ifdef HAVE_WINDOWS
 
 BOOL WINAPI
 DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
@@ -222,7 +222,7 @@ frida_gadget_environment_deinit (void)
 gboolean
 frida_gadget_environment_can_block_at_load_time (void)
 {
-#ifdef G_OS_WIN32
+#ifdef HAVE_WINDOWS
   return FALSE;
 #else
   return TRUE;
@@ -328,6 +328,12 @@ frida_gadget_environment_set_thread_name (const gchar * name)
 #ifdef HAVE_DARWIN
   pthread_setname_np (name);
 #endif
+}
+
+void
+frida_gadget_tcp_enable_nodelay (GSocket * socket)
+{
+  g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
 }
 
 static gpointer

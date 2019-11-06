@@ -87,7 +87,7 @@
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -97,7 +97,7 @@
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -107,7 +107,7 @@
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -117,7 +117,7 @@
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>

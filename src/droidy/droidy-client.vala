@@ -213,11 +213,11 @@ namespace Frida.Droidy {
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			var client = new SocketClient ();
 
-			SocketConnectable connectable;
-			connectable = new InetSocketAddress (new InetAddress.loopback (SocketFamily.IPV4), ADB_SERVER_PORT);
-
 			try {
-				connection = yield client.connect_async (connectable, cancellable);
+				connection = yield client.connect_async (new NetworkAddress.loopback (ADB_SERVER_PORT), cancellable);
+
+				Tcp.enable_nodelay (connection.socket);
+
 				input = connection.get_input_stream ();
 				output = connection.get_output_stream ();
 

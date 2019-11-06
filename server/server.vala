@@ -5,8 +5,8 @@ namespace Frida.Server {
 	private const uint16 DEFAULT_LISTEN_PORT = 27042;
 	private const string DEFAULT_DIRECTORY = "re.frida.server";
 	private static bool output_version = false;
-	private static string listen_address = null;
-	private static string directory = null;
+	private static string? listen_address = null;
+	private static string? directory = null;
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
@@ -46,26 +46,30 @@ namespace Frida.Server {
 
 		Environment.set_verbose_logging_enabled (verbose);
 
-		string listen_uri;
-		try {
-			var raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
-			var socket_address = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT).enumerate ().next ();
-			if (socket_address is InetSocketAddress) {
-				var inet_socket_address = socket_address as InetSocketAddress;
-				var inet_address = inet_socket_address.get_address ();
-				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-				listen_uri = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (),
-					inet_socket_address.get_port ());
-			} else {
-				printerr ("Invalid listen address\n");
+		SocketConnectable connectable;
+		string raw_address = (listen_address != null) ? listen_address : DEFAULT_LISTEN_ADDRESS;
+#if !WINDOWS
+		if (raw_address.has_prefix ("unix:")) {
+			string path = raw_address.substring (5);
+
+			UnixSocketAddressType type = UnixSocketAddress.abstract_names_supported ()
+				? UnixSocketAddressType.ABSTRACT
+				: UnixSocketAddressType.PATH;
+
+			connectable = new UnixSocketAddress.with_type (path, -1, type);
+		} else {
+#else
+		{
+#endif
+			try {
+				connectable = NetworkAddress.parse (raw_address, DEFAULT_LISTEN_PORT);
+			} catch (GLib.Error e) {
+				printerr ("%s\n", e.message);
 				return 1;
 			}
-		} catch (GLib.Error e) {
-			printerr ("%s\n", e.message);
-			return 1;
 		}
 
-		ReadyHandler on_ready = null;
+		ReadyHandler? on_ready = null;
 #if !WINDOWS
 		if (daemonize) {
 			var sync_fds = new int[2];
@@ -88,7 +92,7 @@ namespace Frida.Server {
 					sync_in.read (status);
 					return status[0];
 				} catch (GLib.Error e) {
-					return 1;
+					return 2;
 				}
 			}
 
@@ -121,7 +125,7 @@ namespace Frida.Server {
 
 #if DARWIN
 		var worker = new Thread<int> ("frida-server-main-loop", () => {
-			var exit_code = run_application (listen_uri, on_ready);
+			var exit_code = run_application (connectable, on_ready);
 
 			_stop_run_loop ();
 
@@ -133,11 +137,11 @@ namespace Frida.Server {
 
 		return exit_code;
 #else
-		return run_application (listen_uri, on_ready);
+		return run_application (connectable, on_ready);
 #endif
 	}
 
-	private static int run_application (string listen_uri, ReadyHandler on_ready) {
+	private static int run_application (SocketConnectable connectable, ReadyHandler on_ready) {
 		application = new Application ();
 
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -147,29 +151,14 @@ namespace Frida.Server {
 			application.stop ();
 		});
 
-		try {
-			Idle.add (() => {
-				if (on_ready != null) {
-					on_ready (true);
-					on_ready = null;
-				}
-
-				return false;
-			});
-
-			application.run (listen_uri);
-		} catch (Error e) {
-			printerr ("Unable to start server: %s\n", e.message);
-
-			if (on_ready != null) {
-				on_ready (false);
+		if (on_ready != null) {
+			application.ready.connect (() => {
+				on_ready (true);
 				on_ready = null;
-			}
-
-			return 1;
+			});
 		}
 
-		return 0;
+		return application.run (connectable);
 	}
 
 	namespace Environment {
@@ -178,25 +167,35 @@ namespace Frida.Server {
 		public extern void configure ();
 	}
 
+	namespace Tcp {
+		public extern void enable_nodelay (Socket socket);
+	}
+
 #if DARWIN
 	public extern void _start_run_loop ();
 	public extern void _stop_run_loop ();
 #endif
 
 	public class Application : Object, TransportBroker {
+		public signal void ready ();
+
 		private BaseDBusHostSession host_session;
 		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-		private DBusServer server;
+		private SocketService server = new SocketService ();
+		private string guid = DBus.generate_guid ();
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
 
-		private SocketService? broker_service;
-		private uint16 broker_port;
+		private SocketService broker_service = new SocketService ();
+#if !WINDOWS
+		private uint16 broker_port = 0;
+#endif
 		private Gee.HashMap<string, Transport> transports = new Gee.HashMap<string, Transport> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
+		private int exit_code;
 		private MainLoop loop;
 		private bool stopping;
 
@@ -217,28 +216,49 @@ namespace Frida.Server {
 #endif
 			host_session.agent_session_opened.connect (on_agent_session_opened);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
+
+			server.incoming.connect (on_server_connection);
+
+			broker_service.incoming.connect (on_broker_service_connection);
 		}
 
-		public void run (string listen_uri) throws Error {
-			try {
-				server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS,
-					DBus.generate_guid (), null, io_cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.ADDRESS_IN_USE ("%s", e.message);
-			}
-			server.new_connection.connect (on_connection_opened);
-			server.start ();
-
+		public int run (SocketConnectable connectable) {
 			Idle.add (() => {
-				start.begin ();
+				start.begin (connectable);
 				return false;
 			});
 
+			exit_code = 0;
+
 			loop = new MainLoop ();
 			loop.run ();
+
+			return exit_code;
 		}
 
-		private async void start () {
+		private async void start (SocketConnectable connectable) {
+			var enumerator = connectable.enumerate ();
+			SocketAddress? address;
+			try {
+				while ((address = yield enumerator.next_async (io_cancellable)) != null) {
+					SocketAddress effective_address;
+					server.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+						out effective_address);
+				}
+			} catch (GLib.Error e) {
+				printerr ("Unable to start: %s\n", e.message);
+				exit_code = 3;
+				stop ();
+				return;
+			}
+
+			server.start ();
+
+			Idle.add (() => {
+				ready ();
+				return false;
+			});
+
 			try {
 				yield host_session.preload (io_cancellable);
 			} catch (Error e) {
@@ -261,14 +281,9 @@ namespace Frida.Server {
 			stopping = true;
 
 			transports.clear ();
+			broker_service.stop ();
 
-			if (broker_service != null) {
-				broker_service.incoming.disconnect (on_broker_service_connection);
-				broker_service.stop ();
-				broker_service = null;
-			}
-
-			server.new_connection.disconnect (on_connection_opened);
+			server.stop ();
 
 			while (clients.size != 0) {
 				foreach (var entry in clients.entries) {
@@ -287,8 +302,6 @@ namespace Frida.Server {
 					break;
 				}
 			}
-
-			server.stop ();
 
 			while (agent_sessions.size != 0) {
 				foreach (var entry in agent_sessions.entries) {
@@ -332,7 +345,7 @@ namespace Frida.Server {
 			agent_sessions.unset (id);
 		}
 
-		private bool on_connection_opened (DBusConnection connection) {
+		private bool on_server_connection (SocketConnection connection, Object? source_object) {
 #if IOS
 			/*
 			 * We defer the launchd injection until the first connection is established in order
@@ -341,6 +354,18 @@ namespace Frida.Server {
 			(host_session as DarwinHostSession).activate_crash_reporter_integration ();
 #endif
 
+			handle_server_connection.begin (connection);
+			return true;
+		}
+
+		private async void handle_server_connection (SocketConnection socket_connection) throws GLib.Error {
+			var socket = socket_connection.socket;
+			if (socket.get_family () != UNIX)
+				Tcp.enable_nodelay (socket);
+
+			var connection = yield new DBusConnection (socket_connection, guid,
+				AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+				null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			var client = new Client (connection);
@@ -350,7 +375,7 @@ namespace Frida.Server {
 			client.register_transport_broker (this);
 			clients.set (connection, client);
 
-			return true;
+			connection.start_message_processing ();
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -385,17 +410,14 @@ namespace Frida.Server {
 #if WINDOWS
 			throw new Error.NOT_SUPPORTED ("Not yet supported on Windows");
 #else
-			if (broker_service == null) {
-				var service = new SocketService ();
+			if (broker_port == 0) {
 				try {
-					broker_port = service.add_any_inet_port (null);
+					broker_port = broker_service.add_any_inet_port (null);
 				} catch (GLib.Error e) {
 					throw new Error.NOT_SUPPORTED ("Unable to listen: %s", e.message);
 				}
-				broker_service = service;
 
-				service.incoming.connect (on_broker_service_connection);
-				service.start ();
+				broker_service.start ();
 			}
 
 			string transport_id = Uuid.string_random ();
@@ -420,6 +442,10 @@ namespace Frida.Server {
 		}
 
 		private async void handle_broker_connection (SocketConnection connection) throws GLib.Error {
+			var socket = connection.socket;
+			if (socket.get_family () != UNIX)
+				Tcp.enable_nodelay (socket);
+
 			const size_t uuid_length = 36;
 
 			var raw_token = new uint8[uuid_length + 1];
@@ -439,7 +465,7 @@ namespace Frida.Server {
 #if !WINDOWS
 			AgentSessionProvider provider = host_session.obtain_session_provider (session_id);
 
-			yield provider.migrate (session_id, connection.socket, io_cancellable);
+			yield provider.migrate (session_id, socket, io_cancellable);
 #endif
 
 			if (!agent_sessions.has_key (session_id))
@@ -538,7 +564,8 @@ namespace Frida.Server {
 
 			private delegate void ScheduledFunc ();
 
-			private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message, bool incoming) {
+			private GLib.DBusMessage on_connection_message (DBusConnection connection, owned DBusMessage message,
+					bool incoming) {
 				DBusMessage result = message;
 
 				var type = message.get_message_type ();

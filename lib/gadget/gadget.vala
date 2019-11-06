@@ -525,12 +525,30 @@ namespace Frida.Gadget {
 				yield server.start ();
 				ctrl = server;
 
-				uint16 listen_port = server.listen_port;
-				Environment.set_thread_name ("frida-gadget-tcp-%u".printf (listen_port));
-				if (request != null) {
-					request.set_value (listen_port);
+				var listen_address = server.listen_address;
+				var inet_address = listen_address as InetSocketAddress;
+				if (inet_address != null) {
+					uint16 listen_port = inet_address.get_port ();
+					Environment.set_thread_name ("frida-gadget-tcp-%u".printf (listen_port));
+					if (request != null) {
+						request.set_value (listen_port);
+					} else {
+						log_info ("Listening on %s TCP port %u".printf (
+							inet_address.get_address ().to_string (),
+							listen_port));
+					}
 				} else {
-					log_info ("Listening on %s TCP port %u".printf (server.listen_host, listen_port));
+#if !WINDOWS
+					var unix_address = (UnixSocketAddress) listen_address;
+					Environment.set_thread_name ("frida-gadget-unix");
+					if (request != null) {
+						request.set_value (0);
+					} else {
+						log_info ("Listening on UNIX socket at “%s”".printf (unix_address.get_path ()));
+					}
+#else
+					assert_not_reached ();
+#endif
 				}
 			} else {
 				resume ();
@@ -1213,39 +1231,18 @@ namespace Frida.Gadget {
 	}
 
 	private class Server : BaseController {
-		public InetSocketAddress listen_address {
+		public SocketAddress listen_address {
 			get;
 			set;
 		}
 
-		public string listen_host {
-			owned get {
-				return listen_address.get_address ().to_string ();
-			}
-		}
-
-		public uint16 listen_port {
-			get {
-				return listen_address.get_port ();
-			}
-		}
-
-		public string listen_uri {
-			owned get {
-				var listen_address = listen_address;
-				var inet_address = listen_address.get_address ();
-
-				var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-				var host = inet_address.to_string ();
-				var port = listen_address.get_port ();
-
-				return "tcp:family=%s,host=%s,port=%hu".printf (family, host, port);
-			}
-		}
-
-		private DBusServer? server;
+		private SocketService server = new SocketService ();
+		private string guid = DBus.generate_guid ();
 		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
+
+		private Cancellable io_cancellable = new Cancellable ();
 
 		public Server (Config config, Location location) throws Error {
 			Object (
@@ -1255,41 +1252,43 @@ namespace Frida.Gadget {
 			);
 		}
 
+		construct {
+			server.incoming.connect (on_server_connection);
+		}
+
 		protected override async void on_start () throws Error {
-			var on_port_conflict = (config.interaction as ListenInteraction).on_port_conflict;
-
-			uint16 start_port = listen_port;
-			uint16 candidate_port = start_port;
-			do {
-				try {
-					server = new DBusServer.sync (listen_uri, DBusServerFlags.AUTHENTICATION_ALLOW_ANONYMOUS,
-						DBus.generate_guid ());
-				} catch (GLib.Error e) {
-					if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
-						candidate_port++;
-						if (candidate_port == start_port)
-							throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
-						else if (candidate_port == 0)
-							candidate_port = 1024;
-						listen_address = new InetSocketAddress (listen_address.address, candidate_port);
-					} else {
-						if (e is IOError.ADDRESS_IN_USE)
-							throw new Error.ADDRESS_IN_USE ("%s", e.message);
-						else if (e is IOError.PERMISSION_DENIED)
-							throw new Error.PERMISSION_DENIED ("%s", e.message);
-						else
-							throw new Error.NOT_SUPPORTED ("%s", e.message);
+			SocketAddress? effective_address = null;
+			InetSocketAddress? inet_address = listen_address as InetSocketAddress;
+			if (inet_address != null) {
+				var on_port_conflict = (config.interaction as ListenInteraction).on_port_conflict;
+				uint16 start_port = inet_address.get_port ();
+				uint16 candidate_port = start_port;
+				do {
+					try {
+						server.add_address (inet_address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+							out effective_address);
+					} catch (GLib.Error e) {
+						if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
+							candidate_port++;
+							if (candidate_port == start_port)
+								throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
+							if (candidate_port == 0)
+								candidate_port = 1024;
+							inet_address = new InetSocketAddress (inet_address.get_address (), candidate_port);
+						} else {
+							throw_listen_error (e);
+						}
 					}
+				} while (effective_address == null);
+			} else {
+				try {
+					server.add_address (listen_address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+						out effective_address);
+				} catch (GLib.Error e) {
+					throw_listen_error (e);
 				}
-			} while (server == null);
-
-			server.new_connection.connect ((connection) => {
-				if (server == null)
-					return false;
-
-				attach_client (connection);
-				return true;
-			});
+			}
+			listen_address = effective_address;
 
 			server.start ();
 		}
@@ -1311,7 +1310,6 @@ namespace Frida.Gadget {
 				return;
 
 			server.stop ();
-			server = null;
 
 			while (!clients.is_empty) {
 				var iterator = clients.keys.iterator ();
@@ -1324,6 +1322,27 @@ namespace Frida.Gadget {
 
 				detach_client (client);
 			}
+
+			io_cancellable.cancel ();
+		}
+
+		private bool on_server_connection (SocketConnection connection, Object? source_object) {
+			handle_server_connection.begin (connection);
+			return true;
+		}
+
+		private async void handle_server_connection (SocketConnection socket_connection) throws GLib.Error {
+			var socket = socket_connection.socket;
+			if (socket.get_family () != UNIX)
+				Tcp.enable_nodelay (socket);
+
+			var connection = yield new DBusConnection (socket_connection, guid,
+				AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+				null, io_cancellable);
+
+			attach_client (connection);
+
+			connection.start_message_processing ();
 		}
 
 		private void attach_client (DBusConnection connection) {
@@ -1698,14 +1717,39 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private static InetSocketAddress parse_listen_address (Config config) throws Error {
+		private static SocketAddress parse_listen_address (Config config) throws Error {
 			var interaction = config.interaction as ListenInteraction;
 
-			var address = new InetSocketAddress.from_string (interaction.address, interaction.port);
+			unowned string raw_address = interaction.address;
+
+#if !WINDOWS
+			if (raw_address.has_prefix ("unix:")) {
+				string path = raw_address.substring (5);
+
+				UnixSocketAddressType type = UnixSocketAddress.abstract_names_supported ()
+					? UnixSocketAddressType.ABSTRACT
+					: UnixSocketAddressType.PATH;
+
+				return new UnixSocketAddress.with_type (path, -1, type);
+			}
+#endif
+
+			var address = new InetSocketAddress.from_string (raw_address, interaction.port);
 			if (address == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
 
 			return address;
+		}
+
+		[NoReturn]
+		private static void throw_listen_error (GLib.Error e) throws Error {
+			if (e is IOError.ADDRESS_IN_USE)
+				throw new Error.ADDRESS_IN_USE ("%s", e.message);
+
+			if (e is IOError.PERMISSION_DENIED)
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
+
+			throw new Error.NOT_SUPPORTED ("%s", e.message);
 		}
 	}
 
@@ -1740,6 +1784,10 @@ namespace Frida.Gadget {
 		private extern bool has_objc_class (string name);
 
 		private extern void set_thread_name (string name);
+	}
+
+	namespace Tcp {
+		private extern void enable_nodelay (Socket socket);
 	}
 
 	public extern void _kill (uint pid);

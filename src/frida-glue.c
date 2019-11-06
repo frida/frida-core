@@ -1,6 +1,12 @@
 #include "frida-core.h"
 
 #include <gum/gum.h>
+#ifdef HAVE_WINDOWS
+# include <winsock2.h>
+#else
+# include <netinet/in.h>
+# include <netinet/tcp.h>
+#endif
 
 static FridaRuntime runtime;
 static GThread * main_thread;
@@ -144,6 +150,12 @@ const gchar *
 frida_version_string (void)
 {
   return FRIDA_VERSION;
+}
+
+void
+frida_tcp_enable_nodelay (GSocket * socket)
+{
+  g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
 }
 
 static gpointer

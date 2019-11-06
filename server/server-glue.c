@@ -8,6 +8,12 @@
 # include "frida-selinux.h"
 #endif
 
+#ifdef HAVE_WINDOWS
+# include <winsock2.h>
+#else
+# include <netinet/in.h>
+# include <netinet/tcp.h>
+#endif
 #include <stdlib.h>
 
 #if defined (HAVE_DARWIN)
@@ -65,6 +71,12 @@ frida_server_environment_configure (void)
 #ifdef HAVE_ANDROID
   frida_selinux_patch_policy ();
 #endif
+}
+
+void
+frida_server_tcp_enable_nodelay (GSocket * socket)
+{
+  g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
 }
 
 static void

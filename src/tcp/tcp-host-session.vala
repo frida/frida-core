@@ -54,37 +54,49 @@ namespace Frida {
 		}
 
 		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
-			string address;
-			try {
-				var raw_address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
-				var enumerator = NetworkAddress.parse (raw_address, DEFAULT_SERVER_PORT).enumerate ();
-				var socket_address = yield enumerator.next_async (cancellable);
-				if (socket_address is InetSocketAddress) {
-					var inet_socket_address = socket_address as InetSocketAddress;
-					var inet_address = inet_socket_address.get_address ();
-					var family = (inet_address.get_family () == SocketFamily.IPV6) ? "ipv6" : "ipv4";
-					address = "tcp:family=%s,host=%s,port=%hu".printf (family, inet_address.to_string (),
-						inet_socket_address.get_port ());
-				} else {
-					throw new Error.INVALID_ARGUMENT ("Invalid server address");
+			SocketConnectable connectable;
+			string raw_address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
+#if !WINDOWS
+			/* TODO: rename this backend */
+			if (raw_address.has_prefix ("unix:")) {
+				string path = raw_address.substring (5);
+
+				UnixSocketAddressType type = UnixSocketAddress.abstract_names_supported ()
+					? UnixSocketAddressType.ABSTRACT
+					: UnixSocketAddressType.PATH;
+
+				connectable = new UnixSocketAddress.with_type (path, -1, type);
+			} else {
+#else
+			{
+#endif
+				try {
+					connectable = NetworkAddress.parse (raw_address, DEFAULT_SERVER_PORT);
+				} catch (GLib.Error e) {
+					throw new Error.INVALID_ARGUMENT ("%s", e.message);
 				}
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_ARGUMENT ("%s", e.message);
 			}
 
-			foreach (var entry in entries) {
-				if (entry.address == address)
-					throw new Error.INVALID_ARGUMENT ("Invalid server address: already created");
-			}
-
-			DBusConnection connection;
+			SocketConnection raw_connection;
 			try {
-				connection = yield new DBusConnection.for_address (address, AUTHENTICATION_CLIENT, null, cancellable);
+				var client = new SocketClient ();
+				raw_connection = yield client.connect_async (connectable, cancellable);
 			} catch (GLib.Error e) {
 				if (e is IOError.CONNECTION_REFUSED)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
 				else
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: %s", e.message);
+			}
+
+			var socket = raw_connection.socket;
+			if (socket.get_family () != UNIX)
+				Tcp.enable_nodelay (socket);
+
+			DBusConnection connection;
+			try {
+				connection = yield new DBusConnection (raw_connection, null, AUTHENTICATION_CLIENT, null, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
 			}
 
 			HostSession host_session;
@@ -94,7 +106,7 @@ namespace Frida {
 				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
 
-			var entry = new Entry (address, connection, host_session);
+			var entry = new Entry (connection, host_session);
 			entry.agent_session_closed.connect (on_agent_session_closed);
 			entries.add (entry);
 
@@ -155,11 +167,6 @@ namespace Frida {
 		private class Entry : Object {
 			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
 
-			public string address {
-				get;
-				construct;
-			}
-
 			public DBusConnection connection {
 				get;
 				construct;
@@ -173,8 +180,8 @@ namespace Frida {
 			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id =
 				new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
-			public Entry (string address, DBusConnection connection, HostSession host_session) {
-				Object (address: address, connection: connection, host_session: host_session);
+			public Entry (DBusConnection connection, HostSession host_session) {
+				Object (connection: connection, host_session: host_session);
 
 				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
 				host_session.agent_session_crashed.connect (on_agent_session_crashed);

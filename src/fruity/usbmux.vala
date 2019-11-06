@@ -51,6 +51,11 @@ namespace Frida.Fruity {
 
 			try {
 				connection = yield client.connect_async (connectable, cancellable);
+
+				var socket = connection.socket;
+				if (socket.get_family () != UNIX)
+					Tcp.enable_nodelay (socket);
+
 				input = connection.get_input_stream ();
 				output = connection.get_output_stream ();
 
