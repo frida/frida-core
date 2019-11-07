@@ -75,7 +75,15 @@ namespace Frida.Fruity {
 			closed ();
 		}
 
-		public async IOStream start_service (string name, Cancellable? cancellable = null) throws LockdownError, IOError {
+		public async IOStream start_service (string name_with_options, Cancellable? cancellable = null) throws LockdownError, IOError {
+			var tokens = name_with_options.split ("?", 2);
+			unowned string name = tokens[0];
+			bool tls_handshake_only = false;
+			if (tokens.length > 1) {
+				unowned string options = tokens[1];
+				tls_handshake_only = options == "tls=handshake-only";
+			}
+
 			Plist request = create_request ("StartService");
 			request.set_string ("Service", name);
 
@@ -117,20 +125,22 @@ namespace Frida.Fruity {
 				if (enable_encryption) {
 					var tls_connection = yield start_tls (raw_connection, cancellable);
 
-					/*
-					 * For now we'll just assume that communication should be cleartext after the handshake. This might
-					 * actually depend on the actual transport used (USB vs WiFi), or the particular service, but we'll
-					 * figure that out eventually.
-					 *
-					 * Also, because TlsConnection closes its base stream once destroyed, and because it holds a strong
-					 * ref on the base stream, we cannot return the base stream here and still keep the TlsConnection
-					 * instance alive. And attaching it as data to the base stream would create a reference loop.
-					 *
-					 * So instead we get the underlying Socket and create a new SocketConnection for the Socket, where
-					 * we keep the TlsConnection and its base stream alive by attaching it as data.
-					 */
-					stream = Object.new (typeof (SocketConnection), "socket", raw_connection.socket) as IOStream;
-					stream.set_data ("tls-connection", tls_connection);
+					if (tls_handshake_only) {
+						/*
+						 * In this case we assume that communication should be cleartext after the handshake.
+						 *
+						 * Also, because TlsConnection closes its base stream once destroyed, and because it holds a strong
+						 * ref on the base stream, we cannot return the base stream here and still keep the TlsConnection
+						 * instance alive. And attaching it as data to the base stream would create a reference loop.
+						 *
+						 * So instead we get the underlying Socket and create a new SocketConnection for the Socket, where
+						 * we keep the TlsConnection and its base stream alive by attaching it as data.
+						 */
+						stream = Object.new (typeof (SocketConnection), "socket", raw_connection.socket) as IOStream;
+						stream.set_data ("tls-connection", tls_connection);
+					} else {
+						stream = tls_connection;
+					}
 				}
 
 				return stream;

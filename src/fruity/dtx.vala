@@ -388,7 +388,7 @@ namespace Frida.Fruity {
 			connections[channel_provider] = request.future;
 
 			try {
-				var stream = yield channel_provider.open_channel ("lockdown:com.apple.instruments.remoteserver",
+				var stream = yield channel_provider.open_channel ("lockdown:com.apple.instruments.remoteserver?tls=handshake-only",
 					cancellable);
 
 				var connection = new DTXConnection (stream);
