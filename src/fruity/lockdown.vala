@@ -7,8 +7,11 @@ namespace Frida.Fruity {
 			construct;
 		}
 
-		private PlistServiceClient service;
+		public IOStream stream {
+			get { return service.stream; }
+		}
 
+		private PlistServiceClient service;
 		private string host_id;
 		private string system_buid;
 		private TlsCertificate tls_certificate;

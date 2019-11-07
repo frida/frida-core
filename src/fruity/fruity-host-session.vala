@@ -296,14 +296,23 @@ namespace Frida {
 			if (address.has_prefix ("lockdown:")) {
 				string service_name = address.substring (9);
 
-				var client = yield get_lockdown_client (cancellable);
+				if (service_name.length != 0) {
+					var client = yield get_lockdown_client (cancellable);
 
-				try {
-					return yield client.start_service (service_name, cancellable);
-				} catch (GLib.Error e) {
-					if (e is Fruity.LockdownError.INVALID_SERVICE)
+					try {
+						return yield client.start_service (service_name, cancellable);
+					} catch (GLib.Error e) {
+						if (e is Fruity.LockdownError.INVALID_SERVICE)
+							throw new Error.NOT_SUPPORTED ("%s", e.message);
+						throw new Error.TRANSPORT ("%s", e.message);
+					}
+				} else {
+					try {
+						var client = yield Fruity.LockdownClient.open (device_details, cancellable);
+						return client.stream;
+					} catch (GLib.Error e) {
 						throw new Error.NOT_SUPPORTED ("%s", e.message);
-					throw new Error.TRANSPORT ("%s", e.message);
+					}
 				}
 			}
 
