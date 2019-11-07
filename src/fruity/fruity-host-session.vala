@@ -691,15 +691,13 @@ namespace Frida {
 						argv += provided_argv[i];
 				}
 
-				var lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME, cancellable);
-				var lldb = yield LLDB.Client.open (lldb_stream, cancellable);
+				var lldb = yield start_lldb_service (lockdown, cancellable);
 				var process = yield lldb.launch (argv, launch_options, cancellable);
 				if (process.observed_state == ALREADY_RUNNING) {
 					yield lldb.kill (cancellable);
 					yield lldb.close (cancellable);
 
-					lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME, cancellable);
-					lldb = yield LLDB.Client.open (lldb_stream, cancellable);
+					lldb = yield start_lldb_service (lockdown, cancellable);
 					process = yield lldb.launch (argv, launch_options, cancellable);
 				}
 
@@ -708,12 +706,6 @@ namespace Frida {
 
 				return process.pid;
 			} catch (Fruity.InstallationProxyError e) {
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
-			} catch (Fruity.LockdownError e) {
-				if (e is Fruity.LockdownError.INVALID_SERVICE) {
-					throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
-						"run Xcode briefly or use ideviceimagemounter to mount one manually");
-				}
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			} catch (LLDB.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
@@ -790,20 +782,13 @@ namespace Frida {
 
 			try {
 				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
-				var lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME, cancellable);
-				var lldb = yield LLDB.Client.open (lldb_stream, cancellable);
+				var lldb = yield start_lldb_service (lockdown, cancellable);
 				var process = yield lldb.attach_by_pid (pid, cancellable);
 
 				string? gadget_path = null;
 
 				lldb_session = new LLDBSession (lldb, process, gadget_path, channel_provider);
 				add_lldb_session (lldb_session);
-			} catch (Fruity.LockdownError e) {
-				if (e is Fruity.LockdownError.INVALID_SERVICE) {
-					throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
-						"run Xcode briefly or use ideviceimagemounter to mount one manually");
-				}
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			} catch (LLDB.Error e) {
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
@@ -811,6 +796,20 @@ namespace Frida {
 			var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
 			return yield attach_via_gadget (pid, gadget_details, cancellable);
+		}
+		
+		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
+				throws Error, LLDB.Error, IOError {
+			try {
+				var lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME + "?tls=handshake-only", cancellable);
+				return yield LLDB.Client.open (lldb_stream, cancellable);
+			} catch (Fruity.LockdownError e) {
+				if (e is Fruity.LockdownError.INVALID_SERVICE) {
+					throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
+						"run Xcode briefly or use ideviceimagemounter to mount one manually");
+				}
+				throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
 		}
 
 		private async AgentSessionId attach_via_gadget (uint pid, Fruity.Injector.GadgetDetails gadget_details,
