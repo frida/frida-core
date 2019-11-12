@@ -806,7 +806,7 @@ namespace Frida {
 
 			return yield attach_via_gadget (pid, gadget_details, cancellable);
 		}
-		
+
 		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
 				throws Error, LLDB.Error, IOError {
 			try {
