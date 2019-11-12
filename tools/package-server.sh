@@ -95,11 +95,11 @@ cat >"$tmpdir/DEBIAN/extrainst_" <<EOF
 #!/bin/sh
 
 if [[ \$1 == upgrade ]]; then
-  /bin/launchctl unload /Library/LaunchDaemons/re.frida.server.plist
+  launchctl unload /Library/LaunchDaemons/re.frida.server.plist
 fi
 
 if [[ \$1 == install || \$1 == upgrade ]]; then
-  /bin/launchctl load /Library/LaunchDaemons/re.frida.server.plist
+  launchctl load /Library/LaunchDaemons/re.frida.server.plist
 fi
 
 exit 0
@@ -109,7 +109,7 @@ cat >"$tmpdir/DEBIAN/prerm" <<EOF
 #!/bin/sh
 
 if [[ \$1 == remove || \$1 == purge ]]; then
-  /bin/launchctl unload /Library/LaunchDaemons/re.frida.server.plist
+  launchctl unload /Library/LaunchDaemons/re.frida.server.plist
 fi
 
 exit 0
