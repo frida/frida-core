@@ -755,6 +755,8 @@ namespace Frida {
 		public signal void spawn_preparation_aborted (HostSpawnInfo info);
 		public signal void spawn_captured (HostSpawnInfo info);
 
+		private const string XPC_PROXY_PATH = "/usr/libexec/xpcproxy";
+
 		public Cancellable io_cancellable {
 			get;
 			construct;
@@ -798,40 +800,47 @@ namespace Frida {
 		}
 
 		protected override void on_event (string type, Json.Array event) {
-			var identifier = event.get_string_element (1);
-			var pid = (uint) event.get_int_element (2);
+			var path = event.get_string_element (1);
+			var identifier = event.get_string_element (2);
+			var pid = (uint) event.get_int_element (3);
 
 			switch (type) {
 				case "launch:app":
-					prepare_app.begin (identifier, pid);
+					prepare_app.begin (path, identifier, pid);
 					break;
 				case "spawn":
-					prepare_xpcproxy.begin (identifier, pid);
+					prepare_spawn.begin (path, identifier, pid);
 					break;
 				default:
 					assert_not_reached ();
 			}
 		}
 
-		private async void prepare_app (string identifier, uint pid) {
+		private async void prepare_app (string path, string identifier, uint pid) {
 			app_launch_started (identifier, pid);
 
 			try {
-				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
-				yield agent.run_until_exec (io_cancellable);
+				if (path == XPC_PROXY_PATH) {
+					var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
+					yield agent.run_until_exec (io_cancellable);
+				}
+
 				app_launch_completed (identifier, pid, null);
 			} catch (GLib.Error e) {
 				app_launch_completed (identifier, pid, e);
 			}
 		}
 
-		private async void prepare_xpcproxy (string identifier, uint pid) {
+		private async void prepare_spawn (string path, string identifier, uint pid) {
 			var info = HostSpawnInfo (pid, identifier);
 			spawn_preparation_started (info);
 
 			try {
-				var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
-				yield agent.run_until_exec (io_cancellable);
+				if (path == XPC_PROXY_PATH) {
+					var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
+					yield agent.run_until_exec (io_cancellable);
+				}
+
 				spawn_captured (info);
 			} catch (GLib.Error e) {
 				spawn_preparation_aborted (info);

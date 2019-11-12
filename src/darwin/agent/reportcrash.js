@@ -50,8 +50,10 @@ var mappedMemoryReadPointer = new NativeFunction(
 var AppleErrorReport = ObjC.classes.AppleErrorReport;
 var CrashReport = ObjC.classes.CrashReport;
 var NSMutableDictionary = ObjC.classes.NSMutableDictionary;
+var OSAReport = ObjC.classes.OSAReport;
 
 var threadStates = {};
+var osaHookState = 'pending';
 
 function reset(threadId) {
   var state = {
@@ -97,6 +99,8 @@ Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateF
       });
     });
     op.wait();
+
+    ensureOsaHooked();
   },
 });
 
@@ -122,16 +126,26 @@ Interceptor.attach(CrashReport['- isActionable'].implementation, {
   },
 });
 
-Interceptor.attach(NSMutableDictionary['- logCounter_isLog:byKey:count:withinLimit:withOptions:'].implementation, {
-  onLeave: function (retval) {
-    var isLogWithinLimit = !!retval.toInt32();
-    var state = getState(this.threadId, '- logCounter_isLog');
-    if (!isLogWithinLimit) {
-      retval.replace(ptr(1));
-      state.forcedByUs = true;
-    }
-  },
-});
+function ensureOsaHooked() {
+  if (osaHookState === 'hooked')
+    return;
+
+  var methodName = (OSAReport !== undefined)
+      ? '- osa_logCounter_isLog:byKey:count:withinLimit:withOptions:'
+      : '- logCounter_isLog:byKey:count:withinLimit:withOptions:';
+  Interceptor.attach(NSMutableDictionary[methodName].implementation, {
+    onLeave: function (retval) {
+      var isLogWithinLimit = !!retval.toInt32();
+      var state = getState(this.threadId, '- logCounter_isLog');
+      if (!isLogWithinLimit) {
+        retval.replace(ptr(1));
+        state.forcedByUs = true;
+      }
+    },
+  });
+
+  osaHookState = 'hooked';
+}
 
 Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
   onEnter: function (args) {
@@ -142,9 +156,12 @@ Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
   },
 });
 
-Interceptor.attach(AppleErrorReport['- saveToDir:'].implementation, {
+var saveImpl = (OSAReport !== undefined)
+    ? OSAReport['- saveWithOptions:'].implementation
+    : AppleErrorReport['- saveToDir:'].implementation;
+Interceptor.attach(saveImpl, {
   onLeave: function (retval) {
-    var state = getState(this.threadId, '- saveToDir');
+    var state = getState(this.threadId, '- save');
     if (state.forcedByUs)
       unlink(Memory.allocUtf8String(state.logPath));
 
@@ -225,6 +242,7 @@ var libdyld = findLibdyldInternals();
 if (libdyld !== null) {
   var allImageInfoSizes = {
     15: 320,
+    16: 328,
   };
   var imageElementSize = 3 * Process.pointerSize;
 
@@ -339,9 +357,14 @@ function findLibdyldInternals() {
   var base = m.base;
   var size = m.size;
 
+  /*
+   * Verified on:
+   * - 12.4
+   * - 13.2.2
+   */
   var signatures = {
     'dyld_process_info_base::make': 'ff c3 04 d1 ' + '?? ?? ?? ?? '.repeat(33) + '28 e0 02 91',
-    'withRemoteBuffer': 'ff 03 01 d1 f4 4f 02 a9 fd 7b 03 a9 fd c3 00 91 f3 03 06 aa',
+    'withRemoteBuffer': 'ff ?? 01 d1 f4 4f ?? a9 fd 7b ?? a9 fd ?? ?? 91 f3 03 06 aa',
   };
 
   var result = Object.keys(signatures)

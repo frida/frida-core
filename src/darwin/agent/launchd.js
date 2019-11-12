@@ -46,10 +46,15 @@ applyJailbreakQuirks();
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
   onEnter: function (args) {
     var path = args[1].readUtf8String();
-    if (path !== '/usr/libexec/xpcproxy')
-      return;
 
-    var rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
+    var rawIdentifier;
+    if (path === '/usr/libexec/xpcproxy') {
+      rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
+    } else {
+      rawIdentifier = tryParseXpcServiceName(args[4]);
+      if (rawIdentifier === null)
+        return;
+    }
 
     var identifier, event;
     if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
@@ -74,6 +79,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     attrs.writeU16(flags);
 
     this.event = event;
+    this.path = path;
     this.identifier = identifier;
     this.pidPtr = args[0];
   },
@@ -82,6 +88,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     if (event === undefined)
       return;
 
+    var path = this.path;
     var identifier = this.identifier;
 
     if (event === 'launch:app')
@@ -105,10 +112,30 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     }
 
     function notifyFridaBackend() {
-      send([event, identifier, pid]);
+      send([event, path, identifier, pid]);
     }
   }
 });
+
+function tryParseXpcServiceName(envp) {
+  if (envp.isNull())
+    return null;
+
+  var cur = envp;
+  while (true) {
+    var elementPtr = cur.readPointer();
+    if (elementPtr.isNull())
+      break;
+
+    var element = elementPtr.readUtf8String();
+    if (element.indexOf('XPC_SERVICE_NAME=') === 0)
+      return element.substring(17);
+
+    cur = cur.add(pointerSize);
+  }
+
+  return null;
+}
 
 function applyJailbreakQuirks() {
   var jbdCallImpl = findJbdCallImpl();

@@ -13,6 +13,12 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 });
 
 function applyJailbreakQuirks() {
+  var bootstrapper = findSubstrateBootstrapper();
+  if (bootstrapper !== null) {
+    instrumentSubstrateBootstrapper(bootstrapper);
+    return;
+  }
+
   var jbdCallImpl = findJbdCallImpl();
   if (jbdCallImpl !== null) {
     sabotageJbdCall(jbdCallImpl);
@@ -21,7 +27,7 @@ function applyJailbreakQuirks() {
 
   var proxyer = findSubstrateProxyer();
   if (proxyer !== null)
-    instrumentSubstrateProxyer(proxyer);
+    instrumentSubstrateExec(proxyer.exec);
 }
 
 function sabotageJbdCall(jbdCallImpl) {
@@ -35,8 +41,23 @@ function sabotageJbdCall(jbdCallImpl) {
   }, retType, argTypes));
 }
 
-function instrumentSubstrateProxyer(proxyer) {
-  Interceptor.attach(proxyer.exec, {
+function instrumentSubstrateBootstrapper(bootstrapper) {
+  Interceptor.attach(Module.getExportByName('/usr/lib/system/libdyld.dylib', 'dlopen'), {
+    onEnter: function (args) {
+      this.path = args[0].readUtf8String();
+    },
+    onLeave: function (retval) {
+      if (!retval.isNull() && this.path === '/usr/lib/substrate/SubstrateInserter.dylib') {
+        var inserter = Process.getModuleByName(this.path);
+        var exec = resolveSubstrateExec(inserter.base, inserter.size);
+        instrumentSubstrateExec(exec);
+      }
+    }
+  });
+}
+
+function instrumentSubstrateExec(exec) {
+  Interceptor.attach(exec, {
     onEnter: function (args) {
       var startSuspendedYup = ptr(1);
       args[2] = startSuspendedYup;
@@ -60,6 +81,13 @@ function findJbdCallImpl() {
   return matches[0].address;
 }
 
+function findSubstrateBootstrapper() {
+  if (Process.arch !== 'arm64')
+    return null;
+
+  return Process.findModuleByName('/usr/lib/substrate/SubstrateBootstrap.dylib');
+}
+
 function findSubstrateProxyer() {
   if (Process.arch !== 'arm64')
     return null;
@@ -74,18 +102,16 @@ function findSubstrateProxyer() {
   if (ranges.length === 0)
     return null;
   var proxyer = ranges[0];
-  var base = proxyer.base;
-  var size = proxyer.size;
 
   return {
-    exec: resolveFunction('fd 7b bf a9 fd 03 00 91 f4 4f bf a9 ff 03 01 d1 f3 03 03 aa'),
+    exec: resolveSubstrateExec(proxyer.base, proxyer.size)
   };
+}
 
-  function resolveFunction(signature) {
-    var matches = Memory.scanSync(base, size, signature);
-    if (matches.length !== 1) {
-      throw new Error('Unsupported version of Substrate; please file a bug');
-    }
-    return matches[0].address;
+function resolveSubstrateExec(base, size) {
+  var matches = Memory.scanSync(base, size, 'fd 7b bf a9 fd 03 00 91 f4 4f bf a9 ff 03 01 d1 f3 03 03 aa');
+  if (matches.length !== 1) {
+    throw new Error('Unsupported version of Substrate; please file a bug');
   }
+  return matches[0].address;
 }
