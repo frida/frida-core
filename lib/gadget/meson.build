@@ -50,13 +50,19 @@ if get_option('strip')
   operations += ['--strip', meson.get_cross_binary('strip', 'strip')]
 endif
 
+if host_machine.endian() == 'little'
+  endian_option = ['--endian', 'little']
+else
+  endian_option = ['--endian', 'big']
+endif
+
 custom_target('frida-gadget',
   input: raw_gadget,
   output: 'frida-gadget' + shlib_suffix,
   command: [
     modulate,
     '@INPUT@',
-    ] + operations + [
+    ] + operations + endian_option + [
     '--output', '@OUTPUT@',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),
