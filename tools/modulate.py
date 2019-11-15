@@ -32,6 +32,9 @@ def main():
     parser.add_argument("--install-name-tool", metavar="/path/to/install_name_tool", type=str, default=None)
     parser.add_argument("--strip", metavar="/path/to/strip", type=str, default=None)
 
+    the_endians = ('big', 'little')
+    parser.add_argument("--endian",  metavar=("|".join(the_endians)), type=str, default='little', choices=the_endians)
+
     args = parser.parse_args()
 
     if args.input.name == "<stdin>":
@@ -52,7 +55,7 @@ def main():
             setattr(toolchain, tool, path)
 
     try:
-        editor = ModuleEditor(args.input, toolchain)
+        editor = ModuleEditor(args.input, args.endian, toolchain)
     except Exception as e:
         print(e, file=sys.stderr)
         sys.exit(1)
@@ -74,11 +77,12 @@ def main():
 
 
 class ModuleEditor(object):
-    def __init__(self, module, toolchain):
+    def __init__(self, module, endian, toolchain):
         self.module = module
+        self.endian = endian
         self.toolchain = toolchain
 
-        layout = Layout.from_file(module.name, toolchain)
+        layout = Layout.from_file(module.name, endian, toolchain)
         self.layout = layout
 
         sections = layout.sections
@@ -209,7 +213,7 @@ class Toolchain(object):
 
 class Layout(object):
     @classmethod
-    def from_file(cls, binary_path, toolchain):
+    def from_file(cls, binary_path, endian, toolchain):
         with open(binary_path, "rb") as f:
             magic = f.read(4)
         file_format = 'elf' if magic == b"\x7fELF" else 'mach-o'
@@ -240,13 +244,15 @@ class Layout(object):
 
         symbols = Symbols.from_file(binary_path, pointer_size, toolchain)
 
-        return Layout(file_format, arch_name, pointer_size, sections, symbols)
+        return Layout(file_format, arch_name, endian, pointer_size, sections, symbols)
 
-    def __init__(self, file_format, arch_name, pointer_size, sections, symbols):
+    def __init__(self, file_format, arch_name, endian, pointer_size, sections, symbols):
         self.file_format = file_format
         self.arch_name = arch_name
         self.pointer_size = pointer_size
-        self.pointer_format = "<" + ("I" if pointer_size == 4 else "Q")
+        endian_format = "<" if endian == 'little' else ">"
+        size_format = "I" if pointer_size == 4 else "Q"
+        self.pointer_format = endian_format + size_format
 
         self.sections = sections
         if file_format == 'elf':
@@ -259,8 +265,9 @@ class Layout(object):
         self.symbols = symbols
 
     def __repr__(self):
-        return "Layout(arch_name={}, pointer_size={}, sections=<{} items>, symbols={}".format(
+        return "Layout(arch_name={}, endian={}, pointer_size={}, sections=<{} items>, symbols={}".format(
             self.arch_name,
+            self.endian,
             self.pointer_size,
             len(self.sections),
             repr(self.symbols))

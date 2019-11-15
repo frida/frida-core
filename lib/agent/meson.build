@@ -28,13 +28,19 @@ if host_os_family != 'darwin'
   operations += ['--move', 'destructor', 'frida_deinit_memory', 'first']
 endif
 
+if host_machine.endian() == 'little'
+  endian_option = ['--endian', 'little']
+else
+  endian_option = ['--endian', 'big']
+endif
+
 agent = custom_target('frida-agent',
   input: raw_agent,
   output: 'frida-agent' + shlib_suffix,
   command: [
     modulate,
     '@INPUT@',
-    ] + operations + [
+    ] + operations + endian_option + [
     '--output', '@OUTPUT@',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),
