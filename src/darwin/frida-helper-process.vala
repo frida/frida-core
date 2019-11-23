@@ -267,7 +267,7 @@ namespace Frida {
 				var handshake_port = new HandshakePort.local (service_name);
 
 				string[] argv = { get_resource_store ().helper.path, service_name };
-				pending_process = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
+				pending_process = new Subprocess.newv (argv, SubprocessFlags.INHERIT_FDS);
 
 				var peer_pid = (uint) uint64.parse (pending_process.get_identifier ());
 				IOStream stream;
