@@ -656,7 +656,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   sigemptyset (&signal_mask_set);
   posix_spawnattr_setsigmask (&attributes, &signal_mask_set);
 
-  flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED;
+  flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED;
 
   stdio = frida_host_spawn_options_get_stdio (options);
   switch (stdio)
