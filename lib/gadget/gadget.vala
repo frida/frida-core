@@ -271,6 +271,18 @@ namespace Frida.Gadget {
 			default = LoadBehavior.WAIT;
 		}
 
+		public AttachBehavior on_attach {
+			get;
+			set;
+			default = AttachBehavior.RESUME;
+		}
+
+		public EternalizeBehavior eternalize {
+			get;
+			set;
+			default = EternalizeBehavior.NO;
+		}
+
 		public enum PortConflictBehavior {
 			FAIL,
 			PICK_NEXT
@@ -279,6 +291,16 @@ namespace Frida.Gadget {
 		public enum LoadBehavior {
 			RESUME,
 			WAIT
+		}
+
+		public enum AttachBehavior {
+			RESUME,
+			WAIT
+		}
+
+		public enum EternalizeBehavior {
+			NO,
+			YES
 		}
 	}
 
@@ -1385,6 +1407,11 @@ namespace Frida.Gadget {
 				server = s;
 				connection = c;
 
+				var listen_interaction = server.config.interaction as ListenInteraction;
+				if (listen_interaction != null) {
+					resume_on_attach = listen_interaction.on_attach == ListenInteraction.AttachBehavior.RESUME;
+				}
+
 				try {
 					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION,
 						this as HostSession);
@@ -1514,6 +1541,10 @@ namespace Frida.Gadget {
 				session.closed.disconnect (on_session_closed);
 				sessions.remove (session);
 
+				if (!resume_on_attach) {
+					Frida.Gadget.resume ();
+				}
+
 				agent_session_destroyed (session.id, APPLICATION_REQUESTED);
 			}
 
@@ -1610,7 +1641,6 @@ namespace Frida.Gadget {
 			public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
 					Cancellable? cancellable) throws Error, IOError {
 				check_open ();
-
 				var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
 				return instance.script_id;
 			}
@@ -1654,7 +1684,18 @@ namespace Frida.Gadget {
 			public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 				check_open ();
 
-				yield script_engine.destroy_script (script_id);
+				var eternalize = false;
+				var listen_interaction = server.config.interaction as ListenInteraction;
+				if (listen_interaction != null) {
+					eternalize = listen_interaction.eternalize == ListenInteraction.EternalizeBehavior.YES;
+				}
+
+				if (eternalize) {
+					var script = script_engine.eternalize_script (script_id);
+					script_eternalized (script);
+				} else {
+					yield script_engine.destroy_script (script_id);
+				}
 			}
 
 			public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
