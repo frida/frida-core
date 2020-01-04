@@ -44,21 +44,21 @@ namespace Frida {
 			assert (create_process_internal != null);
 			interceptor.attach (create_process_internal, this);
 #else
-			var libc_name = detect_libc_name ();
+			unowned string libc = Gum.Process.query_libc_name ();
 #if DARWIN
-			posix_spawn = (PosixSpawnFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawn");
-			posix_spawnattr_init = (PosixSpawnAttrInitFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_init");
-			posix_spawnattr_destroy = (PosixSpawnAttrDestroyFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_destroy");
-			posix_spawnattr_getflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_getflags");
-			posix_spawnattr_setflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc_name, "posix_spawnattr_setflags");
+			posix_spawn = (PosixSpawnFunc) Gum.Module.find_export_by_name (libc, "posix_spawn");
+			posix_spawnattr_init = (PosixSpawnAttrInitFunc) Gum.Module.find_export_by_name (libc, "posix_spawnattr_init");
+			posix_spawnattr_destroy = (PosixSpawnAttrDestroyFunc) Gum.Module.find_export_by_name (libc, "posix_spawnattr_destroy");
+			posix_spawnattr_getflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc, "posix_spawnattr_getflags");
+			posix_spawnattr_setflags = (PosixSpawnAttrSetFlagsFunc) Gum.Module.find_export_by_name (libc, "posix_spawnattr_setflags");
 
-			execve = Gum.Module.find_export_by_name (libc_name, "execve");
+			execve = Gum.Module.find_export_by_name (libc, "execve");
 
 			interceptor.attach ((void *) posix_spawn, this);
 
 			interceptor.replace (execve, (void *) replacement_execve, this);
 #else
-			interceptor.attach (Gum.Module.find_export_by_name (libc_name, "execve"), this);
+			interceptor.attach (Gum.Module.find_export_by_name (libc, "execve"), this);
 #endif
 #endif
 		}

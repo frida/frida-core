@@ -29,14 +29,20 @@ namespace Frida {
 		construct {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			Gum.InvocationListener listener = this;
+			unowned Gum.InvocationListener listener = this;
 
 #if WINDOWS
 			interceptor.attach (Gum.Module.find_export_by_name ("kernel32.dll", "ExitProcess"), listener);
 #else
-			interceptor.attach ((void *) Posix.exit, listener);
-			interceptor.attach ((void *) Posix._exit, listener);
-			interceptor.attach ((void *) Posix.abort, listener);
+			unowned string libc = Gum.Process.query_libc_name ();
+			const string[] apis = {
+				"exit",
+				"_exit",
+				"abort",
+			};
+			foreach (var symbol in apis) {
+				interceptor.attach (Gum.Module.find_export_by_name (libc, symbol), listener);
+			}
 #endif
 		}
 

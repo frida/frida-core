@@ -22,36 +22,6 @@ namespace Frida {
 
 	private extern string? try_get_executable_path ();
 
-	private static Once<string> libc_name_value;
-
-	public string detect_libc_name () {
-		return libc_name_value.once (_detect_libc_name);
-	}
-
-	private string _detect_libc_name () {
-#if WINDOWS
-		return "msvcrt.dll";
-#else
-		string? libc_name = null;
-
-		Gum.Address address_in_libc = Gum.Address.from_pointer ((void *) Posix.opendir);
-		Gum.Process.enumerate_modules ((details) => {
-			var range = details.range;
-
-			if (address_in_libc >= range.base_address && address_in_libc < range.base_address + range.size) {
-				libc_name = details.path;
-				return false;
-			}
-
-			return true;
-		});
-
-		assert (libc_name != null);
-
-		return libc_name;
-#endif
-	}
-
 	public Gum.MemoryRange detect_own_memory_range (Gum.MemoryRange? mapped_range) {
 		Gum.MemoryRange? result = mapped_range;
 

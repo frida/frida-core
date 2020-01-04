@@ -84,34 +84,34 @@ namespace Frida {
 		construct {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			var libc_name = detect_libc_name ();
+			unowned string libc = Gum.Process.query_libc_name ();
 
 			var open_listener = new OpenDirListener (this);
 			listeners.add (open_listener);
-			interceptor.attach (Gum.Module.find_export_by_name (libc_name, "opendir"), open_listener);
+			interceptor.attach (Gum.Module.find_export_by_name (libc, "opendir"), open_listener);
 
 			var close_listener = new CloseDirListener (this);
 			listeners.add (close_listener);
-			interceptor.attach (Gum.Module.find_export_by_name (libc_name, "closedir"), close_listener);
+			interceptor.attach (Gum.Module.find_export_by_name (libc, "closedir"), close_listener);
 
-			var readdir = Gum.Module.find_export_by_name (libc_name, "readdir");
+			var readdir = Gum.Module.find_export_by_name (libc, "readdir");
 			var readdir_listener = new ReadDirListener (this, LEGACY);
 			listeners.add (readdir_listener);
 			interceptor.attach (readdir, readdir_listener);
 
-			var readdir64 = Gum.Module.find_export_by_name (libc_name, "readdir64");
+			var readdir64 = Gum.Module.find_export_by_name (libc, "readdir64");
 			if (readdir64 != null && readdir64 != readdir) {
 				var listener = new ReadDirListener (this, MODERN);
 				listeners.add (listener);
 				interceptor.attach (readdir64, listener);
 			}
 
-			var readdir_r = Gum.Module.find_export_by_name (libc_name, "readdir_r");
+			var readdir_r = Gum.Module.find_export_by_name (libc, "readdir_r");
 			var readdir_r_listener = new ReadDirRListener (this, LEGACY);
 			listeners.add (readdir_r_listener);
 			interceptor.attach (readdir_r, readdir_r_listener);
 
-			var readdir64_r = Gum.Module.find_export_by_name (libc_name, "readdir64_r");
+			var readdir64_r = Gum.Module.find_export_by_name (libc, "readdir64_r");
 			if (readdir64_r != null && readdir64_r != readdir_r) {
 				var listener = new ReadDirRListener (this, MODERN);
 				listeners.add (listener);

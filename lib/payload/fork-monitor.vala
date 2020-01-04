@@ -20,6 +20,9 @@ namespace Frida {
 		private State state = IDLE;
 		private ChildRecoveryBehavior child_recovery_behavior = NORMAL;
 
+		private static void * fork_impl;
+		private static void * vfork_impl;
+
 		private enum State {
 			IDLE,
 			FORKING,
@@ -39,10 +42,16 @@ namespace Frida {
 			Object (handler: handler);
 		}
 
+		static construct {
+			unowned string libc = Gum.Process.query_libc_name ();
+			fork_impl = Gum.Module.find_export_by_name (libc, "fork");
+			vfork_impl = Gum.Module.find_export_by_name (libc, "vfork");
+		}
+
 		construct {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			Gum.InvocationListener listener = this;
+			unowned Gum.InvocationListener listener = this;
 
 #if ANDROID
 			if (get_executable_path ().has_prefix ("/system/bin/app_process")) {
@@ -61,14 +70,14 @@ namespace Frida {
 			}
 #endif
 
-			interceptor.attach ((void *) Posix.fork, listener, (void *) HookId.FORK);
-			interceptor.replace ((void *) Posix.vfork, (void *) Posix.fork);
+			interceptor.attach (fork_impl, listener, (void *) HookId.FORK);
+			interceptor.replace (vfork_impl, fork_impl);
 		}
 
 		public override void dispose () {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			interceptor.revert ((void *) Posix.vfork);
+			interceptor.revert (vfork_impl);
 			interceptor.detach (this);
 
 			base.dispose ();
