@@ -363,6 +363,8 @@ namespace Frida.Gadget {
 		if (result != null)
 			request = new Gee.Promise<int> ();
 
+		exceptor = Gum.Exceptor.obtain ();
+
 		location = detect_location (mapped_range);
 
 		try {
@@ -496,8 +498,6 @@ namespace Frida.Gadget {
 
 	private async void perform_start (Gee.Promise<int>? request) {
 		worker_ignore_scope = new ThreadIgnoreScope ();
-
-		exceptor = Gum.Exceptor.obtain ();
 
 		Controller ctrl = null;
 		try {
