@@ -363,8 +363,6 @@ namespace Frida.Gadget {
 		if (result != null)
 			request = new Gee.Promise<int> ();
 
-		exceptor = Gum.Exceptor.obtain ();
-
 		location = detect_location (mapped_range);
 
 		try {
@@ -379,6 +377,8 @@ namespace Frida.Gadget {
 		Gum.Process.set_code_signing_policy (config.code_signing);
 
 		Gum.Cloak.add_range (location.range);
+
+		exceptor = Gum.Exceptor.obtain ();
 
 		wait_for_resume_needed = true;
 
