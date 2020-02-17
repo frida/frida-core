@@ -49,6 +49,7 @@ struct _RemoteWorkerContext
   gpointer get_proc_address_impl;
   gpointer free_library_impl;
   gpointer virtual_free_impl;
+  gpointer get_last_error_impl;
 
   WCHAR dll_path[MAX_PATH + 1];
   gchar entrypoint_name[256];
@@ -322,6 +323,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   const gsize data_alignment = 4;
   const gchar * loadlibrary_failed_label = "loadlibrary_failed";
   const gchar * skip_unload_label = "skip_unload";
+  const gchar * restore_registers = "restore_registers";
 
   gum_init ();
 
@@ -380,17 +382,24 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   /* } */
   gum_x86_writer_put_label (&cw, skip_unload_label);
 
+  /* set return 0 */
+  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
+
+  /* if (call GetLastError) { */
+  gum_x86_writer_put_jmp_short_label (&cw, restore_registers);
+  gum_x86_writer_put_label (&cw, loadlibrary_failed_label);
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
+      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_last_error_impl), 0);
+  /* } */
+
   /* Restore registers */
+  gum_x86_writer_put_label (&cw, restore_registers);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XDI); /* Alignment */
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XSI);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
 
-  /* return 0 */
-  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
+  /* return */
   gum_x86_writer_put_ret (&cw);
-
-  gum_x86_writer_put_label (&cw, loadlibrary_failed_label);
-  gum_x86_writer_put_breakpoint (&cw);
 
   gum_x86_writer_flush (&cw);
   code_size = gum_x86_writer_offset (&cw);
@@ -490,6 +499,8 @@ remote_worker_context_collect_kernel32_export (const GumExportDetails * details,
     rwc->free_library_impl = GSIZE_TO_POINTER (details->address);
   else if (strcmp (details->name, "VirtualFree") == 0)
     rwc->virtual_free_impl = GSIZE_TO_POINTER (details->address);
+  else if (strcmp (details->name, "GetLastError") == 0)
+    rwc->get_last_error_impl = GSIZE_TO_POINTER(details->address);
 
   return TRUE;
 }
