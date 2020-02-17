@@ -49,6 +49,7 @@ struct _RemoteWorkerContext
   gpointer get_proc_address_impl;
   gpointer free_library_impl;
   gpointer virtual_free_impl;
+  gpointer get_last_error_impl;
 
   WCHAR dll_path[MAX_PATH + 1];
   gchar entrypoint_name[256];
@@ -320,8 +321,9 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   guint code_size;
   GumX86Writer cw;
   const gsize data_alignment = 4;
-  const gchar * loadlibrary_failed_label = "loadlibrary_failed";
-  const gchar * skip_unload_label = "skip_unload";
+  const gchar * loadlibrary_failed = "loadlibrary_failed";
+  const gchar * skip_unload = "skip_unload";
+  const gchar * return_result = "return_result";
 
   gum_init ();
 
@@ -331,7 +333,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   /* Will clobber these */
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XBX);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XSI);
-  gum_x86_writer_put_push_reg (&cw, GUM_REG_XDI); /* Alignment */
+  gum_x86_writer_put_push_reg (&cw, GUM_REG_XDI); /* Alignment padding */
 
   /* xbx = (RemoteWorkerContext *) lpParameter */
 #if GLIB_SIZEOF_VOID_P == 4
@@ -346,7 +348,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       1,
       GUM_ARG_REGISTER, GUM_REG_XCX);
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
-  gum_x86_writer_put_jcc_near_label (&cw, X86_INS_JE, loadlibrary_failed_label, GUM_UNLIKELY);
+  gum_x86_writer_put_jcc_near_label (&cw, X86_INS_JE, loadlibrary_failed, GUM_UNLIKELY);
   gum_x86_writer_put_mov_reg_reg (&cw, GUM_REG_XSI, GUM_REG_XAX);
 
   /* xax = GetProcAddress (xsi, xbx->entrypoint_name) */
@@ -369,7 +371,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   /* if (!stay_resident) { */
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, stay_resident));
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
-  gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload_label, GUM_NO_HINT);
+  gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload, GUM_NO_HINT);
 
   /* FreeLibrary (xsi) */
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
@@ -378,19 +380,23 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       GUM_ARG_REGISTER, GUM_REG_XSI);
 
   /* } */
-  gum_x86_writer_put_label (&cw, skip_unload_label);
+  gum_x86_writer_put_label (&cw, skip_unload);
 
-  /* Restore registers */
-  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XDI); /* Alignment */
+  /* result = ERROR_SUCCESS */
+  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
+  gum_x86_writer_put_jmp_short_label (&cw, return_result);
+
+  gum_x86_writer_put_label (&cw, loadlibrary_failed);
+  /* result = GetLastError() */
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
+      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_last_error_impl),
+      0);
+
+  gum_x86_writer_put_label (&cw, return_result);
+  gum_x86_writer_put_pop_reg (&cw, GUM_REG_XDI);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XSI);
   gum_x86_writer_put_pop_reg (&cw, GUM_REG_XBX);
-
-  /* return 0 */
-  gum_x86_writer_put_xor_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
   gum_x86_writer_put_ret (&cw);
-
-  gum_x86_writer_put_label (&cw, loadlibrary_failed_label);
-  gum_x86_writer_put_breakpoint (&cw);
 
   gum_x86_writer_flush (&cw);
   code_size = gum_x86_writer_offset (&cw);
@@ -490,6 +496,8 @@ remote_worker_context_collect_kernel32_export (const GumExportDetails * details,
     rwc->free_library_impl = GSIZE_TO_POINTER (details->address);
   else if (strcmp (details->name, "VirtualFree") == 0)
     rwc->virtual_free_impl = GSIZE_TO_POINTER (details->address);
+  else if (strcmp (details->name, "GetLastError") == 0)
+    rwc->get_last_error_impl = GSIZE_TO_POINTER (details->address);
 
   return TRUE;
 }
