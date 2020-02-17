@@ -133,7 +133,7 @@ class ModuleEditor(object):
         elements = []
         is_macho = layout.file_format == 'mach-o'
         is_arm = layout.arch_name == 'arm'
-        is_apple_arm64 = is_macho and layout.arch_name == 'arm64'
+        is_apple_arm64 = is_macho and layout.arch_name in ('arm64', 'arm64e')
         symbols = layout.symbols
         for value in values:
             if is_arm:
@@ -176,7 +176,7 @@ class ModuleEditor(object):
 
         destination.seek(vector.file_offset)
 
-        is_apple_arm64 = layout.file_format == 'mach-o' and layout.arch_name == 'arm64'
+        is_apple_arm64 = layout.file_format == 'mach-o' and layout.arch_name in ('arm64', 'arm64e')
         if is_apple_arm64:
             # Due to Apple's stateful rebasing logic we have to be careful so the upper 13 bits
             # are preserved, and we only reorder the values' lower 51 bits.
