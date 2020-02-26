@@ -1,5 +1,7 @@
 #include "frida-core.h"
 
+#include <string.h>
+
 static gchar * b2g_get_app_id (const gchar * fd);
 static gchar * b2g_get_app_name (const gchar * str);
 
@@ -107,36 +109,58 @@ frida_system_enumerate_processes (int * result_length)
   while ((proc_name = g_dir_read_name (proc_dir)) != NULL)
   {
     guint pid;
-    gchar * tmp = NULL, * cmdline = NULL, * name;
-    gboolean is_process;
+    gchar * end;
+    gchar * exe_path = NULL;
+    gboolean is_userland;
+    gchar * cmdline_path = NULL;
+    gchar * cmdline_data = NULL;
+    gchar * name = NULL;
     FridaHostProcessInfo * info;
 
-    pid = strtoul (proc_name, &tmp, 10);
-    if (*tmp != '\0')
-      continue;
+    pid = strtoul (proc_name, &end, 10);
+    if (*end != '\0')
+      goto next;
 
-    tmp = g_build_filename ("/proc", proc_name, "exe", NULL);
-    is_process = g_file_test (tmp, G_FILE_TEST_EXISTS);
-    g_free (tmp);
+    exe_path = g_build_filename ("/proc", proc_name, "exe", NULL);
 
-    if (!is_process)
-      continue;
+    is_userland = g_file_test (exe_path, G_FILE_TEST_EXISTS);
+    if (!is_userland)
+      goto next;
 
-    tmp = g_build_filename ("/proc", proc_name, "cmdline", NULL);
-    g_file_get_contents (tmp, &cmdline, NULL, NULL);
-    g_free (tmp);
+    cmdline_path = g_build_filename ("/proc", proc_name, "cmdline", NULL);
 
-    if (cmdline == NULL)
-      continue;
+    g_file_get_contents (cmdline_path, &cmdline_data, NULL, NULL);
+    if (cmdline_data == NULL)
+      goto next;
 
-    name = g_path_get_basename (cmdline);
-    g_free (cmdline);
+    if (g_str_has_prefix (cmdline_data, "/proc/"))
+    {
+      gchar * program_path;
+
+      program_path = g_file_read_link (exe_path, NULL);
+      name = g_path_get_basename (program_path);
+      g_free (program_path);
+    }
+    else
+    {
+      gchar * space_dash;
+
+      space_dash = strstr (cmdline_data, " -");
+      if (space_dash != NULL)
+        *space_dash = '\0';
+
+      name = g_path_get_basename (cmdline_data);
+    }
 
     g_array_set_size (processes, processes->len + 1);
     info = &g_array_index (processes, FridaHostProcessInfo, processes->len - 1);
     frida_host_process_info_init (info, pid, name, &no_icon, &no_icon);
 
+next:
     g_free (name);
+    g_free (cmdline_data);
+    g_free (cmdline_path);
+    g_free (exe_path);
   }
 
   g_dir_close (proc_dir);
