@@ -12,10 +12,20 @@ namespace Frida.Droidy {
 			client.message.connect (on_message);
 
 			try {
-				var devices_encoded = yield client.request_data ("host:track-devices", cancellable);
-				yield update_devices (devices_encoded, cancellable);
+				try {
+					var devices_encoded = yield client.request_data ("host:track-devices-l", cancellable);
+					yield update_devices (devices_encoded, cancellable);
+				} catch (Error.NOT_SUPPORTED e) {
+					client.message.disconnect (on_message);
+					client = null;
+
+					client = yield Client.open (cancellable);
+					var devices_encoded = yield client.request_data ("host:track-devices", cancellable);
+					yield update_devices (devices_encoded, cancellable);
+				}
 			} catch (GLib.Error e) {
-				yield client.close (cancellable);
+				if (client != null)
+					yield client.close (cancellable);
 			}
 		}
 
@@ -36,25 +46,42 @@ namespace Frida.Droidy {
 			var detached = new Gee.ArrayList<DeviceInfo> ();
 			var attached = new Gee.ArrayList<DeviceInfo> ();
 
-			var current = new Gee.HashSet<string> ();
+			var current = new Gee.HashMap<string, string?> ();
 			foreach (var line in devices_encoded.split ("\n")) {
-				if (line.length == 0)
+				MatchInfo info;
+				if (!/^(\S+)\s+(\S+)( (.+))?$/m.match (line, 0, out info)) {
 					continue;
-				var tokens = line.split ("\t", 2);
-				var serial = tokens[0];
-				var status = tokens[1];
-				if (status == "device")
-					current.add (serial);
+				}
+
+				string serial = info.fetch (1);
+
+				string type = info.fetch (2);
+				if (type != "device")
+					continue;
+
+				string? name = null;
+				if (info.get_match_count () == 5) {
+					string[] details = info.fetch (4).split (" ");
+					foreach (unowned string pair in details) {
+						if (pair.has_prefix ("model:")) {
+							name = pair.substring (6).replace ("_", " ");
+							break;
+						}
+					}
+				}
+
+				current[serial] = name;
 			}
 			foreach (var entry in devices.entries) {
 				var serial = entry.key;
 				var info = entry.value;
-				if (!current.contains (serial))
+				if (!current.has_key (serial))
 					detached.add (info);
 			}
-			foreach (var serial in current) {
+			foreach (var entry in current.entries) {
+				unowned string serial = entry.key;
 				if (!devices.has_key (serial))
-					attached.add (new DeviceInfo (serial));
+					attached.add (new DeviceInfo (serial, entry.value));
 			}
 
 			foreach (var info in detached)
@@ -72,15 +99,14 @@ namespace Frida.Droidy {
 
 		private async void announce_device (DeviceInfo info, Cancellable? cancellable) throws IOError {
 			var serial = info.serial;
+
 			uint port = 0;
 			serial.scanf ("emulator-%u", out port);
 			if (port != 0) {
 				info.name = "Android Emulator %u".printf (port);
-			} else {
+			} else if (info.name == null) {
 				try {
-					var manufacturer = yield get_manufacturer (info.serial, cancellable);
-					var model = yield get_model (info.serial, cancellable);
-					info.name = manufacturer + " " + model;
+					info.name = yield detect_name (info.serial, cancellable);
 				} catch (Error e) {
 					info.name = "Android Device";
 				}
@@ -93,24 +119,9 @@ namespace Frida.Droidy {
 			}
 		}
 
-		private async string get_manufacturer (string device_serial, Cancellable? cancellable) throws Error, IOError {
-			var output = yield ShellCommand.run ("getprop ro.product.manufacturer", device_serial, cancellable);
-			var manufacturer = output.strip ();
-			var length = manufacturer.char_count ();
-			if (length == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to determine device manufacturer");
-			var result = manufacturer.get_char (0).toupper ().to_string ();
-			if (length > 1)
-				result += manufacturer.substring (manufacturer.index_of_nth_char (1));
-			return result;
-		}
-
-		private async string get_model (string device_serial, Cancellable? cancellable) throws Error, IOError {
+		private async string detect_name (string device_serial, Cancellable? cancellable) throws Error, IOError {
 			var output = yield ShellCommand.run ("getprop ro.product.model", device_serial, cancellable);
-			var model = output.strip ();
-			if (model.char_count () == 0)
-				throw new Error.NOT_SUPPORTED ("Unable to determine device model");
-			return model;
+			return output.chomp ();
 		}
 
 		private class DeviceInfo {
@@ -119,7 +130,7 @@ namespace Frida.Droidy {
 				private set;
 			}
 
-			public string name {
+			public string? name {
 				get;
 				set;
 			}
@@ -129,8 +140,9 @@ namespace Frida.Droidy {
 				set;
 			}
 
-			public DeviceInfo (string serial) {
+			public DeviceInfo (string serial, string? name) {
 				this.serial = serial;
+				this.name = name;
 			}
 		}
 	}
@@ -439,7 +451,7 @@ namespace Frida.Droidy {
 				handler = null;
 			}
 
-			public void complete_with_error (GLib.Error e) {
+			public void complete_with_error (GLib.Error error) {
 				if (handler == null)
 					return;
 				this.error = error;
