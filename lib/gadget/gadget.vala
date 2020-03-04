@@ -598,6 +598,16 @@ namespace Frida.Gadget {
 
 		var config_path = derive_config_path_from_file_path (gadget_path);
 
+#if IOS
+		if (!FileUtils.test (config_path, FileTest.EXISTS)) {
+			var config_dir = Path.get_dirname (config_path);
+			if (Path.get_basename (config_dir) == "Frameworks") {
+				var app_dir = Path.get_dirname (config_dir);
+				config_path = Path.build_filename (app_dir, Path.get_basename (config_path));
+			}
+		}
+#endif
+
 #if ANDROID
 		if (!FileUtils.test (config_path, FileTest.EXISTS)) {
 			var ext_index = config_path.last_index_of_char ('.');
