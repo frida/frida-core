@@ -1536,7 +1536,7 @@ namespace Frida.LLDB {
 
 		private const uint PAGE_SIZE = 16384U;
 		private const uint32 THREAD_MAGIC = 0x54485244U;
-		private const uint64 PAC_REMOVAL_MASK = 0x0000000fffffffffUL; /* TODO: verify */
+		private const uint64 PAC_REMOVAL_MASK = 0x0000007fffffffffUL;
 
 		public Thread (uint id, string? name, Client client) {
 			Object (
