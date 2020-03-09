@@ -41,7 +41,7 @@ _frida_unc0ver_policy_softener_internal_connect (void)
   mach_port_t service_port = MACH_PORT_NULL;
   kern_return_t kr;
 
-  kr = task_get_special_port (mach_task_self(), TASK_SEATBELT_PORT, &service_port);
+  kr = task_get_special_port (mach_task_self (), TASK_SEATBELT_PORT, &service_port);
   if (kr != KERN_SUCCESS)
     return MACH_PORT_NULL;
 
