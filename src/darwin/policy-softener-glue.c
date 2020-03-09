@@ -45,9 +45,6 @@ _frida_unc0ver_policy_softener_internal_connect (void)
   if (kr != KERN_SUCCESS)
     return MACH_PORT_NULL;
 
-  if (!MACH_PORT_VALID (service_port))
-    return MACH_PORT_NULL;
-
   return service_port;
 }
 
