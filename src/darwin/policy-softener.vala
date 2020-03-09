@@ -213,5 +213,37 @@ namespace Frida {
 		private extern static void _internal_jb_disconnect (uint connection);
 		private extern static int _internal_jb_entitle_now (void * jbd_call, uint connection, uint pid);
 	}
+
+	public class Unc0verPolicySoftener : IOSPolicySoftener {
+		private const string SUBSTITUTED_PATH = "/usr/libexec/substituted";
+
+		private uint connection;
+
+		construct {
+			connection = _internal_connect ();
+		}
+
+		~Unc0verPolicySoftener () {
+			_internal_disconnect (connection);
+		}
+
+		public static bool is_available () {
+			return FileUtils.test (SUBSTITUTED_PATH, FileTest.EXISTS);
+		}
+
+		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) {
+			substitute_setup_process (pid);
+
+			return base.perform_softening (pid);
+		}
+
+		private void substitute_setup_process (uint pid) {
+			_internal_substitute_setup_process (connection, (Posix.pid_t) pid);
+		}
+
+		private extern static uint _internal_connect ();
+		private extern static void _internal_disconnect (uint connection);
+		private extern static void _internal_substitute_setup_process (uint connection, uint pid);
+	}
 #endif
 }
