@@ -59,6 +59,9 @@ _frida_unc0ver_policy_softener_internal_substitute_setup_process (guint service_
 {
   kern_return_t kr;
 
+  if (service_port == MACH_PORT_NULL)
+    return;
+
   /*
    * DISCLAIMER:
    * Don't do this at home. This is not recommended outside of the
