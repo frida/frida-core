@@ -53,7 +53,7 @@ namespace Frida {
 #if IOS
 			if (ElectraPolicySoftener.is_available ())
 				policy_softener = new ElectraPolicySoftener ();
-			else if (Unc0verPolicySoftener.is_available())
+			else if (Unc0verPolicySoftener.is_available ())
 				policy_softener = new Unc0verPolicySoftener ();
 			else
 				policy_softener = new IOSPolicySoftener ();
