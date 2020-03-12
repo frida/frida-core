@@ -1854,6 +1854,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   guint8 mach_stub_code[512] = { 0, };
   guint8 pthread_stub_code[512] = { 0, };
   FridaAgentContext agent_ctx;
+  GumAddress pc, sp, data_arg;
 
   self_task = mach_task_self ();
 
@@ -1994,6 +1995,13 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   kr = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
+  pc = payload_address + layout.mach_code_offset;
+  sp = payload_address + layout.stack_top_offset;
+  data_arg = payload_address + layout.data_offset;
+
+  if (resolver->ptrauth_support == GUM_PTRAUTH_SUPPORTED)
+    pc = gum_sign_code_address (pc);
+
 #ifdef HAVE_I386
   {
     x86_thread_state_t * state = &instance->thread_state;
@@ -2009,10 +2017,10 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
       ts = &state->uts.ts64;
 
-      ts->__rbx = payload_address + layout.data_offset;
+      ts->__rbx = data_arg;
 
-      ts->__rsp = payload_address + layout.stack_top_offset;
-      ts->__rip = payload_address + layout.mach_code_offset;
+      ts->__rsp = sp;
+      ts->__rip = pc;
     }
     else
     {
@@ -2023,10 +2031,10 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
       ts = &state->uts.ts32;
 
-      ts->__ebx = payload_address + layout.data_offset;
+      ts->__ebx = data_arg;
 
-      ts->__esp = payload_address + layout.stack_top_offset;
-      ts->__eip = payload_address + layout.mach_code_offset;
+      ts->__esp = sp;
+      ts->__eip = pc;
     }
 
     instance->thread_state_data = (thread_state_t) state;
@@ -2046,11 +2054,11 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
     ts = &state64->ts_64;
 
-    ts->__x[20] = payload_address + layout.data_offset;
+    ts->__x[20] = data_arg;
 
-    __darwin_arm_thread_state64_set_sp (*ts, payload_address + layout.stack_top_offset);
+    __darwin_arm_thread_state64_set_sp (*ts, sp);
     __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (0xcafebabe));
-    __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (payload_address + layout.mach_code_offset));
+    __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (pc));
 
     instance->thread_state_data = (thread_state_t) state64;
     instance->thread_state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
@@ -2062,11 +2070,11 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
     bzero (state32, sizeof (arm_thread_state_t));
 
-    state32->__r[7] = payload_address + layout.data_offset;
+    state32->__r[7] = data_arg;
 
-    state32->__sp = payload_address + layout.stack_top_offset;
+    state32->__sp = sp;
     state32->__lr = 0xcafebabe;
-    state32->__pc = payload_address + layout.mach_code_offset;
+    state32->__pc = pc;
     state32->__cpsr = FRIDA_PSR_THUMB;
 
     instance->thread_state_data = (thread_state_t) state32;
@@ -3400,6 +3408,8 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
     self->pthread_create_start_routine = payload_base + layout->pthread_code_offset + 1;
   else
     self->pthread_create_start_routine = payload_base + layout->pthread_code_offset;
+  if (resolver->ptrauth_support == GUM_PTRAUTH_SUPPORTED)
+    self->pthread_create_start_routine = gum_sign_code_address (self->pthread_create_start_routine);
   self->pthread_create_arg = payload_base + layout->data_offset;
 
   self->message_that_never_arrives = payload_base + layout->data_offset +
@@ -4004,10 +4014,15 @@ static void
 frida_agent_context_emit_arm64_mach_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
+  GumDarwinModuleResolver * resolver;
 
   ctx.code = code;
   gum_arm64_writer_init (&ctx.aw, ctx.code);
   ctx.mapper = mapper;
+
+  g_object_get (mapper, "resolver", &resolver, NULL);
+  ctx.aw.ptrauth_support = resolver->ptrauth_support;
+  g_object_unref (resolver);
 
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
@@ -4026,10 +4041,15 @@ static void
 frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumDarwinMapper * mapper)
 {
   FridaAgentEmitContext ctx;
+  GumDarwinModuleResolver * resolver;
 
   ctx.code = code;
   gum_arm64_writer_init (&ctx.aw, ctx.code);
   ctx.mapper = mapper;
+
+  g_object_get (mapper, "resolver", &resolver, NULL);
+  ctx.aw.ptrauth_support = resolver->ptrauth_support;
+  g_object_unref (resolver);
 
   gum_arm64_writer_put_push_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_LR);
   gum_arm64_writer_put_mov_reg_reg (&ctx.aw, ARM64_REG_FP, ARM64_REG_SP);
