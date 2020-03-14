@@ -222,7 +222,7 @@ function findSubstrateLauncher() {
 
   var imp = Module.enumerateImports('/sbin/launchd')
       .filter(function (imp) { return imp.name === 'posix_spawn'; })[0];
-  var impl = imp.slot.readPointer();
+  var impl = imp.slot.readPointer().strip();
   var header = findClosestMachHeader(impl);
 
   var launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62';
