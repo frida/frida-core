@@ -2059,6 +2059,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   {
     arm_unified_thread_state_t * state64 = &instance->thread_state64;
     arm_thread_state64_t * ts;
+    GumAddress dummy_lr;
 
     bzero (state64, sizeof (arm_unified_thread_state_t));
 
@@ -2070,7 +2071,10 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     ts->__x[20] = data_arg;
 
     __darwin_arm_thread_state64_set_sp (*ts, sp);
-    __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (0xcafebabe));
+    dummy_lr = 0xcafebabe;
+    if (resolver->ptrauth_support == GUM_PTRAUTH_SUPPORTED)
+      dummy_lr = gum_sign_code_address (dummy_lr);
+    __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (dummy_lr));
     __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (pc));
 
     instance->thread_state_data = (thread_state_t) state64;
