@@ -1,8 +1,8 @@
 #!/bin/bash
 
 host_os="$1"
-agent32="$2"
-agent64="$3"
+agent_modern="$2"
+agent_legacy="$3"
 output_dir="$4"
 resource_compiler="$5"
 resource_config="$6"
@@ -45,12 +45,12 @@ case $host_os in
   macos|ios)
     embedded_agent="$priv_dir/frida-agent.dylib"
 
-    if [ -f "$agent32" -a -f "$agent64" ]; then
-      "$LIPO" "$agent32" "$agent64" -create -output "$embedded_agent" || exit 1
-    elif [ -f "$agent32" ]; then
-      cp "$agent32" "$embedded_agent" || exit 1
-    elif [ -f "$agent64" ]; then
-      cp "$agent64" "$embedded_agent" || exit 1
+    if [ -f "$agent_modern" -a -f "$agent_legacy" ]; then
+      "$LIPO" "$agent_modern" "$agent_legacy" -create -output "$embedded_agent" || exit 1
+    elif [ -f "$agent_modern" ]; then
+      cp "$agent_modern" "$embedded_agent" || exit 1
+    elif [ -f "$agent_legacy" ]; then
+      cp "$agent_legacy" "$embedded_agent" || exit 1
     else
       echo "At least one agent must be provided"
       exit 1
@@ -74,10 +74,10 @@ case $host_os in
   qnx)
     embedded_agent="$priv_dir/frida-agent.so"
 
-    if [ -f "$agent32" ]; then
-      cp "$agent32" "$embedded_agent" || exit 1
-    elif [ -f "$agent64" ]; then
-      cp "$agent64" "$embedded_agent" || exit 1
+    if [ -f "$agent_modern" ]; then
+      cp "$agent_modern" "$embedded_agent" || exit 1
+    elif [ -f "$agent_legacy" ]; then
+      cp "$agent_legacy" "$embedded_agent" || exit 1
     else
       echo "An agent must be provided"
       exit 1
@@ -92,9 +92,10 @@ case $host_os in
   *)
     embedded_agents=()
 
-    embedded_agent="$priv_dir/frida-agent-32.so"
-    if [ -f "$agent32" ]; then
-      cp "$agent32" "$embedded_agent" || exit 1
+    embedded_agent="$priv_dir/frida-agent-64.so"
+    if [ -f "$agent_modern" ]; then
+
+      cp "$agent_modern" "$embedded_agent" || exit 1
 
       if [ "$strip_enabled" = "true" ]; then
         "$strip_binary" "$embedded_agent" || exit 1
@@ -104,10 +105,9 @@ case $host_os in
     fi
     embedded_agents+=("$embedded_agent")
 
-    embedded_agent="$priv_dir/frida-agent-64.so"
-    if [ -f "$agent64" ]; then
-
-      cp "$agent64" "$embedded_agent" || exit 1
+    embedded_agent="$priv_dir/frida-agent-32.so"
+    if [ -f "$agent_legacy" ]; then
+      cp "$agent_legacy" "$embedded_agent" || exit 1
 
       if [ "$strip_enabled" = "true" ]; then
         "$strip_binary" "$embedded_agent" || exit 1

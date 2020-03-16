@@ -97,14 +97,14 @@ if host_os_family == 'darwin'
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
   )
 
-  helper32 = get_option('helper32')
-  helper64 = get_option('helper64')
+  helper_modern = get_option('helper_modern')
+  helper_legacy = get_option('helper_legacy')
   helper_inputs = ['darwin/frida-helper.xcent']
-  if helper32 == '' and helper64 == ''
+  if helper_modern == '' and helper_legacy == ''
     if host_is_64bit
-      helper64 = helper.full_path()
+      helper_modern = helper.full_path()
     else
-      helper32 = helper.full_path()
+      helper_legacy = helper.full_path()
     endif
     helper_inputs += helper
   endif
@@ -119,8 +119,8 @@ if host_os_family == 'darwin'
     command: [
       files('darwin/embed-helper.sh'),
       host_os,
-      helper32,
-      helper64,
+      helper_modern,
+      helper_legacy,
       '@INPUT0@',
       meson.current_build_dir(),
       resource_compiler,
@@ -200,12 +200,12 @@ if host_os_family == 'linux'
     dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
   )
 
-  helper32 = get_option('helper32')
-  helper64 = get_option('helper64')
+  helper_modern = get_option('helper_modern')
+  helper_legacy = get_option('helper_legacy')
   if host_is_64bit
-    helper64 = ''
+    helper_modern = ''
   else
-    helper32 = ''
+    helper_legacy = ''
   endif
   helper_process_data = custom_target('frida-data-helper-process',
     output: [
@@ -217,8 +217,8 @@ if host_os_family == 'linux'
     command: [
       files('linux/embed-helper.sh'),
       host_os,
-      helper32,
-      helper64,
+      helper_modern,
+      helper_legacy,
       meson.current_build_dir(),
       resource_compiler,
       meson.get_cross_binary('strip', 'strip'),
@@ -239,14 +239,14 @@ if host_os_family == 'qnx'
   ]
 endif
 
-agent32 = get_option('agent32')
-agent64 = get_option('agent64')
+agent_modern = get_option('agent_modern')
+agent_legacy = get_option('agent_legacy')
 agent_inputs = ['agent.resources']
-if agent32 == '' and agent64 == ''
+if agent_modern == '' and agent_legacy == ''
   if host_is_64bit
-    agent64 = agent.full_path()
+    agent_modern = agent.full_path()
   else
-    agent32 = agent.full_path()
+    agent_legacy = agent.full_path()
   endif
   agent_inputs += agent
 endif
@@ -261,8 +261,8 @@ agent_data = custom_target('frida-data-agent',
   command: [
     files('embed-agent.sh'),
     host_os,
-    agent32,
-    agent64,
+    agent_modern,
+    agent_legacy,
     meson.current_build_dir(),
     resource_compiler,
     '@INPUT0@',

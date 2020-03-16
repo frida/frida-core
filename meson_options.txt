@@ -4,28 +4,28 @@ option('mapper',
   description: 'Use our own out-of-process dynamic linker for injection on i/macOS'
 )
 
-option('helper32',
+option('helper_modern',
   type: 'string',
   value: '',
-  description: 'Prebuilt 32-bit frida-helper'
+  description: 'Prebuilt frida-helper for modern systems'
 )
 
-option('helper64',
+option('helper_legacy',
   type: 'string',
   value: '',
-  description: 'Prebuilt 64-bit frida-helper'
+  description: 'Prebuilt frida-helper for legacy systems'
 )
 
-option('agent32',
+option('agent_modern',
   type: 'string',
   value: '',
-  description: 'Prebuilt agent to use for 32-bit targets'
+  description: 'Prebuilt agent to use for modern targets'
 )
 
-option('agent64',
+option('agent_legacy',
   type: 'string',
   value: '',
-  description: 'Prebuilt agent to use for 64-bit targets'
+  description: 'Prebuilt agent to use for legacy targets'
 )
 
 option('tests',

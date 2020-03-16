@@ -1,8 +1,8 @@
 #!/bin/bash
 
 host_os="$1"
-helper32="$2"
-helper64="$3"
+helper_modern="$2"
+helper_legacy="$3"
 helper_entitlements="$4"
 output_dir="$5"
 resource_compiler="$6"
@@ -44,12 +44,12 @@ esac
 
 mkdir -p "$priv_dir"
 
-if [ -f "$helper32" -a -f "$helper64" ]; then
-  "$LIPO" "$helper32" "$helper64" -create -output "$embedded_helper" || exit 1
-elif [ -f "$helper32" ]; then
-  cp "$helper32" "$embedded_helper" || exit 1
-elif [ -f "$helper64" ]; then
-  cp "$helper64" "$embedded_helper" || exit 1
+if [ -f "$helper_modern" -a -f "$helper_legacy" ]; then
+  "$LIPO" "$helper_modern" "$helper_legacy" -create -output "$embedded_helper" || exit 1
+elif [ -f "$helper_modern" ]; then
+  cp "$helper_modern" "$embedded_helper" || exit 1
+elif [ -f "$helper_legacy" ]; then
+  cp "$helper_legacy" "$embedded_helper" || exit 1
 else
   echo "At least one helper must be provided"
   exit 1
