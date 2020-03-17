@@ -139,7 +139,6 @@ struct _FridaSpawnInstance
   FridaDarwinHelperBackend * backend;
   guint pid;
   GumCpuType cpu_type;
-  GumPtrauthSupport ptrauth_support;
   mach_port_t thread;
   FridaDebugState previous_debug_state;
   FridaDebugState breakpoint_debug_state;
@@ -338,7 +337,6 @@ static void frida_spawn_instance_unset_nth_breakpoint (FridaSpawnInstance * self
 static void frida_spawn_instance_disable_nth_breakpoint (FridaSpawnInstance * self, guint n);
 static guint32 frida_spawn_instance_put_software_breakpoint (FridaSpawnInstance * self, GumAddress where, guint index);
 static guint32 frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, GumAddress address, guint32 new_instruction);
-static GumAddress frida_spawn_instance_sign_code_address (FridaSpawnInstance * self, GumAddress address);
 
 static void frida_make_pipe (int fds[2]);
 
@@ -1637,9 +1635,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   if (!gum_darwin_cpu_type_from_pid (instance->pid, &instance->cpu_type))
     goto cpu_probe_failed;
 
-  if (!gum_darwin_query_ptrauth_support (task, &instance->ptrauth_support))
-    goto ptrauth_probe_failed;
-
   if (!gum_darwin_query_page_size (task, &page_size))
     goto page_size_probe_failed;
 
@@ -1737,9 +1732,6 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   instance->ret_state = FRIDA_RET_FROM_HELPER;
 
-  kr = frida_spawn_instance_create_dyld_data (instance);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "create_dyld_data");
-
   kr = frida_get_debug_state (child_thread, &instance->previous_debug_state, instance->cpu_type);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "frida_get_debug_state");
 
@@ -1784,14 +1776,6 @@ cpu_probe_failed:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unexpected error while probing CPU type of target process");
-    goto failure;
-  }
-ptrauth_probe_failed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while probing pointer authentication support of target process");
     goto failure;
   }
 page_size_probe_failed:
@@ -2007,12 +1991,9 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   kr = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
-  pc = payload_address + layout.mach_code_offset;
+  pc = gum_sign_code_address (payload_address + layout.mach_code_offset);
   sp = payload_address + layout.stack_top_offset;
   data_arg = payload_address + layout.data_offset;
-
-  if (resolver->ptrauth_support == GUM_PTRAUTH_SUPPORTED)
-    pc = gum_sign_code_address (pc);
 
 #ifdef HAVE_I386
   {
@@ -2070,9 +2051,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     ts->__x[20] = data_arg;
 
     __darwin_arm_thread_state64_set_sp (*ts, sp);
-    dummy_lr = 0xcafebabe;
-    if (resolver->ptrauth_support == GUM_PTRAUTH_SUPPORTED)
-      dummy_lr = gum_sign_code_address (dummy_lr);
+    dummy_lr = gum_sign_code_address (0xcafebabe);
     __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (dummy_lr));
     __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (pc));
 
@@ -2570,7 +2549,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     {
       GumAddress new_pc;
 
-      new_pc = frida_spawn_instance_sign_code_address (self, __darwin_arm_thread_state64_get_lr (state->ts_64));
+      new_pc = gum_sign_code_address (__darwin_arm_thread_state64_get_lr (state->ts_64));
 
       __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, GSIZE_TO_POINTER (new_pc));
 
@@ -2596,6 +2575,8 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
   switch (self->breakpoint_phase)
   {
     case FRIDA_BREAKPOINT_SET_HELPERS:
+      frida_spawn_instance_create_dyld_data (self);
+
       frida_spawn_instance_call_set_helpers (self, state, self->fake_helpers);
 
       frida_spawn_instance_set_nth_breakpoint (self, 2, self->ret_gadget, FRIDA_BREAKPOINT_REPEAT_ALWAYS);
@@ -2747,7 +2728,7 @@ frida_spawn_instance_handle_modinit (FridaSpawnInstance * self, GumDarwinUnified
       if (ret_address >= self->do_modinit_start && ret_address < self->do_modinit_end)
       {
         state->ts_64.__x[0] = 0;
-        __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, __darwin_arm_thread_state64_get_lr_fptr (state->ts_64));
+        __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, GSIZE_TO_POINTER (gum_sign_code_address (ret_address)));
 
         self->ret_state = FRIDA_RET_FROM_STRCMP;
       }
@@ -2897,12 +2878,18 @@ frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self)
 static kern_return_t
 frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 {
+  GumPtrauthSupport ptrauth_support;
+  GumAddress ret_gadget;
+  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, }, { 0, } };
   kern_return_t kr;
   gboolean write_succeeded;
-  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, }, { 0, } };
-  GumAddress ret_gadget;
 
-  ret_gadget = frida_spawn_instance_sign_code_address (self, self->ret_gadget);
+  if (!gum_darwin_query_ptrauth_support (self->task, &ptrauth_support))
+    return KERN_FAILURE;
+
+  ret_gadget = self->ret_gadget;
+  if (ptrauth_support == GUM_PTRAUTH_SUPPORTED)
+    ret_gadget = gum_sign_code_address (ret_gadget);
 
   switch (self->cpu_type)
   {
@@ -3009,7 +2996,7 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
 {
   GumAddress new_pc, current_pc;
 
-  new_pc = frida_spawn_instance_sign_code_address (self, self->register_helpers_address);
+  new_pc = gum_sign_code_address (self->register_helpers_address);
 
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
@@ -3041,12 +3028,12 @@ frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifi
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
   {
-    gpointer new_lr;
+    GumAddress new_lr;
 
-    new_lr = __darwin_arm_thread_state64_get_pc_fptr (state->ts_64);
+    new_lr = gum_sign_code_address (__darwin_arm_thread_state64_get_pc (state->ts_64));
 
     __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, GSIZE_TO_POINTER (new_pc));
-    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, new_lr);
+    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, GSIZE_TO_POINTER (new_lr));
     state->ts_64.__x[0] = helpers;
   }
   else
@@ -3064,7 +3051,7 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
 {
   GumAddress new_pc, current_pc;
 
-  new_pc = frida_spawn_instance_sign_code_address (self, self->dlopen_address);
+  new_pc = gum_sign_code_address (self->dlopen_address);
 
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
@@ -3100,12 +3087,12 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
 #else
   if (self->cpu_type == GUM_CPU_ARM64)
   {
-    gpointer new_lr;
+    GumAddress new_lr;
 
-    new_lr = __darwin_arm_thread_state64_get_pc_fptr (state->ts_64);
+    new_lr = gum_sign_code_address (__darwin_arm_thread_state64_get_pc (state->ts_64));
 
     __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, GSIZE_TO_POINTER (new_pc));
-    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, new_lr);
+    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, GSIZE_TO_POINTER (new_lr));
     state->ts_64.__x[0] = lib_name;
     state->ts_64.__x[1] = mode;
     state->ts_64.__x[2] = 0;
@@ -3274,15 +3261,6 @@ frida_spawn_instance_overwrite_arm64_instruction (FridaSpawnInstance * self, Gum
     return 0;
 
   return original_instruction;
-}
-
-static GumAddress
-frida_spawn_instance_sign_code_address (FridaSpawnInstance * self, GumAddress address)
-{
-  if (self->ptrauth_support == GUM_PTRAUTH_UNSUPPORTED)
-    return address;
-
-  return gum_sign_code_address (address);
 }
 
 static void
