@@ -1375,8 +1375,7 @@ frida_darwin_helper_backend_is_application_process (guint pid)
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
     return FALSE;
 
-  module = gum_darwin_module_new_from_file (path, mach_task_self (), GUM_CPU_INVALID, 0, NULL,
-      GUM_DARWIN_MODULE_FLAGS_HEADER_ONLY, NULL);
+  module = gum_darwin_module_new_from_file (path, GUM_CPU_INVALID, GUM_PTRAUTH_INVALID, NULL, GUM_DARWIN_MODULE_FLAGS_HEADER_ONLY, NULL);
   if (module == NULL)
     return FALSE;
 
@@ -1684,7 +1683,7 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
     g_free (magic);
   }
 
-  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, instance->cpu_type, page_size, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  dyld = gum_darwin_module_new_from_memory ("/usr/lib/dyld", task, dyld_header, GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
   modern_entry_address = 0;

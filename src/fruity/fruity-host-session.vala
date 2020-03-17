@@ -1227,8 +1227,8 @@ namespace Frida {
 						}
 					}
 
-					const uint page_size = 16384;
-					var module = new Gum.DarwinModule.from_file (path, 0, ARM64, page_size);
+					var module = new Gum.DarwinModule.from_file (path, Gum.CpuType.ARM64,
+						Gum.PtrauthSupport.UNSUPPORTED);
 
 					var details = yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
 
