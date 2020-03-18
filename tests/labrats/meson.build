@@ -28,10 +28,13 @@ if host_os == 'ios'
   labrat_files += [
     'sleeper-ios',
     'sleeper-ios32',
+    'sleeper-ios64',
     'stdio-writer-ios',
     'stdio-writer-ios32',
+    'stdio-writer-ios64',
     'forker-ios',
     'forker-ios32',
+    'forker-ios64',
     'spawner-ios',
     'simple-agent-ios.dylib',
     'resident-agent-ios.dylib',

@@ -32,13 +32,17 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
 
 #else
 
-__attribute__ ((constructor)) static void
+__attribute__ ((constructor))
+static void
 on_load (void)
 {
   append_to_log ('>');
 }
 
-__attribute__ ((destructor)) static void
+#ifndef __APPLE__
+__attribute__ ((destructor))
+#endif
+static void
 on_unload (void)
 {
   append_to_log ('<');
@@ -56,6 +60,20 @@ frida_agent_main (const char * data)
     int exit_code = atoi (data);
     exit (exit_code);
   }
+#ifdef __APPLE__
+  else
+  {
+    /*
+     * Modern Apple toolchains no longer emit destructors, and instead
+     * emit a call to __cxa_atexit() from a constructor function.
+     *
+     * For now we will fake that aspect here to keep things simple.
+     * We could consider adding support for this in Gum.Darwin.Mapper
+     * at some point.
+     */
+    on_unload ();
+  }
+#endif
 }
 
 static void
