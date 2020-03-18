@@ -361,10 +361,19 @@ function findLibdyldInternals() {
    * Verified on:
    * - 12.4
    * - 13.2.2
+   * - 13.3
    */
+  var prologue = [];
+
+  var isArm64e = !ptr(1).sign().equals(1);
+  if (isArm64e) {
+    var pacibsp = '7f 23 03 d5';
+    prologue.push(pacibsp);
+  }
+
   var signatures = {
-    'dyld_process_info_base::make': 'ff c3 04 d1 ' + '?? ?? ?? ?? '.repeat(33) + '28 e0 02 91',
-    'withRemoteBuffer': 'ff ?? 01 d1 f4 4f ?? a9 fd 7b ?? a9 fd ?? ?? 91 f3 03 06 aa',
+    'dyld_process_info_base::make': prologue.concat(['ff c3 04 d1', '?? ?? ?? ?? '.repeat(isArm64e ? 35 : 33), '28 e0 02 91']).join(' '),
+    'withRemoteBuffer': prologue.concat(['ff ?? 01 d1 f4 4f ?? a9 fd 7b ?? a9 fd ?? ?? 91 f3 03 06 aa']).join(' '),
   };
 
   var result = Object.keys(signatures)
@@ -485,7 +494,7 @@ function tryParseInterceptorOnLeaveTrampoline(instructions, code, mappedMemory) 
   if (ldr[0] !== 'x16')
     return null;
 
-  var isBrX16 = instructions[2] === 0xd61f0200;
+  var isBrX16 = ((instructions[2] & 0xfffff7e0) >>> 0) === 0xd61f0200;
   if (!isBrX16)
     return null;
 
