@@ -1,6 +1,6 @@
 #!/bin/sh
 
-arch=arm64
+arch=arm64e
 
 remote_host=iphone
 remote_prefix=/usr/local/opt/frida-tests-$arch
