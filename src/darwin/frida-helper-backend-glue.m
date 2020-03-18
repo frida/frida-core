@@ -2254,6 +2254,9 @@ frida_inject_instance_on_mach_thread_dead (void * context)
     mach_msg_type_name_t acquired_type;
 
     mach_port_extract_right (self->task, posix_thread_right_in_remote_task, MACH_MSG_TYPE_MOVE_SEND, &posix_thread_right_in_local_task, &acquired_type);
+
+    if (posix_thread_right_in_local_task == MACH_PORT_DEAD)
+      posix_thread_right_in_local_task = MACH_PORT_NULL;
   }
 
   _frida_darwin_helper_backend_on_mach_thread_dead (self->backend, self->id, GSIZE_TO_POINTER (posix_thread_right_in_local_task));
