@@ -1007,6 +1007,9 @@ namespace Frida {
 			if (/^Termination Reason: +Namespace (.+), Code (.+)$/m.match (report, 0, out info)) {
 				reason_namespace = info.fetch (1);
 				reason_code = info.fetch (2);
+			} else {
+				reason_namespace = "SIGNAL";
+				reason_code = "unknown";
 			}
 
 			if (reason_namespace == null)
@@ -1031,6 +1034,10 @@ namespace Frida {
 
 				if (signal_description != null)
 					return signal_description;
+
+				if (exception_type != null && / \((SIG\w+)\)/.match (exception_type, 0, out info)) {
+					return info.fetch (1);
+				}
 			}
 
 			if (reason_namespace == "CODESIGNING")
