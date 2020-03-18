@@ -3,7 +3,7 @@
 arch=arm64
 
 remote_host=iphone
-remote_prefix=/var/root/frida-tests-$arch
+remote_prefix=/usr/local/opt/frida-tests-$arch
 
 core_tests=$(dirname "$0")
 cd "$core_tests/../../build/tmp-ios-$arch/frida-core" || exit 1
