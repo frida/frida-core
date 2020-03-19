@@ -252,7 +252,7 @@ namespace Frida.InjectorTest {
 		}
 
 		public void wait_for_uninject () {
-			var success = try_wait_for_uninject (1000);
+			var success = try_wait_for_uninject (5000);
 			assert_true (success);
 		}
 
