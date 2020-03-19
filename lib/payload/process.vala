@@ -26,7 +26,7 @@ namespace Frida {
 		Gum.MemoryRange? result = mapped_range;
 
 		if (result == null) {
-			Gum.Address our_address = Gum.Address.from_pointer ((void *) detect_own_memory_range);
+			Gum.Address our_address = Gum.Address.from_pointer (Gum.strip_code_pointer ((void *) detect_own_memory_range));
 
 			Gum.Process.enumerate_modules ((details) => {
 				var range = details.range;

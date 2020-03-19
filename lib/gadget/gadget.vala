@@ -650,7 +650,7 @@ namespace Frida.Gadget {
 		string? our_path = null;
 		Gum.MemoryRange? our_range = mapped_range;
 
-		Gum.Address our_address = Gum.Address.from_pointer ((void *) detect_location);
+		Gum.Address our_address = Gum.Address.from_pointer (Gum.strip_code_pointer ((void *) detect_location));
 
 		var index = 0;
 		Gum.Process.enumerate_modules ((details) => {
