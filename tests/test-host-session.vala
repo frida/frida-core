@@ -2717,7 +2717,7 @@ namespace Frida.HostSessionTest {
 				var device_manager = new DeviceManager ();
 
 				try {
-					var device = yield device_manager.get_device_by_id (device_id + ":lockdown");
+					var device = yield device_manager.get_device_by_id (device_id);
 
 					device.output.connect ((pid, fd, data) => {
 						var chars = data.get_data ();
@@ -2737,8 +2737,7 @@ namespace Frida.HostSessionTest {
 
 					var timer = new Timer ();
 
-					printerr ("enumerate_applications()");
-					stderr.flush ();
+					printerr ("device.enumerate_applications()");
 					timer.reset ();
 					var apps = yield device.enumerate_applications ();
 					printerr (" => got %d apps, took %u ms\n", apps.size (), (uint) (timer.elapsed () * 1000.0));
@@ -2750,14 +2749,46 @@ namespace Frida.HostSessionTest {
 						}
 					}
 
-					printerr ("spawn()");
-					stderr.flush ();
+					printerr ("device.spawn()");
 					timer.reset ();
 					var pid = yield device.spawn (app_id);
 					printerr (" => pid=%u, took %u ms\n", pid, (uint) (timer.elapsed () * 1000.0));
 
-					printerr ("resume(pid=%u)", pid);
-					stderr.flush ();
+					printerr ("device.attach(pid=%u)", pid);
+					timer.reset ();
+					var session = yield device.attach (pid);
+					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					printerr ("session.create_script()");
+					timer.reset ();
+					var script = yield session.create_script ("""
+						send(Module.getExportByName(null, 'open'));
+						""");
+					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					string received_message = null;
+					bool waiting = false;
+					script.message.connect ((message, data) => {
+						received_message = message;
+						if (waiting)
+							lockdown.callback ();
+					});
+
+					printerr ("script.load()");
+					timer.reset ();
+					yield script.load ();
+					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+
+					printerr ("await_message()");
+					while (received_message == null) {
+						waiting = true;
+						yield;
+						waiting = false;
+					}
+					printerr (" => received_message: %s\n", received_message);
+					received_message = null;
+
+					printerr ("device.resume(pid=%u)", pid);
 					timer.reset ();
 					yield device.resume (pid);
 					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
