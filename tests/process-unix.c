@@ -132,6 +132,7 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
     sigset_t signal_mask_set;
     int result;
     cpu_type_t pref;
+    gchar * special_path;
     size_t ocount;
     pid_t pid;
 
@@ -141,6 +142,8 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
     posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT |
         (suspended ? POSIX_SPAWN_START_SUSPENDED : 0));
 
+    special_path = NULL;
+
 # if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
     pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_X86 : CPU_TYPE_X86_64;
 # elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
@@ -148,7 +151,16 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
 # elif defined (HAVE_ARM)
     pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM : CPU_TYPE_ARM64;
 # elif defined (HAVE_ARM64)
+#  if __has_feature (ptrauth_calls)
+    pref = CPU_TYPE_ARM64;
+    if (arch == FRIDA_TEST_ARCH_OTHER)
+    {
+      special_path = g_strconcat (path, "64", NULL);
+      path = special_path;
+    }
+#  else
     pref = (arch == FRIDA_TEST_ARCH_CURRENT) ? CPU_TYPE_ARM64 : CPU_TYPE_ARM;
+#  endif
 # endif
     posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
 
@@ -156,13 +168,18 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
 
     posix_spawnattr_destroy (&attr);
 
-    if (result != 0)
+    if (result == 0)
+    {
+      g_free (special_path);
+    }
+    else
     {
       g_set_error (error,
           FRIDA_ERROR,
           FRIDA_ERROR_INVALID_ARGUMENT,
           "Unable to spawn executable at '%s': %s",
           path, g_strerror (errno));
+      g_free (special_path);
       return;
     }
 
