@@ -5,28 +5,48 @@ namespace Frida.GadgetTest {
 
 	namespace Standalone {
 		private static void load_script () {
-			if (!GLib.Test.slow ()) {
-				stdout.printf ("<skipping, run in slow mode> ");
-				return;
+			string gadget_dir;
+			string data_dir;
+			switch (Frida.Test.os ()) {
+				case Frida.Test.OS.MACOS: {
+					var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+					var build_dir = Path.get_dirname (tests_dir);
+					var source_dir = Path.build_filename (Path.get_dirname (Path.get_dirname (Path.get_dirname (build_dir))), "frida-core");
+					gadget_dir = Path.build_filename (build_dir, "lib", "gadget");
+					data_dir = Path.build_filename (source_dir, "tests");
+					break;
+				}
+				case Frida.Test.OS.IOS: {
+					var deployment_dir = Path.get_dirname (Frida.Test.Process.current.filename);
+					gadget_dir = deployment_dir;
+					data_dir = deployment_dir;
+					break;
+				}
+				default:
+					stdout.printf ("<skipping, test only available on i/macOS for now> ");
+					return;
 			}
 
-			var frida_root_dir = Path.get_dirname (Path.get_dirname (Frida.Test.Process.current.filename));
-			var gadget_filename = Path.build_filename (frida_root_dir, "lib", "gadget", ".libs", "libfrida-gadget" + Frida.Test.os_library_suffix ());
-
-			var tests_dir = Path.get_dirname (Frida.Test.Process.current.filename);
-			var data_dir = Path.build_filename (tests_dir, "data");
-			var script_file = File.new_for_path (Path.build_filename (data_dir, "test-gadget-standalone.js"));
+			var gadget_filename = Path.build_filename (gadget_dir, "frida-gadget" + Frida.Test.os_library_suffix ());
+			var config_filename = Path.build_filename (gadget_dir, "frida-gadget.config");
+			var script_filename = Path.build_filename (data_dir, "test-gadget-standalone.js");
 
 			var envp = new string[] {
 				"DYLD_INSERT_LIBRARIES=" + gadget_filename,
-				"FRIDA_GADGET_SCRIPT=" + script_file.get_path ()
 			};
 
 			try {
+				FileUtils.set_contents (config_filename, """{
+						"interaction": {
+							"type": "script",
+							"path": "%s"
+						}
+					}""".printf (script_filename));
+
 				var process = Frida.Test.Process.start (Frida.Test.Labrats.path_to_executable ("sleeper"), null, envp);
 				var exitcode = process.join (5000);
 				assert_true (exitcode == 123);
-			} catch (Error e) {
+			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
