@@ -73,8 +73,8 @@ namespace Frida.Test {
 		public int join (uint timeout_msec = 0) throws Error {
 			if (handle == null)
 				throw new Error.INVALID_OPERATION ("Process already joined or killed");
-var result = ProcessBackend.join (handle, timeout_msec);
 
+			var result = ProcessBackend.join (handle, timeout_msec);
 			handle = null;
 
 			return result;
