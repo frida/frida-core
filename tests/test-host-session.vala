@@ -1140,13 +1140,11 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn_native (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "sleeper-macos" : "sleeper-ios";
-			yield run_spawn_scenario (h, target_name);
+			yield run_spawn_scenario (h, target_name_of_native ("sleeper"));
 		}
 
 		private static async void spawn_other (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "sleeper-macos32" : "sleeper-ios32";
-			yield run_spawn_scenario (h, target_name);
+			yield run_spawn_scenario (h, target_name_of_other ("sleeper"));
 		}
 
 		private static async void run_spawn_scenario (Harness h, string target_name) {
@@ -1236,13 +1234,11 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void spawn_without_attach_native (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "stdio-writer-macos" : "stdio-writer-ios";
-			yield run_spawn_scenario_with_stdio (h, target_name);
+			yield run_spawn_scenario_with_stdio (h, target_name_of_native ("stdio-writer"));
 		}
 
 		private static async void spawn_without_attach_other (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "stdio-writer-macos32" : "stdio-writer-ios32";
-			yield run_spawn_scenario_with_stdio (h, target_name);
+			yield run_spawn_scenario_with_stdio (h, target_name_of_other ("stdio-writer"));
 		}
 
 		private static async void run_spawn_scenario_with_stdio (Harness h, string target_name) {
@@ -1316,6 +1312,12 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void own_memory_ranges_should_be_cloaked (Harness h) {
+			if (Frida.Test.os () != Frida.Test.OS.MACOS) {
+				stdout.printf ("<skipping, test only available on macOS for now> ");
+				h.done ();
+				return;
+			}
+
 			try {
 				var device_manager = new DeviceManager ();
 				var device = yield device_manager.get_device_by_type (DeviceType.LOCAL);
@@ -1502,13 +1504,11 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void fork_native (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "forker-macos" : "forker-ios";
-			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name));
+			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name_of_native ("forker")));
 		}
 
 		private static async void fork_other (Harness h) {
-			var target_name = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "forker-macos32" : "forker-ios32";
-			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name));
+			yield Unix.run_fork_scenario (h, Frida.Test.Labrats.path_to_file (target_name_of_other ("forker")));
 		}
 
 		private static async void fork_plus_exec (Harness h, string method) {
@@ -1529,6 +1529,23 @@ namespace Frida.HostSessionTest {
 
 		private static async void posix_spawn_plus_setexec (Harness h) {
 			yield Unix.run_exec_scenario (h, Frida.Test.Labrats.path_to_executable ("spawner"), "spawn", "posix_spawn+setexec");
+		}
+
+		private static string target_name_of_native (string name) {
+			string suffix = (Frida.Test.os () == Frida.Test.OS.MACOS) ? "macos" : "ios";
+
+			return name + "-" + suffix;
+		}
+
+		private static string target_name_of_other (string name) {
+			string suffix;
+			if (Frida.Test.os () == Frida.Test.OS.MACOS) {
+				suffix = "macos32";
+			} else {
+				suffix = (Gum.query_ptrauth_support () == SUPPORTED) ? "ios64" : "ios32";
+			}
+
+			return name + "-" + suffix;
 		}
 
 		namespace Manual {
