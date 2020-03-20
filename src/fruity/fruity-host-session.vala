@@ -1222,7 +1222,7 @@ namespace Frida {
 					if (path == null) {
 						path = Path.build_filename (Environment.get_user_cache_dir (), "frida", "gadget-ios.dylib");
 						if (!FileUtils.test (path, FileTest.EXISTS)) {
-							throw new Error.NOT_SUPPORTED ("Need gadget to attach; its default location is: %s",
+							throw new Error.NOT_SUPPORTED ("Need Gadget to attach on jailed iOS; its default location is: %s",
 								path);
 						}
 					}
