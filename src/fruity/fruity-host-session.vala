@@ -1227,8 +1227,13 @@ namespace Frida {
 						}
 					}
 
-					var module = new Gum.DarwinModule.from_file (path, Gum.CpuType.ARM64,
-						Gum.PtrauthSupport.UNSUPPORTED);
+					if (process.cpu_type != ARM64)
+						throw new Error.NOT_SUPPORTED ("Unsupported CPU; only arm64 is supported on jailed iOS");
+
+					var ptrauth_support = (process.cpu_subtype == ARM64E)
+						? Gum.PtrauthSupport.SUPPORTED
+						: Gum.PtrauthSupport.UNSUPPORTED;
+					var module = new Gum.DarwinModule.from_file (path, Gum.CpuType.ARM64, ptrauth_support);
 
 					var details = yield Fruity.Injector.inject ((owned) module, lldb, channel_provider, cancellable);
 

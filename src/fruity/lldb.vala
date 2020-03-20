@@ -39,6 +39,7 @@ namespace Frida.LLDB {
 		private Gee.ArrayQueue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
 
 		private Process? _process;
+		private uint64 ptrauth_removal_mask;
 		private Gee.HashMap<string, Register>? register_by_name;
 		private Gee.HashMap<uint, Register>? register_by_id;
 		private Gee.HashMap<uint64?, Breakpoint> breakpoints = new Gee.HashMap<uint64?, Breakpoint> (
@@ -253,6 +254,8 @@ namespace Frida.LLDB {
 
 		private async Process probe_target (Cancellable? cancellable) throws Error, IOError {
 			_process = yield get_process_info (cancellable);
+
+			ptrauth_removal_mask = (_process.cpu_subtype == ARM64E) ? 0x0000007fffffffffULL : 0xffffffffffffffffULL;
 
 			register_by_name = yield get_register_mappings (cancellable);
 
@@ -697,6 +700,10 @@ namespace Frida.LLDB {
 			return cached_dyld_fields;
 		}
 
+		public uint64 strip_code_address (uint64 address) {
+			return address & ptrauth_removal_mask;
+		}
+
 		private async Process get_process_info (Cancellable? cancellable = null) throws Error, IOError {
 			var response = yield _query_simple ("qProcessInfo", cancellable);
 
@@ -709,8 +716,8 @@ namespace Frida.LLDB {
 			info.real_gid = raw_info.get_uint ("real-gid");
 			info.effective_uid = raw_info.get_uint ("effective-uid");
 			info.effective_gid = raw_info.get_uint ("effective-gid");
-			info.cpu_type = raw_info.get_uint ("cputype");
-			info.cpu_subtype = raw_info.get_uint ("cpusubtype");
+			info.cpu_type = (DarwinCpuType) raw_info.get_uint ("cputype");
+			info.cpu_subtype = (DarwinCpuSubtype) raw_info.get_uint ("cpusubtype");
 			info.pointer_size = raw_info.get_uint ("ptrsize");
 			info.os_type = raw_info.get_string ("ostype");
 			info.vendor = raw_info.get_string ("vendor");
@@ -1471,12 +1478,12 @@ namespace Frida.LLDB {
 			set;
 		}
 
-		public uint cpu_type {
+		public DarwinCpuType cpu_type {
 			get;
 			set;
 		}
 
-		public uint cpu_subtype {
+		public DarwinCpuSubtype cpu_subtype {
 			get;
 			set;
 		}
@@ -1518,6 +1525,23 @@ namespace Frida.LLDB {
 		DISABLE
 	}
 
+	public enum DarwinCpuArchType {
+		ABI64		= 0x01000000,
+		ABI64_32	= 0x02000000,
+	}
+
+	public enum DarwinCpuType {
+		X86		= 7,
+		X86_64		= 7 | DarwinCpuArchType.ABI64,
+		ARM		= 12,
+		ARM64		= 12 | DarwinCpuArchType.ABI64,
+		ARM64_32	= 12 | DarwinCpuArchType.ABI64_32,
+	}
+
+	public enum DarwinCpuSubtype {
+		ARM64E		= 2,
+	}
+
 	public class Thread : Object {
 		public uint id {
 			get;
@@ -1536,7 +1560,6 @@ namespace Frida.LLDB {
 
 		private const uint PAGE_SIZE = 16384U;
 		private const uint32 THREAD_MAGIC = 0x54485244U;
-		private const uint64 PAC_REMOVAL_MASK = 0x0000007fffffffffUL;
 
 		public Thread (uint id, string? name, Client client) {
 			Object (
@@ -1612,7 +1635,7 @@ namespace Frida.LLDB {
 			var result = new Gee.ArrayList<Frame> ();
 
 			var sp = yield read_register ("sp", cancellable);
-			var lr = (yield read_register ("lr", cancellable)) & PAC_REMOVAL_MASK;
+			var lr = client.strip_code_address (yield read_register ("lr", cancellable));
 			var fp = yield read_register ("fp", cancellable);
 
 			result.add (new Frame (lr, sp));
@@ -1626,7 +1649,7 @@ namespace Frida.LLDB {
 				var frame = yield client.read_buffer (current, 16, cancellable);
 
 				uint64 next = frame.read_pointer (0);
-				uint64 return_address = frame.read_pointer (8) & PAC_REMOVAL_MASK;
+				uint64 return_address = client.strip_code_address (frame.read_pointer (8));
 
 				if (next == 0 || return_address == 0)
 					break;
