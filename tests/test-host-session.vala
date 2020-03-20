@@ -2713,6 +2713,8 @@ namespace Frida.HostSessionTest {
 
 				var device_id = "<device-id>";
 				var app_id = "<app-id>";
+				string? target_name = null;
+				uint target_pid = 0;
 
 				var device_manager = new DeviceManager ();
 
@@ -2749,10 +2751,22 @@ namespace Frida.HostSessionTest {
 						}
 					}
 
-					printerr ("device.spawn()");
-					timer.reset ();
-					var pid = yield device.spawn (app_id);
-					printerr (" => pid=%u, took %u ms\n", pid, (uint) (timer.elapsed () * 1000.0));
+					if (target_name != null) {
+						timer.reset ();
+						var process = yield device.get_process_by_name (target_name);
+						target_pid = process.pid;
+						printerr (" => resolved to pid=%u, took %u ms\n", target_pid, (uint) (timer.elapsed () * 1000.0));
+					}
+
+					uint pid;
+					if (target_pid != 0) {
+						pid = target_pid;
+					} else {
+						printerr ("device.spawn()");
+						timer.reset ();
+						pid = yield device.spawn (app_id);
+						printerr (" => pid=%u, took %u ms\n", pid, (uint) (timer.elapsed () * 1000.0));
+					}
 
 					printerr ("device.attach(pid=%u)", pid);
 					timer.reset ();
@@ -2788,10 +2802,12 @@ namespace Frida.HostSessionTest {
 					printerr (" => received_message: %s\n", received_message);
 					received_message = null;
 
-					printerr ("device.resume(pid=%u)", pid);
-					timer.reset ();
-					yield device.resume (pid);
-					printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+					if (target_pid == 0) {
+						printerr ("device.resume(pid=%u)", pid);
+						timer.reset ();
+						yield device.resume (pid);
+						printerr (" => took %u ms\n", (uint) (timer.elapsed () * 1000.0));
+					}
 
 					yield h.prompt_for_key ("Hit a key to exit: ");
 				} catch (GLib.Error e) {
