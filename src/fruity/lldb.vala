@@ -255,7 +255,7 @@ namespace Frida.LLDB {
 		private async Process probe_target (Cancellable? cancellable) throws Error, IOError {
 			_process = yield get_process_info (cancellable);
 
-			ptrauth_removal_mask = (_process.cpu_subtype == ARM64E) ? 0x0000007fffffffffULL : 0xffffffffffffffffULL;
+			ptrauth_removal_mask = (_process.cpu_type == ARM64) ? 0x0000007fffffffffULL : 0xffffffffffffffffULL;
 
 			register_by_name = yield get_register_mappings (cancellable);
 
