@@ -340,7 +340,7 @@ namespace Frida {
 			var task = borrow_task_for_remote_pid (pid);
 
 			var spawn_instance = spawn_instances[pid];
-			if (spawn_instance == null && _is_suspended (task))
+			if (spawn_instance == null && _is_suspended_at_entrypoint (task))
 				spawn_instance = _create_spawn_instance (pid);
 			if (spawn_instance != null) {
 				_prepare_spawn_instance_for_injection (spawn_instance, task);
@@ -604,6 +604,7 @@ namespace Frida {
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
+		protected extern bool _is_suspended_at_entrypoint (uint task) throws Error;
 		protected extern void _resume_process (uint task) throws Error;
 		protected extern void _resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);
