@@ -131,20 +131,24 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Darwin/spawn-other", () => {
-			var h = new Harness ((h) => Darwin.spawn_other.begin (h as Harness));
-			h.run ();
-		});
+		if (build_supports_cross_arch_injection) {
+			GLib.Test.add_func ("/HostSession/Darwin/spawn-other", () => {
+				var h = new Harness ((h) => Darwin.spawn_other.begin (h as Harness));
+				h.run ();
+			});
+		}
 
 		GLib.Test.add_func ("/HostSession/Darwin/spawn-without-attach-native", () => {
 			var h = new Harness ((h) => Darwin.spawn_without_attach_native.begin (h as Harness));
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Darwin/spawn-without-attach-other", () => {
-			var h = new Harness ((h) => Darwin.spawn_without_attach_other.begin (h as Harness));
-			h.run ();
-		});
+		if (build_supports_cross_arch_injection) {
+			GLib.Test.add_func ("/HostSession/Darwin/spawn-without-attach-other", () => {
+				var h = new Harness ((h) => Darwin.spawn_without_attach_other.begin (h as Harness));
+				h.run ();
+			});
+		}
 
 		GLib.Test.add_func ("/HostSession/Darwin/own-memory-ranges-should-be-cloaked", () => {
 			var h = new Harness ((h) => Darwin.own_memory_ranges_should_be_cloaked.begin (h as Harness));
@@ -161,10 +165,12 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-other", () => {
-			var h = new Harness ((h) => Darwin.fork_other.begin (h as Harness));
-			h.run ();
-		});
+		if (build_supports_cross_arch_injection) {
+			GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-other", () => {
+				var h = new Harness ((h) => Darwin.fork_other.begin (h as Harness));
+				h.run ();
+			});
+		}
 
 		var fork_symbol_names = new string[] {
 			"fork",

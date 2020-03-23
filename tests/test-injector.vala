@@ -4,17 +4,21 @@ namespace Frida.InjectorTest {
 			test_dynamic_injection (Frida.Test.Arch.CURRENT);
 		});
 
-		GLib.Test.add_func ("/Injector/inject-dynamic-other-arch", () => {
-			test_dynamic_injection (Frida.Test.Arch.OTHER);
-		});
+		if (build_supports_cross_arch_injection) {
+			GLib.Test.add_func ("/Injector/inject-dynamic-other-arch", () => {
+				test_dynamic_injection (Frida.Test.Arch.OTHER);
+			});
+		}
 
 		GLib.Test.add_func ("/Injector/inject-resident-current-arch", () => {
 			test_resident_injection (Frida.Test.Arch.CURRENT);
 		});
 
-		GLib.Test.add_func ("/Injector/inject-resident-other-arch", () => {
-			test_resident_injection (Frida.Test.Arch.OTHER);
-		});
+		if (build_supports_cross_arch_injection) {
+			GLib.Test.add_func ("/Injector/inject-resident-other-arch", () => {
+				test_resident_injection (Frida.Test.Arch.OTHER);
+			});
+		}
 
 		GLib.Test.add_func ("/Injector/resource-leaks", test_resource_leaks);
 
@@ -23,9 +27,11 @@ namespace Frida.InjectorTest {
 			test_suspended_injection (Frida.Test.Arch.CURRENT);
 		});
 
-		GLib.Test.add_func ("/Injector/suspended-injection-other-arch", () => {
-			test_suspended_injection (Frida.Test.Arch.OTHER);
-		});
+		if (build_supports_cross_arch_injection) {
+			GLib.Test.add_func ("/Injector/suspended-injection-other-arch", () => {
+				test_suspended_injection (Frida.Test.Arch.OTHER);
+			});
+		}
 #endif
 	}
 
