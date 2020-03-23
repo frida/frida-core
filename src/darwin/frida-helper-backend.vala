@@ -339,9 +339,14 @@ namespace Frida {
 
 			var task = borrow_task_for_remote_pid (pid);
 
+			bool still_booting = is_booting (task);
+
 			var spawn_instance = spawn_instances[pid];
-			if (spawn_instance == null && _is_suspended_at_entrypoint (task))
+			if (spawn_instance == null && _is_suspended (task) && still_booting)
 				spawn_instance = _create_spawn_instance (pid);
+
+			var main_context = MainContext.get_thread_default ();
+
 			if (spawn_instance != null) {
 				_prepare_spawn_instance_for_injection (spawn_instance, task);
 
@@ -359,7 +364,7 @@ namespace Frida {
 					_inject.callback ();
 					return false;
 				});
-				timeout_source.attach (MainContext.get_thread_default ());
+				timeout_source.attach (main_context);
 
 				yield;
 
@@ -368,9 +373,58 @@ namespace Frida {
 
 				if (timed_out)
 					throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
+
+				still_booting = false;
+			}
+
+			if (still_booting) {
+				var poll_source = new TimeoutSource (50);
+				poll_source.set_callback (() => {
+					_inject.callback ();
+					return true;
+				});
+				poll_source.attach (main_context);
+
+				bool timed_out = false;
+				var timeout_source = new TimeoutSource.seconds (10);
+				timeout_source.set_callback (() => {
+					timed_out = true;
+					_inject.callback ();
+					return false;
+				});
+				timeout_source.attach (main_context);
+
+				var cancel_source = new CancellableSource (cancellable);
+				cancel_source.set_callback (_inject.callback);
+				cancel_source.attach (main_context);
+
+				try {
+					do {
+						yield;
+					} while ((still_booting = is_booting (task)) && !timed_out && !cancellable.is_cancelled ());
+				} finally {
+					cancel_source.destroy ();
+					timeout_source.destroy ();
+					poll_source.destroy ();
+				}
+
+				if (timed_out) {
+					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process to " +
+						"finish initializing");
+				}
+
+				cancellable.set_error_if_cancelled ();
 			}
 
 			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
+		}
+
+		private bool is_booting (uint task) throws Error {
+			Gum.Darwin.AllImageInfos infos;
+			if (!Gum.Darwin.query_all_image_infos (task, out infos))
+				throw new Error.PROCESS_NOT_FOUND ("Target process died unexpectedly");
+
+			return !infos.libsystem_initialized;
 		}
 
 		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
@@ -604,7 +658,6 @@ namespace Frida {
 		protected extern uint _spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern static void _launch (string identifier, HostSpawnOptions options, LaunchCompletionHandler on_complete);
 		protected extern bool _is_suspended (uint task) throws Error;
-		protected extern bool _is_suspended_at_entrypoint (uint task) throws Error;
 		protected extern void _resume_process (uint task) throws Error;
 		protected extern void _resume_process_fast (uint task) throws Error;
 		protected extern static void _kill_process (uint pid);

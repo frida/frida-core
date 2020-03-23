@@ -1469,40 +1469,6 @@ mach_failure:
   }
 }
 
-gboolean
-_frida_darwin_helper_backend_is_suspended_at_entrypoint (FridaDarwinHelperBackend * self, guint task, GError ** error)
-{
-  gboolean is_suspended;
-  GError * pending_error;
-  GumDarwinAllImageInfos infos;
-
-  pending_error = NULL;
-  is_suspended = _frida_darwin_helper_backend_is_suspended (self, task, &pending_error);
-  if (pending_error != NULL)
-    goto propagate_error;
-  if (!is_suspended)
-    return FALSE;
-
-  if (!gum_darwin_query_all_image_infos (task, &infos))
-    goto query_failed;
-
-  return !infos.libsystem_initialized;
-
-propagate_error:
-  {
-    g_propagate_error (error, pending_error);
-    return FALSE;
-  }
-query_failed:
-  {
-    g_set_error (error,
-        FRIDA_ERROR,
-        FRIDA_ERROR_NOT_SUPPORTED,
-        "Unexpected error while determining whether process is suspended at entrypoint");
-    return FALSE;
-  }
-}
-
 void
 _frida_darwin_helper_backend_resume_process (FridaDarwinHelperBackend * self, guint task, GError ** error)
 {

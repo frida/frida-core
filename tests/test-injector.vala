@@ -190,9 +190,6 @@ namespace Frida.InjectorTest {
 				printerr ("\nFAIL: %s\n\n", e.message);
 				assert_not_reached ();
 			}
-
-			/* TODO: improve injectors to handle injection into a process that hasn't yet finished initializing */
-			Thread.usleep (50000);
 		}
 
 		public Labrat.suspended (string name, string[] envp, Frida.Test.Arch arch = Frida.Test.Arch.CURRENT) {
