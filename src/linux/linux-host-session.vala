@@ -559,10 +559,12 @@ namespace Frida {
 
 						var agent = new ZygoteAgent (host_session, pid);
 						zygote_agents[pid] = agent;
+						agent.unloaded.connect (on_zygote_agent_unloaded);
 
 						try {
 							yield agent.load (cancellable);
 						} catch (GLib.Error e) {
+							agent.unloaded.disconnect (on_zygote_agent_unloaded);
 							zygote_agents.unset (pid);
 
 							if (e is Error.PERMISSION_DENIED) {
@@ -584,6 +586,15 @@ namespace Frida {
 
 				throw_api_error (e);
 			}
+		}
+
+		private void on_zygote_agent_unloaded (InternalAgent dead_internal_agent) {
+			var dead_agent = (ZygoteAgent) dead_internal_agent;
+			dead_agent.unloaded.disconnect (on_zygote_agent_unloaded);
+			zygote_agents.unset (dead_agent.pid);
+
+			if (ensure_request != null && ensure_request.future.ready)
+				ensure_request = null;
 		}
 	}
 
