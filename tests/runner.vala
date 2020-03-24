@@ -1,16 +1,16 @@
 namespace Frida {
-	public static bool build_supports_cross_arch_injection = true;
+	public bool build_supports_cross_arch_injection =
+#if CROSS_ARCH
+		true
+#else
+		false
+#endif
+		;
 }
 
 namespace Frida.Test {
 	public static void run (string[] args) {
 		Environment.init (ref args);
-
-#if !WINDOWS
-		var build_dir = Path.get_basename (Path.get_dirname (Path.get_dirname (Path.get_dirname (Process.current.filename))));
-		if (build_dir.has_prefix ("tmp_thin-"))
-			build_supports_cross_arch_injection = false;
-#endif
 
 		Frida.SystemTest.add_tests ();
 

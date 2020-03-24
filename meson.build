@@ -227,6 +227,9 @@ vala_flags += ['--define=' + host_os_family.to_upper()]
 if host_os != host_os_family
   vala_flags += ['--define=' + host_os.to_upper()]
 endif
+if get_option('agent_legacy') != ''
+  vala_flags += ['--define=CROSS_ARCH']
+endif
 add_project_arguments(vala_flags, language: ['vala'])
 
 subdir('tools')
