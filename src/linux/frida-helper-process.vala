@@ -334,8 +334,12 @@ namespace Frida {
 					bool capture_output = false;
 					pending_superprocess = yield SuperSU.spawn (cwd, argv, envp, capture_output, cancellable);
 				} catch (Error e) {
-					string[] argv = { helper_file.path, server.client_address };
-					pending_subprocess = new Subprocess.newv (argv, SubprocessFlags.STDIN_INHERIT);
+					var launcher = new SubprocessLauncher (SubprocessFlags.STDIN_INHERIT);
+					launcher.unsetenv ("LD_LIBRARY_PATH");
+					pending_subprocess = launcher.spawnv ({
+						helper_file.path,
+						server.client_address
+					});
 				}
 
 				yield;
