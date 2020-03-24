@@ -81,8 +81,8 @@ frida_system_enumerate_applications (int * result_length)
     info->_identifier = app_id;
     info->_name = app_name;
     info->_pid = pid;
-    frida_image_data_init (&info->_small_icon, 0, 0, 0, "");
-    frida_image_data_init (&info->_large_icon, 0, 0, 0, "");
+    frida_image_data_init_empty (&info->_small_icon);
+    frida_image_data_init_empty (&info->_large_icon);
   }
 
   g_dir_close (proc_dir);
@@ -101,7 +101,7 @@ frida_system_enumerate_processes (int * result_length)
   const gchar * proc_name;
 
   processes = g_array_new (FALSE, FALSE, sizeof (FridaHostProcessInfo));
-  frida_image_data_init (&no_icon, 0, 0, 0, "");
+  frida_image_data_init_empty (&no_icon);
 
   proc_dir = g_dir_open ("/proc", 0, NULL);
   g_assert (proc_dir != NULL);

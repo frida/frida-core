@@ -36,7 +36,7 @@ frida_system_enumerate_processes (int * result_length)
   } procfs_name;
 
   processes = g_array_new (FALSE, FALSE, sizeof (FridaHostProcessInfo));
-  frida_image_data_init (&no_icon, 0, 0, 0, "");
+  frida_image_data_init_empty (&no_icon);
 
   proc_dir = g_dir_open ("/proc", 0, NULL);
   g_assert (proc_dir != NULL);

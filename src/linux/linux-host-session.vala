@@ -659,7 +659,7 @@ namespace Frida {
 			var length = items.get_length ();
 
 			var result = new HostApplicationInfo[length];
-			var no_icon = ImageData (0, 0, 0, "");
+			var no_icon = ImageData.empty ();
 
 			for (var i = 0; i != length; i++) {
 				var item = items.get_array_element (i);
@@ -674,15 +674,15 @@ namespace Frida {
 
 		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
 			var app = yield call ("getFrontmostApplication", new Json.Node[] {}, cancellable);
-			var no_icon = ImageData (0, 0, 0, "");
 			if (app != null) {
 				var item = app.get_array ();
 				var identifier = item.get_string_element (0);
 				var name = item.get_string_element (1);
 				var pid = (uint) item.get_int_element (2);
+				var no_icon = ImageData.empty ();
 				return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 			} else {
-				return HostApplicationInfo ("", "", 0, no_icon, no_icon);
+				return HostApplicationInfo.empty ();
 			}
 		}
 

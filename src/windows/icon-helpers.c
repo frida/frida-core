@@ -29,7 +29,7 @@ _frida_image_data_from_process_or_file (DWORD pid, WCHAR * filename, FridaIconSi
   if (icon == NULL)
   {
     icon = g_new (FridaImageData, 1);
-    frida_image_data_init (icon, 0, 0, 0, "");
+    frida_image_data_init_empty (icon);
   }
 
   return icon;

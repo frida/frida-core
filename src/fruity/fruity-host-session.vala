@@ -453,11 +453,9 @@ namespace Frida {
 			var device_info = yield Fruity.DeviceInfoService.open (channel_provider, cancellable);
 			var processes = yield device_info.enumerate_processes (cancellable);
 
-			var no_icon = ImageData (0, 0, 0, "");
-
 			var process = processes.first_match (p => p.foreground_running && p.real_app_name != SPRINGBOARD_PATH);
 			if (process == null)
-				return HostApplicationInfo ("", "", 0, no_icon, no_icon);
+				return HostApplicationInfo.empty ();
 
 			string app_path = compute_app_path_from_executable_path (process.real_app_name);
 
@@ -468,6 +466,7 @@ namespace Frida {
 			if (apps.is_empty)
 				throw new Error.NOT_SUPPORTED ("Unable to resolve bundle path to bundle ID");
 			unowned string identifier = apps[0].bundle_identifier;
+			var no_icon = ImageData.empty ();
 
 			return HostApplicationInfo (identifier, process.name, process.pid, no_icon, no_icon);
 		}
@@ -491,7 +490,7 @@ namespace Frida {
 			var apps = yield apps_request.future.wait_async (cancellable);
 			var pids = yield pids_request.future.wait_async (cancellable);
 
-			var no_icon = ImageData (0, 0, 0, "");
+			var no_icon = ImageData.empty ();
 
 			var result = new HostApplicationInfo[apps.size];
 			int i = 0;
@@ -573,7 +572,7 @@ namespace Frida {
 
 			var processes = yield device_info.enumerate_processes (cancellable);
 
-			var no_icon = ImageData (0, 0, 0, "");
+			var no_icon = ImageData.empty ();
 
 			var result = new HostProcessInfo[processes.size];
 			int i = 0;

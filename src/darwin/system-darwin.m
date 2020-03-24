@@ -98,11 +98,7 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
   }
   else
   {
-    result->_identifier = g_strdup ("");
-    result->_name = g_strdup ("");
-    result->_pid = 0;
-    frida_image_data_init (&result->_small_icon, 0, 0, 0, "");
-    frida_image_data_init (&result->_large_icon, 0, 0, 0, "");
+    frida_host_application_info_init_empty (result);
   }
 
   [identifier release];
@@ -252,8 +248,8 @@ frida_system_enumerate_processes (int * result_length)
           info._name = g_path_get_basename (path);
         }
 
-        frida_image_data_init (&info._small_icon, 0, 0, 0, "");
-        frida_image_data_init (&info._large_icon, 0, 0, 0, "");
+        frida_image_data_init_empty (&info._small_icon);
+        frida_image_data_init_empty (&info._large_icon);
       }
     }
 

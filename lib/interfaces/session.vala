@@ -221,6 +221,14 @@ namespace Frida {
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
 		}
+
+		public HostApplicationInfo.empty () {
+			this.identifier = "";
+			this.name = "";
+			this.pid = 0;
+			this.small_icon = ImageData.empty ();
+			this.large_icon = ImageData.empty ();
+		}
 	}
 
 	public struct HostProcessInfo {
@@ -690,6 +698,13 @@ namespace Frida {
 			this.height = height;
 			this.rowstride = rowstride;
 			this.pixels = pixels;
+		}
+
+		public ImageData.empty () {
+			this.width = 0;
+			this.height = 0;
+			this.rowstride = 0;
+			this.pixels = "";
 		}
 	}
 

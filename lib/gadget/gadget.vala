@@ -1405,7 +1405,7 @@ namespace Frida.Gadget {
 				var pid = get_process_id ();
 				var identifier = "re.frida.Gadget";
 				var name = "Gadget";
-				var no_icon = ImageData (0, 0, 0, "");
+				var no_icon = ImageData.empty ();
 				this_app = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 				this_process = HostProcessInfo (pid, name, no_icon, no_icon);
 			}
