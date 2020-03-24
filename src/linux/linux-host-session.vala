@@ -81,7 +81,7 @@ namespace Frida {
 
 #if ANDROID
 		private RoboLauncher robo_launcher;
-		private SystemServerAgent system_server_agent;
+		internal SystemServerAgent system_server_agent;
 		private CrashMonitor crash_monitor;
 #endif
 
@@ -94,8 +94,9 @@ namespace Frida {
 
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
+			system_server_agent.unloaded.connect (on_system_server_agent_unloaded);
 
-			robo_launcher = new RoboLauncher (this, system_server_agent, io_cancellable);
+			robo_launcher = new RoboLauncher (this, io_cancellable);
 			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
 
@@ -120,6 +121,7 @@ namespace Frida {
 			robo_launcher.spawn_added.disconnect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.disconnect (on_robo_launcher_spawn_removed);
 
+			system_server_agent.unloaded.disconnect (on_system_server_agent_unloaded);
 			yield system_server_agent.close (cancellable);
 
 			crash_monitor.process_crashed.disconnect (on_process_crashed);
@@ -290,6 +292,12 @@ namespace Frida {
 		}
 
 #if ANDROID
+		private void on_system_server_agent_unloaded (InternalAgent dead_agent) {
+			dead_agent.unloaded.disconnect (on_system_server_agent_unloaded);
+
+			system_server_agent = new SystemServerAgent (this);
+		}
+
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
 			spawn_added (info);
 		}
@@ -355,11 +363,6 @@ namespace Frida {
 			construct;
 		}
 
-		public SystemServerAgent system_server_agent {
-			get;
-			construct;
-		}
-
 		public Cancellable io_cancellable {
 			get;
 			construct;
@@ -373,10 +376,9 @@ namespace Frida {
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		public RoboLauncher (LinuxHostSession host_session, SystemServerAgent system_server_agent, Cancellable io_cancellable) {
+		public RoboLauncher (LinuxHostSession host_session, Cancellable io_cancellable) {
 			Object (
 				host_session: host_session,
-				system_server_agent: system_server_agent,
 				io_cancellable: io_cancellable
 			);
 		}
@@ -449,6 +451,8 @@ namespace Frida {
 			var entrypoint = PackageEntrypoint.parse (package, options);
 
 			yield ensure_loaded (cancellable);
+
+			var system_server_agent = host_session.system_server_agent;
 
 			var process_name = yield system_server_agent.get_process_name (package, cancellable);
 			if (spawn_requests.has_key (process_name))
