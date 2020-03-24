@@ -22,17 +22,17 @@ fi
 output_deb="$2"
 
 if file "$executable" | grep -q arm64e; then
-  pkg_id="re.frida.server64e"
+  pkg_id="re.frida.server64"
   pkg_name="Frida for A12+ devices"
   pkg_conflicts="re.frida.server, re.frida.server32"
 elif file "$executable" | grep -q arm64; then
   pkg_id="re.frida.server"
   pkg_name="Frida for pre-A12 devices"
-  pkg_conflicts="re.frida.server32, re.frida.server64e"
+  pkg_conflicts="re.frida.server32, re.frida.server64"
 else
   pkg_id="re.frida.server32"
   pkg_name="Frida for 32-bit devices"
-  pkg_conflicts="re.frida.server, re.frida.server64e"
+  pkg_conflicts="re.frida.server, re.frida.server64"
 fi
 
 tmpdir="$(mktemp -d /tmp/package-server.XXXXXX)"
