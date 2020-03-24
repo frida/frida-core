@@ -73,28 +73,35 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
     struct kinfo_proc * entries;
     guint count, i;
 
-    result->_identifier = g_strdup ([identifier UTF8String]);
     name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-    result->_name = g_strdup ([name UTF8String]);
-    [name release];
-
-    entries = frida_system_query_kinfo_procs (&count);
-    for (result->_pid = 0, i = 0; result->_pid == 0 && i != count; i++)
+    if (name != nil)
     {
-      guint pid = entries[i].kp_proc.p_pid;
-      NSString * cur_identifier;
+      result->_identifier = g_strdup ([identifier UTF8String]);
+      result->_name = g_strdup ([name UTF8String]);
+      [name release];
 
-      cur_identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
-      if (cur_identifier != nil)
+      entries = frida_system_query_kinfo_procs (&count);
+      for (result->_pid = 0, i = 0; result->_pid == 0 && i != count; i++)
       {
-        if ([cur_identifier isEqualToString:identifier])
-          result->_pid = pid;
-        [cur_identifier release];
-      }
-    }
-    g_free (entries);
+        guint pid = entries[i].kp_proc.p_pid;
+        NSString * cur_identifier;
 
-    extract_icons_from_identifier (identifier, &result->_small_icon, &result->_large_icon);
+        cur_identifier = api->SBSCopyDisplayIdentifierForProcessID (pid);
+        if (cur_identifier != nil)
+        {
+          if ([cur_identifier isEqualToString:identifier])
+            result->_pid = pid;
+          [cur_identifier release];
+        }
+      }
+      g_free (entries);
+
+      extract_icons_from_identifier (identifier, &result->_small_icon, &result->_large_icon);
+    }
+    else
+    {
+      frida_host_application_info_init_empty (result);
+    }
   }
   else
   {
