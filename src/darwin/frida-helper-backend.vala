@@ -401,6 +401,7 @@ namespace Frida {
 				try {
 					do {
 						yield;
+						task = borrow_task_for_remote_pid (pid);
 					} while ((still_booting = is_booting (task)) && !timed_out && !cancellable.is_cancelled ());
 				} finally {
 					cancel_source.destroy ();
