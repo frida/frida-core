@@ -339,10 +339,8 @@ namespace Frida {
 
 			var task = borrow_task_for_remote_pid (pid);
 
-			bool still_booting = is_booting (task);
-
 			var spawn_instance = spawn_instances[pid];
-			if (spawn_instance == null && _is_suspended (task) && still_booting)
+			if (spawn_instance == null && _is_suspended (task) && is_booting (task))
 				spawn_instance = _create_spawn_instance (pid);
 
 			var main_context = MainContext.get_thread_default ();
@@ -373,48 +371,6 @@ namespace Frida {
 
 				if (timed_out)
 					throw new Error.TIMED_OUT ("Unexpectedly timed out while initializing suspended process");
-
-				still_booting = false;
-			}
-
-			if (still_booting) {
-				var poll_source = new TimeoutSource (50);
-				poll_source.set_callback (() => {
-					_inject.callback ();
-					return true;
-				});
-				poll_source.attach (main_context);
-
-				bool timed_out = false;
-				var timeout_source = new TimeoutSource.seconds (10);
-				timeout_source.set_callback (() => {
-					timed_out = true;
-					_inject.callback ();
-					return false;
-				});
-				timeout_source.attach (main_context);
-
-				var cancel_source = new CancellableSource (cancellable);
-				cancel_source.set_callback (_inject.callback);
-				cancel_source.attach (main_context);
-
-				try {
-					do {
-						yield;
-						task = borrow_task_for_remote_pid (pid);
-					} while ((still_booting = is_booting (task)) && !timed_out && !cancellable.is_cancelled ());
-				} finally {
-					cancel_source.destroy ();
-					timeout_source.destroy ();
-					poll_source.destroy ();
-				}
-
-				if (timed_out) {
-					throw new Error.TIMED_OUT ("Unexpectedly timed out while waiting for process to " +
-						"finish initializing");
-				}
-
-				cancellable.set_error_if_cancelled ();
 			}
 
 			return _inject_into_task (pid, task, path_or_name, blob, entrypoint, data);
