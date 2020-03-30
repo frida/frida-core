@@ -249,7 +249,7 @@ namespace Frida {
 
 			yield ensure_service (cancellable);
 
-			string id = "tcp@" + host;
+			string id = "remote@" + host;
 
 			foreach (var device in devices) {
 				if (device.id == id) {
