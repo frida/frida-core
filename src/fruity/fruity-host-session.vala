@@ -12,11 +12,11 @@ namespace Frida {
 		private Cancellable io_cancellable = new Cancellable ();
 
 		static construct {
-#if HAVE_GLIB_SCHANNEL_STATIC
-			GLibSChannelStatic.register ();
+#if HAVE_GIOSCHANNEL
+			GIOSChannel.register ();
 #endif
-#if HAVE_GLIB_OPENSSL_STATIC
-			GLibOpenSSLStatic.register ();
+#if HAVE_GIOOPENSSL
+			GIOOpenSSL.register ();
 #endif
 		}
 

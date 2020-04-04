@@ -166,18 +166,18 @@ gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
 
 if host_os_family == 'windows'
-  tls_provider_dep = dependency('glib-schannel-static', required: false)
+  tls_provider_dep = dependency('gioschannel', required: false)
   if tls_provider_dep.found()
-    cdata.set('HAVE_GLIB_SCHANNEL_STATIC', 1)
-    vala_flags += ['--define=HAVE_GLIB_SCHANNEL_STATIC']
+    cdata.set('HAVE_GIOSCHANNEL', 1)
+    vala_flags += ['--define=HAVE_GIOSCHANNEL']
   endif
 else
   gio_unix_dep = dependency('gio-unix-2.0')
 
-  tls_provider_dep = dependency('glib-openssl-static', required: false)
+  tls_provider_dep = dependency('gioopenssl', required: false)
   if tls_provider_dep.found()
-    cdata.set('HAVE_GLIB_OPENSSL_STATIC', 1)
-    vala_flags += ['--define=HAVE_GLIB_OPENSSL_STATIC']
+    cdata.set('HAVE_GIOOPENSSL', 1)
+    vala_flags += ['--define=HAVE_GIOOPENSSL']
   endif
 endif
 

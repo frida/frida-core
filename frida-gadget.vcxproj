@@ -90,7 +90,7 @@
       <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GIOSCHANNEL=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -103,7 +103,7 @@
       <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GIOSCHANNEL=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -116,7 +116,7 @@
       <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GIOSCHANNEL=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-payload-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -129,7 +129,7 @@
       <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GIOSCHANNEL=1;G_LOG_DOMAIN="Frida";$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-payload-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>

@@ -3,7 +3,7 @@
 
   <ItemDefinitionGroup>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GLIB_SCHANNEL_STATIC=1;G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;HAVE_GIOSCHANNEL=1;G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
 

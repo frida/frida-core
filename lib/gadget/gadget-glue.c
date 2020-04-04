@@ -12,11 +12,11 @@
 # include <unistd.h>
 #endif
 #include <gumjs/gumscriptbackend.h>
-#ifdef HAVE_GLIB_SCHANNEL_STATIC
-# include <glib-schannel-static.h>
+#ifdef HAVE_GIOSCHANNEL
+# include <gioschannel.h>
 #endif
-#ifdef HAVE_GLIB_OPENSSL_STATIC
-# include <glib-openssl-static.h>
+#ifdef HAVE_GIOOPENSSL
+# include <gioopenssl.h>
 #endif
 
 #ifdef HAVE_DARWIN
@@ -158,10 +158,10 @@ frida_gadget_environment_init (void)
 
   g_thread_set_garbage_handler (_frida_gadget_on_pending_thread_garbage, NULL);
 
-#ifdef HAVE_GLIB_SCHANNEL_STATIC
+#ifdef HAVE_GIOSCHANNEL
   g_io_module_schannel_register ();
 #endif
-#ifdef HAVE_GLIB_OPENSSL_STATIC
+#ifdef HAVE_GIOOPENSSL
   g_io_module_openssl_register ();
 #endif
 

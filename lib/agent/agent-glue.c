@@ -6,11 +6,11 @@
 #if defined (HAVE_ANDROID) && __ANDROID_API__ < __ANDROID_API_L__
 # include <signal.h>
 #endif
-#ifdef HAVE_GLIB_SCHANNEL_STATIC
-# include <glib-schannel-static.h>
+#ifdef HAVE_GIOSCHANNEL
+# include <gioschannel.h>
 #endif
-#ifdef HAVE_GLIB_OPENSSL_STATIC
-# include <glib-openssl-static.h>
+#ifdef HAVE_GIOOPENSSL
+# include <gioopenssl.h>
 #endif
 #define SUBSTITUTE_INSERTER_PATH "/usr/lib/substitute-inserter.dylib"
 #define CHIMERA_STAGE2_PATH "/usr/lib/pspawn_payload-stg2.dylib"
@@ -22,10 +22,10 @@ _frida_agent_environment_init (void)
 
   g_thread_set_garbage_handler (_frida_agent_on_pending_thread_garbage, NULL);
 
-#ifdef HAVE_GLIB_SCHANNEL_STATIC
+#ifdef HAVE_GIOSCHANNEL
   g_io_module_schannel_register ();
 #endif
-#ifdef HAVE_GLIB_OPENSSL_STATIC
+#ifdef HAVE_GIOOPENSSL
   g_io_module_openssl_register ();
 #endif
 
