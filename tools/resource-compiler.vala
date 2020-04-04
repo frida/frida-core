@@ -778,7 +778,7 @@ namespace Frida {
 			}
 
 			private void write_section_header (SectionHeader h) throws Error {
-				section_header_offset_by_name[h.name] = (stream.get_base_stream () as Seekable).tell ();
+				section_header_offset_by_name[h.name] = ((Seekable) stream.get_base_stream ()).tell ();
 
 				assert (h.name.length <= 8);
 				stream.put_string (h.name);

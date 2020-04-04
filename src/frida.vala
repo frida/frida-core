@@ -50,7 +50,7 @@ namespace Frida {
 
 		public void close_sync (Cancellable? cancellable = null) throws IOError {
 			try {
-				(create<CloseTask> () as CloseTask).execute (cancellable);
+				create<CloseTask> ().execute (cancellable);
 			} catch (Error e) {
 				assert_not_reached ();
 			}
@@ -199,7 +199,7 @@ namespace Frida {
 		}
 
 		public DeviceList enumerate_devices_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return (create<EnumerateDevicesTask> () as EnumerateDevicesTask).execute (cancellable);
+			return create<EnumerateDevicesTask> ().execute (cancellable);
 		}
 
 		private class EnumerateDevicesTask : ManagerTask<DeviceList> {
@@ -231,7 +231,7 @@ namespace Frida {
 		}
 
 		public Device add_remote_device_sync (string host, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<AddRemoteDeviceTask> () as AddRemoteDeviceTask;
+			var task = create<AddRemoteDeviceTask> ();
 			task.host = host;
 			return task.execute (cancellable);
 		}
@@ -264,7 +264,7 @@ namespace Frida {
 		}
 
 		public void remove_remote_device_sync (string host, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<RemoveRemoteDeviceTask> () as RemoveRemoteDeviceTask;
+			var task = create<RemoveRemoteDeviceTask> ();
 			task.host = host;
 			task.execute (cancellable);
 		}
@@ -408,7 +408,7 @@ namespace Frida {
 			}
 		}
 
-		private Object create<T> () {
+		private T create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
@@ -566,7 +566,7 @@ namespace Frida {
 		}
 
 		public Application? get_frontmost_application_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return (create<GetFrontmostApplicationTask> () as GetFrontmostApplicationTask).execute (cancellable);
+			return create<GetFrontmostApplicationTask> ().execute (cancellable);
 		}
 
 		private class GetFrontmostApplicationTask : DeviceTask<Application?> {
@@ -600,7 +600,7 @@ namespace Frida {
 		}
 
 		public ApplicationList enumerate_applications_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return (create<EnumerateApplicationsTask> () as EnumerateApplicationsTask).execute (cancellable);
+			return create<EnumerateApplicationsTask> ().execute (cancellable);
 		}
 
 		private class EnumerateApplicationsTask : DeviceTask<ApplicationList> {
@@ -729,7 +729,7 @@ namespace Frida {
 
 		public Process? find_process_sync (ProcessPredicate predicate, int timeout = 0, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var task = create<FindProcessTask> () as FindProcessTask;
+			var task = create<FindProcessTask> ();
 			task.predicate = (process) => {
 				return predicate (process);
 			};
@@ -770,7 +770,7 @@ namespace Frida {
 		}
 
 		public ProcessList enumerate_processes_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return (create<EnumerateProcessesTask> () as EnumerateProcessesTask).execute (cancellable);
+			return create<EnumerateProcessesTask> ().execute (cancellable);
 		}
 
 		private class EnumerateProcessesTask : DeviceTask<ProcessList> {
@@ -804,7 +804,7 @@ namespace Frida {
 		}
 
 		public void enable_spawn_gating_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<EnableSpawnGatingTask> () as EnableSpawnGatingTask).execute (cancellable);
+			create<EnableSpawnGatingTask> ().execute (cancellable);
 		}
 
 		private class EnableSpawnGatingTask : DeviceTask<void> {
@@ -826,7 +826,7 @@ namespace Frida {
 		}
 
 		public void disable_spawn_gating_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<DisableSpawnGatingTask> () as DisableSpawnGatingTask).execute (cancellable);
+			create<DisableSpawnGatingTask> ().execute (cancellable);
 		}
 
 		private class DisableSpawnGatingTask : DeviceTask<void> {
@@ -854,7 +854,7 @@ namespace Frida {
 		}
 
 		public SpawnList enumerate_pending_spawn_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return (create<EnumeratePendingSpawnTask> () as EnumeratePendingSpawnTask).execute (cancellable);
+			return create<EnumeratePendingSpawnTask> ().execute (cancellable);
 		}
 
 		private class EnumeratePendingSpawnTask : DeviceTask<SpawnList> {
@@ -882,7 +882,7 @@ namespace Frida {
 		}
 
 		public ChildList enumerate_pending_children_sync (Cancellable? cancellable = null) throws Error, IOError {
-			return (create<EnumeratePendingChildrenTask> () as EnumeratePendingChildrenTask).execute (cancellable);
+			return create<EnumeratePendingChildrenTask> ().execute (cancellable);
 		}
 
 		private class EnumeratePendingChildrenTask : DeviceTask<ChildList> {
@@ -938,7 +938,7 @@ namespace Frida {
 
 		public uint spawn_sync (string program, SpawnOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var task = create<SpawnTask> () as SpawnTask;
+			var task = create<SpawnTask> ();
 			task.program = program;
 			task.options = options;
 			return task.execute (cancellable);
@@ -966,7 +966,7 @@ namespace Frida {
 		}
 
 		public void input_sync (uint pid, Bytes data, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<InputTask> () as InputTask;
+			var task = create<InputTask> ();
 			task.pid = pid;
 			task.data = data;
 			task.execute (cancellable);
@@ -994,7 +994,7 @@ namespace Frida {
 		}
 
 		public void resume_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<ResumeTask> () as ResumeTask;
+			var task = create<ResumeTask> ();
 			task.pid = pid;
 			task.execute (cancellable);
 		}
@@ -1022,7 +1022,7 @@ namespace Frida {
 		}
 
 		public void kill_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<KillTask> () as KillTask;
+			var task = create<KillTask> ();
 			task.pid = pid;
 			task.execute (cancellable);
 		}
@@ -1070,7 +1070,7 @@ namespace Frida {
 		}
 
 		public Session attach_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<AttachTask> () as AttachTask;
+			var task = create<AttachTask> ();
 			task.pid = pid;
 			return task.execute (cancellable);
 		}
@@ -1100,7 +1100,7 @@ namespace Frida {
 
 		public uint inject_library_file_sync (uint pid, string path, string entrypoint, string data,
 				Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<InjectLibraryFileTask> () as InjectLibraryFileTask;
+			var task = create<InjectLibraryFileTask> ();
 			task.pid = pid;
 			task.path = path;
 			task.entrypoint = entrypoint;
@@ -1136,7 +1136,7 @@ namespace Frida {
 
 		public uint inject_library_blob_sync (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var task = create<InjectLibraryBlobTask> () as InjectLibraryBlobTask;
+			var task = create<InjectLibraryBlobTask> ();
 			task.pid = pid;
 			task.blob = blob;
 			task.entrypoint = entrypoint;
@@ -1166,7 +1166,7 @@ namespace Frida {
 		}
 
 		public IOStream open_channel_sync (string address, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<OpenChannelTask> () as OpenChannelTask;
+			var task = create<OpenChannelTask> ();
 			task.address = address;
 			return task.execute (cancellable);
 		}
@@ -1380,7 +1380,7 @@ namespace Frida {
 			uninjected (id.handle);
 		}
 
-		private Object create<T> () {
+		private T create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
@@ -1796,7 +1796,7 @@ namespace Frida {
 
 		public void detach_sync (Cancellable? cancellable = null) throws IOError {
 			try {
-				(create<DetachTask> () as DetachTask).execute (cancellable);
+				create<DetachTask> ().execute (cancellable);
 			} catch (Error e) {
 				assert_not_reached ();
 			}
@@ -1819,7 +1819,7 @@ namespace Frida {
 		}
 
 		public void enable_child_gating_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<EnableChildGatingTask> () as EnableChildGatingTask).execute (cancellable);
+			create<EnableChildGatingTask> ().execute (cancellable);
 		}
 
 		private class EnableChildGatingTask : SessionTask<void> {
@@ -1839,7 +1839,7 @@ namespace Frida {
 		}
 
 		public void disable_child_gating_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<DisableChildGatingTask> () as DisableChildGatingTask).execute (cancellable);
+			create<DisableChildGatingTask> ().execute (cancellable);
 		}
 
 		private class DisableChildGatingTask : SessionTask<void> {
@@ -1890,7 +1890,7 @@ namespace Frida {
 
 		public Script create_script_sync (string source, ScriptOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var task = create<CreateScriptTask> () as CreateScriptTask;
+			var task = create<CreateScriptTask> ();
 			task.source = source;
 			task.options = options;
 			return task.execute (cancellable);
@@ -1944,7 +1944,7 @@ namespace Frida {
 
 		public Script create_script_from_bytes_sync (Bytes bytes, ScriptOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var task = create<CreateScriptFromBytesTask> () as CreateScriptFromBytesTask;
+			var task = create<CreateScriptFromBytesTask> ();
 			task.bytes = bytes;
 			task.options = options;
 			return task.execute (cancellable);
@@ -1996,7 +1996,7 @@ namespace Frida {
 
 		public Bytes compile_script_sync (string source, ScriptOptions? options = null, Cancellable? cancellable = null)
 				throws Error, IOError {
-			var task = create<CompileScriptTask> () as CompileScriptTask;
+			var task = create<CompileScriptTask> ();
 			task.source = source;
 			task.options = options;
 			return task.execute (cancellable);
@@ -2029,7 +2029,7 @@ namespace Frida {
 		}
 
 		public void enable_debugger_sync (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<EnableScriptDebuggerTask> () as EnableScriptDebuggerTask;
+			var task = create<EnableScriptDebuggerTask> ();
 			task.port = port;
 			task.execute (cancellable);
 		}
@@ -2053,7 +2053,7 @@ namespace Frida {
 		}
 
 		public void disable_debugger_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<DisableScriptDebuggerTask> () as DisableScriptDebuggerTask).execute (cancellable);
+			create<DisableScriptDebuggerTask> ().execute (cancellable);
 		}
 
 		private class DisableScriptDebuggerTask : SessionTask<void> {
@@ -2073,7 +2073,7 @@ namespace Frida {
 		}
 
 		public void enable_jit_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<EnableJitTask> () as EnableJitTask).execute (cancellable);
+			create<EnableJitTask> ().execute (cancellable);
 		}
 
 		private class EnableJitTask : SessionTask<void> {
@@ -2139,7 +2139,7 @@ namespace Frida {
 			}
 		}
 
-		private Object create<T> () {
+		private T create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
@@ -2195,7 +2195,7 @@ namespace Frida {
 		}
 
 		public void load_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<LoadTask> () as LoadTask).execute (cancellable);
+			create<LoadTask> ().execute (cancellable);
 		}
 
 		private class LoadTask : ScriptTask<void> {
@@ -2211,7 +2211,7 @@ namespace Frida {
 		}
 
 		public void unload_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<UnloadTask> () as UnloadTask).execute (cancellable);
+			create<UnloadTask> ().execute (cancellable);
 		}
 
 		private class UnloadTask : ScriptTask<void> {
@@ -2233,7 +2233,7 @@ namespace Frida {
 		}
 
 		public void eternalize_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<EternalizeTask> () as EternalizeTask).execute (cancellable);
+			create<EternalizeTask> ().execute (cancellable);
 		}
 
 		private class EternalizeTask : ScriptTask<void> {
@@ -2256,7 +2256,7 @@ namespace Frida {
 		}
 
 		public void post_sync (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<PostTask> () as PostTask;
+			var task = create<PostTask> ();
 			task.message = message;
 			task.data = data;
 			task.execute (cancellable);
@@ -2305,7 +2305,7 @@ namespace Frida {
 			close_request.resolve (true);
 		}
 
-		private Object create<T> () {
+		private T create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 
@@ -2358,7 +2358,7 @@ namespace Frida {
 
 		public void close_sync (Cancellable? cancellable = null) throws IOError {
 			try {
-				(create<CloseTask> () as CloseTask).execute (cancellable);
+				((CloseTask) create<CloseTask> ()).execute (cancellable);
 			} catch (Error e) {
 				assert_not_reached ();
 			}
@@ -2452,7 +2452,7 @@ namespace Frida {
 			}
 		}
 
-		private Object create<T> () {
+		private T create<T> () {
 			return Object.new (typeof (T), main_context: get_main_context (), parent: this);
 		}
 
@@ -2530,7 +2530,7 @@ namespace Frida {
 		}
 
 		public void disable_sync (Cancellable? cancellable = null) throws Error, IOError {
-			(create<DisableTask> () as DisableTask).execute (cancellable);
+			create<DisableTask> ().execute (cancellable);
 		}
 
 		private class DisableTask : FileMonitorTask<void> {
@@ -2543,7 +2543,7 @@ namespace Frida {
 			change (file.get_parse_name (), (other_file != null) ? other_file.get_parse_name () : null, event);
 		}
 
-		private Object create<T> () {
+		private T create<T> () {
 			return Object.new (typeof (T), main_context: main_context, parent: this);
 		}
 

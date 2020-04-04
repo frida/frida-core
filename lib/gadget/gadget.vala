@@ -58,9 +58,9 @@ namespace Frida.Gadget {
 							bool valid = true;
 
 							if (obj is ScriptInteraction) {
-								valid = (obj as ScriptInteraction).path != null;
+								valid = ((ScriptInteraction) obj).path != null;
 							} else if (obj is ScriptDirectoryInteraction) {
-								valid = (obj as ScriptDirectoryInteraction).path != null;
+								valid = ((ScriptDirectoryInteraction) obj).path != null;
 							}
 
 							if (valid) {
@@ -789,7 +789,7 @@ namespace Frida.Gadget {
 		}
 
 		private static string resolve_script_path (Config config, Location location) {
-			var raw_path = (config.interaction as ScriptInteraction).path;
+			var raw_path = ((ScriptInteraction) config.interaction).path;
 
 			if (!Path.is_absolute (raw_path)) {
 				string? documents_dir = Environment.detect_documents_dir ();
@@ -996,7 +996,7 @@ namespace Frida.Gadget {
 		}
 
 		private static string parse_script_directory_path (Config config, Location location) {
-			var raw_path = (config.interaction as ScriptDirectoryInteraction).path;
+			var raw_path = ((ScriptDirectoryInteraction) config.interaction).path;
 
 			if (!Path.is_absolute (raw_path)) {
 				unowned string? gadget_path = location.path;
@@ -1270,7 +1270,7 @@ namespace Frida.Gadget {
 			SocketAddress? effective_address = null;
 			InetSocketAddress? inet_address = listen_address as InetSocketAddress;
 			if (inet_address != null) {
-				var on_port_conflict = (config.interaction as ListenInteraction).on_port_conflict;
+				var on_port_conflict = ((ListenInteraction) config.interaction).on_port_conflict;
 				uint16 start_port = inet_address.get_port ();
 				uint16 candidate_port = start_port;
 				do {

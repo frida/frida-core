@@ -26,7 +26,7 @@ namespace Frida {
 		construct {
 			var interceptor = Gum.Interceptor.obtain ();
 
-			task_threads = (ThreadResumeFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "task_threads");
+			task_threads = (TaskThreadsFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "task_threads");
 			thread_suspend = (ThreadSuspendFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "thread_suspend");
 			thread_resume = (ThreadResumeFunc) Gum.Module.find_export_by_name (LIBSYSTEM_KERNEL, "thread_resume");
 
