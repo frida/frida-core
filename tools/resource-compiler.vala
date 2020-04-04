@@ -589,7 +589,7 @@ namespace Frida {
 						assert_not_reached ();
 				}
 				file_header.number_of_sections = 3;
-				file_header.time_date_stamp = (uint32) TimeVal ().tv_sec;
+				file_header.time_date_stamp = (uint32) (get_real_time () / 1000000);
 				file_header.pointer_to_symbol_table = 0; /* filled out at the end */
 				file_header.number_of_symbols = 0; /* filled out at the end */
 				file_header.size_of_optional_header = 0;

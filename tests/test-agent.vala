@@ -443,7 +443,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), fun
 #endif
 #endif
 
-			module = GLib.Module.open (agent_filename, BIND_LOCAL | BIND_LAZY);
+			module = GLib.Module.open (agent_filename, LOCAL | LAZY);
 			assert_nonnull (module);
 
 			void * main_func_symbol;

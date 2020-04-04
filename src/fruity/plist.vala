@@ -1,6 +1,6 @@
 namespace Frida.Fruity {
 	public class Plist : PlistDict {
-		private const uint64 EPOCH = 978307200;
+		private const int64 MAC_EPOCH_DELTA_FROM_UNIX = 978307200LL;
 
 		public Plist.from_binary (uint8[] data) throws PlistError {
 			var parser = new BinaryParser (this);
@@ -220,13 +220,9 @@ namespace Frida.Fruity {
 
 			private Value? read_date () throws GLib.Error {
 				double point_in_time = read_double ();
-
-				uint64 seconds = (uint64) point_in_time;
-				double remainder = point_in_time - (double) seconds;
-
-				var val = TimeVal ();
-				val.tv_sec = (long) (EPOCH + seconds);
-				val.tv_usec = (long) (remainder * 1000000.0);
+				int64 whole_seconds = (int64) point_in_time;
+				var val = new DateTime.from_unix_utc (MAC_EPOCH_DELTA_FROM_UNIX + whole_seconds)
+					.add_seconds (point_in_time - (double) whole_seconds);
 
 				var gval = Value (typeof (PlistDate));
 				gval.take_object (new PlistDate (val));
@@ -630,7 +626,7 @@ namespace Frida.Fruity {
 				output.put_byte (0x33);
 
 				var val = date.get_time ();
-				double point_in_time = (double) (val.tv_sec - EPOCH) + ((double) val.tv_usec * 1000000.0);
+				double point_in_time = (double) (val.to_unix () - MAC_EPOCH_DELTA_FROM_UNIX) + val.get_seconds ();
 				uint64 bits = *((uint64 *) &point_in_time);
 				output.put_uint64 (bits);
 			}
@@ -1480,13 +1476,13 @@ namespace Frida.Fruity {
 	}
 
 	public class PlistDate : Object {
-		private TimeVal time;
+		private DateTime time;
 
-		public PlistDate (TimeVal time) {
+		public PlistDate (DateTime time) {
 			this.time = time;
 		}
 
-		public TimeVal get_time () {
+		public DateTime get_time () {
 			return time;
 		}
 	}
@@ -1565,9 +1561,9 @@ namespace Frida.Fruity {
 			return true;
 
 		if (t == typeof (PlistDate)) {
-			TimeVal tva = ((PlistDate) a.get_object ()).get_time ();
-			TimeVal tvb = ((PlistDate) b.get_object ()).get_time ();
-			return (tva.tv_sec == tvb.tv_sec) && (tva.tv_usec == tvb.tv_usec);
+			DateTime time_a = ((PlistDate) a.get_object ()).get_time ();
+			DateTime time_b = ((PlistDate) b.get_object ()).get_time ();
+			return time_a.equal (time_b);
 		}
 
 		if (t == typeof (PlistUid))

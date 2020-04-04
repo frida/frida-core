@@ -205,22 +205,16 @@ namespace Frida.Fruity {
 			private set;
 		}
 
-		private const uint64 MAC_EPOCH_DELTA_FROM_UNIX = 978307200ULL;
+		private const int64 MAC_EPOCH_DELTA_FROM_UNIX = 978307200LL;
 
 		public NSDate (double time) {
 			this.time = time;
 		}
 
 		public DateTime to_date_time () {
-			uint64 seconds_uint = (uint64) time;
-			double seconds_real = (double) seconds_uint;
-
-			long sec = (long) (MAC_EPOCH_DELTA_FROM_UNIX + seconds_uint);
-			long usec = (long) ((time - seconds_real) * 1000000.0);
-
-			TimeVal tv = { sec, usec };
-
-			return new DateTime.from_timeval_utc (tv);
+			int64 whole_seconds = (int64) time;
+			return new DateTime.from_unix_utc (MAC_EPOCH_DELTA_FROM_UNIX + whole_seconds)
+				.add_seconds (time - (double) whole_seconds);
 		}
 	}
 
