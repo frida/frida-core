@@ -101,7 +101,7 @@ rpc.exports = {
 
       var intent = packageManager.getLaunchIntentForPackage(pkg);
       
-      if (intent == null && packageManager.getLeanbackLaunchIntentForPackage)
+      if (intent === null && 'getLeanbackLaunchIntentForPackage' in packageManager)
         intent = packageManager.getLeanbackLaunchIntentForPackage(pkg);
       
       if (intent === null && activity === null)
