@@ -100,7 +100,6 @@ rpc.exports = {
         throw new Error("Unable to find application with identifier '" + pkg + "'");
 
       var intent = packageManager.getLaunchIntentForPackage(pkg);
-      
       if (intent === null && 'getLeanbackLaunchIntentForPackage' in packageManager)
         intent = packageManager.getLeanbackLaunchIntentForPackage(pkg);
       
