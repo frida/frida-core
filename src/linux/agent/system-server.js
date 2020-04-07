@@ -100,6 +100,10 @@ rpc.exports = {
         throw new Error("Unable to find application with identifier '" + pkg + "'");
 
       var intent = packageManager.getLaunchIntentForPackage(pkg);
+      
+      if (intent == null && packageManager.getLeanbackLaunchIntentForPackage)
+        intent = packageManager.getLeanbackLaunchIntentForPackage(pkg);
+      
       if (intent === null && activity === null)
         throw new Error('Unable to find a front-door activity');
 
