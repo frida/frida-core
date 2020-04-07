@@ -779,13 +779,15 @@ namespace Frida.Fruity.Injector {
 
 			yield save_main_thread_state (cancellable);
 
+			var invalidAsNop = new InvalidAsNopHandler();
+
 			uint64 signed_ret_gadget = yield invoke_remote_function (sign_pointer, {
 					ret_gadget
-				}, null, cancellable);
+				}, invalidAsNop, cancellable);
 
 			uint64 signed_get_thread_buf = yield invoke_remote_function (sign_pointer, {
 					get_thread_buf
-				}, null, cancellable);
+				}, invalidAsNop, cancellable);
 
 			var helpers_builder = lldb.make_buffer_builder ();
 
@@ -887,6 +889,19 @@ namespace Frida.Fruity.Injector {
 					yield thread.write_register ("x0", 0, cancellable);
 					yield thread.write_register ("pc", ret_address, cancellable);
 				}
+
+				return true;
+			}
+		}
+
+		private class InvalidAsNopHandler : Object, ExceptionHandler {
+			public async bool try_handle_exception (LLDB.Exception exception, Cancellable? cancellable) throws GLib.Error {
+				if (exception.metype != EXC_BAD_INSTRUCTION)
+					return false;
+
+				uint64 pc = exception.context["pc"];
+				var thread = exception.thread;
+				yield thread.write_register ("pc", pc + 4, cancellable);
 
 				return true;
 			}
