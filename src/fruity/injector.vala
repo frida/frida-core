@@ -755,6 +755,15 @@ namespace Frida.Fruity.Injector {
 		private async void initialize_libsystem_from_legacy_codepath (Cancellable? cancellable) throws GLib.Error {
 			uint64 code = jit_page;
 
+			var code_builder_pac = lldb.make_buffer_builder ();
+
+			uint64 sign_pointer = code;
+			code_builder_pac
+				.append_uint32 (0xdac123e0U)  // paciza x0
+				.append_uint32 (0xd65f03c0U); // ret
+
+			yield lldb.write_byte_array (code, code_builder_pac.build (), cancellable);
+
 			var code_builder = lldb.make_buffer_builder ();
 
 			uint64 ret_gadget = code;
@@ -768,12 +777,24 @@ namespace Frida.Fruity.Injector {
 
 			size_t error_buf_literal_offset = code_builder.skip (4).offset;
 
+			yield save_main_thread_state (cancellable);
+
+			var invalid_as_nop = new InvalidAsNopHandler ();
+
+			uint64 signed_ret_gadget = yield invoke_remote_function (sign_pointer, {
+					ret_gadget
+				}, invalid_as_nop, cancellable);
+
+			uint64 signed_get_thread_buf = yield invoke_remote_function (sign_pointer, {
+					get_thread_buf
+				}, invalid_as_nop, cancellable);
+
 			var helpers_builder = lldb.make_buffer_builder ();
 
 			uint64 helpers_version = 1;
-			uint64 acquire_global_dyld_lock = ret_gadget;
-			uint64 release_global_dyld_lock = ret_gadget;
-			uint64 get_thread_buffer_for_dlerror = get_thread_buf;
+			uint64 acquire_global_dyld_lock = signed_ret_gadget;
+			uint64 release_global_dyld_lock = signed_ret_gadget;
+			uint64 get_thread_buffer_for_dlerror = signed_get_thread_buf;
 
 			helpers_builder
 				.append_pointer (helpers_version)
@@ -796,8 +817,6 @@ namespace Frida.Fruity.Injector {
 
 			code_builder.write_pointer (error_buf_literal_offset, helpers + error_buffer_offset);
 			yield lldb.write_byte_array (code, code_builder.build (), cancellable);
-
-			yield save_main_thread_state (cancellable);
 
 			uint64 register_thread_helpers =
 				resolve_dyld_symbol ("__ZL21registerThreadHelpersPKN4dyld16LibSystemHelpersE", "registerThreadHelpers");
@@ -870,6 +889,19 @@ namespace Frida.Fruity.Injector {
 					yield thread.write_register ("x0", 0, cancellable);
 					yield thread.write_register ("pc", ret_address, cancellable);
 				}
+
+				return true;
+			}
+		}
+
+		private class InvalidAsNopHandler : Object, ExceptionHandler {
+			public async bool try_handle_exception (LLDB.Exception exception, Cancellable? cancellable) throws GLib.Error {
+				if (exception.metype != EXC_BAD_INSTRUCTION)
+					return false;
+
+				uint64 pc = exception.context["pc"];
+				var thread = exception.thread;
+				yield thread.write_register ("pc", pc + 4, cancellable);
 
 				return true;
 			}
