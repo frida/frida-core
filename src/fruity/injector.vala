@@ -779,15 +779,15 @@ namespace Frida.Fruity.Injector {
 
 			yield save_main_thread_state (cancellable);
 
-			var invalidAsNop = new InvalidAsNopHandler();
+			var invalid_as_nop = new InvalidAsNopHandler ();
 
 			uint64 signed_ret_gadget = yield invoke_remote_function (sign_pointer, {
 					ret_gadget
-				}, invalidAsNop, cancellable);
+				}, invalid_as_nop, cancellable);
 
 			uint64 signed_get_thread_buf = yield invoke_remote_function (sign_pointer, {
 					get_thread_buf
-				}, invalidAsNop, cancellable);
+				}, invalid_as_nop, cancellable);
 
 			var helpers_builder = lldb.make_buffer_builder ();
 
