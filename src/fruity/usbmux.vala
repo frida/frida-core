@@ -154,9 +154,8 @@ namespace Frida.Fruity {
 				}
 
 				var raw_record = response.get_bytes ("PairRecordData");
-				unowned string record_xml_unterminated = (string) raw_record.get_data ();
-				string record_xml = record_xml_unterminated[0:raw_record.length];
-				return new Plist.from_xml (record_xml);
+				var record_data = raw_record.get_data ();
+				return new Plist.from_data (record_data);
 			} catch (PlistError e) {
 				throw new UsbmuxError.PROTOCOL ("Unexpected response: %s", e.message);
 			}
