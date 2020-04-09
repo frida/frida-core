@@ -5,6 +5,7 @@ namespace Frida.Fruity {
 			BINARY,
 			XML
 		}
+
 		private const int64 MAC_EPOCH_DELTA_FROM_UNIX = 978307200LL;
 
 		public Plist.from_binary (uint8[] data) throws PlistError {
@@ -15,19 +16,19 @@ namespace Frida.Fruity {
 			this.from_data (xml.data, XML);
 		}
 
-		public Plist.from_data (uint8[] data, Format fmt = AUTO) throws PlistError {
-			if (fmt == AUTO) {
+		public Plist.from_data (uint8[] data, Format format = AUTO) throws PlistError {
+			if (format == AUTO) {
 				unowned string magic = (string) data;
 				if (magic.has_prefix ("bplist")) {
-					fmt = BINARY;
+					format = BINARY;
 				} else {
-					fmt = XML;
+					format = XML;
 				}
 			}
-			if (fmt == BINARY) {
+			if (format == BINARY) {
 				var parser = new BinaryParser (this);
 				parser.parse (data);
-			} else if (fmt == XML) {
+			} else if (format == XML) {
 				var parser = new XmlParser (this);
 				parser.parse ((string) data);
 			} else {
