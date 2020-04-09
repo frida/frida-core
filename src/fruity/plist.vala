@@ -1,36 +1,37 @@
 namespace Frida.Fruity {
 	public class Plist : PlistDict {
-		public const uint8 FMT_AUTO = 0;
-		public const uint8 FMT_BIN = 1;
-		public const uint8 FMT_XML = 2;
+		public enum Format {
+			AUTO,
+			BINARY,
+			XML
+		}
 		private const int64 MAC_EPOCH_DELTA_FROM_UNIX = 978307200LL;
 
 		public Plist.from_binary (uint8[] data) throws PlistError {
-			this.from_data (data, FMT_BIN);
+			this.from_data (data, BINARY);
 		}
 
 		public Plist.from_xml (string xml) throws PlistError {
-			this.from_data (xml.data, FMT_XML);
+			this.from_data (xml.data, XML);
 		}
 
-		public Plist.from_data (uint8[] data, uint8 fmt=FMT_AUTO) throws PlistError {
-			if (fmt == FMT_AUTO) {
+		public Plist.from_data (uint8[] data, Format fmt = AUTO) throws PlistError {
+			if (fmt == AUTO) {
 				unowned string magic = (string) data;
 				if (magic.has_prefix ("bplist")) {
-					fmt = FMT_BIN;
+					fmt = BINARY;
 				} else {
-					// assume XML
-					fmt = FMT_XML;
+					fmt = XML;
 				}
 			}
-			if (fmt == FMT_BIN) {
+			if (fmt == BINARY) {
 				var parser = new BinaryParser (this);
 				parser.parse (data);
-			} else if (fmt == FMT_XML) {
+			} else if (fmt == XML) {
 				var parser = new XmlParser (this);
-				parser.parse ((string)data);
+				parser.parse ((string) data);
 			} else {
-				throw new PlistError.INVALID_DATA ("Invalid format specified: %d", fmt);
+				assert_not_reached ();
 			}
 		}
 
