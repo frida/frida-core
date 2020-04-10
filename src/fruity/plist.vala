@@ -1,15 +1,39 @@
 namespace Frida.Fruity {
 	public class Plist : PlistDict {
+		public enum Format {
+			AUTO,
+			BINARY,
+			XML
+		}
+
 		private const int64 MAC_EPOCH_DELTA_FROM_UNIX = 978307200LL;
 
 		public Plist.from_binary (uint8[] data) throws PlistError {
-			var parser = new BinaryParser (this);
-			parser.parse (data);
+			this.from_data (data, BINARY);
 		}
 
 		public Plist.from_xml (string xml) throws PlistError {
-			var parser = new XmlParser (this);
-			parser.parse (xml);
+			this.from_data (xml.data, XML);
+		}
+
+		public Plist.from_data (uint8[] data, Format format = AUTO) throws PlistError {
+			if (format == AUTO) {
+				unowned string magic = (string) data;
+				if (magic.has_prefix ("bplist")) {
+					format = BINARY;
+				} else {
+					format = XML;
+				}
+			}
+			if (format == BINARY) {
+				var parser = new BinaryParser (this);
+				parser.parse (data);
+			} else if (format == XML) {
+				var parser = new XmlParser (this);
+				parser.parse ((string) data);
+			} else {
+				assert_not_reached ();
+			}
 		}
 
 		public uint8[] to_binary () {
