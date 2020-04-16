@@ -99,11 +99,20 @@ namespace Frida {
 			listeners.add (readdir_listener);
 			interceptor.attach (readdir, readdir_listener);
 
-			var readdir64 = Gum.Module.find_export_by_name (libc, "readdir64");
-			if (readdir64 != null && readdir64 != readdir) {
+			/*
+			 * It seems that when using the musl CRT, the compiler incorrectly
+			 * determines that symbols with the same name, but a different
+			 * numeric suffix are the same symbol. Thus when the C code is
+			 * generate for this VALA, the symbols 'readdir' and 'readdir64'
+			 * collide resulting in a redefinition error. Hence the name has
+			 * been slightly changed.
+			 */
+			var readdir64_w = Gum.Module.find_export_by_name (libc,
+			"readdir64");
+			if (readdir64_w != null && readdir64_w != readdir) {
 				var listener = new ReadDirListener (this, MODERN);
 				listeners.add (listener);
-				interceptor.attach (readdir64, listener);
+				interceptor.attach (readdir64_w, listener);
 			}
 
 			var readdir_r = Gum.Module.find_export_by_name (libc, "readdir_r");
@@ -111,11 +120,11 @@ namespace Frida {
 			listeners.add (readdir_r_listener);
 			interceptor.attach (readdir_r, readdir_r_listener);
 
-			var readdir64_r = Gum.Module.find_export_by_name (libc, "readdir64_r");
-			if (readdir64_r != null && readdir64_r != readdir_r) {
+			var readdir64_r_w = Gum.Module.find_export_by_name (libc, "readdir64_r");
+			if (readdir64_r_w != null && readdir64_r_w != readdir_r) {
 				var listener = new ReadDirRListener (this, MODERN);
 				listeners.add (listener);
-				interceptor.attach (readdir64_r, listener);
+				interceptor.attach (readdir64_r_w, listener);
 			}
 		}
 
