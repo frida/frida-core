@@ -94,29 +94,25 @@ namespace Frida {
 			listeners.add (close_listener);
 			interceptor.attach (Gum.Module.find_export_by_name (libc, "closedir"), close_listener);
 
-			var readdir = Gum.Module.find_export_by_name (libc, "readdir");
+			var readdir_impl = Gum.Module.find_export_by_name (libc, "readdir");
 			var readdir_listener = new ReadDirListener (this, LEGACY);
 			listeners.add (readdir_listener);
-			interceptor.attach (readdir, readdir_listener);
+			interceptor.attach (readdir_impl, readdir_listener);
 
-			/*
-			 * It seems that when using the musl CRT, the compiler incorrectly determines the symbols 'readdir' and 'readdir64' collide
-			 * resulting in a redefinition error, perhaps as a result of an errant #define. Hence the name has been slightly changed.
-			 */
 			var readdir64_impl = Gum.Module.find_export_by_name (libc, "readdir64");
-			if (readdir64_impl != null && readdir64_impl != readdir) {
+			if (readdir64_impl != null && readdir64_impl != readdir_impl) {
 				var listener = new ReadDirListener (this, MODERN);
 				listeners.add (listener);
 				interceptor.attach (readdir64_impl, listener);
 			}
 
-			var readdir_r = Gum.Module.find_export_by_name (libc, "readdir_r");
+			var readdir_r_impl = Gum.Module.find_export_by_name (libc, "readdir_r");
 			var readdir_r_listener = new ReadDirRListener (this, LEGACY);
 			listeners.add (readdir_r_listener);
-			interceptor.attach (readdir_r, readdir_r_listener);
+			interceptor.attach (readdir_r_impl, readdir_r_listener);
 
 			var readdir64_r_impl = Gum.Module.find_export_by_name (libc, "readdir64_r");
-			if (readdir64_r_impl != null && readdir64_r_impl != readdir_r) {
+			if (readdir64_r_impl != null && readdir64_r_impl != readdir_r_impl) {
 				var listener = new ReadDirRListener (this, MODERN);
 				listeners.add (listener);
 				interceptor.attach (readdir64_r_impl, listener);
