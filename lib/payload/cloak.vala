@@ -107,12 +107,11 @@ namespace Frida {
 			 * collide resulting in a redefinition error. Hence the name has
 			 * been slightly changed.
 			 */
-			var readdir64_w = Gum.Module.find_export_by_name (libc,
-			"readdir64");
-			if (readdir64_w != null && readdir64_w != readdir) {
+			var readdir64_impl = Gum.Module.find_export_by_name (libc, "readdir64");
+			if (readdir64_impl != null && readdir64_impl != readdir) {
 				var listener = new ReadDirListener (this, MODERN);
 				listeners.add (listener);
-				interceptor.attach (readdir64_w, listener);
+				interceptor.attach (readdir64_impl, listener);
 			}
 
 			var readdir_r = Gum.Module.find_export_by_name (libc, "readdir_r");
@@ -120,11 +119,11 @@ namespace Frida {
 			listeners.add (readdir_r_listener);
 			interceptor.attach (readdir_r, readdir_r_listener);
 
-			var readdir64_r_w = Gum.Module.find_export_by_name (libc, "readdir64_r");
-			if (readdir64_r_w != null && readdir64_r_w != readdir_r) {
+			var readdir64_r_impl = Gum.Module.find_export_by_name (libc, "readdir64_r");
+			if (readdir64_r_impl != null && readdir64_r_impl != readdir_r) {
 				var listener = new ReadDirRListener (this, MODERN);
 				listeners.add (listener);
-				interceptor.attach (readdir64_r_w, listener);
+				interceptor.attach (readdir64_r_impl, listener);
 			}
 		}
 
