@@ -100,12 +100,8 @@ namespace Frida {
 			interceptor.attach (readdir, readdir_listener);
 
 			/*
-			 * It seems that when using the musl CRT, the compiler incorrectly
-			 * determines that symbols with the same name, but a different
-			 * numeric suffix are the same symbol. Thus when the C code is
-			 * generate for this VALA, the symbols 'readdir' and 'readdir64'
-			 * collide resulting in a redefinition error. Hence the name has
-			 * been slightly changed.
+			 * It seems that when using the musl CRT, the compiler incorrectly determines the symbols 'readdir' and 'readdir64' collide
+			 * resulting in a redefinition error, perhaps as a result of an errant #define. Hence the name has been slightly changed.
 			 */
 			var readdir64_impl = Gum.Module.find_export_by_name (libc, "readdir64");
 			if (readdir64_impl != null && readdir64_impl != readdir) {
