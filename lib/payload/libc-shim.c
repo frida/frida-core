@@ -5,6 +5,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef HAVE_LOCALE_H
+# include <locale.h>
+#endif
 #ifdef HAVE_XLOCALE_H
 # include <xlocale.h>
 #endif
@@ -386,6 +389,14 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 #include <fcntl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+#ifndef __NR_dup3
+# if defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 4
+#  define __NR_dup3 330
+# elif defined (HAVE_I386) && GLIB_SIZEOF_VOID_P == 8
+#  define __NR_dup3 292
+# endif
+#endif
 
 int dup3 (int old_fd, int new_fd, int flags);
 

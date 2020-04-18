@@ -84,8 +84,14 @@
 #ifndef PTRACE_INTERRUPT
 # define PTRACE_INTERRUPT 0x4207
 #endif
+#ifndef PTRACE_O_TRACEEXEC
+# define PTRACE_O_TRACEEXEC (1 << 4)
+#endif
 #ifndef NT_PRSTATUS
 # define NT_PRSTATUS 1
+#endif
+#ifndef O_CLOEXEC
+# define O_CLOEXEC 02000000
 #endif
 
 #if defined (HAVE_I386)

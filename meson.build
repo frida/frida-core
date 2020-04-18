@@ -103,8 +103,9 @@ foreach d : cpu_defines
 endforeach
 
 headers = [
-  'sys/user.h',
+  'locale.h',
   'xlocale.h',
+  'sys/user.h',
 ]
 foreach h : headers
   if cc.has_header(h)
