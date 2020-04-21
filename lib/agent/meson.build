@@ -15,6 +15,11 @@ elif host_os_family != 'windows'
   extra_link_args += ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), 'frida-agent.version')]
 endif
 
+if host_os_family in ['linux', 'qnx']
+  # For our libc shim to be effective.
+  extra_link_args += ['-Wl,-Bsymbolic']
+endif
+
 raw_agent = shared_library('frida-agent', agent_sources,
   name_prefix: '_',
   c_args: frida_component_cflags,

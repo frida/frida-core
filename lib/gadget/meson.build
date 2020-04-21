@@ -27,6 +27,11 @@ elif host_os_family != 'windows'
   extra_link_depends += [symscript]
 endif
 
+if host_os_family in ['linux', 'qnx']
+  # For our libc shim to be effective.
+  extra_link_args += ['-Wl,-Bsymbolic']
+endif
+
 raw_gadget = shared_library('frida-gadget', gadget_sources,
   name_prefix: '_',
   c_args: frida_component_cflags,
