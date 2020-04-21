@@ -132,6 +132,12 @@ realloc (void * ptr, size_t size)
   return gum_realloc (ptr, size);
 }
 
+void *
+memalign (size_t alignment, size_t size)
+{
+  return gum_memalign (alignment, size);
+}
+
 int
 posix_memalign (void ** memptr, size_t alignment, size_t size)
 {
