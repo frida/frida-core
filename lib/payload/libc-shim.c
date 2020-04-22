@@ -26,8 +26,8 @@ frida_run_atexit_handlers (void)
 
 #else
 
-#define FRIDA_SHIM_LOCK() gum_spinlock_acquire (&shim_lock)
-#define FRIDA_SHIM_UNLOCK() gum_spinlock_release (&shim_lock)
+#define FRIDA_SHIM_LOCK() gum_spinlock_acquire (&frida_shim_lock)
+#define FRIDA_SHIM_UNLOCK() gum_spinlock_release (&frida_shim_lock)
 
 typedef struct _FridaExitEntry FridaExitEntry;
 typedef void (* FridaExitFunc) (gpointer user_data);
@@ -38,15 +38,20 @@ struct _FridaExitEntry
   gpointer user_data;
 };
 
-static FridaExitEntry * atexit_entries = NULL;
-static guint atexit_count = 0;
+static gboolean frida_heap_initialized = FALSE;
+static FridaExitEntry * frida_atexit_entries = NULL;
+static guint frida_atexit_count = 0;
 
-static GumSpinlock shim_lock = GUM_SPINLOCK_INIT;
+static GumSpinlock frida_shim_lock = GUM_SPINLOCK_INIT;
 
 __attribute__ ((constructor)) static void
 frida_init_memory (void)
 {
-  gum_internal_heap_ref ();
+  if (!frida_heap_initialized)
+  {
+    gum_internal_heap_ref ();
+    frida_heap_initialized = TRUE;
+  }
 }
 
 /*
@@ -73,27 +78,29 @@ frida_run_atexit_handlers (void)
 {
   gint i;
 
-  for (i = (gint) atexit_count - 1; i >= 0; i--)
+  for (i = (gint) frida_atexit_count - 1; i >= 0; i--)
   {
-    const FridaExitEntry * entry = &atexit_entries[i];
+    const FridaExitEntry * entry = &frida_atexit_entries[i];
 
     entry->func (entry->user_data);
   }
 
-  gum_free (atexit_entries);
-  atexit_entries = 0;
-  atexit_count = 0;
+  gum_free (frida_atexit_entries);
+  frida_atexit_entries = 0;
+  frida_atexit_count = 0;
 }
 
-int
+G_GNUC_INTERNAL int
 __cxa_atexit (void (* func) (void *), void * arg, void * dso_handle)
 {
   FridaExitEntry * entry;
 
+  frida_init_memory ();
+
   FRIDA_SHIM_LOCK ();
-  atexit_count++;
-  atexit_entries = gum_realloc (atexit_entries, atexit_count * sizeof (FridaExitEntry));
-  entry = &atexit_entries[atexit_count - 1];
+  frida_atexit_count++;
+  frida_atexit_entries = gum_realloc (frida_atexit_entries, frida_atexit_count * sizeof (FridaExitEntry));
+  entry = &frida_atexit_entries[frida_atexit_count - 1];
   FRIDA_SHIM_UNLOCK ();
 
   entry->func = func;
@@ -104,7 +111,7 @@ __cxa_atexit (void (* func) (void *), void * arg, void * dso_handle)
 
 #ifdef HAVE_DARWIN
 
-int
+G_GNUC_INTERNAL int
 atexit (void (* func) (void))
 {
   __cxa_atexit ((FridaExitFunc) func, NULL, NULL);
@@ -114,31 +121,31 @@ atexit (void (* func) (void))
 
 #endif
 
-void *
+G_GNUC_INTERNAL void *
 malloc (size_t size)
 {
   return gum_malloc (size);
 }
 
-void *
+G_GNUC_INTERNAL void *
 calloc (size_t count, size_t size)
 {
   return gum_calloc (count, size);
 }
 
-void *
+G_GNUC_INTERNAL void *
 realloc (void * ptr, size_t size)
 {
   return gum_realloc (ptr, size);
 }
 
-void *
+G_GNUC_INTERNAL void *
 memalign (size_t alignment, size_t size)
 {
   return gum_memalign (alignment, size);
 }
 
-int
+G_GNUC_INTERNAL int
 posix_memalign (void ** memptr, size_t alignment, size_t size)
 {
   gpointer result;
@@ -151,25 +158,25 @@ posix_memalign (void ** memptr, size_t alignment, size_t size)
   return 0;
 }
 
-void
+G_GNUC_INTERNAL void
 free (void * ptr)
 {
   gum_free (ptr);
 }
 
-void *
+G_GNUC_INTERNAL void *
 memcpy (void * dst, const void * src, size_t n)
 {
   return gum_memcpy (dst, src, n);
 }
 
-char *
+G_GNUC_INTERNAL char *
 strdup (const char * s)
 {
   return g_strdup (s);
 }
 
-int
+G_GNUC_INTERNAL int
 printf (const char * format, ...)
 {
   int result;
@@ -187,7 +194,7 @@ printf (const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 fprintf (FILE * stream, const char * format, ...)
 {
   int result;
@@ -205,7 +212,7 @@ fprintf (FILE * stream, const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 sprintf (char * string, const char * format, ...)
 {
   int result;
@@ -218,7 +225,7 @@ sprintf (char * string, const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 snprintf (char * string, size_t size, const char * format, ...)
 {
   int result;
@@ -231,7 +238,7 @@ snprintf (char * string, size_t size, const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 vprintf (const char * format, va_list args)
 {
   int result;
@@ -246,7 +253,7 @@ vprintf (const char * format, va_list args)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 vfprintf (FILE * stream, const char * format, va_list args)
 {
   int result;
@@ -261,13 +268,13 @@ vfprintf (FILE * stream, const char * format, va_list args)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 vsnprintf (char * string, size_t size, const char * format, va_list args)
 {
   return gum_vsnprintf (string, size, format, args);
 }
 
-int
+G_GNUC_INTERNAL int
 __sprintf_chk (char * string, int flag, size_t size, const char * format, ...)
 {
   int result;
@@ -280,7 +287,7 @@ __sprintf_chk (char * string, int flag, size_t size, const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 __snprintf_chk (char * string, size_t size, int flags, size_t len, const char * format, ...)
 {
   int result;
@@ -293,7 +300,7 @@ __snprintf_chk (char * string, size_t size, int flags, size_t len, const char * 
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 __vsnprintf_chk (char * string, size_t size, int flags, size_t len, const char * format, va_list args)
 {
   return gum_vsnprintf (string, size, format, args);
@@ -301,7 +308,7 @@ __vsnprintf_chk (char * string, size_t size, int flags, size_t len, const char *
 
 #ifdef HAVE_XLOCALE_H
 
-int
+G_GNUC_INTERNAL int
 sprintf_l (char * string, locale_t loc, const char * format, ...)
 {
   int result;
@@ -314,7 +321,7 @@ sprintf_l (char * string, locale_t loc, const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 snprintf_l (char * string, size_t size, locale_t loc, const char * format, ...)
 {
   int result;
@@ -327,7 +334,7 @@ snprintf_l (char * string, size_t size, locale_t loc, const char * format, ...)
   return result;
 }
 
-int
+G_GNUC_INTERNAL int
 asprintf_l (char ** ret, locale_t loc, const char * format, ...)
 {
   int result;
@@ -354,34 +361,34 @@ asprintf_l (char ** ret, locale_t loc, const char * format, ...)
 
 #include <resolv.h>
 
-int
+G_GNUC_INTERNAL int
 res_9_init (void)
 {
   g_assert_not_reached ();
   return -1;
 }
 
-int
+G_GNUC_INTERNAL int
 res_9_ninit (res_9_state state)
 {
   g_assert_not_reached ();
   return -1;
 }
 
-void
+G_GNUC_INTERNAL void
 res_9_ndestroy (res_9_state state)
 {
   g_assert_not_reached ();
 }
 
-int
+G_GNUC_INTERNAL int
 res_9_nquery (res_9_state state, const char * dname, int klass, int type, u_char * answer, int anslen)
 {
   g_assert_not_reached ();
   return -1;
 }
 
-int
+G_GNUC_INTERNAL int
 res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp_dn, char * exp_dn, int length)
 {
   g_assert_not_reached ();
@@ -406,13 +413,13 @@ res_9_dn_expand (const u_char * msg, const u_char * eomorig, const u_char * comp
 
 int dup3 (int old_fd, int new_fd, int flags);
 
-int
+G_GNUC_INTERNAL int
 dup (int old_fd)
 {
   return syscall (__NR_dup, old_fd);
 }
 
-int
+G_GNUC_INTERNAL int
 dup2 (int old_fd, int new_fd)
 {
   if (new_fd == old_fd)
@@ -425,7 +432,7 @@ dup2 (int old_fd, int new_fd)
   return dup3 (old_fd, new_fd, 0);
 }
 
-int
+G_GNUC_INTERNAL int
 dup3 (int old_fd, int new_fd, int flags)
 {
   return syscall (__NR_dup3, old_fd, new_fd, flags);
