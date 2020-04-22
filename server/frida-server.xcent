@@ -343,5 +343,7 @@
 	<true/>
 	<key>task_for_pid-allow</key>
 	<true/>
+	<key>com.apple.private.skip-library-validation</key>
+	<true/>
 </dict>
 </plist>
