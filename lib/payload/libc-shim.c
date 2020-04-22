@@ -432,7 +432,7 @@ _frida_set_errno (int n)
 # undef munmap
 
 ssize_t
-read(int fildes, const void *buf, size_t nbyte)
+read (int fildes, const void * buf, size_t nbyte)
 {
   ssize_t result;
 
@@ -477,7 +477,7 @@ read(int fildes, const void *buf, size_t nbyte)
 }
 
 ssize_t
-write(int fildes, const void *buf, size_t nbyte)
+write (int fildes, const void * buf, size_t nbyte)
 {
   ssize_t result;
 
@@ -522,7 +522,7 @@ write(int fildes, const void *buf, size_t nbyte)
 }
 
 void *
-mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
+mmap (void * addr, size_t len, int prot, int flags, int fd, off_t offset)
 {
   void * result;
 
@@ -583,7 +583,7 @@ mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 }
 
 int
-munmap(void *addr, size_t len)
+munmap (void * addr, size_t len)
 {
   int result;
 
