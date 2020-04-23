@@ -50,7 +50,8 @@ cc = meson.get_compiler('c')
 vala_flags = []
 
 frida_component_cflags = []
-if get_option('optimization') in ['2', '3', 's'] and not get_option('debug')
+ndebug = get_option('b_ndebug')
+if ndebug == 'true' or (ndebug == 'if-release' and not get_option('debug'))
   frida_component_cflags += [
     '-DG_DISABLE_ASSERT',
     '-DG_DISABLE_CHECKS',
