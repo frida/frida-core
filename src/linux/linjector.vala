@@ -190,7 +190,7 @@ namespace Frida {
 
 		private static int64 byte_size (InputStream stream) {
 			assert (stream is Seekable);
-			var seekable = stream as Seekable;
+			var seekable = (Seekable) stream;
 			try {
 				var previous_offset = seekable.tell ();
 				seekable.seek (0, SeekType.END);

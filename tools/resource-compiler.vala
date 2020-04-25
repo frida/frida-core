@@ -667,7 +667,7 @@ namespace Frida {
 			}
 
 			private void fill_placeholder_header_values () throws Error {
-				var output_stream = stream.get_base_stream () as Seekable;
+				var output_stream = (Seekable) stream.get_base_stream ();
 				var current_position = output_stream.tell ();
 
 				uint32 pointer_to_symbol_table = (uint32) current_position;
