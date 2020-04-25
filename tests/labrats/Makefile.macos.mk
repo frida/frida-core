@@ -29,9 +29,9 @@ $1-macos: $2
 	strip -Sx $$@.32 $$@.64
 	lipo $$@.32 $$@.64 -create -output $$@.unsigned
 	$(RM) $$@.64
-	codesign -s "$$$$MAC_CERTID" $$@.32
+	codesign -s "$$$$MACOS_CERTID" $$@.32
 	mv $$@.32 $$@32
-	codesign -s "$$$$MAC_CERTID" $$@.unsigned
+	codesign -s "$$$$MACOS_CERTID" $$@.unsigned
 	mv $$@.unsigned $$@
 endef
 
@@ -58,7 +58,7 @@ $1-macos.dylib: $2
 	strip -Sx $$@.32 $$@.64
 	lipo $$@.32 $$@.64 -create -output $$@.unsigned
 	$(RM) $$@.32 $$@.64
-	codesign -s "$$$$MAC_CERTID" $$@.unsigned
+	codesign -s "$$$$MACOS_CERTID" $$@.unsigned
 	mv $$@.unsigned $$@
 endef
 
