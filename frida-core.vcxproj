@@ -525,7 +525,7 @@ echo &gt; "$(IntDir)valacode.stamp"
     <ProjectReference Include="..\frida-gum\bindings\gumjs\gumjs-inspector.vcxproj">
       <Project>{0b28ec3c-cc22-4067-9f08-6a3fac4fb454}</Project>
       <Private>false</Private>
-      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <UseLibraryDependencyInputs>true</UseLibraryDependencyInputs>
     </ProjectReference>
