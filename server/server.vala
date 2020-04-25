@@ -351,7 +351,7 @@ namespace Frida.Server {
 			 * We defer the launchd injection until the first connection is established in order
 			 * to avoid bootloops on unsupported jailbreaks.
 			 */
-			(host_session as DarwinHostSession).activate_crash_reporter_integration ();
+			((DarwinHostSession) host_session).activate_crash_reporter_integration ();
 #endif
 
 			handle_server_connection.begin (connection);

@@ -871,7 +871,7 @@ namespace Frida {
 		public async void run_until_exec (Cancellable? cancellable) throws Error, IOError {
 			yield ensure_loaded (cancellable);
 
-			var helper = (host_session as DarwinHostSession).helper;
+			var helper = ((DarwinHostSession) host_session).helper;
 			yield helper.resume (pid, cancellable);
 
 			yield wait_for_unload (cancellable);
