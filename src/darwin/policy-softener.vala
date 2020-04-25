@@ -173,7 +173,7 @@ namespace Frida {
 		private uint connection;
 
 		construct {
-			libjailbreak = Module.open (LIBJAILBREAK_PATH, BIND_LAZY);
+			libjailbreak = Module.open (LIBJAILBREAK_PATH, LAZY);
 			assert (libjailbreak != null);
 
 			jbd_call = resolve_symbol ("jbd_call");
