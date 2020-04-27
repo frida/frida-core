@@ -95,6 +95,7 @@ if host_os_family == 'darwin'
     link_depends: helper_link_depends,
     link_with: helper_backend,
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
+    override_options: ['b_asneeded=false'],
   )
 
   helper_modern = get_option('helper_modern')
