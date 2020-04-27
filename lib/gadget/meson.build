@@ -38,6 +38,7 @@ raw_gadget = shared_library('frida-gadget', gadget_sources,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-gadget.def',
+  override_options: ['b_asneeded=true'],
   dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep, tls_provider_dep, payload_dep] + platform_deps,
 )
 
