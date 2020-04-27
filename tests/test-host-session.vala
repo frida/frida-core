@@ -1318,8 +1318,8 @@ namespace Frida.HostSessionTest {
 		}
 
 		private static async void own_memory_ranges_should_be_cloaked (Harness h) {
-			if (Frida.Test.os () != Frida.Test.OS.MACOS) {
-				stdout.printf ("<skipping, test only available on macOS for now> ");
+			if (Frida.Test.os () != Frida.Test.OS.MACOS || Frida.Test.cpu () != Frida.Test.CPU.X86_64) {
+				stdout.printf ("<skipping, test only available on macOS/x86_64 for now> ");
 				h.done ();
 				return;
 			}
