@@ -9,7 +9,7 @@
 #include <gio/gio.h>
 #include <gum/gum.h>
 
-#ifdef G_OS_WIN32
+#ifdef HAVE_WINDOWS
 # include <windows.h>
 # include <conio.h>
 # include <crtdbg.h>
@@ -19,7 +19,7 @@
 void
 frida_test_environment_init (int * args_length1, char *** args)
 {
-#if defined (G_OS_WIN32) && DEBUG_HEAP_LEAKS
+#if defined (HAVE_WINDOWS) && DEBUG_HEAP_LEAKS
   int tmp_flag;
 
   /*_CrtSetBreakAlloc (1337);*/
@@ -60,7 +60,7 @@ frida_test_environment_deinit (void)
   glib_deinit ();
 #endif
 
-#if defined (G_OS_WIN32) && !DEBUG_HEAP_LEAKS
+#if defined (HAVE_WINDOWS) && !DEBUG_HEAP_LEAKS
   if (IsDebuggerPresent ())
   {
     printf ("\nPress a key to exit.\n");
@@ -72,7 +72,7 @@ frida_test_environment_deinit (void)
 FridaTestOS
 frida_test_os (void)
 {
-#if defined (G_OS_WIN32)
+#if defined (HAVE_WINDOWS)
   return FRIDA_TEST_OS_WINDOWS;
 #elif defined (HAVE_MACOS)
   return FRIDA_TEST_OS_MACOS;
@@ -110,7 +110,7 @@ frida_test_cpu (void)
 FridaTestLibc
 frida_test_libc (void)
 {
-#if defined (G_OS_WIN32)
+#if defined (HAVE_WINDOWS)
   return FRIDA_TEST_LIBC_MSVCRT;
 #elif defined (HAVE_DARWIN)
   return FRIDA_TEST_LIBC_APPLE;
