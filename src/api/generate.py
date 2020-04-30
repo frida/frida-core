@@ -129,11 +129,6 @@ def emit_vapi(api, output_dir):
         output_vapi_file.write("\n\tpublic static void deinit ();")
         output_vapi_file.write("\n\tpublic static unowned GLib.MainContext get_main_context ();")
 
-        for enum in api.enum_types:
-            output_vapi_file.write("\n\n\t%s\n\t\t" % enum.vapi_declaration)
-            output_vapi_file.write("\n\t\t".join(enum.vapi_members))
-            output_vapi_file.write("\n\t}")
-
         for object_type in api.object_types:
             output_vapi_file.write("\n\n\t%s" % object_type.vapi_declaration)
             sections = []
@@ -146,6 +141,16 @@ def emit_vapi(api, output_dir):
             if len(object_type.vapi_signals) > 0:
                 sections.append("\n\t\t" + "\n\t\t".join(object_type.vapi_signals))
             output_vapi_file.write("\n".join(sections))
+            output_vapi_file.write("\n\t}")
+
+        for enum in api.error_types:
+            output_vapi_file.write("\n\n\t%s\n\t\t" % enum.vapi_declaration)
+            output_vapi_file.write("\n\t\t".join(enum.vapi_members))
+            output_vapi_file.write("\n\t}")
+
+        for enum in api.enum_types:
+            output_vapi_file.write("\n\n\t%s\n\t\t" % enum.vapi_declaration)
+            output_vapi_file.write("\n\t\t".join(enum.vapi_members))
             output_vapi_file.write("\n\t}")
 
         output_vapi_file.write("\n}\n")
@@ -195,6 +200,9 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
                 break
 
     error_types = [ApiEnum(m.group(1)) for m in re.finditer(r"^\t+public\s+errordomain\s+(\w+)\s+", interfaces_vapi, re.MULTILINE)]
+    error_by_name = {}
+    for enum in error_types:
+        error_by_name[enum.name] = enum
     for enum in error_types:
         for m in re.finditer(r"typedef\s+enum\s+.*?\s+(\w+);", interfaces_header, re.DOTALL):
             if m.group(1) == enum.c_name:
@@ -262,13 +270,16 @@ def parse_api(api_version, api_vala, core_vapi, core_header, interfaces_vapi, in
                 if stripped_line.startswith("public abstract") or stripped_line.startswith("public class Promise") \
                         or stripped_line.startswith("public interface Future"):
                     ignoring = True
-                elif stripped_line.startswith("public enum"):
-                    name = re.match(r"^public enum (\w+) ", stripped_line).group(1)
-                    if name not in enum_by_name:
-                        ignoring = True
-                    else:
+                elif stripped_line.startswith("public enum") or stripped_line.startswith("public errordomain"):
+                    name = re.match(r"^public (?:enum|errordomain) (\w+) ", stripped_line).group(1)
+                    if name in enum_by_name:
                         current_enum = enum_by_name[name]
                         current_enum.vapi_declaration = stripped_line
+                    elif name in error_by_name:
+                        current_enum = error_by_name[name]
+                        current_enum.vapi_declaration = stripped_line
+                    else:
+                        ignoring = True
                 elif stripped_line.startswith("public class") or stripped_line.startswith("public interface"):
                     name = re.match(r"^public (class|interface) (\w+) ", stripped_line).group(2)
                     if name not in object_type_by_name:
