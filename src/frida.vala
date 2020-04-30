@@ -208,21 +208,21 @@ namespace Frida {
 			}
 		}
 
-		public async Device add_remote_device (string host, Cancellable? cancellable = null) throws Error, IOError {
+		public async Device add_remote_device (string location, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			var tcp_device = yield get_device ((device) => {
-					return device.provider is TcpHostSessionProvider;
+			var socket_device = yield get_device ((device) => {
+					return device.provider is SocketHostSessionProvider;
 				}, 0, cancellable);
 
-			string id = "remote@" + host;
+			string id = "socket@" + location;
 
 			foreach (var device in devices) {
 				if (device.id == id)
 					return device;
 			}
 
-			var device = new Device (this, id, host, HostSessionProviderKind.REMOTE, tcp_device.provider, host);
+			var device = new Device (this, id, location, HostSessionProviderKind.REMOTE, socket_device.provider, location);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -230,26 +230,26 @@ namespace Frida {
 			return device;
 		}
 
-		public Device add_remote_device_sync (string host, Cancellable? cancellable = null) throws Error, IOError {
+		public Device add_remote_device_sync (string location, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<AddRemoteDeviceTask> ();
-			task.host = host;
+			task.location = location;
 			return task.execute (cancellable);
 		}
 
 		private class AddRemoteDeviceTask : ManagerTask<Device> {
-			public string host;
+			public string location;
 
 			protected override async Device perform_operation () throws Error, IOError {
-				return yield parent.add_remote_device (host, cancellable);
+				return yield parent.add_remote_device (location, cancellable);
 			}
 		}
 
-		public async void remove_remote_device (string host, Cancellable? cancellable = null) throws Error, IOError {
+		public async void remove_remote_device (string location, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
 			yield ensure_service (cancellable);
 
-			string id = "remote@" + host;
+			string id = "socket@" + location;
 
 			foreach (var device in devices) {
 				if (device.id == id) {
@@ -263,17 +263,17 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Device not found");
 		}
 
-		public void remove_remote_device_sync (string host, Cancellable? cancellable = null) throws Error, IOError {
+		public void remove_remote_device_sync (string location, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<RemoveRemoteDeviceTask> ();
-			task.host = host;
+			task.location = location;
 			task.execute (cancellable);
 		}
 
 		private class RemoveRemoteDeviceTask : ManagerTask<void> {
-			public string host;
+			public string location;
 
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.remove_remote_device (host, cancellable);
+				yield parent.remove_remote_device (location, cancellable);
 			}
 		}
 

@@ -1,9 +1,9 @@
 namespace Frida {
-	public class TcpHostSessionBackend : Object, HostSessionBackend {
-		private TcpHostSessionProvider provider;
+	public class SocketHostSessionBackend : Object, HostSessionBackend {
+		private SocketHostSessionProvider provider;
 
 		public async void start (Cancellable? cancellable) throws IOError {
-			provider = new TcpHostSessionProvider ();
+			provider = new SocketHostSessionProvider ();
 			provider_available (provider);
 		}
 
@@ -14,15 +14,15 @@ namespace Frida {
 		}
 	}
 
-	public class TcpHostSessionProvider : Object, HostSessionProvider {
+	public class SocketHostSessionProvider : Object, HostSessionProvider {
 		public string id {
-			get { return "tcp"; }
+			get { return "socket"; }
 		}
 
 		public string name {
 			get { return _name; }
 		}
-		private string _name = "Local TCP";
+		private string _name = "Local Socket";
 
 		public Image? icon {
 			get { return _icon; }
@@ -57,7 +57,6 @@ namespace Frida {
 			SocketConnectable connectable;
 			string raw_address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
 #if !WINDOWS
-			/* TODO: rename this backend */
 			if (raw_address.has_prefix ("unix:")) {
 				string path = raw_address.substring (5);
 

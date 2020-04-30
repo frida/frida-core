@@ -272,8 +272,8 @@ agent_data = custom_target('frida-data-agent',
   ],
 )
 
-tcp_sources = [
-  'tcp/tcp-host-session.vala',
+socket_sources = [
+  'socket/socket-host-session.vala',
 ]
 
 fruity_sources = [
@@ -302,7 +302,7 @@ droidy_sources = [
 ]
 
 local_sources = windows_sources + darwin_sources + linux_sources + qnx_sources + [agent_data]
-remote_sources = tcp_sources + fruity_sources + droidy_sources
+remote_sources = socket_sources + fruity_sources + droidy_sources
 
 core_sources = base_sources + local_sources + remote_sources
 

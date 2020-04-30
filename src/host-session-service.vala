@@ -13,15 +13,15 @@ namespace Frida {
 			add_backend (new FruityHostSessionBackend ());
 			add_backend (new DroidyHostSessionBackend ());
 #endif
-			add_backend (new TcpHostSessionBackend ());
+			add_backend (new SocketHostSessionBackend ());
 		}
 
 		public HostSessionService.with_local_backend_only () {
 			add_local_backends ();
 		}
 
-		public HostSessionService.with_tcp_backend_only () {
-			add_backend (new TcpHostSessionBackend ());
+		public HostSessionService.with_socket_backend_only () {
+			add_backend (new SocketHostSessionBackend ());
 		}
 
 		private void add_local_backends () {
