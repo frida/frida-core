@@ -432,8 +432,8 @@ namespace Frida {
 			}
 
 			public void post (string message, Bytes? data) throws Error {
-				if (state != LOADED && state != DISPOSED)
-					throw new Error.INVALID_OPERATION ("Only loaded scripts may be posted to");
+				if (state != LOADED && state != DISPOSED && state != LOADING)
+					throw new Error.INVALID_OPERATION ("Only loading/loaded scripts may be posted to");
 
 				script.post (message, data);
 			}
