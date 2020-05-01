@@ -98,12 +98,17 @@ namespace Frida {
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_dll_blob ();
 			var dbghelp32 = Frida.Data.Agent.get_dbghelp_32_dll_blob ();
 			var dbghelp64 = Frida.Data.Agent.get_dbghelp_64_dll_blob ();
-			agent_desc = new AgentDescriptor.with_resources ("frida-agent-%u.dll",
+			var symsrv32 = Frida.Data.Agent.get_symsrv_32_dll_blob ();
+			var symsrv64 = Frida.Data.Agent.get_symsrv_64_dll_blob ();
+
+			agent_desc = new AgentDescriptor.with_resources ("%u\\frida-agent.dll",
 				new MemoryInputStream.from_data (blob32.data, null),
 				new MemoryInputStream.from_data (blob64.data, null),
 				new AgentResource[] {
-					new AgentResource ("dbghelp-32.dll", new MemoryInputStream.from_data (dbghelp32.data, null)),
-					new AgentResource ("dbghelp-64.dll", new MemoryInputStream.from_data (dbghelp64.data, null))
+					new AgentResource ("32\\dbghelp.dll", new MemoryInputStream.from_data (dbghelp32.data, null)),
+					new AgentResource ("32\\symsrv.dll", new MemoryInputStream.from_data (symsrv32.data, null)),
+					new AgentResource ("64\\dbghelp.dll", new MemoryInputStream.from_data (dbghelp64.data, null)),
+					new AgentResource ("64\\symsrv.dll", new MemoryInputStream.from_data (symsrv64.data, null))
 				}
 			);
 		}
