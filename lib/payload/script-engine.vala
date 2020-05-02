@@ -438,8 +438,8 @@ namespace Frida {
 					case DISPOSED:
 					throw new Error.INVALID_OPERATION ("Only scripts still alive may be posted to");
 					default:
-					script.post (message, data);
-					break;
+						script.post (message, data);
+						break;
 				}
 			}
 
