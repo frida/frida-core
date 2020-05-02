@@ -432,7 +432,7 @@ namespace Frida {
 			}
 
 			public void post (string message, Bytes? data) throws Error {
-				switch(state) {
+				switch (state) {
 					case LOADING:
 					case LOADED:
 					case DISPOSED:
