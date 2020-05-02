@@ -436,7 +436,7 @@ namespace Frida {
 					case LOADING:
 					case LOADED:
 					case DISPOSED:
-					throw new Error.INVALID_OPERATION ("Only scripts still alive may be posted to");
+						throw new Error.INVALID_OPERATION ("Only active scripts may be posted to");
 					default:
 						script.post (message, data);
 						break;
