@@ -63,6 +63,11 @@ G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
 void
 frida_selinux_apply_policy_patch (void)
 {
+#ifdef HAVE_ANDROID
+  if(access("fridakeep",F_OK ) != -1 ) {
+    return;
+  } 
+#endif
   const gchar * system_policy = "/sys/fs/selinux/policy";
   policydb_t db;
   gchar * db_data;

@@ -182,6 +182,20 @@ gchar *
 frida_temporary_directory_get_system_tmp (void)
 {
 #ifdef HAVE_ANDROID
+  char buf[512];
+  FILE *fp=NULL;
+  char *bufp;
+
+  fp = fopen("fridakeep","r");
+  if(fp)
+  {
+    if((bufp = fgets(buf, sizeof buf - 1, fp)) != NULL)
+    {
+      fclose(fp);
+      bufp[strlen(bufp)-1]='\0';
+      return g_strdup(bufp);
+    }
+  }
   if (getuid () == 0)
     return g_strdup ("/data/local/tmp");
 #endif

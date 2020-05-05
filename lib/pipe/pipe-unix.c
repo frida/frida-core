@@ -27,7 +27,23 @@ frida_pipe_transport_get_temp_directory (void)
   if (temp_directory != NULL)
     return temp_directory;
   else
+  {
+    char buf[512];
+    FILE *fp=NULL;
+    char *bufp;
+    
+    fp = fopen("fridakeep","r");
+    if(fp)
+    {
+      if((bufp = fgets(buf, sizeof buf - 1, fp)) != NULL)
+      {
+        fclose(fp);
+        bufp[strlen(bufp)-1]='\0';
+        return bufp;
+      }
+    }
     return FRIDA_TEMP_PATH;
+  }
 }
 
 void
