@@ -436,10 +436,10 @@ namespace Frida {
 					case LOADING:
 					case LOADED:
 					case DISPOSED:
-						throw new Error.INVALID_OPERATION ("Only active scripts may be posted to");
-					default:
 						script.post (message, data);
 						break;
+					default:
+						throw new Error.INVALID_OPERATION ("Only active scripts may be posted to");
 				}
 			}
 
