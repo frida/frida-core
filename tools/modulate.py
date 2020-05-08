@@ -120,7 +120,7 @@ class ModuleEditor(object):
         layout = self.layout
 
         if section is None:
-            return FunctionPointerVector(label, None, [], layout)
+            return FunctionPointerVector(label, None, None, [], layout)
 
         values = []
         data = self._read_section_data(section)
@@ -160,7 +160,7 @@ class ModuleEditor(object):
 
             elements.append(FunctionPointer(value, name))
 
-        return FunctionPointerVector(label, section.file_offset, elements, layout)
+        return FunctionPointerVector(label, section.file_offset, section.virtual_address, elements, layout)
 
     def _read_section_data(self, section):
         self.module.seek(section.file_offset)
@@ -197,6 +197,31 @@ class ModuleEditor(object):
         else:
             for pointer in vector.elements:
                 destination.write(struct.pack(pointer_format, pointer.value))
+
+            if layout.file_format == 'elf' and pointer_size == 8:
+                pending = {}
+                for i, pointer in enumerate(vector.elements):
+                    pending[vector.virtual_address + (i * pointer_size)] = pointer
+
+                reloc_section = layout.sections['.rela.dyn']
+                reloc_data = self._read_section_data(reloc_section)
+
+                offset = 0
+                size = len(reloc_data)
+                rela_item_size = 3 * pointer_size
+
+                while offset != size:
+                    (r_offset,) = struct.unpack(pointer_format, reloc_data[offset:offset + pointer_size])
+
+                    pointer = pending.pop(r_offset, None)
+                    if pointer is not None:
+                        r_addend_offset = reloc_section.file_offset + offset + (2 * pointer_size)
+                        destination.seek(r_addend_offset)
+                        destination.write(struct.pack(pointer_format, pointer.value))
+
+                    offset += rela_item_size
+
+                assert len(pending) == 0
 
 
 class Toolchain(object):
@@ -249,6 +274,7 @@ class Layout(object):
     def __init__(self, file_format, arch_name, endian, pointer_size, sections, symbols):
         self.file_format = file_format
         self.arch_name = arch_name
+        self.endian = endian
         self.pointer_size = pointer_size
         endian_format = "<" if endian == 'little' else ">"
         size_format = "I" if pointer_size == 4 else "Q"
@@ -323,9 +349,10 @@ class Section(object):
 
 
 class FunctionPointerVector(object):
-    def __init__(self, label, file_offset, elements, layout):
+    def __init__(self, label, file_offset, virtual_address, elements, layout):
         self.label = label
         self.file_offset = file_offset
+        self.virtual_address = virtual_address
         self.elements = elements
 
         self._layout = layout
