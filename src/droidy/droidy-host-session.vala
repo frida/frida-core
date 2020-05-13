@@ -230,7 +230,7 @@ namespace Frida {
 		}
 
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
-			if (address.split(":").length == 2) {
+			if (address.contains (":")) {
 				Droidy.Client client = null;
 				try {
 					client = yield Droidy.Client.open (cancellable);
