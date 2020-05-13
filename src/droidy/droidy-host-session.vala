@@ -230,17 +230,16 @@ namespace Frida {
 		}
 
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
-			if (address.has_prefix ("tcp:")) {
-				ulong raw_port;
-				if (!ulong.try_parse (address.substring (4), out raw_port) || raw_port == 0 || raw_port > uint16.MAX)
-					throw new Error.INVALID_ARGUMENT ("Invalid TCP port");
-				uint16 port = (uint16) raw_port;
+			string[] protocols = {"tcp", "localabstract", "localreserved", "localfilesystem", "dev", "jdwp"};
+
+			string[] address_parts = address.split(":");
+			if (address_parts.length == 2 && address_parts[0] in protocols) {
 
 				Droidy.Client client = null;
 				try {
 					client = yield Droidy.Client.open (cancellable);
 					yield client.request ("host:transport:" + device_serial, cancellable);
-					yield client.request_protocol_change ("tcp:%u".printf (port), cancellable);
+					yield client.request_protocol_change (address, cancellable);
 					return client.connection;
 				} catch (GLib.Error e) {
 					if (client != null)
