@@ -187,7 +187,8 @@ namespace Frida.Fruity {
 
 		private async TlsConnection start_tls (IOStream stream, Cancellable? cancellable) throws LockdownError, IOError {
 			try {
-				var connection = TlsClientConnection.new (stream, null);
+				var server_identity = new NetworkAddress ("apple.com", 62078);
+				var connection = TlsClientConnection.new (stream, server_identity);
 				connection.accept_certificate.connect (on_accept_certificate);
 
 				connection.set_certificate (tls_certificate);
