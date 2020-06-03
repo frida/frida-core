@@ -5,6 +5,7 @@ var YES = ptr(1);
 
 var CSTypeRef = ['pointer', 'pointer'];
 var kCSNow = uint64('0x8000000000000000');
+var NSUTF8StringEncoding = 4;
 
 var nativeOptions = {
   scheduling: 'exclusive',
@@ -50,13 +51,15 @@ var mappedMemoryReadPointer = new NativeFunction(
 var AppleErrorReport = ObjC.classes.AppleErrorReport;
 var CrashReport = ObjC.classes.CrashReport;
 var NSMutableDictionary = ObjC.classes.NSMutableDictionary;
+var NSString = ObjC.classes.NSString;
+var OSALog = ObjC.classes.OSALog;
 var OSAReport = ObjC.classes.OSAReport;
 
-var threadStates = {};
+var sessions = {};
 var osaHookState = 'pending';
 
-function reset(threadId) {
-  var state = {
+function createSession(threadId) {
+  var session = {
     crashedPid: -1,
     is64Bit: null,
     forcedByUs: false,
@@ -66,31 +69,44 @@ function reset(threadId) {
     mappedAgents: []
   };
 
-  threadStates[threadId] = state;
+  sessions[threadId] = session;
 
-  return state;
+  return session;
 }
 
-function getState(threadId, operation) {
-  var state = threadStates[threadId];
-  if (state === undefined) {
-    throw new Error(operation + ': missing state for thread ' + threadId);
+function terminateSession(threadId) {
+  var session = getSession(threadId, 'terminateSession');
+
+  send(['crash-received', session.crashedPid, session.logChunks.join('')]);
+
+  delete sessions[threadId];
+}
+
+function getSession(threadId, operation) {
+  var session = sessions[threadId];
+  if (session === undefined) {
+    throw new Error(operation + ': missing session for thread ' + threadId);
   }
-  return state;
+  return session;
+}
+
+function findSession(threadId) {
+  var session = sessions[threadId];
+  return (session !== undefined) ? session : null;
 }
 
 Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'].implementation, {
   onEnter: function (args) {
-    var state = reset(this.threadId);
+    var session = createSession(this.threadId);
 
     var task = args[2].toUInt32();
 
     var crashedPid = pidForTask(task);
-    state.crashedPid = crashedPid;
+    session.crashedPid = crashedPid;
 
     send(['crash-detected', crashedPid]);
     var op = recv('mapped-agents', function (message) {
-      state.mappedAgents = message.payload.map(function (agent) {
+      session.mappedAgents = message.payload.map(function (agent) {
         return {
           machHeaderAddress: uint64(agent.machHeaderAddress),
           uuid: agent.uuid,
@@ -109,19 +125,19 @@ Interceptor.attach(Module.getExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit
     this.pid = pidForTask(args[0].toUInt32());
   },
   onLeave: function (retval) {
-    var state = getState(this.threadId, 'task_is_64bit');
-    if (this.pid === state.crashedPid)
-      state.is64Bit = !!retval.toUInt32();
+    var session = findSession(this.threadId);
+    if (session !== null && this.pid === session.crashedPid)
+      session.is64Bit = !!retval.toUInt32();
   }
 });
 
 Interceptor.attach(CrashReport['- isActionable'].implementation, {
   onLeave: function (retval) {
     var isActionable = !!retval.toInt32();
-    var state = getState(this.threadId, '- isActionable');
+    var session = getSession(this.threadId, 'isActionable');
     if (!isActionable) {
-      retval.replace(ptr(1));
-      state.forcedByUs = true;
+      retval.replace(YES);
+      session.forcedByUs = true;
     }
   },
 });
@@ -135,11 +151,11 @@ function ensureOsaHooked() {
       : '- logCounter_isLog:byKey:count:withinLimit:withOptions:';
   Interceptor.attach(NSMutableDictionary[methodName].implementation, {
     onLeave: function (retval) {
-      var isLogWithinLimit = !!retval.toInt32();
-      var state = getState(this.threadId, '- logCounter_isLog');
-      if (!isLogWithinLimit) {
-        retval.replace(ptr(1));
-        state.forcedByUs = true;
+      var isWithinLimit = !!retval.toInt32();
+      var session = getSession(this.threadId, 'isWithinLimit');
+      if (!isWithinLimit) {
+        retval.replace(YES);
+        session.forcedByUs = true;
       }
     },
   });
@@ -147,81 +163,90 @@ function ensureOsaHooked() {
   osaHookState = 'hooked';
 }
 
-Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
-  onEnter: function (args) {
-    var newPath = args[1].readUtf8String();
-    var state = getState(this.threadId, 'rename');
-    if (/\.ips$/.test(newPath))
-      state.logPath = newPath;
-  },
-});
-
 var saveImpl = (OSAReport !== undefined)
     ? OSAReport['- saveWithOptions:'].implementation
     : AppleErrorReport['- saveToDir:'].implementation;
 Interceptor.attach(saveImpl, {
   onLeave: function (retval) {
-    var state = getState(this.threadId, '- save');
-    if (state.forcedByUs)
-      unlink(Memory.allocUtf8String(state.logPath));
+    var session = getSession(this.threadId, 'save');
+    if (session.forcedByUs)
+      unlink(Memory.allocUtf8String(session.logPath));
 
-    delete threadStates[this.threadId];
+    terminateSession(this.threadId);
   },
 });
 
-Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
-  onEnter: function (args) {
-    var path = args[0].readUtf8String();
-    this.isCrashLog = /\.ips$/.test(path);
-  },
-  onLeave: function (retval) {
-    var state = getState(this.threadId, 'open_dprotected_np');
-    if (this.isCrashLog)
-      state.logFd = retval.toInt32();
-  },
-});
+var createForSubmission;
+if (OSALog !== undefined)
+  createForSubmission = OSALog['+ createForSubmission:metadata:options:error:writing:'];
 
-Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'close'), {
-  onEnter: function (args) {
-    var fd = args[0].toInt32();
-    var state = threadStates[this.threadId];
-    if (state === undefined || fd !== state.logFd)
-      return;
+if (createForSubmission !== undefined) {
+  Interceptor.attach(createForSubmission.implementation, {
+    onLeave: function (retval) {
+      var log = new ObjC.Object(retval);
+      var filePath = log.filepath();
 
-    var crashedPid = state.crashedPid;
+      var session = getSession(this.threadId, 'createForSubmission');
 
-    if (crashedPid !== -1) {
-      send(['crash-received', crashedPid, state.logChunks.join('')]);
-      state.crashedPid = -1;
+      var logPath = filePath.toString();
+      session.logPath = logPath;
+
+      if (logPath.indexOf('.forced-by-frida') !== -1)
+        session.forcedByUs = true;
+
+      session.logChunks.push(NSString.stringWithContentsOfFile_encoding_error_(filePath, NSUTF8StringEncoding, NULL).toString());
     }
+  });
+} else {
+  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
+    onEnter: function (args) {
+      var newPath = args[1].readUtf8String();
+      var session = getSession(this.threadId, 'rename');
+      if (/\.ips$/.test(newPath))
+        session.logPath = newPath;
+    },
+  });
 
-    state.logFd = null;
-    state.logChunks = [];
-  },
-});
+  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
+    onEnter: function (args) {
+      var path = args[0].readUtf8String();
+      this.isCrashLog = /\.ips$/.test(path);
+    },
+    onLeave: function (retval) {
+      var session = getSession(this.threadId, 'open_dprotected_np');
+      if (this.isCrashLog)
+        session.logFd = retval.toInt32();
+    },
+  });
 
-Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
-  onEnter: function (args) {
-    var fd = args[0].toInt32();
-    var state = getState(this.threadId, 'write');
-    this.theState = state;
-    this.isCrashLog = (fd === state.logFd);
-    this.buf = args[1];
-  },
-  onLeave: function (retval) {
-    if (!this.isCrashLog)
-      return;
+  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
+    onEnter: function (args) {
+      var fd = args[0].toInt32();
+      this.buf = args[1];
 
-    var n = retval.toInt32();
-    if (n === -1)
-      return;
+      var session = findSession(this.threadId);
+      if (session !== null) {
+        this.session = session;
+        this.isCrashLog = (fd === session.logFd);
+      } else {
+        this.isCrashLog = false;
+      }
+    },
+    onLeave: function (retval) {
+      if (!this.isCrashLog)
+        return;
 
-    var chunk = this.buf.readUtf8String(n);
-    var state = this.theState;
-    if (state !== undefined)
-      state.logChunks.push(chunk);
-  }
-});
+      var n = retval.toInt32();
+      if (n === -1)
+        return;
+
+      var chunk = this.buf.readUtf8String(n);
+      var session = this.session;
+      if (session !== undefined)
+        session.logChunks.push(chunk);
+    }
+  });
+}
 
 Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
   onEnter: function (args) {
@@ -233,7 +258,7 @@ Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPrefe
     if (this.name === 'SymbolicateCrashes' && this.domain === 'com.apple.CrashReporter') {
       if (!this.successPtr.isNull())
         this.successPtr.writeU8(1);
-      retval.replace(ptr(1));
+      retval.replace(YES);
     }
   }
 });
@@ -250,10 +275,10 @@ if (libdyld !== null) {
 
   Interceptor.attach(libdyld['dyld_process_info_base::make'], {
     onEnter: function (args) {
-      var state = getState(this.threadId, 'dyld_process_info_base::make');
+      var session = getSession(this.threadId, 'dyld_process_info_base::make');
 
       var pid = pidForTask(args[0].toUInt32());
-      if (pid !== state.crashedPid)
+      if (pid !== session.crashedPid)
         return;
       var allImageInfo = args[1];
 
@@ -267,7 +292,7 @@ if (libdyld !== null) {
         return;
       }
 
-      var extraCount = state.mappedAgents.length;
+      var extraCount = session.mappedAgents.length;
       var copy = Memory.dup(allImageInfo, size);
       copy.add(4).writeU32(count + extraCount);
       this.allImageInfo = copy;
@@ -279,7 +304,7 @@ if (libdyld !== null) {
         array: array,
         realSize: realSize,
         fakeSize: realSize + (extraCount * imageElementSize),
-        agents: state.mappedAgents,
+        agents: session.mappedAgents,
         paths: {}
       };
     },
@@ -294,7 +319,7 @@ if (libdyld !== null) {
       if (invocation === undefined)
         return;
 
-      var state = getState(this.threadId, 'withRemoteBuffer');
+      var session = getSession(this.threadId, 'withRemoteBuffer');
 
       var remoteAddress = uint64(args[1].toString());
 
@@ -314,7 +339,7 @@ if (libdyld !== null) {
             var filePath = loadAddress.sub(4096);
             var modDate = 0;
 
-            if (state.is64Bit) {
+            if (session.is64Bit) {
               element
                   .writeU64(loadAddress).add(8)
                   .writeU64(filePath).add(8)
@@ -412,8 +437,8 @@ if (Process.arch === 'arm64') {
       this.symbolicator = [args[3], args[4]];
     },
     onLeave: function () {
-      var state = getState(this.threadId, '- fixupStackWithSamplingContext');
-      if (!state.is64Bit)
+      var session = getSession(this.threadId, 'fixupStackWithSamplingContext');
+      if (!session.is64Bit)
         return;
 
       var callstack = this.self.$ivars._callstack;
