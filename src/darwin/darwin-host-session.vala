@@ -136,7 +136,7 @@ namespace Frida {
 			fruit_controller.process_crashed.disconnect (on_process_crashed);
 #endif
 
-			var fruitjector = injector as Fruitjector;
+			var fruitjector = (Fruitjector) injector;
 
 			yield wait_for_uninject (injector, cancellable, () => {
 				return fruitjector.any_still_injected ();
@@ -165,7 +165,7 @@ namespace Frida {
 			string remote_address;
 			var stream_request = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var fruitjector = injector as Fruitjector;
+			var fruitjector = (Fruitjector) injector;
 			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
@@ -274,7 +274,7 @@ namespace Frida {
 			string remote_address;
 			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var fruitjector = injector as Fruitjector;
+			var fruitjector = (Fruitjector) injector;
 			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
@@ -624,7 +624,7 @@ namespace Frida {
 		}
 
 		private void on_crash_agent_unloaded (InternalAgent agent) {
-			var crash_agent = agent as ReportCrashAgent;
+			var crash_agent = (ReportCrashAgent) agent;
 			crash_agents.unset (crash_agent.pid);
 		}
 
@@ -672,7 +672,7 @@ namespace Frida {
 				}
 			}
 
-			private Promise<CrashInfo?> promise = new Promise <CrashInfo?> ();
+			private Promise<CrashInfo?> promise = new Promise<CrashInfo?> ();
 			private TimeoutSource expiry_source;
 
 			public CrashDelivery (uint pid) {
@@ -821,7 +821,7 @@ namespace Frida {
 
 			try {
 				if (path == XPC_PROXY_PATH) {
-					var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
+					var agent = new XpcProxyAgent ((DarwinHostSession) host_session, identifier, pid);
 					yield agent.run_until_exec (io_cancellable);
 				}
 
@@ -837,7 +837,7 @@ namespace Frida {
 
 			try {
 				if (path == XPC_PROXY_PATH) {
-					var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
+					var agent = new XpcProxyAgent ((DarwinHostSession) host_session, identifier, pid);
 					yield agent.run_until_exec (io_cancellable);
 				}
 
