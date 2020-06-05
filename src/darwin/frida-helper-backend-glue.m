@@ -154,6 +154,7 @@ struct _FridaSpawnInstance
   FridaPagePoolEntry page_pool[FRIDA_MAX_PAGE_POOL];
   gint single_stepping;
   mach_vm_address_t lib_name;
+  mach_vm_address_t bootstrapper_name;
   mach_vm_address_t fake_helpers;
   mach_vm_address_t fake_error_buf;
   mach_vm_address_t dyld_data;
@@ -178,6 +179,7 @@ enum _FridaBreakpointPhase
   FRIDA_BREAKPOINT_SET_HELPERS,
   FRIDA_BREAKPOINT_DLOPEN_LIBC,
   FRIDA_BREAKPOINT_SKIP_CLEAR,
+  FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER,
   FRIDA_BREAKPOINT_CLEANUP,
   FRIDA_BREAKPOINT_DONE
 };
@@ -190,8 +192,9 @@ enum _FridaRetState
 
 struct _FridaSpawnInstanceDyldData
 {
-  const char libc[32];
+  gchar libc[32];
   guint8 helpers[32];
+  gchar bootstrapper[64];
   guint8 error_buf[1024];
 };
 
@@ -328,6 +331,9 @@ static gboolean frida_spawn_instance_is_libc_initialized (FridaSpawnInstance * s
 static void frida_spawn_instance_set_libc_initialized (FridaSpawnInstance * self);
 static kern_return_t frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self);
 static void frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self);
+#ifdef HAVE_IOS
+static gboolean frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data);
+#endif
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
 static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t lib_name, int mode);
@@ -2532,7 +2538,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     memcpy (&self->previous_thread_state, state, sizeof (GumDarwinUnifiedThreadState));
 
     if (pc == self->modern_entry_address)
-      self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+      self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER;
     else
       self->breakpoint_phase = FRIDA_BREAKPOINT_SET_HELPERS;
   }
@@ -2605,7 +2611,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       }
       else
       {
-        self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+        self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER;
       }
 
       return TRUE;
@@ -2623,9 +2629,25 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
         state->ts_32.__pc = state->ts_32.__lr;
 #endif
 
-      self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+      self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER;
 
       return TRUE;
+
+    case FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER:
+#ifdef HAVE_IOS
+      if (self->bootstrapper_name != 0)
+      {
+        frida_spawn_instance_set_libc_initialized (self);
+        frida_spawn_instance_unset_nth_breakpoint (self, 1);
+        memcpy (state, &self->previous_thread_state, sizeof (GumDarwinUnifiedThreadState));
+
+        frida_spawn_instance_call_dlopen (self, state, self->bootstrapper_name, RTLD_GLOBAL | RTLD_LAZY);
+
+        self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+
+        return TRUE;
+      }
+#endif
 
     case FRIDA_BREAKPOINT_CLEANUP:
     {
@@ -2883,12 +2905,16 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 {
   GumPtrauthSupport ptrauth_support;
   GumAddress ret_gadget;
-  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, }, { 0, } };
+  FridaSpawnInstanceDyldData data = { "/usr/lib/libSystem.B.dylib", { 0, }, "", { 0, } };
   kern_return_t kr;
   gboolean write_succeeded;
 
   if (!gum_darwin_query_ptrauth_support (self->task, &ptrauth_support))
     return KERN_FAILURE;
+
+#ifdef HAVE_IOS
+  gum_darwin_enumerate_modules (self->task, frida_pick_ios_bootstrapper, &data);
+#endif
 
   ret_gadget = self->ret_gadget;
   if (ptrauth_support == GUM_PTRAUTH_SUPPORTED)
@@ -2944,6 +2970,10 @@ frida_spawn_instance_create_dyld_data (FridaSpawnInstance * self)
 
   self->fake_helpers = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, helpers);
   self->lib_name = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, libc);
+  if (data.bootstrapper[0] == '\0')
+    self->bootstrapper_name = 0;
+  else
+    self->bootstrapper_name = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, bootstrapper);
   self->fake_error_buf = self->dyld_data + offsetof (FridaSpawnInstanceDyldData, error_buf);
 
   return KERN_SUCCESS;
@@ -2959,6 +2989,34 @@ frida_spawn_instance_destroy_dyld_data (FridaSpawnInstance * self)
 
   self->dyld_data = 0;
 }
+
+#ifdef HAVE_IOS
+
+static gboolean
+frida_pick_ios_bootstrapper (const GumModuleDetails * details, gpointer user_data)
+{
+  FridaSpawnInstanceDyldData * data = user_data;
+  const gchar * candidates[] = {
+    "/usr/lib/substitute-inserter.dylib",
+    "/usr/lib/pspawn_payload-stg2.dylib"
+  };
+  guint i;
+
+  for (i = 0; i != G_N_ELEMENTS (candidates); i++)
+  {
+    const gchar * bootstrapper = candidates[i];
+
+    if (strcmp (details->path, bootstrapper) == 0)
+    {
+      strcpy (data->bootstrapper, details->path);
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+#endif
 
 static void
 frida_spawn_instance_unset_helpers (FridaSpawnInstance * self)
