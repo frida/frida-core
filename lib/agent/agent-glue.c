@@ -12,8 +12,6 @@
 #ifdef HAVE_GIOOPENSSL
 # include <gioopenssl.h>
 #endif
-#define SUBSTITUTE_INSERTER_PATH "/usr/lib/substitute-inserter.dylib"
-#define CHIMERA_STAGE2_PATH "/usr/lib/pspawn_payload-stg2.dylib"
 
 void
 _frida_agent_environment_init (void)
@@ -31,13 +29,6 @@ _frida_agent_environment_init (void)
 
   gum_script_backend_get_type (); /* Warm up */
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
-
-#ifdef HAVE_IOS
-  if (g_file_test (SUBSTITUTE_INSERTER_PATH, G_FILE_TEST_EXISTS))
-    gum_module_ensure_initialized (SUBSTITUTE_INSERTER_PATH);
-  else if (g_file_test (CHIMERA_STAGE2_PATH, G_FILE_TEST_EXISTS))
-    gum_module_ensure_initialized (CHIMERA_STAGE2_PATH);
-#endif
 
 #if defined (HAVE_ANDROID) && __ANDROID_API__ < __ANDROID_API_L__
   /*

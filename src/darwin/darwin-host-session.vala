@@ -136,7 +136,7 @@ namespace Frida {
 			fruit_controller.process_crashed.disconnect (on_process_crashed);
 #endif
 
-			var fruitjector = injector as Fruitjector;
+			var fruitjector = (Fruitjector) injector;
 
 			yield wait_for_uninject (injector, cancellable, () => {
 				return fruitjector.any_still_injected ();
@@ -165,7 +165,7 @@ namespace Frida {
 			string remote_address;
 			var stream_request = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var fruitjector = injector as Fruitjector;
+			var fruitjector = (Fruitjector) injector;
 			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
@@ -274,7 +274,7 @@ namespace Frida {
 			string remote_address;
 			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var fruitjector = injector as Fruitjector;
+			var fruitjector = (Fruitjector) injector;
 			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
@@ -356,14 +356,24 @@ namespace Frida {
 		}
 
 		private LaunchdAgent launchd_agent;
+
 		private bool spawn_gating_enabled = false;
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
+
+		private CrashReporterState crash_reporter_state = INACTIVE;
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
+		private Gee.HashMap<uint, OSAnalyticsAgent> osa_agents = new Gee.HashMap<uint, OSAnalyticsAgent> ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
 		private Gee.HashMap<uint, MappedAgent> mapped_agents = new Gee.HashMap<uint, MappedAgent> ();
 		private Gee.HashMap<MappedAgent, Source> mapped_agents_dying = new Gee.HashMap<MappedAgent, Source> ();
+
 		private Gee.HashSet<uint> xpcproxies = new Gee.HashSet<uint> ();
+
+		private enum CrashReporterState {
+			INACTIVE,
+			ACTIVE,
+		}
 
 		public FruitController (DarwinHostSession host_session, Cancellable io_cancellable) {
 			Object (
@@ -380,6 +390,7 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.connect (on_spawn_preparation_started);
 			launchd_agent.spawn_preparation_aborted.connect (on_spawn_preparation_aborted);
 			launchd_agent.spawn_captured.connect (on_spawn_captured);
+
 			helper.process_resumed.connect (on_process_resumed);
 			helper.process_killed.connect (on_process_killed);
 		}
@@ -390,6 +401,7 @@ namespace Frida {
 			launchd_agent.spawn_preparation_started.disconnect (on_spawn_preparation_started);
 			launchd_agent.app_launch_completed.disconnect (on_app_launch_completed);
 			launchd_agent.app_launch_started.disconnect (on_app_launch_started);
+
 			helper.process_resumed.disconnect (on_process_resumed);
 			helper.process_killed.disconnect (on_process_killed);
 		}
@@ -486,7 +498,20 @@ namespace Frida {
 		}
 
 		public void activate_crash_reporter_integration () {
+			if (crash_reporter_state == ACTIVE)
+				return;
+
+			foreach (var process in System.enumerate_processes ()) {
+				if (is_osanalytics_process (process)) {
+					var agent = try_add_osanalytics_agent (process.pid);
+					if (agent != null)
+						try_start_osanalytics_agent.begin (agent);
+				}
+			}
+
 			launchd_agent.activate_crash_reporter_integration ();
+
+			crash_reporter_state = ACTIVE;
 		}
 
 		public async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
@@ -562,13 +587,22 @@ namespace Frida {
 		private void on_spawn_preparation_started (HostSpawnInfo info) {
 			xpcproxies.add (info.pid);
 
-			if (is_crash_reporter (info))
+			if (is_reportcrash_spawn (info)) {
 				add_crash_reporter_agent (info.pid);
+				return;
+			}
+
+			if (is_osanalytics_spawn (info)) {
+				try_add_osanalytics_agent (info.pid);
+				return;
+			}
 		}
 
 		private void on_spawn_preparation_aborted (HostSpawnInfo info) {
-			xpcproxies.remove (info.pid);
-			crash_agents.unset (info.pid);
+			var pid = info.pid;
+			xpcproxies.remove (pid);
+			crash_agents.unset (pid);
+			osa_agents.unset (pid);
 		}
 
 		private void on_spawn_captured (HostSpawnInfo info) {
@@ -590,13 +624,12 @@ namespace Frida {
 				var pid = info.pid;
 
 				var crash_agent = crash_agents[pid];
-				if (crash_agent != null) {
-					try {
-						yield crash_agent.start (io_cancellable);
-					} catch (GLib.Error e) {
-						crash_agents.unset (pid);
-					}
-				}
+				if (crash_agent != null)
+					yield try_start_crash_reporter_agent (crash_agent);
+
+				var osa_agent = osa_agents[pid];
+				if (osa_agent != null)
+					yield try_start_osanalytics_agent (osa_agent);
 
 				if (!spawn_gating_enabled) {
 					yield helper.resume (pid, io_cancellable);
@@ -623,8 +656,16 @@ namespace Frida {
 			return agent;
 		}
 
+		private async void try_start_crash_reporter_agent (ReportCrashAgent agent) {
+			try {
+				yield agent.start (io_cancellable);
+			} catch (GLib.Error e) {
+				crash_agents.unset (agent.pid);
+			}
+		}
+
 		private void on_crash_agent_unloaded (InternalAgent agent) {
-			var crash_agent = agent as ReportCrashAgent;
+			var crash_agent = (ReportCrashAgent) agent;
 			crash_agents.unset (crash_agent.pid);
 		}
 
@@ -640,8 +681,41 @@ namespace Frida {
 			process_crashed (crash);
 		}
 
-		private static bool is_crash_reporter (HostSpawnInfo info) {
+		private OSAnalyticsAgent? try_add_osanalytics_agent (uint pid) {
+			if (osa_agents.has_key (pid))
+				return null;
+
+			var agent = new OSAnalyticsAgent (host_session, pid, io_cancellable);
+			osa_agents[pid] = agent;
+
+			agent.unloaded.connect (on_osa_agent_unloaded);
+
+			return agent;
+		}
+
+		private async void try_start_osanalytics_agent (OSAnalyticsAgent agent) {
+			try {
+				yield agent.start (io_cancellable);
+			} catch (GLib.Error e) {
+				osa_agents.unset (agent.pid);
+			}
+		}
+
+		private void on_osa_agent_unloaded (InternalAgent agent) {
+			var osa_agent = (OSAnalyticsAgent) agent;
+			osa_agents.unset (osa_agent.pid);
+		}
+
+		private static bool is_reportcrash_spawn (HostSpawnInfo info) {
 			return info.identifier == "com.apple.ReportCrash";
+		}
+
+		private static bool is_osanalytics_spawn (HostSpawnInfo info) {
+			return info.identifier == "com.apple.osanalytics.osanalyticshelper";
+		}
+
+		private static bool is_osanalytics_process (HostProcessInfo info) {
+			return info.name == "osanalyticshelper";
 		}
 
 		private CrashDelivery get_crash_delivery_for_pid (uint pid) {
@@ -672,7 +746,7 @@ namespace Frida {
 				}
 			}
 
-			private Promise<CrashInfo?> promise = new Promise <CrashInfo?> ();
+			private Promise<CrashInfo?> promise = new Promise<CrashInfo?> ();
 			private TimeoutSource expiry_source;
 
 			public CrashDelivery (uint pid) {
@@ -821,7 +895,7 @@ namespace Frida {
 
 			try {
 				if (path == XPC_PROXY_PATH) {
-					var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
+					var agent = new XpcProxyAgent ((DarwinHostSession) host_session, identifier, pid);
 					yield agent.run_until_exec (io_cancellable);
 				}
 
@@ -837,7 +911,7 @@ namespace Frida {
 
 			try {
 				if (path == XPC_PROXY_PATH) {
-					var agent = new XpcProxyAgent (host_session as DarwinHostSession, identifier, pid);
+					var agent = new XpcProxyAgent ((DarwinHostSession) host_session, identifier, pid);
 					yield agent.run_until_exec (io_cancellable);
 				}
 
@@ -1101,6 +1175,39 @@ namespace Frida {
 			}
 
 			return result.str;
+		}
+
+		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {
+			return pid;
+		}
+	}
+
+	private class OSAnalyticsAgent : InternalAgent {
+		public uint pid {
+			get;
+			construct;
+		}
+
+		public Cancellable io_cancellable {
+			get;
+			construct;
+		}
+
+		public OSAnalyticsAgent (DarwinHostSession host_session, uint pid, Cancellable io_cancellable) {
+			string * source = Frida.Data.Darwin.get_osanalytics_js_blob ().data;
+			Object (
+				host_session: host_session,
+				script_source: source,
+				pid: pid,
+				io_cancellable: io_cancellable
+			);
+		}
+
+		public async void start (Cancellable? cancellable) throws Error, IOError {
+			yield ensure_loaded (cancellable);
+		}
+
+		protected override void on_event (string type, Json.Array event) {
 		}
 
 		protected override async uint get_target_pid (Cancellable? cancellable) throws Error, IOError {

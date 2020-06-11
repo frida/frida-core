@@ -432,10 +432,15 @@ namespace Frida {
 			}
 
 			public void post (string message, Bytes? data) throws Error {
-				if (state != LOADED && state != DISPOSED)
-					throw new Error.INVALID_OPERATION ("Only loaded scripts may be posted to");
-
-				script.post (message, data);
+				switch (state) {
+					case LOADING:
+					case LOADED:
+					case DISPOSED:
+						script.post (message, data);
+						break;
+					default:
+						throw new Error.INVALID_OPERATION ("Only active scripts may be posted to");
+				}
 			}
 
 			private void on_message (Gum.Script script, string raw_message, Bytes? data) {

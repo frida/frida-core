@@ -38,6 +38,7 @@ if host_os_family == 'darwin'
       'darwin/agent/launchd.js',
       'darwin/agent/xpcproxy.js',
       'darwin/agent/reportcrash.js',
+      'darwin/agent/osanalytics.js',
     ],
     output: [
       'frida-data-darwin.vapi',
@@ -53,6 +54,7 @@ if host_os_family == 'darwin'
       '@INPUT1@',
       '@INPUT2@',
       '@INPUT3@',
+      '@INPUT4@',
     ],
   )
   darwin_sources += [darwin_data]

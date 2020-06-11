@@ -3,6 +3,11 @@ var pointerSize = Process.pointerSize;
 var POSIX_SPAWN_START_SUSPENDED = 0x0080;
 var SIGKILL = 9;
 
+var internalAgentServices = {
+  'com.apple.ReportCrash': true,
+  'com.apple.osanalytics.osanalyticshelper': true,
+};
+
 var upcoming = {};
 var gating = false;
 var suspendedPids = {};
@@ -65,7 +70,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
         event = 'spawn';
       else
         return;
-    } else if (gating || rawIdentifier === 'com.apple.ReportCrash') {
+    } else if (gating || internalAgentServices.hasOwnProperty(rawIdentifier)) {
       identifier = rawIdentifier;
       event = 'spawn';
     } else {
