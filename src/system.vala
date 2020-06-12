@@ -186,11 +186,11 @@ namespace Frida {
 		public void destroy () {
 			if (remove_on_dispose && file != null) {
 				try {
-					var enumerator = file.enumerate_children ( "standard::*", 0 ); 
+					var enumerator = file.enumerate_children ("standard::*", 0);
 
 					FileInfo file_info;
 					while ((file_info = enumerator.next_file ()) != null) { 
-						if ((file_info.get_file_type ()) == FileType.DIRECTORY) {
+						if ((file_info.get_file_type ()) == DIRECTORY) {
 							File subdir = file.resolve_relative_path (file_info.get_name ());
 							subdir.delete ();
 						}
@@ -233,8 +233,7 @@ namespace Frida {
 			string file_path = Path.build_filename (this.directory.path, name);
 			string directory_path = Path.get_dirname (file_path);
 
-			if (!FileUtils.test (directory_path, GLib.FileTest.IS_DIR))
-			{
+			if (!FileUtils.test (directory_path, GLib.FileTest.IS_DIR)) {
 				try {
 					File tmp_dir = File.new_for_path (directory_path);
 					tmp_dir.make_directory_with_parents ();
