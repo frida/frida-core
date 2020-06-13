@@ -101,7 +101,7 @@ namespace Frida {
 			var symsrv32 = Frida.Data.Agent.get_symsrv_32_dll_blob ();
 			var symsrv64 = Frida.Data.Agent.get_symsrv_64_dll_blob ();
 
-			agent_desc = new AgentDescriptor.with_resources ("frida-agent-%u.dll",
+			agent_desc = new AgentDescriptor.with_resources ("%u\\frida-agent.dll",
 				new MemoryInputStream.from_data (blob32.data, null),
 				new MemoryInputStream.from_data (blob64.data, null),
 				new AgentResource[] {
