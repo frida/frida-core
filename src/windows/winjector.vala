@@ -441,12 +441,12 @@ namespace Frida {
 				set_acls_as_needed (tempdir.path);
 
 				var blob32 = Frida.Data.Winjector.get_winjector_helper_32_exe_blob ();
-				helper32 = new TemporaryFile.from_stream ("32\\frida-winjector-helper.exe",
+				helper32 = new TemporaryFile.from_stream ("frida-winjector-helper-32.exe",
 					new MemoryInputStream.from_data (blob32.data, null),
 					tempdir);
 
 				var blob64 = Frida.Data.Winjector.get_winjector_helper_64_exe_blob ();
-				helper64 = new TemporaryFile.from_stream ("64\\frida-winjector-helper.exe",
+				helper64 = new TemporaryFile.from_stream ("frida-winjector-helper-64.exe",
 					new MemoryInputStream.from_data (blob64.data, null),
 					tempdir);
 			}
