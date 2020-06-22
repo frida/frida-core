@@ -167,8 +167,10 @@ namespace Frida {
 			devices.remove (raw_id);
 
 			FruityHostSessionProvider provider;
-			if (providers.unset (raw_id, out provider))
+			if (providers.unset (raw_id, out provider)) {
+				provider_unavailable (provider);
 				provider.close.begin (io_cancellable);
+			}
 		}
 
 		public extern static void _extract_details_for_device (int product_id, string udid, out string name, out ImageData? icon)
