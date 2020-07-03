@@ -63,6 +63,13 @@ G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
 void
 frida_selinux_apply_policy_patch (void)
 {
+#ifdef HAVE_ANDROID
+  if(getuid()!=0)
+  {
+    g_print("Start frida-server in non-root mode. Some functions are limited.\n");
+    return;
+  }
+#endif
   const gchar * system_policy = "/sys/fs/selinux/policy";
   policydb_t db;
   gchar * db_data;
