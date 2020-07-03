@@ -1379,7 +1379,7 @@ frida_darwin_helper_backend_is_application_process (guint pid)
   if (proc_pidpath (pid, path, sizeof (path)) <= 0)
     return FALSE;
 
-  module = gum_darwin_module_new_from_file (path, GUM_CPU_INVALID, GUM_PTRAUTH_INVALID, NULL, GUM_DARWIN_MODULE_FLAGS_HEADER_ONLY, NULL);
+  module = gum_darwin_module_new_from_file (path, GUM_CPU_INVALID, GUM_PTRAUTH_INVALID, GUM_DARWIN_MODULE_FLAGS_HEADER_ONLY, NULL);
   if (module == NULL)
     return FALSE;
 
