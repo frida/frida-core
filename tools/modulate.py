@@ -303,8 +303,9 @@ class Layout(object):
                 self.constructors_section_name = "__TEXT.__init_offsets"
                 self.destructors_section_name = "__TEXT.__term_offsets"
             else:
-                self.constructors_section_name = "__DATA.__mod_init_func"
-                self.destructors_section_name = "__DATA.__mod_term_func"
+                section_name = "__DATA_CONST" if "__DATA_CONST.__mod_init_func" in sections else "__DATA"
+                self.constructors_section_name = section_name + ".__mod_init_func"
+                self.destructors_section_name = section_name + ".__mod_term_func"
 
         self.symbols = symbols
 
