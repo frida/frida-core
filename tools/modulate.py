@@ -120,15 +120,25 @@ class ModuleEditor(object):
         layout = self.layout
 
         if section is None:
-            return FunctionPointerVector(label, None, None, [], layout)
+            return FunctionPointerVector(label, None, None, [], 'pointers', layout)
 
         values = []
         data = self._read_section_data(section)
-        pointer_size = layout.pointer_size
-        pointer_format = layout.pointer_format
-        for i in range(0, len(data), pointer_size):
-            (value,) = struct.unpack(pointer_format, data[i:i + pointer_size])
-            values.append(value)
+
+        if section.name.endswith("_offsets"):
+            encoding = 'offsets'
+            u32_size = 4
+            u32_format = layout.u32_format
+            for i in range(0, len(data), u32_size):
+                (value,) = struct.unpack(u32_format, data[i:i + u32_size])
+                values.append(value)
+        else:
+            encoding = 'pointers'
+            pointer_size = layout.pointer_size
+            pointer_format = layout.pointer_format
+            for i in range(0, len(data), pointer_size):
+                (value,) = struct.unpack(pointer_format, data[i:i + pointer_size])
+                values.append(value)
 
         elements = []
         is_macho = layout.file_format == 'mach-o'
@@ -138,7 +148,7 @@ class ModuleEditor(object):
         for value in values:
             if is_arm:
                 address = value & ~1
-            elif is_apple_arm64:
+            elif is_apple_arm64 and encoding == 'pointers':
                 # Starting with arm64e, Apple uses the 13 upper bits to encode
                 # pointer authentication properties, rebase vs bind, etc.
                 top_8_bits     = (value << 13) & 0xff00000000000000
@@ -160,7 +170,7 @@ class ModuleEditor(object):
 
             elements.append(FunctionPointer(value, name))
 
-        return FunctionPointerVector(label, section.file_offset, section.virtual_address, elements, layout)
+        return FunctionPointerVector(label, section.file_offset, section.virtual_address, elements, encoding, layout)
 
     def _read_section_data(self, section):
         self.module.seek(section.file_offset)
@@ -177,7 +187,7 @@ class ModuleEditor(object):
         destination.seek(vector.file_offset)
 
         is_apple_arm64 = layout.file_format == 'mach-o' and layout.arch_name in ('arm64', 'arm64e')
-        if is_apple_arm64:
+        if is_apple_arm64 and vector.encoding == 'pointers':
             # Due to Apple's stateful rebasing logic we have to be careful so the upper 13 bits
             # are preserved, and we only reorder the values' lower 51 bits.
             for pointer in vector.elements:
@@ -195,10 +205,13 @@ class ModuleEditor(object):
 
                 destination.write(struct.pack(pointer_format, new_value))
         else:
+            element_format = pointer_format if vector.encoding == 'pointers' else layout.u32_format
             for pointer in vector.elements:
-                destination.write(struct.pack(pointer_format, pointer.value))
+                destination.write(struct.pack(element_format, pointer.value))
 
             if layout.file_format == 'elf' and pointer_size == 8:
+                assert vector.encoding == 'pointers'
+
                 pending = {}
                 for i, pointer in enumerate(vector.elements):
                     pending[vector.virtual_address + (i * pointer_size)] = pointer
@@ -279,14 +292,19 @@ class Layout(object):
         endian_format = "<" if endian == 'little' else ">"
         size_format = "I" if pointer_size == 4 else "Q"
         self.pointer_format = endian_format + size_format
+        self.u32_format = endian_format + "I"
 
         self.sections = sections
         if file_format == 'elf':
             self.constructors_section_name = ".init_array"
             self.destructors_section_name = ".fini_array"
         else:
-            self.constructors_section_name = "__DATA.__mod_init_func"
-            self.destructors_section_name = "__DATA.__mod_term_func"
+            if "__TEXT.__init_offsets" in sections:
+                self.constructors_section_name = "__TEXT.__init_offsets"
+                self.destructors_section_name = "__TEXT.__term_offsets"
+            else:
+                self.constructors_section_name = "__DATA.__mod_init_func"
+                self.destructors_section_name = "__DATA.__mod_term_func"
 
         self.symbols = symbols
 
@@ -349,11 +367,12 @@ class Section(object):
 
 
 class FunctionPointerVector(object):
-    def __init__(self, label, file_offset, virtual_address, elements, layout):
+    def __init__(self, label, file_offset, virtual_address, elements, encoding, layout):
         self.label = label
         self.file_offset = file_offset
         self.virtual_address = virtual_address
         self.elements = elements
+        self.encoding = encoding
 
         self._layout = layout
 
