@@ -2,6 +2,9 @@
 
 #ifdef HAVE_MACOS
 # import <AppKit/AppKit.h>
+# if __MAC_OS_X_VERSION_MIN_REQUIRED < __MAC_10_12
+#  define NSCompositingOperationCopy NSCompositeCopy
+# endif
 #else
 # import <UIKit/UIKit.h>
 #endif
@@ -63,7 +66,7 @@ _frida_image_data_init_from_native_image_scaled_to (FridaImageData * data, Frida
   [NSGraphicsContext setCurrentContext:context];
   [image drawInRect:NSMakeRect (0, 0, data->_width, data->_height)
            fromRect:NSZeroRect
-          operation:NSCompositeCopy
+          operation:NSCompositingOperationCopy
            fraction:1.0];
   [context flushGraphics];
   [NSGraphicsContext restoreGraphicsState];
