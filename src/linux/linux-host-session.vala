@@ -454,7 +454,8 @@ namespace Frida {
 
 			var system_server_agent = host_session.system_server_agent;
 
-			var process_name = yield system_server_agent.get_process_name (package, cancellable);
+			var process_name = yield system_server_agent.get_process_name (package, entrypoint.uid, cancellable);
+
 			if (spawn_requests.has_key (process_name))
 				throw new Error.INVALID_OPERATION ("Spawn already in progress for the specified package name");
 
@@ -463,7 +464,7 @@ namespace Frida {
 
 			uint pid = 0;
 			try {
-				yield system_server_agent.stop_package (package, cancellable);
+				yield system_server_agent.stop_package (package, entrypoint.uid, cancellable);
 				yield system_server_agent.start_package (package, entrypoint, cancellable);
 
 				var timeout = new TimeoutSource.seconds (20);
@@ -642,7 +643,7 @@ namespace Frida {
 			yield enumerate_applications (cancellable);
 
 			try {
-				yield get_process_name ("", cancellable);
+				yield get_process_name ("", 0, cancellable);
 			} catch (Error e) {
 			}
 
@@ -686,10 +687,11 @@ namespace Frida {
 			}
 		}
 
-		public async string get_process_name (string package, Cancellable? cancellable) throws Error, IOError {
+		public async string get_process_name (string package, int uid, Cancellable? cancellable) throws Error, IOError {
 			var package_name_value = new Json.Node.alloc ().init_string (package);
+			var uid_value = new Json.Node.alloc ().init_int (uid);
 
-			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value }, cancellable);
+			var process_name = yield call ("getProcessName", new Json.Node[] { package_name_value, uid_value }, cancellable);
 
 			return process_name.get_string ();
 		}
@@ -697,19 +699,20 @@ namespace Frida {
 		public async void start_package (string package, PackageEntrypoint entrypoint, Cancellable? cancellable)
 				throws Error, IOError {
 			var package_value = new Json.Node.alloc ().init_string (package);
+			var uid_value = new Json.Node.alloc ().init_int (entrypoint.uid);
 
 			if (entrypoint is DefaultActivityEntrypoint) {
 				var activity_value = new Json.Node.alloc ();
 				activity_value.init_null ();
 
-				yield call ("startActivity", new Json.Node[] { package_value, activity_value }, cancellable);
+				yield call ("startActivity", new Json.Node[] { package_value, activity_value, uid_value }, cancellable);
 			} else if (entrypoint is ActivityEntrypoint) {
 				var e = entrypoint as ActivityEntrypoint;
 
 				var activity_value = new Json.Node.alloc ();
 				activity_value.init_string (e.activity);
 
-				yield call ("startActivity", new Json.Node[] { package_value, activity_value }, cancellable);
+				yield call ("startActivity", new Json.Node[] { package_value, activity_value, uid_value }, cancellable);
 			} else if (entrypoint is BroadcastReceiverEntrypoint) {
 				var e = entrypoint as BroadcastReceiverEntrypoint;
 
@@ -719,16 +722,17 @@ namespace Frida {
 				var action_value = new Json.Node.alloc ();
 				action_value.init_string (e.action);
 
-				yield call ("sendBroadcast", new Json.Node[] { package_value, receiver_value, action_value }, cancellable);
+				yield call ("sendBroadcast", new Json.Node[] { package_value, receiver_value, action_value, uid_value }, cancellable);
 			} else {
 				assert_not_reached ();
 			}
 		}
 
-		public async void stop_package (string package, Cancellable? cancellable) throws Error, IOError {
+		public async void stop_package (string package, int uid, Cancellable? cancellable) throws Error, IOError {
 			var package_value = new Json.Node.alloc ().init_string (package);
+			var uid_value = new Json.Node.alloc ().init_int (uid);
 
-			yield call ("stopPackage", new Json.Node[] { package_value }, cancellable);
+			yield call ("stopPackage", new Json.Node[] { package_value, uid_value }, cancellable);
 		}
 
 		public async bool try_stop_package_by_pid (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -1177,6 +1181,11 @@ namespace Frida {
 	}
 
 	private class PackageEntrypoint : Object {
+		public int uid {
+			get;
+			set;
+		}
+
 		public static PackageEntrypoint parse (string package, HostSpawnOptions options) throws Error {
 			PackageEntrypoint? entrypoint = null;
 
@@ -1218,6 +1227,13 @@ namespace Frida {
 
 			if (entrypoint == null)
 				entrypoint = new DefaultActivityEntrypoint ();
+
+			if (aux_options.contains ("uid")) {
+				int64 uid = 0;
+				if (!aux_options.lookup ("uid", "x", out uid))
+					throw new Error.INVALID_ARGUMENT ("The 'uid' option must be an integer");
+				entrypoint.uid = (int) uid;
+			}
 
 			return entrypoint;
 		}
