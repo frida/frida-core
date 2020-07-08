@@ -13,8 +13,8 @@ namespace Frida {
 
 		private ResourceStore _resource_store;
 
-		private uint process_pid;
 		private MainContext main_context;
+		private uint process_pid;
 		private TaskPort task;
 		private DBusConnection connection;
 		private DarwinRemoteHelper proxy;
@@ -252,7 +252,7 @@ namespace Frida {
 			}
 			obtain_request = new Promise<DarwinRemoteHelper> ();
 
-			uint peer_pid = 0;
+			uint pending_pid = 0;
 			TaskPort pending_task_port = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
@@ -265,11 +265,11 @@ namespace Frida {
 
 				string[] argv = { get_resource_store ().helper.path, service_name };
 
-				GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /*GLib.SpawnFlags.CLOEXEC_PIPES*/ 256;
-				GLib.Process.spawn_async_with_pipes (null, argv, null, flags, null, out peer_pid, null, null, null);
+				GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
+				GLib.Process.spawn_async_with_pipes (null, argv, null, flags, null, out pending_pid, null, null, null);
 
 				IOStream stream;
-				yield handshake_port.exchange (peer_pid, out pending_task_port, out stream);
+				yield handshake_port.exchange (pending_pid, out pending_task_port, out stream);
 
 				pending_connection = yield new DBusConnection (stream, null, NONE, null, cancellable);
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
@@ -282,7 +282,7 @@ namespace Frida {
 			}
 
 			if (pending_error == null) {
-				process_pid = peer_pid;
+				process_pid = pending_pid;
 				task = pending_task_port;
 
 				connection = pending_connection;
@@ -300,9 +300,8 @@ namespace Frida {
 				obtain_request.resolve (proxy);
 				return proxy;
 			} else {
-				process_pid = 0;
-				if (peer_pid != 0)
-					Posix.kill ((Posix.pid_t) peer_pid, Posix.Signal.KILL);
+				if (pending_pid != 0)
+					Posix.kill ((Posix.pid_t) pending_pid, Posix.Signal.KILL);
 
 				obtain_request.reject (pending_error);
 				obtain_request = null;
