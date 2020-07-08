@@ -2,10 +2,7 @@ namespace Frida {
 	public class DarwinHelperProcess : Object, DarwinHelper {
 		public uint pid {
 			get {
-				if (process == null)
-					return 0;
-
-				return (uint) uint64.parse (process.get_identifier ());
+				return process_pid;
 			}
 		}
 
@@ -16,8 +13,8 @@ namespace Frida {
 
 		private ResourceStore _resource_store;
 
+		private uint process_pid;
 		private MainContext main_context;
-		private Subprocess process;
 		private TaskPort task;
 		private DBusConnection connection;
 		private DarwinRemoteHelper proxy;
@@ -50,7 +47,7 @@ namespace Frida {
 				}
 			}
 
-			process = null;
+			process_pid = 0;
 
 			_resource_store = null;
 		}
@@ -255,7 +252,7 @@ namespace Frida {
 			}
 			obtain_request = new Promise<DarwinRemoteHelper> ();
 
-			Subprocess pending_process = null;
+			uint peer_pid = 0;
 			TaskPort pending_task_port = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
@@ -267,9 +264,10 @@ namespace Frida {
 				var handshake_port = new HandshakePort.local (service_name);
 
 				string[] argv = { get_resource_store ().helper.path, service_name };
-				pending_process = new Subprocess.newv (argv, SubprocessFlags.INHERIT_FDS);
 
-				var peer_pid = (uint) uint64.parse (pending_process.get_identifier ());
+				GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /*GLib.SpawnFlags.CLOEXEC_PIPES*/ 256;
+				GLib.Process.spawn_async_with_pipes (null, argv, null, flags, null, out peer_pid, null, null, null);
+
 				IOStream stream;
 				yield handshake_port.exchange (peer_pid, out pending_task_port, out stream);
 
@@ -284,7 +282,7 @@ namespace Frida {
 			}
 
 			if (pending_error == null) {
-				process = pending_process;
+				process_pid = peer_pid;
 				task = pending_task_port;
 
 				connection = pending_connection;
@@ -302,8 +300,9 @@ namespace Frida {
 				obtain_request.resolve (proxy);
 				return proxy;
 			} else {
-				if (pending_process != null)
-					pending_process.force_exit ();
+				process_pid = 0;
+				if (peer_pid != 0)
+					Posix.kill ((Posix.pid_t) peer_pid, Posix.Signal.KILL);
 
 				obtain_request.reject (pending_error);
 				obtain_request = null;
@@ -338,7 +337,7 @@ namespace Frida {
 			connection.on_closed.disconnect (on_connection_closed);
 			connection = null;
 
-			process = null;
+			process_pid = 0;
 			task = null;
 		}
 
