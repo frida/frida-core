@@ -111,6 +111,27 @@ namespace Frida.Fruity {
 			}
 		}
 
+		public async DeviceId[] list_devices (Cancellable? cancellable = null) throws UsbmuxError, IOError {
+			assert (is_processing_messages);
+
+			var response = yield query (create_request ("ListDevices"), REGULAR, cancellable);
+			try {
+				var device_list = response.get_array ("DeviceList");
+
+				int n = device_list.length;
+				DeviceId[] result = new DeviceId[n];
+
+				for (int i = 0; i != n; i++) {
+					var device_message = device_list.get_dict (i);
+					result[i] = dispatch_device_message (device_message);
+				}
+
+				return result;
+			} catch (PlistError e) {
+				throw new UsbmuxError.PROTOCOL ("Unexpected response: %s", e.message);
+			}
+		}
+
 		public async void connect_to_port (DeviceId device_id, uint16 port, Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			assert (is_processing_messages);
 
@@ -225,24 +246,34 @@ namespace Frida.Fruity {
 				if (msg.tag != 0) {
 					handle_response_message (msg.tag, body);
 				} else {
-					var message_type = body.get_string ("MessageType");
-					if (message_type == "Attached") {
-						var props = body.get_dict ("Properties");
-						var details = new DeviceDetails (
-							DeviceId ((uint) body.get_integer ("DeviceID")),
-							ProductId ((int) props.get_integer ("ProductID")),
-							Udid (props.get_string ("SerialNumber"))
-						);
-						device_attached (details);
-					} else if (message_type == "Detached") {
-						device_detached (DeviceId ((uint) body.get_integer ("DeviceID")));
-					} else {
-						throw new UsbmuxError.PROTOCOL ("Unexpected message type: %s", message_type);
-					}
+					dispatch_device_message (body);
 				}
 			} catch (PlistError e) {
 				throw new UsbmuxError.PROTOCOL ("Malformed usbmux message body: %s", e.message);
 			}
+		}
+
+		private DeviceId dispatch_device_message (PlistDict body) throws UsbmuxError, PlistError {
+			DeviceId device_id;
+
+			var message_type = body.get_string ("MessageType");
+			if (message_type == "Attached") {
+				var props = body.get_dict ("Properties");
+				device_id = DeviceId ((uint) body.get_integer ("DeviceID"));
+				var details = new DeviceDetails (
+					device_id,
+					ProductId ((int) props.get_integer ("ProductID")),
+					Udid (props.get_string ("SerialNumber"))
+				);
+				device_attached (details);
+			} else if (message_type == "Detached") {
+				device_id = DeviceId ((uint) body.get_integer ("DeviceID"));
+				device_detached (device_id);
+			} else {
+				throw new UsbmuxError.PROTOCOL ("Unexpected message type: %s", message_type);
+			}
+
+			return device_id;
 		}
 
 		private void handle_response_message (uint32 tag, Plist response) throws UsbmuxError {

@@ -46,6 +46,7 @@ namespace Frida {
 
 		private async void do_start () {
 			bool success = true;
+			Fruity.DeviceId[] initial_device_ids = {};
 
 			try {
 				control_client = yield Fruity.UsbmuxClient.open (start_cancellable);
@@ -57,19 +58,34 @@ namespace Frida {
 					remove_device (id);
 				});
 
+				initial_device_ids = yield control_client.list_devices (start_cancellable);
 				yield control_client.enable_listen_mode (start_cancellable);
 			} catch (GLib.Error e) {
 				success = false;
 			}
 
 			if (success) {
-				/* perform a dummy-request to flush out any pending device attach notifications */
 				try {
-					yield control_client.connect_to_port (Fruity.DeviceId (uint.MAX), 0, start_cancellable);
-					assert_not_reached ();
-				} catch (GLib.Error expected_error) {
+					int n = initial_device_ids.length;
+					for (int i = 0; i != n; i++) {
+						var id = initial_device_ids[i];
+
+						var validate_client = yield Fruity.UsbmuxClient.open (start_cancellable);
+
+						try {
+							yield validate_client.connect_to_port (id, 62078, start_cancellable);
+						} catch (GLib.Error e) {
+							remove_device (id);
+						}
+
+						yield validate_client.close (null);
+					}
+				} catch (GLib.Error e) {
+					success = false;
 				}
-			} else if (control_client != null) {
+			}
+			
+			if (!success && control_client != null) {
 				control_client.close.begin (null);
 				control_client = null;
 			}
