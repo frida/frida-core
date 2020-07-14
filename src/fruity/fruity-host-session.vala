@@ -48,13 +48,13 @@ namespace Frida {
 			bool success = yield try_start_control_connection ();
 
 			if (success) {
-				/* perform a dummy-request to flush out any pending device attach notifications */
+				/* Perform a dummy-request to flush out any pending device attach notifications. */
 				try {
 					yield control_client.connect_to_port (Fruity.DeviceId (uint.MAX), 0, start_cancellable);
 					assert_not_reached ();
 				} catch (GLib.Error expected_error) {
 					if (expected_error.code == IOError.CONNECTION_CLOSED) {
-						/* usbmuxd closes the connection when receiving commands in the wrong state */
+						/* Deal with usbmuxd closing the connection when receiving commands in the wrong state. */
 						control_client.close.begin (null);
 
 						success = yield try_start_control_connection ();
@@ -63,7 +63,9 @@ namespace Frida {
 							try {
 								flush_client = yield Fruity.UsbmuxClient.open (start_cancellable);
 								try {
-									yield flush_client.connect_to_port (Fruity.DeviceId (uint.MAX), 0, start_cancellable);
+									yield flush_client.connect_to_port (
+											Fruity.DeviceId (uint.MAX), 0,
+											start_cancellable);
 									assert_not_reached ();
 								} catch (GLib.Error expected_error) {
 								}
@@ -74,7 +76,7 @@ namespace Frida {
 							if (flush_client != null)
 								flush_client.close.begin (null);
 
-							if (success == false && control_client != null) {
+							if (!success && control_client != null) {
 								control_client.close.begin (null);
 								control_client = null;
 							}
