@@ -1,5 +1,6 @@
 #include "frida-helper-backend.h"
 
+#include <errno.h>
 #include <mach/mach.h>
 #include <sys/socket.h>
 
@@ -205,6 +206,7 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
   FridaHandshakeMessageIn msg_in;
   FridaHandshakeMessageOut msg_out;
   mach_msg_header_t * header_in, * header_out;
+  const mach_msg_timeout_t poll_interval_msec = 10;
   kern_return_t kr;
 
   self_task = mach_task_self ();
@@ -216,13 +218,19 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
   header_in = &msg_in.base.header;
   header_out = &msg_out.base.header;
 
-  kr = mach_msg (header_in,
-      MACH_RCV_MSG | MACH_RCV_TRAILER_TYPE (MACH_MSG_TRAILER_FORMAT_0) | MACH_RCV_TRAILER_ELEMENTS (MACH_RCV_TRAILER_AUDIT),
-      0,
-      sizeof (msg_in),
-      self->mach_port,
-      MACH_MSG_TIMEOUT_NONE,
-      MACH_PORT_NULL);
+  do
+  {
+    kr = mach_msg (header_in,
+        MACH_RCV_MSG | MACH_RCV_TIMEOUT | MACH_RCV_TRAILER_TYPE (MACH_MSG_TRAILER_FORMAT_0) | MACH_RCV_TRAILER_ELEMENTS (MACH_RCV_TRAILER_AUDIT),
+        0,
+        sizeof (msg_in),
+        self->mach_port,
+        poll_interval_msec,
+        MACH_PORT_NULL);
+    if (kr != KERN_SUCCESS && kill (peer_pid, 0) == -1 && errno == ESRCH)
+      goto process_died;
+  }
+  while (kr == MACH_RCV_TIMED_OUT);
   if (kr != KERN_SUCCESS)
     goto mach_failure;
 
@@ -255,6 +263,14 @@ _frida_handshake_port_perform_exchange_as_receiver (FridaHandshakePort * self, g
 
   goto beach;
 
+process_died:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "Peer process died unexpectedly");
+    goto beach;
+  }
 handshake_failed:
   {
     g_set_error (error,
