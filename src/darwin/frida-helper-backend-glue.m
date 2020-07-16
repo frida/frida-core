@@ -1997,7 +1997,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   kr = mach_vm_protect (task, payload_address + layout.data_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
 
-  pc = gum_sign_code_address (payload_address + layout.mach_code_offset);
+  pc = payload_address + layout.mach_code_offset;
   sp = payload_address + layout.stack_top_offset;
   data_arg = payload_address + layout.data_offset;
 
@@ -2054,12 +2054,19 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
     ts = &state64->ts_64;
 
+#if __has_feature (ptrauth_calls)
+    if (resolver->ptrauth_support == GUM_PTRAUTH_UNSUPPORTED)
+    {
+      ts->__opaque_flags = __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH;
+    }
+#endif
+
     ts->__x[20] = data_arg;
 
     __darwin_arm_thread_state64_set_sp (*ts, sp);
-    dummy_lr = gum_sign_code_address (0xcafebabe);
-    __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (dummy_lr));
-    __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (pc));
+    dummy_lr = 0xcafebabe;
+    __darwin_arm_thread_state64_set_lr_fptr (*ts, GSIZE_TO_POINTER (gum_sign_code_address (dummy_lr)));
+    __darwin_arm_thread_state64_set_pc_fptr (*ts, GSIZE_TO_POINTER (gum_sign_code_address (pc)));
 
     instance->thread_state_data = (thread_state_t) state64;
     instance->thread_state_count = ARM_UNIFIED_THREAD_STATE_COUNT;
