@@ -437,8 +437,8 @@ namespace Frida {
 					var size = input.read_uint32 ();
 					input.skip (4);
 
-					bool is_arm64 = cputype == 0x100000c;
-					bool is_arm64e = is_arm64 && (cpusubtype & 0x00ffffff) == 2;
+					bool is_arm64 = cputype == 0x0100000cU;
+					bool is_arm64e = is_arm64 && (cpusubtype & 0x00ffffffU) == 2;
 					if (is_arm64e) {
 						arm64e_offset = offset;
 					} else if (is_arm64) {
