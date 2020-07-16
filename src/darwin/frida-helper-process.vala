@@ -252,11 +252,34 @@ namespace Frida {
 			}
 			obtain_request = new Promise<DarwinRemoteHelper> ();
 
+			try {
+				var proxy = yield launch_helper (cancellable);
+				obtain_request.resolve (proxy);
+				return proxy;
+			} catch (GLib.Error e) {
+				if (e is Error.PROCESS_NOT_FOUND && get_resource_store ().maybe_thin_helper_to_basic_abi ()) {
+					try {
+						var proxy = yield launch_helper (cancellable);
+						obtain_request.resolve (proxy);
+						return proxy;
+					} catch (GLib.Error e) {
+						obtain_request.reject (e);
+						obtain_request = null;
+						throw_api_error (e);
+					}
+				}
+
+				obtain_request.reject (e);
+				obtain_request = null;
+				throw_api_error (e);
+			}
+		}
+
+		private async DarwinRemoteHelper launch_helper (Cancellable? cancellable) throws Error, IOError {
 			uint pending_pid = 0;
 			TaskPort pending_task_port = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
-			GLib.Error? pending_error = null;
 
 			var service_name = make_service_name ();
 
@@ -275,39 +298,31 @@ namespace Frida {
 				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
 					cancellable);
 			} catch (GLib.Error e) {
-				if (e is IOError.CANCELLED)
-					pending_error = e;
-				else
-					pending_error = new Error.PERMISSION_DENIED ("%s", e.message);
-			}
+				if (e is Error.PROCESS_NOT_FOUND || e is IOError.CANCELLED)
+					throw_api_error (e);
 
-			if (pending_error == null) {
-				process_pid = pending_pid;
-				task = pending_task_port;
-
-				connection = pending_connection;
-				connection.on_closed.connect (on_connection_closed);
-
-				proxy = pending_proxy;
-				proxy.output.connect (on_output);
-				proxy.spawn_added.connect (on_spawn_added);
-				proxy.spawn_removed.connect (on_spawn_removed);
-				proxy.injected.connect (on_injected);
-				proxy.uninjected.connect (on_uninjected);
-				proxy.process_resumed.connect (on_process_resumed);
-				proxy.process_killed.connect (on_process_killed);
-
-				obtain_request.resolve (proxy);
-				return proxy;
-			} else {
 				if (pending_pid != 0)
 					Posix.kill ((Posix.pid_t) pending_pid, Posix.Signal.KILL);
 
-				obtain_request.reject (pending_error);
-				obtain_request = null;
-
-				throw_api_error (pending_error);
+				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
+
+			process_pid = pending_pid;
+			task = pending_task_port;
+
+			connection = pending_connection;
+			connection.on_closed.connect (on_connection_closed);
+
+			proxy = pending_proxy;
+			proxy.output.connect (on_output);
+			proxy.spawn_added.connect (on_spawn_added);
+			proxy.spawn_removed.connect (on_spawn_removed);
+			proxy.injected.connect (on_injected);
+			proxy.uninjected.connect (on_uninjected);
+			proxy.process_resumed.connect (on_process_resumed);
+			proxy.process_killed.connect (on_process_killed);
+
+			return proxy;
 		}
 
 		private static string make_service_name () {
@@ -375,6 +390,10 @@ namespace Frida {
 			private set;
 		}
 
+#if MACOS && ARM64
+		private bool thinned = false;
+#endif
+
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
 			FileUtils.chmod (tempdir.path, 0755);
 
@@ -387,6 +406,61 @@ namespace Frida {
 
 		~ResourceStore () {
 			helper.destroy ();
+		}
+
+		public bool maybe_thin_helper_to_basic_abi () {
+#if MACOS && ARM64
+			if (thinned)
+				return false;
+
+			var blob = Frida.Data.Helper.get_frida_helper_blob ();
+
+			var input = new DataInputStream (new MemoryInputStream.from_data (blob.data, null));
+			input.byte_order = BIG_ENDIAN;
+
+			try {
+				const uint32 fat_magic = 0xcafebabeU;
+				var magic = input.read_uint32 ();
+				if (magic != fat_magic)
+					return false;
+
+				uint32 arm64e_offset = 0;
+
+				uint32 arm64_offset = 0;
+				uint32 arm64_size = 0;
+
+				var nfat_arch = input.read_uint32 ();
+				for (uint32 i = 0; i != nfat_arch; i++) {
+					var cputype = input.read_uint32 ();
+					var cpusubtype = input.read_uint32 ();
+					var offset = input.read_uint32 ();
+					var size = input.read_uint32 ();
+					input.skip (4);
+
+					bool is_arm64 = cputype == 0x100000c;
+					bool is_arm64e = is_arm64 && (cpusubtype & 0x00ffffff) == 2;
+					if (is_arm64e) {
+						arm64e_offset = offset;
+					} else if (is_arm64) {
+						arm64_offset = offset;
+						arm64_size = size;
+					}
+				}
+
+				if (arm64e_offset == 0 || arm64_offset == 0)
+					return false;
+
+				FileUtils.set_data (helper.path, blob.data[arm64_offset:arm64_offset + arm64_size]);
+				FileUtils.chmod (helper.path, 0700);
+
+				thinned = true;
+
+				return true;
+			} catch (GLib.Error e) {
+			}
+#endif
+
+			return false;
 		}
 	}
 }
