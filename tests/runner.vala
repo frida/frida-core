@@ -12,7 +12,7 @@ namespace Frida.Test {
 	public static void run (string[] args) {
 		Environment.init (ref args);
 
-		if (os () == MACOS && (cpu () == X86_32 || cpu () == X86_64)) {
+		if (os () == MACOS && cpu () == X86_64) {
 			try {
 				string raw_version;
 				GLib.Process.spawn_command_line_sync ("sw_vers -productVersion", out raw_version);
