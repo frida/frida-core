@@ -131,7 +131,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		if (build_supports_cross_arch_injection) {
+		if (can_test_cross_arch_injection) {
 			GLib.Test.add_func ("/HostSession/Darwin/spawn-other", () => {
 				var h = new Harness ((h) => Darwin.spawn_other.begin (h as Harness));
 				h.run ();
@@ -143,7 +143,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		if (build_supports_cross_arch_injection) {
+		if (can_test_cross_arch_injection) {
 			GLib.Test.add_func ("/HostSession/Darwin/spawn-without-attach-other", () => {
 				var h = new Harness ((h) => Darwin.spawn_without_attach_other.begin (h as Harness));
 				h.run ();
@@ -165,7 +165,7 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
-		if (build_supports_cross_arch_injection) {
+		if (can_test_cross_arch_injection) {
 			GLib.Test.add_func ("/HostSession/Darwin/ChildGating/fork-other", () => {
 				var h = new Harness ((h) => Darwin.fork_other.begin (h as Harness));
 				h.run ();
