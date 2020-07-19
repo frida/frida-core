@@ -233,7 +233,8 @@ namespace Frida {
 		private TemporaryFile? helper_file;
 		private ResourceStore resource_store;
 		private MainContext? main_context;
-		private Object process;
+		private SuperSU.Process superprocess;
+		private Pid process_pid;
 		private DBusConnection connection;
 		private LinuxHelper helper;
 		private Promise<LinuxHelper> obtain_request;
@@ -260,11 +261,11 @@ namespace Frida {
 				}
 			}
 
-			if (process != null && process is SuperSU.Process) {
-				var process = process as SuperSU.Process;
-				yield process.detach (cancellable);
+			if (superprocess != null) {
+				yield superprocess.detach (cancellable);
+				superprocess = null;
 			}
-			process = null;
+			process_pid = 0;
 		}
 
 		public async LinuxHelper obtain (Cancellable? cancellable) throws Error, IOError {
@@ -287,7 +288,7 @@ namespace Frida {
 			}
 
 			SuperSU.Process pending_superprocess = null;
-			Subprocess pending_subprocess = null;
+			Pid pending_pid = 0;
 			DBusConnection pending_connection = null;
 			LinuxRemoteHelper pending_proxy = null;
 			GLib.Error? pending_error = null;
@@ -327,19 +328,18 @@ namespace Frida {
 				});
 				timeout_source.attach (main_context);
 
+				string[] envp = Environ.unset_variable (Environ.get (), "LD_LIBRARY_PATH");
+
 				try {
 					string cwd = "/";
 					string[] argv = new string[] { "su", "-c", helper_file.path, server.client_address };
-					string[]? envp = null;
 					bool capture_output = false;
 					pending_superprocess = yield SuperSU.spawn (cwd, argv, envp, capture_output, cancellable);
 				} catch (Error e) {
-					var launcher = new SubprocessLauncher (SubprocessFlags.STDIN_INHERIT);
-					launcher.unsetenv ("LD_LIBRARY_PATH");
-					pending_subprocess = launcher.spawnv ({
-						helper_file.path,
-						server.client_address
-					});
+					string[] argv = { helper_file.path, server.client_address };
+
+					GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
+					GLib.Process.spawn_async (null, argv, envp, flags, null, out pending_pid);
 				}
 
 				yield;
@@ -368,10 +368,8 @@ namespace Frida {
 			}
 
 			if (pending_error == null) {
-				if (pending_superprocess != null)
-					process = pending_superprocess;
-				else
-					process = pending_subprocess;
+				superprocess = pending_superprocess;
+				process_pid = pending_pid;
 
 				connection = pending_connection;
 				connection.on_closed.connect (on_connection_closed);
@@ -381,8 +379,8 @@ namespace Frida {
 				obtain_request.resolve (helper);
 				return helper;
 			} else {
-				if (pending_subprocess != null)
-					pending_subprocess.force_exit ();
+				if (pending_pid != 0)
+					Posix.kill ((Posix.pid_t) pending_pid, Posix.Signal.KILL);
 
 				obtain_request.reject (pending_error);
 				obtain_request = null;
@@ -399,7 +397,8 @@ namespace Frida {
 			connection.on_closed.disconnect (on_connection_closed);
 			connection = null;
 
-			process = null;
+			superprocess = null;
+			process_pid = 0;
 		}
 
 		private void assign_helper (owned LinuxHelper h) {
