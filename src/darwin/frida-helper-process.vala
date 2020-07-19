@@ -2,7 +2,7 @@ namespace Frida {
 	public class DarwinHelperProcess : Object, DarwinHelper {
 		public uint pid {
 			get {
-				return process_pid;
+				return (uint) process_pid;
 			}
 		}
 
@@ -14,7 +14,7 @@ namespace Frida {
 		private ResourceStore _resource_store;
 
 		private MainContext main_context;
-		private uint process_pid;
+		private Pid process_pid;
 		private TaskPort task;
 		private DBusConnection connection;
 		private DarwinRemoteHelper proxy;
@@ -276,7 +276,7 @@ namespace Frida {
 		}
 
 		private async DarwinRemoteHelper launch_helper (Cancellable? cancellable) throws Error, IOError {
-			uint pending_pid = 0;
+			Pid pending_pid = 0;
 			TaskPort pending_task_port = null;
 			DBusConnection pending_connection = null;
 			DarwinRemoteHelper pending_proxy = null;
@@ -289,7 +289,7 @@ namespace Frida {
 				string[] argv = { get_resource_store ().helper.path, service_name };
 
 				GLib.SpawnFlags flags = GLib.SpawnFlags.LEAVE_DESCRIPTORS_OPEN | /* GLib.SpawnFlags.CLOEXEC_PIPES */ 256;
-				GLib.Process.spawn_async_with_pipes (null, argv, null, flags, null, out pending_pid, null, null, null);
+				GLib.Process.spawn_async (null, argv, null, flags, null, out pending_pid);
 
 				IOStream stream;
 				yield handshake_port.exchange (pending_pid, out pending_task_port, out stream);
