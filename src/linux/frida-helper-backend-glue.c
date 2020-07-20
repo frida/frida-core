@@ -2043,6 +2043,7 @@ frida_wait_for_attach_signal (pid_t pid)
         probably_about_to_exec = FALSE;
         break;
     }
+
     if (probably_about_to_exec)
     {
       if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
