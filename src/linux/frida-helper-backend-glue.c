@@ -2032,7 +2032,17 @@ frida_wait_for_attach_signal (pid_t pid)
   {
     gboolean probably_about_to_exec;
 
-    probably_about_to_exec = stop_signal == SIGSTOP;
+    switch (stop_signal)
+    {
+      case SIGSTOP:
+      case SIGTTIN:
+      case SIGTTOU:
+        probably_about_to_exec = TRUE;
+        break;
+      default:
+        probably_about_to_exec = FALSE;
+        break;
+    }
     if (probably_about_to_exec)
     {
       if (ptrace (PTRACE_CONT, pid, NULL, NULL) != 0)
@@ -2113,7 +2123,26 @@ frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited)
   if (!WIFSTOPPED (status))
     goto beach;
 
-  success = WSTOPSIG (status) == signal;
+  if (signal == SIGTRAP)
+  {
+    switch (WSTOPSIG (status))
+    {
+      case SIGTRAP:
+        success = TRUE;
+        break;
+      case SIGTTIN:
+      case SIGTTOU:
+        success = signal == SIGTRAP;
+        break;
+      default:
+        success = FALSE;
+        break;
+    }
+  }
+  else
+  {
+    success = WSTOPSIG (status) == signal;
+  }
 
 beach:
   if (exited != NULL)
