@@ -2247,12 +2247,12 @@ frida_run_to_entry_point (pid_t pid, GError ** error)
     if ((ctx.entry_point & 1) == 0)
     {
       /* ARM */
-      patched_entry_code = 0xe7f001f0;
+      patched_entry_code = GUINT32_TO_LE (0xe7f001f0);
     }
     else
     {
       /* Thumb */
-      patched_entry_code = 0xde01;
+      patched_entry_code = GUINT16_TO_LE (0xde01);
     }
   }
   else
