@@ -2129,11 +2129,9 @@ frida_wait_for_child_signal (pid_t pid, int signal, gboolean * exited)
     switch (WSTOPSIG (status))
     {
       case SIGTRAP:
-        success = TRUE;
-        break;
       case SIGTTIN:
       case SIGTTOU:
-        success = signal == SIGTRAP;
+        success = TRUE;
         break;
       default:
         success = FALSE;
