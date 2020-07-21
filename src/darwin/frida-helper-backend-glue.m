@@ -89,6 +89,7 @@ typedef struct _FridaAgentEmitContext FridaAgentEmitContext;
 
 typedef struct _FridaExceptionPortSet FridaExceptionPortSet;
 typedef union _FridaDebugState FridaDebugState;
+typedef int FridaConvertThreadStateDirection;
 
 struct _FridaHelperContext
 {
@@ -318,6 +319,12 @@ struct _FridaAgentEmitContext
   GumDarwinMapper * mapper;
 };
 
+enum _FridaConvertThreadStateDirection
+{
+  FRIDA_CONVERT_THREAD_STATE_IN = 1,
+  FRIDA_CONVERT_THREAD_STATE_OUT
+};
+
 static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend * backend);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
@@ -364,8 +371,17 @@ static gboolean frida_agent_context_init_functions (FridaAgentContext * self, Gu
 static void frida_agent_context_emit_mach_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 static void frida_agent_context_emit_pthread_stub_code (FridaAgentContext * self, guint8 * code, GumCpuType cpu_type, GumDarwinMapper * mapper);
 
+static kern_return_t frida_get_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gpointer state,
+    mach_msg_type_number_t * count);
+static kern_return_t frida_set_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gconstpointer state,
+    mach_msg_type_number_t count);
 static kern_return_t frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type);
 static kern_return_t frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type);
+static kern_return_t frida_convert_thread_state_inplace (mach_port_t thread, FridaConvertThreadStateDirection direction,
+    thread_state_flavor_t flavor, gpointer state, mach_msg_type_number_t * count);
+static kern_return_t frida_convert_thread_state (mach_port_t thread, FridaConvertThreadStateDirection direction,
+    thread_state_flavor_t flavor, gconstpointer in_state, mach_msg_type_number_t in_state_count,
+    gpointer out_state, mach_msg_type_number_t * out_state_count);
 static void frida_set_nth_hardware_breakpoint (gpointer state, guint n, GumAddress break_at, GumCpuType cpu_type);
 static void frida_set_hardware_single_step (gpointer debug_state, GumDarwinUnifiedThreadState * thread_state, gboolean enabled, GumCpuType cpu_type);
 static gboolean frida_is_hardware_breakpoint_support_working (void);
@@ -1657,8 +1673,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
   threads = NULL;
 
-  kr = thread_get_state (child_thread, state_flavor, (thread_state_t) &state, &state_count);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_get_state");
+  kr = frida_get_thread_state (child_thread, state_flavor, &state, &state_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "get_thread_state");
 
 #ifdef HAVE_I386
   dyld_start = (instance->cpu_type == GUM_CPU_AMD64) ? state.uts.ts64.__rip : state.uts.ts32.__eip;
@@ -1757,7 +1773,11 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
 
   previous_ports = &instance->previous_ports;
   kr = thread_swap_exception_ports (child_thread,
+#if __has_feature (ptrauth_calls)
+      EXC_MASK_BAD_ACCESS | EXC_MASK_BREAKPOINT,
+#else
       EXC_MASK_BREAKPOINT,
+#endif
       instance->server_port,
       EXCEPTION_DEFAULT,
       state_flavor,
@@ -2224,8 +2244,8 @@ frida_inject_instance_start_thread (FridaInjectInstance * self, GError ** error)
   kr = thread_create (self->task, &self->thread);
   CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "thread_create");
 
-  kr = act_set_state (self->thread, self->thread_state_flavor, self->thread_state_data, self->thread_state_count);
-  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "act_set_state");
+  kr = frida_set_thread_state (self->thread, self->thread_state_flavor, self->thread_state_data, self->thread_state_count);
+  CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "set_thread_state");
 
   source = dispatch_source_create (DISPATCH_SOURCE_TYPE_MACH_SEND, self->thread, DISPATCH_MACH_SEND_DEAD, ctx->dispatch_queue);
   self->thread_monitor_source = source;
@@ -2435,9 +2455,22 @@ frida_spawn_instance_on_server_recv (void * context)
 
   frida_spawn_instance_receive_breakpoint_request (self);
 
-  kr = thread_get_state (self->thread, state_flavor, (thread_state_t) &state, &state_count);
+  kr = frida_get_thread_state (self->thread, state_flavor, &state, &state_count);
   if (kr != KERN_SUCCESS)
     return;
+
+#if __has_feature (ptrauth_calls)
+  {
+    const GumAddress ret_gadget = frida_spawn_instance_get_ret_gadget_address (self);
+    gboolean pc_may_need_fixup_due_to_ptrauth_failure;
+
+    pc_may_need_fixup_due_to_ptrauth_failure = gum_strip_code_address (GUM_ADDRESS (state.ts_64.__opaque_pc)) == ret_gadget;
+    if (pc_may_need_fixup_due_to_ptrauth_failure)
+    {
+      __darwin_arm_thread_state64_set_pc_fptr (state.ts_64, GSIZE_TO_POINTER (gum_sign_code_address (ret_gadget)));
+    }
+  }
+#endif
 
 #ifdef HAVE_I386
   if (self->cpu_type == GUM_CPU_AMD64)
@@ -2468,8 +2501,7 @@ frida_spawn_instance_on_server_recv (void * context)
         frida_spawn_instance_set_nth_breakpoint (self, i, bp->address, bp->repeat);
     }
 
-    thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-
+    frida_set_thread_state (self->thread, state_flavor, &state, state_count);
     frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
 
     frida_spawn_instance_send_breakpoint_response (self);
@@ -2523,8 +2555,7 @@ frida_spawn_instance_on_server_recv (void * context)
     frida_spawn_instance_unset_nth_breakpoint (self, current_bp_index);
   }
 
-  thread_set_state (self->thread, state_flavor, (thread_state_t) &state, state_count);
-
+  frida_set_thread_state (self->thread, state_flavor, &state, state_count);
   frida_set_debug_state (self->thread, &self->breakpoint_debug_state, self->cpu_type);
 
   frida_spawn_instance_send_breakpoint_response (self);
@@ -2682,7 +2713,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
       }
       previous_ports->count = 0;
 
-      kr = thread_set_state (self->thread, state_flavor, (thread_state_t) &self->previous_thread_state, state_count);
+      kr = frida_set_thread_state (self->thread, state_flavor, &self->previous_thread_state, state_count);
       if (kr != KERN_SUCCESS)
         return FALSE;
 
@@ -3496,12 +3527,9 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
 
   self->mach_port_allocate_right = MACH_PORT_RIGHT_RECEIVE;
 
+  self->pthread_create_start_routine = payload_base + layout->pthread_code_offset;
   if (details->cpu_type == GUM_CPU_ARM)
-    self->pthread_create_start_routine = payload_base + layout->pthread_code_offset + 1;
-  else
-    self->pthread_create_start_routine = payload_base + layout->pthread_code_offset;
-  if (resolver->ptrauth_support == GUM_PTRAUTH_SUPPORTED)
-    self->pthread_create_start_routine = gum_sign_code_address (self->pthread_create_start_routine);
+    self->pthread_create_start_routine |= 1;
   self->pthread_create_arg = payload_base + layout->data_offset;
 
   self->message_that_never_arrives = payload_base + layout->data_offset +
@@ -3541,7 +3569,7 @@ frida_agent_context_init (FridaAgentContext * self, const FridaAgentDetails * de
   } \
   G_STMT_END
 #define FRIDA_AGENT_CONTEXT_TRY_RESOLVE(field) \
-  self->field##_impl = gum_darwin_module_resolver_find_export_address (resolver, module, G_STRINGIFY (field))
+  self->field##_impl = gum_strip_code_address (gum_darwin_module_resolver_find_export_address (resolver, module, G_STRINGIFY (field)))
 
 static gboolean
 frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleResolver * resolver, GumDarwinMapper * mapper, GError ** error)
@@ -4165,7 +4193,7 @@ frida_agent_context_emit_arm64_pthread_stub_code (FridaAgentContext * self, guin
 #define EMIT_ARM64_MOVE(dstreg, srcreg) \
     gum_arm64_writer_put_mov_reg_reg (&ctx->aw, ARM64_REG_##dstreg, ARM64_REG_##srcreg)
 #define EMIT_ARM64_CALL(reg) \
-    gum_arm64_writer_put_blr_reg (&ctx->aw, ARM64_REG_##reg)
+    gum_arm64_writer_put_blr_reg_no_auth (&ctx->aw, ARM64_REG_##reg)
 
 static void
 frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAgentEmitContext * ctx)
@@ -4193,11 +4221,21 @@ frida_agent_context_emit_arm64_mach_stub_body (FridaAgentContext * self, FridaAg
 
   gum_arm64_writer_put_push_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
   EMIT_ARM64_MOVE (X0, SP);
+
   EMIT_ARM64_LOAD_U64 (X1, 0);
+
   EMIT_ARM64_LOAD (X2, pthread_create_start_routine);
+  if (ctx->aw.ptrauth_support == GUM_PTRAUTH_SUPPORTED)
+  {
+    const guint32 paciza_x2 = 0xdac123e2;
+    gum_arm64_writer_put_instruction (&ctx->aw, paciza_x2);
+  }
+
   EMIT_ARM64_LOAD (X3, pthread_create_arg);
+
   EMIT_ARM64_LOAD (X8, pthread_create_impl);
   EMIT_ARM64_CALL (X8);
+
   gum_arm64_writer_put_pop_reg_reg (&ctx->aw, ARM64_REG_X0, ARM64_REG_X1);
 
   gum_arm64_writer_put_label (&ctx->aw, again);
@@ -4238,7 +4276,8 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_LOAD (W0, constructed);
     gum_arm64_writer_put_cbnz_reg_label (&ctx->aw, ARM64_REG_W0, skip_construction);
 
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_constructor (ctx->mapper));
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8,
+        gum_strip_code_address (gum_darwin_mapper_constructor (ctx->mapper)));
     EMIT_ARM64_CALL (X8);
     gum_arm64_writer_put_ldr_reg_u64 (&ctx->aw, ARM64_REG_X1, TRUE);
     EMIT_ARM64_STORE (constructed, W1);
@@ -4248,7 +4287,8 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
     EMIT_ARM64_LOAD (X0, entrypoint_data);
     EMIT_ARM64_LOAD_ADDRESS_OF (X1, unload_policy);
     EMIT_ARM64_MOVE (X2, SP);
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage));
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8,
+        gum_strip_code_address (gum_darwin_mapper_resolve (ctx->mapper, self->entrypoint_name_storage)));
     EMIT_ARM64_CALL (X8);
   }
   else
@@ -4286,7 +4326,8 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 
   if (ctx->mapper != NULL)
   {
-    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8, gum_darwin_mapper_destructor (ctx->mapper));
+    gum_arm64_writer_put_ldr_reg_address (&ctx->aw, ARM64_REG_X8,
+        gum_strip_code_address (gum_darwin_mapper_destructor (ctx->mapper)));
     EMIT_ARM64_CALL (X8);
   }
   else
@@ -4315,53 +4356,129 @@ frida_agent_context_emit_arm64_pthread_stub_body (FridaAgentContext * self, Frid
 #endif
 
 static kern_return_t
-frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type)
+frida_get_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gpointer state, mach_msg_type_number_t * count)
 {
-  mach_msg_type_number_t state_count;
   kern_return_t kr;
 
-#ifdef HAVE_I386
-  state_count = x86_DEBUG_STATE_COUNT;
-  kr = thread_get_state (thread, x86_DEBUG_STATE, state, &state_count);
-#else
-  if (cpu_type == GUM_CPU_ARM64)
-  {
-    state_count = ARM_DEBUG_STATE64_COUNT;
-    kr = thread_get_state (thread, ARM_DEBUG_STATE64, state, &state_count);
-  }
-  else
-  {
-    state_count = ARM_DEBUG_STATE32_COUNT;
-    kr = thread_get_state (thread, ARM_DEBUG_STATE, state, &state_count);
-  }
-#endif
+  kr = thread_get_state (thread, flavor, state, count);
+  if (kr == KERN_SUCCESS)
+    kr = frida_convert_thread_state_inplace (thread, FRIDA_CONVERT_THREAD_STATE_IN, flavor, state, count);
 
   return kr;
 }
 
 static kern_return_t
-frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type)
+frida_set_thread_state (mach_port_t thread, thread_state_flavor_t flavor, gconstpointer state, mach_msg_type_number_t count)
 {
-  mach_msg_type_number_t state_count;
   kern_return_t kr;
+  thread_state_t remote_state;
+
+  remote_state = g_alloca (count * sizeof (integer_t));
+
+  kr = frida_convert_thread_state (thread, FRIDA_CONVERT_THREAD_STATE_OUT, flavor, state, count, remote_state, &count);
+  if (kr == KERN_SUCCESS)
+    kr = thread_set_state (thread, flavor, remote_state, count);
+
+  return kr;
+}
+
+static kern_return_t
+frida_get_debug_state (mach_port_t thread, gpointer state, GumCpuType cpu_type)
+{
+  thread_state_flavor_t flavor;
+  mach_msg_type_number_t count;
 
 #ifdef HAVE_I386
-  state_count = x86_DEBUG_STATE_COUNT;
-  kr = thread_set_state (thread, x86_DEBUG_STATE, (thread_state_t) state, state_count);
+  flavor = x86_DEBUG_STATE;
+  count = x86_DEBUG_STATE_COUNT;
 #else
   if (cpu_type == GUM_CPU_ARM64)
   {
-    state_count = ARM_DEBUG_STATE64_COUNT;
-    kr = thread_set_state (thread, ARM_DEBUG_STATE64, (thread_state_t) state, state_count);
+    flavor = ARM_DEBUG_STATE64;
+    count = ARM_DEBUG_STATE64_COUNT;
   }
   else
   {
-    state_count = ARM_DEBUG_STATE32_COUNT;
-    kr = thread_set_state (thread, ARM_DEBUG_STATE32, (thread_state_t) state, state_count);
+    flavor = ARM_DEBUG_STATE;
+    count = ARM_DEBUG_STATE32_COUNT;
   }
 #endif
 
-  return kr;
+  return frida_get_thread_state (thread, flavor, state, &count);
+}
+
+static kern_return_t
+frida_set_debug_state (mach_port_t thread, gconstpointer state, GumCpuType cpu_type)
+{
+  thread_state_flavor_t flavor;
+  mach_msg_type_number_t count;
+
+#ifdef HAVE_I386
+  flavor = x86_DEBUG_STATE;
+  count = x86_DEBUG_STATE_COUNT;
+#else
+  if (cpu_type == GUM_CPU_ARM64)
+  {
+    flavor = ARM_DEBUG_STATE64;
+    count = ARM_DEBUG_STATE64_COUNT;
+  }
+  else
+  {
+    flavor = ARM_DEBUG_STATE32;
+    count = ARM_DEBUG_STATE32_COUNT;
+  }
+#endif
+
+  return frida_set_thread_state (thread, flavor, state, count);
+}
+
+static kern_return_t
+frida_convert_thread_state_inplace (mach_port_t thread, FridaConvertThreadStateDirection direction, thread_state_flavor_t flavor,
+    gpointer state, mach_msg_type_number_t * count)
+{
+  return frida_convert_thread_state (thread, direction, flavor, state, *count, state, count);
+}
+
+static kern_return_t
+frida_convert_thread_state (mach_port_t thread, FridaConvertThreadStateDirection direction, thread_state_flavor_t flavor,
+    gconstpointer in_state, mach_msg_type_number_t in_state_count,
+    gpointer out_state, mach_msg_type_number_t * out_state_count)
+{
+  static gboolean initialized = FALSE;
+  static kern_return_t (* convert) (thread_act_t thread, FridaConvertThreadStateDirection direction, thread_state_flavor_t flavor,
+      thread_state_t in_state, mach_msg_type_number_t in_state_count,
+      thread_state_t out_state, mach_msg_type_number_t * out_state_count);
+
+  if (!initialized)
+  {
+    void * module;
+
+    module = dlopen ("/usr/lib/system/libsystem_kernel.dylib", RTLD_GLOBAL | RTLD_LAZY);
+    g_assert (module != NULL);
+
+    convert = dlsym (module, "thread_convert_thread_state");
+
+    dlclose (module);
+
+    initialized = TRUE;
+  }
+
+  if (convert == NULL)
+    goto fallback;
+
+  return convert (thread, direction, flavor, (thread_state_t) in_state, in_state_count, out_state, out_state_count);
+
+fallback:
+  {
+    const mach_msg_type_number_t n = MIN (in_state_count, *out_state_count);
+
+    if (out_state != in_state)
+      memmove (out_state, in_state, n * sizeof (integer_t));
+
+    *out_state_count = n;
+
+    return KERN_SUCCESS;
+  }
 }
 
 static void
