@@ -2074,13 +2074,6 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
     ts = &state64->ts_64;
 
-#if __has_feature (ptrauth_calls)
-    if (resolver->ptrauth_support == GUM_PTRAUTH_UNSUPPORTED)
-    {
-      ts->__opaque_flags = __DARWIN_ARM_THREAD_STATE64_FLAGS_NO_PTRAUTH;
-    }
-#endif
-
     ts->__x[20] = data_arg;
 
     __darwin_arm_thread_state64_set_sp (*ts, sp);
