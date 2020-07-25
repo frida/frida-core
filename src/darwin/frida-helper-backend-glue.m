@@ -3581,8 +3581,6 @@ frida_agent_context_init_functions (FridaAgentContext * self, GumDarwinModuleRes
 
   module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/libsystem_pthread.dylib");
   if (module == NULL)
-    module = gum_darwin_module_resolver_find_module (resolver, "/usr/lib/system/introspection/libsystem_pthread.dylib");
-  if (module == NULL)
     goto no_libc;
   FRIDA_AGENT_CONTEXT_TRY_RESOLVE (pthread_create_from_mach_thread);
   if (self->pthread_create_from_mach_thread_impl != 0)
