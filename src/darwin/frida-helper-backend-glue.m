@@ -1570,13 +1570,18 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_port_t self_task, child_thread;
   guint page_size;
   thread_act_array_t threads;
-  guint thread_index;
+  guint i;
   mach_msg_type_number_t thread_count = 0;
   GumDarwinUnifiedThreadState state;
   mach_msg_type_number_t state_count = GUM_DARWIN_THREAD_STATE_COUNT;
   thread_state_flavor_t state_flavor = GUM_DARWIN_THREAD_STATE_FLAVOR;
   GumAddress dyld_start, dyld_granularity, dyld_chunk, dyld_header;
   GumAddress legacy_entry_address, modern_entry_address, launch_with_closure_address;
+  const gchar * launch_with_closure_names[] = {
+    "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_R11DiagnosticsPmSG_PbSH_",
+    "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_",
+    "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_",
+  };
   GumDarwinModule * dyld;
   FridaExceptionPortSet * previous_ports;
   dispatch_source_t source;
@@ -1668,8 +1673,8 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   mach_port_mod_refs (self_task, task, MACH_PORT_RIGHT_SEND, 1);
   instance->task = task;
 
-  for (thread_index = 1; thread_index < thread_count; thread_index++)
-    mach_port_deallocate (self_task, threads[thread_index]);
+  for (i = 1; i < thread_count; i++)
+    mach_port_deallocate (self_task, threads[i]);
   vm_deallocate (self_task, (vm_address_t) threads, thread_count * sizeof (thread_t));
   threads = NULL;
 
@@ -1705,10 +1710,10 @@ _frida_darwin_helper_backend_prepare_spawn_instance_for_injection (FridaDarwinHe
   legacy_entry_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyld24initializeMainExecutableEv");
   modern_entry_address = 0;
 
-  launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_");
-  if (launch_with_closure_address == 0)
+  launch_with_closure_address = 0;
+  for (i = 0; i != G_N_ELEMENTS (launch_with_closure_names) && launch_with_closure_address == 0; i++)
   {
-    launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_");
+    launch_with_closure_address = gum_darwin_module_resolve_symbol_address (dyld, launch_with_closure_names[i]);
   }
 
   if (launch_with_closure_address != 0)

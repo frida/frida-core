@@ -680,12 +680,18 @@ namespace Frida.Fruity.Injector {
 
 			LLDB.Breakpoint? modern_breakpoint = null;
 			uint64 launch_with_closure = 0;
-			const string launch_with_closure_new_name = "__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_";
-			const string launch_with_closure_old_name = "__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_";
-			if (dyld_symbols.has_key (launch_with_closure_new_name))
-				launch_with_closure = dyld_symbols[launch_with_closure_new_name];
-			else if (dyld_symbols.has_key (launch_with_closure_old_name))
-				launch_with_closure = dyld_symbols[launch_with_closure_old_name];
+
+			const string[] launch_with_closure_names = {
+				"__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_R11DiagnosticsPmSG_PbSH_",
+				"__ZN4dyldL17launchWithClosureEPKN5dyld312launch_cache13binary_format7ClosureEPK15DyldSharedCachePK11mach_headermiPPKcSE_SE_PmSF_",
+				"__ZN4dyldL17launchWithClosureEPKN5dyld37closure13LaunchClosureEPK15DyldSharedCachePKNS0_11MachOLoadedEmiPPKcSD_SD_PmSE_",
+			};
+			foreach (var candidate in launch_with_closure_names) {
+				if (dyld_symbols.has_key (candidate)) {
+					launch_with_closure = dyld_symbols[candidate];
+					break;
+				}
+			}
 			if (launch_with_closure != 0) {
 				uint64 run_initializers_call = yield find_dyld3_run_initializers_call (launch_with_closure, cancellable);
 				modern_breakpoint = yield lldb.add_breakpoint (run_initializers_call, cancellable);
