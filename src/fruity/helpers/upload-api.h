@@ -1,12 +1,18 @@
 #ifndef __FRIDA_UPLOAD_API_H__
 #define __FRIDA_UPLOAD_API_H__
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <unistd.h>
 #include <libkern/OSCacheControl.h>
+#include <mach/mach.h>
 #include <netinet/in.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+# include <mach/mach_vm.h>
+#endif
 
 typedef struct _FridaUploadApi FridaUploadApi;
 
@@ -21,6 +27,11 @@ struct _FridaUploadApi
   ssize_t (* read) (int fd, void * buf, size_t n);
   void (* sys_icache_invalidate) (void * start, size_t len);
   void (* sys_dcache_flush) (void * start, size_t len);
+  mach_port_t (* _mach_task_self) (void);
+  kern_return_t (* mach_vm_allocate) (vm_map_t target, mach_vm_address_t * address, mach_vm_size_t size, int flags);
+  kern_return_t (* mach_vm_deallocate) (vm_map_t target, mach_vm_address_t address, mach_vm_size_t size);
+  void * (* dlopen) (const char * path, int mode);
+  void * (* dlsym) (void * handle, const char * symbol);
   int (* mprotect) (void * addr, size_t len, int prot);
   int (* close) (int fd);
 
@@ -37,6 +48,11 @@ struct _FridaUploadApi
       read, \
       sys_icache_invalidate, \
       sys_dcache_flush, \
+      dlsym (RTLD_DEFAULT, "mach_task_self"), \
+      mach_vm_allocate, \
+      mach_vm_deallocate, \
+      dlopen, \
+      dlsym, \
       mprotect, \
       close, \
       __error \

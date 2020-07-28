@@ -1,13 +1,13 @@
 helpers := \
 	build/symbol-fetcher.dylib build/test-symbol-fetcher \
-	build/symbol-fetcher.dylib build/test-symbol-fetcher \
+	build/symbol-resolver.dylib build/test-symbol-resolver \
 	build/upload-listener.dylib build/test-upload-listener \
 	build/upload-receiver.dylib build/test-upload-receiver \
 	$(NULL)
 
 sources := \
 	symbol-fetcher.c \
-	symbol-fetcher.c \
+	symbol-resolver.c \
 	upload-listener.c \
 	upload-receiver.c \
 	$(NULL)
@@ -21,7 +21,7 @@ build: $(helpers)
 
 test: build
 	@build/test-symbol-fetcher
-	@build/test-symbol-fetcher
+	@build/test-symbol-resolver
 	@build/test-upload-listener
 	@build/test-upload-receiver
 
@@ -45,8 +45,12 @@ build/test-%: %.c $(sources)
 	@mkdir -p $(@D)
 	$(macos_cc) \
 		-isysroot $(shell xcrun --sdk macosx --show-sdk-path) \
-		-arch x86_64 \
+		-arch arm64e \
 		$(cflags) \
+		-fno-ptrauth-calls \
+		-fno-ptrauth-returns \
+		-fno-stack-check \
+		-fno-stack-protector \
 		-DBUILDING_TEST_PROGRAM \
 		$< \
 		-o $@ \

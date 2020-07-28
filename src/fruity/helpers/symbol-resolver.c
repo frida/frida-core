@@ -18,7 +18,7 @@ struct _FridaMachO
   const void * base;
   uintptr_t slide;
   const void * linkedit;
-  const struct dyld_info_command * info;
+  const void * exports;
 };
 
 static void frida_get_libdyld_api (const struct dyld_all_image_infos * all_image_info, FridaLibdyldApi * api);
@@ -64,14 +64,11 @@ static void
 frida_get_libdyld_api (const struct dyld_all_image_infos * all_image_info, FridaLibdyldApi * api)
 {
   FridaMachO libdyld;
-  const void * exports;
 
   frida_parse_macho (frida_find_libdyld (all_image_info), &libdyld);
 
-  exports = libdyld.linkedit + libdyld.info->export_off;
-
-  api->dlopen = libdyld.base + frida_exports_trie_find (exports, "_dlopen");
-  api->dlsym = libdyld.base + frida_exports_trie_find (exports, "_dlsym");
+  api->dlopen = libdyld.base + frida_exports_trie_find (libdyld.exports, "_dlopen");
+  api->dlsym = libdyld.base + frida_exports_trie_find (libdyld.exports, "_dlsym");
 }
 
 static const void *
@@ -100,12 +97,16 @@ frida_parse_macho (const void * macho, FridaMachO * result)
   uint32_t i;
   const void * preferred_base;
   const void * linkedit;
+  const struct dyld_info_command * dyld_info;
+  const struct linkedit_data_command * exports_trie;
 
   header = macho;
   lc = (const struct load_command *) (header + 1);
 
   preferred_base = NULL;
   linkedit = NULL;
+  dyld_info = NULL;
+  exports_trie = NULL;
 
   for (i = 0; i != header->ncmds; i++)
   {
@@ -123,7 +124,10 @@ frida_parse_macho (const void * macho, FridaMachO * result)
         break;
       }
       case LC_DYLD_INFO_ONLY:
-        result->info = (const struct dyld_info_command *) lc;
+        dyld_info = (const struct dyld_info_command *) lc;
+        break;
+      case LC_DYLD_EXPORTS_TRIE:
+        exports_trie = (const struct linkedit_data_command *) lc;
         break;
       default:
         break;
@@ -135,6 +139,19 @@ frida_parse_macho (const void * macho, FridaMachO * result)
   result->base = macho;
   result->slide = macho - preferred_base;
   result->linkedit = linkedit + result->slide;
+
+  if (dyld_info != NULL)
+  {
+    result->exports = result->linkedit + dyld_info->export_off;
+  }
+  else if (exports_trie != NULL)
+  {
+    result->exports = result->linkedit + exports_trie->dataoff;
+  }
+  else
+  {
+    result->exports = NULL;
+  }
 }
 
 static uint64_t

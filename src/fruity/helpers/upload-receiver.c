@@ -2,6 +2,8 @@
 
 #include <ptrauth.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <mach-o/loader.h>
 
 #define FRIDA_INT2_MASK  0x00000003U
 #define FRIDA_INT11_MASK 0x000007ffU
@@ -13,18 +15,144 @@ typedef uint8_t FridaDarwinThreadedItemType;
 
 typedef void (* FridaConstructorFunc) (int argc, const char * argv[], const char * env[], const char * apple[], int * result);
 
+typedef struct _FridaChainedFixupsHeader FridaChainedFixupsHeader;
+
+typedef struct _FridaChainedStartsInImage FridaChainedStartsInImage;
+typedef struct _FridaChainedStartsInSegment FridaChainedStartsInSegment;
+
+typedef struct _FridaChainedPtrArm64eRebase FridaChainedPtrArm64eRebase;
+typedef struct _FridaChainedPtrArm64eBind FridaChainedPtrArm64eBind;
+typedef struct _FridaChainedPtrArm64eAuthRebase FridaChainedPtrArm64eAuthRebase;
+typedef struct _FridaChainedPtrArm64eAuthBind FridaChainedPtrArm64eAuthBind;
+
+typedef uint32_t FridaChainedImportFormat;
+typedef uint32_t FridaChainedSymbolFormat;
+
+typedef struct _FridaChainedImport FridaChainedImport;
+typedef struct _FridaChainedImportAddend FridaChainedImportAddend;
+typedef struct _FridaChainedImportAddend64 FridaChainedImportAddend64;
+
 enum _FridaUploadCommandType
 {
   FRIDA_UPLOAD_COMMAND_WRITE = 1,
   FRIDA_UPLOAD_COMMAND_APPLY_THREADED,
+  FRIDA_UPLOAD_COMMAND_PROCESS_FIXUPS,
   FRIDA_UPLOAD_COMMAND_PROTECT,
-  FRIDA_UPLOAD_COMMAND_CONSTRUCT
+  FRIDA_UPLOAD_COMMAND_CONSTRUCT_FROM_POINTERS,
+  FRIDA_UPLOAD_COMMAND_CONSTRUCT_FROM_OFFSETS,
 };
 
 enum _FridaDarwinThreadedItemType
 {
   FRIDA_DARWIN_THREADED_REBASE,
   FRIDA_DARWIN_THREADED_BIND
+};
+
+struct _FridaChainedFixupsHeader
+{
+  uint32_t fixups_version;
+  uint32_t starts_offset;
+  uint32_t imports_offset;
+  uint32_t symbols_offset;
+  uint32_t imports_count;
+  FridaChainedImportFormat imports_format;
+  FridaChainedSymbolFormat symbols_format;
+};
+
+struct _FridaChainedStartsInImage
+{
+  uint32_t seg_count;
+  uint32_t seg_info_offset[1];
+};
+
+struct _FridaChainedStartsInSegment
+{
+  uint32_t size;
+  uint16_t page_size;
+  uint16_t pointer_format;
+  uint64_t segment_offset;
+  uint32_t max_valid_pointer;
+  uint16_t page_count;
+  uint16_t page_start[1];
+};
+
+struct _FridaChainedPtrArm64eRebase
+{
+  uint64_t target : 43,
+           high8  :  8,
+           next   : 11,
+           bind   :  1,
+           auth   :  1;
+};
+
+struct _FridaChainedPtrArm64eBind
+{
+  uint64_t ordinal : 16,
+           zero    : 16,
+           addend  : 19,
+           next    : 11,
+           bind    :  1,
+           auth    :  1;
+};
+
+struct _FridaChainedPtrArm64eAuthRebase
+{
+  uint64_t target    : 32,
+           diversity : 16,
+           addr_div  :  1,
+           key       :  2,
+           next      : 11,
+           bind      :  1,
+           auth      :  1;
+};
+
+struct _FridaChainedPtrArm64eAuthBind
+{
+  uint64_t ordinal   : 16,
+           zero      : 16,
+           diversity : 16,
+           addr_div  :  1,
+           key       :  2,
+           next      : 11,
+           bind      :  1,
+           auth      :  1;
+};
+
+enum _FridaChainedImportFormat
+{
+  FRIDA_CHAINED_IMPORT          = 1,
+  FRIDA_CHAINED_IMPORT_ADDEND   = 2,
+  FRIDA_CHAINED_IMPORT_ADDEND64 = 3,
+};
+
+enum _FridaChainedSymbolFormat
+{
+  FRIDA_CHAINED_SYMBOL_UNCOMPRESSED,
+  FRIDA_CHAINED_SYMBOL_ZLIB_COMPRESSED,
+};
+
+struct _FridaChainedImport
+{
+  uint32_t lib_ordinal :  8,
+           weak_import :  1,
+           name_offset : 23;
+};
+
+struct _FridaChainedImportAddend
+{
+  uint32_t lib_ordinal :  8,
+           weak_import :  1,
+           name_offset : 23;
+  int32_t  addend;
+};
+
+struct _FridaChainedImportAddend64
+{
+  uint64_t lib_ordinal : 16,
+           weak_import :  1,
+           reserved    : 15,
+           name_offset : 32;
+  uint64_t addend;
 };
 
 #define FRIDA_TEMP_FAILURE_RETRY(expression) \
@@ -36,6 +164,18 @@ enum _FridaDarwinThreadedItemType
     \
     __result; \
   })
+
+static void frida_apply_threaded_items (uint64_t preferred_base_address, uint64_t slide, uint16_t num_symbols, const uint64_t * symbols,
+    uint16_t num_regions, uint64_t * regions);
+
+static void frida_process_chained_fixups (const FridaChainedFixupsHeader * fixups_header, struct mach_header_64 * mach_header,
+    size_t preferred_base_address, const FridaUploadApi * api);
+static void * frida_resolve_import (void ** dylib_handles, int dylib_ordinal, const char * symbol_strings, uint32_t symbol_offset,
+    const FridaUploadApi * api);
+
+static void * frida_sign_pointer (void * ptr, uint8_t key, uintptr_t diversity, bool use_address_diversity, void * address_of_ptr);
+
+static const char * frida_symbol_name_from_darwin (const char * name);
 
 static bool frida_read_chunk (int fd, void * buffer, size_t length, size_t * bytes_read, const FridaUploadApi * api);
 
@@ -100,7 +240,7 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
         case FRIDA_UPLOAD_COMMAND_APPLY_THREADED:
         {
           uint64_t preferred_base_address, slide;
-          uint16_t num_symbols, num_regions, i;
+          uint16_t num_symbols, num_regions;
 
           FRIDA_READ_VALUE (preferred_base_address);
           FRIDA_READ_VALUE (slide);
@@ -115,106 +255,22 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
           if (!frida_read_chunk (client_fd, regions, num_regions * sizeof (uint64_t), NULL, api))
             goto next_client;
 
-          for (i = 0; i != num_regions; i++)
-          {
-            uint64_t * slot = (uint64_t *) regions[i];
-            uint16_t delta;
+          frida_apply_threaded_items (preferred_base_address, slide, num_symbols, symbols, num_regions, regions);
 
-            do
-            {
-              uint64_t value;
-              bool is_authenticated;
-              FridaDarwinThreadedItemType type;
-              uint8_t key;
-              bool has_address_diversity;
-              uint16_t diversity;
-              uint64_t bound_value;
+          success = true;
 
-              value = *slot;
+          break;
+        }
+        case FRIDA_UPLOAD_COMMAND_PROCESS_FIXUPS:
+        {
+          uint64_t fixups_header_address, mach_header_address, preferred_base_address;
 
-              is_authenticated      = (value >> 63) & 1;
-              type                  = (value >> 62) & 1;
-              delta                 = (value >> 51) & FRIDA_INT11_MASK;
-              key                   = (value >> 49) & FRIDA_INT2_MASK;
-              has_address_diversity = (value >> 48) & 1;
-              diversity             = (value >> 32) & FRIDA_INT16_MASK;
+          FRIDA_READ_VALUE (fixups_header_address);
+          FRIDA_READ_VALUE (mach_header_address);
+          FRIDA_READ_VALUE (preferred_base_address);
 
-              if (type == FRIDA_DARWIN_THREADED_BIND)
-              {
-                uint16_t bind_ordinal;
-
-                bind_ordinal = value & FRIDA_INT16_MASK;
-
-                bound_value = symbols[bind_ordinal];
-              }
-              else if (type == FRIDA_DARWIN_THREADED_REBASE)
-              {
-                uint64_t rebase_address;
-
-                if (is_authenticated)
-                {
-                  rebase_address = value & FRIDA_INT32_MASK;
-                }
-                else
-                {
-                  uint64_t top_8_bits, bottom_43_bits, sign_bits;
-                  bool sign_bit_set;
-
-                  top_8_bits = (value << 13) & 0xff00000000000000UL;
-                  bottom_43_bits = value     & 0x000007ffffffffffUL;
-
-                  sign_bit_set = (value >> 42) & 1;
-                  if (sign_bit_set)
-                    sign_bits = 0x00fff80000000000UL;
-                  else
-                    sign_bits = 0;
-
-                  rebase_address = top_8_bits | sign_bits | bottom_43_bits;
-                }
-
-                bound_value = rebase_address;
-
-                if (is_authenticated)
-                  bound_value += preferred_base_address;
-
-                bound_value += slide;
-              }
-
-              if (is_authenticated)
-              {
-                void * p = (void *) bound_value;
-                uintptr_t d = diversity;
-
-                if (has_address_diversity)
-                  d = ptrauth_blend_discriminator (slot, d);
-
-                switch (key)
-                {
-                  case ptrauth_key_asia:
-                    p = ptrauth_sign_unauthenticated (p, ptrauth_key_asia, d);
-                    break;
-                  case ptrauth_key_asib:
-                    p = ptrauth_sign_unauthenticated (p, ptrauth_key_asib, d);
-                    break;
-                  case ptrauth_key_asda:
-                    p = ptrauth_sign_unauthenticated (p, ptrauth_key_asda, d);
-                    break;
-                  case ptrauth_key_asdb:
-                    p = ptrauth_sign_unauthenticated (p, ptrauth_key_asdb, d);
-                    break;
-                }
-
-                *slot = (uint64_t) p;
-              }
-              else
-              {
-                *slot = bound_value;
-              }
-
-              slot += delta;
-            }
-            while (delta != 0);
-          }
+          frida_process_chained_fixups ((const FridaChainedFixupsHeader *) fixups_header_address,
+              (struct mach_header_64 *) mach_header_address, (size_t) preferred_base_address, api);
 
           success = true;
 
@@ -234,7 +290,7 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
 
           break;
         }
-        case FRIDA_UPLOAD_COMMAND_CONSTRUCT:
+        case FRIDA_UPLOAD_COMMAND_CONSTRUCT_FROM_POINTERS:
         {
           uint64_t address;
           uint32_t count;
@@ -259,6 +315,36 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
 
           break;
         }
+        case FRIDA_UPLOAD_COMMAND_CONSTRUCT_FROM_OFFSETS:
+        {
+          uint64_t address;
+          uint32_t count;
+          uint64_t mach_header_address;
+          uint32_t * constructor_offsets;
+          uint32_t i;
+
+          FRIDA_READ_VALUE (address);
+          FRIDA_READ_VALUE (count);
+          FRIDA_READ_VALUE (mach_header_address);
+
+          constructor_offsets = (uint32_t *) address;
+
+          for (i = 0; i != count; i++)
+          {
+            FridaConstructorFunc constructor;
+            const int argc = 0;
+            const char * argv[] = { NULL };
+            const char * env[] = { NULL };
+
+            constructor = (FridaConstructorFunc) (mach_header_address + constructor_offsets[i]);
+
+            constructor (argc, argv, env, apple, &result);
+          }
+
+          success = true;
+
+          break;
+        }
       }
 
       if (!success)
@@ -274,6 +360,349 @@ beach:
   api->close (listener_fd);
 
   return result;
+}
+
+static void
+frida_apply_threaded_items (uint64_t preferred_base_address, uint64_t slide, uint16_t num_symbols, const uint64_t * symbols,
+    uint16_t num_regions, uint64_t * regions)
+{
+  uint16_t i;
+
+  for (i = 0; i != num_regions; i++)
+  {
+    uint64_t * slot = (uint64_t *) regions[i];
+    uint16_t delta;
+
+    do
+    {
+      uint64_t value;
+      bool is_authenticated;
+      FridaDarwinThreadedItemType type;
+      uint8_t key;
+      bool has_address_diversity;
+      uint16_t diversity;
+      uint64_t bound_value;
+
+      value = *slot;
+
+      is_authenticated      = (value >> 63) & 1;
+      type                  = (value >> 62) & 1;
+      delta                 = (value >> 51) & FRIDA_INT11_MASK;
+      key                   = (value >> 49) & FRIDA_INT2_MASK;
+      has_address_diversity = (value >> 48) & 1;
+      diversity             = (value >> 32) & FRIDA_INT16_MASK;
+
+      if (type == FRIDA_DARWIN_THREADED_BIND)
+      {
+        uint16_t bind_ordinal;
+
+        bind_ordinal = value & FRIDA_INT16_MASK;
+
+        bound_value = symbols[bind_ordinal];
+      }
+      else if (type == FRIDA_DARWIN_THREADED_REBASE)
+      {
+        uint64_t rebase_address;
+
+        if (is_authenticated)
+        {
+          rebase_address = value & FRIDA_INT32_MASK;
+        }
+        else
+        {
+          uint64_t top_8_bits, bottom_43_bits, sign_bits;
+          bool sign_bit_set;
+
+          top_8_bits = (value << 13) & 0xff00000000000000UL;
+          bottom_43_bits = value     & 0x000007ffffffffffUL;
+
+          sign_bit_set = (value >> 42) & 1;
+          if (sign_bit_set)
+            sign_bits = 0x00fff80000000000UL;
+          else
+            sign_bits = 0;
+
+          rebase_address = top_8_bits | sign_bits | bottom_43_bits;
+        }
+
+        bound_value = rebase_address;
+
+        if (is_authenticated)
+          bound_value += preferred_base_address;
+
+        bound_value += slide;
+      }
+
+      if (is_authenticated)
+      {
+        *slot = (uint64_t) frida_sign_pointer ((void *) bound_value, key, diversity, has_address_diversity, slot);
+      }
+      else
+      {
+        *slot = bound_value;
+      }
+
+      slot += delta;
+    }
+    while (delta != 0);
+  }
+}
+
+static void
+frida_process_chained_fixups (const FridaChainedFixupsHeader * fixups_header, struct mach_header_64 * mach_header,
+    size_t preferred_base_address, const FridaUploadApi * api)
+{
+  mach_port_t task;
+  mach_vm_address_t slab_start;
+  size_t slab_size;
+  void * slab_cursor;
+  void ** dylib_handles;
+  size_t dylib_count;
+  const void * command;
+  uint32_t command_index;
+  void ** bound_pointers;
+  size_t bound_count, i;
+  const char * symbols;
+  const FridaChainedStartsInImage * image_starts;
+  ssize_t slide;
+  uint32_t seg_index;
+
+  task = api->_mach_task_self ();
+
+  slab_start = 0;
+  slab_size = 64 * 1024;
+  api->mach_vm_allocate (task, &slab_start, slab_size, VM_FLAGS_ANYWHERE);
+  slab_cursor = (void *) slab_start;
+
+  dylib_handles = slab_cursor;
+  dylib_count = 0;
+
+  command = mach_header + 1;
+  for (command_index = 0; command_index != mach_header->ncmds; command_index++)
+  {
+    const struct load_command * lc = command;
+
+    switch (lc->cmd)
+    {
+      case LC_LOAD_DYLIB:
+      case LC_LOAD_WEAK_DYLIB:
+      case LC_REEXPORT_DYLIB:
+      case LC_LOAD_UPWARD_DYLIB:
+      {
+        const struct dylib_command * dc = command;
+        const char * name = command + dc->dylib.name.offset;
+
+        dylib_handles[dylib_count++] = api->dlopen (name, RTLD_LAZY | RTLD_GLOBAL);
+
+        break;
+      }
+      default:
+        break;
+    }
+
+    command += lc->cmdsize;
+  }
+
+  slab_cursor += dylib_count * sizeof (void *);
+
+  bound_pointers = slab_cursor;
+  bound_count = fixups_header->imports_count;
+  slab_cursor += bound_count * sizeof (void *);
+
+  symbols = (const char *) fixups_header + fixups_header->symbols_offset;
+
+  switch (fixups_header->imports_format)
+  {
+    case FRIDA_CHAINED_IMPORT:
+    {
+      const FridaChainedImport * imports = ((const void *) fixups_header + fixups_header->imports_offset);
+
+      for (i = 0; i != bound_count; i++)
+      {
+        const FridaChainedImport * import = &imports[i];
+
+        bound_pointers[i] = frida_resolve_import (dylib_handles,
+            import->lib_ordinal, symbols, import->name_offset, api);
+      }
+
+      break;
+    }
+    case FRIDA_CHAINED_IMPORT_ADDEND:
+    {
+      const FridaChainedImportAddend * imports = ((const void *) fixups_header + fixups_header->imports_offset);
+
+      for (i = 0; i != bound_count; i++)
+      {
+        const FridaChainedImportAddend * import = &imports[i];
+
+        bound_pointers[i] = frida_resolve_import (dylib_handles,
+            import->lib_ordinal, symbols, import->name_offset, api);
+        bound_pointers[i] += import->addend;
+      }
+
+      break;
+    }
+    case FRIDA_CHAINED_IMPORT_ADDEND64:
+    {
+      const FridaChainedImportAddend64 * imports = ((const void *) fixups_header + fixups_header->imports_offset);
+
+      for (i = 0; i != bound_count; i++)
+      {
+        const FridaChainedImportAddend64 * import = &imports[i];
+
+        bound_pointers[i] = frida_resolve_import (dylib_handles,
+            import->lib_ordinal, symbols, import->name_offset, api);
+        bound_pointers[i] += import->addend;
+      }
+
+      break;
+    }
+  }
+
+  image_starts = (const FridaChainedStartsInImage *) ((const void *) fixups_header + fixups_header->starts_offset);
+  slide = (void *) mach_header - (void *) preferred_base_address;
+
+  for (seg_index = 0; seg_index != image_starts->seg_count; seg_index++)
+  {
+    const uint32_t seg_offset = image_starts->seg_info_offset[seg_index];
+    const FridaChainedStartsInSegment * seg_starts;
+    uint16_t page_index;
+
+    if (seg_offset == 0)
+      continue;
+
+    seg_starts = (const FridaChainedStartsInSegment *) ((const void *) image_starts + seg_offset);
+
+    for (page_index = 0; page_index != seg_starts->page_count; page_index++)
+    {
+      void * cursor = (void *) mach_header + seg_starts->segment_offset + (page_index * seg_starts->page_size) +
+          seg_starts->page_start[page_index];
+
+      while (TRUE)
+      {
+        uint64_t * slot = cursor;
+        size_t delta;
+        const size_t stride = sizeof (uint64_t);
+
+        switch (*slot >> 62)
+        {
+          case 0b00:
+          {
+            FridaChainedPtrArm64eRebase * item = cursor;
+            uint64_t top_8_bits, bottom_43_bits, sign_bits;
+            bool sign_bit_set;
+
+            delta = item->next;
+
+            top_8_bits = (uint64_t) item->high8 << (64 - 8);
+            bottom_43_bits = item->target;
+
+            sign_bit_set = (bottom_43_bits >> 42) & 1;
+            if (sign_bit_set)
+              sign_bits = 0x00fff80000000000UL;
+            else
+              sign_bits = 0;
+
+            *slot = (top_8_bits | sign_bits | bottom_43_bits) + slide;
+
+            break;
+          }
+          case 0b01:
+          {
+            FridaChainedPtrArm64eBind * item = cursor;
+
+            delta = item->next;
+
+            *slot = (uint64_t) (bound_pointers[item->ordinal] + item->addend);
+
+            break;
+          }
+          case 0b10:
+          {
+            FridaChainedPtrArm64eAuthRebase * item = cursor;
+
+            delta = item->next;
+
+            *slot = (uint64_t) frida_sign_pointer ((void *) (preferred_base_address + item->target + slide), item->key, item->diversity,
+                item->addr_div, slot);
+
+            break;
+          }
+          case 0b11:
+          {
+            FridaChainedPtrArm64eAuthBind * item = cursor;
+
+            delta = item->next;
+
+            *slot = (uint64_t) frida_sign_pointer (bound_pointers[item->ordinal], item->key, item->diversity, item->addr_div, slot);
+
+            break;
+          }
+        }
+
+        if (delta == 0)
+          break;
+
+        cursor += delta * stride;
+      }
+    }
+  }
+
+  api->mach_vm_deallocate (task, slab_start, slab_size);
+}
+
+static void *
+frida_resolve_import (void ** dylib_handles, int dylib_ordinal, const char * symbol_strings, uint32_t symbol_offset,
+    const FridaUploadApi * api)
+{
+  void * result;
+  const char * raw_name, * name;
+
+  if (dylib_ordinal <= 0)
+    return NULL; /* Placeholder if we ever need to support this. */
+
+  raw_name = symbol_strings + symbol_offset;
+  name = frida_symbol_name_from_darwin (raw_name);
+
+  result = api->dlsym (dylib_handles[dylib_ordinal - 1], name);
+
+  result = ptrauth_strip (result, ptrauth_key_asia);
+
+  return result;
+}
+
+static void *
+frida_sign_pointer (void * ptr, uint8_t key, uintptr_t diversity, bool use_address_diversity, void * address_of_ptr)
+{
+  void * p = ptr;
+  uintptr_t d = diversity;
+
+  if (use_address_diversity)
+    d = ptrauth_blend_discriminator (address_of_ptr, d);
+
+  switch (key)
+  {
+    case ptrauth_key_asia:
+      p = ptrauth_sign_unauthenticated (p, ptrauth_key_asia, d);
+      break;
+    case ptrauth_key_asib:
+      p = ptrauth_sign_unauthenticated (p, ptrauth_key_asib, d);
+      break;
+    case ptrauth_key_asda:
+      p = ptrauth_sign_unauthenticated (p, ptrauth_key_asda, d);
+      break;
+    case ptrauth_key_asdb:
+      p = ptrauth_sign_unauthenticated (p, ptrauth_key_asdb, d);
+      break;
+  }
+
+  return p;
+}
+
+static const char *
+frida_symbol_name_from_darwin (const char * name)
+{
+  return (name[0] == '_') ? name + 1 : name;
 }
 
 static bool
