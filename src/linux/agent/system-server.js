@@ -130,7 +130,7 @@ rpc.exports = {
 
       if (intent === null) {
         intent = Intent.$new();
-        intent.setAction('android.intent.action.MAIN');
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK.value);
       }
 
       if (activity !== null) {
