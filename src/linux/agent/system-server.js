@@ -1,4 +1,4 @@
-var ApplicationInfo, ComponentName, ContextWrapper, Intent, RunningAppProcessInfo, RunningTaskInfo, UserHandle, GET_META_DATA, GET_ACTIVITIES;
+var ApplicationInfo, ComponentName, ContextWrapper, Intent, RunningAppProcessInfo, RunningTaskInfo, UserHandle, GET_META_DATA, GET_ACTIVITIES, FLAG_ACTIVITY_NEW_TASK;
 var context, packageManager, activityManager;
 
 var multiUserSupported;
@@ -19,6 +19,7 @@ function init() {
   var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
   GET_META_DATA = PackageManager.GET_META_DATA.value;
   GET_ACTIVITIES = PackageManager.GET_ACTIVITIES.value;
+  FLAG_ACTIVITY_NEW_TASK = Intent.FLAG_ACTIVITY_NEW_TASK.value;
 
   multiUserSupported = 'getApplicationInfoAsUser' in PackageManager;
 
@@ -130,7 +131,7 @@ rpc.exports = {
 
       if (intent === null) {
         intent = Intent.$new();
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK.value);
+        intent.setFlags(FLAG_ACTIVITY_NEW_TASK);
       }
 
       if (activity !== null) {
