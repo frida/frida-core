@@ -108,7 +108,7 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				success = false;
 			}
-						  
+
 			if (!success && control_client != null) {
 				control_client.close.begin (null);
 				control_client = null;
@@ -441,7 +441,12 @@ namespace Frida {
 		private const uint16 DEFAULT_SERVER_PORT = 27042;
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
-		private const string DEBUGSERVER_SERVICE_NAME = "com.apple.debugserver";
+		private const string DEBUGSERVER_ENDPOINT_MODERN = "com.apple.debugserver.DVTSecureSocketProxy";
+		private const string DEBUGSERVER_ENDPOINT_LEGACY = "com.apple.debugserver?tls=handshake-only";
+		private const string[] DEBUGSERVER_ENDPOINT_CANDIDATES = {
+			DEBUGSERVER_ENDPOINT_MODERN,
+			DEBUGSERVER_ENDPOINT_LEGACY,
+		};
 		private const string SPRINGBOARD_PATH = "/System/Library/CoreServices/SpringBoard.app/SpringBoard";
 
 		public FruityHostSession (ChannelProvider channel_provider, FruityLockdownProvider lockdown_provider) {
@@ -847,16 +852,18 @@ namespace Frida {
 
 		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
 				throws Error, LLDB.Error, IOError {
-			try {
-				var lldb_stream = yield lockdown.start_service (DEBUGSERVER_SERVICE_NAME + "?tls=handshake-only", cancellable);
-				return yield LLDB.Client.open (lldb_stream, cancellable);
-			} catch (Fruity.LockdownError e) {
-				if (e is Fruity.LockdownError.INVALID_SERVICE) {
-					throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
-						"run Xcode briefly or use ideviceimagemounter to mount one manually");
+			foreach (unowned string endpoint in DEBUGSERVER_ENDPOINT_CANDIDATES) {
+				try {
+					var lldb_stream = yield lockdown.start_service (endpoint, cancellable);
+					return yield LLDB.Client.open (lldb_stream, cancellable);
+				} catch (Fruity.LockdownError e) {
+					if (!(e is Fruity.LockdownError.INVALID_SERVICE))
+						throw new Error.NOT_SUPPORTED ("%s", e.message);
 				}
-				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
+
+			throw new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
+				"run Xcode briefly or use ideviceimagemounter to mount one manually");
 		}
 
 		private async AgentSessionId attach_via_gadget (uint pid, Fruity.Injector.GadgetDetails gadget_details,
