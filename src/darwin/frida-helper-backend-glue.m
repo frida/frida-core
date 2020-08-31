@@ -348,7 +348,7 @@ static gboolean frida_pick_ios_bootstrapper (const GumModuleDetails * details, g
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
 static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t lib_name, int mode);
-static gboolean find_cf_initialize (const GumModuleDetails * details, gpointer user_data);
+static gboolean frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data);
 static void frida_spawn_instance_call_cf_initialize (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state);
 static void frida_spawn_instance_set_nth_breakpoint (FridaSpawnInstance * self, guint n, GumAddress break_at, FridaBreakpointRepeat repeat);
 static void frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n);
@@ -2692,7 +2692,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
 #endif
 
     case FRIDA_BREAKPOINT_CF_INITIALIZE:
-      gum_darwin_enumerate_modules (self->task, find_cf_initialize, self);
+      gum_darwin_enumerate_modules (self->task, frida_find_cf_initialize, self);
 
       if (self->cf_initialize_address != 0)
       {
@@ -3230,27 +3230,25 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
 }
 
 static gboolean
-find_cf_initialize (const GumModuleDetails * details, gpointer user_data)
+frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data)
 {
   FridaSpawnInstance * self = user_data;
 
-  if (strcmp (details->path, CORE_FOUNDATION) == 0)
-  {
-    GumDarwinModule * core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION,
-        self->task, details->range->base_address,
-        GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+  if (strcmp (details->path, CORE_FOUNDATION) != 0)
+    return TRUE;
 
-    self->cf_initialize_address = gum_darwin_module_resolve_symbol_address (core_foundation, "___CFInitialize");
+  GumDarwinModule * core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION,
+      self->task, details->range->base_address,
+      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
-    if (self->cf_initialize_address != 0 && self->cpu_type == GUM_CPU_ARM)
-      self->cf_initialize_address |= 1;
+  self->cf_initialize_address = gum_darwin_module_resolve_symbol_address (core_foundation, "___CFInitialize");
 
-    g_object_unref (core_foundation);
+  if (self->cf_initialize_address != 0 && self->cpu_type == GUM_CPU_ARM)
+    self->cf_initialize_address |= 1;
 
-    return FALSE;
-  }
+  g_object_unref (core_foundation);
 
-  return TRUE;
+  return FALSE;
 }
 
 static void
@@ -3274,15 +3272,15 @@ frida_spawn_instance_call_cf_initialize (FridaSpawnInstance * self, GumDarwinUni
   }
   else
   {
-    guint32 temp[1];
+    guint32 return_address;
     gboolean write_succeeded;
 
     current_pc = state->uts.ts32.__eip;
     state->uts.ts32.__eip = new_pc;
 
-    temp[0] = current_pc;
-    state->uts.ts32.__esp -= sizeof (temp);
-    write_succeeded = gum_darwin_write (self->task, state->uts.ts32.__esp, (const guint8 *) &temp, sizeof (temp));
+    return_address = current_pc;
+    state->uts.ts32.__esp -= sizeof (return_address);
+    write_succeeded = gum_darwin_write (self->task, state->uts.ts32.__esp, (const guint8 *) &return_address, sizeof (temp));
     g_assert (write_succeeded);
   }
 #else
