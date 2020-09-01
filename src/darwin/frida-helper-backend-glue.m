@@ -3280,7 +3280,7 @@ frida_spawn_instance_call_cf_initialize (FridaSpawnInstance * self, GumDarwinUni
 
     return_address = current_pc;
     state->uts.ts32.__esp -= sizeof (return_address);
-    write_succeeded = gum_darwin_write (self->task, state->uts.ts32.__esp, (const guint8 *) &return_address, sizeof (temp));
+    write_succeeded = gum_darwin_write (self->task, state->uts.ts32.__esp, (const guint8 *) &return_address, sizeof (return_address));
     g_assert (write_succeeded);
   }
 #else
