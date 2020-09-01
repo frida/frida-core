@@ -3242,8 +3242,7 @@ frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data)
   if (strcmp (details->path, CORE_FOUNDATION) != 0)
     return TRUE;
 
-  GumDarwinModule * core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION,
-      self->task, details->range->base_address,
+  core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION, self->task, details->range->base_address,
       GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
 
   self->cf_initialize_address = gum_darwin_module_resolve_symbol_address (core_foundation, "___CFInitialize");
