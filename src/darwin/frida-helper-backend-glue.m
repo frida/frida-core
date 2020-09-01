@@ -3237,6 +3237,7 @@ static gboolean
 frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data)
 {
   FridaSpawnInstance * self = user_data;
+  GumDarwinModule * core_foundation;
 
   if (strcmp (details->path, CORE_FOUNDATION) != 0)
     return TRUE;
