@@ -24,8 +24,8 @@ all: \
 
 define declare-executable-macos
 $1-macos: $2
-	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m32 $$< -o $$@.32
-	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m64 $$< -o $$@.64
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework CoreFoundation -m32 $$< -o $$@.32
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework CoreFoundation -m64 $$< -o $$@.64
 	strip -Sx $$@.32 $$@.64
 	lipo $$@.32 $$@.64 -create -output $$@.unsigned
 	$(RM) $$@.64
