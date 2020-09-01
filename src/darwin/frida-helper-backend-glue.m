@@ -73,6 +73,12 @@
     goto bsd_failure; \
   }
 
+#ifdef HAVE_IOS
+# define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+#else
+# define CORE_FOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
+#endif
+
 typedef struct _FridaHelperContext FridaHelperContext;
 typedef struct _FridaSpawnInstance FridaSpawnInstance;
 typedef struct _FridaSpawnInstanceDyldData FridaSpawnInstanceDyldData;
@@ -161,6 +167,7 @@ struct _FridaSpawnInstance
   mach_vm_address_t dyld_data;
   GumAddress modern_entry_address;
   GumAddress dlopen_address;
+  GumAddress cf_initialize_address;
   GumAddress info_address;
   GumAddress register_helpers_address;
   GumAddress dlerror_clear_address;
@@ -181,6 +188,7 @@ enum _FridaBreakpointPhase
   FRIDA_BREAKPOINT_DLOPEN_LIBC,
   FRIDA_BREAKPOINT_SKIP_CLEAR,
   FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER,
+  FRIDA_BREAKPOINT_CF_INITIALIZE,
   FRIDA_BREAKPOINT_CLEANUP,
   FRIDA_BREAKPOINT_DONE
 };
@@ -344,6 +352,8 @@ static gboolean frida_pick_ios_bootstrapper (const GumModuleDetails * details, g
 static void frida_spawn_instance_unset_helpers (FridaSpawnInstance * self);
 static void frida_spawn_instance_call_set_helpers (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t helpers);
 static void frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state, mach_vm_address_t lib_name, int mode);
+static gboolean frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data);
+static void frida_spawn_instance_call_cf_initialize (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state);
 static void frida_spawn_instance_set_nth_breakpoint (FridaSpawnInstance * self, guint n, GumAddress break_at, FridaBreakpointRepeat repeat);
 static void frida_spawn_instance_enable_nth_breakpoint (FridaSpawnInstance * self, guint n);
 static void frida_spawn_instance_unset_nth_breakpoint (FridaSpawnInstance * self, guint n);
@@ -2574,7 +2584,7 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
     memcpy (&self->previous_thread_state, state, sizeof (GumDarwinUnifiedThreadState));
 
     if (pc == self->modern_entry_address)
-      self->breakpoint_phase = FRIDA_BREAKPOINT_DLOPEN_BOOTSTRAPPER;
+      self->breakpoint_phase = FRIDA_BREAKPOINT_CF_INITIALIZE;
     else
       self->breakpoint_phase = FRIDA_BREAKPOINT_SET_HELPERS;
   }
@@ -2684,6 +2694,23 @@ frida_spawn_instance_handle_breakpoint (FridaSpawnInstance * self, FridaBreakpoi
         return TRUE;
       }
 #endif
+
+    case FRIDA_BREAKPOINT_CF_INITIALIZE:
+      gum_darwin_enumerate_modules (self->task, frida_find_cf_initialize, self);
+
+      if (self->cf_initialize_address != 0)
+      {
+        memcpy (state, &self->previous_thread_state, sizeof (GumDarwinUnifiedThreadState));
+
+        if (pc != self->modern_entry_address)
+          frida_spawn_instance_unset_nth_breakpoint (self, 1);
+
+        frida_spawn_instance_call_cf_initialize (self, state);
+
+        self->breakpoint_phase = FRIDA_BREAKPOINT_CLEANUP;
+
+        return TRUE;
+      }
 
     case FRIDA_BREAKPOINT_CLEANUP:
     {
@@ -3202,6 +3229,79 @@ frida_spawn_instance_call_dlopen (FridaSpawnInstance * self, GumDarwinUnifiedThr
     state->ts_32.__r[0] = lib_name;
     state->ts_32.__r[1] = mode;
     state->ts_32.__r[2] = 0;
+  }
+#endif
+}
+
+static gboolean
+frida_find_cf_initialize (const GumModuleDetails * details, gpointer user_data)
+{
+  FridaSpawnInstance * self = user_data;
+  GumDarwinModule * core_foundation;
+
+  if (strcmp (details->path, CORE_FOUNDATION) != 0)
+    return TRUE;
+
+  core_foundation = gum_darwin_module_new_from_memory (CORE_FOUNDATION, self->task, details->range->base_address,
+      GUM_DARWIN_MODULE_FLAGS_NONE, NULL);
+
+  self->cf_initialize_address = gum_darwin_module_resolve_symbol_address (core_foundation, "___CFInitialize");
+
+  if (self->cf_initialize_address != 0 && self->cpu_type == GUM_CPU_ARM)
+    self->cf_initialize_address |= 1;
+
+  g_object_unref (core_foundation);
+
+  return FALSE;
+}
+
+static void
+frida_spawn_instance_call_cf_initialize (FridaSpawnInstance * self, GumDarwinUnifiedThreadState * state)
+{
+  GumAddress new_pc, current_pc;
+
+  new_pc = gum_sign_code_address (self->cf_initialize_address);
+
+#ifdef HAVE_I386
+  if (self->cpu_type == GUM_CPU_AMD64)
+  {
+    gboolean write_succeeded;
+
+    current_pc = state->uts.ts64.__rip;
+    state->uts.ts64.__rip = new_pc;
+
+    state->uts.ts64.__rsp -= 16;
+    write_succeeded = gum_darwin_write (self->task, state->uts.ts64.__rsp, (const guint8 *) &current_pc, sizeof (current_pc));
+    g_assert (write_succeeded);
+  }
+  else
+  {
+    guint32 return_address;
+    gboolean write_succeeded;
+
+    current_pc = state->uts.ts32.__eip;
+    state->uts.ts32.__eip = new_pc;
+
+    return_address = current_pc;
+    state->uts.ts32.__esp -= sizeof (return_address);
+    write_succeeded = gum_darwin_write (self->task, state->uts.ts32.__esp, (const guint8 *) &return_address, sizeof (return_address));
+    g_assert (write_succeeded);
+  }
+#else
+  if (self->cpu_type == GUM_CPU_ARM64)
+  {
+    GumAddress new_lr;
+
+    new_lr = gum_sign_code_address (__darwin_arm_thread_state64_get_pc (state->ts_64));
+
+    __darwin_arm_thread_state64_set_pc_fptr (state->ts_64, GSIZE_TO_POINTER (new_pc));
+    __darwin_arm_thread_state64_set_lr_fptr (state->ts_64, GSIZE_TO_POINTER (new_lr));
+  }
+  else
+  {
+    current_pc = state->ts_32.__pc;
+    state->ts_32.__pc = new_pc;
+    state->ts_32.__lr = current_pc | 1;
   }
 #endif
 }

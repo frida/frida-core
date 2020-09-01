@@ -1201,6 +1201,11 @@ namespace Frida.HostSessionTest {
 					var cout = Module.getExportByName('libc++.1.dylib', '_ZNSt3__14coutE').readPointer();
 					var properlyInitialized = !cout.isNull();
 					write(1, message, 12);
+					var getMainPtr = Module.findExportByName(null, 'CFRunLoopGetMain');
+					if (getMainPtr !== null) {
+					  var getMain = new NativeFunction(getMainPtr, 'pointer', []);
+					  getMain();
+					}
 					var sleepFuncName = (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep';
 					Interceptor.attach(Module.getExportByName('libSystem.B.dylib', sleepFuncName), {
 					  onEnter: function (args) {
