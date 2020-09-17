@@ -367,6 +367,12 @@ namespace Frida.Fruity {
 		private const size_t MAX_BUFFERED_SIZE = 30 * 1024 * 1024;
 		private const size_t MAX_MESSAGE_SIZE = 1024 * 1024;
 		private const size_t MAX_FRAGMENT_SIZE = 128 * 1024;
+		private const string REMOTESERVER_ENDPOINT_MODERN = "lockdown:com.apple.instruments.remoteserver.DVTSecureSocketProxy";
+		private const string REMOTESERVER_ENDPOINT_LEGACY = "lockdown:com.apple.instruments.remoteserver?tls=handshake-only";
+ 		private const string[] REMOTESERVER_ENDPOINT_CANDIDATES = {
+			REMOTESERVER_ENDPOINT_MODERN,
+			REMOTESERVER_ENDPOINT_LEGACY,
+		};
 
 		public static async DTXConnection obtain (ChannelProvider channel_provider, Cancellable? cancellable)
 				throws Error, IOError {
@@ -387,27 +393,35 @@ namespace Frida.Fruity {
 			var request = new Promise<DTXConnection> ();
 			connections[channel_provider] = request.future;
 
-			try {
-				var stream = yield channel_provider.open_channel ("lockdown:com.apple.instruments.remoteserver?tls=handshake-only",
-					cancellable);
+			Error pending_error = null;
 
-				var connection = new DTXConnection (stream);
-				connection.notify["state"].connect (on_connection_state_changed);
+			foreach (unowned string endpoint in REMOTESERVER_ENDPOINT_CANDIDATES) {
+				try {
+					var stream = yield channel_provider.open_channel (endpoint, cancellable);
 
-				request.resolve (connection);
+					var connection = new DTXConnection (stream);
+					connection.notify["state"].connect (on_connection_state_changed);
 
-				return connection;
-			} catch (Error e) {
-				Error api_error = (e is Error.NOT_SUPPORTED)
-					? new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
-						"run Xcode briefly or use ideviceimagemounter to mount one manually")
-					: e;
+					request.resolve (connection);
 
-				request.reject (api_error);
-				connections.unset (channel_provider);
-
-				throw api_error;
+					return connection;
+				} catch (Error e) {
+					if (!(e is Error.NOT_SUPPORTED)) {
+						pending_error = e;
+						break;
+					}
+				}
 			}
+
+			Error api_error = (pending_error == null)
+				? new Error.NOT_SUPPORTED ("This feature requires an iOS Developer Disk Image to be mounted; " +
+					"run Xcode briefly or use ideviceimagemounter to mount one manually")
+				: pending_error;
+
+			request.reject (api_error);
+			connections.unset (channel_provider);
+
+			throw api_error;
 		}
 
 		public static async void close_all (ChannelProvider channel_provider, Cancellable? cancellable) throws IOError {
