@@ -806,9 +806,18 @@ namespace Frida {
 				}
 			}
 
-			var process_control = yield Fruity.ProcessControlService.open (channel_provider, cancellable);
+			try {
+				var lockdown = yield lockdown_provider.get_lockdown_client (cancellable);
+				var lldb = yield start_lldb_service (lockdown, cancellable);
+				var process = yield lldb.attach_by_pid (pid, cancellable);
 
-			yield process_control.kill (pid, cancellable);
+				lldb_session = new LLDBSession (lldb, process, null, channel_provider);
+				yield lldb_session.kill(cancellable);
+				yield lldb_session.close(cancellable);
+			} catch (LLDB.Error e) {
+				var process_control = yield Fruity.ProcessControlService.open (channel_provider, cancellable);
+				yield process_control.kill (pid, cancellable);
+			}
 		}
 
 		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
