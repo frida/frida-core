@@ -447,7 +447,6 @@ namespace Frida {
 			DEBUGSERVER_ENDPOINT_MODERN,
 			DEBUGSERVER_ENDPOINT_LEGACY,
 		};
-		private const string SPRINGBOARD_PATH = "/System/Library/CoreServices/SpringBoard.app/SpringBoard";
 
 		public FruityHostSession (ChannelProvider channel_provider, FruityLockdownProvider lockdown_provider) {
 			Object (
@@ -498,7 +497,7 @@ namespace Frida {
 			var processes = yield device_info.enumerate_processes (cancellable);
 
 			var process = processes.first_match (p => p.foreground_running && p.is_application &&
-					!p.real_app_name.contains (".appex") && p.real_app_name != SPRINGBOARD_PATH);
+					!p.real_app_name.contains (".appex"));
 			if (process == null)
 				return HostApplicationInfo.empty ();
 
