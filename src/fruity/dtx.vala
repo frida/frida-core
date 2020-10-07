@@ -53,6 +53,7 @@ namespace Frida.Fruity {
 
 				info.name = process.get_value<NSString> ("name").str;
 				info.real_app_name = process.get_value<NSString> ("realAppName").str;
+				info.is_application = process.get_value<NSNumber> ("isApplication").boolean;
 
 				NSNumber? foreground_running;
 				if (process.get_optional_value ("foregroundRunning", out foreground_running))
@@ -61,10 +62,6 @@ namespace Frida.Fruity {
 				NSDate? start_date;
 				if (process.get_optional_value ("startDate", out start_date))
 					info.start_date = start_date.to_date_time ();
-
-				NSNumber? is_application;
-				if (process.get_optional_value ("isApplication", out is_application))
-					info.is_application = is_application.boolean;
 
 				result.add (info);
 			}
@@ -231,12 +228,12 @@ namespace Frida.Fruity {
 			set;
 		}
 
-		public bool foreground_running {
+		public bool is_application {
 			get;
 			set;
 		}
 
-		public bool is_application {
+		public bool foreground_running {
 			get;
 			set;
 		}
