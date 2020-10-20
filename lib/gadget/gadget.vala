@@ -699,7 +699,6 @@ namespace Frida.Gadget {
 		}
 
 		private Gum.ScriptBackend? qjs_backend;
-		private Gum.ScriptBackend? duk_backend;
 		private Gum.ScriptBackend? v8_backend;
 
 		public async void start () throws Error {
@@ -737,15 +736,6 @@ namespace Frida.Gadget {
 						}
 					}
 					return qjs_backend;
-				case DUK:
-					if (duk_backend == null) {
-						duk_backend = Gum.ScriptBackend.obtain_duk ();
-						if (duk_backend == null) {
-							throw new Error.NOT_SUPPORTED (
-								"Duktape runtime not available due to build configuration");
-						}
-					}
-					return duk_backend;
 				case V8:
 					if (v8_backend == null) {
 						v8_backend = Gum.ScriptBackend.obtain_v8 ();
@@ -764,7 +754,7 @@ namespace Frida.Gadget {
 		}
 
 		protected Gum.ScriptBackend? get_active_script_backend () {
-			return (qjs_backend != null) ? qjs_backend : (duk_backend != null) ? duk_backend : v8_backend;
+			return (v8_backend != null) ? v8_backend : qjs_backend;
 		}
 	}
 
@@ -1038,7 +1028,7 @@ namespace Frida.Gadget {
 	}
 
 	private class Script : Object, RpcPeer {
-		private const uint8 DUKTAPE_BYTECODE_MAGIC = 0xbf;
+		private const uint8 QUICKJS_BYTECODE_MAGIC = 0x02;
 
 		public enum ChangeBehavior {
 			IGNORE,
@@ -1156,7 +1146,7 @@ namespace Frida.Gadget {
 				options.name = Path.get_basename (path).split (".", 2)[0];
 
 				ScriptEngine.ScriptInstance instance;
-				if (contents.length > 0 && contents[0] == DUKTAPE_BYTECODE_MAGIC) {
+				if (contents.length > 0 && contents[0] == QUICKJS_BYTECODE_MAGIC) {
 					instance = yield engine.create_script (null, new Bytes (contents), options);
 				} else {
 					instance = yield engine.create_script ((string) contents, null, options);

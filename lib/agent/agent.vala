@@ -52,7 +52,6 @@ namespace Frida.Agent {
 
 		private Gum.MemoryRange agent_range;
 		private Gum.ScriptBackend? qjs_backend;
-		private Gum.ScriptBackend? duk_backend;
 		private Gum.ScriptBackend? v8_backend;
 		private ExitMonitor exit_monitor;
 		private Gum.Interceptor interceptor;
@@ -507,15 +506,6 @@ namespace Frida.Agent {
 						}
 					}
 					return qjs_backend;
-				case DUK:
-					if (duk_backend == null) {
-						duk_backend = Gum.ScriptBackend.obtain_duk ();
-						if (duk_backend == null) {
-							throw new Error.NOT_SUPPORTED (
-								"Duktape runtime not available due to build configuration");
-						}
-					}
-					return duk_backend;
 				case V8:
 					if (v8_backend == null) {
 						v8_backend = Gum.ScriptBackend.obtain_v8 ();
@@ -531,15 +521,11 @@ namespace Frida.Agent {
 				return get_script_backend (QJS);
 			} catch (Error e) {
 			}
-			try {
-				return get_script_backend (DUK);
-			} catch (Error e) {
-			}
 			return get_script_backend (V8);
 		}
 
 		public Gum.ScriptBackend? get_active_script_backend () {
-			return (qjs_backend != null) ? qjs_backend : (duk_backend != null) ? duk_backend : v8_backend;
+			return (v8_backend != null) ? v8_backend : qjs_backend;
 		}
 
 		private async void open (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {

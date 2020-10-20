@@ -609,7 +609,6 @@ namespace Frida {
 	public enum ScriptRuntime {
 		DEFAULT,
 		QJS,
-		DUK,
 		V8;
 
 		public string to_nick () {

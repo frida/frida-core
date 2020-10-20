@@ -18,7 +18,7 @@ namespace Frida.Inject {
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, "attach to PID", "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, "attach to NAME", "NAME" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
-		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "duk|v8" },
+		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "qjs|v8" },
 		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
 		{ "development", 0, 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
