@@ -698,6 +698,7 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		private Gum.ScriptBackend? qjs_backend;
 		private Gum.ScriptBackend? duk_backend;
 		private Gum.ScriptBackend? v8_backend;
 
@@ -727,6 +728,15 @@ namespace Frida.Gadget {
 			switch (runtime) {
 				case DEFAULT:
 					break;
+				case QJS:
+					if (qjs_backend == null) {
+						qjs_backend = Gum.ScriptBackend.obtain_qjs ();
+						if (qjs_backend == null) {
+							throw new Error.NOT_SUPPORTED (
+								"QuickJS runtime not available due to build configuration");
+						}
+					}
+					return qjs_backend;
 				case DUK:
 					if (duk_backend == null) {
 						duk_backend = Gum.ScriptBackend.obtain_duk ();
@@ -748,13 +758,13 @@ namespace Frida.Gadget {
 			}
 
 			if (config.runtime == INTERPRETER)
-				return get_script_backend (DUK);
+				return get_script_backend (QJS);
 
 			return get_script_backend (V8);
 		}
 
 		protected Gum.ScriptBackend? get_active_script_backend () {
-			return (v8_backend != null) ? v8_backend : duk_backend;
+			return (qjs_backend != null) ? qjs_backend : (duk_backend != null) ? duk_backend : v8_backend;
 		}
 	}
 

@@ -51,6 +51,7 @@ namespace Frida.Agent {
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
 		private Gum.MemoryRange agent_range;
+		private Gum.ScriptBackend? qjs_backend;
 		private Gum.ScriptBackend? duk_backend;
 		private Gum.ScriptBackend? v8_backend;
 		private ExitMonitor exit_monitor;
@@ -497,6 +498,15 @@ namespace Frida.Agent {
 			switch (runtime) {
 				case DEFAULT:
 					break;
+				case QJS:
+					if (qjs_backend == null) {
+						qjs_backend = Gum.ScriptBackend.obtain_qjs ();
+						if (qjs_backend == null) {
+							throw new Error.NOT_SUPPORTED (
+								"QuickJS runtime not available due to build configuration");
+						}
+					}
+					return qjs_backend;
 				case DUK:
 					if (duk_backend == null) {
 						duk_backend = Gum.ScriptBackend.obtain_duk ();
@@ -518,6 +528,10 @@ namespace Frida.Agent {
 			}
 
 			try {
+				return get_script_backend (QJS);
+			} catch (Error e) {
+			}
+			try {
 				return get_script_backend (DUK);
 			} catch (Error e) {
 			}
@@ -525,7 +539,7 @@ namespace Frida.Agent {
 		}
 
 		public Gum.ScriptBackend? get_active_script_backend () {
-			return (v8_backend != null) ? v8_backend : duk_backend;
+			return (qjs_backend != null) ? qjs_backend : (duk_backend != null) ? duk_backend : v8_backend;
 		}
 
 		private async void open (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {

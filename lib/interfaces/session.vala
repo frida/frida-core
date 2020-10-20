@@ -608,6 +608,7 @@ namespace Frida {
 
 	public enum ScriptRuntime {
 		DEFAULT,
+		QJS,
 		DUK,
 		V8;
 
