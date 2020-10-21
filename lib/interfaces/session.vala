@@ -1,5 +1,5 @@
 namespace Frida {
-	[DBus (name = "re.frida.HostSession12")]
+	[DBus (name = "re.frida.HostSession14")]
 	public interface HostSession : Object {
 		public abstract async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws GLib.Error;
 		public abstract async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws GLib.Error;
@@ -30,7 +30,7 @@ namespace Frida {
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
-	[DBus (name = "re.frida.AgentSessionProvider12")]
+	[DBus (name = "re.frida.AgentSessionProvider14")]
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
 #if !WINDOWS
@@ -44,7 +44,7 @@ namespace Frida {
 		public signal void child_gating_changed (uint subscriber_count);
 	}
 
-	[DBus (name = "re.frida.AgentSession12")]
+	[DBus (name = "re.frida.AgentSession14")]
 	public interface AgentSession : Object {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
 
@@ -75,7 +75,7 @@ namespace Frida {
 		public abstract async void enable_jit (Cancellable? cancellable) throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.AgentController12")]
+	[DBus (name = "re.frida.AgentController14")]
 	public interface AgentController : Object {
 #if !WINDOWS
 		public abstract async HostChildId prepare_to_fork (uint parent_pid, Cancellable? cancellable, out uint parent_injectee_id,
@@ -92,7 +92,7 @@ namespace Frida {
 			Cancellable? cancellable) throws GLib.Error;
 	}
 
-	[DBus (name = "re.frida.TransportBroker12")]
+	[DBus (name = "re.frida.TransportBroker14")]
 	public interface TransportBroker : Object {
 		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
 			out string token) throws GLib.Error;
