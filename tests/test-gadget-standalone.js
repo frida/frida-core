@@ -1,15 +1,15 @@
-var sleep = Module.getExportByName('libSystem.B.dylib',
+const sleep = Module.getExportByName('libSystem.B.dylib',
     (Process.arch === 'ia32') ? 'sleep$UNIX2003' : 'sleep');
-var exit = new NativeFunction(
+const exit = new NativeFunction(
     Module.getExportByName('libSystem.B.dylib', 'exit'),
     'void',
     ['int']);
 
 rpc.exports = {
-  init: function () {
+  init() {
     try {
       Interceptor.attach(sleep, {
-        onEnter: function () {
+        onEnter() {
           exit(123);
         }
       });

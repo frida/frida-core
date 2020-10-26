@@ -34,7 +34,7 @@ namespace Frida.AgentTest {
 				Cancellable? cancellable = null;
 				script_id = yield session.create_script ("load-and-receive-messages",
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
-					 "  onEnter: function(args) {" +
+					 "  onEnter(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: args[1].readUtf8String() });" +
 					 "  }" +
 					 "});").printf ((size_t) func), cancellable);
@@ -64,10 +64,10 @@ namespace Frida.AgentTest {
 			try {
 				Cancellable? cancellable = null;
 				script_id = yield session.create_script ("performance",
-					("var buf = ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\").readByteArray(%d);" +
-					 "var startTime = new Date();" +
-					 "var iterations = 0;" +
-					 "var sendNext = function sendNext() {" +
+					("const buf = ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\").readByteArray(%d);" +
+					 "const startTime = new Date();" +
+					 "let iterations = 0;" +
+					 "function sendNext() {" +
 					 "  send({}, buf);" +
 					 "  if (new Date().getTime() - startTime.getTime() <= 1000) {" +
 					 "    setTimeout(sendNext, ((++iterations %% 10) === 0) ? 1 : 0);" +
@@ -117,32 +117,30 @@ namespace Frida.AgentTest {
 			try {
 				Cancellable? cancellable = null;
 				script_id = yield session.create_script ("launch-scenario", """
-var pointerSize = Process.pointerSize;
+const POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
-var POSIX_SPAWN_START_SUSPENDED = 0x0080;
+const { pointerSize } = Process;
 
-var upcoming = {};
-var gating = false;
-var active = 0;
+const upcoming = new Set();
+let gating = false;
+let active = 0;
 
 rpc.exports = {
-  prepareForLaunch: function (identifier) {
-    upcoming[identifier] = true;
+  prepareForLaunch(identifier) {
+    upcoming.add(identifier);
     active++;
   },
-  cancelLaunch: function (identifier) {
-    if (upcoming[identifier] !== undefined) {
-      delete upcoming[identifier];
+  cancelLaunch(identifier) {
+    if (upcoming.delete(identifier))
       active--;
-    }
   },
-  enableSpawnGating: function () {
+  enableSpawnGating() {
     if (gating)
       throw new Error('Spawn gating already enabled');
     gating = true;
     active++;
   },
-  disableSpawnGating: function () {
+  disableSpawnGating() {
     if (!gating)
       throw new Error('Spawn gating already disabled');
     gating = false;
@@ -151,20 +149,20 @@ rpc.exports = {
 };
 
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
-  onEnter: function (args) {
+  onEnter(args) {
     if (active === 0)
       return;
 
-    var path = args[1].readUtf8String();
+    const path = args[1].readUtf8String();
     if (path !== '/bin/ls')
       return;
 
-    var rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
+    const rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
 
-    var identifier, event;
-    if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
+    let identifier, event;
+    if (rawIdentifier.startsWith('UIKitApplication:')) {
       identifier = rawIdentifier.substring(17, rawIdentifier.indexOf('['));
-      if (upcoming[identifier] !== undefined)
+      if (upcoming.has(identifier))
         event = 'launch:app';
       else if (gating)
         event = 'spawn';
@@ -177,9 +175,9 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
       return;
     }
 
-    var attrs = args[2].add(pointerSize).readPointer();
+    const attrs = args[2].add(pointerSize).readPointer();
 
-    var flags = attrs.readU16();
+    let flags = attrs.readU16();
     flags |= POSIX_SPAWN_START_SUSPENDED;
     attrs.writeU16(flags);
 
@@ -187,25 +185,23 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     this.identifier = identifier;
     this.pidPtr = args[0];
   },
-  onLeave: function (retval) {
+  onLeave(retval) {
     if (active === 0)
       return;
 
-    var event = this.event;
+    const { event, identifier, pidPtr } = this;
     if (event === undefined)
       return;
 
-    var identifier = this.identifier;
-
     if (event === 'launch:app') {
-      delete upcoming[identifier];
+      upcoming.delete(identifier);
       active--;
     }
 
     if (retval.toInt32() < 0)
       return;
 
-    send([event, identifier, this.pidPtr.readU32()]);
+    send([event, identifier, pidPtr.readU32()]);
   }
 });
 """, cancellable);
@@ -340,7 +336,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 				var script_id = yield session.create_script ("thread-suspend-scenario", """
 console.log('Script runtime is: ' + Script.runtime);
 
-Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), function () {
+Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () => {
 });
 """, cancellable);
 				yield session.load_script (script_id, cancellable);

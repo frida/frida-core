@@ -1,40 +1,42 @@
-var YES = ptr(1);
+const YES = ptr(1);
 
-var NSFileManager = ObjC.classes.NSFileManager;
-var NSMutableDictionary = ObjC.classes.NSMutableDictionary;
-var OSALog = ObjC.classes.OSALog;
+const {
+  NSFileManager,
+  NSMutableDictionary,
+  OSALog,
+} = ObjC.classes;
 
-var sessions = {};
+const sessions = new Map();
 
 Interceptor.attach(OSALog['+ locallyCreateForSubmission:metadata:options:error:writing:'].implementation, {
-  onEnter: function (args) {
-    sessions[this.threadId] = {
+  onEnter(args) {
+    sessions.set(this.threadId, {
       forcedByUs: false
-    };
+    });
   },
-  onLeave: function (retval) {
-    var log = new ObjC.Object(retval);
-    var threadId = this.threadId;
+  onLeave(retval) {
+    const log = new ObjC.Object(retval);
+    const { threadId } = this;
 
-    var session = sessions[threadId];
+    const session = sessions.get(threadId);
     if (session.forcedByUs) {
-      var oldPath = log.filepath().toString();
-      var newPath = oldPath + '.forced-by-frida';
+      const oldPath = log.filepath().toString();
+      const newPath = oldPath + '.forced-by-frida';
       NSFileManager.defaultManager().moveItemAtPath_toPath_error_(oldPath, newPath, NULL);
       log.rename_(newPath);
     }
 
-    delete sessions[threadId];
+    sessions.delete(threadId);
   },
 });
 
 Interceptor.attach(NSMutableDictionary['- osa_logCounter_isLog:byKey:count:withinLimit:withOptions:'].implementation, {
-  onLeave: function (retval) {
-    var session = sessions[this.threadId];
+  onLeave(retval) {
+    const session = sessions.get(this.threadId);
     if (session === undefined)
       return;
 
-    var isWithinLimit = !!retval.toInt32();
+    const isWithinLimit = !!retval.toInt32();
     if (!isWithinLimit) {
       retval.replace(YES);
       session.forcedByUs = true;

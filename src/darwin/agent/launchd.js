@@ -1,58 +1,58 @@
-var pointerSize = Process.pointerSize;
+const POSIX_SPAWN_START_SUSPENDED = 0x0080;
+const SIGKILL = 9;
 
-var POSIX_SPAWN_START_SUSPENDED = 0x0080;
-var SIGKILL = 9;
+const { pointerSize } = Process;
 
-var internalAgentServices = {
-  'com.apple.ReportCrash': true,
-  'com.apple.osanalytics.osanalyticshelper': true,
-};
+const internalAgentServices = new Set([
+  'com.apple.ReportCrash',
+  'com.apple.osanalytics.osanalyticshelper',
+]);
 
-var upcoming = {};
-var gating = false;
-var suspendedPids = {};
+const upcoming = new Set();
+let gating = false;
+const suspendedPids = new Set();
 
-var jbdPidsToIgnore = null;
+let jbdPidsToIgnore = null;
 
-var substrateInvocations = {};
-var substratePidsPending = {};
+const substrateInvocations = new Set();
+const substratePidsPending = new Map();
 
 rpc.exports = {
-  dispose: function () {
-    var kill = new NativeFunction(Module.getExportByName(null, 'kill'), 'int', ['int', 'int']);
-    Object.keys(suspendedPids)
-      .forEach(function (pid) {
-        kill(suspendedPids[pid], SIGKILL);
-      });
+  dispose() {
+    if (suspendedPids.size > 0) {
+      const kill = new NativeFunction(Module.getExportByName(null, 'kill'), 'int', ['int', 'int']);
+      for (const pid of suspendedPids) {
+        kill(pid, SIGKILL);
+      }
+    }
   },
-  prepareForLaunch: function (identifier) {
-    upcoming[identifier] = true;
+  prepareForLaunch(identifier) {
+    upcoming.add(identifier);
   },
-  cancelLaunch: function (identifier) {
-    if (upcoming[identifier] !== undefined)
-      delete upcoming[identifier];
+  cancelLaunch(identifier) {
+    upcoming.delete(identifier);
   },
-  enableSpawnGating: function () {
+  enableSpawnGating() {
     gating = true;
   },
-  disableSpawnGating: function () {
+  disableSpawnGating() {
     gating = false;
   },
-  claimProcess: function (pid) {
-    delete suspendedPids[pid];
+  claimProcess(pid) {
+    suspendedPids.delete(pid);
   },
-  unclaimProcess: function (pid) {
-    suspendedPids[pid] = pid;
+  unclaimProcess(pid) {
+    suspendedPids.add(pid);
   },
 };
 
 applyJailbreakQuirks();
 
 Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dylib', '__posix_spawn'), {
-  onEnter: function (args) {
-    var path = args[1].readUtf8String();
+  onEnter(args) {
+    const path = args[1].readUtf8String();
 
-    var rawIdentifier;
+    let rawIdentifier;
     if (path === '/usr/libexec/xpcproxy') {
       rawIdentifier = args[3].add(pointerSize).readPointer().readUtf8String();
     } else {
@@ -61,25 +61,25 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
         return;
     }
 
-    var identifier, event;
-    if (rawIdentifier.indexOf('UIKitApplication:') === 0) {
+    let identifier, event;
+    if (rawIdentifier.startsWith('UIKitApplication:')) {
       identifier = rawIdentifier.substring(17, rawIdentifier.indexOf('['));
-      if (upcoming[identifier] !== undefined)
+      if (upcoming.has(identifier))
         event = 'launch:app';
       else if (gating)
         event = 'spawn';
       else
         return;
-    } else if (gating || internalAgentServices.hasOwnProperty(rawIdentifier)) {
+    } else if (gating || internalAgentServices.has(rawIdentifier)) {
       identifier = rawIdentifier;
       event = 'spawn';
     } else {
       return;
     }
 
-    var attrs = args[2].add(pointerSize).readPointer();
+    const attrs = args[2].add(pointerSize).readPointer();
 
-    var flags = attrs.readU16();
+    let flags = attrs.readU16();
     flags |= POSIX_SPAWN_START_SUSPENDED;
     attrs.writeU16(flags);
 
@@ -88,30 +88,28 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     this.identifier = identifier;
     this.pidPtr = args[0];
   },
-  onLeave: function (retval) {
-    var event = this.event;
+  onLeave(retval) {
+    const { event } = this;
     if (event === undefined)
       return;
 
-    var path = this.path;
-    var identifier = this.identifier;
+    const { path, identifier, pidPtr, threadId } = this;
 
     if (event === 'launch:app')
-      delete upcoming[identifier];
+      upcoming.delete(identifier);
 
     if (retval.toInt32() < 0)
       return;
 
-    var pid = this.pidPtr.readU32();
+    const pid = pidPtr.readU32();
 
-    suspendedPids[pid] = pid;
+    suspendedPids.add(pid);
 
     if (jbdPidsToIgnore !== null)
-      jbdPidsToIgnore[pid] = true;
+      jbdPidsToIgnore.add(pid);
 
-    var dealingWithSubstrate = substrateInvocations[this.threadId] === true;
-    if (dealingWithSubstrate) {
-      substratePidsPending[pid] = notifyFridaBackend;
+    if (substrateInvocations.has(threadId)) {
+      substratePidsPending.set(pid, notifyFridaBackend);
     } else {
       notifyFridaBackend();
     }
@@ -126,14 +124,14 @@ function tryParseXpcServiceName(envp) {
   if (envp.isNull())
     return null;
 
-  var cur = envp;
+  let cur = envp;
   while (true) {
-    var elementPtr = cur.readPointer();
+    const elementPtr = cur.readPointer();
     if (elementPtr.isNull())
       break;
 
-    var element = elementPtr.readUtf8String();
-    if (element.indexOf('XPC_SERVICE_NAME=') === 0)
+    const element = elementPtr.readUtf8String();
+    if (element.startsWith('XPC_SERVICE_NAME='))
       return element.substring(17);
 
     cur = cur.add(pointerSize);
@@ -143,30 +141,27 @@ function tryParseXpcServiceName(envp) {
 }
 
 function applyJailbreakQuirks() {
-  var jbdCallImpl = findJbdCallImpl();
+  const jbdCallImpl = findJbdCallImpl();
   if (jbdCallImpl !== null) {
-    jbdPidsToIgnore = {};
+    jbdPidsToIgnore = new Set();
     sabotageJbdCallForOurPids(jbdCallImpl);
     return;
   }
 
-  var launcher = findSubstrateLauncher();
+  const launcher = findSubstrateLauncher();
   if (launcher !== null)
     instrumentSubstrateLauncher(launcher);
 }
 
 function sabotageJbdCallForOurPids(jbdCallImpl) {
-  var retType = 'int';
-  var argTypes = ['uint', 'uint', 'uint'];
+  const retType = 'int';
+  const argTypes = ['uint', 'uint', 'uint'];
 
-  var jbdCall = new NativeFunction(jbdCallImpl, retType, argTypes);
+  const jbdCall = new NativeFunction(jbdCallImpl, retType, argTypes);
 
-  Interceptor.replace(jbdCall, new NativeCallback(function (port, command, pid) {
-    var isIgnored = jbdPidsToIgnore[pid] !== undefined;
-    if (isIgnored) {
-      delete jbdPidsToIgnore[pid];
+  Interceptor.replace(jbdCall, new NativeCallback((port, command, pid) => {
+    if (jbdPidsToIgnore.delete(pid))
       return 0;
-    }
 
     return jbdCall(port, command, pid);
   }, retType, argTypes));
@@ -174,31 +169,31 @@ function sabotageJbdCallForOurPids(jbdCallImpl) {
 
 function instrumentSubstrateLauncher(launcher) {
   Interceptor.attach(launcher.handlePosixSpawn, {
-    onEnter: function () {
-      substrateInvocations[this.threadId] = true;
+    onEnter() {
+      substrateInvocations.add(this.threadId);
     },
-    onLeave: function () {
-      delete substrateInvocations[this.threadId];
+    onLeave() {
+      substrateInvocations.delete(this.threadId);
     }
   });
 
   Interceptor.attach(launcher.workerCont, {
-    onEnter: function (args) {
-      var baton = args[0];
-      var pid = baton.readS32();
+    onEnter(args) {
+      const baton = args[0];
+      const pid = baton.readS32();
 
-      var notify = substratePidsPending[pid];
+      const notify = substratePidsPending.get(pid);
       if (notify !== undefined) {
-        delete substratePidsPending[pid];
+        substratePidsPending.delete(pid);
 
-        var startSuspendedPtr = baton.add(4);
+        const startSuspendedPtr = baton.add(4);
         startSuspendedPtr.writeU8(1);
 
         this.notify = notify;
       }
     },
-    onLeave: function (retval) {
-      var notify = this.notify;
+    onLeave(retval) {
+      const notify = this.notify;
       if (notify !== undefined)
         notify();
     },
@@ -206,15 +201,15 @@ function instrumentSubstrateLauncher(launcher) {
 }
 
 function findJbdCallImpl() {
-  var impl = Module.findExportByName(null, 'jbd_call');
+  const impl = Module.findExportByName(null, 'jbd_call');
   if (impl !== null)
     return impl;
 
-  var payload = Process.findModuleByName('/chimera/pspawn_payload.dylib');
+  const payload = Process.findModuleByName('/chimera/pspawn_payload.dylib');
   if (payload === null)
     return null;
 
-  var matches = Memory.scanSync(payload.base, payload.size, 'ff 43 01 d1 f4 4f 03 a9 fd 7b 04 a9 fd 03 01 91');
+  const matches = Memory.scanSync(payload.base, payload.size, 'ff 43 01 d1 f4 4f 03 a9 fd 7b 04 a9 fd 03 01 91');
   if (matches.length !== 1)
     throw new Error('Unsupported version of Chimera; please file a bug');
 
@@ -225,13 +220,12 @@ function findSubstrateLauncher() {
   if (Process.arch !== 'arm64')
     return null;
 
-  var imp = Module.enumerateImports('/sbin/launchd')
-      .filter(function (imp) { return imp.name === 'posix_spawn'; })[0];
-  var impl = imp.slot.readPointer().strip();
-  var header = findClosestMachHeader(impl);
+  const imp = Module.enumerateImports('/sbin/launchd').filter(imp => imp.name === 'posix_spawn')[0];
+  const impl = imp.slot.readPointer().strip();
+  const header = findClosestMachHeader(impl);
 
-  var launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62';
-  var isSubstrate = Memory.scanSync(header, 2048, launcherDylibName).length > 0;
+  const launcherDylibName = '4c 61 75 6e 63 68 65 72 2e 74 2e 64 79 6c 69 62';
+  const isSubstrate = Memory.scanSync(header, 2048, launcherDylibName).length > 0;
   if (!isSubstrate)
     return null;
 
@@ -241,7 +235,7 @@ function findSubstrateLauncher() {
   };
 
   function resolveFunction(signature) {
-    var matches = Memory.scanSync(header, 37056, signature);
+    const matches = Memory.scanSync(header, 37056, signature);
     if (matches.length !== 1) {
       throw new Error('Unsupported version of Substrate; please file a bug');
     }
@@ -250,7 +244,7 @@ function findSubstrateLauncher() {
 }
 
 function findClosestMachHeader(address) {
-  var cur = address.and(ptr(4095).not());
+  let cur = address.and(ptr(4095).not());
   while (true) {
     if ((cur.readU32() & 0xfffffffe) >>> 0 === 0xfeedface)
       return cur;

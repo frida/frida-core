@@ -1,22 +1,22 @@
-var ApplicationInfo, ComponentName, ContextWrapper, Intent, RunningAppProcessInfo, RunningTaskInfo, UserHandle, GET_META_DATA, GET_ACTIVITIES, FLAG_ACTIVITY_NEW_TASK;
-var context, packageManager, activityManager;
+let ApplicationInfo, ComponentName, ContextWrapper, Intent, RunningAppProcessInfo, RunningTaskInfo, UserHandle, GET_META_DATA, GET_ACTIVITIES, FLAG_ACTIVITY_NEW_TASK;
+let context, packageManager, activityManager;
 
-var multiUserSupported;
-var pendingLaunches = {};
+let multiUserSupported;
+const pendingLaunches = new Map();
 
 function init() {
-  var ActivityManager = Java.use('android.app.ActivityManager');
-  var ActivityThread = Java.use('android.app.ActivityThread');
+  const ActivityManager = Java.use('android.app.ActivityManager');
+  const ActivityThread = Java.use('android.app.ActivityThread');
   ApplicationInfo = Java.use('android.content.pm.ApplicationInfo');
   ComponentName = Java.use('android.content.ComponentName');
   ContextWrapper = Java.use('android.content.ContextWrapper');
   Intent = Java.use('android.content.Intent');
-  var Context = Java.use('android.content.Context');
-  var PackageManager = Java.use('android.content.pm.PackageManager');
+  const Context = Java.use('android.content.Context');
+  const PackageManager = Java.use('android.content.pm.PackageManager');
   RunningAppProcessInfo = Java.use('android.app.ActivityManager$RunningAppProcessInfo');
   RunningTaskInfo = Java.use('android.app.ActivityManager$RunningTaskInfo');
   UserHandle = Java.use('android.os.UserHandle');
-  var ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
+  const ACTIVITY_SERVICE = Context.ACTIVITY_SERVICE.value;
   GET_META_DATA = PackageManager.GET_META_DATA.value;
   GET_ACTIVITIES = PackageManager.GET_ACTIVITIES.value;
   FLAG_ACTIVITY_NEW_TASK = Intent.FLAG_ACTIVITY_NEW_TASK.value;
@@ -32,44 +32,41 @@ function init() {
 }
 
 rpc.exports = {
-  enumerateApplications: function () {
-    return performOnJavaVM(function () {
-      var result = [];
+  enumerateApplications() {
+    return performOnJavaVM(() => {
+      const result = [];
 
-      var i, pid;
+      const appPids = new Map();
+      const processes = activityManager.getRunningAppProcesses();
+      const numProcesses = processes.size();
+      for (let i = 0; i !== numProcesses; i++) {
+        const process = Java.cast(processes.get(i), RunningAppProcessInfo);
+        const pid = process.pid.value;
 
-      var appPids = {};
-      var processes = activityManager.getRunningAppProcesses();
-      var numProcesses = processes.size();
-      for (i = 0; i !== numProcesses; i++) {
-        var process = Java.cast(processes.get(i), RunningAppProcessInfo);
-        pid = process.pid.value;
+        const importance = process.importance.value;
 
-        var importance = process.importance.value;
-
-        var pkgList = process.pkgList.value;
-        pkgList.forEach(function (pkg) {
-          var entries = appPids[pkg];
+        for (const pkg of process.pkgList.value) {
+          let entries = appPids.get(pkg);
           if (entries === undefined) {
             entries = [];
-            appPids[pkg] = entries;
+            appPids.set(pkg, entries);
           }
           entries.push([ pid, importance ]);
-        });
+        }
       }
 
-      var apps = packageManager.getInstalledApplications(GET_META_DATA);
-      var numApps = apps.size();
-      for (i = 0; i !== numApps; i++) {
-        var app = Java.cast(apps.get(i), ApplicationInfo);
-        var pkg = app.packageName.value;
+      const apps = packageManager.getInstalledApplications(GET_META_DATA);
+      const numApps = apps.size();
+      for (let i = 0; i !== numApps; i++) {
+        const app = Java.cast(apps.get(i), ApplicationInfo);
+        const pkg = app.packageName.value;
 
-        var name = app.loadLabel(packageManager).toString();
+        const name = app.loadLabel(packageManager).toString();
 
-        var pid;
-        var pids = appPids[pkg];
+        let pid;
+        const pids = appPids.get(pkg);
         if (pids !== undefined) {
-          pids.sort(function (a, b) { return a[1] - b[1]; });
+          pids.sort((a, b) => a[1] - b[1]);
           pid = pids[0][0];
         } else {
           pid = 0;
@@ -81,23 +78,22 @@ rpc.exports = {
       return result;
     });
   },
-  getProcessName: function (pkg, uid) {
+  getProcessName(pkg, uid) {
     checkUidOptionSupported(uid);
 
-    return performOnJavaVM(function () {
+    return performOnJavaVM(() => {
       try {
         return getAppMetaData(pkg, uid).processName.value;
       } catch (e) {
-        throw new Error("Unable to find application with identifier '" + pkg + "'" +
-            ((uid !== 0) ? ' belonging to uid ' + uid : ''));
+        throw new Error(`Unable to find application with identifier '${pkg}'${(uid !== 0) ? ' belonging to uid ' + uid : ''}`);
       }
     });
   },
-  startActivity: function (pkg, activity, uid) {
+  startActivity(pkg, activity, uid) {
     checkUidOptionSupported(uid);
 
-    return performOnJavaVM(function () {
-      var user, ctx, pm;
+    return performOnJavaVM(() => {
+      let user, ctx, pm;
       if (uid !== 0) {
         user = UserHandle.of(uid);
         ctx = context.createPackageContextAsUser(pkg, GET_META_DATA, user);
@@ -108,13 +104,13 @@ rpc.exports = {
         pm = packageManager;
       }
 
-      var appInstalled = false;
-      var apps = (uid !== 0)
+      let appInstalled = false;
+      const apps = (uid !== 0)
           ? pm.getInstalledApplicationsAsUser(GET_META_DATA, uid)
           : pm.getInstalledApplications(GET_META_DATA);
-      var numApps = apps.size();
-      for (var i = 0; i !== numApps; i++) {
-        var appInfo = Java.cast(apps.get(i), ApplicationInfo);
+      const numApps = apps.size();
+      for (let i = 0; i !== numApps; i++) {
+        const appInfo = Java.cast(apps.get(i), ApplicationInfo);
         if (appInfo.packageName.value === pkg) {
           appInstalled = true;
           break;
@@ -123,7 +119,7 @@ rpc.exports = {
       if (!appInstalled)
         throw new Error("Unable to find application with identifier '" + pkg + "'");
 
-      var intent = pm.getLaunchIntentForPackage(pkg);
+      let intent = pm.getLaunchIntentForPackage(pkg);
       if (intent === null && 'getLeanbackLaunchIntentForPackage' in pm)
         intent = pm.getLeanbackLaunchIntentForPackage(pkg);
       if (intent === null && activity === null)
@@ -135,19 +131,17 @@ rpc.exports = {
       }
 
       if (activity !== null) {
-        var pkgInfo = (uid !== 0)
+        const pkgInfo = (uid !== 0)
             ? pm.getPackageInfoAsUser(pkg, GET_ACTIVITIES, uid)
             : pm.getPackageInfo(pkg, GET_ACTIVITIES);
-        var activities = pkgInfo.activities.value.map(function (activityInfo) {
-          return activityInfo.name.value;
-        });
-        if (activities.indexOf(activity) === -1)
+        const activities = pkgInfo.activities.value.map(activityInfo => activityInfo.name.value);
+        if (!activities.includes(activity))
           throw new Error("Unable to find activity with identifier '" + activity + "'");
 
         intent.setClassName(pkg, activity);
       }
 
-      performLaunchOperation(pkg, uid, function () {
+      performLaunchOperation(pkg, uid, () => {
         if (user !== null)
           ContextWrapper.$new(ctx).startActivityAsUser(intent, user);
         else
@@ -155,15 +149,15 @@ rpc.exports = {
       });
     });
   },
-  sendBroadcast: function (pkg, receiver, action, uid) {
+  sendBroadcast(pkg, receiver, action, uid) {
     checkUidOptionSupported(uid);
 
-    return performOnJavaVM(function () {
-      var intent = Intent.$new();
+    return performOnJavaVM(() => {
+      const intent = Intent.$new();
       intent.setComponent(ComponentName.$new(pkg, receiver));
       intent.setAction(action);
 
-      performLaunchOperation(pkg, uid, function () {
+      performLaunchOperation(pkg, uid, () => {
         if (uid !== 0)
           ContextWrapper.$new(context).sendBroadcastAsUser(intent, UserHandle.of(uid));
         else
@@ -171,27 +165,27 @@ rpc.exports = {
       });
     });
   },
-  stopPackage: function (pkg, uid) {
+  stopPackage(pkg, uid) {
     checkUidOptionSupported(uid);
 
-    return performOnJavaVM(function () {
+    return performOnJavaVM(() => {
       if (uid !== 0)
         activityManager.forceStopPackageAsUser(pkg, uid);
       else
         activityManager.forceStopPackage(pkg);
     });
   },
-  tryStopPackageByPid: function (pid) {
-    return performOnJavaVM(function () {
-      var processes = activityManager.getRunningAppProcesses();
+  tryStopPackageByPid(pid) {
+    return performOnJavaVM(() => {
+      const processes = activityManager.getRunningAppProcesses();
 
-      var numProcesses = processes.size();
-      for (var i = 0; i !== numProcesses; i++) {
-        var process = Java.cast(processes.get(i), RunningAppProcessInfo);
+      const numProcesses = processes.size();
+      for (let i = 0; i !== numProcesses; i++) {
+        const process = Java.cast(processes.get(i), RunningAppProcessInfo);
         if (process.pid.value === pid) {
-          process.pkgList.value.forEach(function (pkg) {
+          for (const pkg of process.pkgList.value) {
             activityManager.forceStopPackage(pkg);
-          });
+          }
           return true;
         }
       }
@@ -199,26 +193,25 @@ rpc.exports = {
       return false;
     });
   },
-  getFrontmostApplication: function () {
-    return performOnJavaVM(function () {
-      var result = null;
+  getFrontmostApplication() {
+    return performOnJavaVM(() => {
+      let result = null;
 
-      var runningTaskInfos = activityManager.getRunningTasks(1);
+      const runningTaskInfos = activityManager.getRunningTasks(1);
       if (runningTaskInfos !== null && runningTaskInfos.size() > 0) {
-        var runningTaskInfo = Java.cast(runningTaskInfos.get(0), RunningTaskInfo);
+        const runningTaskInfo = Java.cast(runningTaskInfos.get(0), RunningTaskInfo);
         if (runningTaskInfo.topActivity !== undefined) {
-          var topActivity = runningTaskInfo.topActivity.value;
-          var app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
-          var pkg = app.packageName.value;
-          var name = app.loadLabel(packageManager).toString();
+          const topActivity = runningTaskInfo.topActivity.value;
+          const app = packageManager.getApplicationInfo(topActivity.getPackageName(), GET_META_DATA);
+          const pkg = app.packageName.value;
+          const name = app.loadLabel(packageManager).toString();
 
-          var processes = activityManager.getRunningAppProcesses();
-          var numProcesses = processes.size();
-          var pid = 0;
-          for (var i = 0; i !== numProcesses; i++) {
-            var process = Java.cast(processes.get(i), RunningAppProcessInfo);
-            var pkgList = process.pkgList.value;
-            if (pkgList.indexOf(pkg) > -1) {
+          const processes = activityManager.getRunningAppProcesses();
+          const numProcesses = processes.size();
+          let pid = 0;
+          for (let i = 0; i !== numProcesses; i++) {
+            const process = Java.cast(processes.get(i), RunningAppProcessInfo);
+            if (process.pkgList.value.includes(pkg)) {
               pid = process.pid.value;
               break;
             }
@@ -245,27 +238,27 @@ function checkUidOptionSupported(uid) {
 }
 
 function installLaunchTimeoutRemovalInstrumentation() {
-  var Handler = Java.use('android.os.Handler');
-  var OSProcess = Java.use('android.os.Process');
+  const Handler = Java.use('android.os.Handler');
+  const OSProcess = Java.use('android.os.Process');
 
-  var pendingStartRequests = {};
+  const pendingStartRequests = new Set();
 
-  var start = OSProcess.start;
+  const start = OSProcess.start;
   start.implementation = function (processClass, niceName) {
-    var result = start.apply(this, arguments);
+    const result = start.apply(this, arguments);
 
     if (tryFinishLaunch(niceName)) {
-      pendingStartRequests[Process.getCurrentThreadId()] = true;
+      pendingStartRequests.add(Process.getCurrentThreadId());
     }
 
     return result;
   };
 
-  var sendMessageDelayed = Handler.sendMessageDelayed;
+  const sendMessageDelayed = Handler.sendMessageDelayed;
   sendMessageDelayed.implementation = function (msg, delayMillis) {
-    var tid = Process.getCurrentThreadId();
-    if (pendingStartRequests[tid] === true) {
-      delete pendingStartRequests[tid];
+    const tid = Process.getCurrentThreadId();
+    if (pendingStartRequests.has(tid)) {
+      pendingStartRequests.delete(tid);
       msg.recycle();
       return true;
     }
@@ -275,15 +268,15 @@ function installLaunchTimeoutRemovalInstrumentation() {
 }
 
 function performLaunchOperation(pkg, uid, operation) {
-  var processName = getAppMetaData(pkg, uid).processName.value;
+  const processName = getAppMetaData(pkg, uid).processName.value;
 
   tryFinishLaunch(processName);
 
-  var timer = setTimeout(function () {
-    if (pendingLaunches[processName] === timer)
+  const timer = setTimeout(() => {
+    if (pendingLaunches.get(processName) === timer)
       tryFinishLaunch(processName);
   }, 10000);
-  pendingLaunches[processName] = timer;
+  pendingLaunches.set(processName, timer);
 
   try {
     return operation();
@@ -294,20 +287,20 @@ function performLaunchOperation(pkg, uid, operation) {
 }
 
 function tryFinishLaunch(processName) {
-  var timer = pendingLaunches[processName];
+  const timer = pendingLaunches.get(processName);
   if (timer === undefined)
     return false;
 
-  delete pendingLaunches[processName];
+  pendingLaunches.delete(processName);
   clearTimeout(timer);
   return true;
 }
 
 function performOnJavaVM(task) {
-  return new Promise(function (resolve, reject) {
-    Java.perform(function () {
+  return new Promise((resolve, reject) => {
+    Java.perform(() => {
       try {
-        var result = task();
+        const result = task();
 
         resolve(result);
       } catch (e) {
