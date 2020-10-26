@@ -634,8 +634,7 @@ namespace Frida {
 			string * source = Frida.Data.Android.get_system_server_js_blob ().data;
 			Object (
 				host_session: host_session,
-				script_source: source,
-				script_runtime: ScriptRuntime.V8
+				script_source: source
 			);
 		}
 
