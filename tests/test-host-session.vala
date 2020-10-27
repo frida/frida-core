@@ -388,8 +388,7 @@ namespace Frida.HostSessionTest {
 								"2. Load script\n" +
 								"3. Remove script\n" +
 								"4. Enable debugger\n" +
-								"5. Disable debugger\n" +
-								"6. Enable JIT\n"
+								"5. Disable debugger\n"
 							);
 
 							var command = prompt (">");
@@ -436,12 +435,6 @@ namespace Frida.HostSessionTest {
 								case 5:
 									Idle.add (() => {
 										disable_debugger.begin (session);
-										return false;
-									});
-									break;
-								case 6:
-									Idle.add (() => {
-										enable_jit.begin (session);
 										return false;
 									});
 									break;
@@ -538,14 +531,6 @@ namespace Frida.HostSessionTest {
 					yield session.disable_debugger ();
 				} catch (GLib.Error e) {
 					printerr ("Unable to disable debugger: %s\n", e.message);
-				}
-			}
-
-			private static async void enable_jit (Session session) {
-				try {
-					yield session.enable_jit ();
-				} catch (GLib.Error e) {
-					printerr ("Unable to enable JIT: %s\n", e.message);
 				}
 			}
 
@@ -817,7 +802,6 @@ namespace Frida.HostSessionTest {
 
 			/* Warm up static allocations */
 			var session = yield device.attach (process.id);
-			yield session.enable_jit ();
 			var script = yield session.create_script ("true;");
 			yield script.load ();
 			yield script.unload ();
@@ -829,7 +813,6 @@ namespace Frida.HostSessionTest {
 
 			for (var i = 0; i != 1; i++) {
 				session = yield device.attach (process.id);
-				yield session.enable_jit ();
 				script = yield session.create_script ("true;");
 				yield script.load ();
 				yield script.unload ();
