@@ -24,13 +24,8 @@ all: \
 
 define declare-executable-macos
 $1-macos: $2
-	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework CoreFoundation -m32 $$< -o $$@.32
-	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework CoreFoundation -m64 $$< -o $$@.64
-	strip -Sx $$@.32 $$@.64
-	lipo $$@.32 $$@.64 -create -output $$@.unsigned
-	$(RM) $$@.64
-	codesign -s "$$$$MACOS_CERTID" $$@.32
-	mv $$@.32 $$@32
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -framework CoreFoundation -arch arm64 $$< -o $$@.unsigned
+	strip -Sx $$@.unsigned
 	codesign -s "$$$$MACOS_CERTID" $$@.unsigned
 	mv $$@.unsigned $$@
 endef
@@ -53,11 +48,11 @@ endef
 
 define declare-library-macos
 $1-macos.dylib: $2
-	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m32 -dynamiclib $$< -o $$@.32
-	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -m64 -dynamiclib $$< -o $$@.64
-	strip -Sx $$@.32 $$@.64
-	lipo $$@.32 $$@.64 -create -output $$@.unsigned
-	$(RM) $$@.32 $$@.64
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -arch arm64 -dynamiclib $$< -o $$@.arm64
+	$$(MACOS_CC) $$(MACOS_CFLAGS) $$(MACOS_LDFLAGS) -arch arm64e -dynamiclib $$< -o $$@.arm64e
+	strip -Sx $$@.arm64 $$@.arm64e
+	lipo $$@.arm64 $$@.arm64e -create -output $$@.unsigned
+	$(RM) $$@.arm64 $$@.arm64e
 	codesign -s "$$$$MACOS_CERTID" $$@.unsigned
 	mv $$@.unsigned $$@
 endef
