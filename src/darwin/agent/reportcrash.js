@@ -7,6 +7,8 @@ const CSTypeRef = ['pointer', 'pointer'];
 const kCSNow = uint64('0x8000000000000000');
 const NSUTF8StringEncoding = 4;
 
+const { pointerSize } = Process;
+
 const nativeOptions = {
   scheduling: 'exclusive',
   exceptions: 'propagate'
@@ -60,9 +62,16 @@ const {
 const sessions = new Map();
 let osaHookState = 'pending';
 
-function createSession(threadId) {
+function initialize() {
+  const listener = Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'CRCreateDirectoryStructure'), () => {
+    applyInstrumentation();
+    listener.detach();
+  });
+}
+
+function createSession(threadId, crashedPid) {
   const session = {
-    crashedPid: -1,
+    crashedPid,
     is64Bit: null,
     forcedByUs: false,
     logPath: null,
@@ -96,56 +105,62 @@ function findSession(threadId) {
   return sessions.get(threadId) ?? null;
 }
 
-Interceptor.attach(CrashReport['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'].implementation, {
-  onEnter(args) {
-    const session = createSession(this.threadId);
+function applyInstrumentation() {
+  const CrashReportImpl = findCrashReportClass() ?? CrashReport;
 
-    const task = args[2].toUInt32();
+  Interceptor.attach(CrashReportImpl['- initWithTask:exceptionType:thread:threadStateFlavor:threadState:threadStateCount:'].implementation, {
+    onEnter(args) {
+      const task = args[2].toUInt32();
+      const crashedPid = pidForTask(task);
 
-    const crashedPid = pidForTask(task);
-    session.crashedPid = crashedPid;
+      const session = createSession(this.threadId, crashedPid);
 
-    send(['crash-detected', crashedPid]);
-    const op = recv('mapped-agents', message => {
-      session.mappedAgents = message.payload.map(agent => {
-        return {
-          machHeaderAddress: uint64(agent.machHeaderAddress),
-          uuid: agent.uuid,
-          path: agent.path,
-        };
+      send(['crash-detected', crashedPid]);
+      const op = recv('mapped-agents', message => {
+        session.mappedAgents = message.payload.map(agent => {
+          return {
+            machHeaderAddress: uint64(agent.machHeaderAddress),
+            uuid: agent.uuid,
+            path: agent.path,
+          };
+        });
       });
-    });
-    op.wait();
-
-    ensureOsaHooked();
-  },
-});
-
-Interceptor.attach(Module.getExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit'), {
-  onEnter(args) {
-    this.pid = pidForTask(args[0].toUInt32());
-  },
-  onLeave(retval) {
-    const session = findSession(this.threadId);
-    if (this.pid === session?.crashedPid)
-      session.is64Bit = !!retval.toUInt32();
-  }
-});
-
-Interceptor.attach(CrashReport['- isActionable'].implementation, {
-  onLeave(retval) {
-    const isActionable = !!retval.toInt32();
-    const session = getSession(this.threadId, 'isActionable');
-    if (!isActionable) {
-      retval.replace(YES);
-      session.forcedByUs = true;
+      op.wait();
     }
-  },
-});
+  });
 
-function ensureOsaHooked() {
-  if (osaHookState === 'hooked')
-    return;
+  Interceptor.attach(CrashReportImpl['- isActionable'].implementation, {
+    onLeave(retval) {
+      const isActionable = !!retval.toInt32();
+      const session = getSession(this.threadId, 'isActionable');
+      if (!isActionable) {
+        retval.replace(YES);
+        session.forcedByUs = true;
+      }
+    },
+  });
+
+  Interceptor.attach(Module.getExportByName(CORESYMBOLICATION_PATH, 'task_is_64bit'), {
+    onEnter(args) {
+      this.pid = pidForTask(args[0].toUInt32());
+    },
+    onLeave(retval) {
+      const session = findSession(this.threadId);
+      if (this.pid === session?.crashedPid)
+        session.is64Bit = !!retval.toUInt32();
+    }
+  });
+
+  Interceptor.attach(CrashReportImpl['- isActionable'].implementation, {
+    onLeave(retval) {
+      const isActionable = !!retval.toInt32();
+      const session = getSession(this.threadId, 'isActionable');
+      if (!isActionable) {
+        retval.replace(YES);
+        session.forcedByUs = true;
+      }
+    },
+  });
 
   const methodName = (OSAReport !== undefined)
       ? '- osa_logCounter_isLog:byKey:count:withinLimit:withOptions:'
@@ -161,215 +176,282 @@ function ensureOsaHooked() {
     },
   });
 
-  osaHookState = 'hooked';
-}
-
-const saveImpl = (OSAReport !== undefined)
-    ? OSAReport['- saveWithOptions:'].implementation
-    : AppleErrorReport['- saveToDir:'].implementation;
-Interceptor.attach(saveImpl, {
-  onLeave(retval) {
-    const session = getSession(this.threadId, 'save');
-    if (session.forcedByUs)
-      unlink(Memory.allocUtf8String(session.logPath));
-
-    terminateSession(this.threadId);
-  },
-});
-
-const createForSubmission = OSALog?.['+ createForSubmission:metadata:options:error:writing:'];
-if (createForSubmission !== undefined) {
-  Interceptor.attach(createForSubmission.implementation, {
+  const saveImpl = (OSAReport !== undefined)
+      ? OSAReport['- saveWithOptions:'].implementation
+      : AppleErrorReport['- saveToDir:'].implementation;
+  Interceptor.attach(saveImpl, {
     onLeave(retval) {
-      const log = new ObjC.Object(retval);
-      const filePath = log.filepath();
+      const session = getSession(this.threadId, 'save');
+      if (session.forcedByUs)
+        unlink(Memory.allocUtf8String(session.logPath));
 
-      const session = getSession(this.threadId, 'createForSubmission');
-
-      const logPath = filePath.toString();
-      session.logPath = logPath;
-
-      if (logPath.includes('.forced-by-frida'))
-        session.forcedByUs = true;
-
-      session.logChunks.push(NSString.stringWithContentsOfFile_encoding_error_(filePath, NSUTF8StringEncoding, NULL).toString());
-    }
-  });
-} else {
-  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
-    onEnter(args) {
-      const newPath = args[1].readUtf8String();
-      const session = getSession(this.threadId, 'rename');
-      if (/\.ips$/.test(newPath))
-        session.logPath = newPath;
+      terminateSession(this.threadId);
     },
   });
 
-  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
-    onEnter(args) {
-      const path = args[0].readUtf8String();
-      this.isCrashLog = /\.ips$/.test(path);
-    },
-    onLeave(retval) {
-      const session = getSession(this.threadId, 'open_dprotected_np');
-      if (this.isCrashLog)
-        session.logFd = retval.toInt32();
-    },
-  });
+  const createForSubmission = OSALog?.['+ createForSubmission:metadata:options:error:writing:'];
+  if (createForSubmission !== undefined) {
+    Interceptor.attach(createForSubmission.implementation, {
+      onLeave(retval) {
+        const log = new ObjC.Object(retval);
+        const filePath = log.filepath();
 
-  Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
-    onEnter(args) {
-      const fd = args[0].toInt32();
-      this.buf = args[1];
+        const session = getSession(this.threadId, 'createForSubmission');
 
-      const session = findSession(this.threadId);
-      if (session !== null) {
-        this.session = session;
-        this.isCrashLog = (fd === session.logFd);
-      } else {
-        this.isCrashLog = false;
+        const logPath = filePath.toString();
+        session.logPath = logPath;
+
+        if (logPath.includes('.forced-by-frida'))
+          session.forcedByUs = true;
+
+        session.logChunks.push(NSString.stringWithContentsOfFile_encoding_error_(filePath, NSUTF8StringEncoding, NULL).toString());
       }
-    },
-    onLeave(retval) {
-      if (!this.isCrashLog)
-        return;
+    });
+  } else {
+    Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'rename'), {
+      onEnter(args) {
+        const newPath = args[1].readUtf8String();
+        const session = getSession(this.threadId, 'rename');
+        if (/\.ips$/.test(newPath))
+          session.logPath = newPath;
+      },
+    });
 
-      const n = retval.toInt32();
-      if (n === -1)
-        return;
+    Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'open_dprotected_np'), {
+      onEnter(args) {
+        const path = args[0].readUtf8String();
+        this.isCrashLog = /\.ips$/.test(path);
+      },
+      onLeave(retval) {
+        const session = getSession(this.threadId, 'open_dprotected_np');
+        if (this.isCrashLog)
+          session.logFd = retval.toInt32();
+      },
+    });
 
-      const chunk = this.buf.readUtf8String(n);
-      const { session } = this;
-      if (session !== undefined)
-        session.logChunks.push(chunk);
-    }
-  });
-}
+    Interceptor.attach(Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'write'), {
+      onEnter(args) {
+        const fd = args[0].toInt32();
+        this.buf = args[1];
 
-Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
-  onEnter(args) {
-    this.name = new ObjC.Object(args[0]).toString();
-    this.domain = new ObjC.Object(args[1]).toString();
-    this.successPtr = args[2];
-  },
-  onLeave(retval) {
-    if (this.name === 'SymbolicateCrashes' && this.domain === 'com.apple.CrashReporter') {
-      if (!this.successPtr.isNull())
-        this.successPtr.writeU8(1);
-      retval.replace(YES);
-    }
+        const session = findSession(this.threadId);
+        if (session !== null) {
+          this.session = session;
+          this.isCrashLog = (fd === session.logFd);
+        } else {
+          this.isCrashLog = false;
+        }
+      },
+      onLeave(retval) {
+        if (!this.isCrashLog)
+          return;
+
+        const n = retval.toInt32();
+        if (n === -1)
+          return;
+
+        const chunk = this.buf.readUtf8String(n);
+        const { session } = this;
+        if (session !== undefined)
+          session.logChunks.push(chunk);
+      }
+    });
   }
-});
 
-const libdyld = findLibdyldInternals();
-if (libdyld !== null) {
-  const allImageInfoSizes = new Map([
-    [15, 320],
-    [16, 328],
-  ]);
-  const imageElementSize = 3 * Process.pointerSize;
-
-  const procInfoInvocations = new Map();
-
-  Interceptor.attach(libdyld['dyld_process_info_base::make'], {
+  Interceptor.attach(Module.getExportByName(CRASH_REPORTER_SUPPORT_PATH, 'OSAPreferencesGetBoolValue'), {
     onEnter(args) {
-      const session = getSession(this.threadId, 'dyld_process_info_base::make');
-
-      const pid = pidForTask(args[0].toUInt32());
-      if (pid !== session.crashedPid)
-        return;
-      const allImageInfo = args[1];
-
-      const version = allImageInfo.readU32();
-      const count = allImageInfo.add(4).readU32();
-      const array = allImageInfo.add(8).readU64();
-
-      const size = allImageInfoSizes.get(version);
-      if (size === undefined) {
-        console.error('Unsupported dyld_all_image_infos_64; please add support for version ' + version);
-        return;
-      }
-
-      const extraCount = session.mappedAgents.length;
-      const copy = Memory.dup(allImageInfo, size);
-      copy.add(4).writeU32(count + extraCount);
-      this.allImageInfo = copy;
-      args[1] = copy;
-
-      const realSize = count * imageElementSize;
-
-      procInfoInvocations.set(this.threadId, {
-        array: array,
-        realSize: realSize,
-        fakeSize: realSize + (extraCount * imageElementSize),
-        agents: session.mappedAgents,
-        paths: new Map()
-      });
+      this.name = new ObjC.Object(args[0]).toString();
+      this.domain = new ObjC.Object(args[1]).toString();
+      this.successPtr = args[2];
     },
     onLeave(retval) {
-      procInfoInvocations.delete(this.threadId);
+      if (this.name === 'SymbolicateCrashes' && this.domain === 'com.apple.CrashReporter') {
+        if (!this.successPtr.isNull())
+          this.successPtr.writeU8(1);
+        retval.replace(YES);
+      }
     }
   });
 
-  Interceptor.attach(libdyld.withRemoteBuffer, {
-    onEnter(args) {
-      const invocation = procInfoInvocations.get(this.threadId);
-      if (invocation === undefined)
-        return;
+  const libdyld = findLibdyldInternals();
+  if (libdyld !== null) {
+    const allImageInfoSizes = new Map([
+      [15, 304],
+      [16, 328],
+      [17, 368],
+    ]);
+    const imageElementSize = 3 * pointerSize;
 
-      const session = getSession(this.threadId, 'withRemoteBuffer');
+    const procInfoInvocations = new Map();
 
-      const remoteAddress = uint64(args[1].toString());
+    Interceptor.attach(libdyld['dyld_process_info_base::make'], {
+      onEnter(args) {
+        const session = getSession(this.threadId, 'dyld_process_info_base::make');
 
-      if (remoteAddress.equals(invocation.array)) {
-        const realSize = invocation.realSize;
+        const pid = pidForTask(args[0].toUInt32());
+        const allImageInfo = args[1];
 
-        args[2] = ptr(realSize);
+        const version = allImageInfo.readU32();
+        const count = allImageInfo.add(4).readU32();
+        const array = allImageInfo.add(8).readU64();
 
-        this.block = wrapBlock(args[6], (impl, buffer, size) => {
-          const copy = Memory.alloc(invocation.fakeSize);
-          Memory.copy(copy, buffer, realSize);
+        const size = allImageInfoSizes.get(version);
+        if (size === undefined) {
+          console.error('Unsupported dyld_all_image_infos_64; please add support for version ' + version);
+          return;
+        }
 
-          let element = copy.add(realSize);
-          const paths = invocation.paths;
-          for (const agent of invocation.agents) {
-            const loadAddress = agent.machHeaderAddress;
-            const filePath = loadAddress.sub(4096);
-            const modDate = 0;
+        const extraCount = session.mappedAgents.length;
+        const copy = Memory.dup(allImageInfo, size);
+        copy.add(4).writeU32(count + extraCount);
+        this.allImageInfo = copy;
+        args[1] = copy;
 
-            if (session.is64Bit) {
-              element
-                  .writeU64(loadAddress).add(8)
-                  .writeU64(filePath).add(8)
-                  .writeU64(modDate);
-            } else {
-              element
-                  .writeU32(loadAddress).add(4)
-                  .writeU32(filePath).add(4)
-                  .writeU32(modDate);
+        const realSize = count * imageElementSize;
+        const fakeSize = realSize + (extraCount * imageElementSize);
+
+        const paths = new Map();
+
+        procInfoInvocations.set(this.threadId, {
+          session,
+          array,
+          realSize,
+          fakeSize,
+          paths
+        });
+      },
+      onLeave(retval) {
+        procInfoInvocations.delete(this.threadId);
+      }
+    });
+
+    Interceptor.attach(libdyld.withRemoteBuffer, {
+      onEnter(args) {
+        const invocation = procInfoInvocations.get(this.threadId);
+        if (invocation === undefined)
+          return;
+
+        const { session } = invocation;
+
+        const remoteAddress = uint64(args[1].toString());
+
+        if (remoteAddress.equals(invocation.array)) {
+          const realSize = invocation.realSize;
+
+          args[2] = ptr(realSize);
+
+          this.block = wrapBlock(args[6], (impl, buffer, size) => {
+            const copy = Memory.alloc(invocation.fakeSize);
+            Memory.copy(copy, buffer, realSize);
+
+            let element = copy.add(realSize);
+            const paths = invocation.paths;
+            for (const agent of session.mappedAgents) {
+              const loadAddress = agent.machHeaderAddress;
+              const filePath = loadAddress.sub(4096);
+              const modDate = 0;
+
+              if (session.is64Bit) {
+                element
+                    .writeU64(loadAddress).add(8)
+                    .writeU64(filePath).add(8)
+                    .writeU64(modDate);
+              } else {
+                element
+                    .writeU32(loadAddress).add(4)
+                    .writeU32(filePath).add(4)
+                    .writeU32(modDate);
+              }
+
+              paths.set(filePath.toString(), agent);
+
+              element = element.add(imageElementSize);
             }
 
-            paths.set(filePath.toString(), agent);
+            return impl(copy, size);
+          });
 
-            element = element.add(imageElementSize);
-          }
+          return;
+        }
 
-          return impl(copy, size);
-        });
-
-        return;
+        const agent = invocation.paths.get(remoteAddress.toString());
+        if (agent !== undefined) {
+          this.block = wrapBlock(args[6], (impl, buffer, size) => {
+            const copy = Memory.dup(buffer, size);
+            copy.writeUtf8String(agent.path);
+            return impl(copy, size);
+          });
+        }
       }
+    });
+  }
 
-      const agent = invocation.paths.get(remoteAddress.toString());
-      if (agent !== undefined) {
-        this.block = wrapBlock(args[6], (impl, buffer, size) => {
-          const copy = Memory.dup(buffer, size);
-          copy.writeUtf8String(agent.path);
-          return impl(copy, size);
-        });
+  if (Process.arch === 'arm64') {
+    Interceptor.attach(ObjC.classes.VMUSampler['- sampleAllThreadsOnceWithFramePointers:'].implementation, {
+      onEnter(args) {
+        args[2] = YES;
       }
+    });
+
+    Interceptor.attach(ObjC.classes.VMUBacktrace['- fixupStackWithSamplingContext:symbolicator:'].implementation, {
+      onEnter(args) {
+        this.self = new ObjC.Object(args[0]);
+        this.samplingContext = args[2];
+        this.symbolicator = [args[3], args[4]];
+      },
+      onLeave() {
+        const session = getSession(this.threadId, 'fixupStackWithSamplingContext');
+        if (!session.is64Bit)
+          return;
+
+        const { self, samplingContext, symbolicator } = this;
+
+        const [, frames, framePtrs, length] = self.$ivars._callstack;
+        const mappedMemory = new MappedMemory(samplingContext.add(8).readPointer());
+
+        for (let i = 0; i !== length; i++) {
+          const frameSlot = frames.add(i * 8);
+          const frame = frameSlot.readU64();
+
+          const symbol = CSSymbolicatorGetSymbolWithAddressAtTime(symbolicator, frame, kCSNow);
+          if (!CSIsNull(symbol))
+            continue;
+
+          const framePtrAbove = (i > 0) ? framePtrs.add((i - 1) * 8).readU64() : null;
+
+          const functionAddress = tryParseInterceptorTrampoline(frame, framePtrAbove, mappedMemory);
+          if (functionAddress !== null)
+            frameSlot.writeU64(functionAddress);
+        }
+      },
+    });
+  }
+}
+
+function findCrashReportClass() {
+  const { api } = ObjC;
+
+  const reporter = Process.enumerateModules()[0];
+  const reporterStart = reporter.base;
+  const reporterEnd = reporterStart.add(reporter.size);
+
+  const numClasses = api.objc_getClassList(NULL, 0);
+  const classHandles = Memory.alloc(numClasses * pointerSize);
+  api.objc_getClassList(classHandles, numClasses);
+
+  const classGetName = api.class_getName;
+
+  for (let i = numClasses - 1; i >= 0; i--) {
+    const classHandle = classHandles.add(i * pointerSize).readPointer();
+    const rawName = classGetName(classHandle);
+    if (rawName.compare(reporterStart) >= 0 && rawName.compare(reporterEnd) < 0) {
+      const name = rawName.readUtf8String();
+      if (name === 'CrashReport')
+        return new ObjC.Object(classHandle);
     }
-  });
+  }
+
+  return null;
 }
 
 function findLibdyldInternals() {
@@ -378,11 +460,17 @@ function findLibdyldInternals() {
 
   const { base, size } = Process.getModuleByName('/usr/lib/system/libdyld.dylib');
 
+  const {
+    NSAutoreleasePool,
+    NSProcessInfo,
+  } = ObjC.classes;
+
   /*
    * Verified on:
    * - 12.4
    * - 13.2.2
    * - 13.3
+   * - 14.0
    */
   const prologue = [];
 
@@ -392,8 +480,18 @@ function findLibdyldInternals() {
     prologue.push(pacibsp);
   }
 
+  let makeProcessInfoTailSize = isArm64e ? 35 : 33;
+  const pool = NSAutoreleasePool.alloc().init();
+  try {
+    if (NSProcessInfo.processInfo().isOperatingSystemAtLeastVersion_([14, 0, 0])) {
+      makeProcessInfoTailSize -= 2;
+    }
+  } finally {
+    pool.release();
+  }
+
   const signatures = {
-    'dyld_process_info_base::make': prologue.concat(['ff c3 04 d1', '?? ?? ?? ?? '.repeat(isArm64e ? 35 : 33), '28 e0 02 91']).join(' '),
+    'dyld_process_info_base::make': prologue.concat(['ff ?? ?? d1', '?? ?? ?? ?? '.repeat(makeProcessInfoTailSize), '28 e0 02 91']).join(' '),
     'withRemoteBuffer': prologue.concat(['ff ?? 01 d1 f4 4f ?? a9 fd 7b ?? a9 fd ?? ?? 91 f3 03 06 aa']).join(' '),
   };
 
@@ -417,47 +515,6 @@ function pidForTask(task) {
   const pidBuf = Memory.alloc(4);
   _pidForTask(task, pidBuf);
   return pidBuf.readU32();
-}
-
-if (Process.arch === 'arm64') {
-  Interceptor.attach(ObjC.classes.VMUSampler['- sampleAllThreadsOnceWithFramePointers:'].implementation, {
-    onEnter(args) {
-      args[2] = YES;
-    }
-  });
-
-  Interceptor.attach(ObjC.classes.VMUBacktrace['- fixupStackWithSamplingContext:symbolicator:'].implementation, {
-    onEnter(args) {
-      this.self = new ObjC.Object(args[0]);
-      this.samplingContext = args[2];
-      this.symbolicator = [args[3], args[4]];
-    },
-    onLeave() {
-      const session = getSession(this.threadId, 'fixupStackWithSamplingContext');
-      if (!session.is64Bit)
-        return;
-
-      const { self, samplingContext, symbolicator } = this;
-
-      const [, frames, framePtrs, length] = self.$ivars._callstack;
-      const mappedMemory = new MappedMemory(samplingContext.add(8).readPointer());
-
-      for (let i = 0; i !== length; i++) {
-        const frameSlot = frames.add(i * 8);
-        const frame = frameSlot.readU64();
-
-        const symbol = CSSymbolicatorGetSymbolWithAddressAtTime(symbolicator, frame, kCSNow);
-        if (!CSIsNull(symbol))
-          continue;
-
-        const framePtrAbove = (i > 0) ? framePtrs.add((i - 1) * 8).readU64() : null;
-
-        const functionAddress = tryParseInterceptorTrampoline(frame, framePtrAbove, mappedMemory);
-        if (functionAddress !== null)
-          frameSlot.writeU64(functionAddress);
-      }
-    },
-  });
 }
 
 const pointerBuf = Memory.alloc(8);
@@ -571,3 +628,5 @@ function wrapBlock(handle, wrapper) {
 
   return block;
 }
+
+initialize();
