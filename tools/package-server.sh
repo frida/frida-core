@@ -116,15 +116,13 @@ exit 0
 EOF
 chmod 755 "$tmpdir/DEBIAN/prerm"
 
-$FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$output_deb"
+dpkg-deb --root-owner-group --build "$tmpdir" "$output_deb"
 package_size=$(expr $(du -sk "$output_deb" | cut -f1) \* 1024)
 
-sudo chown -R 0:0 "$tmpdir"
-sudo sed \
+sed \
   -i "" \
   -e "s,^Size: 1337$,Size: $package_size,g" \
   "$tmpdir/DEBIAN/control"
-sudo $FRIDA_TOOLCHAIN/bin/dpkg-deb -b "$tmpdir" "$output_deb"
-sudo chown -R $(whoami) "$tmpdir" "$output_deb"
+dpkg-deb --root-owner-group --build "$tmpdir" "$output_deb"
 
 rm -rf "$tmpdir"
