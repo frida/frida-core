@@ -321,18 +321,30 @@ class Layout(object):
 class Symbols(object):
     @classmethod
     def from_file(cls, binary_path, pointer_size, toolchain):
-        items = {}
-
-        for line in subprocess.check_output([toolchain.nm, binary_path]).decode('utf-8').split("\n"):
-            tokens = line.split(" ", 2)
+        raw_items = {}
+        for line in subprocess.check_output([toolchain.nm, "--format=posix", binary_path]).decode('utf-8').split("\n"):
+            tokens = line.rstrip().split(" ", 3)
             if len(tokens) < 3:
                 continue
-            raw_address, type, name = tokens
+
+            name, type, raw_address = tokens[0:3]
             if type.lower() != 't' or name == "":
                 continue
-            address = int(raw_address, 16)
 
-            items[address] = name
+            address = int(raw_address, 16)
+            if len(tokens) > 3:
+                size = int(tokens[3], 16)
+            else:
+                size = 0
+
+            if address in raw_items:
+                (other_name, other_size) = raw_items[address]
+                if size <= other_size:
+                    continue
+
+            raw_items[address] = (name, size)
+
+        items = dict([(address, name) for address, (name, size) in raw_items.items()])
 
         return Symbols(items, pointer_size)
 
