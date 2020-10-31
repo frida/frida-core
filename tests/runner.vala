@@ -88,31 +88,35 @@ namespace Frida.Test {
 				assert_not_reached ();
 		}
 
-		string cpu_name;
+		string abi_name;
 		switch (Frida.Test.cpu ()) {
 			case CPU.X86_32:
-				cpu_name = "x86";
+				abi_name = "x86";
 				break;
 			case CPU.X86_64:
-				cpu_name = "x86_64";
+				abi_name = "x86_64";
 				break;
 			case CPU.ARM_32:
-				cpu_name = "arm";
+#if ARMHF
+				abi_name = "armhf";
+#else
+				abi_name = "arm";
+#endif
 				break;
 			case CPU.ARM_64:
-				cpu_name = "arm64";
+				abi_name = "arm64";
 				break;
 			case CPU.MIPS:
-				cpu_name = "mips";
+				abi_name = "mips";
 				break;
 			case CPU.MIPSEL:
-				cpu_name = "mipsel";
+				abi_name = "mipsel";
 				break;
 			default:
 				assert_not_reached ();
 		}
 
-		return "-" + os_name + "-" + cpu_name;
+		return "-" + os_name + "-" + abi_name;
 	}
 
 	public string os_executable_suffix () {
