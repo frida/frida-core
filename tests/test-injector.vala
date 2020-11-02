@@ -191,8 +191,8 @@ namespace Frida.InjectorTest {
 				assert_not_reached ();
 			}
 
-#if DARWIN
-			/* TODO: improve the i/macOS injector to handle injection into a process that hasn't yet finished initializing */
+#if !WINDOWS
+			/* TODO: improve injectors to handle injection into a process that hasn't yet finished initializing */
 			Thread.usleep (50000);
 #endif
 		}
