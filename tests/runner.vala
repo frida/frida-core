@@ -12,22 +12,29 @@ namespace Frida.Test {
 	public static void run (string[] args) {
 		Environment.init (ref args);
 
-		if (os () == MACOS && cpu () == X86_64) {
-			try {
-				string raw_version;
-				GLib.Process.spawn_command_line_sync ("sw_vers -productVersion", out raw_version);
-
-				string[] tokens = raw_version.strip ().split (".");
-				assert (tokens.length >= 2);
-
-				uint major = uint.parse (tokens[0]);
-				uint minor = uint.parse (tokens[1]);
-
-				bool newer_than_mojave = major > 10 || (major == 10 && minor > 4);
-				if (newer_than_mojave)
+		if (os () == MACOS) {
+			switch (cpu ()) {
+				case ARM_64:
 					can_test_cross_arch_injection = false;
-			} catch (GLib.Error e) {
-				assert_not_reached ();
+					break;
+				case X86_64:
+					try {
+						string raw_version;
+						GLib.Process.spawn_command_line_sync ("sw_vers -productVersion", out raw_version);
+
+						string[] tokens = raw_version.strip ().split (".");
+						assert (tokens.length >= 2);
+
+						uint major = uint.parse (tokens[0]);
+						uint minor = uint.parse (tokens[1]);
+
+						bool newer_than_mojave = major > 10 || (major == 10 && minor > 4);
+						if (newer_than_mojave)
+							can_test_cross_arch_injection = false;
+					} catch (GLib.Error e) {
+						assert_not_reached ();
+					}
+					break;
 			}
 		}
 
