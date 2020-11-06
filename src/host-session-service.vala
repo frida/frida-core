@@ -182,7 +182,7 @@ namespace Frida {
 			if (pending_children_gc_request != null)
 				yield garbage_collect_pending_children (cancellable);
 
-			foreach (var ack_request in pending_acks)
+			foreach (var ack_request in pending_acks.values)
 				ack_request.complete ();
 			pending_acks.clear ();
 
