@@ -871,7 +871,7 @@ namespace Frida.Fruity {
 					case DICT_KEY_START:
 						if (element_name == "key")
 							partial.need = DICT_KEY_TEXT;
-						return;
+						break;
 					case DICT_VALUE_START:
 						partial.type = element_name;
 						partial.val = null;
@@ -890,7 +890,7 @@ namespace Frida.Fruity {
 
 						partial.need = DICT_VALUE_TEXT_OR_END;
 
-						return;
+						break;
 					case ARRAY_VALUE_START:
 						partial.type = element_name;
 						partial.val = null;
@@ -909,7 +909,9 @@ namespace Frida.Fruity {
 
 						partial.need = ARRAY_VALUE_TEXT_OR_END;
 
-						return;
+						break;
+					default:
+						break;
 				}
 			}
 
@@ -936,10 +938,11 @@ namespace Frida.Fruity {
 									parent.array.add_value (partial.dict);
 									parent.need = ARRAY_VALUE_START;
 									break;
+								default:
+									break;
 							}
 						}
-
-						return;
+						break;
 					case ARRAY_VALUE_START:
 						if (element_name == "array") {
 							stack.poll_head ();
@@ -953,26 +956,26 @@ namespace Frida.Fruity {
 									parent.dict.set_array (parent.key, partial.array);
 									parent.need = DICT_KEY_START;
 									break;
-
 								case ARRAY_VALUE_END:
 									parent.array.add_value (partial.array);
 									parent.need = ARRAY_VALUE_START;
 									break;
+								default:
+									break;
 							}
 						}
-
-						return;
+						break;
 					case DICT_KEY_END:
 						if (element_name == "key")
 							partial.need = DICT_VALUE_START;
-						return;
+						break;
 					case DICT_VALUE_TEXT_OR_END:
 					case DICT_VALUE_END: {
 						var val = try_create_value (partial.type, partial.val);
 						if (val != null)
 							partial.dict.set_value (partial.key, (owned) val);
 						partial.need = DICT_KEY_START;
-						return;
+						break;
 					}
 					case ARRAY_VALUE_TEXT_OR_END:
 					case ARRAY_VALUE_END: {
@@ -980,8 +983,10 @@ namespace Frida.Fruity {
 						if (val != null)
 							partial.array.add_value (val);
 						partial.need = ARRAY_VALUE_START;
-						return;
+						break;
 					}
+					default:
+						break;
 				}
 			}
 
@@ -994,15 +999,17 @@ namespace Frida.Fruity {
 					case DICT_KEY_TEXT:
 						partial.key = text;
 						partial.need = DICT_KEY_END;
-						return;
+						break;
 					case DICT_VALUE_TEXT_OR_END:
 						partial.val = text;
 						partial.need = DICT_VALUE_END;
-						return;
+						break;
 					case ARRAY_VALUE_TEXT_OR_END:
 						partial.val = text;
 						partial.need = ARRAY_VALUE_END;
-						return;
+						break;
+					default:
+						break;
 				}
 			}
 

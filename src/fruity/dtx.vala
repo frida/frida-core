@@ -997,6 +997,8 @@ namespace Frida.Fruity {
 
 						break;
 					}
+					default:
+						assert_not_reached ();
 				}
 			}
 		}

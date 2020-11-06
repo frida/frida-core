@@ -35,6 +35,8 @@ namespace Frida.Test {
 						assert_not_reached ();
 					}
 					break;
+				default:
+					break;
 			}
 		}
 
@@ -75,6 +77,8 @@ namespace Frida.Test {
 				return "-macos";
 			case OS.IOS:
 				return "-ios";
+			default:
+				break;
 		}
 
 		string os_name;

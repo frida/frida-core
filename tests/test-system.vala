@@ -17,6 +17,8 @@ namespace Frida.SystemTest {
 					}
 					assert_true (num_icons_seen > 0);
 					break;
+				default:
+					break;
 			}
 
 			timer.start ();
