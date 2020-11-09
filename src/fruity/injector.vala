@@ -543,6 +543,7 @@ namespace Frida.Fruity.Injector {
 				yield output.write_all_async (check_command.build ().get_data (), io_priority, cancellable,
 					out bytes_written);
 				yield input.read_all_async (check_buf, io_priority, cancellable, out bytes_read);
+
 				yield stream.close_async (io_priority, cancellable);
 			} catch (GLib.Error e) {
 			}
