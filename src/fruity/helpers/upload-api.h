@@ -25,6 +25,7 @@ struct _FridaUploadApi
   int (* getsockname) (int socket, struct sockaddr * restrict address, socklen_t * restrict address_len);
   int (* accept) (int socket, struct sockaddr * restrict address, socklen_t * restrict address_len);
   ssize_t (* read) (int fd, void * buf, size_t n);
+  ssize_t (* write) (int fd, const void *buf, size_t n);
   void (* sys_icache_invalidate) (void * start, size_t len);
   void (* sys_dcache_flush) (void * start, size_t len);
   mach_port_t (* _mach_task_self) (void);
@@ -46,6 +47,7 @@ struct _FridaUploadApi
       getsockname, \
       accept, \
       read, \
+      write, \
       sys_icache_invalidate, \
       sys_dcache_flush, \
       dlsym (RTLD_DEFAULT, "mach_task_self"), \

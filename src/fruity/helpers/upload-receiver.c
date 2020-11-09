@@ -40,6 +40,7 @@ enum _FridaUploadCommandType
   FRIDA_UPLOAD_COMMAND_PROTECT,
   FRIDA_UPLOAD_COMMAND_CONSTRUCT_FROM_POINTERS,
   FRIDA_UPLOAD_COMMAND_CONSTRUCT_FROM_OFFSETS,
+  FRIDA_UPLOAD_COMMAND_CHECK,
 };
 
 enum _FridaDarwinThreadedItemType
@@ -178,6 +179,7 @@ static void * frida_sign_pointer (void * ptr, uint8_t key, uintptr_t diversity, 
 static const char * frida_symbol_name_from_darwin (const char * name);
 
 static bool frida_read_chunk (int fd, void * buffer, size_t length, size_t * bytes_read, const FridaUploadApi * api);
+static bool frida_write_chunk (int fd, const void * buffer, size_t length, size_t * bytes_written, const FridaUploadApi * api);
 
 int64_t
 frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bottom, const char * apple[], const FridaUploadApi * api)
@@ -188,6 +190,7 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
   struct sockaddr_in addr;
   socklen_t addr_len;
   int client_fd;
+  uint32_t ACK_MAGIC = 0xac4ac4ac;
 
   expecting_client = true;
 
@@ -206,11 +209,17 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
         if (!frida_read_chunk (client_fd, &(v), sizeof (v), NULL, api)) \
           goto next_client
 
+    #define FRIDA_WRITE_VALUE(v) \
+        if (!frida_write_chunk (client_fd, &(v), sizeof (v), NULL, api)) \
+          goto next_client
+
     FRIDA_READ_VALUE (client_sid);
     if (client_sid[0] != session_id_top || client_sid[1] != session_id_bottom)
       goto next_client;
 
     expecting_client = false;
+
+    FRIDA_WRITE_VALUE (ACK_MAGIC);
 
     while (true)
     {
@@ -340,6 +349,14 @@ frida_receive (int listener_fd, uint64_t session_id_top, uint64_t session_id_bot
 
             constructor (argc, argv, env, apple, &result);
           }
+
+          success = true;
+
+          break;
+        }
+        case FRIDA_UPLOAD_COMMAND_CHECK:
+        {
+          FRIDA_WRITE_VALUE (ACK_MAGIC);
 
           success = true;
 
@@ -732,6 +749,33 @@ frida_read_chunk (int fd, void * buffer, size_t length, size_t * bytes_read, con
   return true;
 }
 
+static bool
+frida_write_chunk (int fd, const void * buffer, size_t length, size_t * bytes_written, const FridaUploadApi * api)
+{
+  const void * cursor = buffer;
+  size_t remaining = length;
+
+  if (bytes_written != NULL)
+    *bytes_written = 0;
+
+  while (remaining != 0)
+  {
+    ssize_t n;
+
+    n = FRIDA_TEMP_FAILURE_RETRY (api->write (fd, cursor, remaining));
+    if (n <= 0)
+      return false;
+
+    if (bytes_written != NULL)
+      *bytes_written += n;
+
+    cursor += n;
+    remaining -= n;
+  }
+
+  return true;
+}
+
 #ifdef BUILDING_TEST_PROGRAM
 
 #include <assert.h>
@@ -741,6 +785,7 @@ frida_read_chunk (int fd, void * buffer, size_t length, size_t * bytes_read, con
 # undef BUILDING_TEST_PROGRAM
 # include "upload-listener.c"
 # define BUILDING_TEST_PROGRAM
+# undef FRIDA_WRITE_VALUE
 
 typedef struct _FridaTestState FridaTestState;
 
@@ -758,7 +803,6 @@ struct _FridaTestState
 };
 
 static void * frida_emulate_client (void * user_data);
-static bool frida_write_chunk (int fd, const void * buffer, size_t length, size_t * bytes_written, const FridaUploadApi * api);
 
 int
 main (void)
@@ -863,33 +907,6 @@ frida_emulate_client (void * user_data)
   api->close (fd);
 
   return NULL;
-}
-
-static bool
-frida_write_chunk (int fd, const void * buffer, size_t length, size_t * bytes_written, const FridaUploadApi * api)
-{
-  const void * cursor = buffer;
-  size_t remaining = length;
-
-  if (bytes_written != NULL)
-    *bytes_written = 0;
-
-  while (remaining != 0)
-  {
-    ssize_t n;
-
-    n = FRIDA_TEMP_FAILURE_RETRY (write (fd, cursor, remaining));
-    if (n <= 0)
-      return false;
-
-    if (bytes_written != NULL)
-      *bytes_written += n;
-
-    cursor += n;
-    remaining -= n;
-  }
-
-  return true;
 }
 
 #endif
