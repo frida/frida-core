@@ -148,19 +148,7 @@ if cc.compiles(uclibc_src, name: 'compiling for uClibc')
   cdata.set('HAVE_UCLIBC', 1)
 endif
 
-asan_src = '''
-#ifndef __SANITIZE_ADDRESS__
-# ifdef __clang__
-#  if __has_feature(address_sanitizer)
-#   define __SANITIZE_ADDRESS__
-#  endif
-# endif
-#endif
-#ifndef __SANITIZE_ADDRESS__
-# error ASAN disabled
-#endif
-'''
-if cc.compiles(asan_src, name: 'compiling with ASan')
+if get_option('b_sanitize') == 'address'
   cdata.set('HAVE_ASAN', 1)
 endif
 
