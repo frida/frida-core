@@ -73,9 +73,6 @@
   </ItemDefinitionGroup>
   <Import Project="frida-agent-common.props" />
   <ItemGroup>
-    <ProjectReference Include="..\..\..\capstone\capstone-64.vcxproj">
-      <Project>{3d5dfa8a-628c-40cc-86d7-078f72833309}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\..\frida-gum\bindings\gumjs\gumjs-64.vcxproj">
       <Project>{0b39885e-731c-4a45-a7de-44cbdbbf0067}</Project>
     </ProjectReference>
