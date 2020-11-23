@@ -63,6 +63,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Droidy/client", () => {
+			var h = new Harness ((h) => Droidy.client.begin (h as Harness));
+			h.run ();
+		});
+
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
 			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
@@ -2975,6 +2980,54 @@ namespace Frida.HostSessionTest {
 			}
 
 			yield h.teardown_backend (backend);
+
+			h.done ();
+		}
+
+		private static async void client (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode with Android device connected> ");
+				h.done ();
+				return;
+			}
+
+			var device_serial = "8B3X1335R";
+			Cancellable? cancellable = null;
+
+			try {
+				var c = yield Frida.Droidy.Client.open (cancellable);
+
+				c.message.connect ((payload) => {
+					printerr ("Got a message: %s\n", payload);
+				});
+
+				printerr ("A\n");
+				yield c.request ("host:transport:" + device_serial, cancellable);
+				printerr ("B\n");
+				yield c.request ("sync:", cancellable);
+
+				// write(3, "SEND\34\0\0\0/data/local/tmp/om.jpg,3"..., 36) = 36
+				var cmd_buf = new MemoryOutputStream.resizable ();
+				var cmd = new DataOutputStream (cmd_buf);
+				cmd.byte_order = LITTLE_ENDIAN;
+				cmd.put_string ("SEND");
+				string filename = "/data/local/tmp/test.bin";
+				string mode = "%d".printf (0100644);
+				cmd.put_uint32 (filename.length + 1 + mode.length);
+				cmd.put_string (filename);
+				cmd.put_string (",");
+				cmd.put_string (mode);
+				printerr ("C\n");
+				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable);
+				printerr ("D\n");
+
+				printerr ("Waiting 2500 ms...\n");
+				Timeout.add (2500, client.callback);
+				yield;
+				printerr ("Ok, done\n");
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+			}
 
 			h.done ();
 		}

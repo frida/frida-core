@@ -201,7 +201,7 @@ namespace Frida.Droidy {
 		protected bool is_processing_messages;
 		private Gee.ArrayQueue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
 
-		private enum RequestType {
+		public enum RequestType {
 			ACK,
 			DATA,
 			PROTOCOL_CHANGE
@@ -281,13 +281,20 @@ namespace Frida.Droidy {
 			yield request_with_type (message, RequestType.PROTOCOL_CHANGE, cancellable);
 		}
 
-		private async string request_with_type (string message, RequestType request_type, Cancellable? cancellable)
+		private async string? request_with_type (string message, RequestType request_type, Cancellable? cancellable)
 				throws Error, IOError {
+			Bytes response_bytes = yield raw_request (new Bytes (message.data), request_type, cancellable);
+			if (response_bytes == null)
+				return null;
+			return (string) Bytes.unref_to_data ((owned) response_bytes);
+		}
+
+		public async Bytes? raw_request (Bytes message, RequestType request_type, Cancellable? cancellable) throws Error, IOError {
 			bool waiting = false;
 
 			var pending = new PendingResponse (request_type, () => {
 				if (waiting)
-					request_with_type.callback ();
+					raw_request.callback ();
 			});
 			pending_responses.offer_tail (pending);
 
@@ -299,16 +306,29 @@ namespace Frida.Droidy {
 			cancel_source.attach (MainContext.get_thread_default ());
 
 			try {
-				var message_str = "%04x%s".printf (message.length, message);
-				unowned uint8[] message_buf = (uint8[]) message_str;
+				var message_size = message.get_size ();
+				var message_buf = new uint8[4 + message_size];
+
+				var length_str = "%04x".printf (message.length);
+				Memory.copy (message_buf, length_str, 4);
+
+				Memory.copy (message_buf + 4, message.get_data (), message_size);
+
+				var m = new StringBuilder ();
+				for (var i = 0; i != message_buf.length; i++) {
+					if (i > 0)
+						m.append (" ");
+					m.append_printf ("%02x", message_buf[i]);
+				}
+				printerr ("Sending: %s\n", m.str);
+
 				size_t bytes_written;
 				try {
-					yield output.write_all_async (message_buf[0:message_str.length], Priority.DEFAULT, cancellable,
-						out bytes_written);
+					yield output.write_all_async (message_buf, Priority.DEFAULT, cancellable, out bytes_written);
 				} catch (GLib.Error e) {
 					throw new Error.TRANSPORT ("Unable to write message: %s", e.message);
 				}
-				if (bytes_written != message_str.length) {
+				if (bytes_written != message_buf.length) {
 					pending_responses.remove (pending);
 					throw new Error.TRANSPORT ("Unable to write message");
 				}
@@ -341,11 +361,11 @@ namespace Frida.Droidy {
 							if (pending != null) {
 								var success = command_or_length == "OKAY";
 								if (success) {
-									string result;
+									Bytes? result;
 									if (pending.request_type == RequestType.DATA)
-										result = yield read_string ();
+										result = yield read_bytes ();
 									else
-										result = "";
+										result = null;
 									pending.complete_with_result (result);
 
 									if (pending.request_type == RequestType.PROTOCOL_CHANGE) {
@@ -405,6 +425,22 @@ namespace Frida.Droidy {
 			return (string) chars;
 		}
 
+		private async Bytes read_bytes () throws Error {
+			var length_str = yield read_fixed_string (4);
+			var length = parse_length (length_str);
+			var buf = new uint8[length + 1];
+			size_t bytes_read;
+			try {
+				yield input.read_all_async (buf[0:length], Priority.DEFAULT, io_cancellable, out bytes_read);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to read: %s", e.message);
+			}
+			if (bytes_read != length)
+				throw new Error.TRANSPORT ("Unable to read");
+			buf.length = (int) length;
+			return new Bytes.take ((owned) buf);
+		}
+
 		private size_t parse_length (string str) throws Error {
 			int length = 0;
 			str.scanf ("%04x", out length);
@@ -428,7 +464,7 @@ namespace Frida.Droidy {
 				}
 			}
 
-			public string? result {
+			public Bytes? result {
 				get;
 				private set;
 			}
@@ -443,7 +479,7 @@ namespace Frida.Droidy {
 				this.handler = (owned) handler;
 			}
 
-			public void complete_with_result (string result) {
+			public void complete_with_result (Bytes result) {
 				if (handler == null)
 					return;
 				this.result = result;
