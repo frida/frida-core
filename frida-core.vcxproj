@@ -92,8 +92,8 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-32.lib;frida-pipe-32.lib;capstone-32.lib;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\capstone-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-32.lib;frida-pipe-32.lib;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -103,8 +103,8 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-32.lib;frida-pipe-32.lib;capstone-32.lib;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\capstone-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-32.lib;frida-pipe-32.lib;gum-32.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\gum-32;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -114,8 +114,8 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-64.lib;frida-pipe-64.lib;capstone-64.lib;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\capstone-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-64.lib;frida-pipe-64.lib;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -125,8 +125,8 @@
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Lib>
-      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-64.lib;frida-pipe-64.lib;capstone-64.lib;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\capstone-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(IntDir)data\frida-data-winjector-blob.obj;$(IntDir)data\frida-data-agent-blob.obj;frida-interfaces-64.lib;frida-pipe-64.lib;gum-64.lib;gumjs-inspector.lib;setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\gum-64;$(IntDir)..\gumjs-inspector;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
