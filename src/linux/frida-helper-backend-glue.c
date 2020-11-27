@@ -3097,7 +3097,7 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
 static gboolean
 frida_is_seize_supported (void)
 {
-  static volatile gsize cached_result = 0;
+  static gsize cached_result = 0;
 
   if (g_once_init_enter (&cached_result))
   {
