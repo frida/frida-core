@@ -68,7 +68,7 @@ namespace Frida {
 	}
 
 	namespace WindowsProcess {
-		public extern static bool is_x64 (uint32 pid);
+		public extern static bool is_x64 (uint32 pid) throws Error;
 	}
 
 	namespace WaitHandleSource {

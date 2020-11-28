@@ -71,6 +71,7 @@ typedef NTSTATUS (WINAPI * RtlCreateUserThreadFunc) (HANDLE process, SECURITY_DE
     BOOLEAN create_suspended, ULONG stack_zero_bits, SIZE_T * stack_reserved, SIZE_T * stack_commit,
     LPTHREAD_START_ROUTINE start_address, LPVOID parameter, HANDLE * thread_handle, RtlClientId * result);
 
+static void frida_propagate_open_process_error (guint32 pid, DWORD os_error, GError ** error);
 static gboolean frida_enable_debug_privilege (void);
 
 static gboolean frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details, GError ** error);
@@ -162,13 +163,9 @@ os_failure:
 
     os_error = GetLastError ();
 
-    if (details.process_handle == NULL && os_error == ERROR_INVALID_PARAMETER)
+    if (details.process_handle == NULL)
     {
-      g_set_error (error,
-          FRIDA_ERROR,
-          FRIDA_ERROR_PROCESS_NOT_FOUND,
-          "Unable to find process with pid %u",
-          pid);
+      frida_propagate_open_process_error (pid, os_error, error);
     }
     else
     {
@@ -235,6 +232,35 @@ _frida_windows_helper_backend_free_inject_instance (void * inject_instance, gboo
   CloseHandle (instance->process_handle);
 
   g_slice_free (FridaInjectInstance, instance);
+}
+
+static void
+frida_propagate_open_process_error (guint32 pid, DWORD os_error, GError ** error)
+{
+  if (os_error == ERROR_INVALID_PARAMETER)
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PROCESS_NOT_FOUND,
+        "Unable to find process with pid %u",
+        pid);
+  }
+  else if (os_error == ERROR_ACCESS_DENIED)
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_PERMISSION_DENIED,
+        "Unable to access process with pid %u from the current user account",
+        pid);
+  }
+  else
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unable to access process with pid %u due to an unexpected error (OpenProcess returned 0x%08lx)",
+        pid, os_error);
+  }
 }
 
 static gboolean
@@ -487,7 +513,7 @@ frida_windows_system_is_x64 (void)
 }
 
 gboolean
-frida_windows_process_is_x64 (guint32 pid)
+frida_windows_process_is_x64 (guint32 pid, GError ** error)
 {
   HANDLE process_handle;
   BOOL is_wow64, success;
@@ -497,16 +523,28 @@ frida_windows_process_is_x64 (guint32 pid)
 
   process_handle = OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, pid);
   if (process_handle == NULL)
-    goto error;
+    goto open_failed;
   success = IsWow64Process (process_handle, &is_wow64);
   CloseHandle (process_handle);
   if (!success)
-    goto error;
+    goto query_failed;
 
   return !is_wow64;
 
-error:
-  return FALSE;
+open_failed:
+  {
+    frida_propagate_open_process_error (pid, GetLastError (), error);
+    return FALSE;
+  }
+query_failed:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_NOT_SUPPORTED,
+        "Unexpected error while interrogating process with pid %u (IsWow64Process failed)",
+        pid);
+    return FALSE;
+  }
 }
 
 static gboolean
