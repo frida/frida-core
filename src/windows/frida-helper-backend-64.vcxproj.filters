@@ -14,45 +14,37 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
     <Filter Include="Source Files\generated">
-      <UniqueIdentifier>{97f21f95-be0b-4fb7-8978-bc06aaed36e6}</UniqueIdentifier>
+      <UniqueIdentifier>{dfe7bd21-9307-4ba7-adfe-08bea4f5908c}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\lib">
-      <UniqueIdentifier>{592dadc1-aa3a-4013-bf2f-c06f128e533b}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\lib\interfaces">
-      <UniqueIdentifier>{364cc9f6-1299-4996-853a-e5c70fb38202}</UniqueIdentifier>
+    <Filter Include="Header Files\generated">
+      <UniqueIdentifier>{bbc7277f-47f7-4753-8414-a1771d1c1686}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)winjector-helper.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="$(IntDir)winjector-helper.c">
+    <ClCompile Include="$(IntDir)frida-helper-backend.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="winjector-helper-services.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="winjector-helper-core.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="winjector-wait-handle-source.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)winjector-types.c">
+    <ClCompile Include="$(IntDir)frida-helper-types.c">
       <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="frida-helper-backend-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="wait-handle-source.c">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="winjector-helper.vala">
+    <CustomBuild Include="frida-helper-backend.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="winjector-types.vala">
+    <None Include="frida-helper-types.vala">
       <Filter>Source Files</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(IntDir)frida-helper-backend.h">
+      <Filter>Header Files\generated</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

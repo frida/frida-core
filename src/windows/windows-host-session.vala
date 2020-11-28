@@ -52,7 +52,8 @@ namespace Frida {
 			assert (location == null);
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
-			host_session = new WindowsHostSession ();
+			var tempdir = new TemporaryDirectory ();
+			host_session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
 			return host_session;
 		}
@@ -81,6 +82,16 @@ namespace Frida {
 	}
 
 	public class WindowsHostSession : BaseDBusHostSession {
+		public WindowsHelper helper {
+			get;
+			construct;
+		}
+
+		public TemporaryDirectory tempdir {
+			get;
+			construct;
+		}
+
 		private AgentContainer system_session_container;
 
 		private AgentDescriptor agent_desc;
@@ -90,8 +101,12 @@ namespace Frida {
 
 		private Gee.HashMap<uint, ChildProcess> process_by_pid = new Gee.HashMap<uint, ChildProcess> ();
 
+		public WindowsHostSession (owned WindowsHelper helper, owned TemporaryDirectory tempdir) {
+			Object (helper: helper, tempdir: tempdir);
+		}
+
 		construct {
-			injector = new Winjector ();
+			injector = new Winjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
 
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_dll_blob ();
@@ -101,15 +116,16 @@ namespace Frida {
 			var symsrv32 = Frida.Data.Agent.get_symsrv_32_dll_blob ();
 			var symsrv64 = Frida.Data.Agent.get_symsrv_64_dll_blob ();
 
-			agent_desc = new AgentDescriptor.with_resources ("%u\\frida-agent.dll",
-				new MemoryInputStream.from_data (blob32.data, null),
-				new MemoryInputStream.from_data (blob64.data, null),
+			agent_desc = new AgentDescriptor (PathTemplate ("<arch>\\frida-agent.dll"),
+				new Bytes.static (blob32.data),
+				new Bytes.static (blob64.data),
 				new AgentResource[] {
-					new AgentResource ("32\\dbghelp.dll", new MemoryInputStream.from_data (dbghelp32.data, null)),
-					new AgentResource ("32\\symsrv.dll", new MemoryInputStream.from_data (symsrv32.data, null)),
-					new AgentResource ("64\\dbghelp.dll", new MemoryInputStream.from_data (dbghelp64.data, null)),
-					new AgentResource ("64\\symsrv.dll", new MemoryInputStream.from_data (symsrv64.data, null))
-				}
+					new AgentResource ("32\\dbghelp.dll", new Bytes.static (dbghelp32.data), tempdir),
+					new AgentResource ("32\\symsrv.dll", new Bytes.static (symsrv32.data), tempdir),
+					new AgentResource ("64\\dbghelp.dll", new Bytes.static (dbghelp64.data), tempdir),
+					new AgentResource ("64\\symsrv.dll", new Bytes.static (symsrv64.data), tempdir)
+				},
+				tempdir
 			);
 		}
 
@@ -133,13 +149,16 @@ namespace Frida {
 			foreach (var process in process_by_pid.values)
 				process.close ();
 			process_by_pid.clear ();
+
+			yield helper.close (cancellable);
+
+			tempdir.destroy ();
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
-			var winjector = injector as Winjector;
-			var path_template = winjector.get_normal_resource_store ().ensure_copy_of (agent_desc);
-			var agent_path = path_template.printf (sizeof (void *) == 8 ? 64 : 32);
+			var path_template = agent_desc.get_path_template ();
+			var agent_path = path_template.expand (sizeof (void *) == 8 ? "64" : "32");
 
 			system_session_container = yield AgentContainer.create (agent_path, cancellable);
 

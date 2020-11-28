@@ -203,7 +203,8 @@ namespace Frida.Server {
 			TemporaryDirectory.always_use ((directory != null) ? directory : DEFAULT_DIRECTORY);
 
 #if WINDOWS
-			host_session = new WindowsHostSession ();
+			var tempdir = new TemporaryDirectory ();
+			host_session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
 #endif
 #if DARWIN
 			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory ());

@@ -54,7 +54,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="src\windows\winjector.resources">
+    <CustomBuild Include="src\windows\frida-windows.resources">
       <Filter>Resource Files\windows</Filter>
     </CustomBuild>
     <CustomBuild Include="src\agent.resources">
@@ -81,7 +81,7 @@
     <None Include="src\windows\winjector.vala">
       <Filter>Source Files\windows</Filter>
     </None>
-    <None Include="src\windows\winjector-types.vala">
+    <None Include="src\windows\frida-helper-process.vala">
       <Filter>Source Files\windows</Filter>
     </None>
     <None Include="src\socket\socket-host-session.vala">
@@ -158,7 +158,7 @@
     <ClCompile Include="src\windows\winjector-glue.c">
       <Filter>Source Files\windows</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)src\windows\winjector-types.c">
+    <ClCompile Include="$(IntDir)src\windows\frida-helper-process.c">
       <Filter>Source Files\generated\windows</Filter>
     </ClCompile>
     <ClInclude Include="src\windows\access-helpers.h">
@@ -218,11 +218,19 @@
     <ClCompile Include="$(IntDir)src\droidy\droidy-client.c">
       <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)data\frida-data-winjector.c">
+    <ClCompile Include="$(IntDir)data\frida-data-windows.c">
       <Filter>Source Files\generated\data</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)data\frida-data-agent.c">
       <Filter>Source Files\generated\data</Filter>
+    </ClCompile>
+    <ClInclude Include="src\windows\frida-helper-process-glue.h">
+      <Filter>Source Files\windows</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\windows\frida-helper-process-glue.c">
+      <Filter>Source Files\windows</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

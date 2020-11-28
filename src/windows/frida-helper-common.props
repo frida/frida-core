@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <FixedBaseAddress>true</FixedBaseAddress>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <CustomBuild Include="frida-helper-service.vala">
+      <FileType>Document</FileType>
+      <Command>"$(ValaCompiler)" frida-helper-service.vala --ccode --directory=$(IntDir) --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-helper-backend-32" --vapidir="$(IntDir)..\frida-helper-backend-64" $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-interfaces --pkg=frida-pipe --pkg=frida-helper-backend || exit 1
+echo &gt; "$(IntDir)valacode.stamp"</Command>
+      <Message>Compiling vala code</Message>
+      <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
+      <AdditionalInputs>$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="frida-helper-service-glue.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="$(IntDir)frida-helper-service.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="frida-helper-service-glue.c" />
+  </ItemGroup>
+
+</Project>

@@ -1,6 +1,4 @@
-using Frida;
-
-namespace Winjector {
+namespace Frida {
 	public int main (string[] args) {
 		HelperMode mode = HelperMode.SERVICE;
 
@@ -26,32 +24,27 @@ namespace Winjector {
 			}
 			var parent_address = args[3];
 
-			var manager = new Winjector.Manager (parent_address, level);
+			var manager = new HelperManager (parent_address, level);
 			return manager.run ();
 		}
 
-		Service service;
+		HelperService service;
 		if (mode == HelperMode.STANDALONE)
-			service = new StandaloneService ();
+			service = new StandaloneHelperService ();
 		else
-			service = new ManagedService ();
+			service = new ManagedHelperService ();
 		service.run ();
 
 		return 0;
 	}
 
-	public enum HelperMode {
+	private enum HelperMode {
 		MANAGER,
 		STANDALONE,
 		SERVICE
 	}
 
-	public enum PrivilegeLevel {
-		NORMAL,
-		ELEVATED
-	}
-
-	public class Manager : Object, WinjectorHelper {
+	private class HelperManager : Object, WindowsRemoteHelper {
 		public string parent_address {
 			get;
 			construct;
@@ -67,11 +60,11 @@ namespace Winjector {
 
 		private DBusConnection connection;
 		private uint registration_id;
-		private HelperService helper32;
-		private HelperService helper64;
+		private ServiceConnection helper32;
+		private ServiceConnection helper64;
 		private void * context;
 
-		public Manager (string parent_address, PrivilegeLevel level) {
+		public HelperManager (string parent_address, PrivilegeLevel level) {
 			Object (parent_address: parent_address, level: level);
 		}
 
@@ -105,17 +98,17 @@ namespace Winjector {
 
 		private async void start () {
 			try {
-				helper32 = new HelperService (Service.derive_svcname_for_suffix ("32"));
-				if (System.is_x64 ())
-					helper64 = new HelperService (Service.derive_svcname_for_suffix ("64"));
+				helper32 = new ServiceConnection (HelperService.derive_svcname_for_suffix ("32"));
+				if (WindowsSystem.is_x64 ())
+					helper64 = new ServiceConnection (HelperService.derive_svcname_for_suffix ("64"));
 
-				context = start_services (Service.derive_basename (), level);
+				context = start_services (HelperService.derive_basename (), level);
 
-				yield helper32.start ();
+				yield helper32.open ();
 				helper32.proxy.uninjected.connect (on_uninjected);
 
-				if (System.is_x64 ()) {
-					yield helper64.start ();
+				if (WindowsSystem.is_x64 ()) {
+					yield helper64.open ();
 					helper64.proxy.uninjected.connect (on_uninjected);
 				}
 
@@ -125,8 +118,8 @@ namespace Winjector {
 				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
-				WinjectorHelper helper = this;
-				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+				WindowsRemoteHelper helper = this;
+				registration_id = connection.register_object (ObjectPath.HELPER, helper);
 
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
@@ -136,8 +129,8 @@ namespace Winjector {
 			}
 		}
 
-		public async void stop (Cancellable? cancellable) throws Frida.Error, IOError {
-			if (System.is_x64 ()) {
+		public async void stop (Cancellable? cancellable) throws Error, IOError {
+			if (WindowsSystem.is_x64 ()) {
 				try {
 					yield helper64.proxy.stop (cancellable);
 				} catch (GLib.Error e) {
@@ -158,16 +151,13 @@ namespace Winjector {
 			});
 		}
 
-		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data,
-				Cancellable? cancellable) throws Frida.Error, IOError {
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
+				Cancellable? cancellable) throws Error, IOError {
 			try {
-				if (Process.is_x64 (pid)) {
-					return yield helper64.proxy.inject_library_file (pid, path_template.printf (64), entrypoint, data,
-						cancellable);
-				} else {
-					return yield helper32.proxy.inject_library_file (pid, path_template.printf (32), entrypoint, data,
-						cancellable);
-				}
+				if (WindowsProcess.is_x64 (pid))
+					yield helper64.proxy.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+				else
+					yield helper32.proxy.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -181,8 +171,8 @@ namespace Winjector {
 			uninjected (id);
 		}
 
-		private class HelperService {
-			public WinjectorHelper proxy {
+		private class ServiceConnection {
+			public WindowsRemoteHelper proxy {
 				get;
 				private set;
 			}
@@ -191,24 +181,24 @@ namespace Winjector {
 			private Future<IOStream> stream_request;
 			private DBusConnection connection;
 
-			public HelperService (string name) {
+			public ServiceConnection (string name) {
 				this.name = name;
 				this.stream_request = Pipe.open ("pipe:role=server,name=" + name, null);
 			}
 
-			public async void start () throws Frida.Error {
+			public async void open () throws Error {
 				try {
 					var stream = yield this.stream_request.wait_async (null);
 
 					connection = yield new DBusConnection (stream, null, NONE);
 				} catch (GLib.Error e) {
-					throw new Frida.Error.PERMISSION_DENIED ("%s", e.message);
+					throw new Error.PERMISSION_DENIED ("%s", e.message);
 				}
 
 				try {
-					proxy = yield connection.get_proxy (null, WinjectorObjectPath.HELPER);
+					proxy = yield connection.get_proxy (null, ObjectPath.HELPER);
 				} catch (IOError e) {
-					throw new Frida.Error.PROTOCOL ("%s", e.message);
+					throw new Error.PROTOCOL ("%s", e.message);
 				}
 			}
 		}
@@ -217,14 +207,15 @@ namespace Winjector {
 		private extern static void stop_services (void * context);
 	}
 
-	public abstract class Service : Object, WinjectorHelper {
+	private abstract class HelperService : Object, WindowsRemoteHelper {
 		private DBusConnection connection;
 		private uint registration_id;
 
-		private uint next_id = 0;
-		private uint pending = 0;
+		private WindowsHelperBackend backend = new WindowsHelperBackend ();
 
-		protected Service () {
+		construct {
+			backend.uninjected.connect (on_backend_uninjected);
+
 			Idle.add (() => {
 				start.begin ();
 				return false;
@@ -243,8 +234,8 @@ namespace Winjector {
 				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
-				WinjectorHelper helper = this;
-				registration_id = connection.register_object (WinjectorObjectPath.HELPER, helper);
+				WindowsRemoteHelper helper = this;
+				registration_id = connection.register_object (ObjectPath.HELPER, helper);
 
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
@@ -253,14 +244,14 @@ namespace Winjector {
 			}
 		}
 
-		public async void stop (Cancellable? cancellable) throws Frida.Error, IOError {
+		public async void stop (Cancellable? cancellable) throws Error, IOError {
 			Timeout.add (20, () => {
 				do_stop.begin ();
 				return false;
 			});
 		}
 
-		private async void do_stop () throws Frida.Error {
+		private async void do_stop () {
 			connection.unregister_object (registration_id);
 			connection.on_closed.disconnect (on_connection_closed);
 			try {
@@ -268,54 +259,34 @@ namespace Winjector {
 			} catch (GLib.Error connection_error) {
 			}
 
-			if (pending == 0)
-				shutdown ();
-		}
-
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
-				throws Frida.Error {
-			if (next_id == 0 || next_id >= int.MAX) {
-				/* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
-				next_id = (sizeof (void *) == 4) ? 1 : 2;
-			}
-			var id = next_id;
-			next_id += 2;
-
-			void * instance, waitable_thread_handle;
-			Process.inject_library_file (pid, path, entrypoint, data, out instance, out waitable_thread_handle);
-			if (waitable_thread_handle != null) {
-				pending++;
-				var source = WaitHandleSource.create (waitable_thread_handle, true);
-				source.set_callback (() => {
-					bool is_resident;
-					Process.free_inject_instance (instance, out is_resident);
-
-					uninjected (id);
-
-					pending--;
-					if (connection.is_closed () && pending == 0)
-						shutdown ();
-
-					return false;
-				});
-				source.attach (MainContext.default ());
+			try {
+				yield backend.close (null);
+			} catch (IOError e) {
+				assert_not_reached ();
 			}
 
-			return id;
+			shutdown ();
 		}
 
 		private void on_connection_closed (bool remote_peer_vanished, GLib.Error? error) {
-			if (pending == 0)
-				shutdown ();
+			do_stop.begin ();
+		}
+
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
+				Cancellable? cancellable) throws Error, IOError {
+			yield backend.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+		}
+
+		private void on_backend_uninjected (uint id) {
+			uninjected (id);
 		}
 
 		public extern static string derive_basename ();
-		public extern static string derive_filename_for_suffix (string suffix);
 		public extern static string derive_svcname_for_self ();
 		public extern static string derive_svcname_for_suffix (string suffix);
 	}
 
-	public class StandaloneService : Service {
+	private class StandaloneHelperService : HelperService {
 		private MainLoop loop;
 
 		public override void run () {
@@ -331,7 +302,7 @@ namespace Winjector {
 		}
 	}
 
-	public class ManagedService : Service {
+	private class ManagedHelperService : HelperService {
 		public override void run () {
 			enter_dispatcher_and_main_loop ();
 		}
@@ -341,22 +312,4 @@ namespace Winjector {
 
 		private extern static void enter_dispatcher_and_main_loop ();
 	}
-
-	namespace System {
-		public extern static bool is_x64 ();
-	}
-
-	namespace Process {
-		public extern static bool is_x64 (uint32 pid);
-		public extern static void inject_library_file (uint32 pid, string path, string entrypoint, string data, out void * inject_instance, out void * waitable_thread_handle) throws Frida.Error;
-		public extern static void free_inject_instance (void * inject_instance, out bool is_resident);
-	}
-
-	namespace WaitHandleSource {
-		public static Source create (void * handle, bool owns_handle) {
-			return wait_handle_source_new (handle, owns_handle);
-		}
-	}
-
-	private extern Source wait_handle_source_new (void * handle, bool owns_handle);
 }

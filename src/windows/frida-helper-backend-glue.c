@@ -1,4 +1,4 @@
-#include "winjector-helper.h"
+#include "frida-helper-backend.h"
 
 #include <gio/gio.h>
 #include <gum/gum.h>
@@ -22,18 +22,18 @@
     goto nt_failure; \
   }
 
-typedef struct _InjectInstance InjectInstance;
-typedef struct _InjectionDetails InjectionDetails;
-typedef struct _RemoteWorkerContext RemoteWorkerContext;
+typedef struct _FridaInjectInstance FridaInjectInstance;
+typedef struct _FridaInjectionDetails FridaInjectionDetails;
+typedef struct _FridaRemoteWorkerContext FridaRemoteWorkerContext;
 
-struct _InjectInstance
+struct _FridaInjectInstance
 {
   HANDLE process_handle;
   gpointer free_address;
   gpointer stay_resident_address;
 };
 
-struct _InjectionDetails
+struct _FridaInjectionDetails
 {
   HANDLE process_handle;
   const WCHAR * dll_path;
@@ -41,7 +41,7 @@ struct _InjectionDetails
   const gchar * entrypoint_data;
 };
 
-struct _RemoteWorkerContext
+struct _FridaRemoteWorkerContext
 {
   gboolean stay_resident;
 
@@ -71,80 +71,39 @@ typedef NTSTATUS (WINAPI * RtlCreateUserThreadFunc) (HANDLE process, SECURITY_DE
     BOOLEAN create_suspended, ULONG stack_zero_bits, SIZE_T * stack_reserved, SIZE_T * stack_commit,
     LPTHREAD_START_ROUTINE start_address, LPVOID parameter, HANDLE * thread_handle, RtlClientId * result);
 
-static gboolean enable_debug_privilege (void);
+static gboolean frida_enable_debug_privilege (void);
 
-static gboolean initialize_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details, GError ** error);
-static void cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details);
+static gboolean frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details, GError ** error);
+static void frida_remote_worker_context_destroy (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details);
 
-static gboolean remote_worker_context_has_resolved_all_kernel32_functions (const RemoteWorkerContext * rwc);
-static gboolean remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data);
+static gboolean frida_remote_worker_context_has_resolved_all_kernel32_functions (const FridaRemoteWorkerContext * rwc);
+static gboolean frida_remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data);
 
-static gboolean file_exists_and_is_readable (const WCHAR * filename);
-
-gboolean
-winjector_system_is_x64 (void)
-{
-  static gboolean initialized = FALSE;
-  static gboolean system_is_x64;
-
-  if (!initialized) {
-    SYSTEM_INFO si;
-
-    GetNativeSystemInfo (&si);
-    system_is_x64 = si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
-
-    initialized = TRUE;
-  }
-
-  return system_is_x64;
-}
-
-gboolean
-winjector_process_is_x64 (guint32 pid)
-{
-  HANDLE process_handle;
-  BOOL is_wow64, success;
-
-  if (!winjector_system_is_x64 ())
-    return FALSE;
-
-  process_handle = OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, pid);
-  if (process_handle == NULL)
-    goto error;
-  success = IsWow64Process (process_handle, &is_wow64);
-  CloseHandle (process_handle);
-  if (!success)
-    goto error;
-
-  return !is_wow64;
-
-error:
-  return FALSE;
-}
+static gboolean frida_file_exists_and_is_readable (const WCHAR * filename);
 
 void
-winjector_process_inject_library_file (guint32 pid, const gchar * path, const gchar * entrypoint, const gchar * data,
+_frida_windows_helper_backend_inject_library_file (guint32 pid, const gchar * path, const gchar * entrypoint, const gchar * data,
     void ** inject_instance, void ** waitable_thread_handle, GError ** error)
 {
   gboolean success = FALSE;
   const gchar * failed_operation;
   NTSTATUS nt_status;
-  InjectionDetails details;
+  FridaInjectionDetails details;
   DWORD desired_access;
   HANDLE thread_handle = NULL;
   gboolean rwc_initialized = FALSE;
-  RemoteWorkerContext rwc;
-  InjectInstance * instance;
+  FridaRemoteWorkerContext rwc;
+  FridaInjectInstance * instance;
 
   details.dll_path = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
   details.entrypoint_name = entrypoint;
   details.entrypoint_data = data;
   details.process_handle = NULL;
 
-  if (!file_exists_and_is_readable (details.dll_path))
+  if (!frida_file_exists_and_is_readable (details.dll_path))
     goto invalid_path;
 
-  enable_debug_privilege ();
+  frida_enable_debug_privilege ();
 
   desired_access =
       PROCESS_DUP_HANDLE    | /* duplicatable handle                  */
@@ -156,11 +115,12 @@ winjector_process_inject_library_file (guint32 pid, const gchar * path, const gc
   details.process_handle = OpenProcess (desired_access, FALSE, pid);
   CHECK_OS_RESULT (details.process_handle, !=, NULL, "OpenProcess");
 
-  if (!initialize_remote_worker_context (&rwc, &details, error))
+  if (!frida_remote_worker_context_init (&rwc, &details, error))
     goto beach;
   rwc_initialized = TRUE;
 
-  thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint), rwc.argument, 0, NULL);
+  thread_handle = CreateRemoteThread (details.process_handle, NULL, 0, GUM_POINTER_TO_FUNCPTR (LPTHREAD_START_ROUTINE, rwc.entrypoint),
+      rwc.argument, 0, NULL);
   if (thread_handle == NULL)
   {
     RtlCreateUserThreadFunc rtl_create_user_thread;
@@ -172,11 +132,11 @@ winjector_process_inject_library_file (guint32 pid, const gchar * path, const gc
     CHECK_NT_RESULT (nt_status, == , 0, "RtlCreateUserThread");
   }
 
-  instance = g_slice_new (InjectInstance);
+  instance = g_slice_new (FridaInjectInstance);
   instance->process_handle = details.process_handle;
   details.process_handle = NULL;
   instance->free_address = rwc.entrypoint;
-  instance->stay_resident_address = (guint8 *) rwc.argument + G_STRUCT_OFFSET (RemoteWorkerContext, stay_resident);
+  instance->stay_resident_address = (guint8 *) rwc.argument + G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident);
   *inject_instance = instance;
 
   *waitable_thread_handle = thread_handle;
@@ -241,7 +201,7 @@ nt_failure:
 beach:
   {
     if (!success && rwc_initialized)
-      cleanup_remote_worker_context (&rwc, &details);
+      frida_remote_worker_context_destroy (&rwc, &details);
 
     if (thread_handle != NULL)
       CloseHandle (thread_handle);
@@ -254,14 +214,14 @@ beach:
 }
 
 void
-winjector_process_free_inject_instance (void * inject_instance, gboolean * is_resident)
+_frida_windows_helper_backend_free_inject_instance (void * inject_instance, gboolean * is_resident)
 {
-  InjectInstance * instance = inject_instance;
+  FridaInjectInstance * instance = inject_instance;
   gboolean stay_resident;
   SIZE_T n_bytes_read;
 
-  if (ReadProcessMemory (instance->process_handle, instance->stay_resident_address, &stay_resident, sizeof (stay_resident), &n_bytes_read) &&
-      n_bytes_read == sizeof (stay_resident))
+  if (ReadProcessMemory (instance->process_handle, instance->stay_resident_address, &stay_resident, sizeof (stay_resident),
+      &n_bytes_read) && n_bytes_read == sizeof (stay_resident))
   {
     *is_resident = stay_resident;
   }
@@ -274,11 +234,11 @@ winjector_process_free_inject_instance (void * inject_instance, gboolean * is_re
 
   CloseHandle (instance->process_handle);
 
-  g_slice_free (InjectInstance, instance);
+  g_slice_free (FridaInjectInstance, instance);
 }
 
 static gboolean
-enable_debug_privilege (void)
+frida_enable_debug_privilege (void)
 {
   static gboolean enabled = FALSE;
   gboolean success = FALSE;
@@ -314,8 +274,7 @@ beach:
 }
 
 static gboolean
-initialize_remote_worker_context (RemoteWorkerContext * rwc,
-    InjectionDetails * details, GError ** error)
+frida_remote_worker_context_init (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details, GError ** error)
 {
   gpointer code;
   guint code_size;
@@ -335,7 +294,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XSI);
   gum_x86_writer_put_push_reg (&cw, GUM_REG_XDI); /* Alignment padding */
 
-  /* xbx = (RemoteWorkerContext *) lpParameter */
+  /* xbx = (FridaRemoteWorkerContext *) lpParameter */
 #if GLIB_SIZEOF_VOID_P == 4
   gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EBX, GUM_REG_ESP, (3 + 1) * sizeof (gpointer));
 #else
@@ -343,8 +302,10 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 #endif
 
   /* xsi = LoadLibrary (xbx->dll_path) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, dll_path));
-  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, load_library_impl),
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX,
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, dll_path));
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, load_library_impl),
       1,
       GUM_ARG_REGISTER, GUM_REG_XCX);
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_XAX, GUM_REG_XAX);
@@ -353,15 +314,18 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 
   /* xax = GetProcAddress (xsi, xbx->entrypoint_name) */
   gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
-      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, entrypoint_name));
-  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_proc_address_impl),
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_name));
+  gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, get_proc_address_impl),
       2,
       GUM_ARG_REGISTER, GUM_REG_XSI,
       GUM_ARG_REGISTER, GUM_REG_XDX);
 
   /* xax (xbx->entrypoint_data, &stay_resident, NULL) */
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, entrypoint_data));
-  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, stay_resident));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XCX,
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, entrypoint_data));
+  gum_x86_writer_put_lea_reg_reg_offset (&cw, GUM_REG_XDX,
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
   gum_x86_writer_put_call_reg_with_arguments (&cw, GUM_CALL_CAPI, GUM_REG_XAX,
       3,
       GUM_ARG_REGISTER, GUM_REG_XCX,
@@ -369,13 +333,14 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
       GUM_ARG_ADDRESS, GUM_ADDRESS (0));
 
   /* if (!stay_resident) { */
-  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX, GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, stay_resident));
+  gum_x86_writer_put_mov_reg_reg_offset_ptr (&cw, GUM_REG_EAX,
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, stay_resident));
   gum_x86_writer_put_test_reg_reg (&cw, GUM_REG_EAX, GUM_REG_EAX);
   gum_x86_writer_put_jcc_short_label (&cw, X86_INS_JNE, skip_unload, GUM_NO_HINT);
 
   /* FreeLibrary (xsi) */
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
-      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, free_library_impl),
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, free_library_impl),
       1,
       GUM_ARG_REGISTER, GUM_REG_XSI);
 
@@ -389,7 +354,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   gum_x86_writer_put_label (&cw, loadlibrary_failed);
   /* result = GetLastError() */
   gum_x86_writer_put_call_reg_offset_ptr_with_arguments (&cw, GUM_CALL_SYSAPI,
-      GUM_REG_XBX, G_STRUCT_OFFSET (RemoteWorkerContext, get_last_error_impl),
+      GUM_REG_XBX, G_STRUCT_OFFSET (FridaRemoteWorkerContext, get_last_error_impl),
       0);
 
   gum_x86_writer_put_label (&cw, return_result);
@@ -402,10 +367,10 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   code_size = gum_x86_writer_offset (&cw);
   gum_x86_writer_clear (&cw);
 
-  memset (rwc, 0, sizeof (RemoteWorkerContext));
+  memset (rwc, 0, sizeof (FridaRemoteWorkerContext));
 
-  gum_module_enumerate_exports ("kernel32.dll", remote_worker_context_collect_kernel32_export, rwc);
-  if (!remote_worker_context_has_resolved_all_kernel32_functions (rwc))
+  gum_module_enumerate_exports ("kernel32.dll", frida_remote_worker_context_collect_kernel32_export, rwc);
+  if (!frida_remote_worker_context_has_resolved_all_kernel32_functions (rwc))
     goto failed_to_resolve_kernel32_functions;
 
   StringCbCopyW (rwc->dll_path, sizeof (rwc->dll_path), details->dll_path);
@@ -413,7 +378,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
   StringCbCopyA (rwc->entrypoint_data, sizeof (rwc->entrypoint_data), details->entrypoint_data);
 
   rwc->entrypoint = VirtualAllocEx (details->process_handle, NULL,
-      code_size + data_alignment + sizeof (RemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+      code_size + data_alignment + sizeof (FridaRemoteWorkerContext), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
   if (rwc->entrypoint == NULL)
     goto virtual_alloc_failed;
 
@@ -422,7 +387,7 @@ initialize_remote_worker_context (RemoteWorkerContext * rwc,
 
   rwc->argument = GSIZE_TO_POINTER (
       (GPOINTER_TO_SIZE (rwc->entrypoint) + code_size + data_alignment - 1) & ~(data_alignment - 1));
-  if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (RemoteWorkerContext), NULL))
+  if (!WriteProcessMemory (details->process_handle, rwc->argument, rwc, sizeof (FridaRemoteWorkerContext), NULL))
     goto write_process_memory_failed;
 
   gum_free_pages (code);
@@ -457,14 +422,14 @@ write_process_memory_failed:
   }
 error_common:
   {
-    cleanup_remote_worker_context (rwc, details);
+    frida_remote_worker_context_destroy (rwc, details);
     gum_free_pages (code);
     return FALSE;
   }
 }
 
 static void
-cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * details)
+frida_remote_worker_context_destroy (FridaRemoteWorkerContext * rwc, FridaInjectionDetails * details)
 {
   if (rwc->entrypoint != NULL)
   {
@@ -474,16 +439,16 @@ cleanup_remote_worker_context (RemoteWorkerContext * rwc, InjectionDetails * det
 }
 
 static gboolean
-remote_worker_context_has_resolved_all_kernel32_functions (const RemoteWorkerContext * rwc)
+frida_remote_worker_context_has_resolved_all_kernel32_functions (const FridaRemoteWorkerContext * rwc)
 {
   return (rwc->load_library_impl != NULL) && (rwc->get_proc_address_impl != NULL) &&
       (rwc->free_library_impl != NULL) && (rwc->virtual_free_impl != NULL);
 }
 
 static gboolean
-remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data)
+frida_remote_worker_context_collect_kernel32_export (const GumExportDetails * details, gpointer user_data)
 {
-  RemoteWorkerContext * rwc = (RemoteWorkerContext *) user_data;
+  FridaRemoteWorkerContext * rwc = user_data;
 
   if (details->type != GUM_EXPORT_FUNCTION)
     return TRUE;
@@ -502,8 +467,50 @@ remote_worker_context_collect_kernel32_export (const GumExportDetails * details,
   return TRUE;
 }
 
+gboolean
+frida_windows_system_is_x64 (void)
+{
+  static gboolean initialized = FALSE;
+  static gboolean system_is_x64;
+
+  if (!initialized)
+  {
+    SYSTEM_INFO si;
+
+    GetNativeSystemInfo (&si);
+    system_is_x64 = si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
+
+    initialized = TRUE;
+  }
+
+  return system_is_x64;
+}
+
+gboolean
+frida_windows_process_is_x64 (guint32 pid)
+{
+  HANDLE process_handle;
+  BOOL is_wow64, success;
+
+  if (!frida_windows_system_is_x64 ())
+    return FALSE;
+
+  process_handle = OpenProcess (PROCESS_QUERY_INFORMATION, FALSE, pid);
+  if (process_handle == NULL)
+    goto error;
+  success = IsWow64Process (process_handle, &is_wow64);
+  CloseHandle (process_handle);
+  if (!success)
+    goto error;
+
+  return !is_wow64;
+
+error:
+  return FALSE;
+}
+
 static gboolean
-file_exists_and_is_readable (const WCHAR * filename)
+frida_file_exists_and_is_readable (const WCHAR * filename)
 {
   HANDLE file;
 

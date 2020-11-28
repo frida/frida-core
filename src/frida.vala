@@ -2322,7 +2322,9 @@ namespace Frida {
 
 		public static Injector new () {
 #if WINDOWS
-			return new Winjector ();
+			var tempdir = new TemporaryDirectory ();
+			var helper = new WindowsHelperProcess (tempdir);
+			return new Winjector (helper, true, tempdir);
 #endif
 #if DARWIN
 			var tempdir = new TemporaryDirectory ();
@@ -2339,7 +2341,9 @@ namespace Frida {
 
 		public static Injector new_inprocess () {
 #if WINDOWS
-			return new Winjector ();
+			var tempdir = new TemporaryDirectory ();
+			var helper = new WindowsHelperBackend ();
+			return new Winjector (helper, true, tempdir);
 #endif
 #if DARWIN
 			var tempdir = new TemporaryDirectory ();

@@ -1,5 +1,5 @@
 namespace Frida {
-	internal class LinuxHelperProcess : Object {
+	internal class LinuxHelperProcess : Object, LinuxHelper {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 

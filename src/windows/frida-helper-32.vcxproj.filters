@@ -16,43 +16,23 @@
     <Filter Include="Source Files\generated">
       <UniqueIdentifier>{f283d6dd-63c1-4dcb-9266-90ee33c2cab1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\lib">
-      <UniqueIdentifier>{f96926e0-a5c2-4480-aee8-abbcce02ba16}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\lib\interfaces">
-      <UniqueIdentifier>{830a4efc-516d-4bde-8050-a86453e9d656}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)winjector-helper.h">
+    <ClInclude Include="frida-helper-service-glue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)winjector-helper.c">
+    <ClCompile Include="$(IntDir)frida-helper-service.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
-    <ClCompile Include="winjector-helper-services.c">
+    <ClCompile Include="frida-helper-service-glue.c">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="winjector-helper-core.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="winjector-wait-handle-source.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)winjector-types.c">
-      <Filter>Source Files\generated</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="winjector-helper.vala">
+    <CustomBuild Include="frida-helper-service.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="winjector-types.vala">
-      <Filter>Source Files</Filter>
-    </None>
   </ItemGroup>
 </Project>

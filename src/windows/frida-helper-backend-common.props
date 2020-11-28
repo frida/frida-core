@@ -2,46 +2,42 @@
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
   <ItemDefinitionGroup>
-    <Link>
-      <SubSystem>Console</SubSystem>
-      <RandomizedBaseAddress>false</RandomizedBaseAddress>
-      <FixedBaseAddress>true</FixedBaseAddress>
-    </Link>
+    <ClCompile>
+      <PreprocessorDefinitions>G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <CustomBuild Include="winjector-helper.vala">
-      <FileType>Document</FileType>
-      <Command>"$(ValaCompiler)" winjector-helper.vala winjector-types.vala -D WINDOWS --ccode --directory=$(IntDir) --header="$(IntDir)winjector-helper.h" --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-interfaces --pkg=frida-pipe || exit 1
-echo &gt; "$(IntDir)valacode.stamp"</Command>
+    <CustomBuild Include="frida-helper-backend.vala">
       <Message>Compiling vala code</Message>
+      <Command>"$(ValaCompiler)" frida-helper-backend.vala frida-helper-types.vala --ccode --directory=$(IntDir) --library=frida-helper-backend --header=$(IntDir)frida-helper-backend.h --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-interfaces || exit 1
+echo &gt; "$(IntDir)valacode.stamp"
+</Command>
+      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)frida-helper-backend.vala;$(ProjectDir)frida-helper-types.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
-      <AdditionalInputs>$(ValaCompiler);$(ProjectDir)winjector-types.vala;%(AdditionalInputs)</AdditionalInputs>
     </CustomBuild>
-    <None Include="winjector-types.vala" />
+    <None Include="frida-helper-types.vala" />
   </ItemGroup>
 
   <ItemGroup>
-    <ClInclude Include="$(IntDir)winjector-helper.h" />
+    <ClInclude Include="$(IntDir)frida-helper-backend.h" />
   </ItemGroup>
 
   <ItemGroup>
-    <ClCompile Include="$(IntDir)winjector-helper.c">
+    <ClCompile Include="$(IntDir)frida-helper-backend.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
-    <ClCompile Include="$(IntDir)winjector-types.c">
+    <ClCompile Include="frida-helper-backend-glue.c" />
+    <ClCompile Include="$(IntDir)frida-helper-types.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
-
-    <ClCompile Include="winjector-helper-core.c" />
-    <ClCompile Include="winjector-helper-services.c" />
-    <ClCompile Include="winjector-wait-handle-source.c" />
+    <ClCompile Include="wait-handle-source.c" />
   </ItemGroup>
 
 </Project>

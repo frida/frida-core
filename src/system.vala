@@ -142,7 +142,10 @@ namespace Frida {
 		}
 		private File file;
 
-		private bool remove_on_dispose;
+		public bool is_ours {
+			get;
+			private set;
+		}
 
 		public static TemporaryDirectory system_default {
 			owned get {
@@ -154,7 +157,7 @@ namespace Frida {
 
 		public TemporaryDirectory () {
 			this.name = (fixed_name != null) ? fixed_name : make_name ();
-			this.remove_on_dispose = true;
+			this.is_ours = true;
 
 			if (fixed_name != null) {
 				try {
@@ -170,9 +173,9 @@ namespace Frida {
 			}
 		}
 
-		public TemporaryDirectory.with_file (File file, bool remove_on_dispose) {
+		public TemporaryDirectory.with_file (File file, bool is_ours) {
 			this.file = file;
-			this.remove_on_dispose = remove_on_dispose;
+			this.is_ours = is_ours;
 		}
 
 		~TemporaryDirectory () {
@@ -184,7 +187,7 @@ namespace Frida {
 		}
 
 		public void destroy () {
-			if (remove_on_dispose && file != null) {
+			if (is_ours && file != null) {
 				try {
 					var enumerator = file.enumerate_children ("standard::*", 0);
 
@@ -222,6 +225,12 @@ namespace Frida {
 			}
 		}
 		private File file;
+
+		public TemporaryDirectory parent {
+			get {
+				return directory;
+			}
+		}
 		private TemporaryDirectory directory;
 
 		public TemporaryFile.from_stream (string name, InputStream istream, TemporaryDirectory? directory = null) throws Error {
