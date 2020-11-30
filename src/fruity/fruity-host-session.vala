@@ -489,7 +489,7 @@ namespace Frida {
 				try {
 					return yield server.session.get_frontmost_application (cancellable);
 				} catch (GLib.Error e) {
-					throw_api_error (e);
+					throw_dbus_error (e);
 				}
 			}
 
@@ -521,7 +521,7 @@ namespace Frida {
 				try {
 					return yield server.session.enumerate_applications (cancellable);
 				} catch (GLib.Error e) {
-					throw_api_error (e);
+					throw_dbus_error (e);
 				}
 			}
 
@@ -608,7 +608,7 @@ namespace Frida {
 				try {
 					return yield server.session.enumerate_processes (cancellable);
 				} catch (GLib.Error e) {
-					throw_api_error (e);
+					throw_dbus_error (e);
 				}
 			}
 
@@ -646,7 +646,7 @@ namespace Frida {
 			try {
 				yield server.session.enable_spawn_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -655,7 +655,7 @@ namespace Frida {
 			try {
 				yield server.session.disable_spawn_gating (cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -664,7 +664,7 @@ namespace Frida {
 			try {
 				return yield server.session.enumerate_pending_spawn (cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -673,7 +673,7 @@ namespace Frida {
 			try {
 				return yield server.session.enumerate_pending_children (cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -683,7 +683,7 @@ namespace Frida {
 				try {
 					return yield server.session.spawn (program, options, cancellable);
 				} catch (GLib.Error e) {
-					throw_api_error (e);
+					throw_dbus_error (e);
 				}
 			}
 
@@ -769,7 +769,7 @@ namespace Frida {
 			try {
 				yield server.session.input (pid, data, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -784,7 +784,7 @@ namespace Frida {
 			try {
 				yield server.session.resume (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -802,7 +802,7 @@ namespace Frida {
 					return;
 				} catch (GLib.Error e) {
 					if (server.flavor == REGULAR)
-						throw_api_error (e);
+						throw_dbus_error (e);
 				}
 			}
 
@@ -911,7 +911,7 @@ namespace Frida {
 			try {
 				remote_session_id = yield server.session.attach_to (pid, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 			var local_session_id = AgentSessionId (next_agent_session_id++);
 
@@ -954,7 +954,7 @@ namespace Frida {
 			try {
 				return yield server.session.inject_library_file (pid, path, entrypoint, data, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
@@ -964,7 +964,7 @@ namespace Frida {
 			try {
 				return yield server.session.inject_library_blob (pid, blob, entrypoint, data, cancellable);
 			} catch (GLib.Error e) {
-				throw_api_error (e);
+				throw_dbus_error (e);
 			}
 		}
 
