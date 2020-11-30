@@ -55,22 +55,31 @@ namespace Frida {
 
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
 				Cancellable? cancellable) throws Error, IOError {
+			bool permission_denied = false;
 			try {
-				yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
-				return;
+				unowned string local_arch = sizeof (void *) == 8 ? "64" : "32";
+				unowned string remote_arch = WindowsProcess.is_x64 (pid) ? "64" : "32";
+				if (remote_arch == local_arch) {
+					yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+					return;
+				}
 			} catch (Error e) {
-				if (!(e is Error.PERMISSION_DENIED))
+				if (e is Error.PERMISSION_DENIED)
+					permission_denied = true;
+				else
 					throw e;
 			}
 
-			var normal_factory = get_normal_factory ();
-			var normal_helper = yield normal_factory.obtain (cancellable);
-			try {
-				yield normal_helper.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
-				return;
-			} catch (Error e) {
-				if (!(e is Error.PERMISSION_DENIED))
-					throw e;
+			if (!permission_denied && !_elevated_factory.running) {
+				var normal_factory = get_normal_factory ();
+				var normal_helper = yield normal_factory.obtain (cancellable);
+				try {
+					yield normal_helper.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+					return;
+				} catch (Error e) {
+					if (!(e is Error.PERMISSION_DENIED))
+						throw e;
+				}
 			}
 
 			var elevated_factory = get_elevated_factory ();
@@ -92,6 +101,17 @@ namespace Frida {
 	private class HelperFactory {
 		public signal void uninjected (uint id);
 
+		public bool running {
+			get {
+				return helper != null;
+			}
+		}
+
+		public ResourceStore? resource_store {
+			get;
+			set;
+		}
+
 		private PrivilegeLevel level;
 		private MainContext main_context;
 
@@ -102,11 +122,6 @@ namespace Frida {
 		private Future<IOStream>? stream_request;
 
 		private Cancellable io_cancellable = new Cancellable ();
-
-		public ResourceStore? resource_store {
-			get;
-			set;
-		}
 
 		public HelperFactory (PrivilegeLevel level) {
 			this.level = level;
@@ -155,8 +170,11 @@ namespace Frida {
 			Error? error = null;
 
 			try {
+				string native_helper_path = WindowsSystem.is_x64 ()
+					? resource_store.helper64.path
+					: resource_store.helper32.path;
 				string level_str = (level == PrivilegeLevel.ELEVATED) ? "ELEVATED" : "NORMAL";
-				void * process = spawn (resource_store.helper32.path,
+				void * process = spawn (native_helper_path,
 					"MANAGER %s %s".printf (level_str, transport.remote_address),
 					level);
 				instance = new HelperInstance (resource_store.helper32, resource_store.helper64, transport,
@@ -183,8 +201,11 @@ namespace Frida {
 				try {
 					yield instance.open (io_cancellable);
 
-					helper = completed_instance;
-					helper.uninjected.connect (on_uninjected);
+					if (completed_instance.is_alive) {
+						helper = completed_instance;
+						helper.terminated.connect (on_terminated);
+						helper.uninjected.connect (on_uninjected);
+					}
 				} catch (GLib.Error e) {
 					completed_instance = null;
 					completed_error = e;
@@ -201,6 +222,12 @@ namespace Frida {
 			obtain_request = null;
 		}
 
+		private void on_terminated () {
+			helper.terminated.disconnect (on_terminated);
+			helper.uninjected.disconnect (on_uninjected);
+			helper = null;
+		}
+
 		private void on_uninjected (uint id) {
 			uninjected (id);
 		}
@@ -209,7 +236,14 @@ namespace Frida {
 	}
 
 	private class HelperInstance {
+		public signal void terminated ();
 		public signal void uninjected (uint id);
+
+		public bool is_alive {
+			get {
+				return connection != null;
+			}
+		}
 
 		private TemporaryFile helper32;
 		private TemporaryFile helper64;
@@ -218,6 +252,8 @@ namespace Frida {
 		private DBusConnection connection;
 		private WindowsRemoteHelper proxy;
 		private void * process;
+
+		private Gee.Set<uint> injectee_ids = new Gee.HashSet<uint> ();
 
 		public HelperInstance (TemporaryFile helper32, TemporaryFile helper64, PipeTransport transport,
 				Future<IOStream> stream_request, void * process) {
@@ -238,6 +274,7 @@ namespace Frida {
 				var stream = yield stream_request.wait_async (cancellable);
 
 				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
+				connection.on_closed.connect (on_connection_closed);
 			} catch (GLib.Error e) {
 				throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
@@ -253,6 +290,11 @@ namespace Frida {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			if (connection != null) {
+				connection.on_closed.disconnect (on_connection_closed);
+				connection = null;
+			}
+
 			proxy.uninjected.disconnect (on_uninjected);
 
 			try {
@@ -301,16 +343,29 @@ namespace Frida {
 			cancel_source.destroy ();
 		}
 
+		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			this.connection = null;
+
+			foreach (var id in injectee_ids)
+				uninjected (id);
+			injectee_ids.clear ();
+
+			terminated ();
+		}
+
 		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
 				Cancellable? cancellable) throws Error, IOError {
 			try {
 				yield proxy.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+				injectee_ids.add (id);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
 		private void on_uninjected (uint id) {
+			injectee_ids.remove (id);
+
 			uninjected (id);
 		}
 
