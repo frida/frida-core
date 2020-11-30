@@ -9,45 +9,49 @@ const NSUTF8StringEncoding = 4;
 
 const { pointerSize } = Process;
 
-const nativeOptions = {
+const simpleFuncOptions = {
   scheduling: 'exclusive',
+  exceptions: 'propagate'
+};
+const complexFuncOptions = {
+  scheduling: 'cooperative',
   exceptions: 'propagate'
 };
 const _pidForTask = new NativeFunction(
     Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'pid_for_task'),
     'int',
     ['uint', 'pointer'],
-    nativeOptions
+    simpleFuncOptions
 );
 const unlink = new NativeFunction(
     Module.getExportByName(LIBSYSTEM_KERNEL_PATH, 'unlink'),
     'int',
     ['pointer'],
-    nativeOptions
+    simpleFuncOptions
 );
 const CSSymbolicatorGetSymbolWithAddressAtTime = new NativeFunction(
     Module.getExportByName(CORESYMBOLICATION_PATH, 'CSSymbolicatorGetSymbolWithAddressAtTime'),
     CSTypeRef,
     [CSTypeRef, 'uint64', 'uint64'],
-    nativeOptions
+    complexFuncOptions
 );
 const CSIsNull = new NativeFunction(
     Module.getExportByName(CORESYMBOLICATION_PATH, 'CSIsNull'),
     'int',
     [CSTypeRef],
-    nativeOptions
+    simpleFuncOptions
 );
 const mappedMemoryRead = new NativeFunction(
     Module.getExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read'),
     'uint',
     ['pointer', 'uint64', 'uint64', 'pointer'],
-    nativeOptions
+    simpleFuncOptions
 );
 const mappedMemoryReadPointer = new NativeFunction(
     Module.getExportByName(CORESYMBOLICATION_PATH, 'mapped_memory_read_pointer'),
     'uint',
     ['pointer', 'uint64', 'pointer'],
-    nativeOptions
+    simpleFuncOptions
 );
 
 const {
@@ -181,7 +185,10 @@ function applyInstrumentation() {
       : AppleErrorReport['- saveToDir:'].implementation;
   Interceptor.attach(saveImpl, {
     onLeave(retval) {
-      const session = getSession(this.threadId, 'save');
+      const session = findSession(this.threadId);
+      if (session === null)
+        return;
+
       if (session.forcedByUs)
         unlink(Memory.allocUtf8String(session.logPath));
 
@@ -193,11 +200,12 @@ function applyInstrumentation() {
   if (createForSubmission !== undefined) {
     Interceptor.attach(createForSubmission.implementation, {
       onLeave(retval) {
+        const session = findSession(this.threadId);
+        if (session === null)
+          return;
+
         const log = new ObjC.Object(retval);
         const filePath = log.filepath();
-
-        const session = getSession(this.threadId, 'createForSubmission');
-
         const logPath = filePath.toString();
         session.logPath = logPath;
 
@@ -286,7 +294,9 @@ function applyInstrumentation() {
 
     Interceptor.attach(libdyld['dyld_process_info_base::make'], {
       onEnter(args) {
-        const session = getSession(this.threadId, 'dyld_process_info_base::make');
+        const session = findSession(this.threadId);
+        if (session === null)
+          return;
 
         const pid = pidForTask(args[0].toUInt32());
         const allImageInfo = args[1];
