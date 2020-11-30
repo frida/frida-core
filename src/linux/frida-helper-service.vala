@@ -147,13 +147,14 @@ namespace Frida {
 			yield backend.kill (pid, cancellable);
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path,
-				Cancellable? cancellable) throws Error, IOError {
-			return yield backend.inject_library_file (pid, path, entrypoint, data, temp_path, cancellable);
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string temp_path, uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.inject_library_file (pid, path_template, entrypoint, data, temp_path, id, cancellable);
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
-			return yield backend.demonitor_and_clone_injectee_state (id, cancellable);
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
+				throws Error, IOError {
+			yield backend.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {

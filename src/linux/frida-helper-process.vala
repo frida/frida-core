@@ -1,13 +1,20 @@
 namespace Frida {
-	internal class LinuxHelperProcess : Object {
-		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void uninjected (uint id);
+	public class LinuxHelperProcess : Object, LinuxHelper {
+		public TemporaryDirectory tempdir {
+			get;
+			construct;
+		}
 
 		private ResourceStore _resource_store;
 
 		private MainContext main_context;
 		private HelperFactory factory32;
 		private HelperFactory factory64;
+		private Gee.Map<uint, LinuxHelper> injectee_ids = new Gee.HashMap<uint, LinuxHelper> ();
+
+		public LinuxHelperProcess (TemporaryDirectory tempdir) {
+			Object (tempdir: tempdir);
+		}
 
 		construct {
 			main_context = MainContext.get_thread_default ();
@@ -25,10 +32,6 @@ namespace Frida {
 			}
 
 			_resource_store = null;
-		}
-
-		public TemporaryDirectory get_tempdir () throws Error {
-			return get_resource_store ().tempdir;
 		}
 
 		private ResourceStore get_resource_store () throws Error {
@@ -87,51 +90,42 @@ namespace Frida {
 			}
 		}
 
-		public async uint inject_library_file (uint pid, string path_template, string entrypoint, string data,
-				Cancellable? cancellable) throws Error, IOError {
-			var cpu_type = cpu_type_from_pid (pid);
-
-			string path;
-			switch (cpu_type) {
-				case Gum.CpuType.IA32:
-				case Gum.CpuType.ARM:
-				case Gum.CpuType.MIPS:
-					path = path_template.printf (32);
-					break;
-
-				case Gum.CpuType.AMD64:
-				case Gum.CpuType.ARM64:
-					path = path_template.printf (64);
-					break;
-
-				default:
-					assert_not_reached ();
-			}
-
-			var helper = yield obtain_for_cpu_type (cpu_type, cancellable);
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string temp_path, uint id, Cancellable? cancellable) throws Error, IOError {
+			var helper = yield obtain_for_cpu_type (cpu_type_from_pid (pid), cancellable);
 			try {
-				return yield helper.inject_library_file (pid, path, entrypoint, data, get_tempdir ().path, cancellable);
+				yield helper.inject_library_file (pid, path_template, entrypoint, data, temp_path, id, cancellable);
+				injectee_ids[id] = helper;
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
-			var helper = yield obtain_for_injectee_id (id, cancellable);
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
+				throws Error, IOError {
+			var helper = obtain_for_injectee_id (id);
 			try {
-				return yield helper.demonitor_and_clone_injectee_state (id, cancellable);
+				yield helper.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
+				injectee_ids[clone_id] = helper;
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
-			var helper = yield obtain_for_injectee_id (id, cancellable);
+			var helper = obtain_for_injectee_id (id);
 			try {
 				yield helper.recreate_injectee_thread (pid, id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
+		}
+
+		private LinuxHelper obtain_for_injectee_id (uint id) throws Error, IOError {
+			var helper = injectee_ids[id];
+			if (helper == null)
+				throw new Error.INVALID_ARGUMENT ("Invalid injectee ID");
+			return helper;
 		}
 
 		private async LinuxHelper obtain_for_path (string path, Cancellable? cancellable) throws Error, IOError {
@@ -158,19 +152,13 @@ namespace Frida {
 			}
 		}
 
-		private async LinuxHelper obtain_for_injectee_id (uint id, Cancellable? cancellable) throws Error, IOError {
-			if (id % 2 != 0)
-				return yield obtain_for_32bit (cancellable);
-			else
-				return yield obtain_for_64bit (cancellable);
-		}
-
 		private async LinuxHelper obtain_for_32bit (Cancellable? cancellable) throws Error, IOError {
 			if (factory32 == null) {
 				var store = get_resource_store ();
 				if (sizeof (void *) != 4 && store.helper32 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 32-bit processes due to build configuration");
 				factory32 = new HelperFactory (store.helper32, store, main_context);
+				factory32.lost.connect (on_factory_lost);
 				factory32.output.connect (on_factory_output);
 				factory32.uninjected.connect (on_factory_uninjected);
 			}
@@ -184,6 +172,7 @@ namespace Frida {
 				if (sizeof (void *) != 8 && store.helper64 == null)
 					throw new Error.NOT_SUPPORTED ("Unable to handle 64-bit processes due to build configuration");
 				factory64 = new HelperFactory (store.helper64, store, main_context);
+				factory64.lost.connect (on_factory_lost);
 				factory64.output.connect (on_factory_output);
 				factory64.uninjected.connect (on_factory_uninjected);
 			}
@@ -191,11 +180,27 @@ namespace Frida {
 			return yield factory64.obtain (cancellable);
 		}
 
+		private void on_factory_lost (LinuxHelper helper) {
+			var dead_ids = new Gee.ArrayList<uint> ();
+			foreach (var e in injectee_ids.entries) {
+				if (e.value == helper)
+					dead_ids.add (e.key);
+			}
+
+			foreach (var id in dead_ids) {
+				injectee_ids.unset (id);
+
+				uninjected (id);
+			}
+		}
+
 		private void on_factory_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
 		}
 
 		private void on_factory_uninjected (uint id) {
+			injectee_ids.unset (id);
+
 			uninjected (id);
 		}
 
@@ -227,6 +232,7 @@ namespace Frida {
 	}
 
 	private class HelperFactory {
+		public signal void lost (LinuxHelper helper);
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
@@ -410,9 +416,13 @@ namespace Frida {
 		private void discard_helper () {
 			if (helper == null)
 				return;
-			helper.output.disconnect (on_helper_output);
-			helper.uninjected.disconnect (on_helper_uninjected);
+
+			var h = helper;
+			h.output.disconnect (on_helper_output);
+			h.uninjected.disconnect (on_helper_uninjected);
 			helper = null;
+
+			lost (h);
 		}
 
 		private void on_helper_output (uint pid, int fd, uint8[] data) {
@@ -505,18 +515,19 @@ namespace Frida {
 			}
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path,
-				Cancellable? cancellable) throws Error, IOError {
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string temp_path, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				return yield proxy.inject_library_file (pid, path, entrypoint, data, temp_path, cancellable);
+				yield proxy.inject_library_file (pid, path_template, entrypoint, data, temp_path, id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable)
+				throws Error, IOError {
 			try {
-				return yield proxy.demonitor_and_clone_injectee_state (id, cancellable);
+				yield proxy.demonitor_and_clone_injectee_state (id, clone_id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

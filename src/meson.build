@@ -184,7 +184,7 @@ if host_os_family == 'linux'
   endif
   helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
-    vala_args: ['--pkg=posix'],
+    vala_args: ['--pkg=posix', '--pkg=frida-gum-linux-1.0'],
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep] + helper_backend_extra_deps,
   )
   backend_libs += [helper_backend]

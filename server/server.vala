@@ -210,7 +210,8 @@ namespace Frida.Server {
 			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory ());
 #endif
 #if LINUX
-			host_session = new LinuxHostSession ();
+			var tempdir = new TemporaryDirectory ();
+			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
 #endif
 #if QNX
 			host_session = new QnxHostSession ();

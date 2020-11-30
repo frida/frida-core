@@ -278,8 +278,6 @@ struct _FridaProbeElfContext
 
 static gboolean frida_set_matching_inject_instances_exec_pending (GeeMapEntry * entry, FridaNotifyExecPendingContext * ctx);
 
-static guint frida_helper_backend_generate_id (FridaLinuxHelperBackend * self);
-
 static FridaSpawnInstance * frida_spawn_instance_new (FridaLinuxHelperBackend * backend);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
@@ -550,8 +548,8 @@ _frida_linux_helper_backend_free_exec_instance (FridaLinuxHelperBackend * self, 
   frida_exec_instance_free (instance);
 }
 
-guint
-_frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, GError ** error)
+void
+_frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid, const gchar * path, const gchar * entrypoint, const gchar * data, const gchar * temp_path, guint id, GError ** error)
 {
   FridaInjectInstance * instance;
   FridaInjectParams params;
@@ -611,7 +609,7 @@ _frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid
   if (params.dlopen_impl == 0 || params.dlclose_impl == 0 || params.dlsym_impl == 0)
     goto no_libc;
 
-  instance = frida_inject_instance_new (self, frida_helper_backend_generate_id (self), pid, temp_path);
+  instance = frida_inject_instance_new (self, id, pid, temp_path);
   if (instance->executable_path == NULL)
     goto premature_termination;
 
@@ -638,9 +636,9 @@ _frida_linux_helper_backend_do_inject (FridaLinuxHelperBackend * self, guint pid
   else
     g_clear_error (error);
 
-  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (instance->id), instance);
+  gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (id), instance);
 
-  return instance->id;
+  return;
 
 no_libc:
   {
@@ -648,24 +646,24 @@ no_libc:
         FRIDA_ERROR,
         FRIDA_ERROR_NOT_SUPPORTED,
         "Unable to inject library into process without libc");
-    return 0;
+    return;
   }
 premature_termination:
   {
     frida_inject_instance_free (instance, FRIDA_UNLOAD_POLICY_IMMEDIATE);
-    return 0;
+    return;
   }
 }
 
 guint
-_frida_linux_helper_backend_demonitor_and_clone_injectee_state (FridaLinuxHelperBackend * self, void * raw_instance)
+_frida_linux_helper_backend_demonitor_and_clone_injectee_state (FridaLinuxHelperBackend * self, void * raw_instance, guint clone_id)
 {
   FridaInjectInstance * instance = raw_instance;
   FridaInjectInstance * clone;
 
   frida_inject_instance_recreate_fifo (instance);
 
-  clone = frida_inject_instance_clone (instance, frida_helper_backend_generate_id (self));
+  clone = frida_inject_instance_clone (instance, clone_id);
 
   gee_abstract_map_set (GEE_ABSTRACT_MAP (self->inject_instances), GUINT_TO_POINTER (clone->id), clone);
 
@@ -711,22 +709,6 @@ failure:
     _frida_linux_helper_backend_destroy_inject_instance (self, instance->id, FRIDA_UNLOAD_POLICY_IMMEDIATE);
     return;
   }
-}
-
-static guint
-frida_helper_backend_generate_id (FridaLinuxHelperBackend * self)
-{
-  guint id;
-
-  if (self->next_id == 0 || self->next_id >= G_MAXINT)
-  {
-    /* Avoid ID collisions when running one helper for 32-bit and one for 64-bit targets */
-    self->next_id = (GLIB_SIZEOF_VOID_P == 4) ? 1 : 2;
-  }
-  id = self->next_id;
-  self->next_id += 2;
-
-  return id;
 }
 
 GInputStream *

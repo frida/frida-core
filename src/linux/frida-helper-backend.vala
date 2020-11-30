@@ -217,16 +217,16 @@ namespace Frida {
 			Posix.kill ((Posix.pid_t) pid, Posix.Signal.KILL);
 		}
 
-		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, string temp_path,
-				Cancellable? cancellable) throws Error, IOError {
-			var id = _do_inject (pid, path, entrypoint, data, temp_path);
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string temp_path, uint id, Cancellable? cancellable) throws Error, IOError {
+			string path = path_template.expand (arch_name_from_pid (pid));
+
+			_do_inject (pid, path, entrypoint, data, temp_path, id);
 
 			yield establish_session (id, pid);
-
-			return id;
 		}
 
-		public async uint demonitor_and_clone_injectee_state (uint id, Cancellable? cancellable) throws Error, IOError {
+		public async void demonitor_and_clone_injectee_state (uint id, uint clone_id, Cancellable? cancellable) throws Error, IOError {
 			var instance = inject_instances[id];
 			if (instance == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid ID");
@@ -237,12 +237,10 @@ namespace Frida {
 				yield session.cancel ();
 			}
 
-			var clone_id = _demonitor_and_clone_injectee_state (instance);
+			_demonitor_and_clone_injectee_state (instance, clone_id);
 
 			schedule_inject_expiry_for_id (id);
 			schedule_inject_expiry_for_id (clone_id);
-
-			return clone_id;
 		}
 
 		public async void recreate_injectee_thread (uint pid, uint id, Cancellable? cancellable) throws Error, IOError {
@@ -320,6 +318,34 @@ namespace Frida {
 			Source.remove (timer);
 		}
 
+		private static unowned string arch_name_from_pid (uint pid) throws Error {
+			Gum.CpuType cpu_type;
+			try {
+				cpu_type = Gum.Linux.cpu_type_from_pid ((Posix.pid_t) pid);
+			} catch (GLib.Error e) {
+				if (e is FileError.NOENT)
+					throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u".printf (pid));
+				else if (e is FileError.ACCES)
+					throw new Error.PERMISSION_DENIED ("Unable to access process with pid %u from the current user account".printf (pid));
+				else
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+			}
+
+			switch (cpu_type) {
+				case Gum.CpuType.IA32:
+				case Gum.CpuType.ARM:
+				case Gum.CpuType.MIPS:
+					return "32";
+
+				case Gum.CpuType.AMD64:
+				case Gum.CpuType.ARM64:
+					return "64";
+
+				default:
+					assert_not_reached ();
+			}
+		}
+
 		protected extern uint _do_spawn (string path, HostSpawnOptions options, out StdioPipes? pipes) throws Error;
 		protected extern void _resume_spawn_instance (void * instance);
 		protected extern void _free_spawn_instance (void * instance);
@@ -331,8 +357,8 @@ namespace Frida {
 		protected extern void _resume_exec_instance (void * instance);
 		protected extern void _free_exec_instance (void * instance);
 
-		protected extern uint _do_inject (uint pid, string path, string entrypoint, string data, string temp_path) throws Error;
-		protected extern uint _demonitor_and_clone_injectee_state (void * instance);
+		protected extern void _do_inject (uint pid, string path, string entrypoint, string data, string temp_path, uint id) throws Error;
+		protected extern uint _demonitor_and_clone_injectee_state (void * instance, uint clone_id);
 		protected extern void _recreate_injectee_thread (void * instance, uint pid) throws Error;
 		protected extern InputStream _get_fifo_for_inject_instance (void * instance);
 		protected extern void _free_inject_instance (void * instance, UnloadPolicy unload_policy);

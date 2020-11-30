@@ -47,7 +47,8 @@ namespace Frida {
 			assert (location == null);
 			if (host_session != null)
 				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
-			host_session = new LinuxHostSession ();
+			var tempdir = new TemporaryDirectory ();
+			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
 			return host_session;
 		}
@@ -74,10 +75,19 @@ namespace Frida {
 	}
 
 	public class LinuxHostSession : BaseDBusHostSession {
+		public LinuxHelper helper {
+			get;
+			construct;
+		}
+
+		public TemporaryDirectory tempdir {
+			get;
+			construct;
+		}
+
 		private AgentContainer system_session_container;
 
-		private LinuxHelperProcess helper;
-		private AgentResource? agent_resource;
+		private AgentDescriptor? agent;
 
 #if ANDROID
 		private RoboLauncher robo_launcher;
@@ -85,12 +95,24 @@ namespace Frida {
 		private CrashMonitor crash_monitor;
 #endif
 
+		public LinuxHostSession (owned LinuxHelper helper, owned TemporaryDirectory tempdir) {
+			Object (helper: helper, tempdir: tempdir);
+		}
+
 		construct {
-			helper = new LinuxHelperProcess ();
 			helper.output.connect (on_output);
 
-			injector = new Linjector.with_helper (helper);
+			injector = new Linjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
+
+			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
+			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
+			agent = new AgentDescriptor (PathTemplate ("frida-agent-<arch>.so"),
+				new Bytes.static (blob32.data),
+				new Bytes.static (blob64.data),
+				new AgentResource[] {},
+				AgentMode.INSTANCED,
+				tempdir);
 
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
@@ -137,22 +159,24 @@ namespace Frida {
 			injector.uninjected.disconnect (on_uninjected);
 			yield injector.close (cancellable);
 
-			yield helper.close (cancellable);
-			helper.output.disconnect (on_output);
-
 			if (system_session_container != null) {
 				yield system_session_container.destroy (cancellable);
 				system_session_container = null;
 			}
 
-			agent_resource = null;
+			yield helper.close (cancellable);
+			helper.output.disconnect (on_output);
+
+			agent = null;
+
+			tempdir.destroy ();
 		}
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
-			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
+			PipeTransport.set_temp_directory (tempdir.path);
 
-			var agent_filename = get_agent_resource ().get_path_template ().printf (sizeof (void *) == 8 ? 64 : 32);
+			var agent_filename = agent.get_path_template ().expand (sizeof (void *) == 8 ? "64" : "32");
 			system_session_container = yield AgentContainer.create (agent_filename, cancellable);
 
 			connection = system_session_container.connection;
@@ -269,9 +293,7 @@ namespace Frida {
 
 		protected override async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
 				throws Error, IOError {
-			var agent_resource = get_agent_resource ();
-
-			PipeTransport.set_temp_directory (helper.get_tempdir ().path);
+			PipeTransport.set_temp_directory (tempdir.path);
 
 			var t = new PipeTransport ();
 
@@ -282,8 +304,7 @@ namespace Frida {
 			});
 
 			var linjector = injector as Linjector;
-			var id = yield linjector.inject_library_resource (pid, agent_resource, "frida_agent_main", t.remote_address,
-				cancellable);
+			var id = yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;
@@ -337,20 +358,6 @@ namespace Frida {
 
 			uninjected (InjectorPayloadId (id));
 		}
-
-		private AgentResource get_agent_resource () throws Error {
-			if (agent_resource == null) {
-				var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
-				var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
-				agent_resource = new AgentResource ("frida-agent-%u.so",
-					new MemoryInputStream.from_data (blob32.data, null),
-					new MemoryInputStream.from_data (blob64.data, null),
-					AgentMode.INSTANCED,
-					helper.get_tempdir ());
-			}
-			return agent_resource;
-		}
-
 	}
 
 #if ANDROID

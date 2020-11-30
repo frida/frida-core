@@ -2332,7 +2332,9 @@ namespace Frida {
 			return new Fruitjector (helper, true, tempdir);
 #endif
 #if LINUX
-			return new Linjector ();
+			var tempdir = new TemporaryDirectory ();
+			var helper = new LinuxHelperProcess (tempdir);
+			return new Linjector (helper, true, tempdir);
 #endif
 #if QNX
 			return new Qinjector ();
@@ -2351,7 +2353,9 @@ namespace Frida {
 			return new Fruitjector (helper, true, tempdir);
 #endif
 #if LINUX
-			return new Linjector ();
+			var tempdir = new TemporaryDirectory ();
+			var helper = new LinuxHelperBackend ();
+			return new Linjector (helper, true, tempdir);
 #endif
 #if QNX
 			return new Qinjector ();
