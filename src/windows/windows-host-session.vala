@@ -152,6 +152,8 @@ namespace Frida {
 
 			yield helper.close (cancellable);
 
+			agent = null;
+
 			tempdir.destroy ();
 		}
 
