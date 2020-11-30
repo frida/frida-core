@@ -94,7 +94,7 @@ namespace Frida {
 
 		private AgentContainer system_session_container;
 
-		private AgentDescriptor agent_desc;
+		private AgentDescriptor? agent;
 
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
@@ -116,7 +116,7 @@ namespace Frida {
 			var symsrv32 = Frida.Data.Agent.get_symsrv_32_dll_blob ();
 			var symsrv64 = Frida.Data.Agent.get_symsrv_64_dll_blob ();
 
-			agent_desc = new AgentDescriptor (PathTemplate ("<arch>\\frida-agent.dll"),
+			agent = new AgentDescriptor (PathTemplate ("<arch>\\frida-agent.dll"),
 				new Bytes.static (blob32.data),
 				new Bytes.static (blob64.data),
 				new AgentResource[] {
@@ -157,7 +157,7 @@ namespace Frida {
 
 		protected override async AgentSessionProvider create_system_session_provider (Cancellable? cancellable,
 				out DBusConnection connection) throws Error, IOError {
-			var path_template = agent_desc.get_path_template ();
+			var path_template = agent.get_path_template ();
 			var agent_path = path_template.expand (sizeof (void *) == 8 ? "64" : "32");
 
 			system_session_container = yield AgentContainer.create (agent_path, cancellable);
@@ -269,8 +269,7 @@ namespace Frida {
 			});
 
 			var winjector = injector as Winjector;
-			var id = yield winjector.inject_library_resource (pid, agent_desc, "frida_agent_main", t.remote_address,
-				cancellable);
+			var id = yield winjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
 			transport = t;

@@ -17,7 +17,7 @@ namespace Frida {
 
 		private Gee.HashMap<uint, uint> pid_by_id = new Gee.HashMap<uint, uint> ();
 		private Gee.HashMap<uint, TemporaryFile> blob_file_by_id = new Gee.HashMap<uint, TemporaryFile> ();
-		private uint next_injection_id = 1;
+		private uint next_injectee_id = 1;
 		private uint next_blob_id = 1;
 
 		public Winjector (WindowsHelper helper, bool close_helper, TemporaryDirectory tempdir) {
@@ -45,7 +45,7 @@ namespace Frida {
 
 		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
-			uint id = next_injection_id++;
+			uint id = next_injectee_id++;
 			yield helper.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
 			pid_by_id[id] = pid;
 			return id;
@@ -63,9 +63,9 @@ namespace Frida {
 			return id;
 		}
 
-		public async uint inject_library_resource (uint pid, AgentDescriptor resource, string entrypoint, string data,
+		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
-			return yield inject_library_file_with_template (pid, resource.get_path_template (), entrypoint, data, cancellable);
+			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, cancellable);
 		}
 
 		public async uint demonitor_and_clone_state (uint id, Cancellable? cancellable) throws Error, IOError {
