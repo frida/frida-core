@@ -1002,7 +1002,8 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
 
   result_callback = ^(NSError * error)
   {
-    GError * frida_error = NULL;
+    FridaStdioPipes * pending_pipes = pipes;
+    GError * pending_error = NULL;
 
     if (error == nil)
     {
@@ -1010,16 +1011,16 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
     }
     else
     {
-      g_clear_object (&pipes);
+      g_clear_object (&pending_pipes);
 
-      frida_error = g_error_new (
+      pending_error = g_error_new (
           FRIDA_ERROR,
           FRIDA_ERROR_NOT_SUPPORTED,
           "Unable to launch iOS app: %s",
           [[error localizedDescription] UTF8String]);
     }
 
-    on_complete (pipes, frida_error, on_complete_target);
+    on_complete (pending_pipes, pending_error, on_complete_target);
   };
 
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
