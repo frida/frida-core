@@ -19,6 +19,7 @@ namespace Frida {
 		private Gee.HashMap<uint, TemporaryFile> blob_file_by_id = new Gee.HashMap<uint, TemporaryFile> ();
 		private uint next_injectee_id = 1;
 		private uint next_blob_id = 1;
+		private bool did_prep_tempdir = false;
 
 		public Linjector (LinuxHelper helper, bool close_helper, TemporaryDirectory tempdir) {
 			Object (helper: helper, close_helper: close_helper, tempdir: tempdir);
@@ -45,6 +46,7 @@ namespace Frida {
 
 		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
+			ensure_tempdir_prepared ();
 			uint id = next_injectee_id++;
 			yield helper.inject_library_file (pid, path_template, entrypoint, data, tempdir.path, id, cancellable);
 			pid_by_id[id] = pid;
@@ -53,13 +55,11 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
+			ensure_tempdir_prepared ();
 			var name = "blob%u.so".printf (next_blob_id++);
 			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
 			var path = file.path;
-			FileUtils.chmod (path, 0755);
-#if ANDROID
-			SELinux.setfilecon (path, "u:object_r:frida_file:s0");
-#endif
+			adjust_file_permissions (path);
 
 			var id = yield inject_library_file (pid, path, entrypoint, data, cancellable);
 
@@ -70,7 +70,18 @@ namespace Frida {
 
 		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
+			ensure_tempdir_prepared ();
 			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, cancellable);
+		}
+
+		private void ensure_tempdir_prepared () {
+			if (did_prep_tempdir)
+				return;
+
+			if (tempdir.is_ours)
+				adjust_directory_permissions (tempdir.path);
+
+			did_prep_tempdir = true;
 		}
 
 		public async uint demonitor_and_clone_state (uint id, Cancellable? cancellable) throws Error, IOError {
@@ -130,17 +141,14 @@ namespace Frida {
 		public AgentDescriptor (PathTemplate name_template, Bytes? so32, Bytes? so64, AgentResource[] resources = {},
 				AgentMode mode = AgentMode.INSTANCED, TemporaryDirectory? tempdir = null) {
 			var all_resources = new Gee.ArrayList<AgentResource> ();
-
 			if (so32 != null) {
 				all_resources.add (new AgentResource (name_template.expand ("32"),
 					(mode == INSTANCED) ? _clone_so (so32) : so32, tempdir));
 			}
-
 			if (so64 != null) {
 				all_resources.add (new AgentResource (name_template.expand ("64"),
 					(mode == INSTANCED) ? _clone_so (so64) : so64, tempdir));
 			}
-
 			foreach (var r in resources)
 				all_resources.add (r);
 
@@ -152,11 +160,7 @@ namespace Frida {
 				TemporaryDirectory? first_tempdir = null;
 				foreach (AgentResource r in resources) {
 					TemporaryFile f = r.get_file ();
-					string path = f.path;
-					FileUtils.chmod (path, path.has_suffix (".so") ? 0755 : 0644);
-#if ANDROID
-					SELinux.setfilecon (path, "u:object_r:frida_file:s0");
-#endif
+					adjust_file_permissions (f.path);
 					if (first_tempdir == null)
 						first_tempdir = f.parent;
 				}
@@ -199,5 +203,19 @@ namespace Frida {
 			}
 			return _file;
 		}
+	}
+
+	private static void adjust_directory_permissions (string path) {
+		FileUtils.chmod (path, 0755);
+#if ANDROID
+		SELinux.setfilecon (path, "u:object_r:frida_file:s0");
+#endif
+	}
+
+	private static void adjust_file_permissions (string path) {
+		FileUtils.chmod (path, path.has_suffix (".so") ? 0755 : 0644);
+#if ANDROID
+		SELinux.setfilecon (path, "u:object_r:frida_file:s0");
+#endif
 	}
 }
