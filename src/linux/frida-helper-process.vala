@@ -5,11 +5,11 @@ namespace Frida {
 			construct;
 		}
 
-		private ResourceStore _resource_store;
+		private ResourceStore? _resource_store;
 
 		private MainContext main_context;
-		private HelperFactory factory32;
-		private HelperFactory factory64;
+		private HelperFactory? factory32;
+		private HelperFactory? factory64;
 		private Gee.Map<uint, LinuxHelper> injectee_ids = new Gee.HashMap<uint, LinuxHelper> ();
 
 		public LinuxHelperProcess (TemporaryDirectory tempdir) {
@@ -21,6 +21,8 @@ namespace Frida {
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
+			injectee_ids.clear ();
+
 			if (factory32 != null) {
 				yield factory32.close (cancellable);
 				factory32 = null;
@@ -237,7 +239,7 @@ namespace Frida {
 		public signal void uninjected (uint id);
 
 		private TemporaryFile? helper_file;
-		private ResourceStore resource_store;
+		private ResourceStore? resource_store;
 		private MainContext? main_context;
 		private SuperSU.Process superprocess;
 		private Pid process_pid;
@@ -272,6 +274,8 @@ namespace Frida {
 				superprocess = null;
 			}
 			process_pid = 0;
+
+			resource_store = null;
 		}
 
 		public async LinuxHelper obtain (Cancellable? cancellable) throws Error, IOError {
