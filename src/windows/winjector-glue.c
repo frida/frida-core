@@ -15,7 +15,7 @@
   }
 
 void
-frida_agent_descriptor_set_acls_as_needed (const gchar * path, GError ** error)
+frida_winjector_set_acls_as_needed (const gchar * path, GError ** error)
 {
   const gchar * failed_operation;
   LPWSTR path_utf16;

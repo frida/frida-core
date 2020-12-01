@@ -19,6 +19,7 @@ namespace Frida {
 		private Gee.HashMap<uint, TemporaryFile> blob_file_by_id = new Gee.HashMap<uint, TemporaryFile> ();
 		private uint next_injectee_id = 1;
 		private uint next_blob_id = 1;
+		private bool did_prep_tempdir = false;
 
 		public Winjector (WindowsHelper helper, bool close_helper, TemporaryDirectory tempdir) {
 			Object (helper: helper, close_helper: close_helper, tempdir: tempdir);
@@ -53,6 +54,7 @@ namespace Frida {
 
 		public async uint inject_library_blob (uint pid, Bytes blob, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
+			ensure_tempdir_prepared ();
 			var name = "blob%u.dll".printf (next_blob_id++);
 			var file = new TemporaryFile.from_stream (name, new MemoryInputStream.from_bytes (blob), tempdir);
 
@@ -65,7 +67,18 @@ namespace Frida {
 
 		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
+			ensure_tempdir_prepared ();
 			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, cancellable);
+		}
+
+		private void ensure_tempdir_prepared () {
+			if (did_prep_tempdir)
+				return;
+
+			if (tempdir.is_ours)
+				set_acls_as_needed (tempdir.path);
+
+			did_prep_tempdir = true;
 		}
 
 		public async uint demonitor_and_clone_state (uint id, Cancellable? cancellable) throws Error, IOError {
@@ -90,6 +103,8 @@ namespace Frida {
 
 			uninjected (id);
 		}
+
+		protected extern static void set_acls_as_needed (string path) throws Error;
 	}
 
 	public class AgentDescriptor : Object {
@@ -131,16 +146,12 @@ namespace Frida {
 						first_tempdir = f.parent;
 				}
 
-				if (first_tempdir.is_ours)
-					set_acls_as_needed (first_tempdir.path);
-
 				cached_path_template = PathTemplate (first_tempdir.path + "\\" + name_template.str);
 			}
 
 			return cached_path_template;
 		}
 
-		protected extern static void set_acls_as_needed (string path) throws Error;
 	}
 
 	public class AgentResource : Object {
