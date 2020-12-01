@@ -170,7 +170,7 @@ namespace Frida.SuperSU {
 			output = null;
 		}
 
-		private async string? establish (string address, Cancellable cancellable) throws Error, IOError {
+		private async string? establish (string address, Cancellable? cancellable) throws Error, IOError {
 			try {
 				var client = new SocketClient ();
 				connection = yield client.connect_async (new UnixSocketAddress.with_type (address, -1, ABSTRACT),
@@ -197,7 +197,7 @@ namespace Frida.SuperSU {
 			}
 		}
 
-		public async string read_string (Cancellable cancellable) throws GLib.Error {
+		public async string read_string (Cancellable? cancellable) throws GLib.Error {
 			var size = yield read_size (cancellable);
 			if (size == 0)
 				return "";
@@ -213,7 +213,7 @@ namespace Frida.SuperSU {
 			return (string) v;
 		}
 
-		public async void write_string (string str, Cancellable cancellable) throws GLib.Error {
+		public async void write_string (string str, Cancellable? cancellable) throws GLib.Error {
 			write_size (str.length);
 
 			if (str.length > 0) {
@@ -222,13 +222,13 @@ namespace Frida.SuperSU {
 			}
 		}
 
-		public async void write_strv (string[] strv, Cancellable cancellable) throws GLib.Error {
+		public async void write_strv (string[] strv, Cancellable? cancellable) throws GLib.Error {
 			write_size (strv.length);
 			foreach (string s in strv)
 				yield write_string (s, cancellable);
 		}
 
-		public async Bytes read_byte_array (Cancellable cancellable) throws GLib.Error {
+		public async Bytes read_byte_array (Cancellable? cancellable) throws GLib.Error {
 			var size = yield read_size (cancellable);
 			if (size == 0)
 				return new Bytes (new uint8[0]);
@@ -240,13 +240,13 @@ namespace Frida.SuperSU {
 			return data;
 		}
 
-		public async size_t read_size (Cancellable cancellable) throws GLib.Error {
+		public async size_t read_size (Cancellable? cancellable) throws GLib.Error {
 			yield prepare_to_read (sizeof (uint32), cancellable);
 
 			return input.read_uint32 ();
 		}
 
-		public async ssize_t read_ssize (Cancellable cancellable) throws GLib.Error {
+		public async ssize_t read_ssize (Cancellable? cancellable) throws GLib.Error {
 			yield prepare_to_read (sizeof (int32), cancellable);
 
 			return input.read_int32 ();
@@ -256,7 +256,7 @@ namespace Frida.SuperSU {
 			output.put_uint32 ((uint32) size);
 		}
 
-		private async void prepare_to_read (size_t required, Cancellable cancellable) throws GLib.Error {
+		private async void prepare_to_read (size_t required, Cancellable? cancellable) throws GLib.Error {
 			while (true) {
 				size_t available = input.get_available ();
 				if (available >= required)
@@ -267,7 +267,7 @@ namespace Frida.SuperSU {
 			}
 		}
 
-		private async void write_credentials (Cancellable cancellable) throws GLib.Error {
+		private async void write_credentials (Cancellable? cancellable) throws GLib.Error {
 			yield output.flush_async (Priority.DEFAULT, cancellable);
 
 			var parameters = new MemoryOutputStream.resizable ();
