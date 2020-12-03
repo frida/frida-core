@@ -1,5 +1,8 @@
 namespace Frida.Fruity {
 	public class UsbmuxClient : Object, AsyncInitable {
+		public signal void device_attached (DeviceDetails details);
+		public signal void device_detached (DeviceId id);
+
 		public SocketConnection? connection {
 			get;
 			private set;
@@ -21,9 +24,6 @@ namespace Frida.Fruity {
 		private const uint16 USBMUX_SERVER_PORT = 27015;
 		private const uint USBMUX_PROTOCOL_VERSION = 1;
 		private const uint32 MAX_MESSAGE_SIZE = 128 * 1024;
-
-		public signal void device_attached (DeviceDetails details);
-		public signal void device_detached (DeviceId id);
 
 		public static async UsbmuxClient open (Cancellable? cancellable = null) throws UsbmuxError, IOError {
 			var client = new UsbmuxClient ();
