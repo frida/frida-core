@@ -10,6 +10,7 @@ namespace Frida.Server {
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
+	private static bool preload = true;
 	private static bool report_crashes = true;
 	private static bool verbose = false;
 
@@ -22,6 +23,7 @@ namespace Frida.Server {
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
+		{ "disable-preload", 'P', OptionFlags.REVERSE, OptionArg.NONE, ref preload, "Disable preload optimization", null },
 		{ "ignore-crashes", 'C', OptionFlags.REVERSE, OptionArg.NONE, ref report_crashes,
 			"Disable native crash reporter integration", null },
 		{ "verbose", 'v', 0, OptionArg.NONE, ref verbose, "Be verbose", null },
@@ -264,12 +266,14 @@ namespace Frida.Server {
 				return false;
 			});
 
-			try {
-				yield host_session.preload (io_cancellable);
-			} catch (Error e) {
-				if (verbose)
-					printerr ("Unable to preload: %s\n", e.message);
-			} catch (IOError e) {
+			if (preload) {
+				try {
+					yield host_session.preload (io_cancellable);
+				} catch (Error e) {
+					if (verbose)
+						printerr ("Unable to preload: %s\n", e.message);
+				} catch (IOError e) {
+				}
 			}
 		}
 
