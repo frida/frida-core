@@ -3,12 +3,13 @@ const SIGKILL = 9;
 
 const { pointerSize } = Process;
 
-const internalAgentServices = new Set([
+const crashServices = new Set([
   'com.apple.ReportCrash',
   'com.apple.osanalytics.osanalyticshelper',
 ]);
 
 const upcoming = new Set();
+const reportCrashes = @REPORT_CRASHES@;
 let gating = false;
 const suspendedPids = new Set();
 
@@ -70,7 +71,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
         event = 'spawn';
       else
         return;
-    } else if (gating || internalAgentServices.has(rawIdentifier)) {
+    } else if (gating || (reportCrashes && crashServices.has(rawIdentifier))) {
       identifier = rawIdentifier;
       event = 'spawn';
     } else {

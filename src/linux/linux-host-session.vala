@@ -85,6 +85,11 @@ namespace Frida {
 			construct;
 		}
 
+		public bool report_crashes {
+			get;
+			construct;
+		}
+
 		private AgentContainer system_session_container;
 
 		private AgentDescriptor? agent;
@@ -92,11 +97,15 @@ namespace Frida {
 #if ANDROID
 		private RoboLauncher robo_launcher;
 		internal SystemServerAgent system_server_agent;
-		private CrashMonitor crash_monitor;
+		private CrashMonitor? crash_monitor;
 #endif
 
-		public LinuxHostSession (owned LinuxHelper helper, owned TemporaryDirectory tempdir) {
-			Object (helper: helper, tempdir: tempdir);
+		public LinuxHostSession (owned LinuxHelper helper, owned TemporaryDirectory tempdir, bool report_crashes = true) {
+			Object (
+				helper: helper,
+				tempdir: tempdir,
+				report_crashes: report_crashes
+			);
 		}
 
 		construct {
@@ -122,8 +131,10 @@ namespace Frida {
 			robo_launcher.spawn_added.connect (on_robo_launcher_spawn_added);
 			robo_launcher.spawn_removed.connect (on_robo_launcher_spawn_removed);
 
-			crash_monitor = new CrashMonitor ();
-			crash_monitor.process_crashed.connect (on_process_crashed);
+			if (report_crashes) {
+				crash_monitor = new CrashMonitor ();
+				crash_monitor.process_crashed.connect (on_process_crashed);
+			}
 #endif
 		}
 
@@ -146,8 +157,10 @@ namespace Frida {
 			system_server_agent.unloaded.disconnect (on_system_server_agent_unloaded);
 			yield system_server_agent.close (cancellable);
 
-			crash_monitor.process_crashed.disconnect (on_process_crashed);
-			yield crash_monitor.close (cancellable);
+			if (crash_monitor != null) {
+				crash_monitor.process_crashed.disconnect (on_process_crashed);
+				yield crash_monitor.close (cancellable);
+			}
 #endif
 
 			var linjector = injector as Linjector;
@@ -328,13 +341,15 @@ namespace Frida {
 		}
 
 		protected override async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
+			if (crash_monitor == null)
+				return null;
 			return yield crash_monitor.try_collect_crash (pid, cancellable);
 		}
 
 		private void on_process_crashed (CrashInfo info) {
 			process_crashed (info);
 
-			if (still_attached_to (info.pid)) {
+			if (crash_monitor != null && still_attached_to (info.pid)) {
 				/*
 				 * May take a while as a Java fatal exception typically won't terminate the process until
 				 * the user dismisses the dialog.

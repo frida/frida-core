@@ -10,6 +10,7 @@ namespace Frida.Server {
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
+	private static bool report_crashes = true;
 	private static bool verbose = false;
 
 	private delegate void ReadyHandler (bool success);
@@ -21,6 +22,8 @@ namespace Frida.Server {
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
+		{ "ignore-crashes", 'C', OptionFlags.REVERSE, OptionArg.NONE, ref report_crashes,
+			"Disable native crash reporter integration", null },
 		{ "verbose", 'v', 0, OptionArg.NONE, ref verbose, "Be verbose", null },
 		{ null }
 	};
@@ -207,11 +210,11 @@ namespace Frida.Server {
 			host_session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
 #endif
 #if DARWIN
-			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory ());
+			host_session = new DarwinHostSession (new DarwinHelperBackend (), new TemporaryDirectory (), report_crashes);
 #endif
 #if LINUX
 			var tempdir = new TemporaryDirectory ();
-			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
+			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir, report_crashes);
 #endif
 #if QNX
 			host_session = new QnxHostSession ();

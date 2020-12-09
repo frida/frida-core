@@ -92,6 +92,11 @@ namespace Frida {
 			construct;
 		}
 
+		public bool report_crashes {
+			get;
+			construct;
+		}
+
 		private Fruitjector fruitjector;
 		private AgentResource? agent;
 #if IOS
@@ -101,8 +106,12 @@ namespace Frida {
 		private ApplicationEnumerator application_enumerator = new ApplicationEnumerator ();
 		private ProcessEnumerator process_enumerator = new ProcessEnumerator ();
 
-		public DarwinHostSession (owned DarwinHelper helper, owned TemporaryDirectory tempdir) {
-			Object (helper: helper, tempdir: tempdir);
+		public DarwinHostSession (owned DarwinHelper helper, owned TemporaryDirectory tempdir, bool report_crashes = true) {
+			Object (
+				helper: helper,
+				tempdir: tempdir,
+				report_crashes: report_crashes
+			);
 		}
 
 		construct {
@@ -361,7 +370,7 @@ namespace Frida {
 		private Gee.HashMap<string, Promise<uint>> spawn_requests = new Gee.HashMap<string, Promise<uint>> ();
 		private Gee.HashMap<uint, HostSpawnInfo?> pending_spawn = new Gee.HashMap<uint, HostSpawnInfo?> ();
 
-		private CrashReporterState crash_reporter_state = INACTIVE;
+		private CrashReporterState crash_reporter_state;
 		private Gee.HashMap<uint, ReportCrashAgent> crash_agents = new Gee.HashMap<uint, ReportCrashAgent> ();
 		private Gee.HashMap<uint, OSAnalyticsAgent> osa_agents = new Gee.HashMap<uint, OSAnalyticsAgent> ();
 		private Gee.HashMap<uint, CrashDelivery> crash_deliveries = new Gee.HashMap<uint, CrashDelivery> ();
@@ -371,6 +380,7 @@ namespace Frida {
 		private Gee.HashSet<uint> xpcproxies = new Gee.HashSet<uint> ();
 
 		private enum CrashReporterState {
+			DISABLED,
 			INACTIVE,
 			ACTIVE,
 		}
@@ -384,6 +394,10 @@ namespace Frida {
 		}
 
 		construct {
+			crash_reporter_state = host_session.report_crashes
+				? CrashReporterState.INACTIVE
+				: CrashReporterState.DISABLED;
+
 			launchd_agent = new LaunchdAgent (host_session, io_cancellable);
 			launchd_agent.app_launch_started.connect (on_app_launch_started);
 			launchd_agent.app_launch_completed.connect (on_app_launch_completed);
@@ -498,7 +512,7 @@ namespace Frida {
 		}
 
 		public void activate_crash_reporter_integration () {
-			if (crash_reporter_state == ACTIVE)
+			if (crash_reporter_state != INACTIVE)
 				return;
 
 			foreach (var process in System.enumerate_processes ()) {
@@ -515,6 +529,9 @@ namespace Frida {
 		}
 
 		public async CrashInfo? try_collect_crash (uint pid, Cancellable? cancellable) throws IOError {
+			if (crash_reporter_state == DISABLED)
+				return null;
+
 			if (crash_agents.has_key (pid) || xpcproxies.contains (pid))
 				return null;
 
@@ -837,7 +854,8 @@ namespace Frida {
 		}
 
 		public LaunchdAgent (DarwinHostSession host_session, Cancellable io_cancellable) {
-			string * source = Frida.Data.Darwin.get_launchd_js_blob ().data;
+			string * raw_source = Frida.Data.Darwin.get_launchd_js_blob ().data;
+			string source = raw_source->replace ("@REPORT_CRASHES@", host_session.report_crashes.to_string ());
 			Object (
 				host_session: host_session,
 				script_source: source,
