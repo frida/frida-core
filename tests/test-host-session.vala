@@ -2991,35 +2991,104 @@ namespace Frida.HostSessionTest {
 				return;
 			}
 
-			var device_serial = "8B3X1335R";
 			Cancellable? cancellable = null;
+			var device_serial = "99UAY1BUBQ";
+			string debuggable_app = "oversecured.ovaa";
+
+			string gadget_so = "gadget.so";
+			string rpath = "/data/local/tmp/";
+			string lpath = "/tmp/" + gadget_so;
+			string filename = rpath + gadget_so;
+			string mode = "%d".printf (0100666);
+
+			var cmd_buf = new MemoryOutputStream.resizable ();
+			var cmd = new DataOutputStream (cmd_buf);
+			cmd.byte_order = LITTLE_ENDIAN;
 
 			try {
+				yield Frida.Droidy.ShellCommand.run (
+					"am set-debug-app -w --persistent '%s'".printf (debuggable_app), device_serial, cancellable
+				);
+
 				var c = yield Frida.Droidy.Client.open (cancellable);
 
 				c.message.connect ((payload) => {
 					printerr ("Got a message: %s\n", payload);
+					var m = new StringBuilder ();
+					for (var i = 0; i != payload.length; i++) {
+						if (i > 0)
+							m.append (" ");
+						m.append_printf ("%02x", payload[i]);
+					}
+					printerr ("Str: %s\n", m.str);
 				});
 
-				printerr ("A\n");
+				c = yield Frida.Droidy.Client.open (cancellable);
 				yield c.request ("host:transport:" + device_serial, cancellable);
-				printerr ("B\n");
 				yield c.request ("sync:", cancellable);
 
-				// write(3, "SEND\34\0\0\0/data/local/tmp/om.jpg,3"..., 36) = 36
-				var cmd_buf = new MemoryOutputStream.resizable ();
-				var cmd = new DataOutputStream (cmd_buf);
-				cmd.byte_order = LITTLE_ENDIAN;
 				cmd.put_string ("SEND");
-				string filename = "/data/local/tmp/test.bin";
-				string mode = "%d".printf (0100644);
 				cmd.put_uint32 (filename.length + 1 + mode.length);
 				cmd.put_string (filename);
 				cmd.put_string (",");
 				cmd.put_string (mode);
-				printerr ("C\n");
-				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable);
-				printerr ("D\n");
+
+				try {
+					File file = File.new_for_path (lpath);
+					Bytes content = file.load_bytes ();
+
+					size_t bytes_read = content.get_size ();
+					size_t MAX_DATA_SIZE = 65536;
+					double data_chunks = bytes_read/ (float) MAX_DATA_SIZE;
+
+					int pos = 0;
+					int chunks = (int) Math.ceil (data_chunks);
+
+					create_adb_data_payload_header (cmd, chunks, bytes_read);
+
+					if (chunks > 0) {
+						size_t bytes_written = 0;
+						size_t remaining = 0;
+						size_t end = MAX_DATA_SIZE;
+						int index = 0;
+
+						while (bytes_written < bytes_read && chunks > 0) {
+							if (chunks == 1) {
+								remaining = bytes_read - bytes_written;
+							}
+							if (remaining > 0 && remaining < MAX_DATA_SIZE) {
+								end = remaining;
+							}
+							while (pos < end) {
+								// TODO Write with uint64 or Memory.copy
+								cmd.put_byte (content[index]);
+								index += 1;
+								bytes_written += 1;
+								pos += 1;
+							}
+
+							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
+							if (remaining == 0)
+								break;
+
+							create_adb_data_payload_header (cmd, chunks, remaining);
+							chunks -= 1;
+							pos = 0;
+						}
+					}
+				} catch (Error e) {
+					error ("%s", e.message);
+				}
+
+				cmd.byte_order = LITTLE_ENDIAN;
+				var timestamp = new DateTime.now_local ();
+
+				cmd.put_string("DONE");
+				cmd.put_uint64(timestamp.to_unix ());
+
+				cmd.put_string("QUIT");
+				cmd.put_uint32(0);
+				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
 
 				printerr ("Waiting 2500 ms...\n");
 				Timeout.add (2500, client.callback);
@@ -3031,7 +3100,25 @@ namespace Frida.HostSessionTest {
 
 			h.done ();
 		}
+	}
 
+	private static DataOutputStream create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
+		try {
+			size_t MAX_DATA_SIZE = 65536;
+
+			cmd.put_string ("DATA");
+			cmd.byte_order = LITTLE_ENDIAN;
+			if (chunks > 0 && remaining > MAX_DATA_SIZE) {
+				cmd.put_uint32 ((uint32) MAX_DATA_SIZE);
+			} else {
+				cmd.put_uint32 ((uint32) remaining);
+			}
+			cmd.byte_order = BIG_ENDIAN;
+		} catch (GLib.Error e) {
+			printerr ("\nFAIL: %s\n\n", e.message);
+		}
+
+		return cmd;
 	}
 
 	private static string parse_string_message_payload (string raw_message) {

@@ -289,7 +289,7 @@ namespace Frida.Droidy {
 			return (string) Bytes.unref_to_data ((owned) response_bytes);
 		}
 
-		public async Bytes? raw_request (Bytes message, RequestType request_type, Cancellable? cancellable) throws Error, IOError {
+		public async Bytes? raw_request (Bytes message, RequestType request_type, Cancellable? cancellable, bool is_sub_command = false) throws Error, IOError {
 			bool waiting = false;
 
 			var pending = new PendingResponse (request_type, () => {
@@ -306,21 +306,24 @@ namespace Frida.Droidy {
 			cancel_source.attach (MainContext.get_thread_default ());
 
 			try {
+				int index = is_sub_command ? 0 : 4;
 				var message_size = message.get_size ();
-				var message_buf = new uint8[4 + message_size];
-
+				var message_buf = new uint8[index + message_size];
 				var length_str = "%04x".printf (message.length);
-				Memory.copy (message_buf, length_str, 4);
 
-				Memory.copy (message_buf + 4, message.get_data (), message_size);
+				Memory.copy (message_buf, length_str, index);
+				Memory.copy ((uint8 *) message_buf + index, message.get_data (), message_size);
 
 				var m = new StringBuilder ();
+				var s = new StringBuilder ();
 				for (var i = 0; i != message_buf.length; i++) {
 					if (i > 0)
 						m.append (" ");
 					m.append_printf ("%02x", message_buf[i]);
+					s.append_printf ("%c", message_buf[i]);
 				}
-				printerr ("Sending: %s\n", m.str);
+				//  printerr ("Sending: %s\n", m.str);
+				printerr ("Sending: %s\n", s.str);
 
 				size_t bytes_written;
 				try {
@@ -332,7 +335,6 @@ namespace Frida.Droidy {
 					pending_responses.remove (pending);
 					throw new Error.TRANSPORT ("Unable to write message");
 				}
-
 				if (!pending.completed) {
 					waiting = true;
 					yield;
@@ -360,6 +362,7 @@ namespace Frida.Droidy {
 							var pending = pending_responses.poll_head ();
 							if (pending != null) {
 								var success = command_or_length == "OKAY";
+								printerr ("Receiving: %s\n", success ? "OKAY" : "FAIL");
 								if (success) {
 									Bytes? result;
 									if (pending.request_type == RequestType.DATA)
@@ -381,7 +384,6 @@ namespace Frida.Droidy {
 								throw new Error.PROTOCOL ("Reply to unknown request");
 							}
 							break;
-
 						case "SYNC":
 						case "CNXN":
 						case "AUTH":
