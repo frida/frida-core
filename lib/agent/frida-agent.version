@@ -1,6 +1,7 @@
 FRIDA_AGENT_1.0 {
   global:
     frida_agent_main;
+    frida_agent_main_nb;
 
   local:
     *;

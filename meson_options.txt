@@ -28,6 +28,18 @@ option('agent_legacy',
   description: 'Prebuilt agent to use for legacy targets'
 )
 
+option('agent_emulated_modern',
+  type: 'string',
+  value: '',
+  description: 'Prebuilt agent to use for modern emulated targets'
+)
+
+option('agent_emulated_legacy',
+  type: 'string',
+  value: '',
+  description: 'Prebuilt agent to use for legacy emulated targets'
+)
+
 option('tests',
   type: 'boolean',
   value: true,

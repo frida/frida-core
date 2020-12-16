@@ -3,11 +3,13 @@
 host_os="$1"
 agent_modern="$2"
 agent_legacy="$3"
-output_dir="$4"
-resource_compiler="$5"
-resource_config="$6"
-strip_binary="$7"
-strip_enabled="$8"
+agent_emulated_modern="$4"
+agent_emulated_legacy="$5"
+output_dir="$6"
+resource_compiler="$7"
+resource_config="$8"
+strip_binary="$9"
+strip_enabled="${10}"
 
 priv_dir="$output_dir/frida-agent@emb"
 
@@ -40,6 +42,29 @@ case $host_os in
 esac
 
 mkdir -p "$priv_dir"
+
+collect_generic_agent ()
+{
+  embedded_agent="$priv_dir/frida-agent-$2.so"
+  if [ -f "$1" ]; then
+    cp "$1" "$embedded_agent" || exit 1
+
+    if [ "$strip_enabled" = "true" ]; then
+      if [ "$host_os-$2" = "android-arm" ]; then
+        # FIXME: This isn't great.
+        strip_dirname=$(dirname "$strip_binary")
+        strip_basename=$(basename "$strip_binary")
+        other_strip_binary="$strip_dirname/$(echo $strip_basename | sed 's,x86,arm,')"
+        "$other_strip_binary" "$embedded_agent" || exit 1
+      else
+        "$strip_binary" "$embedded_agent" || exit 1
+      fi
+    fi
+  else
+    touch "$embedded_agent"
+  fi
+  embedded_agents+=("$embedded_agent")
+}
 
 case $host_os in
   macos|ios)
@@ -92,30 +117,10 @@ case $host_os in
   *)
     embedded_agents=()
 
-    embedded_agent="$priv_dir/frida-agent-64.so"
-    if [ -f "$agent_modern" ]; then
-
-      cp "$agent_modern" "$embedded_agent" || exit 1
-
-      if [ "$strip_enabled" = "true" ]; then
-        "$strip_binary" "$embedded_agent" || exit 1
-      fi
-    else
-      touch "$embedded_agent"
-    fi
-    embedded_agents+=("$embedded_agent")
-
-    embedded_agent="$priv_dir/frida-agent-32.so"
-    if [ -f "$agent_legacy" ]; then
-      cp "$agent_legacy" "$embedded_agent" || exit 1
-
-      if [ "$strip_enabled" = "true" ]; then
-        "$strip_binary" "$embedded_agent" || exit 1
-      fi
-    else
-      touch "$embedded_agent"
-    fi
-    embedded_agents+=("$embedded_agent")
+    collect_generic_agent "$agent_modern" 64
+    collect_generic_agent "$agent_legacy" 32
+    collect_generic_agent "$agent_emulated_modern" arm64
+    collect_generic_agent "$agent_emulated_legacy" arm
 
     exec "$resource_compiler" --toolchain=gnu -c "$resource_config" -o "$output_dir/frida-data-agent" "${embedded_agents[@]}"
     ;;

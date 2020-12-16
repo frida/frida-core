@@ -3,8 +3,11 @@
 #include "frida-interfaces.h"
 #include "frida-payload.h"
 
-#if defined (HAVE_ANDROID) && __ANDROID_API__ < __ANDROID_API_L__
-# include <signal.h>
+#ifdef HAVE_ANDROID
+# include <jni.h>
+# if __ANDROID_API__ < __ANDROID_API_L__
+#  include <signal.h>
+# endif
 #endif
 #ifdef HAVE_GIOSCHANNEL
 # include <gioschannel.h>
@@ -51,3 +54,17 @@ _frida_agent_environment_deinit (void)
   gum_internal_heap_unref ();
 #endif
 }
+
+#ifdef HAVE_ANDROID
+
+jint
+frida_agent_main_nb (JavaVM * vm, void * reserved)
+{
+  FridaAgentEmulatedInvocation * invocation = reserved;
+
+  frida_agent_main (invocation->transport_uri, &invocation->unload_policy, invocation->injector_state);
+
+  return JNI_VERSION_1_6;
+}
+
+#endif

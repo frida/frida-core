@@ -14,6 +14,7 @@ namespace Frida {
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws GLib.Error;
+		public abstract async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
@@ -33,6 +34,7 @@ namespace Frida {
 	[DBus (name = "re.frida.AgentSessionProvider14")]
 	public interface AgentSessionProvider : Object {
 		public abstract async void open (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void open_in_realm (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error;
 #if !WINDOWS
 		public abstract async void migrate (AgentSessionId id, GLib.Socket to_socket, Cancellable? cancellable) throws GLib.Error;
 #endif
@@ -138,6 +140,15 @@ namespace Frida {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<SessionDetachReason> (this);
+		}
+	}
+
+	public enum Realm {
+		NATIVE,
+		EMULATED;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<Realm> (this);
 		}
 	}
 

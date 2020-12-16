@@ -22,27 +22,32 @@ namespace Frida {
 
 	private extern string? try_get_executable_path ();
 
-	public Gum.MemoryRange detect_own_memory_range (Gum.MemoryRange? mapped_range) {
-		Gum.MemoryRange? result = mapped_range;
+	public Gum.MemoryRange detect_own_range_and_path (Gum.MemoryRange? mapped_range, out string? path) {
+		Gum.MemoryRange? own_range = mapped_range;
+		string? own_path = null;
 
-		if (result == null) {
-			Gum.Address our_address = Gum.Address.from_pointer (Gum.strip_code_pointer ((void *) detect_own_memory_range));
+		if (own_range == null) {
+			Gum.Address our_address = Gum.Address.from_pointer (Gum.strip_code_pointer ((void *) detect_own_range_and_path));
 
 			Gum.Process.enumerate_modules ((details) => {
 				var range = details.range;
 
 				if (our_address >= range.base_address && our_address < range.base_address + range.size) {
-					result = range;
+					own_range = range;
+					own_path = details.path;
 					return false;
 				}
 
 				return true;
 			});
 
-			assert (result != null);
+			assert (own_range != null);
+			assert (own_path != null);
 		}
 
-		return result;
+		path = own_path;
+
+		return own_range;
 	}
 
 	public interface ProcessInvader : Object {

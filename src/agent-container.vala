@@ -90,6 +90,10 @@ namespace Frida {
 			yield provider.open (id, cancellable);
 		}
 
+		public async void open_in_realm (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error {
+			yield provider.open_in_realm (id, realm, cancellable);
+		}
+
 #if !WINDOWS
 		private async void migrate (AgentSessionId id, Socket to_socket, Cancellable? cancellable) throws GLib.Error {
 			yield provider.migrate (id, to_socket, cancellable);

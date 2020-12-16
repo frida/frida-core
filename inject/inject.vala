@@ -5,6 +5,7 @@ namespace Frida.Inject {
 	private static string? spawn_file;
 	private static int target_pid = -1;
 	private static string? target_name;
+	private static string? realm_str;
 	private static string? script_path;
 	private static string? script_runtime_str;
 	private static string? parameters_str;
@@ -17,6 +18,7 @@ namespace Frida.Inject {
 		{ "file", 'f', 0, OptionArg.STRING, ref spawn_file, "spawn FILE", "FILE" },
 		{ "pid", 'p', 0, OptionArg.INT, ref target_pid, "attach to PID", "PID" },
 		{ "name", 'n', 0, OptionArg.STRING, ref target_name, "attach to NAME", "NAME" },
+		{ "realm", 'r', 0, OptionArg.STRING, ref realm_str, "attach in REALM", "REALM" },
 		{ "script", 's', 0, OptionArg.FILENAME, ref script_path, null, "JAVASCRIPT_FILENAME" },
 		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "qjs|v8" },
 		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
@@ -54,9 +56,20 @@ namespace Frida.Inject {
 			return 2;
 		}
 
+		Realm realm = NATIVE;
+		if (realm_str != null) {
+			var klass = (EnumClass) typeof (Realm).class_ref ();
+			var v = klass.get_value_by_nick (realm_str);
+			if (v == null) {
+				printerr ("Invalid realm\n");
+				return 3;
+			}
+			realm = (Realm) v.value;
+		}
+
 		if (script_path == null || script_path == "") {
 			printerr ("Path to JavaScript file must be specified\n");
-			return 3;
+			return 4;
 		}
 
 		string? script_source = null;
@@ -71,7 +84,7 @@ namespace Frida.Inject {
 			var v = klass.get_value_by_nick (script_runtime_str);
 			if (v == null) {
 				printerr ("Invalid script runtime\n");
-				return 4;
+				return 5;
 			}
 			script_runtime = (ScriptRuntime) v.value;
 		}
@@ -80,25 +93,25 @@ namespace Frida.Inject {
 		if (parameters_str != null) {
 			if (parameters_str == "") {
 				printerr ("Parameters argument must be specified as JSON if present\n");
-				return 5;
+				return 6;
 			}
 
 			try {
 				var root = Json.from_string (parameters_str);
 				if (root.get_node_type () != OBJECT) {
 					printerr ("Failed to parse parameters argument as JSON: not an object\n");
-					return 6;
+					return 7;
 				}
 
 				parameters.take_object (root.get_object ());
 			} catch (GLib.Error e) {
 				printerr ("Failed to parse parameters argument as JSON: %s\n", e.message);
-				return 6;
+				return 8;
 			}
 		}
 
-		application = new Application (device_id, spawn_file, target_pid, target_name, script_path, script_source, script_runtime,
-			parameters, enable_development);
+		application = new Application (device_id, spawn_file, target_pid, target_name, realm, script_path, script_source,
+			script_runtime, parameters, enable_development);
 
 #if !WINDOWS
 		Posix.signal (Posix.Signal.INT, (sig) => {
@@ -149,6 +162,11 @@ namespace Frida.Inject {
 			construct;
 		}
 
+		public Realm realm {
+			get;
+			construct;
+		}
+
 		public string? script_path {
 			get;
 			construct;
@@ -182,13 +200,15 @@ namespace Frida.Inject {
 		private int exit_code;
 		private MainLoop loop;
 
-		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name, string? script_path,
-				string? script_source, ScriptRuntime script_runtime, Json.Node parameters, bool enable_development) {
+		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name, Realm realm,
+				string? script_path, string? script_source, ScriptRuntime script_runtime, Json.Node parameters,
+				bool enable_development) {
 			Object (
 				device_id: device_id,
 				spawn_file: spawn_file,
 				target_pid: target_pid,
 				target_name: target_name,
+				realm: realm,
 				script_path: script_path,
 				script_source: script_source,
 				script_runtime: script_runtime,
@@ -231,7 +251,7 @@ namespace Frida.Inject {
 					pid = (uint) target_pid;
 				}
 
-				var session = yield device.attach (pid, io_cancellable);
+				var session = yield device.attach (pid, realm, io_cancellable);
 				session.detached.connect (on_detached);
 
 				var r = new ScriptRunner (session, script_path, script_source, script_runtime, parameters,

@@ -822,17 +822,25 @@ namespace Frida {
 		}
 
 		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
+			try {
+				return yield attach_in_realm (pid, NATIVE, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
 			var lldb_session = lldb_sessions[pid];
 			if (lldb_session != null) {
 				var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
-				return yield attach_via_gadget (pid, gadget_details, cancellable);
+				return yield attach_via_gadget (pid, realm, gadget_details, cancellable);
 			}
 
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null) {
 				try {
-					return yield attach_via_remote (pid, server, cancellable);
+					return yield attach_via_remote (pid, realm, server, cancellable);
 				} catch (Error e) {
 					if (server.flavor == REGULAR)
 						throw_api_error (e);
@@ -857,7 +865,7 @@ namespace Frida {
 
 			var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
-			return yield attach_via_gadget (pid, gadget_details, cancellable);
+			return yield attach_via_gadget (pid, realm, gadget_details, cancellable);
 		}
 
 		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
@@ -876,7 +884,7 @@ namespace Frida {
 				"run Xcode briefly or use ideviceimagemounter to mount one manually");
 		}
 
-		private async AgentSessionId attach_via_gadget (uint pid, Fruity.Injector.GadgetDetails gadget_details,
+		private async AgentSessionId attach_via_gadget (uint pid, Realm realm, Fruity.Injector.GadgetDetails gadget_details,
 				Cancellable? cancellable) throws Error, IOError {
 			try {
 				var stream = yield channel_provider.open_channel (
@@ -888,7 +896,20 @@ namespace Frida {
 				HostSession host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION,
 					DBusProxyFlags.NONE, cancellable);
 
-				AgentSessionId remote_session_id = yield host_session.attach_to (pid, cancellable);
+				AgentSessionId remote_session_id;
+				try {
+					remote_session_id = yield host_session.attach_in_realm (pid, realm, cancellable);
+				} catch (GLib.Error e) {
+					if (e is DBusError.UNKNOWN_METHOD) {
+						if (realm != NATIVE) {
+							throw new Error.INVALID_ARGUMENT (
+								"Local Frida Gadget does not support the “realm” option; please upgrade it");
+						}
+						remote_session_id = yield host_session.attach_to (pid, cancellable);
+					} else {
+						throw e;
+					}
+				}
 
 				AgentSession agent_session = yield connection.get_proxy (null,
 					ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
@@ -901,17 +922,31 @@ namespace Frida {
 
 				return local_session_id;
 			} catch (GLib.Error e) {
+				if (e is Error)
+					throw (Error) e;
 				throw new Error.NOT_SUPPORTED ("%s", e.message);
 			}
 		}
 
-		private async AgentSessionId attach_via_remote (uint pid, RemoteServer server, Cancellable? cancellable)
+		private async AgentSessionId attach_via_remote (uint pid, Realm realm, RemoteServer server, Cancellable? cancellable)
 				throws Error, IOError {
 			AgentSessionId remote_session_id;
 			try {
-				remote_session_id = yield server.session.attach_to (pid, cancellable);
+				remote_session_id = yield server.session.attach_in_realm (pid, realm, cancellable);
 			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+				if (e is DBusError.UNKNOWN_METHOD) {
+					if (realm != NATIVE) {
+						throw new Error.INVALID_ARGUMENT (
+							"Remote Frida does not support the “realm” option; please upgrade it");
+					}
+					try {
+						remote_session_id = yield server.session.attach_to (pid, cancellable);
+					} catch (GLib.Error e) {
+						throw_dbus_error (e);
+					}
+				} else {
+					throw_dbus_error (e);
+				}
 			}
 			var local_session_id = AgentSessionId (next_agent_session_id++);
 

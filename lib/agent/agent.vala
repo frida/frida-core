@@ -1,7 +1,7 @@
 namespace Frida.Agent {
-	public void main (string pipe_address, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
+	public void main (string transport_uri, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
 		if (Runner.shared_instance == null)
-			Runner.create_and_run (pipe_address, ref unload_policy, injector_state);
+			Runner.create_and_run (transport_uri, ref unload_policy, injector_state);
 		else
 			Runner.resume_after_fork (ref unload_policy, injector_state);
 	}
@@ -15,7 +15,12 @@ namespace Frida.Agent {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
 
-		public string pipe_address {
+		public string transport_uri {
+			get;
+			construct;
+		}
+
+		public string? agent_path {
 			get;
 			construct;
 		}
@@ -49,6 +54,7 @@ namespace Frida.Agent {
 		private Gee.HashMap<DBusConnection, DirectConnection> direct_connections =
 			new Gee.HashMap<DBusConnection, DirectConnection> ();
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
+		private Gee.HashMap<AgentSessionId?, uint> emulated_session_registrations = new Gee.HashMap<AgentSessionId?, uint> ();
 
 		private Gum.MemoryRange agent_range;
 		private Gum.ScriptBackend? qjs_backend;
@@ -86,7 +92,7 @@ namespace Frida.Agent {
 			CHILD
 		}
 
-		public static void create_and_run (string pipe_address, ref Frida.UnloadPolicy unload_policy,
+		public static void create_and_run (string transport_uri, ref Frida.UnloadPolicy unload_policy,
 				void * opaque_injector_state) {
 			Environment._init ();
 
@@ -99,7 +105,8 @@ namespace Frida.Agent {
 					mapped_range = injector_state.mapped_range;
 #endif
 
-				var agent_range = detect_own_memory_range (mapped_range);
+				string? agent_path;
+				var agent_range = detect_own_range_and_path (mapped_range, out agent_path);
 				Gum.Cloak.add_range (agent_range);
 
 				var fdt_padder = FileDescriptorTablePadder.obtain ();
@@ -114,7 +121,7 @@ namespace Frida.Agent {
 
 				var ignore_scope = new ThreadIgnoreScope ();
 
-				shared_instance = new Runner (pipe_address, agent_range);
+				shared_instance = new Runner (transport_uri, agent_path, agent_range);
 
 				try {
 					shared_instance.run ((owned) fdt_padder);
@@ -187,8 +194,8 @@ namespace Frida.Agent {
 			instance = null;
 		}
 
-		private Runner (string pipe_address, Gum.MemoryRange agent_range) {
-			Object (pipe_address: pipe_address);
+		private Runner (string transport_uri, string? agent_path, Gum.MemoryRange agent_range) {
+			Object (transport_uri: transport_uri, agent_path: agent_path);
 
 			this.agent_range = agent_range;
 		}
@@ -237,7 +244,7 @@ namespace Frida.Agent {
 		}
 
 		private async void start (owned FileDescriptorTablePadder padder) {
-			yield setup_connection_with_pipe_address (pipe_address);
+			yield setup_connection_with_transport_uri (transport_uri);
 
 			Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () => {
 				schedule_idle (start.callback);
@@ -529,8 +536,38 @@ namespace Frida.Agent {
 		}
 
 		private async void open (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			try {
+				yield open_in_realm (id, NATIVE, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		private async void open_in_realm (AgentSessionId id, Realm realm, Cancellable? cancellable) throws Error, IOError {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
+
+			if (realm == EMULATED) {
+				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
+
+				try {
+					yield emulated_provider.open_in_realm (id, NATIVE, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+
+				var emulated_connection = ((DBusProxy) emulated_provider).get_connection ();
+
+				string path = ObjectPath.from_agent_session_id (id);
+
+				AgentSession emulated_session = yield emulated_connection.get_proxy (null, path, DBusProxyFlags.NONE,
+					cancellable);
+
+				var registration_id = connection.register_object (path, emulated_session);
+				emulated_session_registrations[id] = registration_id;
+
+				return;
+			}
 
 			var client = new AgentClient (this, id);
 			clients[id] = client;
@@ -631,6 +668,16 @@ namespace Frida.Agent {
 
 #if !WINDOWS
 		private async void migrate (AgentSessionId id, Socket to_socket, Cancellable? cancellable) throws Error, IOError {
+			if (emulated_session_registrations.has_key (id)) {
+				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
+				try {
+					yield emulated_provider.migrate (id, to_socket, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+				return;
+			}
+
 			if (!clients.has_key (id))
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 			var client = clients[id];
@@ -692,6 +739,15 @@ namespace Frida.Agent {
 		private async void perform_unload () {
 			Promise<bool> operation = null;
 
+			AgentSessionProvider? emulated_provider;
+			try {
+				emulated_provider = yield try_get_emulated_provider (null);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+			if (emulated_provider != null)
+				emulated_provider.unload.begin (null);
+
 			lock (pending_calls) {
 				if (pending_calls > 0) {
 					pending_close = new Promise<bool> ();
@@ -710,6 +766,8 @@ namespace Frida.Agent {
 			yield close_all_clients ();
 
 			yield teardown_connection ();
+
+			teardown_emulated_provider ();
 
 			schedule_idle (() => {
 				main_loop.quit ();
@@ -779,10 +837,17 @@ namespace Frida.Agent {
 			source.attach (main_context);
 		}
 
-		private async void setup_connection_with_pipe_address (string pipe_address) {
+		private async void setup_connection_with_transport_uri (string transport_uri) {
 			IOStream stream;
 			try {
-				stream = yield Pipe.open (pipe_address, null).wait_async (null);
+				if (transport_uri.has_prefix ("socket:")) {
+					var socket = new Socket.from_fd (int.parse (transport_uri[7:]));
+					stream = SocketConnection.factory_create_connection (socket);
+				} else if (transport_uri.has_prefix ("pipe:")) {
+					stream = yield Pipe.open (transport_uri, null).wait_async (null);
+				} else {
+					error ("Invalid transport URI: %s", transport_uri);
+				}
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -857,6 +922,10 @@ namespace Frida.Agent {
 		}
 
 		private void unregister_connection () {
+			foreach (var id in emulated_session_registrations.values)
+				connection.unregister_object (id);
+			emulated_session_registrations.clear ();
+
 			foreach (var client in clients.values) {
 				var id = client.registration_id;
 				if (id != 0)
@@ -941,7 +1010,215 @@ namespace Frida.Agent {
 			foreach (var client in clients.values.to_array ())
 				client.unprepare_for_termination ();
 		}
+
+#if ANDROID && X86
+		private const string LIBNATIVEBRIDGE_PATH = "/system/lib/libnativebridge.so";
+		private const int RTLD_LAZY = 1;
+
+		private Promise<AgentSessionProvider>? get_emulated_request;
+		private AgentSessionProvider? emulated_provider;
+		private void * emulated_agent;
+		private NBOnLoadFunc? emulated_entrypoint;
+		private Socket? emulated_socket;
+		private Thread<bool>? emulated_worker;
+
+		private async AgentSessionProvider? try_get_emulated_provider (Cancellable? cancellable) throws IOError {
+			if (get_emulated_request == null)
+				return null;
+
+			try {
+				return yield get_emulated_provider (cancellable);
+			} catch (Error e) {
+				return null;
+			}
+		}
+
+		private async AgentSessionProvider get_emulated_provider (Cancellable? cancellable) throws Error, IOError {
+			while (get_emulated_request != null) {
+				try {
+					return yield get_emulated_request.future.wait_async (cancellable);
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					assert (e is IOError.CANCELLED);
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			get_emulated_request = new Promise<AgentSessionProvider> ();
+
+			try {
+				if (emulated_entrypoint == null) {
+					string parent_path = Path.get_dirname (agent_path);
+
+					string emulated_agent_path = Path.build_filename (parent_path, "frida-agent-arm.so");
+					if (!FileUtils.test (emulated_agent_path, EXISTS)) {
+						throw new Error.NOT_SUPPORTED (
+							"Unable to handle emulated processes due to build configuration");
+					}
+
+					var load_library = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (LIBNATIVEBRIDGE_PATH,
+						"_ZN7android23NativeBridgeLoadLibraryEPKci");
+					var get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (LIBNATIVEBRIDGE_PATH,
+						"_ZN7android25NativeBridgeGetTrampolineEPvPKcS2_j");
+					if (load_library == null || get_trampoline == null)
+						throw new Error.NOT_SUPPORTED ("NativeBridge interface is not available on this OS");
+
+					emulated_agent = load_library (emulated_agent_path, RTLD_LAZY);
+					if (emulated_agent == null)
+						throw new Error.NOT_SUPPORTED ("Process is not using emulation");
+
+					emulated_entrypoint = (NBOnLoadFunc) get_trampoline (emulated_agent, "frida_agent_main_nb");
+				}
+
+				var fds = new int[2];
+				if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
+					throw new Error.NOT_SUPPORTED ("Unable to allocate socketpair");
+
+				Socket local_socket, remote_socket;
+				try {
+					local_socket = new Socket.from_fd (fds[0]);
+					remote_socket = new Socket.from_fd (fds[1]);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				IOStream stream = SocketConnection.factory_create_connection (local_socket);
+				emulated_socket = remote_socket;
+
+				emulated_worker = new Thread<bool> ("frida-agent-emulated", run_emulated_agent);
+
+				var connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
+					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+
+				AgentSessionProvider provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
+					DBusProxyFlags.NONE, cancellable);
+
+				emulated_provider = provider;
+				provider.opened.connect (on_emulated_session_opened);
+				provider.closed.connect (on_emulated_session_closed);
+
+				get_emulated_request.resolve (provider);
+				return provider;
+			} catch (GLib.Error raw_error) {
+				DBusError.strip_remote_error (raw_error);
+
+				teardown_emulated_provider ();
+
+				GLib.Error e;
+				if (raw_error is Error || raw_error is IOError.CANCELLED)
+					e = raw_error;
+				else
+					e = new Error.TRANSPORT ("%s", raw_error.message);
+
+				get_emulated_request.reject (e);
+				get_emulated_request = null;
+
+				throw_api_error (e);
+			}
+		}
+
+		private void teardown_emulated_provider () {
+			if (emulated_provider != null) {
+				emulated_provider.opened.disconnect (on_emulated_session_opened);
+				emulated_provider.closed.disconnect (on_emulated_session_closed);
+				emulated_provider = null;
+			}
+
+			if (emulated_worker != null) {
+				emulated_worker.join ();
+				emulated_worker = null;
+			}
+
+			emulated_socket = null;
+		}
+
+		private bool run_emulated_agent () {
+			var fake_vm = new FakeJavaVM ();
+			var invocation = EmulatedInvocation (emulated_socket.fd);
+
+			emulated_entrypoint (&fake_vm, &invocation);
+
+			return true;
+		}
+
+		private void on_emulated_session_opened (AgentSessionId id) {
+			opened (id);
+		}
+
+		private void on_emulated_session_closed (AgentSessionId id) {
+			uint registration_id;
+			if (emulated_session_registrations.unset (id, out registration_id))
+				connection.unregister_object (registration_id);
+
+			closed (id);
+		}
+
+		[CCode (has_target = false)]
+		private delegate void * NBLoadLibraryFunc (string path, int flags);
+
+		[CCode (has_target = false)]
+		private delegate void * NBGetTrampolineFunc (void * handle, string name, string? shorty = null, uint32 len = 0);
+
+		[CCode (has_target = false)]
+		private delegate int NBOnLoadFunc (void * vm, void * reserved);
+
+#else
+		private async AgentSessionProvider? try_get_emulated_provider (Cancellable? cancellable) throws IOError {
+			return null;
+		}
+
+		private async AgentSessionProvider get_emulated_provider (Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on this OS");
+		}
+
+		private void teardown_emulated_provider () {
+		}
+#endif
 	}
+
+#if ANDROID
+	public struct EmulatedInvocation {
+		public string transport_uri;
+		public UnloadPolicy unload_policy;
+		public LinuxInjectorState * injector_state;
+
+		public EmulatedInvocation (int fd) {
+			transport_uri = "socket:%d".printf (fd);
+			unload_policy = IMMEDIATE;
+		}
+	}
+
+	[Compact]
+	public class FakeJavaVM {
+		public FakeJNIInvokeInterface functions;
+
+		public FakeJavaVM () {
+			functions = new FakeJNIInvokeInterface ();
+		}
+	}
+
+	[Compact]
+	public class FakeJNIInvokeInterface {
+		public void * reserved0;
+		public void * reserved1;
+		public void * reserved2;
+
+		public void * destroy_java_vm;
+		public void * attach_current_thread;
+		public void * detach_current_thread;
+		public void * get_env;
+		public void * attach_current_thread_as_daemon;
+
+		public FakeJNIInvokeInterface () {
+			void * stub = (void *) Process.abort;
+			destroy_java_vm = stub;
+			attach_current_thread = stub;
+			detach_current_thread = stub;
+			get_env = stub;
+			attach_current_thread_as_daemon = stub;
+		}
+	}
+#endif
 
 	private class AgentClient : Object, AgentSession {
 		public signal void closed ();

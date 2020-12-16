@@ -8,7 +8,13 @@ if force_cpp_linking
   agent_sources += ['dummy.cpp']
 endif
 
+extra_vala_args = []
 extra_link_args = []
+
+if host_os_family != 'windows'
+  extra_vala_args += ['--pkg=posix']
+endif
+
 if host_os_family == 'darwin'
   extra_link_args += ['-Wl,-exported_symbol,_frida_agent_main']
 elif host_os_family != 'windows'
@@ -23,6 +29,7 @@ endif
 raw_agent = shared_library('frida-agent', agent_sources,
   name_prefix: '_',
   c_args: frida_component_cflags,
+  vala_args: extra_vala_args,
   link_args: extra_link_args,
   vs_module_defs: 'frida-agent.def',
   override_options: ['b_asneeded=true'],

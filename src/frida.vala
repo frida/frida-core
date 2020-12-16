@@ -1035,7 +1035,7 @@ namespace Frida {
 			}
 		}
 
-		public async Session attach (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+		public async Session attach (uint pid, Realm realm = NATIVE, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
 			var attach_request = new Promise<Session> ();
@@ -1045,8 +1045,27 @@ namespace Frida {
 			try {
 				var host_session = yield get_host_session (cancellable);
 
+				AgentSessionId agent_session_id;
 				try {
-					var agent_session_id = yield host_session.attach_to (pid, cancellable);
+					agent_session_id = yield host_session.attach_in_realm (pid, realm, cancellable);
+				} catch (GLib.Error e) {
+					if (e is DBusError.UNKNOWN_METHOD) {
+						if (realm != NATIVE) {
+							throw new Error.INVALID_ARGUMENT (
+								"Remote Frida does not support the “realm” option; please upgrade it");
+						}
+
+						try {
+							agent_session_id = yield host_session.attach_to (pid, cancellable);
+						} catch (GLib.Error e) {
+							throw_dbus_error (e);
+						}
+					} else {
+						throw_dbus_error (e);
+					}
+				}
+
+				try {
 					var agent_session = yield provider.obtain_agent_session (host_session, agent_session_id,
 						cancellable);
 					session = new Session (this, pid, agent_session);
@@ -1069,17 +1088,19 @@ namespace Frida {
 			return session;
 		}
 
-		public Session attach_sync (uint pid, Cancellable? cancellable = null) throws Error, IOError {
+		public Session attach_sync (uint pid, Realm realm = NATIVE, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<AttachTask> ();
 			task.pid = pid;
+			task.realm = realm;
 			return task.execute (cancellable);
 		}
 
 		private class AttachTask : DeviceTask<Session> {
 			public uint pid;
+			public Realm realm;
 
 			protected override async Session perform_operation () throws Error, IOError {
-				return yield parent.attach (pid, cancellable);
+				return yield parent.attach (pid, realm, cancellable);
 			}
 		}
 
