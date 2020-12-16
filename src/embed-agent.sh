@@ -50,15 +50,15 @@ collect_generic_agent ()
     cp "$1" "$embedded_agent" || exit 1
 
     if [ "$strip_enabled" = "true" ]; then
-      if [ "$host_os-$2" = "android-arm" ]; then
-        # FIXME: This isn't great.
-        strip_dirname=$(dirname "$strip_binary")
-        strip_basename=$(basename "$strip_binary")
-        other_strip_binary="$strip_dirname/$(echo $strip_basename | sed 's,x86,arm,')"
-        "$other_strip_binary" "$embedded_agent" || exit 1
-      else
-        "$strip_binary" "$embedded_agent" || exit 1
-      fi
+      case $host_os-$2 in
+        android-arm*)
+          other_strip_wrapper="$(dirname "$strip_binary")/frida-android-$2-strip"
+          "$other_strip_wrapper" "$embedded_agent" || exit 1
+          ;;
+        *)
+          "$strip_binary" "$embedded_agent" || exit 1
+          ;;
+      esac
     fi
   else
     touch "$embedded_agent"

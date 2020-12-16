@@ -62,7 +62,7 @@ namespace Frida.Agent {
 		private Gum.MemoryRange agent_range;
 		private Gum.ScriptBackend? qjs_backend;
 		private Gum.ScriptBackend? v8_backend;
-		private ExitMonitor exit_monitor;
+		private ExitMonitor? exit_monitor;
 		private Gum.Interceptor interceptor;
 		private Gum.Exceptor exceptor;
 
@@ -80,8 +80,8 @@ namespace Frida.Agent {
 		private ForkRecoveryState fork_recovery_state;
 		private Mutex fork_mutex;
 		private Cond fork_cond;
-		private SpawnMonitor spawn_monitor;
-		private ThreadSuspendMonitor thread_suspend_monitor;
+		private SpawnMonitor? spawn_monitor;
+		private ThreadSuspendMonitor? thread_suspend_monitor;
 
 		private delegate void CompletionNotify ();
 
@@ -208,17 +208,6 @@ namespace Frida.Agent {
 
 			main_context = MainContext.default ();
 			main_loop = new MainLoop (main_context);
-
-			var interceptor = Gum.Interceptor.obtain ();
-			interceptor.begin_transaction ();
-
-			exit_monitor = new ExitMonitor (this, main_context);
-			thread_suspend_monitor = new ThreadSuspendMonitor (this);
-
-			this.interceptor = interceptor;
-			this.exceptor = Gum.Exceptor.obtain ();
-
-			interceptor.end_transaction ();
 		}
 
 		~Runner () {
@@ -249,11 +238,28 @@ namespace Frida.Agent {
 		private async void start (owned FileDescriptorTablePadder padder) {
 			string[] tokens = agent_parameters.split ("|");
 			unowned string transport_uri = tokens[0];
+			bool enable_exit_monitor = true;
 			foreach (unowned string option in tokens[1:]) {
 				if (option == "eternal")
 					ensure_eternalized ();
 				else if (option == "sticky")
 					stop_thread_on_unload = false;
+				else if (option == "exit-monitor:off")
+					enable_exit_monitor = false;
+			}
+
+			{
+				var interceptor = Gum.Interceptor.obtain ();
+				interceptor.begin_transaction ();
+
+				if (enable_exit_monitor)
+					exit_monitor = new ExitMonitor (this, main_context);
+				thread_suspend_monitor = new ThreadSuspendMonitor (this);
+
+				this.interceptor = interceptor;
+				this.exceptor = Gum.Exceptor.obtain ();
+
+				interceptor.end_transaction ();
 			}
 
 			yield setup_connection_with_transport_uri (transport_uri);
@@ -771,6 +777,9 @@ namespace Frida.Agent {
 
 			yield teardown_connection ();
 
+			if (!is_eternal)
+				teardown_emulated_provider ();
+
 			if (stop_thread_on_unload) {
 				schedule_idle (() => {
 					main_loop.quit ();
@@ -1022,15 +1031,15 @@ namespace Frida.Agent {
 				client.unprepare_for_termination ();
 		}
 
-#if ANDROID && X86
-		private const string LIBNATIVEBRIDGE_PATH = "/system/lib/libnativebridge.so";
-		private const int RTLD_LAZY = 1;
-
+#if ANDROID && (X86 || X86_64)
 		private Promise<AgentSessionProvider>? get_emulated_request;
+		private AgentSessionProvider? cached_emulated_provider;
+		private NativeBridgeApi? nb_api;
 		private void * emulated_agent;
 		private NBOnLoadFunc? emulated_entrypoint;
 		private Socket? emulated_socket;
-		private Thread<bool>? emulated_worker;
+		private BridgeState? emulated_bridge_state;
+		private Thread<void>? emulated_worker;
 
 		private async AgentSessionProvider? try_get_emulated_provider (Cancellable? cancellable) throws IOError {
 			if (get_emulated_request == null)
@@ -1054,31 +1063,28 @@ namespace Frida.Agent {
 					cancellable.set_error_if_cancelled ();
 				}
 			}
-			get_emulated_request = new Promise<AgentSessionProvider> ();
+			var request = new Promise<AgentSessionProvider> ();
+			get_emulated_request = request;
 
 			try {
-				if (emulated_entrypoint == null) {
-					string parent_path = Path.get_dirname (agent_path);
+				if (nb_api == null)
+					nb_api = NativeBridgeApi.open ();
 
-					string emulated_agent_path = Path.build_filename (parent_path, "frida-agent-arm.so");
-					if (!FileUtils.test (emulated_agent_path, EXISTS)) {
-						throw new Error.NOT_SUPPORTED (
-							"Unable to handle emulated processes due to build configuration");
-					}
+				string parent_path = Path.get_dirname (agent_path);
+				string emulated_agent_path = Path.build_filename (parent_path,
+					sizeof (void *) == 8 ? "frida-agent-arm64.so" : "frida-agent-arm.so");
+				if (!FileUtils.test (emulated_agent_path, EXISTS))
+					throw new Error.NOT_SUPPORTED ("Unable to handle emulated processes due to build configuration");
 
-					var load_library = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (LIBNATIVEBRIDGE_PATH,
-						"_ZN7android23NativeBridgeLoadLibraryEPKci");
-					var get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (LIBNATIVEBRIDGE_PATH,
-						"_ZN7android25NativeBridgeGetTrampolineEPvPKcS2_j");
-					if (load_library == null || get_trampoline == null)
-						throw new Error.NOT_SUPPORTED ("NativeBridge interface is not available on this OS");
+				emulated_agent = nb_api.load_library (emulated_agent_path, RTLD_LAZY);
+				if (emulated_agent == null)
+					throw new Error.NOT_SUPPORTED ("Process is not using emulation");
 
-					emulated_agent = load_library (emulated_agent_path, RTLD_LAZY);
-					if (emulated_agent == null)
-						throw new Error.NOT_SUPPORTED ("Process is not using emulation");
-
-					emulated_entrypoint = (NBOnLoadFunc) get_trampoline (emulated_agent, "frida_agent_main_nb");
-				}
+				/*
+				 * We name our entrypoint “JNI_OnLoad” so that the NativeBridge implementation
+				 * recognizes its name and we don't have to register it.
+				 */
+				emulated_entrypoint = (NBOnLoadFunc) nb_api.get_trampoline (emulated_agent, "JNI_OnLoad");
 
 				var fds = new int[2];
 				if (Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0, fds) != 0)
@@ -1095,7 +1101,21 @@ namespace Frida.Agent {
 				IOStream stream = SocketConnection.factory_create_connection (local_socket);
 				emulated_socket = remote_socket;
 
-				emulated_worker = new Thread<bool> ("frida-agent-emulated", run_emulated_agent);
+				var parameters = new StringBuilder.sized (64);
+				parameters.append_printf ("socket:%d", emulated_socket.fd);
+				if (nb_api.unload_library == null)
+					parameters.append ("|eternal|sticky");
+				/*
+				 * Disable ExitMonitor to work around a bug in Android's libndk_translation.so on Android 11.
+				 * We need to avoid modifying libc.so ranges that the translator potentially depends on, to
+				 * avoid blowing up when Interceptor's CPU cache flush results in the translated code being
+				 * discarded, which seems like an edge-case the translator doesn't handle.
+				 */
+				parameters.append ("|exit-monitor:off");
+
+				emulated_bridge_state = new BridgeState (parameters.str);
+
+				emulated_worker = new Thread<void> ("frida-agent-emulated", run_emulated_agent);
 
 				var connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
 					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
@@ -1103,23 +1123,21 @@ namespace Frida.Agent {
 				AgentSessionProvider provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
 					DBusProxyFlags.NONE, cancellable);
 
+				cached_emulated_provider = provider;
 				provider.opened.connect (on_emulated_session_opened);
 				provider.closed.connect (on_emulated_session_closed);
+				provider.eternalized.connect (on_emulated_provider_eternalized);
 				provider.child_gating_changed.connect (on_emulated_child_gating_changed);
 
-				ensure_eternalized ();
+				if (nb_api.unload_library == null)
+					ensure_eternalized ();
 
-				get_emulated_request.resolve (provider);
+				request.resolve (provider);
 				return provider;
 			} catch (GLib.Error raw_error) {
 				DBusError.strip_remote_error (raw_error);
 
-				if (emulated_worker != null) {
-					emulated_worker.join ();
-					emulated_worker = null;
-				}
-
-				emulated_socket = null;
+				teardown_emulated_provider ();
 
 				GLib.Error e;
 				if (raw_error is Error || raw_error is IOError.CANCELLED)
@@ -1127,20 +1145,39 @@ namespace Frida.Agent {
 				else
 					e = new Error.TRANSPORT ("%s", raw_error.message);
 
-				get_emulated_request.reject (e);
-				get_emulated_request = null;
-
+				request.reject (e);
 				throw_api_error (e);
 			}
 		}
 
-		private bool run_emulated_agent () {
-			var fake_vm = new FakeJavaVM ();
-			var invocation = EmulatedInvocation (emulated_socket.fd);
+		private void teardown_emulated_provider () {
+			get_emulated_request = null;
 
-			emulated_entrypoint (&fake_vm, &invocation);
+			if (cached_emulated_provider != null) {
+				var provider = cached_emulated_provider;
+				provider.opened.disconnect (on_emulated_session_opened);
+				provider.closed.disconnect (on_emulated_session_closed);
+				provider.eternalized.disconnect (on_emulated_provider_eternalized);
+				provider.child_gating_changed.disconnect (on_emulated_child_gating_changed);
+				cached_emulated_provider = null;
+			}
 
-			return true;
+			if (emulated_worker != null) {
+				emulated_worker.join ();
+				emulated_worker = null;
+			}
+
+			emulated_socket = null;
+
+			if (emulated_agent != null) {
+				if (nb_api.unload_library != null)
+					nb_api.unload_library (emulated_agent);
+				emulated_agent = null;
+			}
+		}
+
+		private void run_emulated_agent () {
+			emulated_entrypoint (nb_api.vm, emulated_bridge_state);
 		}
 
 		private void on_emulated_session_opened (AgentSessionId id) {
@@ -1155,13 +1192,84 @@ namespace Frida.Agent {
 			closed (id);
 		}
 
+		private void on_emulated_provider_eternalized () {
+			ensure_eternalized ();
+		}
+
 		private void on_emulated_child_gating_changed (uint subscriber_count) {
 			// TODO: Wire up remainder of the child gating logic.
 			child_gating_changed (subscriber_count);
 		}
 
+		private class NativeBridgeApi {
+			public NBLoadLibraryFunc load_library;
+			public NBUnloadLibraryFunc? unload_library;
+			public NBGetTrampolineFunc get_trampoline;
+			public void * vm;
+
+			public static NativeBridgeApi open () throws Error {
+				string? nb_mod = null;
+				string? vm_mod = null;
+				Gum.Process.enumerate_modules ((details) => {
+					if (/\/lib(64)?\/libnativebridge.so$/.match (details.path))
+						nb_mod = details.path;
+					else if (/^lib(art|dvm).so$/.match (details.name) && !/\/system\/fake-libs/.match (details.path))
+						vm_mod = details.path;
+					bool carry_on = nb_mod == null || vm_mod == null;
+					return carry_on;
+				});
+				if (nb_mod == null)
+					throw new Error.NOT_SUPPORTED ("NativeBridge API is not available on this system");
+				if (vm_mod == null)
+					throw new Error.NOT_SUPPORTED ("Unable to locate Java VM");
+
+				var load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod, "NativeBridgeLoadLibrary");
+				NBUnloadLibraryFunc? unload;
+				NBGetTrampolineFunc get_trampoline;
+				if (load != null) {
+					// XXX: NativeBridgeUnloadLibrary() is only a stub as of Android 11 w/ libndk_translation.so
+					unload = null;
+					get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (nb_mod,
+						"NativeBridgeGetTrampoline");
+				} else {
+					load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod,
+						"_ZN7android23NativeBridgeLoadLibraryEPKci");
+					unload = null;
+					get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (nb_mod,
+						"_ZN7android25NativeBridgeGetTrampolineEPvPKcS2_j");
+				}
+				if (load == null || get_trampoline == null)
+					throw new Error.NOT_SUPPORTED ("NativeBridge API is not available on this system");
+
+				var get_vms = (JNIGetCreatedJavaVMsFunc) Gum.Module.find_export_by_name (vm_mod, "JNI_GetCreatedJavaVMs");
+				if (get_vms == null)
+					throw new Error.NOT_SUPPORTED ("Unable to locate Java VM");
+
+				var vms = new void *[] { null };
+				int num_vms;
+				if (get_vms (vms, out num_vms) != JNI_OK || num_vms < 1)
+					throw new Error.NOT_SUPPORTED ("No Java VM loaded");
+
+				return new NativeBridgeApi (load, unload, get_trampoline, vms[0]);
+			}
+
+			private NativeBridgeApi (NBLoadLibraryFunc load_library, NBUnloadLibraryFunc? unload_library,
+					NBGetTrampolineFunc get_trampoline, void * vm) {
+				this.load_library = load_library;
+				this.unload_library = unload_library;
+				this.get_trampoline = get_trampoline;
+				this.vm = vm;
+			}
+		}
+
+		private const int JNI_OK = 0;
+		private const int RTLD_LAZY = 1;
+
 		[CCode (has_target = false)]
 		private delegate void * NBLoadLibraryFunc (string path, int flags);
+
+		[CCode (has_target = false)]
+		private delegate int NBUnloadLibraryFunc (void * handle);
 
 		[CCode (has_target = false)]
 		private delegate void * NBGetTrampolineFunc (void * handle, string name, string? shorty = null, uint32 len = 0);
@@ -1169,6 +1277,8 @@ namespace Frida.Agent {
 		[CCode (has_target = false)]
 		private delegate int NBOnLoadFunc (void * vm, void * reserved);
 
+		[CCode (has_target = false)]
+		private delegate int JNIGetCreatedJavaVMsFunc (void *[] vms, out int num_vms);
 #else
 		private async AgentSessionProvider? try_get_emulated_provider (Cancellable? cancellable) throws IOError {
 			return null;
@@ -1177,49 +1287,21 @@ namespace Frida.Agent {
 		private async AgentSessionProvider get_emulated_provider (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on this OS");
 		}
+
+		private void teardown_emulated_provider () {
+		}
 #endif
 	}
 
 #if ANDROID
-	public struct EmulatedInvocation {
+	public class BridgeState {
 		public string agent_parameters;
 		public UnloadPolicy unload_policy;
 		public LinuxInjectorState * injector_state;
 
-		public EmulatedInvocation (int fd) {
-			agent_parameters = "socket:%d|eternal|sticky".printf (fd);
-			unload_policy = IMMEDIATE;
-		}
-	}
-
-	[Compact]
-	public class FakeJavaVM {
-		public FakeJNIInvokeInterface functions;
-
-		public FakeJavaVM () {
-			functions = new FakeJNIInvokeInterface ();
-		}
-	}
-
-	[Compact]
-	public class FakeJNIInvokeInterface {
-		public void * reserved0;
-		public void * reserved1;
-		public void * reserved2;
-
-		public void * destroy_java_vm;
-		public void * attach_current_thread;
-		public void * detach_current_thread;
-		public void * get_env;
-		public void * attach_current_thread_as_daemon;
-
-		public FakeJNIInvokeInterface () {
-			void * stub = (void *) Process.abort;
-			destroy_java_vm = stub;
-			attach_current_thread = stub;
-			detach_current_thread = stub;
-			get_env = stub;
-			attach_current_thread_as_daemon = stub;
+		public BridgeState (string agent_parameters) {
+			this.agent_parameters = agent_parameters;
+			this.unload_policy = IMMEDIATE;
 		}
 	}
 #endif

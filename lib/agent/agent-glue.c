@@ -58,11 +58,11 @@ _frida_agent_environment_deinit (void)
 #ifdef HAVE_ANDROID
 
 jint
-frida_agent_main_nb (JavaVM * vm, void * reserved)
+JNI_OnLoad (JavaVM * vm, void * reserved)
 {
-  FridaAgentEmulatedInvocation * invocation = reserved;
+  FridaAgentBridgeState * state = reserved;
 
-  frida_agent_main (invocation->agent_parameters, &invocation->unload_policy, invocation->injector_state);
+  frida_agent_main (state->agent_parameters, &state->unload_policy, state->injector_state);
 
   return JNI_VERSION_1_6;
 }
