@@ -335,6 +335,7 @@ namespace Frida {
 			dead_agent.unloaded.disconnect (on_system_server_agent_unloaded);
 
 			system_server_agent = new SystemServerAgent (this);
+			system_server_agent.unloaded.connect (on_system_server_agent_unloaded);
 		}
 
 		private void on_robo_launcher_spawn_added (HostSpawnInfo info) {
