@@ -330,7 +330,7 @@ namespace Frida {
 			entry.sessions.add (id);
 
 			try {
-				yield entry.provider.open_in_realm (id, realm, cancellable);
+				yield entry.provider.open (id, realm, cancellable);
 
 				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
 					DBusProxyFlags.NONE, cancellable);

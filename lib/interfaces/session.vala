@@ -33,8 +33,7 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentSessionProvider14")]
 	public interface AgentSessionProvider : Object {
-		public abstract async void open (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
-		public abstract async void open_in_realm (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void open (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error;
 #if !WINDOWS
 		public abstract async void migrate (AgentSessionId id, GLib.Socket to_socket, Cancellable? cancellable) throws GLib.Error;
 #endif

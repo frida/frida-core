@@ -535,15 +535,7 @@ namespace Frida.Agent {
 			return (v8_backend != null) ? v8_backend : qjs_backend;
 		}
 
-		private async void open (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
-			try {
-				yield open_in_realm (id, NATIVE, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		private async void open_in_realm (AgentSessionId id, Realm realm, Cancellable? cancellable) throws Error, IOError {
+		private async void open (AgentSessionId id, Realm realm, Cancellable? cancellable) throws Error, IOError {
 			if (unloading)
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
@@ -551,7 +543,7 @@ namespace Frida.Agent {
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
 
 				try {
-					yield emulated_provider.open_in_realm (id, NATIVE, cancellable);
+					yield emulated_provider.open (id, Realm.NATIVE, cancellable);
 				} catch (GLib.Error e) {
 					throw_dbus_error (e);
 				}
