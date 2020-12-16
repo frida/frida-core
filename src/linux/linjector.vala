@@ -159,6 +159,8 @@ namespace Frida {
 			if (cached_path_template == null) {
 				TemporaryDirectory? first_tempdir = null;
 				foreach (AgentResource r in resources) {
+					if (r.blob.length == 0)
+						continue;
 					TemporaryFile f = r.get_file ();
 					adjust_file_permissions (f.path);
 					if (first_tempdir == null)
