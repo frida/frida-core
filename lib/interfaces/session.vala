@@ -99,6 +99,15 @@ namespace Frida {
 			out string token) throws GLib.Error;
 	}
 
+	public enum Realm {
+		NATIVE,
+		EMULATED;
+
+		public string to_nick () {
+			return Marshal.enum_to_nick<Realm> (this);
+		}
+	}
+
 	public enum SpawnStartState {
 		RUNNING,
 		SUSPENDED;
@@ -139,15 +148,6 @@ namespace Frida {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<SessionDetachReason> (this);
-		}
-	}
-
-	public enum Realm {
-		NATIVE,
-		EMULATED;
-
-		public string to_nick () {
-			return Marshal.enum_to_nick<Realm> (this);
 		}
 	}
 
