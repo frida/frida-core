@@ -62,7 +62,7 @@ frida_agent_main_nb (JavaVM * vm, void * reserved)
 {
   FridaAgentEmulatedInvocation * invocation = reserved;
 
-  frida_agent_main (invocation->transport_uri, &invocation->unload_policy, invocation->injector_state);
+  frida_agent_main (invocation->agent_parameters, &invocation->unload_policy, invocation->injector_state);
 
   return JNI_VERSION_1_6;
 }

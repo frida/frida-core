@@ -1,7 +1,7 @@
 namespace Frida.Agent {
-	public void main (string transport_uri, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
+	public void main (string agent_parameters, ref Frida.UnloadPolicy unload_policy, void * injector_state) {
 		if (Runner.shared_instance == null)
-			Runner.create_and_run (transport_uri, ref unload_policy, injector_state);
+			Runner.create_and_run (agent_parameters, ref unload_policy, injector_state);
 		else
 			Runner.resume_after_fork (ref unload_policy, injector_state);
 	}
@@ -15,7 +15,7 @@ namespace Frida.Agent {
 		public static Runner shared_instance = null;
 		public static Mutex shared_mutex;
 
-		public string transport_uri {
+		public string agent_parameters {
 			get;
 			construct;
 		}
@@ -26,16 +26,19 @@ namespace Frida.Agent {
 		}
 
 		public StopReason stop_reason {
-			default = UNLOAD;
 			get;
 			set;
+			default = UNLOAD;
 		}
 
-		public bool has_eternalized_scripts {
+		public bool is_eternal {
 			get {
-				return !eternalized_scripts.is_empty;
+				return _is_eternal;
 			}
 		}
+		private bool _is_eternal = false;
+
+		private bool stop_thread_on_unload = true;
 
 		private void * agent_pthread;
 		private Thread<bool> agent_gthread;
@@ -92,7 +95,7 @@ namespace Frida.Agent {
 			CHILD
 		}
 
-		public static void create_and_run (string transport_uri, ref Frida.UnloadPolicy unload_policy,
+		public static void create_and_run (string agent_parameters, ref Frida.UnloadPolicy unload_policy,
 				void * opaque_injector_state) {
 			Environment._init ();
 
@@ -121,7 +124,7 @@ namespace Frida.Agent {
 
 				var ignore_scope = new ThreadIgnoreScope ();
 
-				shared_instance = new Runner (transport_uri, agent_path, agent_range);
+				shared_instance = new Runner (agent_parameters, agent_path, agent_range);
 
 				try {
 					shared_instance.run ((owned) fdt_padder);
@@ -136,9 +139,9 @@ namespace Frida.Agent {
 #endif
 					unload_policy = DEFERRED;
 					return;
-				} else if (shared_instance.has_eternalized_scripts) {
+				} else if (shared_instance.is_eternal) {
 					unload_policy = RESIDENT;
-					shared_instance.keep_running_eternalized_scripts ();
+					shared_instance.keep_running_eternalized ();
 					return;
 				} else {
 					release_shared_instance ();
@@ -171,9 +174,9 @@ namespace Frida.Agent {
 #endif
 					unload_policy = DEFERRED;
 					return;
-				} else if (shared_instance.has_eternalized_scripts) {
+				} else if (shared_instance.is_eternal) {
 					unload_policy = RESIDENT;
-					shared_instance.keep_running_eternalized_scripts ();
+					shared_instance.keep_running_eternalized ();
 					return;
 				} else {
 					release_shared_instance ();
@@ -194,8 +197,8 @@ namespace Frida.Agent {
 			instance = null;
 		}
 
-		private Runner (string transport_uri, string? agent_path, Gum.MemoryRange agent_range) {
-			Object (transport_uri: transport_uri, agent_path: agent_path);
+		private Runner (string agent_parameters, string? agent_path, Gum.MemoryRange agent_range) {
+			Object (agent_parameters: agent_parameters, agent_path: agent_path);
 
 			this.agent_range = agent_range;
 		}
@@ -244,6 +247,15 @@ namespace Frida.Agent {
 		}
 
 		private async void start (owned FileDescriptorTablePadder padder) {
+			string[] tokens = agent_parameters.split ("|");
+			unowned string transport_uri = tokens[0];
+			foreach (unowned string option in tokens[1:]) {
+				if (option == "eternal")
+					ensure_eternalized ();
+				else if (option == "sticky")
+					stop_thread_on_unload = false;
+			}
+
 			yield setup_connection_with_transport_uri (transport_uri);
 
 			Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () => {
@@ -254,7 +266,7 @@ namespace Frida.Agent {
 			padder = null;
 		}
 
-		private void keep_running_eternalized_scripts () {
+		private void keep_running_eternalized () {
 			agent_gthread = new Thread<bool> ("frida-eternal-agent", () => {
 				var ignore_scope = new ThreadIgnoreScope ();
 
@@ -655,7 +667,7 @@ namespace Frida.Agent {
 
 		private void on_script_eternalized (Gum.Script script) {
 			eternalized_scripts.add (script);
-			eternalized ();
+			ensure_eternalized ();
 		}
 
 #if !WINDOWS
@@ -759,12 +771,19 @@ namespace Frida.Agent {
 
 			yield teardown_connection ();
 
-			teardown_emulated_provider ();
+			if (stop_thread_on_unload) {
+				schedule_idle (() => {
+					main_loop.quit ();
+					return false;
+				});
+			}
+		}
 
-			schedule_idle (() => {
-				main_loop.quit ();
-				return false;
-			});
+		private void ensure_eternalized () {
+			if (!_is_eternal) {
+				_is_eternal = true;
+				eternalized ();
+			}
 		}
 
 		public void acquire_child_gating () {
@@ -1008,7 +1027,6 @@ namespace Frida.Agent {
 		private const int RTLD_LAZY = 1;
 
 		private Promise<AgentSessionProvider>? get_emulated_request;
-		private AgentSessionProvider? emulated_provider;
 		private void * emulated_agent;
 		private NBOnLoadFunc? emulated_entrypoint;
 		private Socket? emulated_socket;
@@ -1085,16 +1103,23 @@ namespace Frida.Agent {
 				AgentSessionProvider provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
 					DBusProxyFlags.NONE, cancellable);
 
-				emulated_provider = provider;
 				provider.opened.connect (on_emulated_session_opened);
 				provider.closed.connect (on_emulated_session_closed);
+				provider.child_gating_changed.connect (on_emulated_child_gating_changed);
+
+				ensure_eternalized ();
 
 				get_emulated_request.resolve (provider);
 				return provider;
 			} catch (GLib.Error raw_error) {
 				DBusError.strip_remote_error (raw_error);
 
-				teardown_emulated_provider ();
+				if (emulated_worker != null) {
+					emulated_worker.join ();
+					emulated_worker = null;
+				}
+
+				emulated_socket = null;
 
 				GLib.Error e;
 				if (raw_error is Error || raw_error is IOError.CANCELLED)
@@ -1107,21 +1132,6 @@ namespace Frida.Agent {
 
 				throw_api_error (e);
 			}
-		}
-
-		private void teardown_emulated_provider () {
-			if (emulated_provider != null) {
-				emulated_provider.opened.disconnect (on_emulated_session_opened);
-				emulated_provider.closed.disconnect (on_emulated_session_closed);
-				emulated_provider = null;
-			}
-
-			if (emulated_worker != null) {
-				emulated_worker.join ();
-				emulated_worker = null;
-			}
-
-			emulated_socket = null;
 		}
 
 		private bool run_emulated_agent () {
@@ -1145,6 +1155,11 @@ namespace Frida.Agent {
 			closed (id);
 		}
 
+		private void on_emulated_child_gating_changed (uint subscriber_count) {
+			// TODO: Wire up remainder of the child gating logic.
+			child_gating_changed (subscriber_count);
+		}
+
 		[CCode (has_target = false)]
 		private delegate void * NBLoadLibraryFunc (string path, int flags);
 
@@ -1162,20 +1177,17 @@ namespace Frida.Agent {
 		private async AgentSessionProvider get_emulated_provider (Cancellable? cancellable) throws Error, IOError {
 			throw new Error.NOT_SUPPORTED ("Emulated realm is not supported on this OS");
 		}
-
-		private void teardown_emulated_provider () {
-		}
 #endif
 	}
 
 #if ANDROID
 	public struct EmulatedInvocation {
-		public string transport_uri;
+		public string agent_parameters;
 		public UnloadPolicy unload_policy;
 		public LinuxInjectorState * injector_state;
 
 		public EmulatedInvocation (int fd) {
-			transport_uri = "socket:%d".printf (fd);
+			agent_parameters = "socket:%d|eternal|sticky".printf (fd);
 			unload_policy = IMMEDIATE;
 		}
 	}
