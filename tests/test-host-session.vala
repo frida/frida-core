@@ -3053,16 +3053,14 @@ namespace Frida.HostSessionTest {
 						create_adb_data_payload_header (cmd, chunks, bytes_read);
 
 						while (bytes_written < bytes_read && chunks > 0) {
-							if (chunks == 1) {
+							if (chunks == 1)
 								remaining = bytes_read - bytes_written;
-							}
-							if (remaining > 0 && remaining < MAX_DATA_SIZE) {
+
+							if (remaining > 0 && remaining < MAX_DATA_SIZE)
 								end = remaining;
-							}
 
 							written = cmd.write_bytes (content[index:index+end]);
 							bytes_written += written;
-							//  printerr ("Written %zu -> %zu+%zu=%zu/%zu\n", written, index, end, index+end, bytes_read);
 
 							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
 							if (remaining == 0)
@@ -3110,11 +3108,10 @@ namespace Frida.HostSessionTest {
 
 			cmd.put_string ("DATA");
 			cmd.byte_order = LITTLE_ENDIAN;
-			if (chunks > 0 && remaining > MAX_DATA_SIZE) {
+			if (chunks > 0 && remaining > MAX_DATA_SIZE)
 				cmd.put_uint32 ((uint32) MAX_DATA_SIZE);
-			} else {
+			else
 				cmd.put_uint32 ((uint32) remaining);
-			}
 			cmd.byte_order = BIG_ENDIAN;
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
