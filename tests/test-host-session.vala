@@ -2999,7 +2999,7 @@ namespace Frida.HostSessionTest {
 			try {
 				yield Frida.Droidy.Client.push (device_serial, local_path, remote_path, cancellable);
 			} catch (GLib.Error e) {
-				assert_not_reached ();
+				printerr ("\nFAIL: %s\n\n", e.message);
 			}
 
 			h.done ();

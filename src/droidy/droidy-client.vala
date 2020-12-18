@@ -395,7 +395,7 @@ namespace Frida.Droidy {
 							if (remaining > 0 && remaining < MAX_DATA_SIZE)
 								end = remaining;
 
-							written = cmd.write_bytes (content[index:index+end]);
+							written = cmd.write_bytes (content[index:index + end]);
 							bytes_written += written;
 
 							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
@@ -418,11 +418,11 @@ namespace Frida.Droidy {
 				cmd.byte_order = LITTLE_ENDIAN;
 				var timestamp = new DateTime.now_local ();
 
-				cmd.put_string("DONE");
-				cmd.put_uint64(timestamp.to_unix ());
+				cmd.put_string ("DONE");
+				cmd.put_uint64 (timestamp.to_unix ());
 
-				cmd.put_string("QUIT");
-				cmd.put_uint32(0);
+				cmd.put_string ("QUIT");
+				cmd.put_uint32 (0);
 
 				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
 			} catch (GLib.Error e) {
