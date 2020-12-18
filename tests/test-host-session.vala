@@ -2993,128 +2993,16 @@ namespace Frida.HostSessionTest {
 
 			Cancellable? cancellable = null;
 			var device_serial = "99UAY1BUBQ";
-			string debuggable_app = "oversecured.ovaa";
-
-			string gadget_so = "gadget.so";
-			string rpath = "/data/local/tmp/";
-			string lpath = "/tmp/" + gadget_so;
-			string filename = rpath + gadget_so;
-			string mode = "%d".printf (0100666);
-
-			var cmd_buf = new MemoryOutputStream.resizable ();
-			var cmd = new DataOutputStream (cmd_buf);
-			cmd.byte_order = LITTLE_ENDIAN;
+			var remote_path = "/data/local/tmp/gadget.so";
+			var local_path = "/tmp/gadget.so";
 
 			try {
-				yield Frida.Droidy.ShellCommand.run (
-					"am set-debug-app -w --persistent '%s'".printf (debuggable_app), device_serial, cancellable
-				);
-
-				var c = yield Frida.Droidy.Client.open (cancellable);
-
-				c.message.connect ((payload) => {
-					printerr ("Got a message: %s\n", payload);
-					var m = new StringBuilder ();
-					for (var i = 0; i != payload.length; i++) {
-						if (i > 0)
-							m.append (" ");
-						m.append_printf ("%02x", payload[i]);
-					}
-					printerr ("Str: %s\n", m.str);
-				});
-
-				c = yield Frida.Droidy.Client.open (cancellable);
-				yield c.request ("host:transport:" + device_serial, cancellable);
-				yield c.request ("sync:", cancellable);
-
-				cmd.put_string ("SEND");
-				cmd.put_uint32 (filename.length + 1 + mode.length);
-				cmd.put_string (filename);
-				cmd.put_string (",");
-				cmd.put_string (mode);
-
-				try {
-					File file = File.new_for_path (lpath);
-					Bytes content = file.load_bytes ();
-
-					size_t bytes_read = content.get_size ();
-					size_t MAX_DATA_SIZE = 65536;
-					double data_chunks = bytes_read / (float) MAX_DATA_SIZE;
-
-					int chunks = (int) Math.ceil (data_chunks);
-
-					if (chunks > 0) {
-						int index = 0;
-						size_t bytes_written = 0;
-						size_t written = 0;
-						size_t remaining = 0;
-						size_t end = MAX_DATA_SIZE;
-
-						create_adb_data_payload_header (cmd, chunks, bytes_read);
-
-						while (bytes_written < bytes_read && chunks > 0) {
-							if (chunks == 1)
-								remaining = bytes_read - bytes_written;
-
-							if (remaining > 0 && remaining < MAX_DATA_SIZE)
-								end = remaining;
-
-							written = cmd.write_bytes (content[index:index+end]);
-							bytes_written += written;
-
-							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
-							if (remaining == 0)
-								break;
-
-							create_adb_data_payload_header (cmd, chunks, remaining);
-							chunks -= 1;
-
-							if (remaining > MAX_DATA_SIZE)
-								index += (int) MAX_DATA_SIZE;
-							else
-								index = index + (int) end;
-						}
-					}
-				} catch (Error e) {
-					error ("%s", e.message);
-				}
-
-				cmd.byte_order = LITTLE_ENDIAN;
-				var timestamp = new DateTime.now_local ();
-
-				cmd.put_string("DONE");
-				cmd.put_uint64(timestamp.to_unix ());
-
-				cmd.put_string("QUIT");
-				cmd.put_uint32(0);
-
-				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
-
-				printerr ("Waiting 2500 ms...\n");
-				Timeout.add (2500, client.callback);
-				yield;
-				printerr ("Ok, done\n");
+				yield Frida.Droidy.Client.push (device_serial, local_path, remote_path, cancellable);
 			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
+				assert_not_reached ();
 			}
 
 			h.done ();
-		}
-	}
-
-	private static void create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
-		try {
-			size_t MAX_DATA_SIZE = 65536;
-
-			cmd.put_string ("DATA");
-			cmd.byte_order = LITTLE_ENDIAN;
-			if (chunks > 0 && remaining > MAX_DATA_SIZE)
-				cmd.put_uint32 ((uint32) MAX_DATA_SIZE);
-			else
-				cmd.put_uint32 ((uint32) remaining);
-			cmd.byte_order = BIG_ENDIAN;
-		} catch (GLib.Error e) {
-			printerr ("\nFAIL: %s\n\n", e.message);
 		}
 	}
 

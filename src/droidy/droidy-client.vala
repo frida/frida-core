@@ -352,6 +352,100 @@ namespace Frida.Droidy {
 			return pending.result;
 		}
 
+		public static async void push (string device_serial, string local_path, string remote_path, Cancellable? cancellable = null) throws Error, IOError {
+			var mode = "%d".printf (0100666);
+			var cmd_buf = new MemoryOutputStream.resizable ();
+			var cmd = new DataOutputStream (cmd_buf);
+			cmd.byte_order = LITTLE_ENDIAN;
+
+			try {
+				var c = yield open (cancellable);
+				yield c.request ("host:transport:" + device_serial, cancellable);
+				yield c.request ("sync:", cancellable);
+
+				cmd.put_string ("SEND");
+				cmd.put_uint32 (remote_path.length + 1 + mode.length);
+				cmd.put_string (remote_path);
+				cmd.put_string (",");
+				cmd.put_string (mode);
+
+				try {
+					File file = File.new_for_path (local_path);
+					Bytes content = file.load_bytes ();
+
+					size_t bytes_read = content.get_size ();
+					size_t MAX_DATA_SIZE = 65536;
+					double data_chunks = bytes_read / (float) MAX_DATA_SIZE;
+
+					int chunks = (int) Math.ceil (data_chunks);
+
+					if (chunks > 0) {
+						int index = 0;
+						size_t bytes_written = 0;
+						size_t written = 0;
+						size_t remaining = 0;
+						size_t end = MAX_DATA_SIZE;
+
+						create_adb_data_payload_header (cmd, chunks, bytes_read);
+
+						while (bytes_written < bytes_read && chunks > 0) {
+							if (chunks == 1)
+								remaining = bytes_read - bytes_written;
+
+							if (remaining > 0 && remaining < MAX_DATA_SIZE)
+								end = remaining;
+
+							written = cmd.write_bytes (content[index:index+end]);
+							bytes_written += written;
+
+							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
+							if (remaining == 0)
+								break;
+
+							create_adb_data_payload_header (cmd, chunks, remaining);
+							chunks -= 1;
+
+							if (remaining > MAX_DATA_SIZE)
+								index += (int) MAX_DATA_SIZE;
+							else
+								index = index + (int) end;
+						}
+					}
+				} catch (Error e) {
+					error ("%s", e.message);
+				}
+
+				cmd.byte_order = LITTLE_ENDIAN;
+				var timestamp = new DateTime.now_local ();
+
+				cmd.put_string("DONE");
+				cmd.put_uint64(timestamp.to_unix ());
+
+				cmd.put_string("QUIT");
+				cmd.put_uint32(0);
+
+				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+			}
+		}
+
+		private static void create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
+			try {
+				size_t MAX_DATA_SIZE = 65536;
+
+				cmd.put_string ("DATA");
+				cmd.byte_order = LITTLE_ENDIAN;
+				if (chunks > 0 && remaining > MAX_DATA_SIZE)
+					cmd.put_uint32 ((uint32) MAX_DATA_SIZE);
+				else
+					cmd.put_uint32 ((uint32) remaining);
+				cmd.byte_order = BIG_ENDIAN;
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+			}
+		}
+
 		private async void process_incoming_messages () {
 			while (is_processing_messages) {
 				try {
