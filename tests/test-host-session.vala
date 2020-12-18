@@ -3039,18 +3039,18 @@ namespace Frida.HostSessionTest {
 
 					size_t bytes_read = content.get_size ();
 					size_t MAX_DATA_SIZE = 65536;
-					double data_chunks = bytes_read/ (float) MAX_DATA_SIZE;
+					double data_chunks = bytes_read / (float) MAX_DATA_SIZE;
 
-					int pos = 0;
 					int chunks = (int) Math.ceil (data_chunks);
 
-					create_adb_data_payload_header (cmd, chunks, bytes_read);
-
 					if (chunks > 0) {
+						int index = 0;
 						size_t bytes_written = 0;
+						size_t written = 0;
 						size_t remaining = 0;
 						size_t end = MAX_DATA_SIZE;
-						int index = 0;
+
+						create_adb_data_payload_header (cmd, chunks, bytes_read);
 
 						while (bytes_written < bytes_read && chunks > 0) {
 							if (chunks == 1) {
@@ -3059,13 +3059,10 @@ namespace Frida.HostSessionTest {
 							if (remaining > 0 && remaining < MAX_DATA_SIZE) {
 								end = remaining;
 							}
-							while (pos < end) {
-								// TODO Write with uint64 or Memory.copy
-								cmd.put_byte (content[index]);
-								index += 1;
-								bytes_written += 1;
-								pos += 1;
-							}
+
+							written = cmd.write_bytes (content[index:index+end]);
+							bytes_written += written;
+							//  printerr ("Written %zu -> %zu+%zu=%zu/%zu\n", written, index, end, index+end, bytes_read);
 
 							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
 							if (remaining == 0)
@@ -3073,7 +3070,11 @@ namespace Frida.HostSessionTest {
 
 							create_adb_data_payload_header (cmd, chunks, remaining);
 							chunks -= 1;
-							pos = 0;
+
+							if (remaining > MAX_DATA_SIZE)
+								index += (int) MAX_DATA_SIZE;
+							else
+								index = index + (int) end;
 						}
 					}
 				} catch (Error e) {
@@ -3088,6 +3089,7 @@ namespace Frida.HostSessionTest {
 
 				cmd.put_string("QUIT");
 				cmd.put_uint32(0);
+
 				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
 
 				printerr ("Waiting 2500 ms...\n");
@@ -3102,7 +3104,7 @@ namespace Frida.HostSessionTest {
 		}
 	}
 
-	private static DataOutputStream create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
+	private static void create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
 		try {
 			size_t MAX_DATA_SIZE = 65536;
 
@@ -3117,8 +3119,6 @@ namespace Frida.HostSessionTest {
 		} catch (GLib.Error e) {
 			printerr ("\nFAIL: %s\n\n", e.message);
 		}
-
-		return cmd;
 	}
 
 	private static string parse_string_message_payload (string raw_message) {
@@ -3140,7 +3140,7 @@ namespace Frida.HostSessionTest {
 			private set;
 		}
 
-		private uint timeout = 20;
+		private uint timeout = 30;
 
 		private Gee.ArrayList<HostSessionProvider> available_providers = new Gee.ArrayList<HostSessionProvider> ();
 
