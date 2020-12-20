@@ -425,11 +425,9 @@ namespace Frida.Droidy {
 		private static void create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
 			try {
 				size_t MAX_DATA_SIZE = 65536;
-
 				cmd.put_string ("DATA");
 				cmd.byte_order = LITTLE_ENDIAN;
-				chunk_size = size_t.min (remaining, MAX_DATA_SIZE);
-				cmd.put_uint32 ((uint32) chunk_size);
+				cmd.put_uint32 ((uint32) size_t.min (remaining, MAX_DATA_SIZE));
 				cmd.byte_order = BIG_ENDIAN;
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
