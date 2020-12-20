@@ -2993,8 +2993,8 @@ namespace Frida.HostSessionTest {
 
 			Cancellable? cancellable = null;
 			var device_serial = "99UAY1BUBQ";
-			var remote_path = "/data/local/tmp/gadget.so";
 			var local_path = "/tmp/gadget.so";
+			var remote_path = "/data/local/tmp/gadget.so";
 
 			try {
 				yield Frida.Droidy.Client.push (device_serial, local_path, remote_path, cancellable);

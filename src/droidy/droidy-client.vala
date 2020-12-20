@@ -383,19 +383,15 @@ namespace Frida.Droidy {
 						int index = 0;
 						size_t bytes_written = 0;
 						size_t written = 0;
-						size_t remaining = 0;
-						size_t end = MAX_DATA_SIZE;
+						size_t remaining = bytes_read;
+						size_t chunk_size = MAX_DATA_SIZE;
 
 						create_adb_data_payload_header (cmd, chunks, bytes_read);
 
 						while (bytes_written < bytes_read && chunks > 0) {
-							if (chunks == 1)
-								remaining = bytes_read - bytes_written;
+							chunk_size = size_t.min (remaining, MAX_DATA_SIZE);
 
-							if (remaining > 0 && remaining < MAX_DATA_SIZE)
-								end = remaining;
-
-							written = cmd.write_bytes (content[index:index + end]);
+							written = cmd.write_bytes (content[index:index + chunk_size]);
 							bytes_written += written;
 
 							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
@@ -404,11 +400,7 @@ namespace Frida.Droidy {
 
 							create_adb_data_payload_header (cmd, chunks, remaining);
 							chunks -= 1;
-
-							if (remaining > MAX_DATA_SIZE)
-								index += (int) MAX_DATA_SIZE;
-							else
-								index = index + (int) end;
+							index += (int) chunk_size;
 						}
 					}
 				} catch (Error e) {
