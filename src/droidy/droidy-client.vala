@@ -428,10 +428,8 @@ namespace Frida.Droidy {
 
 				cmd.put_string ("DATA");
 				cmd.byte_order = LITTLE_ENDIAN;
-				if (chunks > 0 && remaining > MAX_DATA_SIZE)
-					cmd.put_uint32 ((uint32) MAX_DATA_SIZE);
-				else
-					cmd.put_uint32 ((uint32) remaining);
+				chunk_size = size_t.min (remaining, MAX_DATA_SIZE);
+				cmd.put_uint32 ((uint32) chunk_size);
 				cmd.byte_order = BIG_ENDIAN;
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
