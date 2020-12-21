@@ -209,6 +209,7 @@ namespace Frida.Droidy {
 
 		private const uint16 ADB_SERVER_PORT = 5037;
 		private const uint16 MAX_MESSAGE_LENGTH = 1024;
+		private const size_t MAX_DATA_SIZE = 65536;
 
 		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
 			var client = new Client ();
@@ -267,6 +268,67 @@ namespace Frida.Droidy {
 			connection = null;
 			input = null;
 			output = null;
+		}
+
+		public static async void push (string device_serial, string local_path, string remote_path, Cancellable? cancellable = null) throws Error, IOError {
+			int mode = 0100666;
+			var timestamp = new DateTime.now_local ();
+
+			try {
+				File file = File.new_for_path (local_path);
+				Bytes content = file.load_bytes ();
+				size_t size = content.get_size ();
+
+				size_t max_chunks_needed = (size / MAX_DATA_SIZE) + 1;
+				size_t buffer_size_estimate = 64 + remote_path.length + (max_chunks_needed * 8) + size;
+
+				var cmd_buf = new MemoryOutputStream (new uint8[buffer_size_estimate]);
+				var cmd = new DataOutputStream (cmd_buf);
+				cmd.byte_order = LITTLE_ENDIAN;
+
+				var c = yield open (cancellable);
+				yield c.request ("host:transport:" + device_serial, cancellable);
+				yield c.request ("sync:", cancellable);
+
+				string raw_mode = "%d".printf (mode);
+
+				cmd.put_string ("SEND");
+				cmd.put_uint32 (remote_path.length + 1 + raw_mode.length);
+				cmd.put_string (remote_path);
+				cmd.put_string (",");
+				cmd.put_string (raw_mode);
+
+				size_t remaining = size;
+				while (remaining != 0) {
+					size_t chunk_offset = size - remaining;
+					size_t chunk_size = size_t.min (remaining, MAX_DATA_SIZE);
+
+					cmd.put_string ("DATA");
+					cmd.put_uint32 ((uint32) chunk_size);
+
+					cmd.write_bytes (content[chunk_offset:chunk_offset + chunk_size]);
+
+					remaining -= chunk_size;
+				}
+
+				cmd.put_string ("DONE");
+				cmd.put_uint64 (timestamp.to_unix ());
+
+				cmd.put_string ("QUIT");
+				cmd.put_uint32 (0);
+
+				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+		}
+
+		public static async string jdwp (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
+			var c = yield open (cancellable);
+			yield c.request ("host:transport:" + device_serial, cancellable);
+			var list_pids = yield c.request_data ("jdwp", cancellable);
+
+			return list_pids;
 		}
 
 		public async void request (string message, Cancellable? cancellable = null) throws Error, IOError {
@@ -352,96 +414,6 @@ namespace Frida.Droidy {
 				throw_api_error (pending.error);
 
 			return pending.result;
-		}
-
-		public static async void push (string device_serial, string local_path, string remote_path, Cancellable? cancellable = null) throws Error, IOError {
-			var mode = "%d".printf (0100666);
-			var cmd_buf = new MemoryOutputStream.resizable ();
-			var cmd = new DataOutputStream (cmd_buf);
-			cmd.byte_order = LITTLE_ENDIAN;
-
-			try {
-				var c = yield open (cancellable);
-				yield c.request ("host:transport:" + device_serial, cancellable);
-				yield c.request ("sync:", cancellable);
-
-				cmd.put_string ("SEND");
-				cmd.put_uint32 (remote_path.length + 1 + mode.length);
-				cmd.put_string (remote_path);
-				cmd.put_string (",");
-				cmd.put_string (mode);
-
-				try {
-					File file = File.new_for_path (local_path);
-					Bytes content = file.load_bytes ();
-
-					size_t bytes_read = content.get_size ();
-					size_t MAX_DATA_SIZE = 65536;
-					double data_chunks = bytes_read / (float) MAX_DATA_SIZE;
-
-					int chunks = (int) Math.ceil (data_chunks);
-
-					if (chunks > 0) {
-						int index = 0;
-						size_t bytes_written = 0;
-						size_t written = 0;
-						size_t remaining = bytes_read;
-						size_t chunk_size = MAX_DATA_SIZE;
-
-						create_adb_data_payload_header (cmd, chunks, bytes_read);
-
-						while (bytes_written < bytes_read && chunks > 0) {
-							chunk_size = size_t.min (remaining, MAX_DATA_SIZE);
-
-							written = cmd.write_bytes (content[index:index + chunk_size]);
-							bytes_written += written;
-
-							remaining = (bytes_read - bytes_written) > bytes_read ? remaining : bytes_read - bytes_written;
-							if (remaining == 0)
-								break;
-
-							create_adb_data_payload_header (cmd, chunks, remaining);
-							chunks -= 1;
-							index += (int) chunk_size;
-						}
-					}
-				} catch (Error e) {
-					error ("%s", e.message);
-				}
-
-				cmd.byte_order = LITTLE_ENDIAN;
-				var timestamp = new DateTime.now_local ();
-
-				cmd.put_string ("DONE");
-				cmd.put_uint64 (timestamp.to_unix ());
-
-				cmd.put_string ("QUIT");
-				cmd.put_uint32 (0);
-
-				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
-			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
-			}
-		}
-
-		private static void create_adb_data_payload_header (DataOutputStream cmd, int chunks, size_t remaining) {
-			try {
-				size_t MAX_DATA_SIZE = 65536;
-				cmd.put_string ("DATA");
-				cmd.byte_order = LITTLE_ENDIAN;
-				cmd.put_uint32 ((uint32) size_t.min (remaining, MAX_DATA_SIZE));
-				cmd.byte_order = BIG_ENDIAN;
-			} catch (GLib.Error e) {
-				printerr ("\nFAIL: %s\n\n", e.message);
-			}
-		}
-
-		public static async string jdwp (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
-			var c = yield open (cancellable);
-			yield c.request ("host:transport:" + device_serial, cancellable);
-			var list_pids = yield c.request_data ("jdwp", cancellable);
-
-			return list_pids;
 		}
 
 		private async void process_incoming_messages () {
