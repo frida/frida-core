@@ -202,7 +202,8 @@ namespace Frida.Droidy {
 		private Gee.ArrayQueue<PendingResponse> pending_responses = new Gee.ArrayQueue<PendingResponse> ();
 
 		public enum RequestType {
-			ACK,
+			COMMAND,
+			SUBCOMMAND,
 			DATA,
 			PROTOCOL_CHANGE
 		}
@@ -317,7 +318,7 @@ namespace Frida.Droidy {
 				cmd.put_string ("QUIT");
 				cmd.put_uint32 (0);
 
-				yield c.raw_request (cmd_buf.steal_as_bytes (), ACK, cancellable, true);
+				yield c.raw_request (cmd_buf.steal_as_bytes (), SUBCOMMAND, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}
@@ -332,7 +333,7 @@ namespace Frida.Droidy {
 		}
 
 		public async void request (string message, Cancellable? cancellable = null) throws Error, IOError {
-			yield request_with_type (message, RequestType.ACK, cancellable);
+			yield request_with_type (message, RequestType.COMMAND, cancellable);
 		}
 
 		public async string request_data (string message, Cancellable? cancellable = null) throws Error, IOError {
@@ -351,7 +352,7 @@ namespace Frida.Droidy {
 			return (string) Bytes.unref_to_data ((owned) response_bytes);
 		}
 
-		public async Bytes? raw_request (Bytes message, RequestType request_type, Cancellable? cancellable, bool is_sub_command = false) throws Error, IOError {
+		public async Bytes? raw_request (Bytes message, RequestType request_type, Cancellable? cancellable) throws Error, IOError {
 			bool waiting = false;
 
 			var pending = new PendingResponse (request_type, () => {
@@ -368,37 +369,23 @@ namespace Frida.Droidy {
 			cancel_source.attach (MainContext.get_thread_default ());
 
 			try {
-				int index = is_sub_command ? 0 : 4;
-				var message_size = message.get_size ();
-				var message_buf = new uint8[index + message_size];
-				var length_str = "%04x".printf (message.length);
-
-				Memory.copy (message_buf, length_str, index);
-				Memory.copy ((uint8 *) message_buf + index, message.get_data (), message_size);
-
-				/*
-				var m = new StringBuilder ();
-				var s = new StringBuilder ();
-				for (var i = 0; i != message_buf.length; i++) {
-					if (i > 0)
-						m.append (" ");
-					m.append_printf ("%02x", message_buf[i]);
-					s.append_printf ("%c", message_buf[i]);
-				}
-				//  printerr ("Sending: %s\n", m.str);
-				printerr ("Sending: %s\n", s.str);
-				*/
-
 				size_t bytes_written;
 				try {
-					yield output.write_all_async (message_buf, Priority.DEFAULT, cancellable, out bytes_written);
+					if (request_type == SUBCOMMAND) {
+						yield output.write_all_async (message.get_data (), Priority.DEFAULT, cancellable, out bytes_written);
+					} else {
+						var message_size = message.get_size ();
+						var message_buf = new uint8[4 + message_size];
+						var length_str = "%04x".printf (message.length);
+						Memory.copy (message_buf, length_str, 4);
+						Memory.copy ((uint8 *) message_buf + 4, message.get_data (), message_size);
+
+						yield output.write_all_async (message_buf, Priority.DEFAULT, cancellable, out bytes_written);
+					}
 				} catch (GLib.Error e) {
 					throw new Error.TRANSPORT ("Unable to write message: %s", e.message);
 				}
-				if (bytes_written != message_buf.length) {
-					pending_responses.remove (pending);
-					throw new Error.TRANSPORT ("Unable to write message");
-				}
+
 				if (!pending.completed) {
 					waiting = true;
 					yield;
