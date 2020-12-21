@@ -434,6 +434,14 @@ namespace Frida.Droidy {
 			}
 		}
 
+		public static async string jdwp (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
+			var c = yield open (cancellable);
+			yield c.request ("host:transport:" + device_serial, cancellable);
+			var list_pids = yield c.request_data ("jdwp", cancellable);
+
+			return list_pids;
+		}
+
 		private async void process_incoming_messages () {
 			while (is_processing_messages) {
 				try {

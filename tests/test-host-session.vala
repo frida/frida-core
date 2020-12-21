@@ -2996,11 +2996,28 @@ namespace Frida.HostSessionTest {
 			var local_path = "/tmp/gadget.so";
 			var remote_path = "/data/local/tmp/gadget.so";
 
+			var debuggable_app = "oversecured.ovaa";
+
 			try {
 				yield Frida.Droidy.Client.push (device_serial, local_path, remote_path, cancellable);
+
+				yield Frida.Droidy.ShellCommand.run (
+					"am set-debug-app -w --persistent '%s'".printf (debuggable_app), device_serial, cancellable
+				);
+
+				yield Frida.Droidy.ShellCommand.run (
+					"am force-stop '%s'".printf (debuggable_app), device_serial, cancellable
+				);
+
+				yield Frida.Droidy.ShellCommand.run (
+					"am start -D $(cmd package resolve-activity --brief '%s'| tail -n 1)".printf (debuggable_app), device_serial, cancellable
+				);
+
+				yield Frida.Droidy.Client.jdwp (device_serial, cancellable);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 			}
+
 
 			h.done ();
 		}
