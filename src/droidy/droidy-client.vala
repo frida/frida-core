@@ -271,25 +271,18 @@ namespace Frida.Droidy {
 			output = null;
 		}
 
-		public static async void push (string device_serial, string local_path, string remote_path, Cancellable? cancellable = null) throws Error, IOError {
+		public static async void push (string device_serial, InputStream content, string remote_path, Cancellable? cancellable = null) throws Error, IOError {
 			int mode = 0100666;
 			var timestamp = new DateTime.now_local ();
 
 			try {
-				File file = File.new_for_path (local_path);
-				Bytes content = file.load_bytes ();
-				size_t size = content.get_size ();
-
-				size_t max_chunks_needed = (size / MAX_DATA_SIZE) + 1;
-				size_t buffer_size_estimate = 64 + remote_path.length + (max_chunks_needed * 8) + size;
-
-				var cmd_buf = new MemoryOutputStream (new uint8[buffer_size_estimate]);
-				var cmd = new DataOutputStream (cmd_buf);
-				cmd.byte_order = LITTLE_ENDIAN;
-
 				var c = yield open (cancellable);
 				yield c.request ("host:transport:" + device_serial, cancellable);
 				yield c.request ("sync:", cancellable);
+
+				var cmd_buf = new MemoryOutputStream.resizable ();
+				var cmd = new DataOutputStream (cmd_buf);
+				cmd.byte_order = LITTLE_ENDIAN;
 
 				string raw_mode = "%d".printf (mode);
 
@@ -299,17 +292,26 @@ namespace Frida.Droidy {
 				cmd.put_string (",");
 				cmd.put_string (raw_mode);
 
-				size_t remaining = size;
-				while (remaining != 0) {
-					size_t chunk_offset = size - remaining;
-					size_t chunk_size = size_t.min (remaining, MAX_DATA_SIZE);
+				while (true) {
+					Bytes chunk = yield content.read_bytes_async (MAX_DATA_SIZE, Priority.DEFAULT, cancellable);
+					size_t size = chunk.get_size ();
+					if (size == 0)
+						break;
 
 					cmd.put_string ("DATA");
-					cmd.put_uint32 ((uint32) chunk_size);
+					cmd.put_uint32 ((uint32) size);
+					cmd.write_bytes (chunk);
 
-					cmd.write_bytes (content[chunk_offset:chunk_offset + chunk_size]);
+					unowned uint8[] raw_chunk_data = cmd_buf.get_data ();
+					unowned uint8[] chunk_data = raw_chunk_data[0:cmd_buf.data_size];
 
-					remaining -= chunk_size;
+					size_t bytes_written;
+					yield c.output.write_all_async (chunk_data, Priority.DEFAULT, cancellable, out bytes_written);
+
+					cmd_buf.close ();
+					cmd_buf = new MemoryOutputStream.resizable ();
+					cmd = new DataOutputStream (cmd_buf);
+					cmd.byte_order = LITTLE_ENDIAN;
 				}
 
 				cmd.put_string ("DONE");
@@ -318,6 +320,7 @@ namespace Frida.Droidy {
 				cmd.put_string ("QUIT");
 				cmd.put_uint32 (0);
 
+				cmd_buf.close ();
 				yield c.raw_request (cmd_buf.steal_as_bytes (), SUBCOMMAND, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
