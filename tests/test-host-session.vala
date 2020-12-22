@@ -3001,6 +3001,7 @@ namespace Frida.HostSessionTest {
 			try {
 				var file = File.new_for_path (local_path);
 				InputStream content = yield file.read_async (Priority.DEFAULT, cancellable);
+				yield Frida.Droidy.Client.push (device_serial, content, remote_path, cancellable);
 
 				yield Frida.Droidy.ShellCommand.run (
 					"am set-debug-app -w --persistent '%s'".printf (debuggable_app), device_serial, cancellable
