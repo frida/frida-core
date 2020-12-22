@@ -3019,19 +3019,32 @@ namespace Frida.HostSessionTest {
 					"am force-stop '%s'".printf (debuggable_app), device_serial, cancellable
 				);
 
+				var tracker = new Frida.Droidy.JDWPTracker ();
+				yield tracker.open (device_serial, cancellable);
+
+				uint target_pid = 0;
+				bool waiting = false;
+				tracker.debugger_attached.connect (pid => {
+					printerr ("Debugger attached! PID=%u\n", pid);
+					target_pid = pid;
+					if (waiting)
+						client.callback ();
+				});
+
 				yield Frida.Droidy.ShellCommand.run (
 					"am start -D $(cmd package resolve-activity --brief '%s'| tail -n 1)".printf (debuggable_app),
 					device_serial, cancellable
 				);
 
-				var tracker = new Frida.Droidy.JDWPTracker ();
-				tracker.debugger_attached.connect (pid => {
-					printerr ("Debugger attached! PID=%u\n", pid);
-				});
-				tracker.debugger_detached.connect (pid => {
-					printerr ("Debugger detached! PID=%u\n", pid);
-				});
-				yield tracker.open (device_serial, cancellable);
+				if (target_pid == 0) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+
+				yield tracker.close (cancellable);
+
+				printerr ("Yay, now we need to do something with PID %u\n", target_pid);
 
 				printerr ("Waiting 5 seconds...\n");
 				Timeout.add (5000, client.callback);
