@@ -150,7 +150,7 @@ namespace Frida {
 				yield client.request ("host:transport:" + device_serial, cancellable);
 				yield client.request_protocol_change ("tcp:%u".printf (port), cancellable);
 
-				connection = yield new DBusConnection (client.connection, null, AUTHENTICATION_CLIENT, null, cancellable);
+				connection = yield new DBusConnection (client.stream, null, AUTHENTICATION_CLIENT, null, cancellable);
 			} catch (GLib.Error e) {
 				if (client != null)
 					client.close.begin ();
@@ -236,7 +236,7 @@ namespace Frida {
 					client = yield Droidy.Client.open (cancellable);
 					yield client.request ("host:transport:" + device_serial, cancellable);
 					yield client.request_protocol_change (address, cancellable);
-					return client.connection;
+					return client.stream;
 				} catch (GLib.Error e) {
 					if (client != null)
 						client.close.begin ();
