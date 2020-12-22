@@ -154,20 +154,6 @@ frida_tcp_enable_nodelay (GSocket * socket)
   g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
 }
 
-void
-frida_io_maximize_send_buffer_size (GSocket * socket)
-{
-  int size;
-
-#ifdef HAVE_LINUX
-  size = 4 * 1024 * 1024;
-#else
-  size = 1024 * 1024;
-#endif
-
-  g_socket_set_option (socket, SOL_SOCKET, SO_SNDBUF, size, NULL);
-}
-
 static gpointer
 run_main_loop (gpointer data)
 {

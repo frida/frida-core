@@ -219,7 +219,6 @@ namespace Frida.Droidy {
 				var connection = yield client.connect_async (new NetworkAddress.loopback (ADB_SERVER_PORT), cancellable);
 
 				Tcp.enable_nodelay (connection.socket);
-				IO.maximize_send_buffer_size (connection.socket);
 
 				stream = connection;
 			} catch (GLib.Error e) {
@@ -284,51 +283,25 @@ namespace Frida.Droidy {
 				cmd.put_string (",");
 				cmd.put_string (raw_mode);
 
-				uint offset = 0;
-
-				uint time_in_read = 0;
-				uint time_in_write = 0;
-
-				var timer = new Timer ();
-
 				while (true) {
-					size_t amount = (offset == 0) ? MAX_DATA_SIZE : ((4 * 1024 * 1024) - 8);
-
-					if (offset > 0) {
-						cmd_buf.close ();
-						cmd_buf = new MemoryOutputStream.resizable ();
-						cmd = new DataOutputStream (cmd_buf);
-						cmd.byte_order = LITTLE_ENDIAN;
-					}
-
-					timer.reset ();
-					Bytes chunk = yield content.read_bytes_async (amount, Priority.DEFAULT, cancellable);
-					time_in_read += (uint) (timer.elapsed () * 1000.0);
+					Bytes chunk = yield content.read_bytes_async (MAX_DATA_SIZE, Priority.DEFAULT, cancellable);
 					size_t size = chunk.get_size ();
 					if (size == 0)
 						break;
 
-					size_t remaining = size;
-					while (remaining != 0) {
-						size_t subchunk_offset = size - remaining;
-						size_t subchunk_size = size_t.min (remaining, MAX_DATA_SIZE);
-
-						cmd.put_string ("DATA");
-						cmd.put_uint32 ((uint32) subchunk_size);
-						cmd.write_bytes (chunk[subchunk_offset:subchunk_offset + subchunk_size]);
-
-						remaining -= subchunk_size;
-					}
+					cmd.put_string ("DATA");
+					cmd.put_uint32 ((uint32) size);
+					cmd.write_bytes (chunk);
 
 					unowned uint8[] raw_chunk_data = cmd_buf.get_data ();
 					unowned uint8[] chunk_data = raw_chunk_data[0:cmd_buf.data_size];
-
 					size_t bytes_written;
-					timer.reset ();
 					yield c.output.write_all_async (chunk_data, Priority.DEFAULT, cancellable, out bytes_written);
-					time_in_write += (uint) (timer.elapsed () * 1000.0);
 
-					offset++;
+					cmd_buf.close ();
+					cmd_buf = new MemoryOutputStream.resizable ();
+					cmd = new DataOutputStream (cmd_buf);
+					cmd.byte_order = LITTLE_ENDIAN;
 				}
 
 				cmd.put_string ("DONE");
@@ -338,11 +311,7 @@ namespace Frida.Droidy {
 				cmd.put_uint32 (0);
 
 				cmd_buf.close ();
-				timer.reset ();
 				yield c.raw_request (cmd_buf.steal_as_bytes (), SUBCOMMAND, cancellable);
-				uint time_in_wrap = (uint) (timer.elapsed () * 1000.0);
-
-				printerr ("*** Time spent:\n\tRead: %u ms\n\tWrite: %u ms\n\tWrap: %u ms\n", time_in_read, time_in_write, time_in_wrap);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}

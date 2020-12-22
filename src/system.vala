@@ -10,10 +10,6 @@ namespace Frida {
 		public extern void enable_nodelay (Socket socket);
 	}
 
-	namespace IO {
-		public extern void maximize_send_buffer_size (Socket socket);
-	}
-
 	public class ApplicationEnumerator {
 		private MainContext current_main_context;
 		private Gee.ArrayList<EnumerateRequest> pending_requests = new Gee.ArrayList<EnumerateRequest> ();
