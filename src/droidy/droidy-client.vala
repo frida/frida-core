@@ -269,14 +269,8 @@ namespace Frida.Droidy {
 
 			try {
 				var c = yield open (cancellable);
-				string local_address = "local:/Users/oleavr/foo";
-				string remote_address = "sync:";
-				yield c.request ("host-serial:" + device_serial + ":forward:" + local_address + ";" + remote_address, cancellable);
-				yield c.close ();
-				var connectable = new UnixSocketAddress ("/Users/oleavr/foo");
-				var client = new SocketClient ();
-				var connection = yield client.connect_async (connectable, cancellable);
-				c = new Client (connection);
+				yield c.request ("host:transport:" + device_serial, cancellable);
+				yield c.request ("sync:", cancellable);
 
 				var cmd_buf = new MemoryOutputStream.resizable ();
 				var cmd = new DataOutputStream (cmd_buf);
@@ -340,8 +334,8 @@ namespace Frida.Droidy {
 				cmd.put_string ("DONE");
 				cmd.put_uint64 (timestamp.to_unix ());
 
-				//cmd.put_string ("QUIT");
-				//cmd.put_uint32 (0);
+				cmd.put_string ("QUIT");
+				cmd.put_uint32 (0);
 
 				cmd_buf.close ();
 				timer.reset ();
@@ -479,7 +473,6 @@ namespace Frida.Droidy {
 							break;
 					}
 				} catch (Error e) {
-					printerr ("Oops: %s\n", e.message);
 					foreach (var pending_response in pending_responses)
 						pending_response.complete_with_error (e);
 					is_processing_messages = false;
