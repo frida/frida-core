@@ -3046,9 +3046,11 @@ namespace Frida.HostSessionTest {
 
 				printerr ("Yay, now we need to do something with PID %u\n", target_pid);
 
-				printerr ("Waiting 5 seconds...\n");
-				Timeout.add (5000, client.callback);
-				yield;
+				var c = yield Frida.Droidy.Client.open (cancellable);
+				yield c.request ("host:transport:" + device_serial, cancellable);
+				yield c.request_protocol_change ("jdwp:%u".printf (target_pid), cancellable);
+
+				printerr ("Now we need to do something with stream %p\n", c.stream);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 			}
