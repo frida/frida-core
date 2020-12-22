@@ -195,7 +195,7 @@ namespace Frida.Droidy {
 			var client = yield Client.open (cancellable);
 
 			try {
-				yield client.request_data ("host:tport:any", cancellable);
+				yield client.request ("host:transport:" + device_serial, cancellable);
 				yield client.request ("sync:", cancellable);
 
 				var cmd_buf = new MemoryOutputStream.resizable ();
