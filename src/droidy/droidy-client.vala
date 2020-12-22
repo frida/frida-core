@@ -495,16 +495,20 @@ namespace Frida.Droidy {
 		private async Bytes read_bytes () throws Error {
 			var length_str = yield read_fixed_string (4);
 			var length = parse_length (length_str);
+
 			var buf = new uint8[length + 1];
-			size_t bytes_read;
-			try {
-				yield input.read_all_async (buf[0:length], Priority.DEFAULT, io_cancellable, out bytes_read);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("Unable to read: %s", e.message);
+			if (length > 0) {
+				size_t bytes_read;
+				try {
+					yield input.read_all_async (buf[0:length], Priority.DEFAULT, io_cancellable, out bytes_read);
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("Unable to read: %s", e.message);
+				}
+				if (bytes_read != length)
+					throw new Error.TRANSPORT ("Unable to read");
+				buf.length = (int) length;
 			}
-			if (bytes_read != length)
-				throw new Error.TRANSPORT ("Unable to read");
-			buf.length = (int) length;
+
 			return new Bytes.take ((owned) buf);
 		}
 
