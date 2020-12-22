@@ -3020,14 +3020,25 @@ namespace Frida.HostSessionTest {
 				);
 
 				yield Frida.Droidy.ShellCommand.run (
-					"am start -D $(cmd package resolve-activity --brief '%s'| tail -n 1)".printf (debuggable_app), device_serial, cancellable
+					"am start -D $(cmd package resolve-activity --brief '%s'| tail -n 1)".printf (debuggable_app),
+					device_serial, cancellable
 				);
 
-				yield Frida.Droidy.Client.jdwp (device_serial, cancellable);
+				var tracker = new Frida.Droidy.JDWPTracker ();
+				tracker.debugger_attached.connect (pid => {
+					printerr ("Debugger attached! PID=%u\n", pid);
+				});
+				tracker.debugger_detached.connect (pid => {
+					printerr ("Debugger detached! PID=%u\n", pid);
+				});
+				yield tracker.open (device_serial, cancellable);
+
+				printerr ("Waiting 5 seconds...\n");
+				Timeout.add (5000, client.callback);
+				yield;
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 			}
-
 
 			h.done ();
 		}

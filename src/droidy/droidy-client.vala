@@ -256,6 +256,72 @@ namespace Frida.Droidy {
 		}
 	}
 
+	public class JDWPTracker : Object {
+		public signal void debugger_attached (uint pid);
+		public signal void debugger_detached (uint pid);
+
+		private Client? client;
+		private Gee.HashSet<uint> debugger_pids = new Gee.HashSet<uint> ();
+		private Cancellable io_cancellable = new Cancellable ();
+
+		public async void open (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
+			client = yield Client.open (cancellable);
+			client.message.connect (on_message);
+
+			try {
+				yield client.request ("host:transport:" + device_serial, cancellable);
+				string? pids_encoded = yield client.request_data ("track-jdwp", cancellable);
+				update_pids (pids_encoded, cancellable);
+			} catch (GLib.Error e) {
+				yield client.close (cancellable);
+			}
+		}
+
+		public async void close (Cancellable? cancellable = null) throws IOError {
+			if (client == null)
+				return;
+
+			io_cancellable.cancel ();
+
+			yield client.close (cancellable);
+		}
+
+		private void on_message (string pids_encoded) {
+			try {
+				update_pids (pids_encoded, io_cancellable);
+			} catch (IOError e) {
+			}
+		}
+
+		private void update_pids (string pids_encoded, Cancellable? cancellable) throws IOError {
+			var detached = new Gee.ArrayList<uint> ();
+			var attached = new Gee.ArrayList<uint> ();
+
+			var current = new Gee.HashSet<uint> ();
+			foreach (var line in pids_encoded.chomp ().split ("\n")) {
+				uint pid = uint.parse (line);
+				current.add (pid);
+			}
+			foreach (var pid in debugger_pids) {
+				if (!current.contains (pid))
+					detached.add (pid);
+			}
+			foreach (var pid in current) {
+				if (!debugger_pids.contains (pid))
+					attached.add (pid);
+			}
+
+			foreach (var pid in detached) {
+				debugger_pids.remove (pid);
+				debugger_detached (pid);
+			}
+			foreach (var pid in attached) {
+				debugger_pids.add (pid);
+				debugger_attached (pid);
+			}
+		}
+	}
+
 	public class Client : Object {
 		public signal void message (string payload);
 
@@ -328,14 +394,6 @@ namespace Frida.Droidy {
 				if (e is IOError.CANCELLED)
 					throw (IOError) e;
 			}
-		}
-
-		public static async string jdwp (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
-			var c = yield open (cancellable);
-			yield c.request ("host:transport:" + device_serial, cancellable);
-			var list_pids = yield c.request_data ("jdwp", cancellable);
-
-			return list_pids;
 		}
 
 		public async void request (string message, Cancellable? cancellable = null) throws Error, IOError {
