@@ -3000,9 +3000,15 @@ namespace Frida.HostSessionTest {
 
 			try {
 				var file = File.new_for_path (local_path);
+				FileInfo info = yield file.query_info_async (FileAttribute.TIME_MODIFIED, FileQueryInfoFlags.NONE,
+					Priority.DEFAULT, cancellable);
+				var meta = new Frida.Droidy.FileMetadata ();
+				meta.mode = 0100755;
+				meta.time_modified = info.get_modification_date_time ();
+
 				InputStream content = yield file.read_async (Priority.DEFAULT, cancellable);
 				var timer = new Timer ();
-				yield Frida.Droidy.Client.push (device_serial, content, remote_path, cancellable);
+				yield Frida.Droidy.FileSync.send (content, meta, remote_path, device_serial, cancellable);
 				printerr ("Transfer took %u ms\n", (uint) (timer.elapsed () * 1000.0));
 
 				yield Frida.Droidy.ShellCommand.run (

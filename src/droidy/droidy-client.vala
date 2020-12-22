@@ -187,6 +187,75 @@ namespace Frida.Droidy {
 		}
 	}
 
+	namespace FileSync {
+		private const size_t MAX_DATA_SIZE = 65536;
+
+		public static async void send (InputStream content, FileMetadata metadata, string remote_path, string device_serial,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var client = yield Client.open (cancellable);
+
+			try {
+				yield client.request_data ("host:tport:any", cancellable);
+				yield client.request ("sync:", cancellable);
+
+				var cmd_buf = new MemoryOutputStream.resizable ();
+				var cmd = new DataOutputStream (cmd_buf);
+				cmd.byte_order = LITTLE_ENDIAN;
+
+				string raw_mode = "%u".printf (metadata.mode);
+
+				cmd.put_string ("SEND");
+				cmd.put_uint32 (remote_path.length + 1 + raw_mode.length);
+				cmd.put_string (remote_path);
+				cmd.put_string (",");
+				cmd.put_string (raw_mode);
+
+				while (true) {
+					Bytes chunk = yield content.read_bytes_async (MAX_DATA_SIZE, Priority.DEFAULT, cancellable);
+					size_t size = chunk.get_size ();
+					if (size == 0)
+						break;
+
+					cmd.put_string ("DATA");
+					cmd.put_uint32 ((uint32) size);
+					cmd.write_bytes (chunk);
+
+					cmd_buf.close ();
+					yield client.write_subcommand_chunk (cmd_buf.steal_as_bytes (), cancellable);
+
+					cmd_buf = new MemoryOutputStream.resizable ();
+					cmd = new DataOutputStream (cmd_buf);
+					cmd.byte_order = LITTLE_ENDIAN;
+				}
+
+				cmd.put_string ("DONE");
+				cmd.put_uint32 ((uint32) metadata.time_modified.to_unix ());
+
+				cmd.put_string ("QUIT");
+				cmd.put_uint32 (0);
+
+				cmd_buf.close ();
+				yield client.request_with_bytes (cmd_buf.steal_as_bytes (), SUBCOMMAND, cancellable);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
+		}
+	}
+
+	public class FileMetadata : Object {
+		public uint32 mode {
+			get;
+			set;
+			default = 0100644;
+		}
+
+		public DateTime time_modified {
+			get;
+			set;
+			default = new DateTime.now_local ();
+		}
+	}
+
 	public class Client : Object {
 		public signal void message (string payload);
 
@@ -210,7 +279,6 @@ namespace Frida.Droidy {
 
 		private const uint16 ADB_SERVER_PORT = 5037;
 		private const uint16 MAX_MESSAGE_LENGTH = 1024;
-		private const size_t MAX_DATA_SIZE = 65536;
 
 		public static async Client open (Cancellable? cancellable = null) throws Error, IOError {
 			IOStream stream;
@@ -262,61 +330,6 @@ namespace Frida.Droidy {
 			}
 		}
 
-		public static async void push (string device_serial, InputStream content, string remote_path, Cancellable? cancellable = null) throws Error, IOError {
-			int mode = 0100666;
-			var timestamp = new DateTime.now_local ();
-
-			try {
-				var c = yield open (cancellable);
-				yield c.request ("host:transport:" + device_serial, cancellable);
-				yield c.request ("sync:", cancellable);
-
-				var cmd_buf = new MemoryOutputStream.resizable ();
-				var cmd = new DataOutputStream (cmd_buf);
-				cmd.byte_order = LITTLE_ENDIAN;
-
-				string raw_mode = "%d".printf (mode);
-
-				cmd.put_string ("SEND");
-				cmd.put_uint32 (remote_path.length + 1 + raw_mode.length);
-				cmd.put_string (remote_path);
-				cmd.put_string (",");
-				cmd.put_string (raw_mode);
-
-				while (true) {
-					Bytes chunk = yield content.read_bytes_async (MAX_DATA_SIZE, Priority.DEFAULT, cancellable);
-					size_t size = chunk.get_size ();
-					if (size == 0)
-						break;
-
-					cmd.put_string ("DATA");
-					cmd.put_uint32 ((uint32) size);
-					cmd.write_bytes (chunk);
-
-					unowned uint8[] raw_chunk_data = cmd_buf.get_data ();
-					unowned uint8[] chunk_data = raw_chunk_data[0:cmd_buf.data_size];
-					size_t bytes_written;
-					yield c.output.write_all_async (chunk_data, Priority.DEFAULT, cancellable, out bytes_written);
-
-					cmd_buf.close ();
-					cmd_buf = new MemoryOutputStream.resizable ();
-					cmd = new DataOutputStream (cmd_buf);
-					cmd.byte_order = LITTLE_ENDIAN;
-				}
-
-				cmd.put_string ("DONE");
-				cmd.put_uint64 (timestamp.to_unix ());
-
-				cmd.put_string ("QUIT");
-				cmd.put_uint32 (0);
-
-				cmd_buf.close ();
-				yield c.raw_request (cmd_buf.steal_as_bytes (), SUBCOMMAND, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
-		}
-
 		public static async string jdwp (string device_serial, Cancellable? cancellable = null) throws Error, IOError {
 			var c = yield open (cancellable);
 			yield c.request ("host:transport:" + device_serial, cancellable);
@@ -339,18 +352,18 @@ namespace Frida.Droidy {
 
 		private async string? request_with_type (string message, RequestType request_type, Cancellable? cancellable)
 				throws Error, IOError {
-			Bytes response_bytes = yield raw_request (new Bytes (message.data), request_type, cancellable);
+			Bytes response_bytes = yield request_with_bytes (new Bytes (message.data), request_type, cancellable);
 			if (response_bytes == null)
 				return null;
 			return (string) Bytes.unref_to_data ((owned) response_bytes);
 		}
 
-		public async Bytes? raw_request (Bytes message, RequestType request_type, Cancellable? cancellable) throws Error, IOError {
+		public async Bytes? request_with_bytes (Bytes message, RequestType request_type, Cancellable? cancellable) throws Error, IOError {
 			bool waiting = false;
 
 			var pending = new PendingResponse (request_type, () => {
 				if (waiting)
-					raw_request.callback ();
+					request_with_bytes.callback ();
 			});
 			pending_responses.offer_tail (pending);
 
@@ -394,6 +407,15 @@ namespace Frida.Droidy {
 				throw_api_error (pending.error);
 
 			return pending.result;
+		}
+
+		public async void write_subcommand_chunk (Bytes chunk, Cancellable? cancellable) throws Error, IOError {
+			try {
+				size_t bytes_written;
+				yield output.write_all_async (chunk.get_data (), Priority.DEFAULT, cancellable, out bytes_written);
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("Unable to write subcommand chunk: %s", e.message);
+			}
 		}
 
 		private async void process_incoming_messages () {
