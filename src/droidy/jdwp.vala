@@ -378,11 +378,16 @@ namespace Frida.JDWP {
 
 		internal override void serialize (CommandBuilder builder) {
 			builder
+				.append_uint8 (EventModifierKind.LOCATION_ONLY)
 				.append_uint8 (type_tag)
 				.append_reference_type_id (type_id)
 				.append_method_id (method_id)
 				.append_uint64 (index);
 		}
+	}
+
+	private enum EventModifierKind {
+		LOCATION_ONLY = 7,
 	}
 
 	public struct EventRequestID {
