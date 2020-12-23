@@ -307,7 +307,6 @@ namespace Frida.JDWP {
 		public ReferenceTypeID read_reference_type_id () throws Error {
 			int64 handle;
 
-			printerr ("ref type id size: %d\n", (int) id_sizes.get_reference_type_id_size ());
 			switch (id_sizes.get_reference_type_id_size ()) {
 				case 4:
 					handle = read_int32 ();
