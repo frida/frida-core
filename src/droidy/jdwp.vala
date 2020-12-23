@@ -95,7 +95,7 @@ namespace Frida.JDWP {
 			return result;
 		}
 
-		public async EventRequestID add_event_request (EventKind kind, SuspendPolicy suspend_policy, EventModifier[] modifiers,
+		public async EventRequestID set_event_request (EventKind kind, SuspendPolicy suspend_policy, EventModifier[] modifiers,
 				Cancellable? cancellable = null) throws Error, IOError {
 			var command = make_command (EVENT_REQUEST, EventRequestCommand.SET);
 			command
@@ -106,6 +106,20 @@ namespace Frida.JDWP {
 				modifier.serialize (command);
 			var reply = yield perform_command (command, cancellable);
 			return EventRequestID (reply.read_int32 ());
+		}
+
+		public async void clear_event_request (EventKind kind, EventRequestID request_id, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var command = make_command (EVENT_REQUEST, EventRequestCommand.CLEAR);
+			command
+				.append_uint8 (kind)
+				.append_int32 (request_id.handle);
+			yield perform_command (command, cancellable);
+		}
+
+		public async void clear_all_breakpoints (Cancellable? cancellable = null) throws Error, IOError {
+			var command = make_command (EVENT_REQUEST, EventRequestCommand.CLEAR_ALL_BREAKPOINTS);
+			yield perform_command (command, cancellable);
 		}
 
 		private async void handshake (Cancellable? cancellable) throws Error, IOError {
@@ -698,7 +712,9 @@ namespace Frida.JDWP {
 	}
 
 	private enum EventRequestCommand {
-		SET = 1,
+		SET                   = 1,
+		CLEAR                 = 2,
+		CLEAR_ALL_BREAKPOINTS = 3,
 	}
 
 	private class CommandBuilder {
