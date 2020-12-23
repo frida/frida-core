@@ -3050,7 +3050,9 @@ namespace Frida.HostSessionTest {
 				yield c.request ("host:transport:" + device_serial, cancellable);
 				yield c.request_protocol_change ("jdwp:%u".printf (target_pid), cancellable);
 
-				printerr ("Now we need to do something with stream %p\n", c.stream);
+				var session = yield Frida.JDWP.Session.open (c.stream, cancellable);
+				yield session.get_classes_by_signature ("Ljava/lang/Runtime;", cancellable);
+				//yield session.get_all_classes (cancellable);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 			}
