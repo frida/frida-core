@@ -11,6 +11,7 @@ namespace Frida.JDWP {
 		private IDSizes id_sizes = new IDSizes.unknown ();
 
 		private const string HANDSHAKE = "JDWP-Handshake";
+		private const uint32 MAX_REPLY_SIZE = 10 * 1024 * 1024;
 
 		public static async Session open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
 			var session = new Session (stream);
@@ -93,7 +94,7 @@ namespace Frida.JDWP {
 			}
 		}
 
-		private async IDSizes get_id_sizes (Cancellable? cancellable = null) throws Error, IOError {
+		private async IDSizes get_id_sizes (Cancellable? cancellable) throws Error, IOError {
 			var command = make_command (VM, VMCommand.ID_SIZES);
 			var reply = yield perform_command (command, cancellable);
 			return new IDSizes.from_reply (reply);
@@ -143,7 +144,8 @@ namespace Frida.JDWP {
 				yield input.read_all_async (raw_reply, Priority.DEFAULT, cancellable, out n);
 
 				uint32 reply_size = uint32.from_big_endian (*((uint32 *) raw_reply));
-				// TODO: validate reply_size
+				if (reply_size > MAX_REPLY_SIZE)
+					throw new Error.PROTOCOL ("Reply too large");
 				raw_reply.resize ((int) reply_size);
 
 				yield input.read_all_async (raw_reply[11:], Priority.DEFAULT, cancellable, out n);
