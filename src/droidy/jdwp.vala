@@ -67,6 +67,15 @@ namespace Frida.JDWP {
 			}
 		}
 
+		public async ClassEntry get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
+			var candidates = yield get_classes_by_signature (signature, cancellable);
+			if (candidates.is_empty)
+				throw new Error.INVALID_ARGUMENT ("Class %s not found", signature);
+			if (candidates.size > 1)
+				throw new Error.INVALID_ARGUMENT ("Class %s is ambiguous", signature);
+			return candidates.get (0);
+		}
+
 		public async Gee.List<ClassEntry> get_classes_by_signature (string signature, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var command = make_command (VM, VMCommand.CLASSES_BY_SIGNATURE);
@@ -84,11 +93,6 @@ namespace Frida.JDWP {
 			}
 
 			return result;
-		}
-
-		public async void get_all_classes (Cancellable? cancellable = null) throws Error, IOError {
-			var command = make_command (VM, VMCommand.ALL_CLASSES);
-			var reply = yield perform_command (command, cancellable);
 		}
 
 		private async IDSizes get_id_sizes (Cancellable? cancellable = null) throws Error, IOError {
@@ -156,7 +160,11 @@ namespace Frida.JDWP {
 	public enum TypeTag {
 		CLASS = 1,
 		INTERFACE = 2,
-		ARRAY = 3,
+		ARRAY = 3;
+
+		public string to_short_string () {
+			return Marshal.enum_to_nick<TypeTag> (this).up ();
+		}
 	}
 
 	public class ClassEntry : Object {
@@ -182,14 +190,25 @@ namespace Frida.JDWP {
 				status: status
 			);
 		}
+
+		public string to_string () {
+			return "ClassEntry(ref_type_tag: %s, type_id: %s, status: %s)".printf (
+				ref_type_tag.to_short_string (),
+				type_id.to_string (),
+				status.to_short_string ());
+		}
 	}
 
 	[Flags]
 	public enum ClassStatus {
-		VERIFIED = 1,
-		PREPARED = 2,
-		INITIALIZED = 4,
-		ERROR = 8,
+		VERIFIED    = (1 << 0),
+		PREPARED    = (1 << 1),
+		INITIALIZED = (1 << 2),
+		ERROR       = (1 << 3);
+
+		public string to_short_string () {
+			return this.to_string ().replace ("FRIDA_JDWP_CLASS_STATUS_", "");
+		}
 	}
 
 	public struct ReferenceTypeID {
@@ -201,6 +220,10 @@ namespace Frida.JDWP {
 		public ReferenceTypeID (int64 handle) {
 			this.handle = handle;
 		}
+
+		public string to_string () {
+			return handle.to_string ();
+		}
 	}
 
 	private enum CommandSet {
@@ -209,7 +232,6 @@ namespace Frida.JDWP {
 
 	private enum VMCommand {
 		CLASSES_BY_SIGNATURE = 2,
-		ALL_CLASSES = 3,
 		ID_SIZES = 7,
 	}
 

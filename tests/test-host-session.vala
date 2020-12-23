@@ -3051,12 +3051,10 @@ namespace Frida.HostSessionTest {
 				yield c.request_protocol_change ("jdwp:%u".printf (target_pid), cancellable);
 
 				var session = yield Frida.JDWP.Session.open (c.stream, cancellable);
-				foreach (var entry in yield session.get_classes_by_signature ("Ljava/lang/Runtime;", cancellable)) {
-					printerr ("Match:\n\tref_type_tag: %s\n\ttype_id: %llu\n\tstatus: %s\n",
-						entry.ref_type_tag.to_string (),
-						entry.type_id.handle,
-						entry.status.to_string ());
-				}
+
+				var runtime_class = yield session.get_class_by_signature ("Ljava/lang/Runtime;", cancellable);
+				printerr ("java.lang.Runtime: %s\n", runtime_class.to_string ());
+
 				//yield session.get_all_classes (cancellable);
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
