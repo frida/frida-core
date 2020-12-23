@@ -8,6 +8,8 @@ namespace Frida.JDWP {
 		private OutputStream output;
 		private uint32 next_id = 1;
 
+		private IDSizes id_sizes = new IDSizes.unknown ();
+
 		private const string HANDSHAKE = "JDWP-Handshake";
 
 		public static async Session open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
@@ -33,6 +35,8 @@ namespace Frida.JDWP {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			yield handshake (cancellable);
+
+			id_sizes = yield get_id_sizes (cancellable);
 
 			return true;
 		}
@@ -63,25 +67,37 @@ namespace Frida.JDWP {
 			}
 		}
 
-		public async void get_classes_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
-			var command = new CommandBuilder (next_id++, VM, VMCommand.ClassesBySignature);
-			command
-				.append_string (signature);
+		public async Gee.List<ClassEntry> get_classes_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
+			var command = make_command (VM, VMCommand.CLASSES_BY_SIGNATURE);
+			command.append_string (signature);
 			var reply = yield perform_command (command, cancellable);
 
-			uint32 n = reply.read_uint32 ();
-			printerr ("Got %u matching classes\n", n);
-			for (uint32 i = 0; i != n; i++) {
-				uint8 kind = reply.read_uint8 ();
-				uint32 type_id = reply.read_uint32 ();
-				uint32 status = reply.read_uint32 ();
-				printerr ("\tkind=%u type_id=%u status=%u\n", kind, type_id, status);
+			var result = new Gee.ArrayList<ClassEntry> ();
+
+			int n = reply.read_int32 ();
+			for (int i = 0; i != n; i++) {
+				TypeTag kind = (TypeTag) reply.read_uint8 ();
+				ReferenceTypeID type_id = reply.read_reference_type_id ();
+				ClassStatus status = (ClassStatus) reply.read_int32 ();
+				result.add (new ClassEntry (kind, type_id, status));
 			}
+
+			return result;
 		}
 
 		public async void get_all_classes (Cancellable? cancellable = null) throws Error, IOError {
-			var command = new CommandBuilder (next_id++, VM, VMCommand.AllClasses);
+			var command = make_command (VM, VMCommand.ALL_CLASSES);
 			var reply = yield perform_command (command, cancellable);
+		}
+
+		private async IDSizes get_id_sizes (Cancellable? cancellable = null) throws Error, IOError {
+			var command = make_command (VM, VMCommand.ID_SIZES);
+			var reply = yield perform_command (command, cancellable);
+			return new IDSizes.from_reply (reply);
+		}
+
+		private CommandBuilder make_command (CommandSet command_set, uint8 command) {
+			return new CommandBuilder (next_id++, command_set, command);
 		}
 
 		private async ReplyReader perform_command (CommandBuilder builder, Cancellable? cancellable) throws Error, IOError {
@@ -129,10 +145,60 @@ namespace Frida.JDWP {
 
 				yield input.read_all_async (raw_reply[11:], Priority.DEFAULT, cancellable, out n);
 
-				return new ReplyReader ((owned) raw_reply);
+				return new ReplyReader ((owned) raw_reply, id_sizes);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s".printf (e.message));
 			}
+		}
+	}
+
+	public enum TypeTag {
+		CLASS = 1,
+		INTERFACE = 2,
+		ARRAY = 3,
+	}
+
+	public class ClassEntry : Object {
+		public TypeTag ref_type_tag {
+			get;
+			construct;
+		}
+
+		public ReferenceTypeID type_id {
+			get;
+			construct;
+		}
+
+		public ClassStatus status {
+			get;
+			construct;
+		}
+
+		public ClassEntry (TypeTag ref_type_tag, ReferenceTypeID type_id, ClassStatus status) {
+			Object (
+				ref_type_tag: ref_type_tag,
+				type_id: type_id,
+				status: status
+			);
+		}
+	}
+
+	[Flags]
+	public enum ClassStatus {
+		VERIFIED = 1,
+		PREPARED = 2,
+		INITIALIZED = 4,
+		ERROR = 8,
+	}
+
+	public struct ReferenceTypeID {
+		public int64 handle {
+			get;
+			private set;
+		}
+
+		public ReferenceTypeID (int64 handle) {
+			this.handle = handle;
 		}
 	}
 
@@ -141,8 +207,9 @@ namespace Frida.JDWP {
 	}
 
 	private enum VMCommand {
-		ClassesBySignature = 2,
-		AllClasses = 3,
+		CLASSES_BY_SIGNATURE = 2,
+		ALL_CLASSES = 3,
+		ID_SIZES = 7,
 	}
 
 	private class CommandBuilder {
@@ -222,15 +289,37 @@ namespace Frida.JDWP {
 		private uint8 * cursor;
 		private uint8 * end;
 
-		public ReplyReader (owned uint8[] data) {
+		private IDSizes id_sizes;
+
+		public ReplyReader (owned uint8[] data, IDSizes id_sizes) {
 			this.data = (owned) data;
 			this.cursor = (uint8 *) this.data;
 			this.end = cursor + this.data.length;
+
+			this.id_sizes = id_sizes;
 		}
 
 		public void skip (size_t n) throws Error {
 			check_available (n);
 			cursor += n;
+		}
+
+		public ReferenceTypeID read_reference_type_id () throws Error {
+			int64 handle;
+
+			printerr ("ref type id size: %d\n", (int) id_sizes.get_reference_type_id_size ());
+			switch (id_sizes.get_reference_type_id_size ()) {
+				case 4:
+					handle = read_int32 ();
+					break;
+				case 8:
+					handle = read_int64 ();
+					break;
+				default:
+					assert_not_reached ();
+			}
+
+			return ReferenceTypeID (handle);
 		}
 
 		public uint8 read_uint8 () throws Error {
@@ -253,11 +342,41 @@ namespace Frida.JDWP {
 			return val;
 		}
 
+		public int32 read_int32 () throws Error {
+			const size_t n = sizeof (int32);
+			check_available (n);
+
+			int32 val = int32.from_big_endian (*((int32 *) cursor));
+			cursor += n;
+
+			return val;
+		}
+
 		public uint32 read_uint32 () throws Error {
 			const size_t n = sizeof (uint32);
 			check_available (n);
 
 			uint32 val = uint32.from_big_endian (*((uint32 *) cursor));
+			cursor += n;
+
+			return val;
+		}
+
+		public int64 read_int64 () throws Error {
+			const size_t n = sizeof (int64);
+			check_available (n);
+
+			int64 val = int64.from_big_endian (*((int64 *) cursor));
+			cursor += n;
+
+			return val;
+		}
+
+		public uint64 read_uint64 () throws Error {
+			const size_t n = sizeof (uint64);
+			check_available (n);
+
+			uint64 val = uint64.from_big_endian (*((uint64 *) cursor));
 			cursor += n;
 
 			return val;
@@ -294,6 +413,39 @@ namespace Frida.JDWP {
 		private void check_available (size_t n) throws Error {
 			if (cursor + n > end)
 				throw new Error.PROTOCOL ("Invalid reply");
+		}
+	}
+
+	private class IDSizes {
+		private bool valid;
+		private int field_id_size = -1;
+		private int method_id_size = -1;
+		private int object_id_size = -1;
+		private int reference_type_id_size = -1;
+		private int frame_id_size = -1;
+
+		public IDSizes.unknown () {
+			valid = false;
+		}
+
+		public IDSizes.from_reply (ReplyReader reply) throws Error {
+			field_id_size = reply.read_int32 ();
+			method_id_size = reply.read_int32 ();
+			object_id_size = reply.read_int32 ();
+			reference_type_id_size = reply.read_int32 ();
+			frame_id_size = reply.read_int32 ();
+
+			valid = true;
+		}
+
+		public size_t get_reference_type_id_size () throws Error {
+			check ();
+			return reference_type_id_size;
+		}
+
+		private void check () throws Error {
+			if (!valid)
+				throw new Error.PROTOCOL ("ID sizes not known");
 		}
 	}
 }
