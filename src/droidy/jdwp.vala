@@ -281,6 +281,36 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public struct ObjectID {
+		public int64 handle {
+			get;
+			private set;
+		}
+
+		public ObjectID (int64 handle) {
+			this.handle = handle;
+		}
+
+		public string to_string () {
+			return (handle != 0) ? handle.to_string () : "null";
+		}
+	}
+
+	public struct ThreadID {
+		public int64 handle {
+			get;
+			private set;
+		}
+
+		public ThreadID (int64 handle) {
+			this.handle = handle;
+		}
+
+		public string to_string () {
+			return handle.to_string ();
+		}
+	}
+
 	public struct ReferenceTypeID {
 		public int64 handle {
 			get;
@@ -292,7 +322,7 @@ namespace Frida.JDWP {
 		}
 
 		public string to_string () {
-			return handle.to_string ();
+			return (handle != 0) ? handle.to_string () : "null";
 		}
 	}
 
@@ -303,6 +333,21 @@ namespace Frida.JDWP {
 		}
 
 		public MethodID (int64 handle) {
+			this.handle = handle;
+		}
+
+		public string to_string () {
+			return handle.to_string ();
+		}
+	}
+
+	public struct FieldID {
+		public int64 handle {
+			get;
+			private set;
+		}
+
+		public FieldID (int64 handle) {
 			this.handle = handle;
 		}
 
@@ -346,18 +391,103 @@ namespace Frida.JDWP {
 		internal abstract void serialize (CommandBuilder builder);
 	}
 
+	public class CountModifier : EventModifier {
+		public int32 count {
+			get;
+			construct;
+		}
+
+		public CountModifier (int32 count) {
+			Object (count: count);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.COUNT)
+				.append_int32 (count);
+		}
+	}
+
+	public class ThreadOnlyModifier : EventModifier {
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public ThreadOnlyModifier (ThreadID thread) {
+			Object (thread: thread);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.THREAD_ONLY)
+				.append_thread_id (thread);
+		}
+	}
+
+	public class ClassOnlyModifier : EventModifier {
+		public ReferenceTypeID clazz {
+			get;
+			construct;
+		}
+
+		public ClassOnlyModifier (ReferenceTypeID clazz) {
+			Object (clazz: clazz);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.CLASS_ONLY)
+				.append_reference_type_id (clazz);
+		}
+	}
+
+	public class ClassMatchModifier : EventModifier {
+		public string class_pattern {
+			get;
+			construct;
+		}
+
+		public ClassMatchModifier (string class_pattern) {
+			Object (class_pattern: class_pattern);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.CLASS_MATCH)
+				.append_utf8_string (class_pattern);
+		}
+	}
+
+	public class ClassExcludeModifier : EventModifier {
+		public string class_pattern {
+			get;
+			construct;
+		}
+
+		public ClassExcludeModifier (string class_pattern) {
+			Object (class_pattern: class_pattern);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.CLASS_EXCLUDE)
+				.append_utf8_string (class_pattern);
+		}
+	}
+
 	public class LocationOnlyModifier : EventModifier {
-		public TypeTag type_tag {
+		public TypeTag tag {
 			get;
 			construct;
 		}
 
-		public ReferenceTypeID type_id {
+		public ReferenceTypeID rtype {
 			get;
 			construct;
 		}
 
-		public MethodID method_id {
+		public MethodID method {
 			get;
 			construct;
 		}
@@ -367,11 +497,11 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public LocationOnlyModifier (TypeTag type_tag, ReferenceTypeID type_id, MethodID method_id, uint64 index = 0) {
+		public LocationOnlyModifier (TypeTag tag, ReferenceTypeID rtype, MethodID method, uint64 index = 0) {
 			Object (
-				type_tag: type_tag,
-				type_id: type_id,
-				method_id: method_id,
+				tag: tag,
+				rtype: rtype,
+				method: method,
 				index: index
 			);
 		}
@@ -379,15 +509,162 @@ namespace Frida.JDWP {
 		internal override void serialize (CommandBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.LOCATION_ONLY)
-				.append_uint8 (type_tag)
-				.append_reference_type_id (type_id)
-				.append_method_id (method_id)
+				.append_uint8 (tag)
+				.append_reference_type_id (rtype)
+				.append_method_id (method)
 				.append_uint64 (index);
 		}
 	}
 
+	public class ExceptionOnlyModifier : EventModifier {
+		public ReferenceTypeID exception_or_null {
+			get;
+			construct;
+		}
+
+		public bool caught {
+			get;
+			construct;
+		}
+
+		public bool uncaught {
+			get;
+			construct;
+		}
+
+		public ExceptionOnlyModifier (ReferenceTypeID exception_or_null, bool caught, bool uncaught) {
+			Object (
+				exception_or_null: exception_or_null,
+				caught: caught,
+				uncaught: uncaught
+			);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.EXCEPTION_ONLY)
+				.append_reference_type_id (exception_or_null)
+				.append_bool (caught)
+				.append_bool (uncaught);
+		}
+	}
+
+	public class FieldOnlyModifier : EventModifier {
+		public ReferenceTypeID declaring {
+			get;
+			construct;
+		}
+
+		public FieldID field {
+			get;
+			construct;
+		}
+
+		public FieldOnlyModifier (ReferenceTypeID declaring, FieldID field) {
+			Object (
+				declaring: declaring,
+				field: field
+			);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.FIELD_ONLY)
+				.append_reference_type_id (declaring)
+				.append_field_id (field);
+		}
+	}
+
+	public class StepModifier : EventModifier {
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public StepSize step_size {
+			get;
+			construct;
+		}
+
+		public StepDepth step_depth {
+			get;
+			construct;
+		}
+
+		public StepModifier (ThreadID thread, StepSize step_size, StepDepth step_depth) {
+			Object (
+				thread: thread,
+				step_size: step_size,
+				step_depth: step_depth
+			);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.STEP)
+				.append_thread_id (thread)
+				.append_int32 (step_size)
+				.append_int32 (step_depth);
+		}
+	}
+
+	public enum StepSize {
+		MIN  = 0,
+		LINE = 1,
+	}
+
+	public enum StepDepth {
+		INTO = 0,
+		OVER = 1,
+		OUT  = 2,
+	}
+
+	public class InstanceOnlyModifier : EventModifier {
+		public ObjectID instance {
+			get;
+			construct;
+		}
+
+		public InstanceOnlyModifier (ObjectID instance) {
+			Object (instance: instance);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.INSTANCE_ONLY)
+				.append_object_id (instance);
+		}
+	}
+
+	public class SourceNameMatchModifier : EventModifier {
+		public string source_name_pattern {
+			get;
+			construct;
+		}
+
+		public SourceNameMatchModifier (string source_name_pattern) {
+			Object (source_name_pattern: source_name_pattern);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (EventModifierKind.SOURCE_NAME_MATCH)
+				.append_utf8_string (source_name_pattern);
+		}
+	}
+
 	private enum EventModifierKind {
-		LOCATION_ONLY = 7,
+		COUNT             = 1,
+		THREAD_ONLY       = 3,
+		CLASS_ONLY        = 4,
+		CLASS_MATCH       = 5,
+		CLASS_EXCLUDE     = 6,
+		LOCATION_ONLY     = 7,
+		EXCEPTION_ONLY    = 8,
+		FIELD_ONLY        = 9,
+		STEP              = 10,
+		INSTANCE_ONLY     = 11,
+		SOURCE_NAME_MATCH = 12,
 	}
 
 	public struct EventRequestID {
@@ -487,6 +764,10 @@ namespace Frida.JDWP {
 			return this;
 		}
 
+		public unowned CommandBuilder append_bool (bool val) {
+			return append_uint8 ((uint8) val);
+		}
+
 		public unowned CommandBuilder append_utf8_string (string str) {
 			append_uint32 (str.length);
 
@@ -497,24 +778,24 @@ namespace Frida.JDWP {
 			return this;
 		}
 
-		public unowned CommandBuilder append_reference_type_id (ReferenceTypeID type_id) {
-			size_t size;
-			try {
-				size = id_sizes.get_reference_type_id_size ();
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-			return append_handle (type_id.handle, size);
+		public unowned CommandBuilder append_object_id (ObjectID object) {
+			return append_handle (object.handle, id_sizes.get_object_id_size_or_die ());
 		}
 
-		public unowned CommandBuilder append_method_id (MethodID method_id) {
-			size_t size;
-			try {
-				size = id_sizes.get_method_id_size ();
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-			return append_handle (method_id.handle, size);
+		public unowned CommandBuilder append_thread_id (ThreadID thread) {
+			return append_handle (thread.handle, id_sizes.get_object_id_size_or_die ());
+		}
+
+		public unowned CommandBuilder append_reference_type_id (ReferenceTypeID type) {
+			return append_handle (type.handle, id_sizes.get_reference_type_id_size_or_die ());
+		}
+
+		public unowned CommandBuilder append_method_id (MethodID method) {
+			return append_handle (method.handle, id_sizes.get_method_id_size_or_die ());
+		}
+
+		public unowned CommandBuilder append_field_id (FieldID field) {
+			return append_handle (field.handle, id_sizes.get_field_id_size_or_die ());
 		}
 
 		private unowned CommandBuilder append_handle (int64 val, size_t size) {
@@ -676,13 +957,43 @@ namespace Frida.JDWP {
 			valid = true;
 		}
 
+		public size_t get_field_id_size () throws Error {
+			check ();
+			return field_id_size;
+		}
+
+		public size_t get_field_id_size_or_die () {
+			assert (valid);
+			return field_id_size;
+		}
+
 		public size_t get_method_id_size () throws Error {
 			check ();
 			return method_id_size;
 		}
 
+		public size_t get_method_id_size_or_die () {
+			assert (valid);
+			return method_id_size;
+		}
+
+		public size_t get_object_id_size () throws Error {
+			check ();
+			return object_id_size;
+		}
+
+		public size_t get_object_id_size_or_die () {
+			assert (valid);
+			return object_id_size;
+		}
+
 		public size_t get_reference_type_id_size () throws Error {
 			check ();
+			return reference_type_id_size;
+		}
+
+		public size_t get_reference_type_id_size_or_die () {
+			assert (valid);
 			return reference_type_id_size;
 		}
 
