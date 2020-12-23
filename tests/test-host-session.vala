@@ -3054,6 +3054,10 @@ namespace Frida.HostSessionTest {
 
 				var runtime_class = yield session.get_class_by_signature ("Ljava/lang/Runtime;", cancellable);
 				printerr ("java.lang.Runtime: %s\n", runtime_class.to_string ());
+				var runtime_methods = yield session.get_methods (runtime_class.type_id, cancellable);
+				foreach (var method in runtime_methods) {
+					printerr ("\t%s\n", method.to_string ());
+				}
 
 				//yield session.get_all_classes (cancellable);
 			} catch (GLib.Error e) {

@@ -51,7 +51,7 @@ namespace Frida.JDWP {
 			}
 		}
 
-		public async ClassEntry get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
+		public async ClassInfo get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
 			var candidates = yield get_classes_by_signature (signature, cancellable);
 			if (candidates.is_empty)
 				throw new Error.INVALID_ARGUMENT ("Class %s not found", signature);
@@ -60,21 +60,39 @@ namespace Frida.JDWP {
 			return candidates.get (0);
 		}
 
-		public async Gee.List<ClassEntry> get_classes_by_signature (string signature, Cancellable? cancellable = null)
+		public async Gee.List<ClassInfo> get_classes_by_signature (string signature, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var command = make_command (VM, VMCommand.CLASSES_BY_SIGNATURE);
-			command.append_string (signature);
+			command.append_utf8_string (signature);
 			var reply = yield perform_command (command, cancellable);
 
-			var entries = new Gee.ArrayList<ClassEntry> ();
-			int n = reply.read_int32 ();
-			for (int i = 0; i != n; i++) {
+			var result = new Gee.ArrayList<ClassInfo> ();
+			int32 n = reply.read_int32 ();
+			for (int32 i = 0; i != n; i++) {
 				TypeTag kind = (TypeTag) reply.read_uint8 ();
 				ReferenceTypeID type_id = reply.read_reference_type_id ();
 				ClassStatus status = (ClassStatus) reply.read_int32 ();
-				entries.add (new ClassEntry (kind, type_id, status));
+				result.add (new ClassInfo (kind, type_id, status));
 			}
-			return entries;
+			return result;
+		}
+
+		public async Gee.List<MethodInfo> get_methods (ReferenceTypeID type_id, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var command = make_command (REFERENCE_TYPE, ReferenceTypeCommand.METHODS);
+			command.append_reference_type_id (type_id);
+			var reply = yield perform_command (command, cancellable);
+
+			var result = new Gee.ArrayList<MethodInfo> ();
+			int32 n = reply.read_int32 ();
+			for (int32 i = 0; i != n; i++) {
+				MethodID method_id = reply.read_method_id ();
+				string name = reply.read_utf8_string ();
+				string signature = reply.read_utf8_string ();
+				int32 mod_bits = reply.read_int32 ();
+				result.add (new MethodInfo (method_id, name, signature, mod_bits));
+			}
+			return result;
 		}
 
 		private async void handshake (Cancellable? cancellable) throws Error, IOError {
@@ -101,7 +119,7 @@ namespace Frida.JDWP {
 		}
 
 		private CommandBuilder make_command (CommandSet command_set, uint8 command) {
-			return new CommandBuilder (next_id++, command_set, command);
+			return new CommandBuilder (next_id++, command_set, command, id_sizes);
 		}
 
 		private async ReplyReader perform_command (CommandBuilder builder, Cancellable? cancellable) throws Error, IOError {
@@ -167,7 +185,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassEntry : Object {
+	public class ClassInfo : Object {
 		public TypeTag ref_type_tag {
 			get;
 			construct;
@@ -183,7 +201,7 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public ClassEntry (TypeTag ref_type_tag, ReferenceTypeID type_id, ClassStatus status) {
+		public ClassInfo (TypeTag ref_type_tag, ReferenceTypeID type_id, ClassStatus status) {
 			Object (
 				ref_type_tag: ref_type_tag,
 				type_id: type_id,
@@ -192,7 +210,7 @@ namespace Frida.JDWP {
 		}
 
 		public string to_string () {
-			return "ClassEntry(ref_type_tag: %s, type_id: %s, status: %s)".printf (
+			return "ClassInfo(ref_type_tag: %s, type_id: %s, status: %s)".printf (
 				ref_type_tag.to_short_string (),
 				type_id.to_string (),
 				status.to_short_string ());
@@ -211,6 +229,45 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public class MethodInfo : Object {
+		public MethodID method_id {
+			get;
+			construct;
+		}
+
+		public string name {
+			get;
+			construct;
+		}
+
+		public string signature {
+			get;
+			construct;
+		}
+
+		public int32 mod_bits {
+			get;
+			construct;
+		}
+
+		public MethodInfo (MethodID method_id, string name, string signature, int32 mod_bits) {
+			Object (
+				method_id: method_id,
+				name: name,
+				signature: signature,
+				mod_bits: mod_bits
+			);
+		}
+
+		public string to_string () {
+			return "MethodInfo(method_id: %s, name: \"%s\", signature: \"%s\", mod_bits: 0x%08x)".printf (
+				method_id.to_string (),
+				name,
+				signature,
+				mod_bits);
+		}
+	}
+
 	public struct ReferenceTypeID {
 		public int64 handle {
 			get;
@@ -226,13 +283,33 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public struct MethodID {
+		public int64 handle {
+			get;
+			private set;
+		}
+
+		public MethodID (int64 handle) {
+			this.handle = handle;
+		}
+
+		public string to_string () {
+			return handle.to_string ();
+		}
+	}
+
 	private enum CommandSet {
 		VM = 1,
+		REFERENCE_TYPE = 2,
 	}
 
 	private enum VMCommand {
 		CLASSES_BY_SIGNATURE = 2,
 		ID_SIZES = 7,
+	}
+
+	private enum ReferenceTypeCommand {
+		METHODS = 5,
 	}
 
 	private class CommandBuilder {
@@ -250,8 +327,11 @@ namespace Frida.JDWP {
 		private ByteArray buffer = new ByteArray.sized (64);
 		private size_t cursor = 0;
 
-		public CommandBuilder (uint32 id, CommandSet command_set, uint8 command) {
+		private IDSizes id_sizes;
+
+		public CommandBuilder (uint32 id, CommandSet command_set, uint8 command, IDSizes id_sizes) {
 			this.id = id;
+			this.id_sizes = id_sizes;
 
 			uint32 length_placeholder = 0;
 			append_uint32 (length_placeholder);
@@ -271,13 +351,25 @@ namespace Frida.JDWP {
 			return this;
 		}
 
+		public unowned CommandBuilder append_int32 (int32 val) {
+			*((int32 *) get_pointer (cursor, sizeof (int32))) = val.to_big_endian ();
+			cursor += (uint) sizeof (int32);
+			return this;
+		}
+
 		public unowned CommandBuilder append_uint32 (uint32 val) {
 			*((uint32 *) get_pointer (cursor, sizeof (uint32))) = val.to_big_endian ();
 			cursor += (uint) sizeof (uint32);
 			return this;
 		}
 
-		public unowned CommandBuilder append_string (string str) {
+		public unowned CommandBuilder append_int64 (int64 val) {
+			*((int64 *) get_pointer (cursor, sizeof (int64))) = val.to_big_endian ();
+			cursor += (uint) sizeof (int64);
+			return this;
+		}
+
+		public unowned CommandBuilder append_utf8_string (string str) {
 			append_uint32 (str.length);
 
 			uint size = str.length;
@@ -285,6 +377,27 @@ namespace Frida.JDWP {
 			cursor += size;
 
 			return this;
+		}
+
+		public unowned CommandBuilder append_reference_type_id (ReferenceTypeID type_id) {
+			size_t size;
+			try {
+				size = id_sizes.get_reference_type_id_size ();
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+			return append_handle (type_id.handle, size);
+		}
+
+		private unowned CommandBuilder append_handle (int64 val, size_t size) {
+			switch (size) {
+				case 4:
+					return append_int32 ((int32) val);
+				case 8:
+					return append_int64 (val);
+				default:
+					assert_not_reached ();
+			}
 		}
 
 		private uint8 * get_pointer (size_t offset, size_t n) {
@@ -325,23 +438,6 @@ namespace Frida.JDWP {
 		public void skip (size_t n) throws Error {
 			check_available (n);
 			cursor += n;
-		}
-
-		public ReferenceTypeID read_reference_type_id () throws Error {
-			int64 handle;
-
-			switch (id_sizes.get_reference_type_id_size ()) {
-				case 4:
-					handle = read_int32 ();
-					break;
-				case 8:
-					handle = read_int64 ();
-					break;
-				default:
-					assert_not_reached ();
-			}
-
-			return ReferenceTypeID (handle);
 		}
 
 		public uint8 read_uint8 () throws Error {
@@ -413,6 +509,17 @@ namespace Frida.JDWP {
 			return arr;
 		}
 
+		public string read_utf8_string () throws Error {
+			size_t size = read_uint32 ();
+			check_available (size);
+
+			unowned string data = (string) cursor;
+			string str = data.substring (0, (long) size);
+			cursor += size;
+
+			return str;
+		}
+
 		public string read_utf16_string () throws Error {
 			size_t length = read_uint32 ();
 			size_t size = length * sizeof (uint16);
@@ -429,6 +536,25 @@ namespace Frida.JDWP {
 				return str_utf16.to_utf8 ((long) length);
 			} catch (ConvertError e) {
 				throw new Error.PROTOCOL ("%s", e.message);
+			}
+		}
+
+		public ReferenceTypeID read_reference_type_id () throws Error {
+			return ReferenceTypeID (read_handle (id_sizes.get_reference_type_id_size ()));
+		}
+
+		public MethodID read_method_id () throws Error {
+			return MethodID (read_handle (id_sizes.get_method_id_size ()));
+		}
+
+		private int64 read_handle (size_t size) throws Error {
+			switch (size) {
+				case 4:
+					return read_int32 ();
+				case 8:
+					return read_int64 ();
+				default:
+					assert_not_reached ();
 			}
 		}
 
@@ -458,6 +584,11 @@ namespace Frida.JDWP {
 			frame_id_size = reply.read_int32 ();
 
 			valid = true;
+		}
+
+		public size_t get_method_id_size () throws Error {
+			check ();
+			return method_id_size;
 		}
 
 		public size_t get_reference_type_id_size () throws Error {
