@@ -50,23 +50,6 @@ namespace Frida.JDWP {
 			}
 		}
 
-		private async void handshake (Cancellable? cancellable) throws Error, IOError {
-			try {
-				size_t n;
-
-				unowned uint8[] raw_handshake = HANDSHAKE.data;
-				yield output.write_all_async (raw_handshake, Priority.DEFAULT, cancellable, out n);
-
-				var raw_reply = new uint8[HANDSHAKE.length];
-				yield input.read_all_async (raw_reply, Priority.DEFAULT, cancellable, out n);
-
-				if (Memory.cmp (raw_reply, raw_handshake, raw_reply.length) != 0)
-					throw new Error.PROTOCOL ("Unexpected handshake reply");
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s".printf (e.message));
-			}
-		}
-
 		public async ClassEntry get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
 			var candidates = yield get_classes_by_signature (signature, cancellable);
 			if (candidates.is_empty)
@@ -82,17 +65,32 @@ namespace Frida.JDWP {
 			command.append_string (signature);
 			var reply = yield perform_command (command, cancellable);
 
-			var result = new Gee.ArrayList<ClassEntry> ();
-
+			var entries = new Gee.ArrayList<ClassEntry> ();
 			int n = reply.read_int32 ();
 			for (int i = 0; i != n; i++) {
 				TypeTag kind = (TypeTag) reply.read_uint8 ();
 				ReferenceTypeID type_id = reply.read_reference_type_id ();
 				ClassStatus status = (ClassStatus) reply.read_int32 ();
-				result.add (new ClassEntry (kind, type_id, status));
+				entries.add (new ClassEntry (kind, type_id, status));
 			}
+			return entries;
+		}
 
-			return result;
+		private async void handshake (Cancellable? cancellable) throws Error, IOError {
+			try {
+				size_t n;
+
+				unowned uint8[] raw_handshake = HANDSHAKE.data;
+				yield output.write_all_async (raw_handshake, Priority.DEFAULT, cancellable, out n);
+
+				var raw_reply = new uint8[HANDSHAKE.length];
+				yield input.read_all_async (raw_reply, Priority.DEFAULT, cancellable, out n);
+
+				if (Memory.cmp (raw_reply, raw_handshake, raw_reply.length) != 0)
+					throw new Error.PROTOCOL ("Unexpected handshake reply");
+			} catch (GLib.Error e) {
+				throw new Error.TRANSPORT ("%s".printf (e.message));
+			}
 		}
 
 		private async IDSizes get_id_sizes (Cancellable? cancellable = null) throws Error, IOError {
