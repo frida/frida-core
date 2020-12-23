@@ -148,7 +148,7 @@ namespace Frida.JDWP {
 					throw new Error.PROTOCOL ("Reply too large");
 				raw_reply.resize ((int) reply_size);
 
-				yield input.read_all_async (raw_reply[11:reply_size], Priority.DEFAULT, cancellable, out n);
+				yield input.read_all_async (raw_reply[11:], Priority.DEFAULT, cancellable, out n);
 
 				return new ReplyReader ((owned) raw_reply, id_sizes);
 			} catch (GLib.Error e) {
