@@ -1,20 +1,40 @@
 namespace Frida.JDWP {
-	public class Session : Object, AsyncInitable {
+	public class Client : Object, AsyncInitable {
+		public signal void closed ();
+
 		public IOStream stream {
 			get;
 			construct;
 		}
+
+		public State state {
+			get {
+				return _state;
+			}
+		}
+
 		private InputStream input;
 		private OutputStream output;
-		private uint32 next_id = 1;
+		private Cancellable io_cancellable = new Cancellable ();
 
+		private State _state = CREATED;
+		private uint32 next_id = 1;
 		private IDSizes id_sizes = new IDSizes.unknown ();
+		private Gee.ArrayList<StopObserverEntry> on_stop = new Gee.ArrayList<StopObserverEntry> ();
+		private Gee.ArrayQueue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
+		private Gee.Map<uint32, PendingReply> pending_replies = new Gee.HashMap<uint32, PendingReply> ();
+
+		public enum State {
+			CREATED,
+			READY,
+			CLOSED
+		}
 
 		private const string HANDSHAKE = "JDWP-Handshake";
-		private const uint32 MAX_REPLY_SIZE = 10 * 1024 * 1024;
+		private const uint32 MAX_PACKET_SIZE = 10 * 1024 * 1024;
 
-		public static async Session open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
-			var session = new Session (stream);
+		public static async Client open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
+			var session = new Client (stream);
 
 			try {
 				yield session.init_async (Priority.DEFAULT, cancellable);
@@ -25,7 +45,7 @@ namespace Frida.JDWP {
 			return session;
 		}
 
-		private Session (IOStream stream) {
+		private Client (IOStream stream) {
 			Object (stream: stream);
 		}
 
@@ -36,18 +56,38 @@ namespace Frida.JDWP {
 
 		private async bool init_async (int io_priority, Cancellable? cancellable) throws Error, IOError {
 			yield handshake (cancellable);
+			process_incoming_packets.begin ();
 
 			id_sizes = yield get_id_sizes (cancellable);
+
+			change_state (READY);
 
 			return true;
 		}
 
+		private void change_state (State new_state) {
+			bool state_differs = new_state != _state;
+			if (state_differs)
+				_state = new_state;
+
+			if (state_differs)
+				notify_property ("state");
+		}
+
 		public async void close (Cancellable? cancellable) throws IOError {
+			if (state == CLOSED)
+				return;
+
+			io_cancellable.cancel ();
+
+			var source = new IdleSource ();
+			source.set_callback (close.callback);
+			source.attach (MainContext.get_thread_default ());
+			yield;
+
 			try {
 				yield stream.close_async (Priority.DEFAULT, cancellable);
 			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
 			}
 		}
 
@@ -64,7 +104,8 @@ namespace Frida.JDWP {
 				throws Error, IOError {
 			var command = make_command (VM, VMCommand.CLASSES_BY_SIGNATURE);
 			command.append_utf8_string (signature);
-			var reply = yield perform_command (command, cancellable);
+
+			var reply = yield execute (command, cancellable);
 
 			var result = new Gee.ArrayList<ClassInfo> ();
 			int32 n = reply.read_int32 ();
@@ -81,7 +122,8 @@ namespace Frida.JDWP {
 				throws Error, IOError {
 			var command = make_command (REFERENCE_TYPE, ReferenceTypeCommand.METHODS);
 			command.append_reference_type_id (type_id);
-			var reply = yield perform_command (command, cancellable);
+
+			var reply = yield execute (command, cancellable);
 
 			var result = new Gee.ArrayList<MethodInfo> ();
 			int32 n = reply.read_int32 ();
@@ -104,7 +146,9 @@ namespace Frida.JDWP {
 				.append_int32 (modifiers.length);
 			foreach (var modifier in modifiers)
 				modifier.serialize (command);
-			var reply = yield perform_command (command, cancellable);
+
+			var reply = yield execute (command, cancellable);
+
 			return EventRequestID (reply.read_int32 ());
 		}
 
@@ -114,12 +158,14 @@ namespace Frida.JDWP {
 			command
 				.append_uint8 (kind)
 				.append_int32 (request_id.handle);
-			yield perform_command (command, cancellable);
+
+			yield execute (command, cancellable);
 		}
 
 		public async void clear_all_breakpoints (Cancellable? cancellable = null) throws Error, IOError {
 			var command = make_command (EVENT_REQUEST, EventRequestCommand.CLEAR_ALL_BREAKPOINTS);
-			yield perform_command (command, cancellable);
+
+			yield execute (command, cancellable);
 		}
 
 		private async void handshake (Cancellable? cancellable) throws Error, IOError {
@@ -141,63 +187,184 @@ namespace Frida.JDWP {
 
 		private async IDSizes get_id_sizes (Cancellable? cancellable) throws Error, IOError {
 			var command = make_command (VM, VMCommand.ID_SIZES);
-			var reply = yield perform_command (command, cancellable);
-			return new IDSizes.from_reply (reply);
+
+			var reply = yield execute (command, cancellable);
+
+			var field_id_size = reply.read_int32 ();
+			var method_id_size = reply.read_int32 ();
+			var object_id_size = reply.read_int32 ();
+			var reference_type_id_size = reply.read_int32 ();
+			var frame_id_size = reply.read_int32 ();
+			return new IDSizes (field_id_size, method_id_size, object_id_size, reference_type_id_size, frame_id_size);
 		}
 
 		private CommandBuilder make_command (CommandSet command_set, uint8 command) {
 			return new CommandBuilder (next_id++, command_set, command, id_sizes);
 		}
 
-		private async ReplyReader perform_command (CommandBuilder builder, Cancellable? cancellable) throws Error, IOError {
-			yield write_command (builder, cancellable);
+		private async PacketReader execute (CommandBuilder command, Cancellable? cancellable) throws Error, IOError {
+			if (state == CLOSED)
+				throw new Error.INVALID_OPERATION ("Unable to perform command; connection is closed");
 
-			uint32 id = builder.id;
+			var pending = new PendingReply (execute.callback);
+			pending_replies[command.id] = pending;
+
+			var cancel_source = new CancellableSource (cancellable);
+			cancel_source.set_callback (() => {
+				pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
+				return false;
+			});
+			cancel_source.attach (MainContext.get_thread_default ());
+
+			write_bytes (command.build ());
+
+			yield;
+
+			cancel_source.destroy ();
+
+			cancellable.set_error_if_cancelled ();
+
+			var reply = pending.reply;
+			if (reply == null)
+				throw_local_error (pending.error);
+
+			return reply;
+		}
+
+		private async void process_incoming_packets () {
 			while (true) {
-				var reply = yield read_reply (cancellable);
+				try {
+					var packet = yield read_packet ();
 
-				reply.skip (sizeof (uint32));
-				var reply_id = reply.read_uint32 ();
-				reply.skip (sizeof (uint8));
-				var error_code = reply.read_uint16 ();
+					dispatch_packet (packet);
+				} catch (GLib.Error error) {
+					change_state (CLOSED);
 
-				if (reply_id == id) {
-					if (error_code != 0)
-						throw new Error.NOT_SUPPORTED ("Command failed: %u", error_code);
+					foreach (var pending in pending_replies.values)
+						pending.complete_with_error (error);
+					pending_replies.clear ();
 
-					return reply;
+					foreach (var observer in on_stop.to_array ())
+						observer.func ();
+
+					closed ();
+
+					return;
 				}
 			}
 		}
 
-		private async void write_command (CommandBuilder builder, Cancellable? cancellable) throws Error, IOError {
-			try {
-				Bytes raw_command = builder.build ();
+		private async void process_pending_writes () {
+			while (!pending_writes.is_empty) {
+				Bytes current = pending_writes.peek_head ();
 
+				try {
+					size_t n;
+					yield output.write_all_async (current.get_data (), Priority.DEFAULT, io_cancellable, out n);
+				} catch (GLib.Error e) {
+					return;
+				}
+
+				pending_writes.poll_head ();
+			}
+		}
+
+		private void dispatch_packet (PacketReader packet) throws Error {
+			packet.skip (sizeof (uint32));
+			uint32 id = packet.read_uint32 ();
+			packet.skip (sizeof (uint8));
+
+			PendingReply? pending = pending_replies[id];
+			if (pending != null) {
+				var error_code = packet.read_uint16 ();
+
+				if (error_code == 0)
+					pending.complete_with_reply (packet);
+				else
+					pending.complete_with_error (new Error.NOT_SUPPORTED ("Command failed: %u", error_code));
+			}
+		}
+
+		private async PacketReader read_packet () throws Error, IOError {
+			try {
 				size_t n;
-				yield output.write_all_async (raw_command.get_data (), Priority.DEFAULT, cancellable, out n);
+
+				int header_size = 11;
+				var raw_reply = new uint8[header_size];
+				yield input.read_all_async (raw_reply, Priority.DEFAULT, io_cancellable, out n);
+
+				uint32 reply_size = uint32.from_big_endian (*((uint32 *) raw_reply));
+				if (reply_size != raw_reply.length) {
+					if (reply_size < raw_reply.length)
+						throw new Error.PROTOCOL ("Invalid packet length (too small)");
+					if (reply_size > MAX_PACKET_SIZE)
+						throw new Error.PROTOCOL ("Invalid packet length (too large)");
+
+					raw_reply.resize ((int) reply_size);
+					yield input.read_all_async (raw_reply[header_size:], Priority.DEFAULT, io_cancellable, out n);
+				}
+
+				return new PacketReader ((owned) raw_reply, id_sizes);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s".printf (e.message));
 			}
 		}
 
-		private async ReplyReader read_reply (Cancellable? cancellable) throws Error, IOError {
-			try {
-				size_t n;
+		private void write_bytes (Bytes bytes) {
+			pending_writes.offer_tail (bytes);
+			if (pending_writes.size == 1)
+				process_pending_writes.begin ();
+		}
 
-				var raw_reply = new uint8[11];
-				yield input.read_all_async (raw_reply, Priority.DEFAULT, cancellable, out n);
+		private static void throw_local_error (GLib.Error e) throws Error, IOError {
+			if (e is Error)
+				throw (Error) e;
 
-				uint32 reply_size = uint32.from_big_endian (*((uint32 *) raw_reply));
-				if (reply_size > MAX_REPLY_SIZE)
-					throw new Error.PROTOCOL ("Reply too large");
-				raw_reply.resize ((int) reply_size);
+			if (e is IOError)
+				throw (IOError) e;
 
-				yield input.read_all_async (raw_reply[11:], Priority.DEFAULT, cancellable, out n);
+			assert_not_reached ();
+		}
 
-				return new ReplyReader ((owned) raw_reply, id_sizes);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s".printf (e.message));
+		private class StopObserverEntry {
+			public SourceFunc? func;
+
+			public StopObserverEntry (owned SourceFunc func) {
+				this.func = (owned) func;
+			}
+		}
+
+		private class PendingReply {
+			private SourceFunc? handler;
+
+			public PacketReader? reply {
+				get;
+				private set;
+			}
+
+			public GLib.Error? error {
+				get;
+				private set;
+			}
+
+			public PendingReply (owned SourceFunc handler) {
+				this.handler = (owned) handler;
+			}
+
+			public void complete_with_reply (PacketReader? reply) {
+				if (handler == null)
+					return;
+				this.reply = reply;
+				handler ();
+				handler = null;
+			}
+
+			public void complete_with_error (GLib.Error error) {
+				if (handler == null)
+					return;
+				this.error = error;
+				handler ();
+				handler = null;
 			}
 		}
 	}
@@ -717,7 +884,16 @@ namespace Frida.JDWP {
 		CLEAR_ALL_BREAKPOINTS = 3,
 	}
 
-	private class CommandBuilder {
+	private class CommandBuilder : PacketBuilder {
+		public CommandBuilder (uint32 id, CommandSet command_set, uint8 command, IDSizes id_sizes) {
+			base (id, 0, id_sizes);
+
+			append_uint8 (command_set);
+			append_uint8 (command);
+		}
+	}
+
+	private class PacketBuilder {
 		public uint32 id {
 			get;
 			private set;
@@ -734,57 +910,51 @@ namespace Frida.JDWP {
 
 		private IDSizes id_sizes;
 
-		public CommandBuilder (uint32 id, CommandSet command_set, uint8 command, IDSizes id_sizes) {
+		public PacketBuilder (uint32 id, uint8 flags, IDSizes id_sizes) {
 			this.id = id;
 			this.id_sizes = id_sizes;
 
 			uint32 length_placeholder = 0;
 			append_uint32 (length_placeholder);
-
 			append_uint32 (id);
-
-			uint8 flags = 0;
 			append_uint8 (flags);
-
-			append_uint8 (command_set);
-			append_uint8 (command);
 		}
 
-		public unowned CommandBuilder append_uint8 (uint8 val) {
+		public unowned PacketBuilder append_uint8 (uint8 val) {
 			*(get_pointer (cursor, sizeof (uint8))) = val;
 			cursor += (uint) sizeof (uint8);
 			return this;
 		}
 
-		public unowned CommandBuilder append_int32 (int32 val) {
+		public unowned PacketBuilder append_int32 (int32 val) {
 			*((int32 *) get_pointer (cursor, sizeof (int32))) = val.to_big_endian ();
 			cursor += (uint) sizeof (int32);
 			return this;
 		}
 
-		public unowned CommandBuilder append_uint32 (uint32 val) {
+		public unowned PacketBuilder append_uint32 (uint32 val) {
 			*((uint32 *) get_pointer (cursor, sizeof (uint32))) = val.to_big_endian ();
 			cursor += (uint) sizeof (uint32);
 			return this;
 		}
 
-		public unowned CommandBuilder append_int64 (int64 val) {
+		public unowned PacketBuilder append_int64 (int64 val) {
 			*((int64 *) get_pointer (cursor, sizeof (int64))) = val.to_big_endian ();
 			cursor += (uint) sizeof (int64);
 			return this;
 		}
 
-		public unowned CommandBuilder append_uint64 (uint64 val) {
+		public unowned PacketBuilder append_uint64 (uint64 val) {
 			*((uint64 *) get_pointer (cursor, sizeof (uint64))) = val.to_big_endian ();
 			cursor += (uint) sizeof (uint64);
 			return this;
 		}
 
-		public unowned CommandBuilder append_bool (bool val) {
+		public unowned PacketBuilder append_bool (bool val) {
 			return append_uint8 ((uint8) val);
 		}
 
-		public unowned CommandBuilder append_utf8_string (string str) {
+		public unowned PacketBuilder append_utf8_string (string str) {
 			append_uint32 (str.length);
 
 			uint size = str.length;
@@ -794,27 +964,27 @@ namespace Frida.JDWP {
 			return this;
 		}
 
-		public unowned CommandBuilder append_object_id (ObjectID object) {
+		public unowned PacketBuilder append_object_id (ObjectID object) {
 			return append_handle (object.handle, id_sizes.get_object_id_size_or_die ());
 		}
 
-		public unowned CommandBuilder append_thread_id (ThreadID thread) {
+		public unowned PacketBuilder append_thread_id (ThreadID thread) {
 			return append_handle (thread.handle, id_sizes.get_object_id_size_or_die ());
 		}
 
-		public unowned CommandBuilder append_reference_type_id (ReferenceTypeID type) {
+		public unowned PacketBuilder append_reference_type_id (ReferenceTypeID type) {
 			return append_handle (type.handle, id_sizes.get_reference_type_id_size_or_die ());
 		}
 
-		public unowned CommandBuilder append_method_id (MethodID method) {
+		public unowned PacketBuilder append_method_id (MethodID method) {
 			return append_handle (method.handle, id_sizes.get_method_id_size_or_die ());
 		}
 
-		public unowned CommandBuilder append_field_id (FieldID field) {
+		public unowned PacketBuilder append_field_id (FieldID field) {
 			return append_handle (field.handle, id_sizes.get_field_id_size_or_die ());
 		}
 
-		private unowned CommandBuilder append_handle (int64 val, size_t size) {
+		private unowned PacketBuilder append_handle (int64 val, size_t size) {
 			switch (size) {
 				case 4:
 					return append_int32 ((int32) val);
@@ -839,7 +1009,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	private class ReplyReader {
+	private class PacketReader {
 		public size_t available_bytes {
 			get {
 				return end - cursor;
@@ -852,7 +1022,7 @@ namespace Frida.JDWP {
 
 		private IDSizes id_sizes;
 
-		public ReplyReader (owned uint8[] data, IDSizes id_sizes) {
+		public PacketReader (owned uint8[] data, IDSizes id_sizes) {
 			this.data = (owned) data;
 			this.cursor = (uint8 *) this.data;
 			this.end = cursor + this.data.length;
@@ -947,7 +1117,7 @@ namespace Frida.JDWP {
 
 		private void check_available (size_t n) throws Error {
 			if (cursor + n > end)
-				throw new Error.PROTOCOL ("Invalid reply");
+				throw new Error.PROTOCOL ("Invalid JDWP packet");
 		}
 	}
 
@@ -959,18 +1129,18 @@ namespace Frida.JDWP {
 		private int reference_type_id_size = -1;
 		private int frame_id_size = -1;
 
-		public IDSizes.unknown () {
-			valid = false;
-		}
-
-		public IDSizes.from_reply (ReplyReader reply) throws Error {
-			field_id_size = reply.read_int32 ();
-			method_id_size = reply.read_int32 ();
-			object_id_size = reply.read_int32 ();
-			reference_type_id_size = reply.read_int32 ();
-			frame_id_size = reply.read_int32 ();
+		public IDSizes (int field_id_size, int method_id_size, int object_id_size, int reference_type_id_size, int frame_id_size) {
+			this.field_id_size = field_id_size;
+			this.method_id_size = method_id_size;
+			this.object_id_size = object_id_size;
+			this.reference_type_id_size = reference_type_id_size;
+			this.frame_id_size = frame_id_size;
 
 			valid = true;
+		}
+
+		public IDSizes.unknown () {
+			valid = false;
 		}
 
 		public size_t get_field_id_size () throws Error {

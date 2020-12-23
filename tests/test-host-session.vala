@@ -3050,15 +3050,15 @@ namespace Frida.HostSessionTest {
 				yield c.request ("host:transport:" + device_serial, cancellable);
 				yield c.request_protocol_change ("jdwp:%u".printf (target_pid), cancellable);
 
-				var session = yield JDWP.Session.open (c.stream, cancellable);
+				var jdwp = yield JDWP.Client.open (c.stream, cancellable);
 
-				var activity_class = yield session.get_class_by_signature ("Landroid/app/Activity;", cancellable);
+				var activity_class = yield jdwp.get_class_by_signature ("Landroid/app/Activity;", cancellable);
 				printerr ("android.app.Activity: %s\n", activity_class.to_string ());
-				var activity_methods = yield session.get_methods (activity_class.type_id, cancellable);
+				var activity_methods = yield jdwp.get_methods (activity_class.type_id, cancellable);
 				foreach (var method in activity_methods) {
 					printerr ("\t%s\n", method.to_string ());
 					if (method.name == "onCreate") {
-						var id = yield session.add_event_request (BREAKPOINT, JDWP.SuspendPolicy.EVENT_THREAD, new JDWP.EventModifier[] {
+						var id = yield jdwp.set_event_request (BREAKPOINT, JDWP.SuspendPolicy.EVENT_THREAD, new JDWP.EventModifier[] {
 							new JDWP.LocationOnlyModifier (CLASS, activity_class.type_id, method.id),
 						});
 						printerr ("\t\tPut breapoint with ID: %s\n", id.to_string ());
@@ -3066,9 +3066,9 @@ namespace Frida.HostSessionTest {
 				}
 
 				/*
-				var runtime_class = yield session.get_class_by_signature ("Ljava/lang/Runtime;", cancellable);
+				var runtime_class = yield jdwp.get_class_by_signature ("Ljava/lang/Runtime;", cancellable);
 				printerr ("java.lang.Runtime: %s\n", runtime_class.to_string ());
-				var runtime_methods = yield session.get_methods (runtime_class.type_id, cancellable);
+				var runtime_methods = yield jdwp.get_methods (runtime_class.type_id, cancellable);
 				foreach (var method in runtime_methods) {
 					printerr ("\t%s\n", method.to_string ());
 				}
