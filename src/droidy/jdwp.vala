@@ -67,7 +67,8 @@ namespace Frida.JDWP {
 			}
 		}
 
-		public async Gee.List<ClassEntry> get_classes_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
+		public async Gee.List<ClassEntry> get_classes_by_signature (string signature, Cancellable? cancellable = null)
+				throws Error, IOError {
 			var command = make_command (VM, VMCommand.CLASSES_BY_SIGNATURE);
 			command.append_string (signature);
 			var reply = yield perform_command (command, cancellable);
