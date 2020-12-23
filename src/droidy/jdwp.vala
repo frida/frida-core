@@ -95,6 +95,19 @@ namespace Frida.JDWP {
 			return result;
 		}
 
+		public async EventRequestID add_event_request (EventKind kind, SuspendPolicy suspend_policy, EventModifier[] modifiers,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var command = make_command (EVENT_REQUEST, EventRequestCommand.SET);
+			command
+				.append_uint8 (kind)
+				.append_uint8 (suspend_policy)
+				.append_int32 (modifiers.length);
+			foreach (var modifier in modifiers)
+				modifier.serialize (command);
+			var reply = yield perform_command (command, cancellable);
+			return EventRequestID (reply.read_int32 ());
+		}
+
 		private async void handshake (Cancellable? cancellable) throws Error, IOError {
 			try {
 				size_t n;
@@ -176,9 +189,9 @@ namespace Frida.JDWP {
 	}
 
 	public enum TypeTag {
-		CLASS = 1,
+		CLASS     = 1,
 		INTERFACE = 2,
-		ARRAY = 3;
+		ARRAY     = 3;
 
 		public string to_short_string () {
 			return Marshal.enum_to_nick<TypeTag> (this).up ();
@@ -230,7 +243,7 @@ namespace Frida.JDWP {
 	}
 
 	public class MethodInfo : Object {
-		public MethodID method_id {
+		public MethodID id {
 			get;
 			construct;
 		}
@@ -250,9 +263,9 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public MethodInfo (MethodID method_id, string name, string signature, int32 mod_bits) {
+		public MethodInfo (MethodID id, string name, string signature, int32 mod_bits) {
 			Object (
-				method_id: method_id,
+				id: id,
 				name: name,
 				signature: signature,
 				mod_bits: mod_bits
@@ -260,8 +273,8 @@ namespace Frida.JDWP {
 		}
 
 		public string to_string () {
-			return "MethodInfo(method_id: %s, name: \"%s\", signature: \"%s\", mod_bits: 0x%08x)".printf (
-				method_id.to_string (),
+			return "MethodInfo(id: %s, name: \"%s\", signature: \"%s\", mod_bits: 0x%08x)".printf (
+				id.to_string (),
 				name,
 				signature,
 				mod_bits);
@@ -298,18 +311,112 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public enum EventKind {
+		SINGLE_STEP                   = 1,
+		BREAKPOINT                    = 2,
+		FRAME_POP                     = 3,
+		EXCEPTION                     = 4,
+		USER_DEFINED                  = 5,
+		THREAD_START                  = 6,
+		THREAD_DEATH                  = 7,
+		CLASS_PREPARE                 = 8,
+		CLASS_UNLOAD                  = 9,
+		CLASS_LOAD                    = 10,
+		FIELD_ACCESS                  = 20,
+		FIELD_MODIFICATION            = 21,
+		EXCEPTION_CATCH               = 30,
+		METHOD_ENTRY                  = 40,
+		METHOD_EXIT                   = 41,
+		METHOD_EXIT_WITH_RETURN_VALUE = 42,
+		MONITOR_CONTENDED_ENTER       = 43,
+		MONITOR_CONTENDED_ENTERED     = 44,
+		MONITOR_WAIT                  = 45,
+		MONITOR_WAITED                = 46,
+		VM_START                      = 90,
+		VM_DEATH                      = 99,
+	}
+
+	public enum SuspendPolicy {
+		NONE         = 0,
+		EVENT_THREAD = 1,
+		ALL          = 2,
+	}
+
+	public abstract class EventModifier : Object {
+		internal abstract void serialize (CommandBuilder builder);
+	}
+
+	public class LocationOnlyModifier : EventModifier {
+		public TypeTag type_tag {
+			get;
+			construct;
+		}
+
+		public ReferenceTypeID type_id {
+			get;
+			construct;
+		}
+
+		public MethodID method_id {
+			get;
+			construct;
+		}
+
+		public uint64 index {
+			get;
+			construct;
+		}
+
+		public LocationOnlyModifier (TypeTag type_tag, ReferenceTypeID type_id, MethodID method_id, uint64 index = 0) {
+			Object (
+				type_tag: type_tag,
+				type_id: type_id,
+				method_id: method_id,
+				index: index
+			);
+		}
+
+		internal override void serialize (CommandBuilder builder) {
+			builder
+				.append_uint8 (type_tag)
+				.append_reference_type_id (type_id)
+				.append_method_id (method_id)
+				.append_uint64 (index);
+		}
+	}
+
+	public struct EventRequestID {
+		public int32 handle {
+			get;
+			private set;
+		}
+
+		public EventRequestID (int32 handle) {
+			this.handle = handle;
+		}
+
+		public string to_string () {
+			return handle.to_string ();
+		}
+	}
+
 	private enum CommandSet {
-		VM = 1,
+		VM             = 1,
 		REFERENCE_TYPE = 2,
+		EVENT_REQUEST  = 15,
 	}
 
 	private enum VMCommand {
 		CLASSES_BY_SIGNATURE = 2,
-		ID_SIZES = 7,
+		ID_SIZES             = 7,
 	}
 
 	private enum ReferenceTypeCommand {
 		METHODS = 5,
+	}
+
+	private enum EventRequestCommand {
+		SET = 1,
 	}
 
 	private class CommandBuilder {
@@ -369,6 +476,12 @@ namespace Frida.JDWP {
 			return this;
 		}
 
+		public unowned CommandBuilder append_uint64 (uint64 val) {
+			*((uint64 *) get_pointer (cursor, sizeof (uint64))) = val.to_big_endian ();
+			cursor += (uint) sizeof (uint64);
+			return this;
+		}
+
 		public unowned CommandBuilder append_utf8_string (string str) {
 			append_uint32 (str.length);
 
@@ -387,6 +500,16 @@ namespace Frida.JDWP {
 				assert_not_reached ();
 			}
 			return append_handle (type_id.handle, size);
+		}
+
+		public unowned CommandBuilder append_method_id (MethodID method_id) {
+			size_t size;
+			try {
+				size = id_sizes.get_method_id_size ();
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+			return append_handle (method_id.handle, size);
 		}
 
 		private unowned CommandBuilder append_handle (int64 val, size_t size) {
@@ -490,25 +613,6 @@ namespace Frida.JDWP {
 			return val;
 		}
 
-		public uint64 read_uint64 () throws Error {
-			const size_t n = sizeof (uint64);
-			check_available (n);
-
-			uint64 val = uint64.from_big_endian (*((uint64 *) cursor));
-			cursor += n;
-
-			return val;
-		}
-
-		public unowned uint8[] read_byte_array (size_t n) throws Error {
-			check_available (n);
-
-			unowned uint8[] arr = ((uint8[]) cursor)[0:n];
-			cursor += n;
-
-			return arr;
-		}
-
 		public string read_utf8_string () throws Error {
 			size_t size = read_uint32 ();
 			check_available (size);
@@ -518,25 +622,6 @@ namespace Frida.JDWP {
 			cursor += size;
 
 			return str;
-		}
-
-		public string read_utf16_string () throws Error {
-			size_t length = read_uint32 ();
-			size_t size = length * sizeof (uint16);
-
-			unowned uint8[] str_bytes = read_byte_array (size);
-			var str_words = new uint16[length];
-			for (uint i = 0; i != length; i++) {
-				str_words[i] = uint16.from_big_endian (*((uint16 *) ((uint8 *) str_bytes + (i * sizeof (uint16)))));
-			}
-
-			unowned string16 str_utf16 = (string16) str_words;
-
-			try {
-				return str_utf16.to_utf8 ((long) length);
-			} catch (ConvertError e) {
-				throw new Error.PROTOCOL ("%s", e.message);
-			}
 		}
 
 		public ReferenceTypeID read_reference_type_id () throws Error {
