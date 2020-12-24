@@ -856,12 +856,12 @@ namespace Frida.JDWP {
 
 			foreach (var event in items) {
 				result
-					.append ("\t\t")
+					.append_c ('\t')
 					.append (event.to_string ())
 					.append_c ('\n');
 			}
 
-			result.append ("\t)");
+			result.append_c (')');
 
 			return result.str;
 		}
