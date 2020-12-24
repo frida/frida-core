@@ -3044,8 +3044,6 @@ namespace Frida.HostSessionTest {
 
 				yield tracker.close (cancellable);
 
-				printerr ("Yay, now we need to do something with PID %u\n", target_pid);
-
 				var c = yield Frida.Droidy.Client.open (cancellable);
 				yield c.request ("host:transport:" + device_serial, cancellable);
 				yield c.request_protocol_change ("jdwp:%u".printf (target_pid), cancellable);
