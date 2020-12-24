@@ -3056,8 +3056,8 @@ namespace Frida.HostSessionTest {
 				printerr ("android.app.Activity: %s\n", activity_class.to_string ());
 				var activity_methods = yield jdwp.get_methods (activity_class.id, cancellable);
 				foreach (var method in activity_methods) {
-					printerr ("\t%s\n", method.to_string ());
 					if (method.name == "onCreate") {
+						printerr ("\t%s\n", method.to_string ());
 						var id = yield jdwp.set_event_request (BREAKPOINT, JDWP.SuspendPolicy.EVENT_THREAD,
 							new JDWP.EventModifier[] {
 								new JDWP.LocationOnlyModifier (CLASS, activity_class.id, method.id),

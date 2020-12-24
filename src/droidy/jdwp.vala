@@ -776,6 +776,14 @@ namespace Frida.JDWP {
 			);
 		}
 
+		public string to_string () {
+			return "Location(tag: %s, declaring: %s, method: %s, index: %s)".printf (
+				tag.to_short_string (),
+				declaring.to_string (),
+				method.to_string (),
+				index.to_string ());
+		}
+
 		internal void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (tag)
@@ -844,7 +852,18 @@ namespace Frida.JDWP {
 		}
 
 		public string to_string () {
-			return "Events(items.size: %d)".printf (items.size);
+			var result = new StringBuilder ("Events(\n");
+
+			foreach (var event in items) {
+				result
+					.append ("\t\t")
+					.append (event.to_string ())
+					.append_c ('\n');
+			}
+
+			result.append ("\t)");
+
+			return result.str;
 		}
 	}
 
@@ -854,9 +873,7 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public string to_string () {
-			return "Event()";
-		}
+		public abstract string to_string ();
 	}
 
 	public class BreakpointEvent : Event {
@@ -882,6 +899,13 @@ namespace Frida.JDWP {
 				thread: thread,
 				location: location
 			);
+		}
+
+		public override string to_string () {
+			return "BreakpointEvent(request_id: %s, thread: %s, location: %s)".printf (
+				request_id.to_string (),
+				thread.to_string (),
+				location.to_string ());
 		}
 
 		internal static BreakpointEvent deserialize (PacketReader packet) throws Error {
