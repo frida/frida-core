@@ -3054,13 +3054,13 @@ namespace Frida.HostSessionTest {
 
 				var activity_class = yield jdwp.get_class_by_signature ("Landroid/app/Activity;", cancellable);
 				printerr ("android.app.Activity: %s\n", activity_class.to_string ());
-				var activity_methods = yield jdwp.get_methods (activity_class.type_id, cancellable);
+				var activity_methods = yield jdwp.get_methods (activity_class.id, cancellable);
 				foreach (var method in activity_methods) {
 					printerr ("\t%s\n", method.to_string ());
 					if (method.name == "onCreate") {
 						var id = yield jdwp.set_event_request (BREAKPOINT, JDWP.SuspendPolicy.EVENT_THREAD,
 							new JDWP.EventModifier[] {
-								new JDWP.LocationOnlyModifier (CLASS, activity_class.type_id, method.id),
+								new JDWP.LocationOnlyModifier (CLASS, activity_class.id, method.id),
 							});
 						printerr ("\t\tAdded breakpoint with ID: %s\n", id.to_string ());
 					}

@@ -116,31 +116,22 @@ namespace Frida.JDWP {
 
 			var result = new Gee.ArrayList<ClassInfo> ();
 			int32 n = reply.read_int32 ();
-			for (int32 i = 0; i != n; i++) {
-				TypeTag kind = (TypeTag) reply.read_uint8 ();
-				ReferenceTypeID type_id = reply.read_reference_type_id ();
-				ClassStatus status = (ClassStatus) reply.read_int32 ();
-				result.add (new ClassInfo (kind, type_id, status));
-			}
+			for (int32 i = 0; i != n; i++)
+				result.add (ClassInfo.deserialize (reply));
 			return result;
 		}
 
-		public async Gee.List<MethodInfo> get_methods (ReferenceTypeID type_id, Cancellable? cancellable = null)
+		public async Gee.List<MethodInfo> get_methods (ReferenceTypeID type, Cancellable? cancellable = null)
 				throws Error, IOError {
 			var command = make_command (REFERENCE_TYPE, ReferenceTypeCommand.METHODS);
-			command.append_reference_type_id (type_id);
+			command.append_reference_type_id (type);
 
 			var reply = yield execute (command, cancellable);
 
 			var result = new Gee.ArrayList<MethodInfo> ();
 			int32 n = reply.read_int32 ();
-			for (int32 i = 0; i != n; i++) {
-				MethodID method_id = reply.read_method_id ();
-				string name = reply.read_utf8_string ();
-				string signature = reply.read_utf8_string ();
-				int32 mod_bits = reply.read_int32 ();
-				result.add (new MethodInfo (method_id, name, signature, mod_bits));
-			}
+			for (int32 i = 0; i != n; i++)
+				result.add (MethodInfo.deserialize (reply));
 			return result;
 		}
 
@@ -335,7 +326,7 @@ namespace Frida.JDWP {
 						event = parse_single_step (packet);
 						break;
 					case BREAKPOINT:
-						event = parse_breakpoint (packet);
+						event = BreakpointEvent.deserialize (packet);
 						break;
 					case FRAME_POP:
 						event = parse_frame_pop (packet);
@@ -410,10 +401,6 @@ namespace Frida.JDWP {
 
 		private Event parse_single_step (PacketReader packet) throws Error {
 			throw new Error.NOT_SUPPORTED ("SINGLE_STEP event not yet handled");
-		}
-
-		private Event parse_breakpoint (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("BREAKPOINT event not yet handled");
 		}
 
 		private Event parse_frame_pop (PacketReader packet) throws Error {
@@ -587,12 +574,12 @@ namespace Frida.JDWP {
 	}
 
 	public class ClassInfo : Object {
-		public TypeTag ref_type_tag {
+		public TypeTag tag {
 			get;
 			construct;
 		}
 
-		public ReferenceTypeID type_id {
+		public ReferenceTypeID id {
 			get;
 			construct;
 		}
@@ -602,19 +589,26 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public ClassInfo (TypeTag ref_type_tag, ReferenceTypeID type_id, ClassStatus status) {
+		public ClassInfo (TypeTag tag, ReferenceTypeID id, ClassStatus status) {
 			Object (
-				ref_type_tag: ref_type_tag,
-				type_id: type_id,
+				tag: tag,
+				id: id,
 				status: status
 			);
 		}
 
 		public string to_string () {
-			return "ClassInfo(ref_type_tag: %s, type_id: %s, status: %s)".printf (
-				ref_type_tag.to_short_string (),
-				type_id.to_string (),
+			return "ClassInfo(tag: %s, id: %s, status: %s)".printf (
+				tag.to_short_string (),
+				id.to_string (),
 				status.to_short_string ());
+		}
+
+		internal static ClassInfo deserialize (PacketReader packet) throws Error {
+			var tag = (TypeTag) packet.read_uint8 ();
+			var id = packet.read_reference_type_id ();
+			var status = (ClassStatus) packet.read_int32 ();
+			return new ClassInfo (tag, id, status);
 		}
 	}
 
@@ -666,6 +660,14 @@ namespace Frida.JDWP {
 				name,
 				signature,
 				mod_bits);
+		}
+
+		internal static MethodInfo deserialize (PacketReader packet) throws Error {
+			var id = packet.read_method_id ();
+			var name = packet.read_utf8_string ();
+			var signature = packet.read_utf8_string ();
+			var mod_bits = packet.read_int32 ();
+			return new MethodInfo (id, name, signature, mod_bits);
 		}
 	}
 
@@ -744,6 +746,53 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public class Location : Object {
+		public TypeTag tag {
+			get;
+			construct;
+		}
+
+		public ReferenceTypeID declaring {
+			get;
+			construct;
+		}
+
+		public MethodID method {
+			get;
+			construct;
+		}
+
+		public uint64 index {
+			get;
+			construct;
+		}
+
+		public Location (TypeTag tag, ReferenceTypeID declaring, MethodID method, uint64 index = 0) {
+			Object (
+				tag: tag,
+				declaring: declaring,
+				method: method,
+				index: index
+			);
+		}
+
+		internal void serialize (PacketBuilder builder) {
+			builder
+				.append_uint8 (tag)
+				.append_reference_type_id (declaring)
+				.append_method_id (method)
+				.append_uint64 (index);
+		}
+
+		internal static Location deserialize (PacketReader packet) throws Error {
+			var tag = (TypeTag) packet.read_uint8 ();
+			var declaring = packet.read_reference_type_id ();
+			var method = packet.read_method_id ();
+			var index = packet.read_uint64 ();
+			return new Location (tag, declaring, method, index);
+		}
+	}
+
 	public enum EventKind {
 		SINGLE_STEP                   = 1,
 		BREAKPOINT                    = 2,
@@ -800,13 +849,51 @@ namespace Frida.JDWP {
 	}
 
 	public abstract class Event : Object {
+		public EventKind kind {
+			get;
+			construct;
+		}
+
 		public string to_string () {
 			return "Event()";
 		}
 	}
 
+	public class BreakpointEvent : Event {
+		public EventRequestID request_id {
+			get;
+			construct;
+		}
+
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public Location location {
+			get;
+			construct;
+		}
+
+		public BreakpointEvent (EventRequestID request_id, ThreadID thread, Location location) {
+			Object (
+				kind: EventKind.BREAKPOINT,
+				request_id: request_id,
+				thread: thread,
+				location: location
+			);
+		}
+
+		internal static BreakpointEvent deserialize (PacketReader packet) throws Error {
+			var request_id = EventRequestID (packet.read_int32 ());
+			var thread_id = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			return new BreakpointEvent (request_id, thread_id, location);
+		}
+	}
+
 	public abstract class EventModifier : Object {
-		internal abstract void serialize (CommandBuilder builder);
+		internal abstract void serialize (PacketBuilder builder);
 	}
 
 	public class CountModifier : EventModifier {
@@ -819,7 +906,7 @@ namespace Frida.JDWP {
 			Object (count: count);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.COUNT)
 				.append_int32 (count);
@@ -836,7 +923,7 @@ namespace Frida.JDWP {
 			Object (thread: thread);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.THREAD_ONLY)
 				.append_thread_id (thread);
@@ -853,7 +940,7 @@ namespace Frida.JDWP {
 			Object (clazz: clazz);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.CLASS_ONLY)
 				.append_reference_type_id (clazz);
@@ -870,7 +957,7 @@ namespace Frida.JDWP {
 			Object (class_pattern: class_pattern);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.CLASS_MATCH)
 				.append_utf8_string (class_pattern);
@@ -887,7 +974,7 @@ namespace Frida.JDWP {
 			Object (class_pattern: class_pattern);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.CLASS_EXCLUDE)
 				.append_utf8_string (class_pattern);
@@ -895,42 +982,18 @@ namespace Frida.JDWP {
 	}
 
 	public class LocationOnlyModifier : EventModifier {
-		public TypeTag tag {
+		public Location location {
 			get;
 			construct;
 		}
 
-		public ReferenceTypeID rtype {
-			get;
-			construct;
+		public LocationOnlyModifier (TypeTag tag, ReferenceTypeID declaring, MethodID method, uint64 index = 0) {
+			Object (location: new Location (tag, declaring, method, index));
 		}
 
-		public MethodID method {
-			get;
-			construct;
-		}
-
-		public uint64 index {
-			get;
-			construct;
-		}
-
-		public LocationOnlyModifier (TypeTag tag, ReferenceTypeID rtype, MethodID method, uint64 index = 0) {
-			Object (
-				tag: tag,
-				rtype: rtype,
-				method: method,
-				index: index
-			);
-		}
-
-		internal override void serialize (CommandBuilder builder) {
-			builder
-				.append_uint8 (EventModifierKind.LOCATION_ONLY)
-				.append_uint8 (tag)
-				.append_reference_type_id (rtype)
-				.append_method_id (method)
-				.append_uint64 (index);
+		internal override void serialize (PacketBuilder builder) {
+			builder.append_uint8 (EventModifierKind.LOCATION_ONLY);
+			location.serialize (builder);
 		}
 	}
 
@@ -958,7 +1021,7 @@ namespace Frida.JDWP {
 			);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.EXCEPTION_ONLY)
 				.append_reference_type_id (exception_or_null)
@@ -985,7 +1048,7 @@ namespace Frida.JDWP {
 			);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.FIELD_ONLY)
 				.append_reference_type_id (declaring)
@@ -1017,7 +1080,7 @@ namespace Frida.JDWP {
 			);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.STEP)
 				.append_thread_id (thread)
@@ -1047,7 +1110,7 @@ namespace Frida.JDWP {
 			Object (instance: instance);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.INSTANCE_ONLY)
 				.append_object_id (instance);
@@ -1064,7 +1127,7 @@ namespace Frida.JDWP {
 			Object (source_name_pattern: source_name_pattern);
 		}
 
-		internal override void serialize (CommandBuilder builder) {
+		internal override void serialize (PacketBuilder builder) {
 			builder
 				.append_uint8 (EventModifierKind.SOURCE_NAME_MATCH)
 				.append_utf8_string (source_name_pattern);
@@ -1334,6 +1397,16 @@ namespace Frida.JDWP {
 			return val;
 		}
 
+		public uint64 read_uint64 () throws Error {
+			const size_t n = sizeof (uint64);
+			check_available (n);
+
+			uint64 val = uint64.from_big_endian (*((uint64 *) cursor));
+			cursor += n;
+
+			return val;
+		}
+
 		public string read_utf8_string () throws Error {
 			size_t size = read_uint32 ();
 			check_available (size);
@@ -1343,6 +1416,10 @@ namespace Frida.JDWP {
 			cursor += size;
 
 			return str;
+		}
+
+		public ThreadID read_thread_id () throws Error {
+			return ThreadID (read_handle (id_sizes.get_object_id_size ()));
 		}
 
 		public ReferenceTypeID read_reference_type_id () throws Error {
