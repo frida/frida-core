@@ -3058,12 +3058,24 @@ namespace Frida.HostSessionTest {
 				foreach (var method in activity_methods) {
 					printerr ("\t%s\n", method.to_string ());
 					if (method.name == "onCreate") {
-						var id = yield jdwp.set_event_request (BREAKPOINT, JDWP.SuspendPolicy.EVENT_THREAD, new JDWP.EventModifier[] {
-							new JDWP.LocationOnlyModifier (CLASS, activity_class.type_id, method.id),
-						});
-						printerr ("\t\tPut breapoint with ID: %s\n", id.to_string ());
+						var id = yield jdwp.set_event_request (BREAKPOINT, JDWP.SuspendPolicy.EVENT_THREAD,
+							new JDWP.EventModifier[] {
+								new JDWP.LocationOnlyModifier (CLASS, activity_class.type_id, method.id),
+							});
+						printerr ("\t\tAdded breakpoint with ID: %s\n", id.to_string ());
 					}
 				}
+
+				jdwp.events_received.connect (events => {
+					printerr ("Got events: %s\n", events.to_string ());
+				});
+
+				yield jdwp.resume (cancellable);
+
+				Timeout.add (5000, client.callback);
+				printerr ("Waiting 5 seconds...\n");
+				yield;
+				printerr ("Waited 5 seconds...\n");
 
 				/*
 				var runtime_class = yield jdwp.get_class_by_signature ("Ljava/lang/Runtime;", cancellable);

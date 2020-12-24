@@ -1,6 +1,7 @@
 namespace Frida.JDWP {
 	public class Client : Object, AsyncInitable {
 		public signal void closed ();
+		public signal void events_received (Events events);
 
 		public IOStream stream {
 			get;
@@ -20,7 +21,6 @@ namespace Frida.JDWP {
 		private State _state = CREATED;
 		private uint32 next_id = 1;
 		private IDSizes id_sizes = new IDSizes.unknown ();
-		private Gee.ArrayList<StopObserverEntry> on_stop = new Gee.ArrayList<StopObserverEntry> ();
 		private Gee.ArrayQueue<Bytes> pending_writes = new Gee.ArrayQueue<Bytes> ();
 		private Gee.Map<uint32, PendingReply> pending_replies = new Gee.HashMap<uint32, PendingReply> ();
 
@@ -30,7 +30,6 @@ namespace Frida.JDWP {
 			CLOSED
 		}
 
-		private const string HANDSHAKE = "JDWP-Handshake";
 		private const uint32 MAX_PACKET_SIZE = 10 * 1024 * 1024;
 
 		public static async Client open (IOStream stream, Cancellable? cancellable = null) throws Error, IOError {
@@ -89,6 +88,14 @@ namespace Frida.JDWP {
 				yield stream.close_async (Priority.DEFAULT, cancellable);
 			} catch (IOError e) {
 			}
+		}
+
+		public async void suspend (Cancellable? cancellable = null) throws Error, IOError {
+			yield execute (make_command (VM, VMCommand.SUSPEND), cancellable);
+		}
+
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+			yield execute (make_command (VM, VMCommand.RESUME), cancellable);
 		}
 
 		public async ClassInfo get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
@@ -172,10 +179,12 @@ namespace Frida.JDWP {
 			try {
 				size_t n;
 
-				unowned uint8[] raw_handshake = HANDSHAKE.data;
+				string magic = "JDWP-Handshake";
+
+				unowned uint8[] raw_handshake = magic.data;
 				yield output.write_all_async (raw_handshake, Priority.DEFAULT, cancellable, out n);
 
-				var raw_reply = new uint8[HANDSHAKE.length];
+				var raw_reply = new uint8[magic.length];
 				yield input.read_all_async (raw_reply, Priority.DEFAULT, cancellable, out n);
 
 				if (Memory.cmp (raw_reply, raw_handshake, raw_reply.length) != 0)
@@ -238,14 +247,13 @@ namespace Frida.JDWP {
 
 					dispatch_packet (packet);
 				} catch (GLib.Error error) {
+					printerr ("!!! Oops: %s\n", error.message);
+
 					change_state (CLOSED);
 
 					foreach (var pending in pending_replies.values)
 						pending.complete_with_error (error);
 					pending_replies.clear ();
-
-					foreach (var observer in on_stop.to_array ())
-						observer.func ();
 
 					closed ();
 
@@ -271,18 +279,225 @@ namespace Frida.JDWP {
 
 		private void dispatch_packet (PacketReader packet) throws Error {
 			packet.skip (sizeof (uint32));
-			uint32 id = packet.read_uint32 ();
-			packet.skip (sizeof (uint8));
+			var id = packet.read_uint32 ();
+			var flags = (PacketFlags) packet.read_uint8 ();
 
-			PendingReply? pending = pending_replies[id];
-			if (pending != null) {
-				var error_code = packet.read_uint16 ();
+			if ((flags & PacketFlags.REPLY) != 0)
+				handle_reply (packet, id);
+			else
+				handle_command (packet, id);
+		}
 
-				if (error_code == 0)
-					pending.complete_with_reply (packet);
-				else
-					pending.complete_with_error (new Error.NOT_SUPPORTED ("Command failed: %u", error_code));
+		private void handle_reply (PacketReader packet, uint32 id) throws Error {
+			PendingReply? pending;
+			if (!pending_replies.unset (id, out pending))
+				return;
+
+			var error_code = packet.read_uint16 ();
+			if (error_code == 0)
+				pending.complete_with_reply (packet);
+			else
+				pending.complete_with_error (new Error.NOT_SUPPORTED ("Command failed: %u", error_code));
+		}
+
+		private void handle_command (PacketReader packet, uint32 id) throws Error {
+			var command_set = (CommandSet) packet.read_uint8 ();
+			var command = packet.read_uint8 ();
+			switch (command_set) {
+				case EVENT:
+					handle_event ((EventCommand) command, packet);
+					break;
+				default:
+					break;
 			}
+		}
+
+		private void handle_event (EventCommand command, PacketReader packet) throws Error {
+			switch (command) {
+				case COMPOSITE:
+					handle_event_composite (packet);
+					break;
+				default:
+					break;
+			}
+		}
+
+		private void handle_event_composite (PacketReader packet) throws Error {
+			var suspend_policy = (SuspendPolicy) packet.read_uint8 ();
+
+			var items = new Gee.ArrayList<Event> ();
+			int32 n = packet.read_int32 ();
+			for (int32 i = 0; i != n; i++) {
+				Event? event = null;
+				var kind = (EventKind) packet.read_uint8 ();
+				switch (kind) {
+					case SINGLE_STEP:
+						event = parse_single_step (packet);
+						break;
+					case BREAKPOINT:
+						event = parse_breakpoint (packet);
+						break;
+					case FRAME_POP:
+						event = parse_frame_pop (packet);
+						break;
+					case EXCEPTION:
+						event = parse_exception (packet);
+						break;
+					case USER_DEFINED:
+						event = parse_user_defined (packet);
+						break;
+					case THREAD_START:
+						event = parse_thread_start (packet);
+						break;
+					case THREAD_DEATH:
+						event = parse_thread_death (packet);
+						break;
+					case CLASS_PREPARE:
+						event = parse_class_prepare (packet);
+						break;
+					case CLASS_UNLOAD:
+						event = parse_class_unload (packet);
+						break;
+					case CLASS_LOAD:
+						event = parse_class_load (packet);
+						break;
+					case FIELD_ACCESS:
+						event = parse_field_access (packet);
+						break;
+					case FIELD_MODIFICATION:
+						event = parse_field_modification (packet);
+						break;
+					case EXCEPTION_CATCH:
+						event = parse_exception_catch (packet);
+						break;
+					case METHOD_ENTRY:
+						event = parse_method_entry (packet);
+						break;
+					case METHOD_EXIT:
+						event = parse_method_exit (packet);
+						break;
+					case METHOD_EXIT_WITH_RETURN_VALUE:
+						event = parse_method_exit_with_return_value (packet);
+						break;
+					case MONITOR_CONTENDED_ENTER:
+						event = parse_monitor_contended_enter (packet);
+						break;
+					case MONITOR_CONTENDED_ENTERED:
+						event = parse_monitor_contended_entered (packet);
+						break;
+					case MONITOR_WAIT:
+						event = parse_monitor_wait (packet);
+						break;
+					case MONITOR_WAITED:
+						event = parse_monitor_waited (packet);
+						break;
+					case VM_START:
+						event = parse_vm_start (packet);
+						break;
+					case VM_DEATH:
+						event = parse_vm_death (packet);
+						break;
+					case VM_DISCONNECTED:
+						event = parse_vm_disconnected (packet);
+						break;
+				}
+				if (event != null)
+					items.add (event);
+			}
+
+			events_received (new Events (suspend_policy, items));
+		}
+
+		private Event parse_single_step (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("SINGLE_STEP event not yet handled");
+		}
+
+		private Event parse_breakpoint (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("BREAKPOINT event not yet handled");
+		}
+
+		private Event parse_frame_pop (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("FRAME_POP event not yet handled");
+		}
+
+		private Event parse_exception (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("EXCEPTION event not yet handled");
+		}
+
+		private Event parse_user_defined (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("USER_DEFINED event not yet handled");
+		}
+
+		private Event parse_thread_start (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("THREAD_START event not yet handled");
+		}
+
+		private Event parse_thread_death (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("THREAD_DEATH event not yet handled");
+		}
+
+		private Event parse_class_prepare (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("CLASS_PREPARE event not yet handled");
+		}
+
+		private Event parse_class_unload (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("CLASS_UNLOAD event not yet handled");
+		}
+
+		private Event parse_class_load (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("CLASS_LOAD event not yet handled");
+		}
+
+		private Event parse_field_access (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("FIELD_ACCESS event not yet handled");
+		}
+
+		private Event parse_field_modification (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("FIELD_MODIFICATION event not yet handled");
+		}
+
+		private Event parse_exception_catch (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("EXCEPTION_CATCH event not yet handled");
+		}
+
+		private Event parse_method_entry (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("METHOD_ENTRY event not yet handled");
+		}
+
+		private Event parse_method_exit (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("METHOD_EXIT event not yet handled");
+		}
+
+		private Event parse_method_exit_with_return_value (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("METHOD_EXIT_WITH_RETURN_VALUE event not yet handled");
+		}
+
+		private Event parse_monitor_contended_enter (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTER event not yet handled");
+		}
+
+		private Event parse_monitor_contended_entered (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTERED event not yet handled");
+		}
+
+		private Event parse_monitor_wait (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_WAIT event not yet handled");
+		}
+
+		private Event parse_monitor_waited (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_WAITED event not yet handled");
+		}
+
+		private Event parse_vm_start (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("VM_START event not yet handled");
+		}
+
+		private Event parse_vm_death (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("VM_DEATH event not yet handled");
+		}
+
+		private Event parse_vm_disconnected (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("VM_DISCONNECTED event not yet handled");
 		}
 
 		private async PacketReader read_packet () throws Error, IOError {
@@ -324,14 +539,6 @@ namespace Frida.JDWP {
 				throw (IOError) e;
 
 			assert_not_reached ();
-		}
-
-		private class StopObserverEntry {
-			public SourceFunc? func;
-
-			public StopObserverEntry (owned SourceFunc func) {
-				this.func = (owned) func;
-			}
 		}
 
 		private class PendingReply {
@@ -560,12 +767,42 @@ namespace Frida.JDWP {
 		MONITOR_WAITED                = 46,
 		VM_START                      = 90,
 		VM_DEATH                      = 99,
+		VM_DISCONNECTED               = 100,
 	}
 
 	public enum SuspendPolicy {
 		NONE         = 0,
 		EVENT_THREAD = 1,
 		ALL          = 2,
+	}
+
+	public class Events : Object {
+		public SuspendPolicy suspend_policy {
+			get;
+			construct;
+		}
+
+		public Gee.List<Event> items {
+			get;
+			construct;
+		}
+
+		public Events (SuspendPolicy suspend_policy, Gee.List<Event> items) {
+			Object (
+				suspend_policy: suspend_policy,
+				items: items
+			);
+		}
+
+		public string to_string () {
+			return "Events(items.size: %d)".printf (items.size);
+		}
+	}
+
+	public abstract class Event : Object {
+		public string to_string () {
+			return "Event()";
+		}
 	}
 
 	public abstract class EventModifier : Object {
@@ -867,11 +1104,14 @@ namespace Frida.JDWP {
 		VM             = 1,
 		REFERENCE_TYPE = 2,
 		EVENT_REQUEST  = 15,
+		EVENT          = 64,
 	}
 
 	private enum VMCommand {
 		CLASSES_BY_SIGNATURE = 2,
 		ID_SIZES             = 7,
+		SUSPEND              = 8,
+		RESUME               = 9,
 	}
 
 	private enum ReferenceTypeCommand {
@@ -882,6 +1122,15 @@ namespace Frida.JDWP {
 		SET                   = 1,
 		CLEAR                 = 2,
 		CLEAR_ALL_BREAKPOINTS = 3,
+	}
+
+	private enum EventCommand {
+		COMPOSITE = 100,
+	}
+
+	[Flags]
+	private enum PacketFlags {
+		REPLY = (1 << 7),
 	}
 
 	private class CommandBuilder : PacketBuilder {
