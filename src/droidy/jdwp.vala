@@ -190,12 +190,7 @@ namespace Frida.JDWP {
 
 			var reply = yield execute (command, cancellable);
 
-			var field_id_size = reply.read_int32 ();
-			var method_id_size = reply.read_int32 ();
-			var object_id_size = reply.read_int32 ();
-			var reference_type_id_size = reply.read_int32 ();
-			var frame_id_size = reply.read_int32 ();
-			return new IDSizes (field_id_size, method_id_size, object_id_size, reference_type_id_size, frame_id_size);
+			return IDSizes.deserialize (reply);
 		}
 
 		private CommandBuilder make_command (CommandSet command_set, uint8 command) {
@@ -323,73 +318,73 @@ namespace Frida.JDWP {
 				var kind = (EventKind) packet.read_uint8 ();
 				switch (kind) {
 					case SINGLE_STEP:
-						event = parse_single_step (packet);
+						event = SingleStepEvent.deserialize (packet);
 						break;
 					case BREAKPOINT:
 						event = BreakpointEvent.deserialize (packet);
 						break;
 					case FRAME_POP:
-						event = parse_frame_pop (packet);
+						event = FramePopEvent.deserialize (packet);
 						break;
 					case EXCEPTION:
-						event = parse_exception (packet);
+						event = ExceptionEvent.deserialize (packet);
 						break;
 					case USER_DEFINED:
-						event = parse_user_defined (packet);
+						event = UserDefinedEvent.deserialize (packet);
 						break;
 					case THREAD_START:
-						event = parse_thread_start (packet);
+						event = ThreadStartEvent.deserialize (packet);
 						break;
 					case THREAD_DEATH:
-						event = parse_thread_death (packet);
+						event = ThreadDeathEvent.deserialize (packet);
 						break;
 					case CLASS_PREPARE:
-						event = parse_class_prepare (packet);
+						event = ClassPrepareEvent.deserialize (packet);
 						break;
 					case CLASS_UNLOAD:
-						event = parse_class_unload (packet);
+						event = ClassUnloadEvent.deserialize (packet);
 						break;
 					case CLASS_LOAD:
-						event = parse_class_load (packet);
+						event = ClassLoadEvent.deserialize (packet);
 						break;
 					case FIELD_ACCESS:
-						event = parse_field_access (packet);
+						event = FieldAccessEvent.deserialize (packet);
 						break;
 					case FIELD_MODIFICATION:
-						event = parse_field_modification (packet);
+						event = FieldModificationEvent.deserialize (packet);
 						break;
 					case EXCEPTION_CATCH:
-						event = parse_exception_catch (packet);
+						event = ExceptionCatchEvent.deserialize (packet);
 						break;
 					case METHOD_ENTRY:
-						event = parse_method_entry (packet);
+						event = MethodEntryEvent.deserialize (packet);
 						break;
 					case METHOD_EXIT:
-						event = parse_method_exit (packet);
+						event = MethodExitEvent.deserialize (packet);
 						break;
 					case METHOD_EXIT_WITH_RETURN_VALUE:
-						event = parse_method_exit_with_return_value (packet);
+						event = MethodExitWithReturnValueEvent.deserialize (packet);
 						break;
 					case MONITOR_CONTENDED_ENTER:
-						event = parse_monitor_contended_enter (packet);
+						event = MonitorContendedEnterEvent.deserialize (packet);
 						break;
 					case MONITOR_CONTENDED_ENTERED:
-						event = parse_monitor_contended_entered (packet);
+						event = MonitorContendedEnteredEvent.deserialize (packet);
 						break;
 					case MONITOR_WAIT:
-						event = parse_monitor_wait (packet);
+						event = MonitorWaitEvent.deserialize (packet);
 						break;
 					case MONITOR_WAITED:
-						event = parse_monitor_waited (packet);
+						event = MonitorWaitedEvent.deserialize (packet);
 						break;
 					case VM_START:
-						event = parse_vm_start (packet);
+						event = VMStartEvent.deserialize (packet);
 						break;
 					case VM_DEATH:
-						event = parse_vm_death (packet);
+						event = VMDeathEvent.deserialize (packet);
 						break;
 					case VM_DISCONNECTED:
-						event = parse_vm_disconnected (packet);
+						event = VMDisconnectedEvent.deserialize (packet);
 						break;
 				}
 				if (event != null)
@@ -397,94 +392,6 @@ namespace Frida.JDWP {
 			}
 
 			events_received (new Events (suspend_policy, items));
-		}
-
-		private Event parse_single_step (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("SINGLE_STEP event not yet handled");
-		}
-
-		private Event parse_frame_pop (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("FRAME_POP event not yet handled");
-		}
-
-		private Event parse_exception (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("EXCEPTION event not yet handled");
-		}
-
-		private Event parse_user_defined (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("USER_DEFINED event not yet handled");
-		}
-
-		private Event parse_thread_start (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("THREAD_START event not yet handled");
-		}
-
-		private Event parse_thread_death (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("THREAD_DEATH event not yet handled");
-		}
-
-		private Event parse_class_prepare (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("CLASS_PREPARE event not yet handled");
-		}
-
-		private Event parse_class_unload (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("CLASS_UNLOAD event not yet handled");
-		}
-
-		private Event parse_class_load (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("CLASS_LOAD event not yet handled");
-		}
-
-		private Event parse_field_access (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("FIELD_ACCESS event not yet handled");
-		}
-
-		private Event parse_field_modification (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("FIELD_MODIFICATION event not yet handled");
-		}
-
-		private Event parse_exception_catch (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("EXCEPTION_CATCH event not yet handled");
-		}
-
-		private Event parse_method_entry (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("METHOD_ENTRY event not yet handled");
-		}
-
-		private Event parse_method_exit (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("METHOD_EXIT event not yet handled");
-		}
-
-		private Event parse_method_exit_with_return_value (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("METHOD_EXIT_WITH_RETURN_VALUE event not yet handled");
-		}
-
-		private Event parse_monitor_contended_enter (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTER event not yet handled");
-		}
-
-		private Event parse_monitor_contended_entered (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTERED event not yet handled");
-		}
-
-		private Event parse_monitor_wait (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_WAIT event not yet handled");
-		}
-
-		private Event parse_monitor_waited (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_WAITED event not yet handled");
-		}
-
-		private Event parse_vm_start (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("VM_START event not yet handled");
-		}
-
-		private Event parse_vm_death (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("VM_DEATH event not yet handled");
-		}
-
-		private Event parse_vm_disconnected (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("VM_DISCONNECTED event not yet handled");
 		}
 
 		private async PacketReader read_packet () throws Error, IOError {
@@ -686,6 +593,27 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public struct TaggedObjectID {
+		public TypeTag tag {
+			get;
+			private set;
+		}
+
+		public ObjectID object {
+			get;
+			private set;
+		}
+
+		public TaggedObjectID (TypeTag tag, ObjectID object) {
+			this.tag = tag;
+			this.object = object;
+		}
+
+		public string to_string () {
+			return "TaggedObjectID(tag: %s, object: %s)".printf (tag.to_short_string (), object.to_string ());
+		}
+	}
+
 	public struct ThreadID {
 		public int64 handle {
 			get;
@@ -876,8 +804,8 @@ namespace Frida.JDWP {
 		public abstract string to_string ();
 	}
 
-	public class BreakpointEvent : Event {
-		public EventRequestID request_id {
+	public class SingleStepEvent : Event {
+		public EventRequestID request {
 			get;
 			construct;
 		}
@@ -892,27 +820,324 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public BreakpointEvent (EventRequestID request_id, ThreadID thread, Location location) {
+		public SingleStepEvent (EventRequestID request, ThreadID thread, Location location) {
 			Object (
-				kind: EventKind.BREAKPOINT,
-				request_id: request_id,
+				kind: EventKind.SINGLE_STEP,
+				request: request,
 				thread: thread,
 				location: location
 			);
 		}
 
 		public override string to_string () {
-			return "BreakpointEvent(request_id: %s, thread: %s, location: %s)".printf (
-				request_id.to_string (),
+			return "SingleStepEvent(request: %s, thread: %s, location: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string ());
+		}
+
+		internal static SingleStepEvent deserialize (PacketReader packet) throws Error {
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			return new SingleStepEvent (request, thread, location);
+		}
+	}
+
+	public class BreakpointEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
+		}
+
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public Location location {
+			get;
+			construct;
+		}
+
+		public BreakpointEvent (EventRequestID request, ThreadID thread, Location location) {
+			Object (
+				kind: EventKind.BREAKPOINT,
+				request: request,
+				thread: thread,
+				location: location
+			);
+		}
+
+		public override string to_string () {
+			return "BreakpointEvent(request: %s, thread: %s, location: %s)".printf (
+				request.to_string (),
 				thread.to_string (),
 				location.to_string ());
 		}
 
 		internal static BreakpointEvent deserialize (PacketReader packet) throws Error {
-			var request_id = EventRequestID (packet.read_int32 ());
-			var thread_id = packet.read_thread_id ();
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
 			var location = Location.deserialize (packet);
-			return new BreakpointEvent (request_id, thread_id, location);
+			return new BreakpointEvent (request, thread, location);
+		}
+	}
+
+	public class FramePopEvent : Event {
+		public override string to_string () {
+			return "FramePopEvent()";
+		}
+
+		internal static FramePopEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("FRAME_POP event not supported");
+		}
+	}
+
+	public class ExceptionEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
+		}
+
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public Location location {
+			get;
+			construct;
+		}
+
+		public TaggedObjectID exception {
+			get;
+			construct;
+		}
+
+		public Location? catch_location {
+			get;
+			construct;
+		}
+
+		public ExceptionEvent (EventRequestID request, ThreadID thread, Location location, TaggedObjectID exception,
+				Location? catch_location) {
+			Object (
+				kind: EventKind.EXCEPTION,
+				request: request,
+				thread: thread,
+				location: location,
+				exception: exception,
+				catch_location: catch_location
+			);
+		}
+
+		public override string to_string () {
+			return "ExceptionEvent(request: %s, thread: %s, location: %s, exception: %s, catch_location: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string (),
+				exception.to_string (),
+				(catch_location != null) ? catch_location.to_string () : "null");
+		}
+
+		internal static ExceptionEvent deserialize (PacketReader packet) throws Error {
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			var exception = packet.read_tagged_object_id ();
+			var catch_location = Location.deserialize (packet);
+			return new ExceptionEvent (request, thread, location, exception, catch_location);
+		}
+	}
+
+	public class UserDefinedEvent : Event {
+		public override string to_string () {
+			return "UserDefinedEvent()";
+		}
+
+		internal static UserDefinedEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("USER_DEFINED event not supported");
+		}
+	}
+
+	public class ThreadStartEvent : Event {
+		public override string to_string () {
+			return "ThreadStartEvent()";
+		}
+
+		internal static ThreadStartEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("THREAD_START event not supported");
+		}
+	}
+
+	public class ThreadDeathEvent : Event {
+		public override string to_string () {
+			return "ThreadDeathEvent()";
+		}
+
+		internal static ThreadDeathEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("THREAD_DEATH event not supported");
+		}
+	}
+
+	public class ClassPrepareEvent : Event {
+		public override string to_string () {
+			return "ClassPrepareEvent()";
+		}
+
+		internal static ClassPrepareEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("CLASS_PREPARE event not supported");
+		}
+	}
+
+	public class ClassUnloadEvent : Event {
+		public override string to_string () {
+			return "ClassUnloadEvent()";
+		}
+
+		internal static ClassUnloadEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("CLASS_UNLOAD event not supported");
+		}
+	}
+
+	public class ClassLoadEvent : Event {
+		public override string to_string () {
+			return "ClassLoadEvent()";
+		}
+
+		internal static ClassLoadEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("CLASS_LOAD event not supported");
+		}
+	}
+
+	public class FieldAccessEvent : Event {
+		public override string to_string () {
+			return "FieldAccessEvent()";
+		}
+
+		internal static FieldAccessEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("FIELD_ACCESS event not supported");
+		}
+	}
+
+	public class FieldModificationEvent : Event {
+		public override string to_string () {
+			return "FieldModificationEvent()";
+		}
+
+		internal static FieldModificationEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("FIELD_MODIFICATION event not supported");
+		}
+	}
+
+	public class ExceptionCatchEvent : Event {
+		public override string to_string () {
+			return "ExceptionCatchEvent()";
+		}
+
+		internal static ExceptionCatchEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("EXCEPTION_CATCH event not supported");
+		}
+	}
+
+	public class MethodEntryEvent : Event {
+		public override string to_string () {
+			return "MethodEntryEvent()";
+		}
+
+		internal static MethodEntryEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("METHOD_ENTRY event not supported");
+		}
+	}
+
+	public class MethodExitEvent : Event {
+		public override string to_string () {
+			return "MethodExitEvent()";
+		}
+
+		internal static MethodExitEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("METHOD_EXIT event not supported");
+		}
+	}
+
+	public class MethodExitWithReturnValueEvent : Event {
+		public override string to_string () {
+			return "MethodExitWithReturnValueEvent()";
+		}
+
+		internal static MethodExitWithReturnValueEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("METHOD_EXIT_WITH_RETURN_VALUE event not supported");
+		}
+	}
+
+	public class MonitorContendedEnterEvent : Event {
+		public override string to_string () {
+			return "MonitorContendedEnterEvent()";
+		}
+
+		internal static MonitorContendedEnterEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTER event not supported");
+		}
+	}
+
+	public class MonitorContendedEnteredEvent : Event {
+		public override string to_string () {
+			return "MonitorContendedEnteredEvent()";
+		}
+
+		internal static MonitorContendedEnteredEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTERED event not supported");
+		}
+	}
+
+	public class MonitorWaitEvent : Event {
+		public override string to_string () {
+			return "MonitorWaitEvent()";
+		}
+
+		internal static MonitorWaitEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_WAIT event not supported");
+		}
+	}
+
+	public class MonitorWaitedEvent : Event {
+		public override string to_string () {
+			return "MonitorWaitedEvent()";
+		}
+
+		internal static MonitorWaitedEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("MONITOR_WAITED event not supported");
+		}
+	}
+
+	public class VMStartEvent : Event {
+		public override string to_string () {
+			return "VMStartEvent()";
+		}
+
+		internal static VMStartEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("VM_START event not supported");
+		}
+	}
+
+	public class VMDeathEvent : Event {
+		public override string to_string () {
+			return "VMDeathEvent()";
+		}
+
+		internal static VMDeathEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("VM_DEATH event not supported");
+		}
+	}
+
+	public class VMDisconnectedEvent : Event {
+		public override string to_string () {
+			return "VMDisconnectedEvent()";
+		}
+
+		internal static VMDisconnectedEvent deserialize (PacketReader packet) throws Error {
+			throw new Error.NOT_SUPPORTED ("VM_DISCONNECTED event not supported");
 		}
 	}
 
@@ -1442,6 +1667,16 @@ namespace Frida.JDWP {
 			return str;
 		}
 
+		public ObjectID read_object_id () throws Error {
+			return ObjectID (read_handle (id_sizes.get_object_id_size ()));
+		}
+
+		public TaggedObjectID read_tagged_object_id () throws Error {
+			var tag = (TypeTag) read_uint8 ();
+			var object = read_object_id ();
+			return TaggedObjectID (tag, object);
+		}
+
 		public ThreadID read_thread_id () throws Error {
 			return ThreadID (read_handle (id_sizes.get_object_id_size ()));
 		}
@@ -1536,6 +1771,15 @@ namespace Frida.JDWP {
 		private void check () throws Error {
 			if (!valid)
 				throw new Error.PROTOCOL ("ID sizes not known");
+		}
+
+		internal static IDSizes deserialize (PacketReader packet) throws Error {
+			var field_id_size = packet.read_int32 ();
+			var method_id_size = packet.read_int32 ();
+			var object_id_size = packet.read_int32 ();
+			var reference_type_id_size = packet.read_int32 ();
+			var frame_id_size = packet.read_int32 ();
+			return new IDSizes (field_id_size, method_id_size, object_id_size, reference_type_id_size, frame_id_size);
 		}
 	}
 }
