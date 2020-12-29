@@ -98,6 +98,15 @@ namespace Frida.JDWP {
 			yield execute (make_command (VM, VMCommand.RESUME), cancellable);
 		}
 
+		public async ObjectID create_string (string str, Cancellable? cancellable = null) throws Error, IOError {
+			var command = make_command (VM, VMCommand.CREATE_STRING);
+			command.append_utf8_string (str);
+
+			var reply = yield execute (command, cancellable);
+
+			return reply.read_object_id ();
+		}
+
 		public async ClassInfo get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
 			var candidates = yield get_classes_by_signature (signature, cancellable);
 			if (candidates.is_empty)
@@ -2070,6 +2079,7 @@ namespace Frida.JDWP {
 		ID_SIZES             = 7,
 		SUSPEND              = 8,
 		RESUME               = 9,
+		CREATE_STRING        = 11,
 	}
 
 	private enum ReferenceTypeCommand {
