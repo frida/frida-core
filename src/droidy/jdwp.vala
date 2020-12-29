@@ -1014,15 +1014,15 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public abstract string to_string ();
-	}
-
-	public class SingleStepEvent : Event {
 		public EventRequestID request {
 			get;
 			construct;
 		}
 
+		public abstract string to_string ();
+	}
+
+	public class SingleStepEvent : Event {
 		public ThreadID thread {
 			get;
 			construct;
@@ -1059,11 +1059,6 @@ namespace Frida.JDWP {
 	}
 
 	public class BreakpointEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public ThreadID thread {
 			get;
 			construct;
@@ -1110,11 +1105,6 @@ namespace Frida.JDWP {
 	}
 
 	public class ExceptionEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public ThreadID thread {
 			get;
 			construct;
@@ -1178,11 +1168,6 @@ namespace Frida.JDWP {
 	}
 
 	public class ThreadStartEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public ThreadID thread {
 			get;
 			construct;
@@ -1211,11 +1196,6 @@ namespace Frida.JDWP {
 	}
 
 	public class ThreadDeathEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public ThreadID thread {
 			get;
 			construct;
@@ -1244,11 +1224,6 @@ namespace Frida.JDWP {
 	}
 
 	public class ClassPrepareEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public ThreadID thread {
 			get;
 			construct;
@@ -1302,11 +1277,6 @@ namespace Frida.JDWP {
 	}
 
 	public class ClassUnloadEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public string signature {
 			get;
 			construct;
@@ -1342,11 +1312,6 @@ namespace Frida.JDWP {
 	}
 
 	public abstract class FieldEvent : Event {
-		public EventRequestID request {
-			get;
-			construct;
-		}
-
 		public ThreadID thread {
 			get;
 			construct;
@@ -1464,93 +1429,291 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MethodEntryEvent : Event {
+	public abstract class MethodEvent : Event {
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public Location location {
+			get;
+			construct;
+		}
+	}
+
+	public class MethodEntryEvent : MethodEvent {
+		public MethodEntryEvent (EventRequestID request, ThreadID thread, Location location) {
+			GLib.Object (
+				kind: EventKind.METHOD_ENTRY,
+				request: request,
+				thread: thread,
+				location: location
+			);
+		}
+
 		public override string to_string () {
-			return "MethodEntryEvent()";
+			return "MethodEntryEvent(request: %s, thread: %s, location: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string ()
+			);
 		}
 
 		internal static MethodEntryEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("METHOD_ENTRY event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			return new MethodEntryEvent (request, thread, location);
 		}
 	}
 
-	public class MethodExitEvent : Event {
+	public class MethodExitEvent : MethodEvent {
+		public MethodExitEvent (EventRequestID request, ThreadID thread, Location location) {
+			GLib.Object (
+				kind: EventKind.METHOD_EXIT,
+				request: request,
+				thread: thread,
+				location: location
+			);
+		}
+
 		public override string to_string () {
-			return "MethodExitEvent()";
+			return "MethodExitEvent(request: %s, thread: %s, location: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string ()
+			);
 		}
 
 		internal static MethodExitEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("METHOD_EXIT event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			return new MethodExitEvent (request, thread, location);
 		}
 	}
 
-	public class MethodExitWithReturnValueEvent : Event {
+	public class MethodExitWithReturnValueEvent : MethodEvent {
+		public Value retval {
+			get;
+			construct;
+		}
+
+		public MethodExitWithReturnValueEvent (EventRequestID request, ThreadID thread, Location location, Value retval) {
+			GLib.Object (
+				kind: EventKind.METHOD_EXIT_WITH_RETURN_VALUE,
+				request: request,
+				thread: thread,
+				location: location,
+				retval: retval
+			);
+		}
+
 		public override string to_string () {
-			return "MethodExitWithReturnValueEvent()";
+			return "MethodExitWithReturnValueEvent(request: %s, thread: %s, location: %s, retval: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string (),
+				retval.to_string ()
+			);
 		}
 
 		internal static MethodExitWithReturnValueEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("METHOD_EXIT_WITH_RETURN_VALUE event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			var retval = packet.read_value ();
+			return new MethodExitWithReturnValueEvent (request, thread, location, retval);
 		}
 	}
 
-	public class MonitorContendedEnterEvent : Event {
+	public abstract class MonitorEvent : Event {
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public TaggedObjectID object {
+			get;
+			construct;
+		}
+
+		public Location location {
+			get;
+			construct;
+		}
+	}
+
+	public class MonitorContendedEnterEvent : MonitorEvent {
+		public MonitorContendedEnterEvent (EventRequestID request, ThreadID thread, TaggedObjectID object, Location location) {
+			GLib.Object (
+				kind: EventKind.MONITOR_CONTENDED_ENTER,
+				request: request,
+				thread: thread,
+				object: object,
+				location: location
+			);
+		}
+
 		public override string to_string () {
-			return "MonitorContendedEnterEvent()";
+			return "MonitorContendedEnterEvent(request: %s, thread: %s, object: %s, location: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				object.to_string (),
+				location.to_string ()
+			);
 		}
 
 		internal static MonitorContendedEnterEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTER event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var object = packet.read_tagged_object_id ();
+			var location = Location.deserialize (packet);
+			return new MonitorContendedEnterEvent (request, thread, object, location);
 		}
 	}
 
-	public class MonitorContendedEnteredEvent : Event {
+	public class MonitorContendedEnteredEvent : MonitorEvent {
+		public MonitorContendedEnteredEvent (EventRequestID request, ThreadID thread, TaggedObjectID object, Location location) {
+			GLib.Object (
+				kind: EventKind.MONITOR_CONTENDED_ENTERED,
+				request: request,
+				thread: thread,
+				object: object,
+				location: location
+			);
+		}
+
 		public override string to_string () {
-			return "MonitorContendedEnteredEvent()";
+			return "MonitorContendedEnteredEvent(request: %s, thread: %s, object: %s, location: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				object.to_string (),
+				location.to_string ()
+			);
 		}
 
 		internal static MonitorContendedEnteredEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_CONTENDED_ENTERED event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var object = packet.read_tagged_object_id ();
+			var location = Location.deserialize (packet);
+			return new MonitorContendedEnteredEvent (request, thread, object, location);
 		}
 	}
 
-	public class MonitorWaitEvent : Event {
+	public class MonitorWaitEvent : MonitorEvent {
+		public int64 timeout {
+			get;
+			construct;
+		}
+
+		public MonitorWaitEvent (EventRequestID request, ThreadID thread, TaggedObjectID object, Location location, int64 timeout) {
+			GLib.Object (
+				kind: EventKind.MONITOR_CONTENDED_ENTER,
+				request: request,
+				thread: thread,
+				object: object,
+				location: location,
+				timeout: timeout
+			);
+		}
+
 		public override string to_string () {
-			return "MonitorWaitEvent()";
+			return ("MonitorWaitEvent(request: %s, thread: %s, object: %s, location: %s, timeout=%s)").printf (
+				request.to_string (),
+				thread.to_string (),
+				object.to_string (),
+				location.to_string (),
+				timeout.to_string ()
+			);
 		}
 
 		internal static MonitorWaitEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_WAIT event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var object = packet.read_tagged_object_id ();
+			var location = Location.deserialize (packet);
+			var timeout = packet.read_int64 ();
+			return new MonitorWaitEvent (request, thread, object, location, timeout);
 		}
 	}
 
-	public class MonitorWaitedEvent : Event {
+	public class MonitorWaitedEvent : MonitorEvent {
+		public bool timed_out {
+			get;
+			construct;
+		}
+
+		public MonitorWaitedEvent (EventRequestID request, ThreadID thread, TaggedObjectID object, Location location,
+				bool timed_out) {
+			GLib.Object (
+				kind: EventKind.MONITOR_CONTENDED_ENTER,
+				request: request,
+				thread: thread,
+				object: object,
+				location: location,
+				timed_out: timed_out
+			);
+		}
+
 		public override string to_string () {
-			return "MonitorWaitedEvent()";
+			return ("MonitorWaitedEvent(request: %s, thread: %s, object: %s, location: %s, timed_out=%s)").printf (
+				request.to_string (),
+				thread.to_string (),
+				object.to_string (),
+				location.to_string (),
+				timed_out.to_string ()
+			);
 		}
 
 		internal static MonitorWaitedEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("MONITOR_WAITED event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var object = packet.read_tagged_object_id ();
+			var location = Location.deserialize (packet);
+			var timed_out = packet.read_boolean ();
+			return new MonitorWaitedEvent (request, thread, object, location, timed_out);
 		}
 	}
 
 	public class VMStartEvent : Event {
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public VMStartEvent (EventRequestID request, ThreadID thread) {
+			GLib.Object (
+				kind: EventKind.VM_START,
+				request: request,
+				thread: thread
+			);
+		}
+
 		public override string to_string () {
-			return "VMStartEvent()";
+			return "VMStartEvent(request: %s, thread: %s)".printf (request.to_string (), thread.to_string ());
 		}
 
 		internal static VMStartEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("VM_START event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			return new VMStartEvent (request, thread);
 		}
 	}
 
 	public class VMDeathEvent : Event {
+		public VMDeathEvent (EventRequestID request) {
+			GLib.Object (kind: EventKind.VM_DEATH, request: request);
+		}
+
 		public override string to_string () {
-			return "VMDeathEvent()";
+			return "VMDeathEvent(request: %s)".printf (request.to_string ());
 		}
 
 		internal static VMDeathEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("VM_DEATH event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			return new VMDeathEvent (request);
 		}
 	}
 
@@ -2107,6 +2270,10 @@ namespace Frida.JDWP {
 			return *val;
 		}
 
+		public bool read_boolean () throws Error {
+			return (bool) read_uint8 ();
+		}
+
 		public string read_utf8_string () throws Error {
 			size_t size = read_uint32 ();
 			check_available (size);
@@ -2148,7 +2315,7 @@ namespace Frida.JDWP {
 				case VOID:
 					return new Void ();
 				case BOOLEAN:
-					return new Boolean ((bool) read_uint8 ());
+					return new Boolean (read_boolean ());
 				case ARRAY:
 					return new Array (read_object_id ());
 				case CLASS_OBJECT:
