@@ -98,13 +98,13 @@ namespace Frida.JDWP {
 			yield execute (make_command (VM, VMCommand.RESUME), cancellable);
 		}
 
-		public async ObjectID create_string (string str, Cancellable? cancellable = null) throws Error, IOError {
+		public async String create_string (string str, Cancellable? cancellable = null) throws Error, IOError {
 			var command = make_command (VM, VMCommand.CREATE_STRING);
 			command.append_utf8_string (str);
 
 			var reply = yield execute (command, cancellable);
 
-			return reply.read_object_id ();
+			return new String (reply.read_object_id ());
 		}
 
 		public async ClassInfo get_class_by_signature (string signature, Cancellable? cancellable = null) throws Error, IOError {
@@ -163,13 +163,13 @@ namespace Frida.JDWP {
 			return handle_invoke_reply (reply);
 		}
 
-		public async Value invoke_instance_method (ObjectID object, ThreadID thread, TaggedReferenceTypeID clazz, MethodID method,
+		public async Value invoke_instance_method (ObjectID object, ThreadID thread, ReferenceTypeID clazz, MethodID method,
 				Value[] arguments = {}, InvokeOptions options = 0, Cancellable? cancellable = null) throws Error, IOError {
 			var command = make_command (OBJECT_REFERENCE, ObjectReferenceCommand.INVOKE_METHOD);
 			command
 				.append_object_id (object)
 				.append_thread_id (thread)
-				.append_reference_type_id (clazz.id)
+				.append_reference_type_id (clazz)
 				.append_method_id (method)
 				.append_int32 (arguments.length);
 			foreach (var arg in arguments)
