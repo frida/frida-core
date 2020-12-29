@@ -2999,6 +2999,10 @@ namespace Frida.HostSessionTest {
 			var debuggable_app = "oversecured.ovaa";
 
 			try {
+				bool waiting = false;
+				uint target_pid = 0;
+				JDWP.BreakpointEvent? breakpoint_event = null;
+
 				var file = File.new_for_path (local_path);
 				FileInfo info = yield file.query_info_async (FileAttribute.TIME_MODIFIED, FileQueryInfoFlags.NONE,
 					Priority.DEFAULT, cancellable);
@@ -3022,8 +3026,6 @@ namespace Frida.HostSessionTest {
 				var tracker = new Frida.Droidy.JDWPTracker ();
 				yield tracker.open (device_serial, cancellable);
 
-				uint target_pid = 0;
-				bool waiting = false;
 				tracker.debugger_attached.connect (pid => {
 					printerr ("Debugger attached! PID=%u\n", pid);
 					target_pid = pid;
@@ -3066,23 +3068,44 @@ namespace Frida.HostSessionTest {
 
 				jdwp.events_received.connect (events => {
 					printerr ("Got events: %s\n", events.to_string ());
+					breakpoint_event = (JDWP.BreakpointEvent) events.items[0];
+					if (waiting)
+						client.callback ();
 				});
 
 				yield jdwp.resume (cancellable);
 
-				Timeout.add (5000, client.callback);
-				printerr ("Waiting 5 seconds...\n");
-				yield;
-				printerr ("Waited 5 seconds...\n");
+				if (breakpoint_event == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
 
-				/*
 				var runtime_class = yield jdwp.get_class_by_signature ("Ljava/lang/Runtime;", cancellable);
 				printerr ("java.lang.Runtime: %s\n", runtime_class.to_string ());
-				var runtime_methods = yield jdwp.get_methods (runtime_class.type_id, cancellable);
+				var runtime_methods = yield jdwp.get_methods (runtime_class.ref_type.id, cancellable);
+				var get_runtime_method = JDWP.MethodID (0);
+				var load_method = JDWP.MethodID (0);
 				foreach (var method in runtime_methods) {
 					printerr ("\t%s\n", method.to_string ());
+					if (method.name == "getRuntime" && method.signature == "()Ljava/lang/Runtime;") {
+						get_runtime_method = method.id;
+					} else if (method.name == "load" && method.signature == "(Ljava/lang/String;)V") {
+						load_method = method.id;
+					}
 				}
-				*/
+				assert (get_runtime_method.handle != 0 && load_method.handle != 0);
+
+				var runtime = (JDWP.Object) yield jdwp.invoke_static_method (runtime_class.ref_type, breakpoint_event.thread,
+					get_runtime_method, {}, 0, cancellable);
+
+				var gadget_path = yield jdwp.create_string ("/data/user/0/no.oleavr.helloandroid/gadget.so", cancellable);
+
+				var result = yield jdwp.invoke_instance_method (runtime.val, breakpoint_event.thread,
+					runtime_class.ref_type.id, load_method, new JDWP.Value[] {
+						gadget_path,
+					}, 0, cancellable);
+				printerr ("Runtime.load() result: %s\n", result.to_string ());
 			} catch (GLib.Error e) {
 				printerr ("\nFAIL: %s\n\n", e.message);
 			}
