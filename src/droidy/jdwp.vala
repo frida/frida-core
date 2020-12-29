@@ -2216,6 +2216,8 @@ namespace Frida.JDWP {
 		}
 
 		public unowned PacketBuilder append_value (Value v) {
+			append_uint8 (v.tag);
+
 			switch (v.tag) {
 				case BYTE:
 					append_uint8 (((Byte) v).val);
