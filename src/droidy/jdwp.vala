@@ -1,5 +1,5 @@
 namespace Frida.JDWP {
-	public class Client : Object, AsyncInitable {
+	public class Client : GLib.Object, AsyncInitable {
 		public signal void closed ();
 		public signal void events_received (Events events);
 
@@ -45,7 +45,7 @@ namespace Frida.JDWP {
 		}
 
 		private Client (IOStream stream) {
-			Object (stream: stream);
+			GLib.Object (stream: stream);
 		}
 
 		construct {
@@ -135,7 +135,7 @@ namespace Frida.JDWP {
 			return result;
 		}
 
-		public async EventRequestID set_event_request (EventKind kind, SuspendPolicy suspend_policy, EventModifier[] modifiers,
+		public async EventRequestID set_event_request (EventKind kind, SuspendPolicy suspend_policy, EventModifier[] modifiers = {},
 				Cancellable? cancellable = null) throws Error, IOError {
 			var command = make_command (EVENT_REQUEST, EventRequestCommand.SET);
 			command
@@ -480,13 +480,217 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class ClassInfo : Object {
-		public TypeTag tag {
+	public enum ValueTag {
+		BYTE         = 66,
+		CHAR         = 67,
+		DOUBLE       = 68,
+		FLOAT        = 70,
+		INT          = 73,
+		LONG         = 74,
+		OBJECT       = 76,
+		SHORT        = 83,
+		VOID         = 86,
+		BOOLEAN      = 90,
+		ARRAY        = 91,
+		CLASS_OBJECT = 99,
+		THREAD_GROUP = 103,
+		CLASS_LOADER = 108,
+		STRING       = 115,
+		THREAD       = 116,
+	}
+
+	public abstract class Value : GLib.Object {
+		public ValueTag tag {
 			get;
 			construct;
 		}
 
-		public ReferenceTypeID id {
+		public abstract string to_string ();
+	}
+
+	public class Byte : Value {
+		public uint8 val {
+			get;
+			construct;
+		}
+
+		public Byte (uint8 val) {
+			GLib.Object (tag: ValueTag.BYTE, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Char : Value {
+		public string val {
+			get;
+			construct;
+		}
+
+		public Char (string val) {
+			GLib.Object (tag: ValueTag.CHAR, val: val);
+		}
+
+		public override string to_string () {
+			return val;
+		}
+	}
+
+	public class Double : Value {
+		public double val {
+			get;
+			construct;
+		}
+
+		public Double (double val) {
+			GLib.Object (tag: ValueTag.DOUBLE, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Float : Value {
+		public float val {
+			get;
+			construct;
+		}
+
+		public Float (float val) {
+			GLib.Object (tag: ValueTag.FLOAT, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Int : Value {
+		public int32 val {
+			get;
+			construct;
+		}
+
+		public Int (int32 val) {
+			GLib.Object (tag: ValueTag.INT, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Long : Value {
+		public int64 val {
+			get;
+			construct;
+		}
+
+		public Long (int64 val) {
+			GLib.Object (tag: ValueTag.LONG, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Object : Value {
+		public ObjectID val {
+			get;
+			construct;
+		}
+
+		public Object (ObjectID val) {
+			GLib.Object (tag: ValueTag.OBJECT, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Short : Value {
+		public int16 val {
+			get;
+			construct;
+		}
+
+		public Short (int16 val) {
+			GLib.Object (tag: ValueTag.SHORT, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Void : Value {
+		public Void () {
+			GLib.Object (tag: ValueTag.VOID);
+		}
+
+		public override string to_string () {
+			return "void";
+		}
+	}
+
+	public class Boolean : Value {
+		public bool val {
+			get;
+			construct;
+		}
+
+		public Boolean (bool val) {
+			GLib.Object (tag: ValueTag.BOOLEAN, val: val);
+		}
+
+		public override string to_string () {
+			return val.to_string ();
+		}
+	}
+
+	public class Array : Object {
+		public Array (ObjectID val) {
+			GLib.Object (tag: ValueTag.ARRAY, val: val);
+		}
+	}
+
+	public class ClassObject : Object {
+		public ClassObject (ObjectID val) {
+			GLib.Object (tag: ValueTag.CLASS_OBJECT, val: val);
+		}
+	}
+
+	public class ThreadGroup : Object {
+		public ThreadGroup (ObjectID val) {
+			GLib.Object (tag: ValueTag.THREAD_GROUP, val: val);
+		}
+	}
+
+	public class ClassLoader : Object {
+		public ClassLoader (ObjectID val) {
+			GLib.Object (tag: ValueTag.CLASS_LOADER, val: val);
+		}
+	}
+
+	public class String : Object {
+		public String (ObjectID val) {
+			GLib.Object (tag: ValueTag.STRING, val: val);
+		}
+	}
+
+	public class Thread : Object {
+		public Thread (ObjectID val) {
+			GLib.Object (tag: ValueTag.THREAD, val: val);
+		}
+	}
+
+	public class ClassInfo : GLib.Object {
+		public TaggedReferenceTypeID ref_type {
 			get;
 			construct;
 		}
@@ -496,26 +700,21 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public ClassInfo (TypeTag tag, ReferenceTypeID id, ClassStatus status) {
-			Object (
-				tag: tag,
-				id: id,
+		public ClassInfo (TaggedReferenceTypeID ref_type, ClassStatus status) {
+			GLib.Object (
+				ref_type: ref_type,
 				status: status
 			);
 		}
 
 		public string to_string () {
-			return "ClassInfo(tag: %s, id: %s, status: %s)".printf (
-				tag.to_short_string (),
-				id.to_string (),
-				status.to_short_string ());
+			return "ClassInfo(ref_type: %s, status: %s)".printf (ref_type.to_string (), status.to_short_string ());
 		}
 
 		internal static ClassInfo deserialize (PacketReader packet) throws Error {
-			var tag = (TypeTag) packet.read_uint8 ();
-			var id = packet.read_reference_type_id ();
+			var ref_type = packet.read_tagged_reference_type_id ();
 			var status = (ClassStatus) packet.read_int32 ();
-			return new ClassInfo (tag, id, status);
+			return new ClassInfo (ref_type, status);
 		}
 	}
 
@@ -531,7 +730,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class MethodInfo : Object {
+	public class MethodInfo : GLib.Object {
 		public MethodID id {
 			get;
 			construct;
@@ -553,7 +752,7 @@ namespace Frida.JDWP {
 		}
 
 		public MethodInfo (MethodID id, string name, string signature, int32 mod_bits) {
-			Object (
+			GLib.Object (
 				id: id,
 				name: name,
 				signature: signature,
@@ -566,7 +765,8 @@ namespace Frida.JDWP {
 				id.to_string (),
 				name,
 				signature,
-				mod_bits);
+				mod_bits
+			);
 		}
 
 		internal static MethodInfo deserialize (PacketReader packet) throws Error {
@@ -599,18 +799,18 @@ namespace Frida.JDWP {
 			private set;
 		}
 
-		public ObjectID object {
+		public ObjectID id {
 			get;
 			private set;
 		}
 
-		public TaggedObjectID (TypeTag tag, ObjectID object) {
+		public TaggedObjectID (TypeTag tag, ObjectID id) {
 			this.tag = tag;
-			this.object = object;
+			this.id = id;
 		}
 
 		public string to_string () {
-			return "TaggedObjectID(tag: %s, object: %s)".printf (tag.to_short_string (), object.to_string ());
+			return "TaggedObjectID(tag: %s, id: %s)".printf (tag.to_short_string (), id.to_string ());
 		}
 	}
 
@@ -644,6 +844,27 @@ namespace Frida.JDWP {
 		}
 	}
 
+	public struct TaggedReferenceTypeID {
+		public TypeTag tag {
+			get;
+			private set;
+		}
+
+		public ReferenceTypeID id {
+			get;
+			private set;
+		}
+
+		public TaggedReferenceTypeID (TypeTag tag, ReferenceTypeID id) {
+			this.tag = tag;
+			this.id = id;
+		}
+
+		public string to_string () {
+			return "TaggedReferenceTypeID(tag: %s, id: %s)".printf (tag.to_short_string (), id.to_string ());
+		}
+	}
+
 	public struct MethodID {
 		public int64 handle {
 			get;
@@ -674,13 +895,8 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class Location : Object {
-		public TypeTag tag {
-			get;
-			construct;
-		}
-
-		public ReferenceTypeID declaring {
+	public class Location : GLib.Object {
+		public TaggedReferenceTypeID declaring {
 			get;
 			construct;
 		}
@@ -695,9 +911,8 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public Location (TypeTag tag, ReferenceTypeID declaring, MethodID method, uint64 index = 0) {
-			Object (
-				tag: tag,
+		public Location (TaggedReferenceTypeID declaring, MethodID method, uint64 index = 0) {
+			GLib.Object (
 				declaring: declaring,
 				method: method,
 				index: index
@@ -705,27 +920,25 @@ namespace Frida.JDWP {
 		}
 
 		public string to_string () {
-			return "Location(tag: %s, declaring: %s, method: %s, index: %s)".printf (
-				tag.to_short_string (),
+			return "Location(declaring: %s, method: %s, index: %s)".printf (
 				declaring.to_string (),
 				method.to_string (),
-				index.to_string ());
+				index.to_string ()
+			);
 		}
 
 		internal void serialize (PacketBuilder builder) {
 			builder
-				.append_uint8 (tag)
-				.append_reference_type_id (declaring)
+				.append_tagged_reference_type_id (declaring)
 				.append_method_id (method)
 				.append_uint64 (index);
 		}
 
 		internal static Location deserialize (PacketReader packet) throws Error {
-			var tag = (TypeTag) packet.read_uint8 ();
-			var declaring = packet.read_reference_type_id ();
+			var declaring = packet.read_tagged_reference_type_id ();
 			var method = packet.read_method_id ();
 			var index = packet.read_uint64 ();
-			return new Location (tag, declaring, method, index);
+			return new Location (declaring, method, index);
 		}
 	}
 
@@ -761,7 +974,7 @@ namespace Frida.JDWP {
 		ALL          = 2,
 	}
 
-	public class Events : Object {
+	public class Events : GLib.Object {
 		public SuspendPolicy suspend_policy {
 			get;
 			construct;
@@ -773,7 +986,7 @@ namespace Frida.JDWP {
 		}
 
 		public Events (SuspendPolicy suspend_policy, Gee.List<Event> items) {
-			Object (
+			GLib.Object (
 				suspend_policy: suspend_policy,
 				items: items
 			);
@@ -795,7 +1008,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public abstract class Event : Object {
+	public abstract class Event : GLib.Object {
 		public EventKind kind {
 			get;
 			construct;
@@ -821,7 +1034,7 @@ namespace Frida.JDWP {
 		}
 
 		public SingleStepEvent (EventRequestID request, ThreadID thread, Location location) {
-			Object (
+			GLib.Object (
 				kind: EventKind.SINGLE_STEP,
 				request: request,
 				thread: thread,
@@ -833,7 +1046,8 @@ namespace Frida.JDWP {
 			return "SingleStepEvent(request: %s, thread: %s, location: %s)".printf (
 				request.to_string (),
 				thread.to_string (),
-				location.to_string ());
+				location.to_string ()
+			);
 		}
 
 		internal static SingleStepEvent deserialize (PacketReader packet) throws Error {
@@ -861,7 +1075,7 @@ namespace Frida.JDWP {
 		}
 
 		public BreakpointEvent (EventRequestID request, ThreadID thread, Location location) {
-			Object (
+			GLib.Object (
 				kind: EventKind.BREAKPOINT,
 				request: request,
 				thread: thread,
@@ -873,7 +1087,8 @@ namespace Frida.JDWP {
 			return "BreakpointEvent(request: %s, thread: %s, location: %s)".printf (
 				request.to_string (),
 				thread.to_string (),
-				location.to_string ());
+				location.to_string ()
+			);
 		}
 
 		internal static BreakpointEvent deserialize (PacketReader packet) throws Error {
@@ -922,7 +1137,7 @@ namespace Frida.JDWP {
 
 		public ExceptionEvent (EventRequestID request, ThreadID thread, Location location, TaggedObjectID exception,
 				Location? catch_location) {
-			Object (
+			GLib.Object (
 				kind: EventKind.EXCEPTION,
 				request: request,
 				thread: thread,
@@ -938,7 +1153,8 @@ namespace Frida.JDWP {
 				thread.to_string (),
 				location.to_string (),
 				exception.to_string (),
-				(catch_location != null) ? catch_location.to_string () : "null");
+				(catch_location != null) ? catch_location.to_string () : "null"
+			);
 		}
 
 		internal static ExceptionEvent deserialize (PacketReader packet) throws Error {
@@ -962,42 +1178,156 @@ namespace Frida.JDWP {
 	}
 
 	public class ThreadStartEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
+		}
+
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public ThreadStartEvent (EventRequestID request, ThreadID thread) {
+			GLib.Object (
+				kind: EventKind.THREAD_START,
+				request: request,
+				thread: thread
+			);
+		}
+
 		public override string to_string () {
-			return "ThreadStartEvent()";
+			return "ThreadStartEvent(request: %s, thread: %s)".printf (
+				request.to_string (),
+				thread.to_string ()
+			);
 		}
 
 		internal static ThreadStartEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("THREAD_START event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			return new ThreadStartEvent (request, thread);
 		}
 	}
 
 	public class ThreadDeathEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
+		}
+
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public ThreadDeathEvent (EventRequestID request, ThreadID thread) {
+			GLib.Object (
+				kind: EventKind.THREAD_DEATH,
+				request: request,
+				thread: thread
+			);
+		}
+
 		public override string to_string () {
-			return "ThreadDeathEvent()";
+			return "ThreadDeathEvent(request: %s, thread: %s)".printf (
+				request.to_string (),
+				thread.to_string ()
+			);
 		}
 
 		internal static ThreadDeathEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("THREAD_DEATH event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			return new ThreadDeathEvent (request, thread);
 		}
 	}
 
 	public class ClassPrepareEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
+		}
+
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public TaggedReferenceTypeID ref_type {
+			get;
+			construct;
+		}
+
+		public string signature {
+			get;
+			construct;
+		}
+
+		public ClassStatus status {
+			get;
+			construct;
+		}
+
+		public ClassPrepareEvent (EventRequestID request, ThreadID thread, TaggedReferenceTypeID ref_type, string signature,
+				ClassStatus status) {
+			GLib.Object (
+				kind: EventKind.CLASS_PREPARE,
+				request: request,
+				thread: thread,
+				ref_type: ref_type,
+				signature: signature,
+				status: status
+			);
+		}
+
 		public override string to_string () {
-			return "ClassPrepareEvent()";
+			return "ClassPrepareEvent(request: %s, thread: %s, ref_type: %s, signature: \"%s\", status: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				ref_type.to_string (),
+				signature,
+				status.to_short_string ()
+			);
 		}
 
 		internal static ClassPrepareEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("CLASS_PREPARE event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var ref_type = packet.read_tagged_reference_type_id ();
+			var signature = packet.read_utf8_string ();
+			var status = (ClassStatus) packet.read_int32 ();
+			return new ClassPrepareEvent (request, thread, ref_type, signature, status);
 		}
 	}
 
 	public class ClassUnloadEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
+		}
+
+		public string signature {
+			get;
+			construct;
+		}
+
+		public ClassUnloadEvent (EventRequestID request, string signature) {
+			GLib.Object (
+				kind: EventKind.CLASS_UNLOAD,
+				request: request,
+				signature: signature
+			);
+		}
+
 		public override string to_string () {
-			return "ClassUnloadEvent()";
+			return "ClassUnloadEvent(request: %s, signature: \"%s\")".printf (request.to_string (), signature);
 		}
 
 		internal static ClassUnloadEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("CLASS_UNLOAD event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var signature = packet.read_utf8_string ();
+			return new ClassUnloadEvent (request, signature);
 		}
 	}
 
@@ -1011,23 +1341,116 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public class FieldAccessEvent : Event {
-		public override string to_string () {
-			return "FieldAccessEvent()";
+	public abstract class FieldEvent : Event {
+		public EventRequestID request {
+			get;
+			construct;
 		}
 
-		internal static FieldAccessEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("FIELD_ACCESS event not supported");
+		public ThreadID thread {
+			get;
+			construct;
+		}
+
+		public Location location {
+			get;
+			construct;
+		}
+
+		public TaggedReferenceTypeID ref_type {
+			get;
+			construct;
+		}
+
+		public FieldID field {
+			get;
+			construct;
+		}
+
+		public TaggedObjectID object {
+			get;
+			construct;
 		}
 	}
 
-	public class FieldModificationEvent : Event {
+	public class FieldAccessEvent : FieldEvent {
+		public FieldAccessEvent (EventRequestID request, ThreadID thread, Location location, TaggedReferenceTypeID ref_type,
+				FieldID field, TaggedObjectID object) {
+			GLib.Object (
+				kind: EventKind.FIELD_ACCESS,
+				request: request,
+				thread: thread,
+				location: location,
+				ref_type: ref_type,
+				field: field,
+				object: object
+			);
+		}
+
 		public override string to_string () {
-			return "FieldModificationEvent()";
+			return "FieldAccessEvent(request: %s, thread: %s, location: %s, ref_type: %s, field: %s, object: %s)".printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string (),
+				ref_type.to_string (),
+				field.to_string (),
+				object.to_string ()
+			);
+		}
+
+		internal static FieldAccessEvent deserialize (PacketReader packet) throws Error {
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			var ref_type = packet.read_tagged_reference_type_id ();
+			var field = packet.read_field_id ();
+			var object = packet.read_tagged_object_id ();
+			return new FieldAccessEvent (request, thread, location, ref_type, field, object);
+		}
+	}
+
+	public class FieldModificationEvent : FieldEvent {
+		public Value value_to_be {
+			get;
+			construct;
+		}
+
+		public FieldModificationEvent (EventRequestID request, ThreadID thread, Location location, TaggedReferenceTypeID ref_type,
+				FieldID field, TaggedObjectID object, Value value_to_be) {
+			GLib.Object (
+				kind: EventKind.FIELD_MODIFICATION,
+				request: request,
+				thread: thread,
+				location: location,
+				ref_type: ref_type,
+				field: field,
+				object: object,
+				value_to_be: value_to_be
+			);
+		}
+
+		public override string to_string () {
+			return ("FieldModificationEvent(request: %s, thread: %s, location: %s, ref_type: %s, field: %s, object: %s, " +
+					"value_to_be: %s)").printf (
+				request.to_string (),
+				thread.to_string (),
+				location.to_string (),
+				ref_type.to_string (),
+				field.to_string (),
+				object.to_string (),
+				value_to_be.to_string ()
+			);
 		}
 
 		internal static FieldModificationEvent deserialize (PacketReader packet) throws Error {
-			throw new Error.NOT_SUPPORTED ("FIELD_MODIFICATION event not supported");
+			var request = EventRequestID (packet.read_int32 ());
+			var thread = packet.read_thread_id ();
+			var location = Location.deserialize (packet);
+			var ref_type = packet.read_tagged_reference_type_id ();
+			var field = packet.read_field_id ();
+			var object = packet.read_tagged_object_id ();
+			var value_to_be = packet.read_value ();
+			return new FieldModificationEvent (request, thread, location, ref_type, field, object, value_to_be);
 		}
 	}
 
@@ -1141,7 +1564,7 @@ namespace Frida.JDWP {
 		}
 	}
 
-	public abstract class EventModifier : Object {
+	public abstract class EventModifier : GLib.Object {
 		internal abstract void serialize (PacketBuilder builder);
 	}
 
@@ -1152,7 +1575,7 @@ namespace Frida.JDWP {
 		}
 
 		public CountModifier (int32 count) {
-			Object (count: count);
+			GLib.Object (count: count);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1169,7 +1592,7 @@ namespace Frida.JDWP {
 		}
 
 		public ThreadOnlyModifier (ThreadID thread) {
-			Object (thread: thread);
+			GLib.Object (thread: thread);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1186,7 +1609,7 @@ namespace Frida.JDWP {
 		}
 
 		public ClassOnlyModifier (ReferenceTypeID clazz) {
-			Object (clazz: clazz);
+			GLib.Object (clazz: clazz);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1203,7 +1626,7 @@ namespace Frida.JDWP {
 		}
 
 		public ClassMatchModifier (string class_pattern) {
-			Object (class_pattern: class_pattern);
+			GLib.Object (class_pattern: class_pattern);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1220,7 +1643,7 @@ namespace Frida.JDWP {
 		}
 
 		public ClassExcludeModifier (string class_pattern) {
-			Object (class_pattern: class_pattern);
+			GLib.Object (class_pattern: class_pattern);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1236,8 +1659,8 @@ namespace Frida.JDWP {
 			construct;
 		}
 
-		public LocationOnlyModifier (TypeTag tag, ReferenceTypeID declaring, MethodID method, uint64 index = 0) {
-			Object (location: new Location (tag, declaring, method, index));
+		public LocationOnlyModifier (TaggedReferenceTypeID declaring, MethodID method, uint64 index = 0) {
+			GLib.Object (location: new Location (declaring, method, index));
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1263,7 +1686,7 @@ namespace Frida.JDWP {
 		}
 
 		public ExceptionOnlyModifier (ReferenceTypeID exception_or_null, bool caught, bool uncaught) {
-			Object (
+			GLib.Object (
 				exception_or_null: exception_or_null,
 				caught: caught,
 				uncaught: uncaught
@@ -1291,7 +1714,7 @@ namespace Frida.JDWP {
 		}
 
 		public FieldOnlyModifier (ReferenceTypeID declaring, FieldID field) {
-			Object (
+			GLib.Object (
 				declaring: declaring,
 				field: field
 			);
@@ -1322,7 +1745,7 @@ namespace Frida.JDWP {
 		}
 
 		public StepModifier (ThreadID thread, StepSize step_size, StepDepth step_depth) {
-			Object (
+			GLib.Object (
 				thread: thread,
 				step_size: step_size,
 				step_depth: step_depth
@@ -1356,7 +1779,7 @@ namespace Frida.JDWP {
 		}
 
 		public InstanceOnlyModifier (ObjectID instance) {
-			Object (instance: instance);
+			GLib.Object (instance: instance);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1373,7 +1796,7 @@ namespace Frida.JDWP {
 		}
 
 		public SourceNameMatchModifier (string source_name_pattern) {
-			Object (source_name_pattern: source_name_pattern);
+			GLib.Object (source_name_pattern: source_name_pattern);
 		}
 
 		internal override void serialize (PacketBuilder builder) {
@@ -1537,6 +1960,12 @@ namespace Frida.JDWP {
 			return append_handle (type.handle, id_sizes.get_reference_type_id_size_or_die ());
 		}
 
+		public unowned PacketBuilder append_tagged_reference_type_id (TaggedReferenceTypeID ref_type) {
+			return this
+				.append_uint8 (ref_type.tag)
+				.append_reference_type_id (ref_type.id);
+		}
+
 		public unowned PacketBuilder append_method_id (MethodID method) {
 			return append_handle (method.handle, id_sizes.get_method_id_size_or_die ());
 		}
@@ -1606,6 +2035,16 @@ namespace Frida.JDWP {
 			return val;
 		}
 
+		public int16 read_int16 () throws Error {
+			const size_t n = sizeof (int16);
+			check_available (n);
+
+			int16 val = int16.from_big_endian (*((int16 *) cursor));
+			cursor += n;
+
+			return val;
+		}
+
 		public uint16 read_uint16 () throws Error {
 			const size_t n = sizeof (uint16);
 			check_available (n);
@@ -1656,6 +2095,18 @@ namespace Frida.JDWP {
 			return val;
 		}
 
+		public double read_double () throws Error {
+			var bits = read_uint64 ();
+			var val = (double *) &bits;
+			return *val;
+		}
+
+		public float read_float () throws Error {
+			var bits = read_uint32 ();
+			var val = (float *) &bits;
+			return *val;
+		}
+
 		public string read_utf8_string () throws Error {
 			size_t size = read_uint32 ();
 			check_available (size);
@@ -1667,14 +2118,62 @@ namespace Frida.JDWP {
 			return str;
 		}
 
+		public Value read_value () throws Error {
+			var tag = (ValueTag) read_uint8 ();
+
+			switch (tag) {
+				case BYTE:
+					return new Byte (read_uint8 ());
+				case CHAR: {
+					uint16 c = read_uint16 ();
+					var s = (string16 *) &c;
+					try {
+						return new Char (s->to_utf8 (1));
+					} catch (ConvertError e) {
+						throw new Error.PROTOCOL ("%s", e.message);
+					}
+				}
+				case DOUBLE:
+					return new Double (read_double ());
+				case FLOAT:
+					return new Float (read_float ());
+				case INT:
+					return new Int (read_int32 ());
+				case LONG:
+					return new Long (read_int64 ());
+				case OBJECT:
+					return new Object (read_object_id ());
+				case SHORT:
+					return new Short (read_int16 ());
+				case VOID:
+					return new Void ();
+				case BOOLEAN:
+					return new Boolean ((bool) read_uint8 ());
+				case ARRAY:
+					return new Array (read_object_id ());
+				case CLASS_OBJECT:
+					return new ClassObject (read_object_id ());
+				case THREAD_GROUP:
+					return new ThreadGroup (read_object_id ());
+				case CLASS_LOADER:
+					return new ClassLoader (read_object_id ());
+				case STRING:
+					return new String (read_object_id ());
+				case THREAD:
+					return new Thread (read_object_id ());
+			}
+
+			throw new Error.PROTOCOL ("Unexpected value tag");
+		}
+
 		public ObjectID read_object_id () throws Error {
 			return ObjectID (read_handle (id_sizes.get_object_id_size ()));
 		}
 
 		public TaggedObjectID read_tagged_object_id () throws Error {
 			var tag = (TypeTag) read_uint8 ();
-			var object = read_object_id ();
-			return TaggedObjectID (tag, object);
+			var id = read_object_id ();
+			return TaggedObjectID (tag, id);
 		}
 
 		public ThreadID read_thread_id () throws Error {
@@ -1685,8 +2184,18 @@ namespace Frida.JDWP {
 			return ReferenceTypeID (read_handle (id_sizes.get_reference_type_id_size ()));
 		}
 
+		public TaggedReferenceTypeID read_tagged_reference_type_id () throws Error {
+			var tag = (TypeTag) read_uint8 ();
+			var id = read_reference_type_id ();
+			return TaggedReferenceTypeID (tag, id);
+		}
+
 		public MethodID read_method_id () throws Error {
 			return MethodID (read_handle (id_sizes.get_method_id_size ()));
+		}
+
+		public FieldID read_field_id () throws Error {
+			return FieldID (read_handle (id_sizes.get_field_id_size ()));
 		}
 
 		private int64 read_handle (size_t size) throws Error {
