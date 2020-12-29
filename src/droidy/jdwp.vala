@@ -135,6 +135,51 @@ namespace Frida.JDWP {
 			return result;
 		}
 
+		public async Value invoke_static_method (TaggedReferenceTypeID ref_type, ThreadID thread, MethodID method,
+				Value[] arguments = {}, InvokeOptions options = 0, Cancellable? cancellable = null) throws Error, IOError {
+			var command = (ref_type.tag == CLASS)
+				? make_command (CLASS_TYPE, ClassTypeCommand.INVOKE_METHOD)
+				: make_command (INTERFACE_TYPE, InterfaceTypeCommand.INVOKE_METHOD);
+			command
+				.append_reference_type_id (ref_type.id)
+				.append_thread_id (thread)
+				.append_method_id (method)
+				.append_int32 (arguments.length);
+			foreach (var arg in arguments)
+				command.append_value (arg);
+			command.append_int32 (options);
+
+			var reply = yield execute (command, cancellable);
+
+			return handle_invoke_reply (reply);
+		}
+
+		public async Value invoke_instance_method (ObjectID object, ThreadID thread, TaggedReferenceTypeID clazz, MethodID method,
+				Value[] arguments = {}, InvokeOptions options = 0, Cancellable? cancellable = null) throws Error, IOError {
+			var command = make_command (OBJECT_REFERENCE, ObjectReferenceCommand.INVOKE_METHOD);
+			command
+				.append_object_id (object)
+				.append_thread_id (thread)
+				.append_reference_type_id (clazz.id)
+				.append_method_id (method)
+				.append_int32 (arguments.length);
+			foreach (var arg in arguments)
+				command.append_value (arg);
+			command.append_int32 (options);
+
+			var reply = yield execute (command, cancellable);
+
+			return handle_invoke_reply (reply);
+		}
+
+		private Value handle_invoke_reply (PacketReader reply) throws Error {
+			var retval = reply.read_value ();
+			var exception = reply.read_tagged_object_id ();
+			if (!exception.id.is_null)
+				throw new Error.PROTOCOL ("Exception thrown during method invocation");
+			return retval;
+		}
+
 		public async EventRequestID set_event_request (EventKind kind, SuspendPolicy suspend_policy, EventModifier[] modifiers = {},
 				Cancellable? cancellable = null) throws Error, IOError {
 			var command = make_command (EVENT_REQUEST, EventRequestCommand.SET);
@@ -778,10 +823,22 @@ namespace Frida.JDWP {
 		}
 	}
 
+	[Flags]
+	public enum InvokeOptions {
+		INVOKE_SINGLE_THREADED = 0x01,
+		INVOKE_NONVIRTUAL      = 0x02,
+	}
+
 	public struct ObjectID {
 		public int64 handle {
 			get;
 			private set;
+		}
+
+		public bool is_null {
+			get {
+				return handle == 0;
+			}
 		}
 
 		public ObjectID (int64 handle) {
@@ -1860,8 +1917,8 @@ namespace Frida.JDWP {
 			builder
 				.append_uint8 (EventModifierKind.EXCEPTION_ONLY)
 				.append_reference_type_id (exception_or_null)
-				.append_bool (caught)
-				.append_bool (uncaught);
+				.append_boolean (caught)
+				.append_boolean (uncaught);
 		}
 	}
 
@@ -1999,10 +2056,13 @@ namespace Frida.JDWP {
 	}
 
 	private enum CommandSet {
-		VM             = 1,
-		REFERENCE_TYPE = 2,
-		EVENT_REQUEST  = 15,
-		EVENT          = 64,
+		VM               = 1,
+		REFERENCE_TYPE   = 2,
+		CLASS_TYPE       = 3,
+		INTERFACE_TYPE   = 5,
+		OBJECT_REFERENCE = 9,
+		EVENT_REQUEST    = 15,
+		EVENT            = 64,
 	}
 
 	private enum VMCommand {
@@ -2014,6 +2074,18 @@ namespace Frida.JDWP {
 
 	private enum ReferenceTypeCommand {
 		METHODS = 5,
+	}
+
+	private enum ClassTypeCommand {
+		INVOKE_METHOD = 3,
+	}
+
+	private enum InterfaceTypeCommand {
+		INVOKE_METHOD = 1,
+	}
+
+	private enum ObjectReferenceCommand {
+		INVOKE_METHOD = 6,
 	}
 
 	private enum EventRequestCommand {
@@ -2073,6 +2145,18 @@ namespace Frida.JDWP {
 			return this;
 		}
 
+		public unowned PacketBuilder append_int16 (int16 val) {
+			*(get_pointer (cursor, sizeof (int16))) = val.to_big_endian ();
+			cursor += (uint) sizeof (int16);
+			return this;
+		}
+
+		public unowned PacketBuilder append_uint16 (uint16 val) {
+			*(get_pointer (cursor, sizeof (uint16))) = val.to_big_endian ();
+			cursor += (uint) sizeof (uint16);
+			return this;
+		}
+
 		public unowned PacketBuilder append_int32 (int32 val) {
 			*((int32 *) get_pointer (cursor, sizeof (int32))) = val.to_big_endian ();
 			cursor += (uint) sizeof (int32);
@@ -2097,7 +2181,17 @@ namespace Frida.JDWP {
 			return this;
 		}
 
-		public unowned PacketBuilder append_bool (bool val) {
+		public unowned PacketBuilder append_double (double val) {
+			var bits = (uint64 *) &val;
+			return append_uint64 (*bits);
+		}
+
+		public unowned PacketBuilder append_float (float val) {
+			var bits = (uint32 *) &val;
+			return append_uint32 (*bits);
+		}
+
+		public unowned PacketBuilder append_boolean (bool val) {
 			return append_uint8 ((uint8) val);
 		}
 
@@ -2107,6 +2201,56 @@ namespace Frida.JDWP {
 			uint size = str.length;
 			Memory.copy (get_pointer (cursor, size), str, size);
 			cursor += size;
+
+			return this;
+		}
+
+		public unowned PacketBuilder append_value (Value v) {
+			switch (v.tag) {
+				case BYTE:
+					append_uint8 (((Byte) v).val);
+					break;
+				case CHAR: {
+					string16 s;
+					try {
+						s = ((Char) v).val.to_utf16 ();
+					} catch (ConvertError e) {
+						assert_not_reached ();
+					}
+					var c = (uint16 *) s;
+					append_uint16 (*c);
+					break;
+				}
+				case DOUBLE:
+					append_double (((Double) v).val);
+					break;
+				case FLOAT:
+					append_float (((Float) v).val);
+					break;
+				case INT:
+					append_int32 (((Int) v).val);
+					break;
+				case LONG:
+					append_int64 (((Long) v).val);
+					break;
+				case OBJECT:
+				case ARRAY:
+				case CLASS_OBJECT:
+				case THREAD_GROUP:
+				case CLASS_LOADER:
+				case STRING:
+				case THREAD:
+					append_object_id (((Object) v).val);
+					break;
+				case SHORT:
+					append_int16 (((Short) v).val);
+					break;
+				case VOID:
+					break;
+				case BOOLEAN:
+					append_boolean (((Boolean) v).val);
+					break;
+			}
 
 			return this;
 		}
