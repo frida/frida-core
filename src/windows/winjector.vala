@@ -71,7 +71,7 @@ namespace Frida {
 			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, cancellable);
 		}
 
-		private void ensure_tempdir_prepared () {
+		private void ensure_tempdir_prepared () throws Error {
 			if (did_prep_tempdir)
 				return;
 
