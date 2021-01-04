@@ -181,6 +181,14 @@ else
   endif
 endif
 
+if host_os == 'android'
+  libselinux_dep = dependency('libselinux', version: '>=3.0')
+  libsepol_dep = dependency('libsepol', version: '>=3.0')
+else
+  libselinux_dep = disabler()
+  libsepol_dep = disabler()
+endif
+
 backend_deps_private = []
 if tls_provider_dep.found()
   backend_deps_private += tls_provider_dep

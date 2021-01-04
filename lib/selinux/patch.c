@@ -1,9 +1,4 @@
-#ifdef FRIDA_SELINUX_LEGACY
-# define frida_selinux_apply_policy_patch legacy_frida_selinux_apply_policy_patch
-# define frida_selinux_error_quark legacy_frida_selinux_error_quark
-#endif
-
-#include "patch.h"
+#include "frida-selinux.h"
 
 #include <fcntl.h>
 #include <gio/gio.h>
@@ -61,7 +56,7 @@ static const FridaSELinuxRule frida_selinux_rules[] =
 G_DEFINE_QUARK (frida-selinux-error-quark, frida_selinux_error)
 
 void
-frida_selinux_apply_policy_patch (void)
+frida_selinux_patch_policy (void)
 {
   const gchar * system_policy = "/sys/fs/selinux/policy";
   policydb_t db;
@@ -401,12 +396,7 @@ frida_ensure_rule (policydb_t * db, const gchar * s, const gchar * t, const gcha
 
     av = malloc (sizeof (avtab_datum_t));
     av->data = perm_bit;
-#ifdef FRIDA_SELINUX_MODERN
     av->xperms = NULL;
-#endif
-#ifdef FRIDA_SELINUX_LEGACY
-    av->ops = NULL;
-#endif
 
     res = avtab_insert (&db->te_avtab, &key, av);
     g_assert (res == 0);
