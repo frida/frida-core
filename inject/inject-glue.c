@@ -2,7 +2,7 @@
 
 #include "frida-core.h"
 #ifdef HAVE_ANDROID
-# include "frida-selinux.h"
+# include "../lib/selinux/frida-selinux.h"
 #endif
 
 void

@@ -5,7 +5,7 @@
 # include "server-ios.h"
 #endif
 #ifdef HAVE_ANDROID
-# include "frida-selinux.h"
+# include "../lib/selinux/frida-selinux.h"
 #endif
 
 #ifdef HAVE_WINDOWS

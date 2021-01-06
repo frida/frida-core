@@ -3,7 +3,7 @@
 #include "frida-tests.h"
 
 #ifdef HAVE_ANDROID
-# include "frida-selinux.h"
+# include "../lib/selinux/frida-selinux.h"
 #endif
 
 #include <gio/gio.h>
