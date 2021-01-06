@@ -4,11 +4,11 @@ install_headers('frida-selinux.h', subdir: 'frida-' + api_version)
 
 frida_selinux = static_library('frida-selinux', 'patch.c',
   c_args: frida_component_cflags,
-  include_directories: frida_selinux_incdir,
   dependencies: [glib_dep, libselinux_dep, libsepol_dep],
 )
 
 frida_selinux_dep = declare_dependency(
+  include_directories: frida_selinux_incdir,
   link_with: frida_selinux,
 )
 
