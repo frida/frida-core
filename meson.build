@@ -181,20 +181,19 @@ else
   endif
 endif
 
+backend_deps_private = []
+backend_libs_private = []
+
 if host_os == 'android'
   libselinux_dep = dependency('libselinux', version: '>=3.0')
   libsepol_dep = dependency('libsepol', version: '>=3.0')
-else
-  libselinux_dep = disabler()
-  libsepol_dep = disabler()
+  backend_deps_private += [libselinux_dep, libsepol_dep]
 endif
 
-backend_deps_private = []
 if tls_provider_dep.found()
   backend_deps_private += tls_provider_dep
 endif
 
-backend_libs_private = []
 if host_os_family == 'darwin'
   backend_libs_private += ['-Wl,-framework,Foundation', '-lbsm']
 endif
