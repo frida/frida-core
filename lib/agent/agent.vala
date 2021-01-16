@@ -1076,7 +1076,16 @@ namespace Frida.Agent {
 				if (!FileUtils.test (emulated_agent_path, EXISTS))
 					throw new Error.NOT_SUPPORTED ("Unable to handle emulated processes due to build configuration");
 
-				emulated_agent = nb_api.load_library (emulated_agent_path, RTLD_LAZY);
+				if (nb_api.load_library_ext != null && nb_api.flavor == LEGACY) {
+					/*
+					 * FIXME: We should be using LoadLibraryExt() on modern systems also, but we need to figure out
+					 *        how to get the namespace pointer for the namespace named “classloader-namespace”.
+					 */
+					var classloader_namespace = (void *) 3;
+					emulated_agent = nb_api.load_library_ext (emulated_agent_path, RTLD_LAZY, classloader_namespace);
+				} else {
+					emulated_agent = nb_api.load_library (emulated_agent_path, RTLD_LAZY);
+				}
 				if (emulated_agent == null)
 					throw new Error.NOT_SUPPORTED ("Process is not using emulation");
 
@@ -1202,10 +1211,17 @@ namespace Frida.Agent {
 		}
 
 		private class NativeBridgeApi {
+			public Flavor flavor;
 			public NBLoadLibraryFunc load_library;
+			public NBLoadLibraryExtFunc? load_library_ext;
 			public NBUnloadLibraryFunc? unload_library;
 			public NBGetTrampolineFunc get_trampoline;
 			public void * vm;
+
+			public enum Flavor {
+				MODERN,
+				LEGACY
+			}
 
 			public static NativeBridgeApi open () throws Error {
 				string? nb_mod = null;
@@ -1223,17 +1239,27 @@ namespace Frida.Agent {
 				if (vm_mod == null)
 					throw new Error.NOT_SUPPORTED ("Unable to locate Java VM");
 
-				var load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod, "NativeBridgeLoadLibrary");
+				Flavor flavor;
+				NBLoadLibraryFunc load;
+				NBLoadLibraryExtFunc? load_ext;
 				NBUnloadLibraryFunc? unload;
 				NBGetTrampolineFunc get_trampoline;
+
+				load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod, "NativeBridgeLoadLibrary");;
 				if (load != null) {
+					flavor = MODERN;
+					load_ext = (NBLoadLibraryExtFunc) Gum.Module.find_export_by_name (nb_mod, "NativeBridgeLoadLibraryExt");
 					// XXX: NativeBridgeUnloadLibrary() is only a stub as of Android 11 w/ libndk_translation.so
 					unload = null;
 					get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (nb_mod,
 						"NativeBridgeGetTrampoline");
 				} else {
+					flavor = LEGACY;
 					load = (NBLoadLibraryFunc) Gum.Module.find_export_by_name (nb_mod,
 						"_ZN7android23NativeBridgeLoadLibraryEPKci");
+					load_ext = (NBLoadLibraryExtFunc) Gum.Module.find_export_by_name (nb_mod,
+						"_ZN7android26NativeBridgeLoadLibraryExtEPKciPNS_25native_bridge_namespace_tE");
+					// XXX: Unload implementation seems to be unreliable.
 					unload = null;
 					get_trampoline = (NBGetTrampolineFunc) Gum.Module.find_export_by_name (nb_mod,
 						"_ZN7android25NativeBridgeGetTrampolineEPvPKcS2_j");
@@ -1250,12 +1276,14 @@ namespace Frida.Agent {
 				if (get_vms (vms, out num_vms) != JNI_OK || num_vms < 1)
 					throw new Error.NOT_SUPPORTED ("No Java VM loaded");
 
-				return new NativeBridgeApi (load, unload, get_trampoline, vms[0]);
+				return new NativeBridgeApi (flavor, load, load_ext, unload, get_trampoline, vms[0]);
 			}
 
-			private NativeBridgeApi (NBLoadLibraryFunc load_library, NBUnloadLibraryFunc? unload_library,
-					NBGetTrampolineFunc get_trampoline, void * vm) {
+			private NativeBridgeApi (Flavor flavor, NBLoadLibraryFunc load_library, NBLoadLibraryExtFunc? load_library_ext,
+					NBUnloadLibraryFunc? unload_library, NBGetTrampolineFunc get_trampoline, void * vm) {
+				this.flavor = flavor;
 				this.load_library = load_library;
+				this.load_library_ext = load_library_ext;
 				this.unload_library = unload_library;
 				this.get_trampoline = get_trampoline;
 				this.vm = vm;
@@ -1267,6 +1295,9 @@ namespace Frida.Agent {
 
 		[CCode (has_target = false)]
 		private delegate void * NBLoadLibraryFunc (string path, int flags);
+
+		[CCode (has_target = false)]
+		private delegate void * NBLoadLibraryExtFunc (string path, int flags, void * ns);
 
 		[CCode (has_target = false)]
 		private delegate int NBUnloadLibraryFunc (void * handle);
