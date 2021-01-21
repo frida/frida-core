@@ -41,7 +41,6 @@ void CFLog (CFLogLevel level, CFStringRef format, ...);
 # include <stdio.h>
 #endif
 
-static void frida_server_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data) G_GNUC_NORETURN;
 static void frida_server_on_log_message (const gchar * log_domain, GLogLevelFlags log_level, const gchar * message, gpointer user_data);
 
 static gboolean frida_verbose_logging_enabled = FALSE;
@@ -51,7 +50,6 @@ frida_server_environment_init (void)
 {
   frida_init_with_runtime (FRIDA_RUNTIME_GLIB);
 
-  g_assertion_set_handler (frida_server_on_assert_failure, NULL);
   g_log_set_default_handler (frida_server_on_log_message, NULL);
 }
 
@@ -77,23 +75,6 @@ void
 frida_server_tcp_enable_nodelay (GSocket * socket)
 {
   g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
-}
-
-static void
-frida_server_on_assert_failure (const gchar * log_domain, const gchar * file, gint line, const gchar * func, const gchar * message, gpointer user_data)
-{
-  gchar * full_message;
-
-  while (g_str_has_prefix (file, ".." G_DIR_SEPARATOR_S))
-    file += 3;
-  if (message == NULL)
-    message = "code should not be reached";
-
-  full_message = g_strdup_printf ("%s:%d:%s%s %s", file, line, func, (func[0] != '\0') ? ":" : "", message);
-  frida_server_on_log_message (log_domain, G_LOG_LEVEL_ERROR, full_message, user_data);
-  g_free (full_message);
-
-  abort ();
 }
 
 static void
