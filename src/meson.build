@@ -320,6 +320,7 @@ internal_deps = [interfaces_dep, pipe_dep]
 core = library('frida-core', core_sources,
   c_args: frida_component_cflags,
   vala_args: backend_vala_args,
+  vala_gir: 'Frida-' + api_version + '.gir',
   link_args: backend_libs_private,
   link_with: backend_libs,
   dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, tls_provider_dep] + backend_deps + internal_deps,
