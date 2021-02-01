@@ -225,6 +225,41 @@ namespace Frida.Inject {
 
 			exit_code = 0;
 
+			var fd = stdin.fileno();
+#if WINDOWS
+			var inchan = new IOChannel.win32_new_fd (fd);
+#else
+			var inchan = new IOChannel.unix_new (fd);
+#endif
+			inchan.add_watch (IOCondition.IN, (source, condition) => {
+				string str_return = null;
+				size_t length = -1;
+				size_t terminator_pos = -1;
+
+				if (condition == IOCondition.HUP) {
+					return false;
+				}
+
+				try {
+					IOStatus status = inchan.read_line (out str_return, out length, out terminator_pos);
+					if (status == IOStatus.EOF) {
+						loop.quit ();
+						return false;
+					}
+
+					Idle.add(() => {
+						script_runner.call_send.begin (str_return);
+						return false;
+					});
+
+					return true;
+				} catch (IOChannelError e) {
+					return false;
+				} catch (ConvertError e) {
+					return false;
+				}
+			});
+
 			loop = new MainLoop ();
 			loop.run ();
 
@@ -436,6 +471,15 @@ namespace Frida.Inject {
 					yield script.eternalize (io_cancellable);
 			} finally {
 				load_in_progress = false;
+			}
+		}
+
+		public async void call_send (string message) {
+			var msg = new Json.Node.alloc ().init_string (message);
+
+			try {
+				yield rpc_client.call ("recv", new Json.Node[] { msg }, io_cancellable);
+			} catch (GLib.Error e) {
 			}
 		}
 
