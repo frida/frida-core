@@ -246,12 +246,11 @@ namespace Frida.Inject {
 			var inchan = new IOChannel.unix_new (fd);
 #endif
 			inchan.add_watch (IOCondition.IN, (source, condition) => {
-				string str_return = null;
-
 				if (condition == IOCondition.HUP) {
 					return false;
 				}
 
+				string str_return = null;
 				try {
 					IOStatus status = inchan.read_line (out str_return, null, null);
 					if (status == IOStatus.EOF) {
