@@ -246,21 +246,21 @@ namespace Frida.Inject {
 			var inchan = new IOChannel.unix_new (fd);
 #endif
 			inchan.add_watch (IOCondition.IN, (source, condition) => {
-				if (condition == IOCondition.HUP) {
+				if (condition == IOCondition.HUP)
 					return false;
-				}
 
 				string str_return = null;
+				IOStatus status;
 				try {
-					IOStatus status = inchan.read_line (out str_return, null, null);
-					if (status == IOStatus.EOF) {
-						loop.quit ();
-						return false;
-					}
-
+					status = inchan.read_line (out str_return, null, null);
 				} catch (IOChannelError e) {
 					return false;
 				} catch (ConvertError e) {
+					return false;
+				}
+
+				if (status == IOStatus.EOF) {
+					loop.quit ();
 					return false;
 				}
 
@@ -593,12 +593,11 @@ namespace Frida.Inject {
 			if (payload == null)
 				return false;
 
-			if (payload.get_length() != 2)
+			if (payload.get_length () != 2)
 				return false;
 
 			var type = payload.get_string_element (0);
-			switch (type)
-			{
+			switch (type) {
 				case "frida:stdout":
 				case "frida:stderr":
 					break;
@@ -610,8 +609,7 @@ namespace Frida.Inject {
 			if (msg == null)
 				return false;
 
-			switch (type)
-			{
+			switch (type) {
 				case "frida:stdout":
 					stdout.puts (msg);
 					return true;
