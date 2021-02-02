@@ -225,7 +225,7 @@ namespace Frida.Inject {
 
 			exit_code = 0;
 
-			var fd = stdin.fileno();
+			var fd = stdin.fileno ();
 #if WINDOWS
 			var inchan = new IOChannel.win32_new_fd (fd);
 #else
@@ -233,31 +233,30 @@ namespace Frida.Inject {
 #endif
 			inchan.add_watch (IOCondition.IN, (source, condition) => {
 				string str_return = null;
-				size_t length = -1;
-				size_t terminator_pos = -1;
 
 				if (condition == IOCondition.HUP) {
 					return false;
 				}
 
 				try {
-					IOStatus status = inchan.read_line (out str_return, out length, out terminator_pos);
+					IOStatus status = inchan.read_line (out str_return, null, null);
 					if (status == IOStatus.EOF) {
 						loop.quit ();
 						return false;
 					}
 
-					Idle.add(() => {
-						script_runner.call_send.begin (str_return);
-						return false;
-					});
-
-					return true;
 				} catch (IOChannelError e) {
 					return false;
 				} catch (ConvertError e) {
 					return false;
 				}
+
+				Idle.add (() => {
+					script_runner.call_send.begin (str_return);
+					return false;
+				});
+
+				return true;
 			});
 
 			loop = new MainLoop ();
@@ -474,20 +473,20 @@ namespace Frida.Inject {
 			}
 		}
 
-		public async void call_send (string message) {
-			var msg = new Json.Node.alloc ().init_string (message);
-
-			try {
-				yield rpc_client.call ("recv", new Json.Node[] { msg }, io_cancellable);
-			} catch (GLib.Error e) {
-			}
-		}
-
 		private async void call_init () {
 			var stage = new Json.Node.alloc ().init_string ("early");
 
 			try {
 				yield rpc_client.call ("init", new Json.Node[] { stage, parameters }, io_cancellable);
+			} catch (GLib.Error e) {
+			}
+		}
+
+		public async void call_send (string message) {
+			var msg = new Json.Node.alloc ().init_string (message);
+
+			try {
+				yield rpc_client.call ("recv", new Json.Node[] { msg }, io_cancellable);
 			} catch (GLib.Error e) {
 			}
 		}
