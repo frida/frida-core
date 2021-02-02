@@ -226,18 +226,17 @@ namespace Frida.Inject {
 			exit_code = 0;
 
 			/**
-			 * Support reading from stdin for communications with the injected
-			 * script. With the console in its default canonical mode, we will
-			 * read a line at a time when the user presses enter and send it to
-			 * a registered RPC function in the script as follows. Here, the
-			 * message parameter is the string typed by the user including the
-			 * newline.
+			 * Support reading from stdin for communications with the injected script.
+			 * With the console in its default canonical mode, we will read a line at a
+			 * time when the user presses enter and send it to a registered RPC method
+			 * in the script as follows. Here, the data parameter is the string typed
+			 * by the user including the newline.
 			 *
 			 * rpc.exports = {
-    		 *   onFridaStdIn: function (message) {
-			 * 	   ...
+			 *   onFridaStdin(data) {
+			 *     ...
 			 *   }
-			 * }
+			 * };
 			 */
 			var fd = stdin.fileno ();
 #if WINDOWS
@@ -249,13 +248,11 @@ namespace Frida.Inject {
 				if (condition == IOCondition.HUP)
 					return false;
 
-				string str_return = null;
 				IOStatus status;
+				string line = null;
 				try {
-					status = inchan.read_line (out str_return, null, null);
-				} catch (IOChannelError e) {
-					return false;
-				} catch (ConvertError e) {
+					status = inchan.read_line (out line, null, null);
+				} catch (GLib.Error e) {
 					return false;
 				}
 
@@ -264,10 +261,7 @@ namespace Frida.Inject {
 					return false;
 				}
 
-				Idle.add (() => {
-					script_runner.call_on_stdin.begin (str_return);
-					return false;
-				});
+				script_runner.on_stdin (line);
 
 				return true;
 			});
@@ -495,13 +489,10 @@ namespace Frida.Inject {
 			}
 		}
 
-		public async void call_on_stdin (string message) {
-			var msg = new Json.Node.alloc ().init_string (message);
+		public void on_stdin (string data) {
+			var data_value = new Json.Node.alloc ().init_string (data);
 
-			try {
-				yield rpc_client.call ("onFridaStdIn", new Json.Node[] { msg }, io_cancellable);
-			} catch (GLib.Error e) {
-			}
+			rpc_client.call.begin ("onFridaStdin", new Json.Node[] { data_value }, io_cancellable);
 		}
 
 		private void on_script_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
@@ -577,31 +568,31 @@ namespace Frida.Inject {
 		 * The script can send strings to frida-inject to write to its stdout or
 		 * stderr. This can be done either inside the RPC handler for receiving
 		 * input from frida-inject, or elsewhere at any arbitrary point in the
-		 * script. We use the follow syntax:
+		 * script. We use the following syntax:
 		 *
-		 * send(['frida:stdout', 'MESSAGE']);
-		 * send(['frida:stderr', 'MESSAGE']);
+		 * send(['frida:stdout', 'DATA']);
+		 * send(['frida:stderr', 'DATA']);
 		 *
 		 * The resulting message will look as shown below. Note that we don't
-		 * use the parents object's `type` field since this is reserved for use
+		 * use the parent object's `type` field since this is reserved for use
 		 * by the runtime itself.
 		 *
-		 * {"type":"send","payload":["frida:stdout","MESSAGE"]}
+		 * {"type":"send","payload":["frida:stdout","DATA"]}
 		 */
 		private bool try_handle_stdout_message (Json.Object message) {
 			var payload = message.get_member ("payload");
 			if (payload.get_node_type () != Json.NodeType.ARRAY)
 				return false;
 
-			var array = payload.get_array ();
-			if (array.get_length () != 2)
+			var tuple = payload.get_array ();
+			if (tuple.get_length () != 2)
 				return false;
 
-			var first_child = array.get_element (0);
-			if (first_child.get_value_type () != typeof (string))
+			var first_element = tuple.get_element (0);
+			if (first_element.get_value_type () != typeof (string))
 				return false;
 
-			var type = first_child.get_string ();
+			var type = first_element.get_string ();
 			switch (type) {
 				case "frida:stdout":
 				case "frida:stderr":
@@ -610,17 +601,18 @@ namespace Frida.Inject {
 					return false;
 			}
 
-			var second_child = array.get_element (1);
-			if (second_child.get_value_type () != typeof (string))
+			var second_element = tuple.get_element (1);
+			if (second_element.get_value_type () != typeof (string))
 				return false;
-			var msg = second_child.get_string ();
+			var str = second_element.get_string ();
 
 			switch (type) {
 				case "frida:stdout":
-					stdout.puts (msg);
+					stdout.write (str.data);
+					stdout.flush ();
 					return true;
 				case "frida:stderr":
-					stderr.puts (msg);
+					stderr.write (str.data);
 					return true;
 				default:
 					return false;
