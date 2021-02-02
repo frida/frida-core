@@ -225,6 +225,47 @@ namespace Frida.Inject {
 
 			exit_code = 0;
 
+			/**
+			 * Support reading from stdin for communications with the injected script.
+			 * With the console in its default canonical mode, we will read a line at a
+			 * time when the user presses enter and send it to a registered RPC method
+			 * in the script as follows. Here, the data parameter is the string typed
+			 * by the user including the newline.
+			 *
+			 * rpc.exports = {
+			 *   onFridaStdin(data) {
+			 *     ...
+			 *   }
+			 * };
+			 */
+			var fd = stdin.fileno ();
+#if WINDOWS
+			var inchan = new IOChannel.win32_new_fd (fd);
+#else
+			var inchan = new IOChannel.unix_new (fd);
+#endif
+			inchan.add_watch (IOCondition.IN, (source, condition) => {
+				if (condition == IOCondition.HUP)
+					return false;
+
+				IOStatus status;
+				string line = null;
+				try {
+					status = inchan.read_line (out line, null, null);
+				} catch (GLib.Error e) {
+					return false;
+				}
+
+				if (status == IOStatus.EOF) {
+					loop.quit ();
+					return false;
+				}
+
+				script_runner.on_stdin (line);
+
+				return true;
+			});
+
 			loop = new MainLoop ();
 			loop.run ();
 
@@ -448,6 +489,12 @@ namespace Frida.Inject {
 			}
 		}
 
+		public void on_stdin (string data) {
+			var data_value = new Json.Node.alloc ().init_string (data);
+
+			rpc_client.call.begin ("onFridaStdin", new Json.Node[] { data_value }, io_cancellable);
+		}
+
 		private void on_script_file_changed (File file, File? other_file, FileMonitorEvent event_type) {
 			if (event_type == FileMonitorEvent.CHANGES_DONE_HINT)
 				return;
@@ -480,8 +527,17 @@ namespace Frida.Inject {
 			var message = parser.get_root ().get_object ();
 
 			var type = message.get_string_member ("type");
-			if (type == "log")
-				handled = try_handle_log_message (message);
+			switch (type) {
+				case "log":
+					handled = try_handle_log_message (message);
+					break;
+				case "send":
+					handled = try_handle_stdout_message (message);
+					break;
+				default:
+					handled = false;
+					break;
+			}
 
 			if (!handled) {
 				stdout.puts (raw_message);
@@ -506,6 +562,61 @@ namespace Frida.Inject {
 					break;
 			}
 			return true;
+		}
+
+		/**
+		 * The script can send strings to frida-inject to write to its stdout or
+		 * stderr. This can be done either inside the RPC handler for receiving
+		 * input from frida-inject, or elsewhere at any arbitrary point in the
+		 * script. We use the following syntax:
+		 *
+		 * send(['frida:stdout', 'DATA']);
+		 * send(['frida:stderr', 'DATA']);
+		 *
+		 * The resulting message will look as shown below. Note that we don't
+		 * use the parent object's `type` field since this is reserved for use
+		 * by the runtime itself.
+		 *
+		 * {"type":"send","payload":["frida:stdout","DATA"]}
+		 */
+		private bool try_handle_stdout_message (Json.Object message) {
+			var payload = message.get_member ("payload");
+			if (payload.get_node_type () != Json.NodeType.ARRAY)
+				return false;
+
+			var tuple = payload.get_array ();
+			if (tuple.get_length () != 2)
+				return false;
+
+			var first_element = tuple.get_element (0);
+			if (first_element.get_value_type () != typeof (string))
+				return false;
+
+			var type = first_element.get_string ();
+			switch (type) {
+				case "frida:stdout":
+				case "frida:stderr":
+					break;
+				default:
+					return false;
+			}
+
+			var second_element = tuple.get_element (1);
+			if (second_element.get_value_type () != typeof (string))
+				return false;
+			var str = second_element.get_string ();
+
+			switch (type) {
+				case "frida:stdout":
+					stdout.write (str.data);
+					stdout.flush ();
+					return true;
+				case "frida:stderr":
+					stderr.write (str.data);
+					return true;
+				default:
+					return false;
+			}
 		}
 
 		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
