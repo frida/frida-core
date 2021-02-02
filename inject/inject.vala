@@ -589,14 +589,19 @@ namespace Frida.Inject {
 		 * {"type":"send","payload":["frida:stdout","MESSAGE"]}
 		 */
 		private bool try_handle_stdout_message (Json.Object message) {
-			var payload = message.get_array_member ("payload");
-			if (payload == null)
+			var payload = message.get_member ("payload");
+			if (payload.get_node_type () != Json.NodeType.ARRAY)
 				return false;
 
-			if (payload.get_length () != 2)
+			var array = payload.get_array ();
+			if (array.get_length () != 2)
 				return false;
 
-			var type = payload.get_string_element (0);
+			var first_child = array.get_element (0);
+			if (first_child.get_value_type () != typeof (string))
+				return false;
+
+			var type = first_child.get_string ();
 			switch (type) {
 				case "frida:stdout":
 				case "frida:stderr":
@@ -605,9 +610,10 @@ namespace Frida.Inject {
 					return false;
 			}
 
-			var msg = payload.get_string_element (1);
-			if (msg == null)
+			var second_child = array.get_element (1);
+			if (second_child.get_value_type () != typeof (string))
 				return false;
+			var msg = second_child.get_string ();
 
 			switch (type) {
 				case "frida:stdout":
