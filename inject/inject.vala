@@ -241,36 +241,64 @@ namespace Frida.Inject {
 			var fd = stdin.fileno ();
 #if WINDOWS
 			var inchan = new IOChannel.win32_new_fd (fd);
+			inchan.add_watch (IOCondition.IN, (source, condition) => {
+				return read_line (source, condition);
+			});
 #else
 			var inchan = new IOChannel.unix_new (fd);
-#endif
 			inchan.add_watch (IOCondition.IN, (source, condition) => {
-				if (condition == IOCondition.HUP)
-					return false;
-
-				IOStatus status;
-				string line = null;
-				try {
-					status = inchan.read_line (out line, null, null);
-				} catch (GLib.Error e) {
-					return false;
-				}
-
-				if (status == IOStatus.EOF) {
-					loop.quit ();
-					return false;
-				}
-
-				script_runner.on_stdin (line);
-
-				return true;
+				if (script_runner.is_raw_mode)
+					return read_raw (source, condition);
+				else
+					return read_line (source, condition);
 			});
+#endif
 
 			loop = new MainLoop ();
 			loop.run ();
 
 			return exit_code;
 		}
+
+		private bool read_line (IOChannel source, IOCondition condition) {
+			if (condition == IOCondition.HUP)
+				return false;
+
+			IOStatus status;
+			string line = null;
+			try {
+				status = source.read_line (out line, null, null);
+			} catch (GLib.Error e) {
+				return true;
+			}
+
+			if (status == IOStatus.EOF) {
+				loop.quit ();
+				return false;
+			}
+
+			script_runner.on_stdin (line);
+
+			return true;
+		}
+
+#if !WINDOWS
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			var fd = source.unix_get_fd ();
+			string buf = " ";
+
+			if (Posix.read (fd, buf, buf.length) < 0)
+			{
+				return true;
+			}
+
+			switch (buf[0]) {
+				default:
+					script_runner.on_stdin (buf);
+					return true;
+			}
+		}
+#endif
 
 		private async void start () {
 			device_manager = new DeviceManager ();
@@ -386,6 +414,13 @@ namespace Frida.Inject {
 		private Source script_unchanged_timeout;
 		private RpcClient rpc_client;
 		private Session session;
+#if !WINDOWS
+		private Posix.termios original_term;
+#endif
+		public bool is_raw_mode {
+			get;
+			private set;
+		}
 		private bool load_in_progress = false;
 		private bool enable_development = false;
 		private Cancellable io_cancellable;
@@ -399,6 +434,7 @@ namespace Frida.Inject {
 			this.parameters = parameters;
 			this.enable_development = enable_development;
 			this.io_cancellable = io_cancellable;
+			this.is_raw_mode = false;
 		}
 
 		construct {
@@ -406,6 +442,11 @@ namespace Frida.Inject {
 		}
 
 		public async void start () throws Error, IOError {
+#if !WINDOWS
+			var fd = stdin.fileno ();
+			if (Posix.tcgetattr(fd, out original_term) < 0)
+				throw new Error.INVALID_OPERATION ("tcgetattr (%d) - %s", fd, strerror (Posix.errno));
+#endif
 			yield load ();
 
 			if (enable_development && script_path != null) {
@@ -426,6 +467,11 @@ namespace Frida.Inject {
 			}
 
 			yield session.detach (cancellable);
+#if !WINDOWS
+			var fd = stdin.fileno ();
+			Posix.tcsetattr(fd, Posix.TCSANOW, original_term);
+			print ("\r");
+#endif
 		}
 
 		private async void try_reload () {
@@ -473,6 +519,10 @@ namespace Frida.Inject {
 
 				yield call_init ();
 
+#if !WINDOWS
+				is_raw_mode = yield call_get_stdin_raw_mode ();
+#endif
+
 				if (eternalize)
 					yield script.eternalize (io_cancellable);
 			} finally {
@@ -488,7 +538,53 @@ namespace Frida.Inject {
 			} catch (GLib.Error e) {
 			}
 		}
+#if !WINDOWS
+		private async bool call_get_stdin_raw_mode () {
+			Posix.termios term;
+			int fd;
+			try {
+				Json.Node? node = yield rpc_client.call ("onFridaGetStdInRawMode", new Json.Node[] { }, io_cancellable);
+				if (node == null)
+					return false;
 
+				if (node.get_node_type () != Json.NodeType.VALUE)
+					return false;
+
+				if (node.get_value_type() != typeof (bool))
+					return false;
+
+				if (node.get_boolean () == false)
+					return false;
+
+				fd = stdin.fileno ();
+
+				if (Posix.tcgetattr(fd, out term) < 0)
+					throw new Error.INVALID_OPERATION ("tcgetattr (%d) - %s", fd, strerror (Posix.errno));
+
+				term.c_iflag &= ~Posix.BRKINT;
+				term.c_iflag &= ~Posix.ICRNL;
+				term.c_iflag &= ~Posix.INPCK;
+				term.c_iflag &= ~Posix.ISTRIP;
+				term.c_iflag &= ~Posix.IXON;
+
+				term.c_oflag &= ~Posix.OPOST;
+
+				term.c_cflag |= Posix.CS8;
+
+				term.c_lflag &= ~Posix.ECHO;
+				term.c_lflag &= ~Posix.ICANON;
+				term.c_lflag &= ~Posix.IEXTEN;
+				term.c_lflag |= Posix.ISIG;
+
+				if (Posix.tcsetattr(fd, Posix.TCSANOW, term) < 0)
+					throw new Error.INVALID_OPERATION ("tcsetattr (%d) - %s", fd, strerror (Posix.errno));
+
+				return true;
+			} catch (GLib.Error e) {
+				return false;
+			}
+		}
+#endif
 		public void on_stdin (string data) {
 			var data_value = new Json.Node.alloc ().init_string (data);
 
