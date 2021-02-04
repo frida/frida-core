@@ -51,7 +51,9 @@ namespace Frida {
 			}
 
 #if IOS
-			if (ElectraPolicySoftener.is_available ())
+			if (PureIOSPolicySoftener.is_available ())
+				policy_softener = new PureIOSPolicySoftener ();
+			else if (ElectraPolicySoftener.is_available ())
 				policy_softener = new ElectraPolicySoftener ();
 			else if (Unc0verPolicySoftener.is_available ())
 				policy_softener = new Unc0verPolicySoftener ();
@@ -562,7 +564,11 @@ namespace Frida {
 		}
 
 		public void _on_inject_instance_loaded (uint id, uint pid, DarwinModuleDetails? mapped_module) {
-			policy_softener.retain (pid);
+			try {
+				policy_softener.retain (pid);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
 
 			if (mapped_module != null)
 				injected (id, pid, true, mapped_module);
