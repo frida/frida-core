@@ -65,6 +65,8 @@ if host_os_family == 'darwin'
     'darwin/frida-helper-types.vala',
     'darwin/policy-softener.vala',
     'darwin/policy-softener-glue.c',
+    'darwin/policyd.c',
+    'darwin/policyd-client.c',
     'darwin/substitutedclient.c',
     'darwin/port.vala',
     'darwin/port-glue.m',

@@ -1,5 +1,7 @@
 #include "server-darwin.h"
 
+#include "darwin/policyd.h"
+
 #import <Foundation/Foundation.h>
 
 static volatile BOOL frida_run_loop_running = NO;
@@ -19,4 +21,10 @@ _frida_server_stop_run_loop (void)
 {
   frida_run_loop_running = NO;
   CFRunLoopStop ([[NSRunLoop mainRunLoop] getCFRunLoop]);
+}
+
+gint
+_frida_server_policyd_main (void)
+{
+  return frida_policyd_main ();
 }

@@ -10,9 +10,15 @@ namespace Frida.Server {
 #if !WINDOWS
 	private static bool daemonize = false;
 #endif
+	private static string? softener_flavor_str = null;
 	private static bool preload = true;
 	private static bool report_crashes = true;
 	private static bool verbose = false;
+
+	private enum PolicySoftenerFlavor {
+		SYSTEM,
+		INTERNAL
+	}
 
 	private delegate void ReadyHandler (bool success);
 
@@ -23,6 +29,7 @@ namespace Frida.Server {
 #if !WINDOWS
 		{ "daemonize", 'D', 0, OptionArg.NONE, ref daemonize, "Detach and become a daemon", null },
 #endif
+		{ "policy-softener", 0, 0, OptionArg.STRING, ref softener_flavor_str, "Select policy softener", "system|internal" },
 		{ "disable-preload", 'P', OptionFlags.REVERSE, OptionArg.NONE, ref preload, "Disable preload optimization", null },
 		{ "ignore-crashes", 'C', OptionFlags.REVERSE, OptionArg.NONE, ref report_crashes,
 			"Disable native crash reporter integration", null },
@@ -32,6 +39,12 @@ namespace Frida.Server {
 
 	private static int main (string[] args) {
 		Environment.init ();
+
+#if DARWIN
+		if (Path.get_basename (args[0]) == "frida-policyd") {
+			return Policyd._main ();
+		}
+#endif
 
 		try {
 			var ctx = new OptionContext ();
@@ -73,6 +86,22 @@ namespace Frida.Server {
 				return 1;
 			}
 		}
+
+		PolicySoftenerFlavor softener_flavor = SYSTEM;
+		if (softener_flavor_str != null) {
+			var klass = (EnumClass) typeof (PolicySoftenerFlavor).class_ref ();
+			var v = klass.get_value_by_nick (softener_flavor_str);
+			if (v == null) {
+				printerr ("Invalid policy softener flavor\n");
+				return 2;
+			}
+			softener_flavor = (PolicySoftenerFlavor) v.value;
+		}
+
+#if IOS
+		if (softener_flavor == INTERNAL)
+			InternalIOSPolicySoftener.enable ();
+#endif
 
 		ReadyHandler? on_ready = null;
 #if !WINDOWS
@@ -179,6 +208,10 @@ namespace Frida.Server {
 #if DARWIN
 	public extern void _start_run_loop ();
 	public extern void _stop_run_loop ();
+
+	namespace Policyd {
+		public extern int _main ();
+	}
 #endif
 
 	public class Application : Object, TransportBroker {

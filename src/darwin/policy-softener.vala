@@ -1,16 +1,16 @@
 namespace Frida {
 	public interface PolicySoftener : Object {
-		public abstract void soften (uint pid);
-		public abstract void retain (uint pid);
+		public abstract void soften (uint pid) throws Error;
+		public abstract void retain (uint pid) throws Error;
 		public abstract void release (uint pid);
 		public abstract void forget (uint pid);
 	}
 
 	public class NullPolicySoftener : Object, PolicySoftener {
-		public void soften (uint pid) {
+		public void soften (uint pid) throws Error {
 		}
 
-		public void retain (uint pid) {
+		public void retain (uint pid) throws Error {
 		}
 
 		public void release (uint pid) {
@@ -24,7 +24,7 @@ namespace Frida {
 	public class IOSPolicySoftener : Object, PolicySoftener {
 		private Gee.HashMap<uint, ProcessEntry> process_entries = new Gee.HashMap<uint, ProcessEntry> ();
 
-		public void soften (uint pid) {
+		public void soften (uint pid) throws Error {
 			if (process_entries.has_key (pid))
 				return;
 
@@ -42,7 +42,7 @@ namespace Frida {
 			entry.expiry_source = expiry_source;
 		}
 
-		public void retain (uint pid) {
+		public void retain (uint pid) throws Error {
 			var entry = process_entries[pid];
 			if (entry == null)
 				entry = perform_softening (pid);
@@ -68,7 +68,7 @@ namespace Frida {
 				entry.cancel_expiry ();
 		}
 
-		protected virtual ProcessEntry perform_softening (uint pid) {
+		protected virtual ProcessEntry perform_softening (uint pid) throws Error {
 			MemlimitProperties? saved_memory_limits = null;
 			if (!DarwinHelperBackend.is_application_process (pid)) {
 				saved_memory_limits = try_commit_memlimit_properties (pid, MemlimitProperties.without_limits ());
@@ -164,6 +164,26 @@ namespace Frida {
 		}
 	}
 
+	public class InternalIOSPolicySoftener : IOSPolicySoftener {
+		private static bool enabled = false;
+
+		public static void enable () {
+			enabled = true;
+		}
+
+		public static bool is_available () {
+			return enabled;
+		}
+
+		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
+			_soften (pid);
+
+			return base.perform_softening (pid);
+		}
+
+		private extern static void _soften (uint pid) throws Error;
+	}
+
 	public class ElectraPolicySoftener : IOSPolicySoftener {
 		private const string LIBJAILBREAK_PATH = "/usr/lib/libjailbreak.dylib";
 
@@ -192,7 +212,7 @@ namespace Frida {
 			return FileUtils.test (LIBJAILBREAK_PATH, FileTest.EXISTS);
 		}
 
-		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) {
+		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
 			entitle_and_platformize (pid);
 
 			return base.perform_softening (pid);
@@ -231,7 +251,7 @@ namespace Frida {
 			return FileUtils.test (SUBSTITUTED_PATH, FileTest.EXISTS);
 		}
 
-		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) {
+		protected override IOSPolicySoftener.ProcessEntry perform_softening (uint pid) throws Error {
 			substitute_setup_process (pid);
 
 			return base.perform_softening (pid);
