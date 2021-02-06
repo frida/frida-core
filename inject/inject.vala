@@ -281,7 +281,7 @@ namespace Frida.Inject {
 
 #if WINDOWS
 		private bool read_raw (IOChannel source, IOCondition condition) {
-			assert_not_reached ();
+			return false;
 		}
 #else
 		private bool read_raw (IOChannel source, IOCondition condition) {
