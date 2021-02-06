@@ -245,25 +245,10 @@ namespace Frida.Inject {
 			var inchan = new IOChannel.unix_new (fd);
 #endif
 			inchan.add_watch (IOCondition.IN, (source, condition) => {
-				if (condition == IOCondition.HUP)
-					return false;
-
-				IOStatus status;
-				string line = null;
-				try {
-					status = inchan.read_line (out line, null, null);
-				} catch (GLib.Error e) {
-					return false;
-				}
-
-				if (status == IOStatus.EOF) {
-					loop.quit ();
-					return false;
-				}
-
-				script_runner.on_stdin (line);
-
-				return true;
+				if (script_runner.terminal_mode == COOKED)
+					return read_line (source, condition);
+				else
+					return read_raw (source, condition);
 			});
 
 			loop = new MainLoop ();
@@ -271,6 +256,55 @@ namespace Frida.Inject {
 
 			return exit_code;
 		}
+
+		private bool read_line (IOChannel source, IOCondition condition) {
+			if (condition == IOCondition.HUP)
+				return false;
+
+			IOStatus status;
+			string line = null;
+			try {
+				status = source.read_line (out line, null, null);
+			} catch (GLib.Error e) {
+				return true;
+			}
+
+			if (status == IOStatus.EOF) {
+				loop.quit ();
+				return false;
+			}
+
+			script_runner.on_stdin (line);
+
+			return true;
+		}
+
+#if WINDOWS
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			return false;
+		}
+#else
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			var fd = source.unix_get_fd ();
+
+			uint8 buf[1024];
+			ssize_t n = Posix.read (fd, buf, buf.length - 1);
+			if (n == -1)
+				return true;
+
+			bool eof = n == 0;
+			if (eof) {
+				loop.quit ();
+				return false;
+			}
+
+			buf[n] = 0;
+
+			script_runner.on_stdin ((string) buf);
+
+			return true;
+		}
+#endif
 
 		private async void start () {
 			device_manager = new DeviceManager ();
@@ -377,17 +411,30 @@ namespace Frida.Inject {
 	}
 
 	private class ScriptRunner : Object, RpcPeer {
+		public TerminalMode terminal_mode {
+			get;
+			private set;
+			default = COOKED;
+		}
+
+		private Session session;
 		private Script? script;
 		private string? script_path;
 		private string? script_source;
 		private ScriptRuntime script_runtime;
 		private Json.Node parameters;
+		private bool enable_development = false;
+
+		private bool load_in_progress = false;
 		private GLib.FileMonitor script_monitor;
 		private Source script_unchanged_timeout;
+
 		private RpcClient rpc_client;
-		private Session session;
-		private bool load_in_progress = false;
-		private bool enable_development = false;
+
+#if !WINDOWS
+		private Posix.termios original_term;
+#endif
+
 		private Cancellable io_cancellable;
 
 		public ScriptRunner (Session session, string? script_path, string? script_source, ScriptRuntime script_runtime,
@@ -406,6 +453,8 @@ namespace Frida.Inject {
 		}
 
 		public async void start () throws Error, IOError {
+			save_terminal_config ();
+
 			yield load ();
 
 			if (enable_development && script_path != null) {
@@ -426,6 +475,8 @@ namespace Frida.Inject {
 			}
 
 			yield session.detach (cancellable);
+
+			restore_terminal_config ();
 		}
 
 		private async void try_reload () {
@@ -473,6 +524,9 @@ namespace Frida.Inject {
 
 				yield call_init ();
 
+				terminal_mode = yield query_terminal_mode ();
+				apply_terminal_mode (terminal_mode);
+
 				if (eternalize)
 					yield script.eternalize (io_cancellable);
 			} finally {
@@ -488,6 +542,77 @@ namespace Frida.Inject {
 			} catch (GLib.Error e) {
 			}
 		}
+
+#if WINDOWS
+		private void save_terminal_config () throws Error {
+		}
+
+		private void restore_terminal_config () {
+		}
+
+		private async TerminalMode query_terminal_mode () {
+			return COOKED;
+		}
+
+		private static void apply_terminal_mode (TerminalMode mode) throws Error {
+		}
+#else
+		private void save_terminal_config () throws Error {
+			var fd = stdin.fileno ();
+			if (Posix.tcgetattr (fd, out original_term) == -1)
+				throw new Error.INVALID_OPERATION ("tcgetattr failed: %s", strerror (Posix.errno));
+		}
+
+		private void restore_terminal_config () {
+			var fd = stdin.fileno ();
+			Posix.tcsetattr (fd, Posix.TCSANOW, original_term);
+			stdout.putc ('\r');
+			stdout.flush ();
+		}
+
+		private async TerminalMode query_terminal_mode () {
+			Json.Node mode_value;
+			try {
+				mode_value = yield rpc_client.call ("getFridaTerminalMode", new Json.Node[] {}, io_cancellable);
+			} catch (GLib.Error e) {
+				return COOKED;
+			}
+
+			if (mode_value.get_value_type () != typeof (string))
+				return COOKED;
+
+			return (mode_value.get_string () == "raw") ? TerminalMode.RAW : TerminalMode.COOKED;
+		}
+
+		private static void apply_terminal_mode (TerminalMode mode) throws Error {
+			if (mode == COOKED)
+				return;
+
+			int fd = stdin.fileno ();
+
+			Posix.termios term;
+			if (Posix.tcgetattr (fd, out term) == -1)
+				throw new Error.INVALID_OPERATION ("tcgetattr() failed: %s", strerror (Posix.errno));
+
+			term.c_iflag &= ~Posix.BRKINT;
+			term.c_iflag &= ~Posix.ICRNL;
+			term.c_iflag &= ~Posix.INPCK;
+			term.c_iflag &= ~Posix.ISTRIP;
+			term.c_iflag &= ~Posix.IXON;
+
+			term.c_oflag &= ~Posix.OPOST;
+
+			term.c_cflag |= Posix.CS8;
+
+			term.c_lflag &= ~Posix.ECHO;
+			term.c_lflag &= ~Posix.ICANON;
+			term.c_lflag &= ~Posix.IEXTEN;
+			term.c_lflag |= Posix.ISIG;
+
+			if (Posix.tcsetattr (fd, Posix.TCSANOW, term) == -1)
+				throw new Error.INVALID_OPERATION ("tcsetattr() failed: %s", strerror (Posix.errno));
+		}
+#endif
 
 		public void on_stdin (string data) {
 			var data_value = new Json.Node.alloc ().init_string (data);
@@ -622,5 +747,10 @@ namespace Frida.Inject {
 		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
 			yield script.post (raw_message, null, cancellable);
 		}
+	}
+
+	private enum TerminalMode {
+		COOKED,
+		RAW
 	}
 }
