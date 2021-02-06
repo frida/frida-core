@@ -5,8 +5,8 @@
  *     -isysroot $(xcrun --sdk macosx --show-sdk-path) \
  *     -sheader substitutedserver.h \
  *     -server substitutedserver.c \
- *     -header substitutedclient.h \
- *     -user substitutedclient.c \
+ *     -header substituted-client.h \
+ *     -user substituted-client.c \
  *     substituted.defs
  */
 

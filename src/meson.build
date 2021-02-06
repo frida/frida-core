@@ -67,7 +67,7 @@ if host_os_family == 'darwin'
     'darwin/policy-softener-glue.c',
     'darwin/policyd.c',
     'darwin/policyd-client.c',
-    'darwin/substitutedclient.c',
+    'darwin/substituted-client.c',
     'darwin/port.vala',
     'darwin/port-glue.m',
   ]

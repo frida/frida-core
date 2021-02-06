@@ -6,7 +6,7 @@
  */
 #define	__MIG_check__Reply__substitute_daemon_subsystem__ 1
 
-#include "substitutedclient.h"
+#include "substituted-client.h"
 
 /* TODO: #include <mach/mach.h> */
 #ifdef __cplusplus

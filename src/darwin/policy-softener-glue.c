@@ -2,7 +2,7 @@
 
 #ifdef HAVE_IOS
 # include "policyd.h"
-# include "substitutedclient.h"
+# include "substituted-client.h"
 
 # include <errno.h>
 # include <mach/mach.h>
