@@ -74,9 +74,7 @@ checkin_error:
 }
 
 kern_return_t
-frida_policyd_do_soften (mach_port_t server,
-                         int pid,
-                         int * error_code)
+frida_policyd_do_soften (mach_port_t server, int pid, int * error_code)
 {
   gboolean should_retry;
 

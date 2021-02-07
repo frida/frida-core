@@ -16,8 +16,7 @@ subsystem substitute_daemon 31337;
 #include <mach/mach_types.defs>
 
 routine substitute_setup_process(
-		server : mach_port_t;
-		in target_pid : int32_t;
-		in set_exec : boolean_t;
-		in should_resume : boolean_t
-);
+		server		: mach_port_t;
+	in	target_pid	: int32_t;
+	in	set_exec	: boolean_t;
+	in	should_resume	: boolean_t);
