@@ -1,0 +1,23 @@
+/*
+ * Regenerate with:
+ *
+ * $(xcrun --sdk macosx -f mig) \
+ *     -isysroot $(xcrun --sdk macosx --show-sdk-path) \
+ *     -sheader jitd-server.h \
+ *     -server jitd-server.c \
+ *     -header jitd-client.h \
+ *     -user jitd-client.c \
+ *     jitd.defs
+ */
+
+subsystem frida_jitd 21337;
+
+#include <mach/std_types.defs>
+#include <mach/mach_types.defs>
+
+routine frida_jitd_mark(
+		server		: mach_port_t;
+	in	task		: vm_task_entry_t;
+	in	source_address	: mach_vm_address_t;
+	in	source_size	: mach_vm_size_t;
+	inout	target_address	: mach_vm_address_t);

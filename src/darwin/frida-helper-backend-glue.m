@@ -1990,6 +1990,8 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
 
   frida_agent_context_emit_pthread_stub_code (&agent_ctx, pthread_stub_code, details.cpu_type, mapper);
 
+  g_info ("code: 0x%llx->0x%llx", payload_address + layout.code_offset, payload_address + layout.code_offset + 1024);
+
   if (gum_query_is_rwx_supported () || !gum_code_segment_is_supported ())
   {
     kr = mach_vm_write (task, payload_address + layout.mach_code_offset,
@@ -2003,6 +2005,25 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     kr = mach_vm_protect (task, payload_address + layout.code_offset, page_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
     CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "mach_vm_protect");
   }
+  else if (gum_darwin_query_is_mark_supported ())
+  {
+    const gsize code_size = layout.pthread_code_offset + sizeof (pthread_stub_code);
+    guint8 * code;
+    mach_vm_address_t target_address;
+
+    code = g_malloc (code_size);
+    memcpy (code, mach_stub_code, sizeof (mach_stub_code));
+    memcpy (code + layout.pthread_code_offset, pthread_stub_code, sizeof (pthread_stub_code));
+
+    target_address = payload_address + layout.code_offset;
+
+    kr = gum_darwin_mark (task, code, code_size, &target_address);
+    g_info ("[A] gum_darwin_mark() target_address=0x%llx => kr=%d", target_address, kr);
+
+    g_free (code);
+
+    CHECK_MACH_RESULT (kr, ==, KERN_SUCCESS, "gum_darwin_mark(code)");
+  }
   else
   {
     GumCodeSegment * segment;
@@ -2015,12 +2036,15 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
     memcpy (scratch_page + layout.mach_code_offset, mach_stub_code, sizeof (mach_stub_code));
     memcpy (scratch_page + layout.pthread_code_offset, pthread_stub_code, sizeof (pthread_stub_code));
 
+    g_info ("[1] realize()");
     gum_code_segment_realize (segment);
+    g_info ("[2] map()");
     gum_code_segment_map (segment, 0, page_size, scratch_page);
 
     code_address = payload_address + layout.code_offset;
     kr = mach_vm_remap (task, &code_address, page_size, 0, VM_FLAGS_OVERWRITE, self_task, (mach_vm_address_t) scratch_page,
         FALSE, &cur_protection, &max_protection, VM_INHERIT_COPY);
+    g_info ("[3] mach_vm_remap() kr=%d", kr);
 
     gum_code_segment_free (segment);
 

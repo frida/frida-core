@@ -40,12 +40,6 @@ namespace Frida.Server {
 	private static int main (string[] args) {
 		Environment.init ();
 
-#if DARWIN
-		if (Path.get_basename (args[0]) == "frida-policyd") {
-			return Policyd._main ();
-		}
-#endif
-
 		try {
 			var ctx = new OptionContext ();
 			ctx.set_help_enabled (true);
@@ -208,10 +202,6 @@ namespace Frida.Server {
 #if DARWIN
 	public extern void _start_run_loop ();
 	public extern void _stop_run_loop ();
-
-	namespace Policyd {
-		public extern int _main ();
-	}
 #endif
 
 	public class Application : Object, TransportBroker {

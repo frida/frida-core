@@ -65,7 +65,6 @@ if host_os_family == 'darwin'
     'darwin/frida-helper-types.vala',
     'darwin/policy-softener.vala',
     'darwin/policy-softener-glue.c',
-    'darwin/policyd.c',
     'darwin/policyd-client.c',
     'darwin/substituted-client.c',
     'darwin/port.vala',
@@ -136,6 +135,42 @@ if host_os_family == 'darwin'
   darwin_sources += [helper_process_data]
 
   backend_vala_args += ['--pkg=posix']
+
+  policyd = executable('frida-policyd-unsigned', 'darwin/policyd.c')
+  custom_target('frida-policyd',
+    input: [
+      policyd,
+      'darwin/policyd.xcent',
+    ],
+    output: 'frida-policyd',
+    command: [
+      files('darwin/sign.sh'),
+      're.frida.policyd',
+      host_os,
+      '@INPUT@',
+      '@OUTPUT@',
+    ],
+    install: true,
+    install_dir: get_option('bindir')
+  )
+
+  jitd = executable('frida-jitd-unsigned', 'darwin/jitd.c')
+  custom_target('frida-jitd',
+    input: [
+      jitd,
+      'darwin/jitd.xcent',
+    ],
+    output: 'frida-jitd',
+    command: [
+      files('darwin/sign.sh'),
+      're.frida.jitd',
+      host_os,
+      '@INPUT@',
+      '@OUTPUT@',
+    ],
+    install: true,
+    install_dir: get_option('bindir')
+  )
 endif
 
 if host_os_family == 'linux'

@@ -1,9 +1,11 @@
 #include "policyd.h"
 
+#include <assert.h>
 #include <errno.h>
-#include <glib.h>
 #include <signal.h>
+#include <stdio.h>
 #include <strings.h>
+#include <unistd.h>
 #include <mach/mach.h>
 
 #define PT_DETACH    11
@@ -24,7 +26,7 @@ extern int ptrace (int request, pid_t pid, void * addr, int data);
 #include "policyd-server.c"
 
 int
-frida_policyd_main (void)
+main (int argc, char * argv[])
 {
   kern_return_t kr;
   mach_port_t listening_port;
@@ -32,7 +34,7 @@ frida_policyd_main (void)
   signal (SIGCHLD, SIG_IGN);
 
   kr = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_RECEIVE, &listening_port);
-  g_assert (kr == KERN_SUCCESS);
+  assert (kr == KERN_SUCCESS);
 
   kr = bootstrap_register (bootstrap_port, FRIDA_POLICYD_SERVICE_NAME, listening_port);
   if (kr != KERN_SUCCESS)
@@ -68,17 +70,15 @@ frida_policyd_main (void)
 
 checkin_error:
   {
-    g_info ("Unable to check in with launchd: are we running standalone?");
+    fputs ("Unable to check in with launchd: are we running standalone?\n", stderr);
     return 1;
   }
 }
 
 kern_return_t
-frida_policyd_do_soften (mach_port_t server,
-                         int pid,
-                         int * error_code)
+frida_policyd_do_soften (mach_port_t server, int pid, int * error_code)
 {
-  gboolean should_retry;
+  boolean_t should_retry;
 
   if (ptrace (PT_ATTACHEXC, pid, NULL, 0) == -1)
     goto attach_failed;
@@ -89,7 +89,7 @@ frida_policyd_do_soften (mach_port_t server,
 
     should_retry = res == -1 && errno == EBUSY;
     if (should_retry)
-      g_usleep (G_USEC_PER_SEC / 100);
+      usleep (10000);
   }
   while (should_retry);
 
