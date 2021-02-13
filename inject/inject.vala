@@ -245,6 +245,9 @@ namespace Frida.Inject {
 			var inchan = new IOChannel.unix_new (fd);
 #endif
 			inchan.add_watch (IOCondition.IN, (source, condition) => {
+				if (script_runner == null)
+					return false;
+
 				if (script_runner.terminal_mode == COOKED)
 					return read_line (source, condition);
 				else
@@ -432,7 +435,7 @@ namespace Frida.Inject {
 		private RpcClient rpc_client;
 
 #if !WINDOWS
-		private Posix.termios original_term;
+		private Posix.termios? original_term;
 #endif
 
 		private Cancellable io_cancellable;
@@ -554,16 +557,23 @@ namespace Frida.Inject {
 			return COOKED;
 		}
 
-		private static void apply_terminal_mode (TerminalMode mode) throws Error {
+		private void apply_terminal_mode (TerminalMode mode) throws Error {
 		}
 #else
 		private void save_terminal_config () throws Error {
 			var fd = stdin.fileno ();
-			if (Posix.tcgetattr (fd, out original_term) == -1)
-				throw new Error.INVALID_OPERATION ("tcgetattr failed: %s", strerror (Posix.errno));
+			if (Posix.tcgetattr (fd, out original_term) == -1) {
+				if (Posix.errno == 25)  /* ENOTTY */
+					original_term = null;
+				else
+					throw new Error.INVALID_OPERATION ("tcgetattr failed: %s", strerror (Posix.errno));
+			}
 		}
 
 		private void restore_terminal_config () {
+			if (original_term == null)
+				return;
+
 			var fd = stdin.fileno ();
 			Posix.tcsetattr (fd, Posix.TCSANOW, original_term);
 			stdout.putc ('\r');
@@ -584,8 +594,8 @@ namespace Frida.Inject {
 			return (mode_value.get_string () == "raw") ? TerminalMode.RAW : TerminalMode.COOKED;
 		}
 
-		private static void apply_terminal_mode (TerminalMode mode) throws Error {
-			if (mode == COOKED)
+		private void apply_terminal_mode (TerminalMode mode) throws Error {
+			if (mode == COOKED || original_term == null)
 				return;
 
 			int fd = stdin.fileno ();
