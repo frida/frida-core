@@ -14,5 +14,7 @@
 	<true/>
 	<key>com.apple.private.amfi.can-execute-cdhash</key>
 	<true/>
+	<key>com.apple.private.skip-library-validation</key>
+	<true/>
 </dict>
 </plist>

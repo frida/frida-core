@@ -50,11 +50,16 @@ struct _FridaJitdRequest
 
 struct _FridaMachOLayout
 {
+  gsize total_vm_size;
+
   gsize header_file_size;
+  gsize header_vm_size;
 
   gsize text_file_offset;
   gsize text_file_size;
-  gsize text_size;
+  gsize text_vm_size;
+
+  gsize linkedit_vm_size;
 
   gsize code_signature_file_offset;
   gsize code_signature_file_size;
@@ -225,31 +230,41 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
   fsignatures_t sigs;
   gint res;
   gpointer mapped_code = MAP_FAILED;
-  gboolean target_allocated = FALSE;
+  int remap_flags;
   vm_prot_t cur_protection, max_protection;
 
   page_size = getpagesize ();
   vm_size = (source_size + page_size - 1) & ~(page_size - 1);
   frida_compute_macho_layout (source_size, vm_size, &layout);
 
+  errno = 0;
   fd = frida_file_open_tmp ("frida-XXXXXX.dylib", &dylib_path);
+  g_printerr ("frida_file_open_tmp() => fd=%d errno=%d\n", fd, errno);
   if (fd == -1)
     goto filesystem_failure;
 
   dylib_header = g_malloc0 (layout.header_file_size);
   frida_put_macho_headers (dylib_path, &layout, dylib_header, &dylib_header_size);
 
-  code = g_malloc (source_size);
-  kr = mach_vm_read_overwrite (task, source_address, source_size, (mach_vm_address_t) code, &n);
+  mach_vm_address_t code_address = 0;
+  kr = mach_vm_allocate (mach_task_self (), &code_address, vm_size, VM_FLAGS_ANYWHERE);
   if (kr != KERN_SUCCESS)
     goto beach;
+  kr = mach_vm_read_overwrite (task, source_address, source_size, code_address, &n);
+  if (kr != KERN_SUCCESS)
+    goto beach;
+  code = GSIZE_TO_POINTER (code_address);
 
   code_signature = g_malloc0 (layout.code_signature_file_size);
   frida_put_code_signature (dylib_header, code, &layout, code_signature, code_directory_hash);
 
   frida_file_write_all (fd, GUM_OFFSET_NONE, dylib_header, dylib_header_size);
-  frida_file_write_all (fd, layout.text_file_offset, code, layout.text_size);
+  frida_file_write_all (fd, layout.text_file_offset, code, layout.text_vm_size);
   frida_file_write_all (fd, layout.code_signature_file_offset, code_signature, layout.code_signature_file_size);
+
+  close (fd);
+  fd = open (dylib_path, O_RDONLY);
+  g_printerr ("ok let's try this\n");
 
   kr = IOConnectCallMethod (amfi_connection, FRIDA_AMFI_LOAD_COMPILATION_SERVICE_CODE_DIRECTORY_HASH, NULL, 0,
       code_directory_hash, sizeof (code_directory_hash), NULL, 0, NULL, 0);
@@ -264,20 +279,92 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
   if (res != 0)
     goto codesign_failure;
 
-  mapped_code = mmap (NULL, vm_size, PROT_READ | PROT_EXEC, MAP_PRIVATE, fd, page_size);
+  gchar message[512] = { 0, };
+  struct fchecklv info;
+  info.lv_file_start = 0;
+  info.lv_error_message_size = sizeof (message);
+  info.lv_error_message = message;
+  res = fcntl (fd, F_CHECK_LV, &info);
+  g_printerr ("F_CHECK_LV => res=%d message=\"%s\"\n", res, message);
+
+  mach_vm_address_t load_address = 0;
+  kr = mach_vm_allocate (mach_task_self (), &load_address, layout.total_vm_size, VM_FLAGS_ANYWHERE);
+  if (kr != KERN_SUCCESS)
+    goto beach;
+
+  gpointer mapped_header;
+  mapped_header = mmap (GSIZE_TO_POINTER (load_address), layout.header_file_size, PROT_READ, MAP_FIXED | MAP_PRIVATE, fd, 0);
+  if (mapped_header == MAP_FAILED)
+    goto mmap_failure;
+
+  gpointer mapped_linkedit;
+  mapped_linkedit = mmap (GSIZE_TO_POINTER (load_address + layout.header_vm_size + layout.text_vm_size), layout.linkedit_vm_size,
+      PROT_READ, MAP_FIXED | MAP_PRIVATE, fd, layout.code_signature_file_offset);
+  if (mapped_linkedit == MAP_FAILED)
+    goto mmap_failure;
+
+  mapped_code = mmap (GSIZE_TO_POINTER (load_address + layout.header_vm_size), layout.text_file_size, PROT_READ | PROT_EXEC,
+      MAP_FIXED | MAP_PRIVATE, fd, layout.text_file_offset);
   if (mapped_code == MAP_FAILED)
     goto mmap_failure;
 
-  if (*target_address == 0)
+#if 0
+  kr = mach_vm_protect (mach_task_self (), (mach_vm_address_t) mapped_code, vm_size, TRUE, VM_PROT_READ | VM_PROT_EXECUTE);
+  g_printerr ("mach_vm_protect() ayA kr=%d\n", kr);
+  if (kr != KERN_SUCCESS)
   {
-    kr = mach_vm_allocate (task, target_address, vm_size, VM_FLAGS_ANYWHERE);
-    if (kr != KERN_SUCCESS)
-      goto beach;
-    target_allocated = TRUE;
+    kr = mach_vm_protect (mach_task_self (), (mach_vm_address_t) mapped_code, vm_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    g_printerr ("mach_vm_protect() B kr=%d\n", kr);
   }
 
-  kr = mach_vm_remap (task, target_address, vm_size, 0, VM_FLAGS_OVERWRITE, mach_task_self (), (mach_vm_address_t) mapped_code, TRUE,
-      &cur_protection, &max_protection, VM_INHERIT_COPY);
+  if (kr != KERN_SUCCESS)
+  {
+    kr = mach_vm_protect (mach_task_self (), (mach_vm_address_t) mapped_code, vm_size, TRUE, VM_PROT_READ | VM_PROT_EXECUTE | VM_PROT_COPY);
+    g_printerr ("mach_vm_protect() C kr=%d\n", kr);
+  }
+  if (kr != KERN_SUCCESS)
+  {
+    kr = mach_vm_protect (mach_task_self (), (mach_vm_address_t) mapped_code, vm_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE | VM_PROT_COPY);
+    g_printerr ("mach_vm_protect() D kr=%d\n", kr);
+  }
+  if (kr != KERN_SUCCESS)
+  {
+    void (* foo) (void) = ptrauth_sign_unauthenticated (mapped_code, ptrauth_key_asia, NULL);
+    foo ();
+    goto beach;
+  }
+#endif
+
+  {
+    void (* foo) (void) = ptrauth_sign_unauthenticated (mapped_code, ptrauth_key_asia, NULL);
+    g_printerr ("here we go again...!\n");
+    foo ();
+  }
+
+  if (*target_address == 0)
+  {
+    remap_flags = VM_FLAGS_ANYWHERE;
+  }
+  else
+  {
+    remap_flags = VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE;
+
+    kr = mach_vm_deallocate (task, *target_address, vm_size);
+    if (kr != KERN_SUCCESS)
+      goto beach;
+  }
+
+  kr = mach_vm_remap (task, target_address, vm_size, 0, remap_flags, mach_task_self (), (mach_vm_address_t) mapped_code, FALSE,
+      &cur_protection, &max_protection, VM_INHERIT_SHARE);
+  if (kr != KERN_SUCCESS)
+    goto beach;
+
+  g_printerr ("mach_vm_remap() b00m => kr=%d\n", kr);
+
+#if 0
+  kr = mach_vm_protect (task, *target_address, vm_size, TRUE, VM_PROT_READ | VM_PROT_EXECUTE);
+  g_printerr ("mach_vm_protect() w/ set maximum kr=%d\n", kr);
+#endif
 
   goto beach;
 
@@ -290,9 +377,6 @@ mmap_failure:
   }
 beach:
   {
-    if (kr != KERN_SUCCESS && target_allocated)
-      mach_vm_deallocate (task, *target_address, vm_size);
-
     if (mapped_code != MAP_FAILED)
       munmap (mapped_code, vm_size);
 
@@ -320,10 +404,12 @@ frida_compute_macho_layout (gsize text_file_size, gsize text_vm_size, FridaMachO
   page_size = getpagesize ();
 
   layout->header_file_size = page_size;
+  layout->header_vm_size = page_size;
 
   layout->text_file_offset = layout->header_file_size;
-  layout->text_file_size = text_file_size;
-  layout->text_size = text_vm_size;
+  //layout->text_file_size = text_file_size;
+  layout->text_file_size = text_vm_size;
+  layout->text_vm_size = text_vm_size;
 
   cs_page_size = 4096;
   cs_hash_count = (layout->text_file_offset + layout->text_file_size) / cs_page_size;
@@ -340,12 +426,16 @@ frida_compute_macho_layout (gsize text_file_size, gsize text_vm_size, FridaMachO
   layout->code_signature_size = cs_size;
   layout->code_signature_hash_count = cs_hash_count;
   layout->code_signature_hash_size = cs_hash_size;
+
+  layout->linkedit_vm_size = (cs_file_size + page_size - 1) & ~(page_size - 1);
+
+  layout->total_vm_size = layout->header_vm_size + layout->text_vm_size + layout->linkedit_vm_size;
 }
 
 static void
 frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layout, gpointer output, gsize * output_size)
 {
-  gsize dylib_path_size;
+  gsize dylib_path_size, page_size;
   struct mach_header_64 * header = output;
   struct segment_command_64 * seg, * text_segment, * linkedit_segment;
   struct section_64 * sect;
@@ -353,6 +443,7 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
   struct linkedit_data_command * sig;
 
   dylib_path_size = strlen (dylib_path);
+  page_size = getpagesize ();
 
   header->magic = MH_MAGIC_64;
   header->cputype = CPU_TYPE_ARM64;
@@ -366,7 +457,7 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
   seg->cmdsize = sizeof (struct segment_command_64);
   strcpy (seg->segname, SEG_PAGEZERO);
   seg->vmaddr = 0;
-  seg->vmsize = getpagesize ();
+  seg->vmsize = page_size;
   seg->fileoff = 0;
   seg->filesize = 0;
   seg->maxprot = VM_PROT_NONE;
@@ -379,10 +470,10 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
   seg->cmdsize = sizeof (struct segment_command_64) + sizeof (struct section_64);
   strcpy (seg->segname, SEG_TEXT);
   seg->vmaddr = layout->text_file_offset;
-  seg->vmsize = layout->text_file_size;
+  seg->vmsize = layout->text_vm_size;
   seg->fileoff = layout->text_file_offset;
   seg->filesize = layout->text_file_size;
-  seg->maxprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+  seg->maxprot = VM_PROT_READ | VM_PROT_EXECUTE;
   seg->initprot = VM_PROT_READ | VM_PROT_EXECUTE;
   seg->nsects = 1;
   seg->flags = 0;
@@ -390,7 +481,7 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
   strcpy (sect->sectname, SECT_TEXT);
   strcpy (sect->segname, SEG_TEXT);
   sect->addr = layout->text_file_offset;
-  sect->size = layout->text_size;
+  sect->size = layout->text_vm_size;
   sect->offset = layout->text_file_offset;
   sect->align = 4;
   sect->reloff = 0;
@@ -403,7 +494,7 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
   seg->cmdsize = sizeof (struct segment_command_64);
   strcpy (seg->segname, SEG_LINKEDIT);
   seg->vmaddr = text_segment->vmaddr + text_segment->vmsize;
-  seg->vmsize = 4096;
+  seg->vmsize = layout->linkedit_vm_size;
   seg->fileoff = layout->code_signature_file_offset;
   seg->filesize = layout->code_signature_file_size;
   seg->maxprot = VM_PROT_READ;
@@ -511,14 +602,8 @@ frida_file_open_tmp (const gchar * tmpl, gchar ** name_used)
   gchar * path;
   gint res;
 
-  path = g_build_filename (g_get_tmp_dir (), tmpl, NULL);
+  path = g_build_filename ("/Library/Caches", tmpl, NULL);
   res = g_mkstemp (path);
-  if (res == -1)
-  {
-    g_free (path);
-    path = g_build_filename ("/Library/Caches", tmpl, NULL);
-    res = g_mkstemp (path);
-  }
 
   if (res != -1)
   {
