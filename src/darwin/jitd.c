@@ -163,25 +163,20 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
     mach_vm_address_t * target_address)
 {
   kern_return_t kr;
-  gpointer code;
-  mach_vm_size_t n;
-  gint fd = -1;
-  gchar * dylib_path = NULL;
   gsize page_size, vm_size;
   FridaMachOLayout layout;
+  gint fd = -1;
+  gchar * dylib_path = NULL;
   guint8 * dylib_header = NULL;
   gsize dylib_header_size;
+  gpointer code = NULL;
+  mach_vm_size_t n;
   guint8 * code_signature = NULL;
   fsignatures_t sigs;
   gint res;
   gpointer mapped_code = MAP_FAILED;
   gboolean target_allocated = FALSE;
   vm_prot_t cur_protection, max_protection;
-
-  code = g_malloc (source_size);
-  kr = mach_vm_read_overwrite (task, source_address, source_size, (mach_vm_address_t) code, &n);
-  if (kr != KERN_SUCCESS)
-    goto beach;
 
   page_size = getpagesize ();
   vm_size = (source_size + page_size - 1) & ~(page_size - 1);
@@ -193,6 +188,11 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
 
   dylib_header = g_malloc0 (layout.header_file_size);
   frida_put_macho_headers (dylib_path, &layout, dylib_header, &dylib_header_size);
+
+  code = g_malloc (source_size);
+  kr = mach_vm_read_overwrite (task, source_address, source_size, (mach_vm_address_t) code, &n);
+  if (kr != KERN_SUCCESS)
+    goto beach;
 
   code_signature = g_malloc0 (layout.code_signature_file_size);
   frida_put_code_signature (dylib_header, code, &layout, code_signature);
@@ -253,13 +253,12 @@ beach:
       unlink (dylib_path);
 
     g_free (code_signature);
+    g_free (code);
     g_free (dylib_header);
     g_free (dylib_path);
 
     if (fd != -1)
       close (fd);
-
-    g_free (code);
 
     return kr;
   }
