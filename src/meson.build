@@ -154,7 +154,9 @@ if host_os_family == 'darwin'
     install_dir: get_option('bindir')
   )
 
-  jitd = executable('frida-jitd-unsigned', 'darwin/jitd.c')
+  jitd = executable('frida-jitd-unsigned', 'darwin/jitd.c',
+    dependencies: [glib_dep],
+  )
   custom_target('frida-jitd',
     input: [
       jitd,
