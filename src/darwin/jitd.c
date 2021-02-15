@@ -109,7 +109,7 @@ enum _FridaAmfiSelector
   FRIDA_AMFI_PURGE_CACHED_VALIDATION_RESULTS              = 4,
   FRIDA_AMFI_LOAD_COMPILATION_SERVICE_CODE_DIRECTORY_HASH = 5,
   FRIDA_AMFI_IS_CDHASH_IN_TRUST_CACHE                     = 6,
-  FRIDA_AMFI_LOAD_TRUST_CACHE                             = 7,
+  FRIDA_AMFI_LOAD_TRUST_CACHE_WITH_MANIFEST               = 7,
   FRIDA_AMFI_VALIDATE_SIGNATURE                           = 8,
   FRIDA_AMFI_SET_DENYLIST                                 = 9,
 };
@@ -290,7 +290,7 @@ mmap_failure:
   }
 beach:
   {
-    if (target_allocated)
+    if (kr != KERN_SUCCESS && target_allocated)
       mach_vm_deallocate (task, *target_address, vm_size);
 
     if (mapped_code != MAP_FAILED)
