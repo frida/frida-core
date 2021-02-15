@@ -155,6 +155,7 @@ if host_os_family == 'darwin'
   )
 
   jitd = executable('frida-jitd-unsigned', 'darwin/jitd.c',
+    link_args: ['-Wl,-framework,IOKit'],
     dependencies: [glib_dep],
   )
   custom_target('frida-jitd',

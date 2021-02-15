@@ -2,15 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>seatbelt-profiles</key>
-	<array>
-		<string>debugserver</string>
-	</array>
 	<key>com.apple.security.exception.mach-register.global-name</key>
 	<array>
 		<string>re.frida.jitd</string>
 	</array>
-	<key>dynamic-codesigning</key>
+	<key>com.apple.security.iokit-user-client-class</key>
+	<array>
+		<string>AppleMobileFileIntegrityUserClient</string>
+	</array>
+	<key>com.apple.private.amfi.can-load-cdhash</key>
+	<true/>
+	<key>com.apple.private.amfi.can-execute-cdhash</key>
 	<true/>
 </dict>
 </plist>

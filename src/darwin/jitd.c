@@ -1,6 +1,7 @@
 #include "jitd.h"
 
 #include <CommonCrypto/CommonDigest.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <glib.h>
@@ -34,6 +35,12 @@ typedef struct _FridaCSSuperBlob FridaCSSuperBlob;
 typedef struct _FridaCSBlobIndex FridaCSBlobIndex;
 typedef struct _FridaCSDirectory FridaCSDirectory;
 typedef struct _FridaCSRequirements FridaCSRequirements;
+
+typedef uint32_t FridaAmfiSelector;
+
+typedef mach_port_t io_object_t;
+typedef io_object_t io_service_t;
+typedef io_object_t io_connect_t;
 
 struct _FridaJitdRequest
 {
@@ -96,11 +103,32 @@ struct _FridaCSRequirements
   guint32 count;
 };
 
+enum _FridaAmfiSelector
+{
+  FRIDA_AMFI_LOAD_TRUST_CACHE                             = 2,
+  FRIDA_AMFI_PURGE_CACHED_VALIDATION_RESULTS              = 4,
+  FRIDA_AMFI_LOAD_COMPILATION_SERVICE_CODE_DIRECTORY_HASH = 5,
+  FRIDA_AMFI_IS_CDHASH_IN_TRUST_CACHE                     = 6,
+  FRIDA_AMFI_LOAD_TRUST_CACHE                             = 7,
+  FRIDA_AMFI_VALIDATE_SIGNATURE                           = 8,
+  FRIDA_AMFI_SET_DENYLIST                                 = 9,
+};
+
 extern kern_return_t bootstrap_register (mach_port_t bp, const char * service_name, mach_port_t sp);
+
+extern CFMutableDictionaryRef IOServiceMatching (const char * name);
+extern io_service_t IOServiceGetMatchingService (mach_port_t master_port, CFDictionaryRef matching);
+extern kern_return_t IOServiceOpen (io_service_t service, task_port_t owning_task, uint32_t type, io_connect_t * connect);
+extern kern_return_t IOConnectCallMethod (mach_port_t connection, uint32_t selector, const uint64_t * input, uint32_t input_count,
+    const void * input_struct, size_t input_struct_count, uint64_t * output, uint32_t * output_count,
+    void * output_struct, size_t * output_struct_count);
+
+extern const mach_port_t kIOMasterPortDefault;
 
 static void frida_compute_macho_layout (gsize text_file_size, gsize text_vm_size, FridaMachOLayout * layout);
 static void frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layout, gpointer output, gsize * output_size);
-static void frida_put_code_signature (gconstpointer header, gconstpointer text, const FridaMachOLayout * layout, gpointer output);
+static void frida_put_code_signature (gconstpointer header, gconstpointer text, const FridaMachOLayout * layout, gpointer output,
+    gpointer code_directory_hash);
 
 static gint frida_file_open_tmp (const gchar * tmpl, gchar ** name_used);
 static void frida_file_write_all (gint fd, gssize offset, gconstpointer data, gsize size);
@@ -108,11 +136,14 @@ static void frida_file_write_all (gint fd, gssize offset, gconstpointer data, gs
 #define frida_jitd_mark frida_jitd_do_mark
 #include "jitd-server.c"
 
+static io_connect_t amfi_connection;
+
 int
 main (int argc, char * argv[])
 {
   kern_return_t kr;
   mach_port_t listening_port;
+  io_service_t amfi_service;
 
   glib_init ();
 
@@ -122,6 +153,14 @@ main (int argc, char * argv[])
   kr = bootstrap_register (bootstrap_port, FRIDA_JITD_SERVICE_NAME, listening_port);
   if (kr != KERN_SUCCESS)
     goto checkin_error;
+
+  amfi_service = IOServiceGetMatchingService (kIOMasterPortDefault, IOServiceMatching ("AppleMobileFileIntegrity"));
+  if (!MACH_PORT_VALID (amfi_service))
+    goto amfi_not_found;
+
+  kr = IOServiceOpen (amfi_service, mach_task_self (), 0, &amfi_connection);
+  if (kr != KERN_SUCCESS)
+    goto amfi_open_failure;
 
   while (TRUE)
   {
@@ -156,6 +195,16 @@ checkin_error:
     fputs ("Unable to check in with launchd: are we running standalone?\n", stderr);
     return 1;
   }
+amfi_not_found:
+  {
+    fputs ("Unable to find AMFI: missing entitlement?\n", stderr);
+    return 2;
+  }
+amfi_open_failure:
+  {
+    fputs ("Unable to open AMFI: missing entitlement?\n", stderr);
+    return 3;
+  }
 }
 
 kern_return_t
@@ -172,6 +221,7 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
   gpointer code = NULL;
   mach_vm_size_t n;
   guint8 * code_signature = NULL;
+  guint8 code_directory_hash[20];
   fsignatures_t sigs;
   gint res;
   gpointer mapped_code = MAP_FAILED;
@@ -195,11 +245,16 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
     goto beach;
 
   code_signature = g_malloc0 (layout.code_signature_file_size);
-  frida_put_code_signature (dylib_header, code, &layout, code_signature);
+  frida_put_code_signature (dylib_header, code, &layout, code_signature, code_directory_hash);
 
   frida_file_write_all (fd, GUM_OFFSET_NONE, dylib_header, dylib_header_size);
   frida_file_write_all (fd, layout.text_file_offset, code, layout.text_size);
   frida_file_write_all (fd, layout.code_signature_file_offset, code_signature, layout.code_signature_file_size);
+
+  kr = IOConnectCallMethod (amfi_connection, FRIDA_AMFI_LOAD_COMPILATION_SERVICE_CODE_DIRECTORY_HASH, NULL, 0,
+      code_directory_hash, sizeof (code_directory_hash), NULL, 0, NULL, 0);
+  if (kr != KERN_SUCCESS)
+    goto beach;
 
   sigs.fs_file_start = 0;
   sigs.fs_blob_start = GSIZE_TO_POINTER (layout.code_signature_file_offset);
@@ -227,15 +282,7 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
   goto beach;
 
 filesystem_failure:
-  {
-    kr = KERN_FAILURE;
-    goto beach;
-  }
 codesign_failure:
-  {
-    kr = KERN_FAILURE;
-    goto beach;
-  }
 mmap_failure:
   {
     kr = KERN_FAILURE;
@@ -388,11 +435,13 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
 }
 
 static void
-frida_put_code_signature (gconstpointer header, gconstpointer text, const FridaMachOLayout * layout, gpointer output)
+frida_put_code_signature (gconstpointer header, gconstpointer text, const FridaMachOLayout * layout, gpointer output,
+    gpointer code_directory_hash)
 {
   FridaCSSuperBlob * sb;
   FridaCSBlobIndex * bi;
   FridaCSDirectory * dir;
+  gsize dir_size;
   guint8 * ident, * hashes;
   gsize cs_hashes_size, cs_page_size;
   FridaCSRequirements * req;
@@ -419,7 +468,8 @@ frida_put_code_signature (gconstpointer header, gconstpointer text, const FridaM
   hashes = ident + 41;
 
   dir->magic = GUINT32_TO_BE (FRIDA_CS_MAGIC_CODE_DIRECTORY);
-  dir->length = GUINT32_TO_BE (85 + cs_hashes_size);
+  dir_size = 85 + cs_hashes_size;
+  dir->length = GUINT32_TO_BE (dir_size);
   dir->version = GUINT32_TO_BE (0x00020001);
   dir->flags = GUINT32_TO_BE (0);
   dir->hash_offset = GUINT32_TO_BE (hashes - (guint8 *) dir);
@@ -451,6 +501,8 @@ frida_put_code_signature (gconstpointer header, gconstpointer text, const FridaM
     CC_SHA1 (text + (i * cs_page_size), cs_page_size, hashes);
     hashes += 20;
   }
+
+  CC_SHA1 (dir, dir_size, code_directory_hash);
 }
 
 static gint
