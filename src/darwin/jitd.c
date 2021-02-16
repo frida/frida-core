@@ -2,6 +2,7 @@
 
 #include <CommonCrypto/CommonDigest.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <glib.h>
@@ -37,6 +38,7 @@ typedef struct _FridaCSDirectory FridaCSDirectory;
 typedef struct _FridaCSRequirements FridaCSRequirements;
 
 typedef uint32_t FridaAmfiSelector;
+typedef guint FridaSandboxFilterType;
 
 typedef mach_port_t io_object_t;
 typedef io_object_t io_service_t;
@@ -119,7 +121,14 @@ enum _FridaAmfiSelector
   FRIDA_AMFI_SET_DENYLIST                                 = 9,
 };
 
+enum _FridaSandboxFilterType
+{
+  FRIDA_SANDBOX_FILTER_PATH = 1,
+};
+
 extern kern_return_t bootstrap_register (mach_port_t bp, const char * service_name, mach_port_t sp);
+
+extern char * sandbox_extension_issue_file (const char * permission, const char * path, int flags);
 
 extern CFMutableDictionaryRef IOServiceMatching (const char * name);
 extern io_service_t IOServiceGetMatchingService (mach_port_t master_port, CFDictionaryRef matching);
@@ -137,6 +146,7 @@ static void frida_put_code_signature (gconstpointer header, gconstpointer text, 
 
 static gint frida_file_open_tmp (const gchar * tmpl, gchar ** name_used);
 static void frida_file_write_all (gint fd, gssize offset, gconstpointer data, gsize size);
+static gboolean frida_file_check_sandbox_allows (const gchar * path, const gchar * operation);
 
 #define frida_jitd_mark frida_jitd_do_mark
 #include "jitd-server.c"
@@ -309,6 +319,24 @@ frida_jitd_do_mark (mach_port_t server, vm_map_t task, mach_vm_address_t source_
     goto mmap_failure;
 
 #if 0
+  kr = mach_vm_protect (mach_task_self (), (mach_vm_address_t) mapped_code, layout.text_vm_size, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+  g_printerr ("mach_vm_protect() kr1=%d\n", kr);
+
+  if (kr != KERN_SUCCESS)
+  {
+    mach_vm_address_t address = (mach_vm_address_t) mapped_code;
+
+    kr = mach_vm_protect (mach_task_self (), address, vm_size, FALSE,
+        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    g_printerr ("mach_vm_protect() kr2=%d\n", kr);
+
+    kr = mach_vm_protect (mach_task_self (), address, vm_size, FALSE,
+        VM_PROT_READ | VM_PROT_EXECUTE | VM_PROT_COPY);
+    g_printerr ("mach_vm_protect() kr3=%d!\n", kr);
+  }
+#endif
+
+#if 0
   kr = mach_vm_protect (mach_task_self (), (mach_vm_address_t) mapped_code, vm_size, TRUE, VM_PROT_READ | VM_PROT_EXECUTE);
   g_printerr ("mach_vm_protect() ayA kr=%d\n", kr);
   if (kr != KERN_SUCCESS)
@@ -447,7 +475,7 @@ frida_put_macho_headers (const gchar * dylib_path, const FridaMachOLayout * layo
 
   header->magic = MH_MAGIC_64;
   header->cputype = CPU_TYPE_ARM64;
-  header->cpusubtype = CPU_SUBTYPE_LITTLE_ENDIAN;
+  header->cpusubtype = CPU_SUBTYPE_ARM64E | CPU_SUBTYPE_PTRAUTH_ABI | CPU_SUBTYPE_LITTLE_ENDIAN;
   header->filetype = MH_DYLIB;
   header->ncmds = 5;
   header->flags = MH_DYLDLINK | MH_PIE;
@@ -602,8 +630,15 @@ frida_file_open_tmp (const gchar * tmpl, gchar ** name_used)
   gchar * path;
   gint res;
 
-  path = g_build_filename ("/Library/Caches", tmpl, NULL);
+  path = g_build_filename ("/var/mobile", tmpl, NULL);
   res = g_mkstemp (path);
+
+  if (!frida_file_check_sandbox_allows (path, "file-map-executable"))
+  {
+    char * token = sandbox_extension_issue_file ("file-map-executable", path, 0);
+    g_printerr ("oh no, sandbox does not allow it for %s, token=%s!!\n", path, token);
+    g_abort ();
+  }
 
   if (res != -1)
   {
@@ -643,4 +678,45 @@ frida_file_write_all (gint fd, gssize offset, gconstpointer data, gsize size)
     written += res;
   }
   while (written != size);
+}
+
+static gboolean
+frida_file_check_sandbox_allows (const gchar * path, const gchar * operation)
+{
+  static gsize initialized = FALSE;
+  static gint (* check) (pid_t pid, const gchar * operation, FridaSandboxFilterType type, ...) = NULL;
+  static FridaSandboxFilterType no_report = 0;
+
+  if (g_once_init_enter (&initialized))
+  {
+    void * sandbox;
+
+    sandbox = dlopen ("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOLOAD | RTLD_LAZY);
+    if (sandbox != NULL)
+    {
+      FridaSandboxFilterType * no_report_ptr;
+
+      no_report_ptr = dlsym (sandbox, "SANDBOX_CHECK_NO_REPORT");
+      if (no_report_ptr != NULL)
+      {
+        no_report = *no_report_ptr;
+
+        check = dlsym (sandbox, "sandbox_check");
+      }
+
+      dlclose (sandbox);
+    }
+
+    g_once_init_leave (&initialized, TRUE);
+  }
+
+  if (check == NULL)
+  {
+    g_printerr ("check=NULL\n");
+    return TRUE;
+  }
+
+  g_printerr ("calling check()\n");
+  return !check (getpid (), operation, FRIDA_SANDBOX_FILTER_PATH | no_report,
+      path);
 }
