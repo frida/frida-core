@@ -225,86 +225,11 @@ namespace Frida.Inject {
 
 			exit_code = 0;
 
-			/**
-			 * Support reading from stdin for communications with the injected script.
-			 * With the console in its default canonical mode, we will read a line at a
-			 * time when the user presses enter and send it to a registered RPC method
-			 * in the script as follows. Here, the data parameter is the string typed
-			 * by the user including the newline.
-			 *
-			 * rpc.exports = {
-			 *   onFridaStdin(data) {
-			 *     ...
-			 *   }
-			 * };
-			 */
-			var fd = stdin.fileno ();
-#if WINDOWS
-			var inchan = new IOChannel.win32_new_fd (fd);
-#else
-			var inchan = new IOChannel.unix_new (fd);
-#endif
-			inchan.add_watch (IOCondition.IN, (source, condition) => {
-				if (script_runner.terminal_mode == COOKED)
-					return read_line (source, condition);
-				else
-					return read_raw (source, condition);
-			});
-
 			loop = new MainLoop ();
 			loop.run ();
 
 			return exit_code;
 		}
-
-		private bool read_line (IOChannel source, IOCondition condition) {
-			if (condition == IOCondition.HUP)
-				return false;
-
-			IOStatus status;
-			string line = null;
-			try {
-				status = source.read_line (out line, null, null);
-			} catch (GLib.Error e) {
-				return true;
-			}
-
-			if (status == IOStatus.EOF) {
-				loop.quit ();
-				return false;
-			}
-
-			script_runner.on_stdin (line);
-
-			return true;
-		}
-
-#if WINDOWS
-		private bool read_raw (IOChannel source, IOCondition condition) {
-			return false;
-		}
-#else
-		private bool read_raw (IOChannel source, IOCondition condition) {
-			var fd = source.unix_get_fd ();
-
-			uint8 buf[1024];
-			ssize_t n = Posix.read (fd, buf, buf.length - 1);
-			if (n == -1)
-				return true;
-
-			bool eof = n == 0;
-			if (eof) {
-				loop.quit ();
-				return false;
-			}
-
-			buf[n] = 0;
-
-			script_runner.on_stdin ((string) buf);
-
-			return true;
-		}
-#endif
 
 		private async void start () {
 			device_manager = new DeviceManager ();
@@ -333,6 +258,8 @@ namespace Frida.Inject {
 					enable_development, io_cancellable);
 				yield r.start ();
 				script_runner = r;
+
+				watch_stdin ();
 
 				if (spawn_file != null) {
 					yield device.resume (pid);
@@ -408,6 +335,83 @@ namespace Frida.Inject {
 
 			shutdown ();
 		}
+
+		private void watch_stdin () {
+			/**
+			 * Support reading from stdin for communications with the injected script.
+			 * With the console in its default canonical mode, we will read a line at a
+			 * time when the user presses enter and send it to a registered RPC method
+			 * in the script as follows. Here, the data parameter is the string typed
+			 * by the user including the newline.
+			 *
+			 * rpc.exports = {
+			 *   onFridaStdin(data) {
+			 *     ...
+			 *   }
+			 * };
+			 */
+			var fd = stdin.fileno ();
+#if WINDOWS
+			var inchan = new IOChannel.win32_new_fd (fd);
+#else
+			var inchan = new IOChannel.unix_new (fd);
+#endif
+			inchan.add_watch (IOCondition.IN, (source, condition) => {
+				if (script_runner.terminal_mode == COOKED)
+					return read_line (source, condition);
+				else
+					return read_raw (source, condition);
+			});
+		}
+
+		private bool read_line (IOChannel source, IOCondition condition) {
+			if (condition == IOCondition.HUP)
+				return false;
+
+			IOStatus status;
+			string line = null;
+			try {
+				status = source.read_line (out line, null, null);
+			} catch (GLib.Error e) {
+				return true;
+			}
+
+			if (status == IOStatus.EOF) {
+				loop.quit ();
+				return false;
+			}
+
+			script_runner.on_stdin (line);
+
+			return true;
+		}
+
+#if WINDOWS
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			return false;
+		}
+#else
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			var fd = source.unix_get_fd ();
+
+			uint8 buf[1024];
+			ssize_t n = Posix.read (fd, buf, buf.length - 1);
+			if (n == -1)
+				return true;
+
+			bool eof = n == 0;
+			if (eof) {
+				loop.quit ();
+				return false;
+			}
+
+			buf[n] = 0;
+
+			script_runner.on_stdin ((string) buf);
+
+			return true;
+		}
+#endif
 	}
 
 	private class ScriptRunner : Object, RpcPeer {
@@ -432,7 +436,7 @@ namespace Frida.Inject {
 		private RpcClient rpc_client;
 
 #if !WINDOWS
-		private Posix.termios original_term;
+		private Posix.termios? original_term;
 #endif
 
 		private Cancellable io_cancellable;
@@ -554,16 +558,23 @@ namespace Frida.Inject {
 			return COOKED;
 		}
 
-		private static void apply_terminal_mode (TerminalMode mode) throws Error {
+		private void apply_terminal_mode (TerminalMode mode) throws Error {
 		}
 #else
 		private void save_terminal_config () throws Error {
 			var fd = stdin.fileno ();
-			if (Posix.tcgetattr (fd, out original_term) == -1)
-				throw new Error.INVALID_OPERATION ("tcgetattr failed: %s", strerror (Posix.errno));
+			if (Posix.tcgetattr (fd, out original_term) == -1) {
+				if (Posix.errno == 25)  /* ENOTTY */
+					original_term = null;
+				else
+					throw new Error.INVALID_OPERATION ("tcgetattr failed: %s", strerror (Posix.errno));
+			}
 		}
 
 		private void restore_terminal_config () {
+			if (original_term == null)
+				return;
+
 			var fd = stdin.fileno ();
 			Posix.tcsetattr (fd, Posix.TCSANOW, original_term);
 			stdout.putc ('\r');
@@ -584,8 +595,8 @@ namespace Frida.Inject {
 			return (mode_value.get_string () == "raw") ? TerminalMode.RAW : TerminalMode.COOKED;
 		}
 
-		private static void apply_terminal_mode (TerminalMode mode) throws Error {
-			if (mode == COOKED)
+		private void apply_terminal_mode (TerminalMode mode) throws Error {
+			if (mode == COOKED || original_term == null)
 				return;
 
 			int fd = stdin.fileno ();
