@@ -231,83 +231,6 @@ namespace Frida.Inject {
 			return exit_code;
 		}
 
-		private bool read_line (IOChannel source, IOCondition condition) {
-			if (condition == IOCondition.HUP)
-				return false;
-
-			IOStatus status;
-			string line = null;
-			try {
-				status = source.read_line (out line, null, null);
-			} catch (GLib.Error e) {
-				return true;
-			}
-
-			if (status == IOStatus.EOF) {
-				loop.quit ();
-				return false;
-			}
-
-			script_runner.on_stdin (line);
-
-			return true;
-		}
-
-#if WINDOWS
-		private bool read_raw (IOChannel source, IOCondition condition) {
-			return false;
-		}
-#else
-		private bool read_raw (IOChannel source, IOCondition condition) {
-			var fd = source.unix_get_fd ();
-
-			uint8 buf[1024];
-			ssize_t n = Posix.read (fd, buf, buf.length - 1);
-			if (n == -1)
-				return true;
-
-			bool eof = n == 0;
-			if (eof) {
-				loop.quit ();
-				return false;
-			}
-
-			buf[n] = 0;
-
-			script_runner.on_stdin ((string) buf);
-
-			return true;
-		}
-#endif
-
-		private void watch_stdin () {
-			/**
-			 * Support reading from stdin for communications with the injected script.
-			 * With the console in its default canonical mode, we will read a line at a
-			 * time when the user presses enter and send it to a registered RPC method
-			 * in the script as follows. Here, the data parameter is the string typed
-			 * by the user including the newline.
-			 *
-			 * rpc.exports = {
-			 *   onFridaStdin(data) {
-			 *     ...
-			 *   }
-			 * };
-			 */
-			var fd = stdin.fileno ();
-#if WINDOWS
-			var inchan = new IOChannel.win32_new_fd (fd);
-#else
-			var inchan = new IOChannel.unix_new (fd);
-#endif
-			inchan.add_watch (IOCondition.IN, (source, condition) => {
-				if (script_runner.terminal_mode == COOKED)
-					return read_line (source, condition);
-				else
-					return read_raw (source, condition);
-			});
-		}
-
 		private async void start () {
 			device_manager = new DeviceManager ();
 
@@ -412,6 +335,83 @@ namespace Frida.Inject {
 
 			shutdown ();
 		}
+
+		private void watch_stdin () {
+			/**
+			 * Support reading from stdin for communications with the injected script.
+			 * With the console in its default canonical mode, we will read a line at a
+			 * time when the user presses enter and send it to a registered RPC method
+			 * in the script as follows. Here, the data parameter is the string typed
+			 * by the user including the newline.
+			 *
+			 * rpc.exports = {
+			 *   onFridaStdin(data) {
+			 *     ...
+			 *   }
+			 * };
+			 */
+			var fd = stdin.fileno ();
+#if WINDOWS
+			var inchan = new IOChannel.win32_new_fd (fd);
+#else
+			var inchan = new IOChannel.unix_new (fd);
+#endif
+			inchan.add_watch (IOCondition.IN, (source, condition) => {
+				if (script_runner.terminal_mode == COOKED)
+					return read_line (source, condition);
+				else
+					return read_raw (source, condition);
+			});
+		}
+
+		private bool read_line (IOChannel source, IOCondition condition) {
+			if (condition == IOCondition.HUP)
+				return false;
+
+			IOStatus status;
+			string line = null;
+			try {
+				status = source.read_line (out line, null, null);
+			} catch (GLib.Error e) {
+				return true;
+			}
+
+			if (status == IOStatus.EOF) {
+				loop.quit ();
+				return false;
+			}
+
+			script_runner.on_stdin (line);
+
+			return true;
+		}
+
+#if WINDOWS
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			return false;
+		}
+#else
+		private bool read_raw (IOChannel source, IOCondition condition) {
+			var fd = source.unix_get_fd ();
+
+			uint8 buf[1024];
+			ssize_t n = Posix.read (fd, buf, buf.length - 1);
+			if (n == -1)
+				return true;
+
+			bool eof = n == 0;
+			if (eof) {
+				loop.quit ();
+				return false;
+			}
+
+			buf[n] = 0;
+
+			script_runner.on_stdin ((string) buf);
+
+			return true;
+		}
+#endif
 	}
 
 	private class ScriptRunner : Object, RpcPeer {
