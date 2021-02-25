@@ -18,6 +18,10 @@ if host_os_family != 'windows'
 endif
 
 if host_os_family == 'darwin'
+  extra_link_args += '-Wl,-needed_framework,Foundation'
+endif
+
+if host_os_family == 'darwin'
   symlist = 'frida-gadget.symbols'
   extra_link_args += ['-Wl,-exported_symbols_list,' + join_paths(meson.current_source_dir(), symlist)]
   extra_link_depends += [symlist]
