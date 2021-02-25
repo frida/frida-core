@@ -10,6 +10,7 @@ namespace Frida.Inject {
 	private static string? script_runtime_str;
 	private static string? parameters_str;
 	private static bool eternalize;
+	private static bool interactive;
 	private static bool enable_development;
 	private static bool output_version;
 
@@ -23,6 +24,7 @@ namespace Frida.Inject {
 		{ "runtime", 'R', 0, OptionArg.STRING, ref script_runtime_str, "Script runtime to use", "qjs|v8" },
 		{ "parameters", 'P', 0, OptionArg.STRING, ref parameters_str, "Parameters as JSON, same as Gadget", "PARAMETERS_JSON" },
 		{ "eternalize", 'e', 0, OptionArg.NONE, ref eternalize, "Eternalize script and exit", null },
+		{ "interactive", 'i', 0, OptionArg.NONE, ref interactive, "Interact with script through stdin", null },
 		{ "development", 0, 0, OptionArg.NONE, ref enable_development, "Enable development mode", null },
 		{ "version", 0, 0, OptionArg.NONE, ref output_version, "Output version information and exit", null },
 		{ null }
@@ -108,6 +110,11 @@ namespace Frida.Inject {
 				printerr ("Failed to parse parameters argument as JSON: %s\n", e.message);
 				return 8;
 			}
+		}
+
+		if (interactive && eternalize) {
+			printerr ("Cannot specify both -e and -i options\n");
+			return 9;
 		}
 
 		application = new Application (device_id, spawn_file, target_pid, target_name, realm, script_path, script_source,
@@ -259,7 +266,8 @@ namespace Frida.Inject {
 				yield r.start ();
 				script_runner = r;
 
-				watch_stdin ();
+				if (interactive)
+					watch_stdin ();
 
 				if (spawn_file != null) {
 					yield device.resume (pid);
