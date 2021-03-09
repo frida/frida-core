@@ -291,7 +291,7 @@ function findInserterResume() {
     try {
       const instr = Instruction.parse(cursor);
       if (instr.mnemonic.startsWith('ret')) {
-        return cursor.add(4);
+        return cursor.add(4).sign();
       }
     } catch (e) {
     }
