@@ -14,7 +14,6 @@ let gating = false;
 const suspendedPids = new Set();
 
 let pidsToIgnore = null;
-let _cachedInseterImpl = null;
 
 const substrateInvocations = new Set();
 const substratePidsPending = new Map();
@@ -273,16 +272,8 @@ function findClosestMachHeader(address) {
 }
 
 function findInserterResume() {
-  if (_cachedInseterImpl !== null) {
-    if (_cachedInseterImpl.isNull()) {
-      return null;
-    }
-    return _cachedInseterImpl;
-  }
-
   const candidates = Process.enumerateModules().filter(x => x.name === 'substitute-inserter.dylib');
   if (candidates.length !== 1) {
-    _cachedInseterImpl = NULL;
     return null;
   }
 
@@ -291,7 +282,6 @@ function findInserterResume() {
 
   const matches = Memory.scanSync(base, size, signature);
   if (matches.length !== 1) {
-    _cachedInseterImpl = NULL;
     return null;
   }
 
@@ -301,14 +291,13 @@ function findInserterResume() {
     try {
       const instr = Instruction.parse(cursor);
       if (instr.mnemonic.startsWith('ret')) {
-        _cachedInseterImpl = cursor.add(4);
-        break;
+        return cursor.add(4);
       }
     } catch (e) {
     }
     cursor = cursor.sub(4);
   }
 
-  return _cachedInseterImpl;
+  return null;
 }
 
