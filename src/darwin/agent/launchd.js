@@ -273,26 +273,23 @@ function findClosestMachHeader(address) {
 
 function findInserterResume() {
   const candidates = Process.enumerateModules().filter(x => x.name === 'substitute-inserter.dylib');
-  if (candidates.length !== 1) {
+  if (candidates.length !== 1)
     return null;
-  }
 
   const { base, size } = candidates[0];
   const signature = '8? 00 00 b4 e0 03 00 91 ?? ?? 00 9? e4 0f 40 b9 e0 03 00 91 e1 07 00 32 82 05 80 52 83 05 80 52 05 00 80 52';
 
   const matches = Memory.scanSync(base, size, signature);
-  if (matches.length !== 1) {
+  if (matches.length !== 1)
     return null;
-  }
 
   let cursor = matches[0].address.sub(4);
   const end = cursor.sub(1024);
   while (cursor.compare(end) >= 0) {
     try {
       const instr = Instruction.parse(cursor);
-      if (instr.mnemonic.startsWith('ret')) {
+      if (instr.mnemonic.startsWith('ret'))
         return cursor.add(4).sign();
-      }
     } catch (e) {
     }
     cursor = cursor.sub(4);
@@ -300,4 +297,3 @@ function findInserterResume() {
 
   return null;
 }
-
