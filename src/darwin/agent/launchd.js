@@ -13,7 +13,7 @@ const reportCrashes = @REPORT_CRASHES@;
 let gating = false;
 const suspendedPids = new Set();
 
-let jbdPidsToIgnore = null;
+let pidsToIgnore = null;
 
 const substrateInvocations = new Set();
 const substratePidsPending = new Map();
@@ -106,8 +106,8 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 
     suspendedPids.add(pid);
 
-    if (jbdPidsToIgnore !== null)
-      jbdPidsToIgnore.add(pid);
+    if (pidsToIgnore !== null)
+      pidsToIgnore.add(pid);
 
     if (substrateInvocations.has(threadId)) {
       substratePidsPending.set(pid, notifyFridaBackend);
@@ -144,14 +144,22 @@ function tryParseXpcServiceName(envp) {
 function applyJailbreakQuirks() {
   const jbdCallImpl = findJbdCallImpl();
   if (jbdCallImpl !== null) {
-    jbdPidsToIgnore = new Set();
+    pidsToIgnore = new Set();
     sabotageJbdCallForOurPids(jbdCallImpl);
     return;
   }
 
   const launcher = findSubstrateLauncher();
-  if (launcher !== null)
+  if (launcher !== null) {
     instrumentSubstrateLauncher(launcher);
+    return;
+  }
+
+  const inserterResume = findInserterResume();
+  if (inserterResume !== null) {
+    pidsToIgnore = new Set();
+    instrumentInserter(inserterResume);
+  }
 }
 
 function sabotageJbdCallForOurPids(jbdCallImpl) {
@@ -161,7 +169,7 @@ function sabotageJbdCallForOurPids(jbdCallImpl) {
   const jbdCall = new NativeFunction(jbdCallImpl, retType, argTypes);
 
   Interceptor.replace(jbdCall, new NativeCallback((port, command, pid) => {
-    if (jbdPidsToIgnore.delete(pid))
+    if (pidsToIgnore.delete(pid))
       return 0;
 
     return jbdCall(port, command, pid);
@@ -199,6 +207,16 @@ function instrumentSubstrateLauncher(launcher) {
         notify();
     },
   });
+}
+
+function instrumentInserter(at) {
+  const original = new NativeFunction(at, 'int', ['uint', 'uint', 'uint', 'uint']);
+  Interceptor.replace(at, new NativeCallback((a0, pid, a2, a3) => {
+    if (pidsToIgnore.delete(pid))
+      return 0;
+
+    return original(a0, pid, a2, a3);
+  }, 'int', ['uint', 'uint', 'uint', 'uint']));
 }
 
 function findJbdCallImpl() {
@@ -251,4 +269,31 @@ function findClosestMachHeader(address) {
       return cur;
     cur = cur.sub(4096);
   }
+}
+
+function findInserterResume() {
+  const candidates = Process.enumerateModules().filter(x => x.name === 'substitute-inserter.dylib');
+  if (candidates.length !== 1)
+    return null;
+
+  const { base, size } = candidates[0];
+  const signature = '8? 00 00 b4 e0 03 00 91 ?? ?? 00 9? e4 0f 40 b9 e0 03 00 91 e1 07 00 32 82 05 80 52 83 05 80 52 05 00 80 52';
+
+  const matches = Memory.scanSync(base, size, signature);
+  if (matches.length !== 1)
+    return null;
+
+  let cursor = matches[0].address.sub(4);
+  const end = cursor.sub(1024);
+  while (cursor.compare(end) >= 0) {
+    try {
+      const instr = Instruction.parse(cursor);
+      if (instr.mnemonic.startsWith('ret'))
+        return cursor.add(4).sign();
+    } catch (e) {
+    }
+    cursor = cursor.sub(4);
+  }
+
+  return null;
 }
