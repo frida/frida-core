@@ -456,7 +456,7 @@ _frida_set_errno (int n)
 # undef munmap
 
 ssize_t
-read (int fildes, const void * buf, size_t nbyte)
+read (int fildes, void * buf, size_t nbyte)
 {
   ssize_t result;
 
