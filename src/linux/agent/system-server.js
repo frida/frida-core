@@ -1,5 +1,5 @@
 let ApplicationInfo, ComponentName, ContextWrapper, Intent, RunningAppProcessInfo, RunningTaskInfo, UserHandle, GET_META_DATA, GET_ACTIVITIES, FLAG_ACTIVITY_NEW_TASK;
-let context, packageManager, activityManager;
+let context, packageManager, activityManager, loadAppLabel;
 
 let multiUserSupported;
 const pendingLaunches = new Map();
@@ -27,6 +27,8 @@ function init() {
 
   packageManager = context.getPackageManager();
   activityManager = Java.cast(context.getSystemService(ACTIVITY_SERVICE), ActivityManager);
+
+  loadAppLabel = ApplicationInfo.loadUnsafeLabel ?? ApplicationInfo.loadLabel;
 
   installLaunchTimeoutRemovalInstrumentation();
 }
@@ -61,7 +63,7 @@ rpc.exports = {
         const app = Java.cast(apps.get(i), ApplicationInfo);
         const pkg = app.packageName.value;
 
-        const name = app.loadLabel(packageManager).toString();
+        const name = loadAppLabel.call(app, packageManager).toString();
 
         let pid;
         const pids = appPids.get(pkg);
