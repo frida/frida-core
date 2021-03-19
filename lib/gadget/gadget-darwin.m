@@ -17,12 +17,16 @@ frida_gadget_environment_detect_bundle_id (void)
 gchar *
 frida_gadget_environment_detect_documents_dir (void)
 {
+#ifdef HAVE_IOS
   @autoreleasepool
   {
     NSArray<NSString *> * paths = NSSearchPathForDirectoriesInDomains (NSDocumentDirectory, NSUserDomainMask, YES);
     NSString * first = paths.firstObject;
     return g_strdup (first.UTF8String);
   }
+#else
+  return NULL;
+#endif
 }
 
 gboolean

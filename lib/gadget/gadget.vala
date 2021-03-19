@@ -792,11 +792,12 @@ namespace Frida.Gadget {
 			var raw_path = ((ScriptInteraction) config.interaction).path;
 
 			if (!Path.is_absolute (raw_path)) {
-#if IOS
-				var script_path = Path.build_filename (Environment.detect_documents_dir (), raw_path);
-				if (FileUtils.test (script_path, FileTest.EXISTS))
-					return script_path;
-#endif
+				string? documents_dir = Environment.detect_documents_dir ();
+				if (documents_dir != null) {
+					var script_path = Path.build_filename (documents_dir, raw_path);
+					if (FileUtils.test (script_path, FileTest.EXISTS))
+						return script_path;
+				}
 
 				unowned string? gadget_path = location.path;
 				if (gadget_path != null) {
