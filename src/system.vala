@@ -194,8 +194,11 @@ namespace Frida {
 					FileInfo file_info;
 					while ((file_info = enumerator.next_file ()) != null) {
 						if (file_info.get_file_type () == DIRECTORY) {
-							File subdir = file.resolve_relative_path (file_info.get_name ());
-							subdir.delete ();
+							File subdir = file.get_child (file_info.get_name ());
+							try {
+								subdir.delete ();
+							} catch (GLib.Error e) {
+							}
 						}
 					}
 				} catch (GLib.Error e) {
