@@ -49,7 +49,7 @@ endif
 
 agent = custom_target('frida-agent',
   input: raw_agent,
-  output: 'frida-agent' + shlib_suffix,
+  output: agent_name,
   command: [
     modulate,
     '@INPUT@',
@@ -60,6 +60,8 @@ agent = custom_target('frida-agent',
     '--otool', meson.get_cross_binary('otool', 'otool'),
     '--install-name-tool', meson.get_cross_binary('install_name_tool', 'install_name_tool'),
   ],
+  install: get_option('assets') == 'installed',
+  install_dir: asset_dir,
 )
 
 agent_dep = declare_dependency(link_with: agent)

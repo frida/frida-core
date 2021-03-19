@@ -114,6 +114,7 @@ namespace Frida {
 			injector = new Linjector (helper, false, tempdir);
 			injector.uninjected.connect (on_uninjected);
 
+#if HAVE_EMBEDDED_ASSETS
 			var blob32 = Frida.Data.Agent.get_frida_agent_32_so_blob ();
 			var blob64 = Frida.Data.Agent.get_frida_agent_64_so_blob ();
 			var emulated_arm = Frida.Data.Agent.get_frida_agent_arm_so_blob ();
@@ -127,6 +128,7 @@ namespace Frida {
 				},
 				AgentMode.INSTANCED,
 				tempdir);
+#endif
 
 #if ANDROID
 			system_server_agent = new SystemServerAgent (this);
@@ -194,8 +196,14 @@ namespace Frida {
 				out DBusConnection connection) throws Error, IOError {
 			PipeTransport.set_temp_directory (tempdir.path);
 
-			var agent_filename = agent.get_path_template ().expand (sizeof (void *) == 8 ? "64" : "32");
-			system_session_container = yield AgentContainer.create (agent_filename, cancellable);
+			PathTemplate tpl;
+#if HAVE_EMBEDDED_ASSETS
+			tpl = agent.get_path_template ();
+#else
+			tpl = new PathTemplate (Config.FRIDA_AGENT_PATH);
+#endif
+			string path = tpl.expand (sizeof (void *) == 8 ? "64" : "32");
+			system_session_container = yield AgentContainer.create (path, cancellable);
 
 			connection = system_session_container.connection;
 
@@ -317,8 +325,14 @@ namespace Frida {
 
 			var stream_request = Pipe.open (t.local_address, cancellable);
 
+			uint id;
+			string entrypoint = "frida_agent_main";
 			var linjector = injector as Linjector;
-			var id = yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address, cancellable);
+#if HAVE_EMBEDDED_ASSETS
+			id = yield linjector.inject_library_resource (pid, agent, entrypoint, t.remote_address, cancellable);
+#else
+			id = yield linjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, t.remote_address, cancellable);
+#endif
 			injectee_by_pid[pid] = id;
 
 			transport = t;

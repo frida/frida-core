@@ -75,7 +75,7 @@ endif
 
 custom_target('frida-gadget',
   input: raw_gadget,
-  output: 'frida-gadget' + shlib_suffix,
+  output: gadget_name,
   command: [
     modulate,
     '@INPUT@',
@@ -88,5 +88,5 @@ custom_target('frida-gadget',
   ],
   build_by_default: true,
   install: true,
-  install_dir: get_option('libdir'),
+  install_dir: asset_dir,
 )

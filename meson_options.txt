@@ -1,3 +1,10 @@
+option('assets',
+  type: 'combo',
+  choices: ['embedded', 'installed'],
+  value: 'embedded',
+  description: 'Whether assets such as frida-agent should be embedded vs installed and loaded at runtime'
+)
+
 option('mapper',
   type: 'feature',
   value: 'auto',
@@ -7,37 +14,37 @@ option('mapper',
 option('helper_modern',
   type: 'string',
   value: '',
-  description: 'Prebuilt frida-helper for modern systems'
+  description: 'Prebuilt frida-helper to embed for use on modern systems'
 )
 
 option('helper_legacy',
   type: 'string',
   value: '',
-  description: 'Prebuilt frida-helper for legacy systems'
+  description: 'Prebuilt frida-helper to embed for use on legacy systems'
 )
 
 option('agent_modern',
   type: 'string',
   value: '',
-  description: 'Prebuilt agent to use for modern targets'
+  description: 'Prebuilt agent to embed for use on modern targets'
 )
 
 option('agent_legacy',
   type: 'string',
   value: '',
-  description: 'Prebuilt agent to use for legacy targets'
+  description: 'Prebuilt agent to embed for use on legacy targets'
 )
 
 option('agent_emulated_modern',
   type: 'string',
   value: '',
-  description: 'Prebuilt agent to use for modern emulated targets'
+  description: 'Prebuilt agent to embed for use on modern emulated targets'
 )
 
 option('agent_emulated_legacy',
   type: 'string',
   value: '',
-  description: 'Prebuilt agent to use for legacy emulated targets'
+  description: 'Prebuilt agent to embed for use on legacy emulated targets'
 )
 
 option('tests',

@@ -124,8 +124,10 @@ namespace Frida {
 			fruitjector.injected.connect (on_injected);
 			injector.uninjected.connect (on_uninjected);
 
+#if HAVE_EMBEDDED_ASSETS
 			var blob = Frida.Data.Agent.get_frida_agent_dylib_blob ();
 			agent = new AgentResource (blob.name, new Bytes.static (blob.data), tempdir);
+#endif
 
 #if IOS
 			fruit_controller = new FruitController (this, io_cancellable);
@@ -174,8 +176,7 @@ namespace Frida {
 			string remote_address;
 			var stream_request = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var fruitjector = (Fruitjector) injector;
-			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
+			var id = yield inject_agent (pid, remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
 			IOStream stream = yield stream_request.wait_async (cancellable);
@@ -279,8 +280,7 @@ namespace Frida {
 			string remote_address;
 			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
-			var fruitjector = (Fruitjector) injector;
-			var id = yield fruitjector.inject_library_resource (pid, agent, "frida_agent_main", remote_address, cancellable);
+			var id = yield inject_agent (pid, remote_address, cancellable);
 			injectee_by_pid[pid] = id;
 
 			return stream_future;
@@ -313,6 +313,19 @@ namespace Frida {
 			process_crashed (info);
 		}
 #endif
+
+		private async uint inject_agent (uint pid, string remote_address, Cancellable? cancellable) throws Error, IOError {
+			uint id;
+
+			unowned string entrypoint = "frida_agent_main";
+#if HAVE_EMBEDDED_ASSETS
+			id = yield fruitjector.inject_library_resource (pid, agent, entrypoint, remote_address, cancellable);
+#else
+			id = yield fruitjector.inject_library_file (pid, Config.FRIDA_AGENT_PATH, entrypoint, remote_address, cancellable);
+#endif
+
+			return id;
+		}
 
 		private void on_injected (uint id, uint pid, bool has_mapped_module, DarwinModuleDetails mapped_module) {
 #if IOS

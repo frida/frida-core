@@ -31,14 +31,6 @@ else
   host_abi = host_arch
 endif
 
-if host_os_family == 'windows'
-  shlib_suffix = '.dll'
-elif host_os_family == 'darwin'
-  shlib_suffix = '.dylib'
-else
-  shlib_suffix = '.so'
-endif
-
 c_languages = ['c', 'cpp']
 if host_os_family == 'darwin'
   c_languages += ['objc', 'objcpp']
@@ -94,7 +86,40 @@ if cc.has_header('android/api-level.h')
   host_os = 'android'
 endif
 
+if cc.sizeof('void *') == 8
+  host_cpu_mode = '64'
+else
+  host_cpu_mode = '32'
+endif
+
 cdata = configuration_data()
+
+if host_os_family == 'windows'
+  shlib_suffix = '.dll'
+elif host_os_family == 'darwin'
+  shlib_suffix = '.dylib'
+else
+  shlib_suffix = '.so'
+endif
+
+helper_name = 'frida-helper'
+agent_name = 'frida-agent' + shlib_suffix
+gadget_name = 'frida-gadget' + shlib_suffix
+
+if host_os_family == 'darwin'
+  asset_dir = get_option('libdir') / 'frida'
+  asset_path_template = get_option('prefix') / get_option('libdir') / 'frida'
+else
+  asset_dir = get_option('libdir') / 'frida' / host_cpu_mode
+  asset_path_template = get_option('prefix') / get_option('libdir') / 'frida' / '<arch>'
+endif
+
+if get_option('assets') == 'embedded'
+  vala_flags += '--define=HAVE_EMBEDDED_ASSETS'
+else
+  cdata.set_quoted('FRIDA_HELPER_PATH', asset_path_template / helper_name)
+  cdata.set_quoted('FRIDA_AGENT_PATH', asset_path_template / agent_name)
+endif
 
 cdata.set('HAVE_' + host_os_family.to_upper(), 1)
 if host_os != host_os_family
@@ -230,6 +255,11 @@ add_project_arguments(
 if host_os_family == 'linux'
   add_project_arguments('-D_GNU_SOURCE=1', language: c_languages)
 endif
+
+vala_flags += [
+  '--vapidir=' + meson.current_source_dir() / 'vapi',
+  '--pkg', 'config',
+]
 
 vala_flags += ['--define=' + host_os_family.to_upper()]
 if host_os != host_os_family

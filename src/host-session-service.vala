@@ -1041,6 +1041,46 @@ namespace Frida {
 		}
 	}
 
+	internal interface HelperFile : Object {
+		public abstract string path {
+			owned get;
+		}
+	}
+
+	internal class InstalledHelperFile : Object, HelperFile {
+		public string path {
+			owned get {
+				return installed_path;
+			}
+		}
+
+		public string installed_path {
+			get;
+			construct;
+		}
+
+		public InstalledHelperFile.for_path (string path) {
+			Object (installed_path: path);
+		}
+	}
+
+	internal class TemporaryHelperFile : Object, HelperFile {
+		public string path {
+			owned get {
+				return file.path;
+			}
+		}
+
+		public TemporaryFile file {
+			get;
+			construct;
+		}
+
+		public TemporaryHelperFile (TemporaryFile file) {
+			Object (file: file);
+		}
+	}
+
 	public abstract class InternalAgent : Object, RpcPeer {
 		public signal void unloaded ();
 

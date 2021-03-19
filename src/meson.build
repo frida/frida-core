@@ -93,47 +93,51 @@ if host_os_family == 'darwin'
     helper_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + join_paths(meson.current_source_dir(), helper_plist)]
     helper_link_depends += [helper_plist]
   endif
-  helper = executable('frida-helper', helper_sources,
+  helper = executable(helper_name, helper_sources,
     vala_args: ['--pkg=posix'],
     link_args: helper_link_args + backend_libs_private,
     link_depends: helper_link_depends,
     link_with: helper_backend,
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
+    install: get_option('assets') == 'installed',
+    install_dir: asset_dir,
     override_options: ['b_asneeded=false'],
   )
 
-  helper_modern = get_option('helper_modern')
-  helper_legacy = get_option('helper_legacy')
-  helper_inputs = ['darwin/frida-helper.xcent']
-  if helper_modern == '' and helper_legacy == ''
-    if host_is_64bit
-      helper_modern = helper.full_path()
-    else
-      helper_legacy = helper.full_path()
+  if get_option('assets') == 'embedded'
+    helper_modern = get_option('helper_modern')
+    helper_legacy = get_option('helper_legacy')
+    helper_inputs = ['darwin/frida-helper.xcent']
+    if helper_modern == '' and helper_legacy == ''
+      if host_is_64bit
+        helper_modern = helper.full_path()
+      else
+        helper_legacy = helper.full_path()
+      endif
+      helper_inputs += helper
     endif
-    helper_inputs += helper
+    helper_process_data = custom_target('frida-data-helper-process',
+      input: helper_inputs,
+      output: [
+        'frida-data-helper-process.vapi',
+        'frida-data-helper-process.h',
+        'frida-data-helper-process.c',
+        'frida-data-helper-process-blob.S',
+      ],
+      command: [
+        files('darwin/embed-helper.sh'),
+        host_os,
+        helper_modern,
+        helper_legacy,
+        '@INPUT0@',
+        meson.current_build_dir(),
+        resource_compiler,
+        meson.get_cross_binary('strip', 'strip'),
+        get_option('strip').to_string(),
+      ],
+    )
+    darwin_sources += [helper_process_data]
   endif
-  helper_process_data = custom_target('frida-data-helper-process',
-    input: helper_inputs,
-    output: [
-      'frida-data-helper-process.vapi',
-      'frida-data-helper-process.h',
-      'frida-data-helper-process.c',
-      'frida-data-helper-process-blob.S',
-    ],
-    command: [
-      files('darwin/embed-helper.sh'),
-      host_os,
-      helper_modern,
-      helper_legacy,
-      '@INPUT0@',
-      meson.current_build_dir(),
-      resource_compiler,
-      meson.get_cross_binary('strip', 'strip'),
-      get_option('strip').to_string(),
-    ],
-  )
-  darwin_sources += [helper_process_data]
 
   backend_vala_args += ['--pkg=posix']
 endif
@@ -197,40 +201,44 @@ if host_os_family == 'linux'
   helper_symscript = 'linux/frida-helper.version'
   helper_link_args = ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), helper_symscript)]
   helper_link_depends = [helper_symscript]
-  helper = executable('frida-helper', helper_sources,
+  helper = executable(helper_name, helper_sources,
     vala_args: ['--pkg=posix'],
     link_args: helper_link_args,
     link_depends: helper_link_depends,
     link_with: helper_backend,
     dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
+    install: get_option('assets') == 'installed',
+    install_dir: asset_dir,
   )
 
-  helper_modern = get_option('helper_modern')
-  helper_legacy = get_option('helper_legacy')
-  if host_is_64bit
-    helper_modern = ''
-  else
-    helper_legacy = ''
+  if get_option('assets') == 'embedded'
+    helper_modern = get_option('helper_modern')
+    helper_legacy = get_option('helper_legacy')
+    if host_is_64bit
+      helper_modern = ''
+    else
+      helper_legacy = ''
+    endif
+    helper_process_data = custom_target('frida-data-helper-process',
+      output: [
+        'frida-data-helper-process.vapi',
+        'frida-data-helper-process.h',
+        'frida-data-helper-process.c',
+        'frida-data-helper-process-blob.S',
+      ],
+      command: [
+        files('linux/embed-helper.sh'),
+        host_os,
+        helper_modern,
+        helper_legacy,
+        meson.current_build_dir(),
+        resource_compiler,
+        meson.get_cross_binary('strip', 'strip'),
+        get_option('strip').to_string(),
+      ],
+    )
+    linux_sources += [helper_process_data]
   endif
-  helper_process_data = custom_target('frida-data-helper-process',
-    output: [
-      'frida-data-helper-process.vapi',
-      'frida-data-helper-process.h',
-      'frida-data-helper-process.c',
-      'frida-data-helper-process-blob.S',
-    ],
-    command: [
-      files('linux/embed-helper.sh'),
-      host_os,
-      helper_modern,
-      helper_legacy,
-      meson.current_build_dir(),
-      resource_compiler,
-      meson.get_cross_binary('strip', 'strip'),
-      get_option('strip').to_string(),
-    ],
-  )
-  linux_sources += [helper_process_data]
 
   backend_vala_args += ['--pkg=posix', '--pkg=frida-gum-linux-1.0']
 endif
@@ -244,39 +252,43 @@ if host_os_family == 'qnx'
   ]
 endif
 
-agent_modern = get_option('agent_modern')
-agent_legacy = get_option('agent_legacy')
-agent_inputs = ['agent.resources']
-if agent_modern == '' and agent_legacy == ''
-  if host_is_64bit
-    agent_modern = agent.full_path()
-  else
-    agent_legacy = agent.full_path()
+if get_option('assets') == 'embedded'
+  agent_modern = get_option('agent_modern')
+  agent_legacy = get_option('agent_legacy')
+  agent_inputs = ['agent.resources']
+  if agent_modern == '' and agent_legacy == ''
+    if host_is_64bit
+      agent_modern = agent.full_path()
+    else
+      agent_legacy = agent.full_path()
+    endif
+    agent_inputs += agent
   endif
-  agent_inputs += agent
+  agent_data = custom_target('frida-data-agent',
+    input: agent_inputs,
+    output: [
+      'frida-data-agent.vapi',
+      'frida-data-agent.h',
+      'frida-data-agent.c',
+      'frida-data-agent-blob.S',
+    ],
+    command: [
+      files('embed-agent.sh'),
+      host_os,
+      agent_modern,
+      agent_legacy,
+      get_option('agent_emulated_modern'),
+      get_option('agent_emulated_legacy'),
+      meson.current_build_dir(),
+      resource_compiler,
+      '@INPUT0@',
+      meson.get_cross_binary('strip', 'strip'),
+      get_option('strip').to_string(),
+    ],
+  )
+else
+  agent_data = []
 endif
-agent_data = custom_target('frida-data-agent',
-  input: agent_inputs,
-  output: [
-    'frida-data-agent.vapi',
-    'frida-data-agent.h',
-    'frida-data-agent.c',
-    'frida-data-agent-blob.S',
-  ],
-  command: [
-    files('embed-agent.sh'),
-    host_os,
-    agent_modern,
-    agent_legacy,
-    get_option('agent_emulated_modern'),
-    get_option('agent_emulated_legacy'),
-    meson.current_build_dir(),
-    resource_compiler,
-    '@INPUT0@',
-    meson.get_cross_binary('strip', 'strip'),
-    get_option('strip').to_string(),
-  ],
-)
 
 socket_sources = [
   'socket/socket-host-session.vala',

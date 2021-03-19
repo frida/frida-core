@@ -385,31 +385,38 @@ namespace Frida {
 	}
 
 	private class ResourceStore {
-		public TemporaryFile helper {
+		public HelperFile helper {
 			get;
 			private set;
 		}
 
-#if MACOS && ARM64
+#if HAVE_EMBEDDED_ASSETS && MACOS && ARM64
 		private bool thinned = false;
 #endif
 
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
+#if HAVE_EMBEDDED_ASSETS
 			FileUtils.chmod (tempdir.path, 0755);
 
 			var blob = Frida.Data.Helper.get_frida_helper_blob ();
-			helper = new TemporaryFile.from_stream ("frida-helper",
-				new MemoryInputStream.from_data (blob.data, null),
-				tempdir);
+			helper = new TemporaryHelperFile (
+				new TemporaryFile.from_stream ("frida-helper",
+					new MemoryInputStream.from_data (blob.data, null),
+					tempdir));
 			FileUtils.chmod (helper.path, 0700);
+#else
+			helper = new InstalledHelperFile.for_path (Config.FRIDA_HELPER_PATH);
+#endif
 		}
 
 		~ResourceStore () {
-			helper.destroy ();
+#if HAVE_EMBEDDED_ASSETS
+			((TemporaryHelperFile) helper).file.destroy ();
+#endif
 		}
 
 		public bool maybe_thin_helper_to_basic_abi () {
-#if MACOS && ARM64
+#if HAVE_EMBEDDED_ASSETS && MACOS && ARM64
 			if (thinned)
 				return false;
 

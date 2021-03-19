@@ -238,7 +238,7 @@ namespace Frida {
 		public signal void output (uint pid, int fd, uint8[] data);
 		public signal void uninjected (uint id);
 
-		private TemporaryFile? helper_file;
+		private HelperFile? helper_file;
 		private ResourceStore? resource_store;
 		private MainContext? main_context;
 		private SuperSU.Process superprocess;
@@ -247,7 +247,7 @@ namespace Frida {
 		private LinuxHelper helper;
 		private Promise<LinuxHelper> obtain_request;
 
-		public HelperFactory (TemporaryFile? helper_file, ResourceStore resource_store, MainContext? main_context) {
+		public HelperFactory (HelperFile? helper_file, ResourceStore resource_store, MainContext? main_context) {
 			this.helper_file = helper_file;
 			this.resource_store = resource_store;
 			this.main_context = main_context;
@@ -560,12 +560,12 @@ namespace Frida {
 			private set;
 		}
 
-		public TemporaryFile? helper32 {
+		public HelperFile? helper32 {
 			get;
 			private set;
 		}
 
-		public TemporaryFile? helper64 {
+		public HelperFile? helper64 {
 			get;
 			private set;
 		}
@@ -575,21 +575,31 @@ namespace Frida {
 		public ResourceStore (TemporaryDirectory tempdir) throws Error {
 			this.tempdir = tempdir;
 
+#if HAVE_EMBEDDED_ASSETS
 			var blob32 = Frida.Data.Helper.get_frida_helper_32_blob ();
 			if (blob32.data.length > 0) {
-				helper32 = new TemporaryFile.from_stream ("frida-helper-32",
-					new MemoryInputStream.from_data (blob32.data, null),
-					tempdir);
+				helper32 = new TemporaryHelperFile (
+					new TemporaryFile.from_stream ("frida-helper-32",
+						new MemoryInputStream.from_data (blob32.data, null),
+						tempdir));
 				FileUtils.chmod (helper32.path, 0700);
 			}
 
 			var blob64 = Frida.Data.Helper.get_frida_helper_64_blob ();
 			if (blob64.data.length > 0) {
-				helper64 = new TemporaryFile.from_stream ("frida-helper-64",
-					new MemoryInputStream.from_data (blob64.data, null),
-					tempdir);
+				helper64 = new TemporaryHelperFile (
+					new TemporaryFile.from_stream ("frida-helper-64",
+						new MemoryInputStream.from_data (blob64.data, null),
+						tempdir));
 				FileUtils.chmod (helper64.path, 0700);
 			}
+#else
+			HelperFile file = new InstalledHelperFile.for_path (Config.FRIDA_HELPER_PATH);
+			if (sizeof (void *) == 8)
+				helper64 = file;
+			else
+				helper32 = file;
+#endif
 		}
 
 		public void manage (TemporaryFile file) {

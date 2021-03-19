@@ -1,5 +1,11 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
+/* Define to filesystem path to the installed agent. */
+#mesondefine FRIDA_AGENT_PATH
+
+/* Define to filesystem path to the installed helper. */
+#mesondefine FRIDA_HELPER_PATH
+
 /* Define to 1 if OS is Android based. */
 #mesondefine HAVE_ANDROID
 
