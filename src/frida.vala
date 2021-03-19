@@ -2365,7 +2365,7 @@ namespace Frida {
 		public static Injector new_inprocess () {
 #if WINDOWS
 			var tempdir = new TemporaryDirectory ();
-			var helper = new WindowsHelperBackend ();
+			var helper = new WindowsHelperBackend (PrivilegeLevel.NORMAL);
 			return new Winjector (helper, true, tempdir);
 #endif
 #if DARWIN

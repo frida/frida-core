@@ -41,13 +41,15 @@ namespace Frida {
 
 		public async uint inject_library_file (uint pid, string path, string entrypoint, string data, Cancellable? cancellable)
 				throws Error, IOError {
-			return yield inject_library_file_with_template (pid, PathTemplate (path), entrypoint, data, cancellable);
+			var no_dependencies = new string[] {};
+			return yield inject_library_file_with_template (pid, PathTemplate (path), entrypoint, data, no_dependencies,
+				cancellable);
 		}
 
 		private async uint inject_library_file_with_template (uint pid, PathTemplate path_template, string entrypoint, string data,
-				Cancellable? cancellable) throws Error, IOError {
+				string[] dependencies, Cancellable? cancellable) throws Error, IOError {
 			uint id = next_injectee_id++;
-			yield helper.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+			yield helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 			pid_by_id[id] = pid;
 			return id;
 		}
@@ -68,7 +70,13 @@ namespace Frida {
 		public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
 			ensure_tempdir_prepared ();
-			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, cancellable);
+
+			var dependencies = new Gee.ArrayList<string> ();
+			foreach (var dep in agent.dependencies)
+				dependencies.add (dep.get_file ().path);
+
+			return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data,
+				dependencies.to_array (), cancellable);
 		}
 
 		private void ensure_tempdir_prepared () throws Error {
@@ -113,7 +121,12 @@ namespace Frida {
 			construct;
 		}
 
-		public Gee.Collection<AgentResource> resources {
+		public Gee.Collection<AgentResource> agents {
+			get;
+			construct;
+		}
+
+		public Gee.Collection<AgentResource> dependencies {
 			get;
 			construct;
 		}
@@ -125,33 +138,38 @@ namespace Frida {
 
 		private PathTemplate? cached_path_template;
 
-		public AgentDescriptor (PathTemplate name_template, Bytes dll32, Bytes dll64, AgentResource[] resources,
+		public AgentDescriptor (PathTemplate name_template, Bytes dll32, Bytes dll64, AgentResource[] dependencies,
 				TemporaryDirectory? tempdir = null) {
-			var all_resources = new Gee.ArrayList<AgentResource> ();
-			all_resources.add (new AgentResource (name_template.expand ("32"), dll32, tempdir));
-			all_resources.add (new AgentResource (name_template.expand ("64"), dll64, tempdir));
+			var agents = new Gee.ArrayList<AgentResource> ();
+			agents.add (new AgentResource (name_template.expand ("32"), dll32, tempdir));
+			agents.add (new AgentResource (name_template.expand ("64"), dll64, tempdir));
 
-			foreach (var r in resources)
-				all_resources.add (r);
-
-			Object (name_template: name_template, resources: all_resources, tempdir: tempdir);
+			Object (
+				name_template: name_template,
+				agents: agents,
+				dependencies: new Gee.ArrayList<AgentResource>.wrap (dependencies),
+				tempdir: tempdir
+			);
 		}
 
 		public PathTemplate get_path_template () throws Error {
 			if (cached_path_template == null) {
 				TemporaryDirectory? first_tempdir = null;
-				foreach (AgentResource r in resources) {
+
+				foreach (AgentResource r in agents) {
 					TemporaryFile f = r.get_file ();
 					if (first_tempdir == null)
 						first_tempdir = f.parent;
 				}
+
+				foreach (AgentResource r in dependencies)
+					r.get_file ();
 
 				cached_path_template = PathTemplate (first_tempdir.path + "\\" + name_template.str);
 			}
 
 			return cached_path_template;
 		}
-
 	}
 
 	public class AgentResource : Object {

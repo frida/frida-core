@@ -5,7 +5,7 @@ namespace Frida {
 			construct;
 		}
 
-		private WindowsHelperBackend inprocess_backend = new WindowsHelperBackend ();
+		private WindowsHelperBackend inprocess_backend = new WindowsHelperBackend (PrivilegeLevel.NORMAL);
 
 		private HelperFactory _normal_factory = new HelperFactory (PrivilegeLevel.NORMAL);
 		private HelperFactory _elevated_factory = new HelperFactory (PrivilegeLevel.ELEVATED);
@@ -53,14 +53,15 @@ namespace Frida {
 			return _resource_store;
 		}
 
-		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
-				Cancellable? cancellable) throws Error, IOError {
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			bool permission_denied = false;
 			try {
 				unowned string local_arch = sizeof (void *) == 8 ? "64" : "32";
 				unowned string remote_arch = WindowsProcess.is_x64 (pid) ? "64" : "32";
 				if (remote_arch == local_arch) {
-					yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+					yield inprocess_backend.inject_library_file (pid, path_template, entrypoint, data, dependencies,
+						id, cancellable);
 					return;
 				}
 			} catch (Error e) {
@@ -74,7 +75,8 @@ namespace Frida {
 				var normal_factory = get_normal_factory ();
 				var normal_helper = yield normal_factory.obtain (cancellable);
 				try {
-					yield normal_helper.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+					yield normal_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
+						cancellable);
 					return;
 				} catch (Error e) {
 					if (!(e is Error.PERMISSION_DENIED))
@@ -90,7 +92,7 @@ namespace Frida {
 				throw new Error.PERMISSION_DENIED (
 					"Unable to access process with pid %u from the current user account".printf (pid));
 			}
-			yield elevated_helper.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+			yield elevated_helper.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 		}
 
 		private void on_uninjected (uint id) {
@@ -353,10 +355,10 @@ namespace Frida {
 			terminated ();
 		}
 
-		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
-				Cancellable? cancellable) throws Error, IOError {
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				yield proxy.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+				yield proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 				injectee_ids.add (id);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);

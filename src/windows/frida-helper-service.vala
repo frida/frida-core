@@ -61,7 +61,7 @@ namespace Frida {
 		private DBusConnection connection;
 		private uint registration_id;
 		private ServiceConnection helper32;
-		private ServiceConnection helper64;
+		private ServiceConnection? helper64;
 		private void * context;
 
 		public HelperManager (string parent_address, PrivilegeLevel level) {
@@ -107,7 +107,7 @@ namespace Frida {
 				yield helper32.open ();
 				helper32.proxy.uninjected.connect (on_uninjected);
 
-				if (WindowsSystem.is_x64 ()) {
+				if (helper64 != null) {
 					yield helper64.open ();
 					helper64.proxy.uninjected.connect (on_uninjected);
 				}
@@ -130,7 +130,7 @@ namespace Frida {
 		}
 
 		public async void stop (Cancellable? cancellable) throws Error, IOError {
-			if (WindowsSystem.is_x64 ()) {
+			if (helper64 != null) {
 				try {
 					yield helper64.proxy.stop (cancellable);
 				} catch (GLib.Error e) {
@@ -151,13 +151,20 @@ namespace Frida {
 			});
 		}
 
-		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
-				Cancellable? cancellable) throws Error, IOError {
+		public async bool can_handle_target (uint pid, Cancellable? cancellable) throws Error, IOError {
+			return true;
+		}
+
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
 			try {
-				if (WindowsProcess.is_x64 (pid))
-					yield helper64.proxy.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
-				else
-					yield helper32.proxy.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+				if (helper64 != null && yield helper64.proxy.can_handle_target (pid, cancellable)) {
+					yield helper64.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
+						cancellable);
+				} else {
+					yield helper32.proxy.inject_library_file (pid, path_template, entrypoint, data, dependencies, id,
+						cancellable);
+				}
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -208,12 +215,18 @@ namespace Frida {
 	}
 
 	private abstract class HelperService : Object, WindowsRemoteHelper {
+		public PrivilegeLevel level {
+			get;
+			construct;
+		}
+
 		private DBusConnection connection;
 		private uint registration_id;
 
-		private WindowsHelperBackend backend = new WindowsHelperBackend ();
+		private WindowsHelperBackend backend;
 
 		construct {
+			backend = new WindowsHelperBackend (level);
 			backend.uninjected.connect (on_backend_uninjected);
 
 			Idle.add (() => {
@@ -272,9 +285,15 @@ namespace Frida {
 			do_stop.begin ();
 		}
 
-		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data, uint id,
-				Cancellable? cancellable) throws Error, IOError {
-			yield backend.inject_library_file (pid, path_template, entrypoint, data, id, cancellable);
+		public async bool can_handle_target (uint pid, Cancellable? cancellable) throws Error, IOError {
+			uint local_arch = sizeof (void *) == 8 ? 64 : 32;
+			uint remote_arch = WindowsProcess.is_x64 (pid) ? 64 : 32;
+			return local_arch == remote_arch;
+		}
+
+		public async void inject_library_file (uint pid, PathTemplate path_template, string entrypoint, string data,
+				string[] dependencies, uint id, Cancellable? cancellable) throws Error, IOError {
+			yield backend.inject_library_file (pid, path_template, entrypoint, data, dependencies, id, cancellable);
 		}
 
 		private void on_backend_uninjected (uint id) {
@@ -288,6 +307,10 @@ namespace Frida {
 
 	private class StandaloneHelperService : HelperService {
 		private MainLoop loop;
+
+		public StandaloneHelperService () {
+			Object (level: PrivilegeLevel.NORMAL);
+		}
 
 		public override void run () {
 			loop = new MainLoop ();
@@ -303,6 +326,10 @@ namespace Frida {
 	}
 
 	private class ManagedHelperService : HelperService {
+		public ManagedHelperService () {
+			Object (level: PrivilegeLevel.ELEVATED);
+		}
+
 		public override void run () {
 			enter_dispatcher_and_main_loop ();
 		}
