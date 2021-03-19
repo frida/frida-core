@@ -41,21 +41,31 @@ namespace Frida {
 			_inject_library_file (pid, path, entrypoint, data, out instance, out waitable_thread_handle);
 			if (waitable_thread_handle != null) {
 				pending++;
-				var source = WaitHandleSource.create (waitable_thread_handle, true);
+
+				var source = new IdleSource ();
 				source.set_callback (() => {
-					bool is_resident;
-					_free_inject_instance (instance, out is_resident);
-
-					uninjected (id);
-
-					pending--;
-					if (close_request != null && pending == 0)
-						close_request.resolve (true);
-
+					monitor_remote_thread (id, instance, waitable_thread_handle);
 					return false;
 				});
 				source.attach (main_context);
 			}
+		}
+
+		private void monitor_remote_thread (uint id, void * instance, void * waitable_thread_handle) {
+			var source = WaitHandleSource.create (waitable_thread_handle, true);
+			source.set_callback (() => {
+				bool is_resident;
+				_free_inject_instance (instance, out is_resident);
+
+				uninjected (id);
+
+				pending--;
+				if (close_request != null && pending == 0)
+					close_request.resolve (true);
+
+				return false;
+			});
+			source.attach (main_context);
 		}
 
 		protected extern static void _inject_library_file (uint32 pid, string path, string entrypoint, string data,

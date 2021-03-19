@@ -276,10 +276,6 @@ namespace Frida {
 				throws Error, IOError {
 			transport = null;
 
-			yield wait_for_uninject (injector, cancellable, () => {
-				return injectee_by_pid.has_key (pid);
-			});
-
 			string remote_address;
 			var stream_future = yield helper.open_pipe_stream (pid, cancellable, out remote_address);
 
@@ -327,19 +323,12 @@ namespace Frida {
 #endif
 		}
 
-		private void on_uninjected (uint id) {
+		protected override void on_uninjected (uint id) {
 #if IOS
 			fruit_controller.on_agent_uninjected (id);
 #endif
 
-			foreach (var entry in injectee_by_pid.entries) {
-				if (entry.value == id) {
-					injectee_by_pid.unset (entry.key);
-					return;
-				}
-			}
-
-			uninjected (InjectorPayloadId (id));
+			base.on_uninjected (id);
 		}
 	}
 

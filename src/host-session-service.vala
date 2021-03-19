@@ -149,6 +149,8 @@ namespace Frida {
 		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
 		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash);
 
+		private Gee.HashMap<uint, Cancellable> pending_establish_ops = new Gee.HashMap<uint, Cancellable> ();
+
 		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
 
 		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
@@ -361,7 +363,8 @@ namespace Frida {
 			var promise = new Promise<AgentEntry> ();
 			agent_entries[pid] = promise.future;
 
-			AgentEntry entry;
+			AgentEntry entry = null;
+			CancellableSource? cancel_source = null;
 			try {
 				DBusConnection connection;
 				AgentSessionProvider provider;
@@ -370,16 +373,30 @@ namespace Frida {
 					provider = yield create_system_session_provider (cancellable, out connection);
 					entry = new AgentEntry (pid, null, connection, provider);
 				} else {
-					Object transport;
-					var stream_request = yield perform_attach_to (pid, cancellable, out transport);
+					yield wait_for_uninject (injector, cancellable, () => {
+						return injectee_by_pid.has_key (pid);
+					});
 
-					IOStream stream = yield stream_request.wait_async (cancellable);
+					var io_cancellable = new Cancellable ();
+					pending_establish_ops[pid] = io_cancellable;
+
+					cancel_source = new CancellableSource (cancellable);
+					cancel_source.set_callback (() => {
+						io_cancellable.cancel ();
+						return false;
+					});
+					cancel_source.attach (MainContext.get_thread_default ());
+
+					Object transport;
+					var stream_request = yield perform_attach_to (pid, io_cancellable, out transport);
+
+					IOStream stream = yield stream_request.wait_async (io_cancellable);
 
 					uint controller_registration_id;
 					try {
 						connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
 							AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
-							null, cancellable);
+							null, io_cancellable);
 
 						AgentController controller = this;
 						controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
@@ -388,9 +405,12 @@ namespace Frida {
 						connection.start_message_processing ();
 
 						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
-							DBusProxyFlags.NONE, cancellable);
+							DBusProxyFlags.NONE, io_cancellable);
 					} catch (GLib.Error e) {
-						throw new Error.PROCESS_NOT_RESPONDING ("%s", e.message);
+						if (e is IOError.CANCELLED)
+							throw e;
+						else
+							throw new Error.PROCESS_NOT_RESPONDING ("%s", e.message);
 					}
 
 					entry = new AgentEntry (pid, transport, connection, provider, controller_registration_id);
@@ -403,13 +423,40 @@ namespace Frida {
 
 				promise.resolve (entry);
 			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED && (cancellable == null || !cancellable.is_cancelled ())) {
+					e = new Error.PROCESS_NOT_RESPONDING ("Process with pid %u either refused to load frida-agent, " +
+						"or terminated during injection", pid);
+				}
+
 				agent_entries.unset (pid);
 
 				promise.reject (e);
 				throw_api_error (e);
+			} finally {
+				pending_establish_ops.unset (pid);
+				if (cancel_source != null)
+					cancel_source.destroy ();
 			}
 
 			return entry;
+		}
+
+		protected virtual void on_uninjected (uint id) {
+			foreach (var entry in injectee_by_pid.entries) {
+				if (entry.value == id) {
+					uint pid = entry.key;
+
+					injectee_by_pid.unset (pid);
+
+					var io_cancellable = pending_establish_ops[pid];
+					if (io_cancellable != null)
+						io_cancellable.cancel ();
+
+					return;
+				}
+			}
+
+			uninjected (InjectorPayloadId (id));
 		}
 
 		protected abstract async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)

@@ -317,10 +317,6 @@ namespace Frida {
 
 			var stream_request = Pipe.open (t.local_address, cancellable);
 
-			yield wait_for_uninject (injector, cancellable, () => {
-				return injectee_by_pid.has_key (pid);
-			});
-
 			var linjector = injector as Linjector;
 			var id = yield linjector.inject_library_resource (pid, agent, "frida_agent_main", t.remote_address, cancellable);
 			injectee_by_pid[pid] = id;
@@ -367,17 +363,6 @@ namespace Frida {
 
 		private void on_output (uint pid, int fd, uint8[] data) {
 			output (pid, fd, data);
-		}
-
-		private void on_uninjected (uint id) {
-			foreach (var entry in injectee_by_pid.entries) {
-				if (entry.value == id) {
-					injectee_by_pid.unset (entry.key);
-					return;
-				}
-			}
-
-			uninjected (InjectorPayloadId (id));
 		}
 	}
 
