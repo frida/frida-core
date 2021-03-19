@@ -3,13 +3,18 @@ gadget_sources = [
   'gadget-glue.c',
 ]
 
+if host_os_family == 'darwin'
+  gadget_sources += 'gadget-darwin.m'
+endif
+
 force_cpp_linking = gumjs_dep.get_pkgconfig_variable('gumjs_v8') == 'enabled'
 if force_cpp_linking
-  gadget_sources += ['dummy.cpp']
+  gadget_sources += 'dummy.cpp'
 endif
 
 platform_deps = []
 
+extra_objc_args = []
 extra_link_args = []
 extra_link_depends = []
 
@@ -18,7 +23,8 @@ if host_os_family != 'windows'
 endif
 
 if host_os_family == 'darwin'
-  extra_link_args += '-Wl,-needed_framework,Foundation'
+  extra_objc_args += '-fobjc-arc'
+  extra_link_args += '-Wl,-framework,Foundation'
 endif
 
 if host_os_family == 'darwin'
@@ -39,6 +45,7 @@ endif
 raw_gadget = shared_library('frida-gadget', gadget_sources,
   name_prefix: '_',
   c_args: frida_component_cflags,
+  objc_args: extra_objc_args,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   vs_module_defs: 'frida-gadget.def',
