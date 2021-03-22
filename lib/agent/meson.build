@@ -27,7 +27,7 @@ if host_os_family in ['linux', 'qnx']
 endif
 
 raw_agent = shared_library('frida-agent', agent_sources,
-  name_prefix: '_',
+  name_prefix: 'lib',
   c_args: frida_component_cflags,
   vala_args: extra_vala_args,
   link_args: extra_link_args,
@@ -47,9 +47,9 @@ else
   endian_option = ['--endian', 'big']
 endif
 
-agent = custom_target('frida-agent',
+modulated_agent = custom_target('frida-agent-modulated',
   input: raw_agent,
-  output: agent_name,
+  output: 'libfrida-agent-modulated' + shlib_suffix,
   command: [
     modulate,
     '@INPUT@',
@@ -58,8 +58,28 @@ agent = custom_target('frida-agent',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),
     '--otool', meson.get_cross_binary('otool', 'otool'),
-    '--install-name-tool', meson.get_cross_binary('install_name_tool', 'install_name_tool'),
   ],
+)
+
+if host_os_family == 'darwin'
+  identity = 'FridaAgent'
+else
+  identity = agent_name
+endif
+
+agent = custom_target('frida-agent',
+  input: modulated_agent,
+  output: agent_name,
+  command: [
+    post_process_module,
+    '@INPUT@',
+    '@OUTPUT@',
+    identity,
+    host_os,
+    meson.get_cross_binary('strip', 'strip'),
+    get_option('strip').to_string(),
+  ],
+  build_by_default: true,
   install: get_option('assets') == 'installed',
   install_dir: asset_dir,
 )

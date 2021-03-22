@@ -21,10 +21,27 @@ elif host_os_family != 'windows'
   extra_link_depends += [symscript]
 endif
 
-executable('frida-inject', inject_sources,
+raw_inject = executable('frida-inject-raw', inject_sources,
   vala_args: system_vala_args,
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   dependencies: [json_glib_dep, core_dep],
+)
+
+custom_target('frida-inject',
+  input: [
+    raw_inject,
+    'frida-inject.xcent',
+  ],
+  output: 'frida-inject',
+  command: [
+    files('post-process.sh'),
+    '@INPUT@',
+    '@OUTPUT@',
+    host_os,
+    meson.get_cross_binary('strip', 'strip'),
+    get_option('strip').to_string(),
+  ],
   install: true,
+  install_dir: get_option('bindir'),
 )

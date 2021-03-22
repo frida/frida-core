@@ -29,7 +29,6 @@ def main():
     parser.add_argument("--nm", metavar="/path/to/nm", type=str, default=None)
     parser.add_argument("--objdump", metavar="/path/to/objdump", type=str, default=None)
     parser.add_argument("--otool", metavar="/path/to/otool", type=str, default=None)
-    parser.add_argument("--install-name-tool", metavar="/path/to/install_name_tool", type=str, default=None)
     parser.add_argument("--strip", metavar="/path/to/strip", type=str, default=None)
 
     the_endians = ('big', 'little')
@@ -106,9 +105,6 @@ class ModuleEditor(object):
 
             self._write_function_pointer_vector(self.constructors, destination)
             self._write_function_pointer_vector(self.destructors, destination)
-
-        if self.layout.file_format == 'mach-o':
-            subprocess.check_call([self.toolchain.install_name_tool, "-id", make_darwin_module_name(destination_path), temp_destination_path])
 
         strip = self.toolchain.strip
         if strip is not None:
@@ -242,7 +238,6 @@ class Toolchain(object):
         self.nm = "nm"
         self.objdump = "objdump"
         self.otool = "otool"
-        self.install_name_tool = "install_name_tool"
         self.strip = None
 
     def __repr__(self):
@@ -426,11 +421,6 @@ class FunctionPointer(object):
 
     def __repr__(self):
         return "FunctionPointer(value=0x{:x}, name=\"{}\")".format(self.value, self.name)
-
-
-def make_darwin_module_name(path):
-    name, ext = os.path.splitext(os.path.basename(path))
-    return name.replace("-", " ").title().replace(" ", "")
 
 
 main()

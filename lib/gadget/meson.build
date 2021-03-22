@@ -43,7 +43,7 @@ if host_os_family in ['linux', 'qnx']
 endif
 
 raw_gadget = shared_library('frida-gadget', gadget_sources,
-  name_prefix: '_',
+  name_prefix: 'lib',
   c_args: frida_component_cflags,
   objc_args: extra_objc_args,
   link_args: extra_link_args,
@@ -73,9 +73,9 @@ else
   endian_option = ['--endian', 'big']
 endif
 
-custom_target('frida-gadget',
+modulated_gadget = custom_target('frida-gadget-modulated',
   input: raw_gadget,
-  output: gadget_name,
+  output: 'libfrida-gadget-modulated' + shlib_suffix,
   command: [
     modulate,
     '@INPUT@',
@@ -84,9 +84,29 @@ custom_target('frida-gadget',
     '--nm', meson.get_cross_binary('nm', 'nm'),
     '--objdump', meson.get_cross_binary('objdump', 'objdump'),
     '--otool', meson.get_cross_binary('otool', 'otool'),
-    '--install-name-tool', meson.get_cross_binary('install_name_tool', 'install_name_tool'),
   ],
-  build_by_default: true,
+)
+
+if host_os == 'macos'
+  identity = '@executable_path/../Frameworks/FridaGadget.dylib'
+elif host_os == 'ios'
+  identity = '@executable_path/Frameworks/FridaGadget.dylib'
+else
+  identity = gadget_name
+endif
+
+custom_target('frida-gadget',
+  input: modulated_gadget,
+  output: gadget_name,
+  command: [
+    post_process_module,
+    '@INPUT@',
+    '@OUTPUT@',
+    identity,
+    host_os,
+    meson.get_cross_binary('strip', 'strip'),
+    get_option('strip').to_string(),
+  ],
   install: true,
   install_dir: asset_dir,
 )

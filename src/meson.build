@@ -93,21 +93,38 @@ if host_os_family == 'darwin'
     helper_link_args += ['-Wl,-sectcreate,__TEXT,__info_plist,' + join_paths(meson.current_source_dir(), helper_plist)]
     helper_link_depends += [helper_plist]
   endif
-  helper = executable(helper_name, helper_sources,
+  raw_helper = executable('frida-helper-raw', helper_sources,
     vala_args: ['--pkg=posix'],
     link_args: helper_link_args + backend_libs_private,
     link_depends: helper_link_depends,
     link_with: helper_backend,
     dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
+    override_options: ['b_asneeded=false'],
+  )
+
+  helper = custom_target('frida-helper',
+    input: [
+      raw_helper,
+      'darwin/frida-helper.xcent',
+    ],
+    output: helper_name,
+    command: [
+      files('post-process-helper.sh'),
+      '@INPUT@',
+      '@OUTPUT@',
+      host_os,
+      meson.get_cross_binary('strip', 'strip'),
+      get_option('strip').to_string(),
+    ],
+    build_by_default: true,
     install: get_option('assets') == 'installed',
     install_dir: asset_dir,
-    override_options: ['b_asneeded=false'],
   )
 
   if get_option('assets') == 'embedded'
     helper_modern = get_option('helper_modern')
     helper_legacy = get_option('helper_legacy')
-    helper_inputs = ['darwin/frida-helper.xcent']
+    helper_inputs = ['helper.resources']
     if helper_modern == '' and helper_legacy == ''
       if host_is_64bit
         helper_modern = helper.full_path()
@@ -125,15 +142,13 @@ if host_os_family == 'darwin'
         'frida-data-helper-process-blob.S',
       ],
       command: [
-        files('darwin/embed-helper.sh'),
-        host_os,
+        files('embed-helper.sh'),
         helper_modern,
         helper_legacy,
-        '@INPUT0@',
         meson.current_build_dir(),
+        host_os,
         resource_compiler,
-        meson.get_cross_binary('strip', 'strip'),
-        get_option('strip').to_string(),
+        '@INPUT0@',
       ],
     )
     darwin_sources += [helper_process_data]
@@ -201,12 +216,27 @@ if host_os_family == 'linux'
   helper_symscript = 'linux/frida-helper.version'
   helper_link_args = ['-Wl,--version-script,' + join_paths(meson.current_source_dir(), helper_symscript)]
   helper_link_depends = [helper_symscript]
-  helper = executable(helper_name, helper_sources,
+  raw_helper = executable('frida-helper-raw', helper_sources,
     vala_args: ['--pkg=posix'],
     link_args: helper_link_args,
     link_depends: helper_link_depends,
     link_with: helper_backend,
     dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
+  )
+
+  helper = custom_target('frida-helper',
+    input: raw_helper,
+    output: helper_name,
+    command: [
+      files('post-process-helper.sh'),
+      '@INPUT@',
+      '',
+      '@OUTPUT@',
+      host_os,
+      meson.get_cross_binary('strip', 'strip'),
+      get_option('strip').to_string(),
+    ],
+    build_by_default: true,
     install: get_option('assets') == 'installed',
     install_dir: asset_dir,
   )
@@ -220,6 +250,7 @@ if host_os_family == 'linux'
       helper_legacy = ''
     endif
     helper_process_data = custom_target('frida-data-helper-process',
+      input: 'helper.resources',
       output: [
         'frida-data-helper-process.vapi',
         'frida-data-helper-process.h',
@@ -227,14 +258,13 @@ if host_os_family == 'linux'
         'frida-data-helper-process-blob.S',
       ],
       command: [
-        files('linux/embed-helper.sh'),
-        host_os,
+        files('embed-helper.sh'),
         helper_modern,
         helper_legacy,
         meson.current_build_dir(),
+        host_os,
         resource_compiler,
-        meson.get_cross_binary('strip', 'strip'),
-        get_option('strip').to_string(),
+        '@INPUT@',
       ],
     )
     linux_sources += [helper_process_data]
@@ -274,16 +304,14 @@ if get_option('assets') == 'embedded'
     ],
     command: [
       files('embed-agent.sh'),
-      host_os,
       agent_modern,
       agent_legacy,
       get_option('agent_emulated_modern'),
       get_option('agent_emulated_legacy'),
       meson.current_build_dir(),
+      host_os,
       resource_compiler,
       '@INPUT0@',
-      meson.get_cross_binary('strip', 'strip'),
-      get_option('strip').to_string(),
     ],
   )
 else

@@ -231,7 +231,8 @@ endif
 
 resource_compiler = find_program('frida-resource-compiler')
 
-modulate = find_program('tools/modulate.py')
+modulate = files('tools/modulate.py')
+post_process_module = files('tools/post-process-module.sh')
 
 mapper_opt = get_option('mapper')
 if mapper_opt.auto()

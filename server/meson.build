@@ -29,10 +29,27 @@ if host_os == 'macos'
   extra_link_depends += [server_plist]
 endif
 
-executable('frida-server', server_sources,
+raw_server = executable('frida-server-raw', server_sources,
   vala_args: ['--pkg=posix'],
   link_args: extra_link_args,
   link_depends: extra_link_depends,
   dependencies: [core_dep],
+)
+
+custom_target('frida-server',
+  input: [
+    raw_server,
+    'frida-server.xcent',
+  ],
+  output: 'frida-server',
+  command: [
+    files('post-process.sh'),
+    '@INPUT@',
+    '@OUTPUT@',
+    host_os,
+    meson.get_cross_binary('strip', 'strip'),
+    get_option('strip').to_string(),
+  ],
   install: true,
+  install_dir: get_option('bindir'),
 )
