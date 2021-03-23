@@ -1,34 +1,27 @@
 #!/bin/sh
 
-if [ -z "$FRIDA_TOOLCHAIN" ]; then
-  echo "FRIDA_TOOLCHAIN must be set" > /dev/stderr
-  exit 1
-fi
-
 if [ -z "$FRIDA_VERSION" ]; then
   echo "FRIDA_VERSION must be set" > /dev/stderr
   exit 2
 fi
 
 if [ $# -ne 2 ]; then
-  echo "Usage: $0 frida-server output.deb" > /dev/stderr
+  echo "Usage: $0 path/to/prefix output.deb" > /dev/stderr
   exit 3
 fi
-executable="$1"
+prefix=$1
+output_deb=$2
+
+executable=$prefix/usr/bin/frida-server
 if [ ! -f "$executable" ]; then
   echo "$executable: not found" > /dev/stderr
   exit 4
 fi
-output_deb="$2"
 
-if file "$executable" | grep -q arm64e; then
-  pkg_id="re.frida.server64"
-  pkg_name="Frida for A12+ devices"
-  pkg_conflicts="re.frida.server"
-elif file "$executable" | grep -q arm64; then
-  pkg_id="re.frida.server"
-  pkg_name="Frida for pre-A12 devices"
-  pkg_conflicts="re.frida.server64"
+agent=$prefix/usr/lib/frida/frida-agent.dylib
+if [ ! -f "$agent" ]; then
+  echo "$agent: not found" > /dev/stderr
+  exit 5
 fi
 
 tmpdir="$(mktemp -d /tmp/package-server.XXXXXX)"
@@ -36,6 +29,10 @@ tmpdir="$(mktemp -d /tmp/package-server.XXXXXX)"
 mkdir -p "$tmpdir/usr/sbin/"
 cp "$executable" "$tmpdir/usr/sbin/frida-server"
 chmod 755 "$tmpdir/usr/sbin/frida-server"
+
+mkdir -p "$tmpdir/usr/lib/frida/"
+cp "$agent" "$tmpdir/usr/lib/frida/frida-agent.dylib"
+chmod 755 "$tmpdir/usr/lib/frida/frida-agent.dylib"
 
 mkdir -p "$tmpdir/Library/LaunchDaemons/"
 cat >"$tmpdir/Library/LaunchDaemons/re.frida.server.plist" <<EOF
@@ -75,8 +72,8 @@ installed_size=$(du -sk "$tmpdir" | cut -f1)
 
 mkdir -p "$tmpdir/DEBIAN/"
 cat >"$tmpdir/DEBIAN/control" <<EOF
-Package: $pkg_id
-Name: $pkg_name
+Package: re.frida.server
+Name: Frida
 Version: $FRIDA_VERSION
 Priority: optional
 Size: 1337
@@ -87,7 +84,7 @@ Homepage: https://www.frida.re/
 Maintainer: Ole André Vadla Ravnås <oleavr@nowsecure.com>
 Author: Frida Developers <oleavr@nowsecure.com>
 Section: Development
-Conflicts: $pkg_conflicts
+Conflicts: re.frida.server64
 EOF
 chmod 644 "$tmpdir/DEBIAN/control"
 
