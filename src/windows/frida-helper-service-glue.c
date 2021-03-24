@@ -42,6 +42,7 @@ static gboolean frida_stop_services (FridaServiceContext * self);
 
 static SC_HANDLE frida_register_service (FridaServiceContext * self, const gchar * suffix);
 static gboolean frida_unregister_service (FridaServiceContext * self, SC_HANDLE handle);
+static void frida_unregister_stale_services (FridaServiceContext * self);
 static gboolean frida_start_service (FridaServiceContext * self, SC_HANDLE handle);
 static gboolean frida_stop_service (FridaServiceContext * self, SC_HANDLE handle);
 
@@ -51,6 +52,8 @@ static void frida_kill_standalone_service (FridaServiceContext * self, HANDLE ha
 
 static FridaServiceContext * frida_service_context_new (const gchar * service_basename);
 static void frida_service_context_free (FridaServiceContext * self);
+
+static void frida_rmtree (GFile * file);
 
 static WCHAR * frida_managed_helper_service_name = NULL;
 static SERVICE_STATUS_HANDLE frida_managed_helper_service_status_handle = NULL;
@@ -67,6 +70,8 @@ frida_helper_manager_start_services (const char * service_basename, FridaPrivile
       : NULL;
   if (self->scm != NULL)
   {
+    frida_unregister_stale_services (self);
+
     if (!frida_register_and_start_services (self))
     {
       CloseServiceHandle (self->scm);
@@ -515,6 +520,122 @@ frida_unregister_service (FridaServiceContext * self, SC_HANDLE handle)
   return DeleteService (handle);
 }
 
+static void
+frida_unregister_stale_services (FridaServiceContext * self)
+{
+  BYTE * services_data;
+  DWORD services_size, bytes_needed, num_services, resume_handle;
+  GQueue stale_services = G_QUEUE_INIT;
+
+  services_size = 16384;
+  services_data = g_malloc (services_size);
+
+  resume_handle = 0;
+
+  do
+  {
+    ENUM_SERVICE_STATUS_PROCESSW * services;
+    DWORD i;
+
+    num_services = 0;
+    if (!EnumServicesStatusExW (self->scm,
+        SC_ENUM_PROCESS_INFO,
+        SERVICE_WIN32_OWN_PROCESS,
+        SERVICE_INACTIVE,
+        services_data,
+        services_size,
+        &bytes_needed,
+        &num_services,
+        &resume_handle,
+        NULL))
+    {
+      if (GetLastError () == ERROR_MORE_DATA)
+      {
+        if (num_services == 0)
+        {
+          services_data = g_realloc (services_data, bytes_needed);
+          services_size = bytes_needed;
+          continue;
+        }
+      }
+      else
+      {
+        break;
+      }
+    }
+
+    services = (ENUM_SERVICE_STATUS_PROCESSW *) services_data;
+    for (i = 0; i != num_services; i++)
+    {
+      ENUM_SERVICE_STATUS_PROCESSW * service = &services[i];
+
+      if (wcsncmp (service->lpServiceName, L"frida-", 6) == 0 && wcslen (service->lpServiceName) == 41)
+      {
+        SC_HANDLE handle = OpenServiceW (self->scm, service->lpServiceName, SERVICE_QUERY_CONFIG | DELETE);
+        if (handle != NULL)
+          g_queue_push_tail (&stale_services, handle);
+      }
+    }
+  }
+  while (num_services == 0 || resume_handle != 0);
+
+  g_free (services_data);
+
+  if (!g_queue_is_empty (&stale_services))
+  {
+    GHashTable * stale_dirs;
+    QUERY_SERVICE_CONFIG * config_data;
+    DWORD config_size;
+    GList * cur;
+    GHashTableIter iter;
+    gchar * stale_dir;
+
+    stale_dirs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    config_data = NULL;
+    config_size = 0;
+
+    for (cur = stale_services.head; cur != NULL; cur = cur->next)
+    {
+      SC_HANDLE handle = cur->data;
+
+retry:
+      if (QueryServiceConfigW (handle, config_data, config_size, &bytes_needed))
+      {
+        gchar * binary_path, * tempdir_path;
+
+        binary_path = g_utf16_to_utf8 (config_data->lpBinaryPathName, -1, NULL, NULL, NULL);
+        tempdir_path = g_path_get_dirname (binary_path);
+
+        g_hash_table_add (stale_dirs, tempdir_path);
+
+        g_free (binary_path);
+      }
+      else if (GetLastError () == ERROR_INSUFFICIENT_BUFFER)
+      {
+        config_data = g_realloc (config_data, bytes_needed);
+        config_size = bytes_needed;
+        goto retry;
+      }
+
+      DeleteService (handle);
+      CloseServiceHandle (handle);
+    }
+
+    g_hash_table_iter_init (&iter, stale_dirs);
+    while (g_hash_table_iter_next (&iter, (gpointer *) &stale_dir, NULL))
+    {
+      GFile * file = g_file_new_for_path (stale_dir);
+      frida_rmtree (file);
+      g_object_unref (file);
+    }
+
+    g_free (config_data);
+    g_hash_table_unref (stale_dirs);
+  }
+
+  g_queue_clear (&stale_services);
+}
+
 static gboolean
 frida_start_service (FridaServiceContext * self, SC_HANDLE handle)
 {
@@ -612,4 +733,28 @@ frida_service_context_free (FridaServiceContext * self)
   g_free (self->service_basename);
 
   g_slice_free (FridaServiceContext, self);
+}
+
+static void
+frida_rmtree (GFile * file)
+{
+  GFileEnumerator * enumerator =
+      g_file_enumerate_children (file, G_FILE_ATTRIBUTE_STANDARD_NAME, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
+  if (enumerator != NULL)
+  {
+    GFileInfo * info;
+    GFile * child;
+
+    while (g_file_enumerator_iterate (enumerator, &info, &child, NULL, NULL) && child != NULL)
+    {
+      if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
+        frida_rmtree (child);
+      else
+        g_file_delete (child, NULL, NULL);
+    }
+
+    g_object_unref (enumerator);
+  }
+
+  g_file_delete (file, NULL, NULL);
 }
