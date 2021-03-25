@@ -232,5 +232,19 @@
     <ClCompile Include="src\windows\frida-helper-process-glue.c">
       <Filter>Source Files\windows</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\injector.c">
+      <Filter>Source Files\generated\droidy</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\droidy\jdwp.c">
+      <Filter>Source Files\generated\droidy</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\droidy\injector.vala">
+      <Filter>Source Files\droidy</Filter>
+    </None>
+    <None Include="src\droidy\jdwp.vala">
+      <Filter>Source Files\droidy</Filter>
+    </None>
   </ItemGroup>
 </Project>

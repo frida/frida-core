@@ -63,6 +63,11 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		GLib.Test.add_func ("/HostSession/Droidy/injector", () => {
+			var h = new Harness ((h) => Droidy.injector.begin (h as Harness));
+			h.run ();
+		});
+
 #if LINUX
 		GLib.Test.add_func ("/HostSession/Linux/backend", () => {
 			var h = new Harness ((h) => Linux.backend.begin (h as Harness));
@@ -2979,6 +2984,31 @@ namespace Frida.HostSessionTest {
 			h.done ();
 		}
 
+		private static async void injector (Harness h) {
+			if (!GLib.Test.slow ()) {
+				stdout.printf ("<skipping, run in slow mode with Android device connected> ");
+				h.done ();
+				return;
+			}
+
+			string device_serial = "<device-serial>";
+			string debuggable_app = "<app-id>";
+			string gadget_path = "/path/to/frida-gadget-arm64.so";
+			Cancellable? cancellable = null;
+
+			try {
+				var gadget_file = File.new_for_path (gadget_path);
+				InputStream gadget = yield gadget_file.read_async (Priority.DEFAULT, cancellable);
+
+				var details = yield Frida.Droidy.Injector.inject (gadget, debuggable_app, device_serial, cancellable);
+
+				printerr ("inject() => %p\n", details);
+			} catch (GLib.Error e) {
+				printerr ("\nFAIL: %s\n\n", e.message);
+			}
+
+			h.done ();
+		}
 	}
 
 	private static string parse_string_message_payload (string raw_message) {

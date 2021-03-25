@@ -345,6 +345,8 @@ endif
 droidy_sources = [
   'droidy/droidy-host-session.vala',
   'droidy/droidy-client.vala',
+  'droidy/jdwp.vala',
+  'droidy/injector.vala',
 ]
 
 local_sources = windows_sources + darwin_sources + linux_sources + qnx_sources + [agent_data]
