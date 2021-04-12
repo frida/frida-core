@@ -277,7 +277,7 @@ function findInserterResume() {
     return null;
 
   const { base, size } = candidates[0];
-  const signature = '8? 00 00 b4 e0 03 00 91 ?? ?? 00 9? e4 0f 40 b9 e0 03 00 91 e1 07 00 32 82 05 80 52 83 05 80 52 05 00 80 52';
+  const signature = 'e0 03 00 91 e1 07 00 32 82 05 80 52 83 05 80 52 05 00 80 52';
 
   const matches = Memory.scanSync(base, size, signature);
   if (matches.length !== 1)
