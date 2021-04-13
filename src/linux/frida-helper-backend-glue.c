@@ -2843,23 +2843,79 @@ frida_find_libc_base (pid_t pid)
 }
 
 #ifdef HAVE_ANDROID
+static gboolean
+frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
+{
+  gboolean result = false;
+  gchar * maps_path;
+  FILE * fp;
+  const guint line_size = 1024 + PATH_MAX;
+  gchar * line, * path;
+
+  *library_path = NULL;
+
+  maps_path = g_strdup_printf ("/proc/%d/maps", pid);
+
+  fp = fopen (maps_path, "r");
+  g_assert (fp != NULL);
+
+  g_free (maps_path);
+
+  line = g_malloc (line_size);
+  path = g_malloc (PATH_MAX);
+
+  while (result == false && fgets (line, line_size, fp) != NULL)
+  {
+    GumAddress start;
+    gint n;
+
+    n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
+    if (n == 1)
+      continue;
+    g_assert (n == 2);
+
+    if (path[0] == '[')
+      continue;
+
+    if (start == base)
+    {
+      result = true;
+      if (library_path != NULL)
+        *library_path = g_strdup (path);
+    }
+  }
+
+  g_free (path);
+  g_free (line);
+
+  fclose (fp);
+
+  return result;
+}
 
 static GumAddress
 frida_resolve_linker_address (pid_t pid, gpointer func)
 {
   Dl_info info;
-  const gchar * linker_path;
+  gchar * linker_path = NULL;
   GumAddress local_base, remote_base, remote_address;
 
-  if (dladdr (func, &info) != 0)
-    linker_path = info.dli_fname;
+  if (dladdr (func, &info) != 0) 
+    local_base = GUM_ADDRESS (info.dli_fbase);
   else
-    linker_path = gum_android_get_linker_module_details ()->path;
+    local_base = gum_android_get_linker_module_details ()->range->base_address;
 
-  local_base = frida_find_library_base (getpid (), linker_path, NULL);
   g_assert (local_base != 0);
+  if (!frida_find_library_path (getpid (), local_base, &linker_path))
+  {
+    g_critical ("Unable to locate library path; please file a bug");
+    g_abort ();
+  }
 
   remote_base = frida_find_library_base (pid, linker_path, NULL);
+
+  g_free (linker_path);
+
   if (remote_base == 0)
     return 0;
 
