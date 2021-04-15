@@ -330,6 +330,7 @@ static GumAddress frida_resolve_android_dlopen (pid_t pid);
 #endif
 static GumAddress frida_resolve_library_function (pid_t pid, const gchar * library_name, const gchar * function_name);
 static GumAddress frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library_path);
+G_GNUC_UNUSED static gboolean frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path);
 
 static gboolean frida_is_seize_supported (void);
 
@@ -2844,56 +2845,6 @@ frida_find_libc_base (pid_t pid)
 
 #ifdef HAVE_ANDROID
 
-static gboolean
-frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
-{
-  gboolean found = FALSE;
-  gchar * maps_path;
-  FILE * fp;
-  const guint line_size = 1024 + PATH_MAX;
-  gchar * line, * path;
-
-  *library_path = NULL;
-
-  maps_path = g_strdup_printf ("/proc/%d/maps", pid);
-
-  fp = fopen (maps_path, "r");
-  g_assert (fp != NULL);
-
-  g_free (maps_path);
-
-  line = g_malloc (line_size);
-  path = g_malloc (PATH_MAX);
-
-  while (!found && fgets (line, line_size, fp) != NULL)
-  {
-    GumAddress start;
-    gint n;
-
-    n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
-    if (n == 1)
-      continue;
-    g_assert (n == 2);
-
-    if (path[0] == '[')
-      continue;
-
-    if (start == base)
-    {
-      found = TRUE;
-      if (library_path != NULL)
-        *library_path = g_strdup (path);
-    }
-  }
-
-  g_free (path);
-  g_free (line);
-
-  fclose (fp);
-
-  return found;
-}
-
 static GumAddress
 frida_resolve_linker_address (pid_t pid, gpointer func)
 {
@@ -3131,6 +3082,56 @@ frida_find_library_base (pid_t pid, const gchar * library_name, gchar ** library
   fclose (fp);
 
   return result;
+}
+
+static gboolean
+frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
+{
+  gboolean found = FALSE;
+  gchar * maps_path;
+  FILE * fp;
+  const guint line_size = 1024 + PATH_MAX;
+  gchar * line, * path;
+
+  *library_path = NULL;
+
+  maps_path = g_strdup_printf ("/proc/%d/maps", pid);
+
+  fp = fopen (maps_path, "r");
+  g_assert (fp != NULL);
+
+  g_free (maps_path);
+
+  line = g_malloc (line_size);
+  path = g_malloc (PATH_MAX);
+
+  while (!found && fgets (line, line_size, fp) != NULL)
+  {
+    GumAddress start;
+    gint n;
+
+    n = sscanf (line, "%" G_GINT64_MODIFIER "x-%*x %*s %*x %*s %*s %s", &start, path);
+    if (n == 1)
+      continue;
+    g_assert (n == 2);
+
+    if (path[0] == '[')
+      continue;
+
+    if (start == base)
+    {
+      found = TRUE;
+      if (library_path != NULL)
+        *library_path = g_strdup (path);
+    }
+  }
+
+  g_free (path);
+  g_free (line);
+
+  fclose (fp);
+
+  return found;
 }
 
 static gboolean
