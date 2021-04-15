@@ -3121,8 +3121,7 @@ frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
     if (start == base)
     {
       found = TRUE;
-      if (library_path != NULL)
-        *library_path = g_strdup (path);
+      *library_path = g_strdup (path);
     }
   }
 
