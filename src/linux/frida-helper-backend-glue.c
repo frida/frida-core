@@ -2849,7 +2849,7 @@ static GumAddress
 frida_resolve_linker_address (pid_t pid, gpointer func)
 {
   Dl_info info;
-  gchar * linker_path = NULL;
+  gchar * linker_path;
   GumAddress local_base, remote_base, remote_address;
 
   if (dladdr (func, &info) != 0) 
