@@ -2843,10 +2843,11 @@ frida_find_libc_base (pid_t pid)
 }
 
 #ifdef HAVE_ANDROID
+
 static gboolean
 frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
 {
-  gboolean result = false;
+  gboolean found = FALSE;
   gchar * maps_path;
   FILE * fp;
   const guint line_size = 1024 + PATH_MAX;
@@ -2864,7 +2865,7 @@ frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
   line = g_malloc (line_size);
   path = g_malloc (PATH_MAX);
 
-  while (result == false && fgets (line, line_size, fp) != NULL)
+  while (!found && fgets (line, line_size, fp) != NULL)
   {
     GumAddress start;
     gint n;
@@ -2879,7 +2880,7 @@ frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
 
     if (start == base)
     {
-      result = true;
+      found = TRUE;
       if (library_path != NULL)
         *library_path = g_strdup (path);
     }
@@ -2890,7 +2891,7 @@ frida_find_library_path (pid_t pid, GumAddress base, gchar ** library_path)
 
   fclose (fp);
 
-  return result;
+  return found;
 }
 
 static GumAddress
@@ -2904,8 +2905,8 @@ frida_resolve_linker_address (pid_t pid, gpointer func)
     local_base = GUM_ADDRESS (info.dli_fbase);
   else
     local_base = gum_android_get_linker_module_details ()->range->base_address;
-
   g_assert (local_base != 0);
+
   if (!frida_find_library_path (getpid (), local_base, &linker_path))
   {
     g_critical ("Unable to locate library path; please file a bug");
