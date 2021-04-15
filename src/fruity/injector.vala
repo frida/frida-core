@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaFruityInjector", gir_version = "1.0")]
 namespace Frida.Fruity.Injector {
 	public static async GadgetDetails inject (owned Gum.DarwinModule module, LLDB.Client lldb, ChannelProvider channel_provider,
 			Cancellable? cancellable) throws Error, IOError {

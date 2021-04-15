@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public class UsbmuxClient : Object, AsyncInitable {
 		public signal void device_attached (DeviceDetails details);

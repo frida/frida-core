@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaFruity", gir_version = "1.0")]
 namespace Frida.Fruity {
 	public class DeviceInfoService : Object, AsyncInitable {
 		public ChannelProvider channel_provider {

@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaJDWP", gir_version = "1.0")]
 namespace Frida.JDWP {
 	public class Client : GLib.Object, AsyncInitable {
 		public signal void closed ();

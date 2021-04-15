@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaLLDB", gir_version = "1.0")]
 namespace Frida.LLDB {
 	public class Client : Object, AsyncInitable {
 		public signal void closed ();

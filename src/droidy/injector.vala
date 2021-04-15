@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaDroidyInjector", gir_version = "1.0")]
 namespace Frida.Droidy.Injector {
 	public static async GadgetDetails inject (InputStream gadget, string package, string device_serial, Cancellable? cancellable = null)
 			throws Error, IOError {

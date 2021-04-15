@@ -1,3 +1,4 @@
+[CCode (gir_namespace = "FridaDroidy", gir_version = "1.0")]
 namespace Frida.Droidy {
 	public class DeviceTracker : Object {
 		public signal void device_attached (DeviceDetails details);
