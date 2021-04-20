@@ -30,6 +30,7 @@ def main():
         "frida.vala",
         "control-service.vala",
         "portal-service.vala",
+        "web-gateway-service.vala",
         "endpoint.vala",
         "file-monitor.vala",
     ]

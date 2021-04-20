@@ -10,7 +10,7 @@ namespace Frida {
 		return parse_socket_address (address, port, "127.0.0.1", DEFAULT_CLUSTER_PORT);
 	}
 
-	private SocketConnectable parse_socket_address (string? address, uint16 port, string default_address,
+	public SocketConnectable parse_socket_address (string? address, uint16 port, string default_address,
 			uint16 default_port) throws Error {
 		if (address == null)
 			address = default_address;
