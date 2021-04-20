@@ -36,10 +36,9 @@ namespace Frida {
 			try {
 				var stream = yield stream_request.wait_async (cancellable);
 
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 				provider.opened.connect (container.on_session_opened);
 				provider.closed.connect (container.on_session_closed);
@@ -86,8 +85,8 @@ namespace Frida {
 			return true;
 		}
 
-		public async void open (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error {
-			yield provider.open (id, realm, cancellable);
+		public async void open (AgentSessionId id, HashTable<string, Variant> options, Cancellable? cancellable) throws GLib.Error {
+			yield provider.open (id, options, cancellable);
 		}
 
 #if !WINDOWS

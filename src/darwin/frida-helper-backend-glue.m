@@ -96,6 +96,7 @@ typedef struct _FridaAgentEmitContext FridaAgentEmitContext;
 typedef struct _FridaExceptionPortSet FridaExceptionPortSet;
 typedef union _FridaDebugState FridaDebugState;
 typedef int FridaConvertThreadStateDirection;
+typedef guint FridaAslr;
 
 struct _FridaHelperContext
 {
@@ -337,6 +338,12 @@ enum _FridaConvertThreadStateDirection
   FRIDA_CONVERT_THREAD_STATE_OUT
 };
 
+enum _FridaAslr
+{
+  FRIDA_ASLR_AUTO,
+  FRIDA_ASLR_DISABLE
+};
+
 static FridaSpawnInstance * frida_spawn_instance_new (FridaDarwinHelperBackend * backend);
 static void frida_spawn_instance_free (FridaSpawnInstance * instance);
 static void frida_spawn_instance_resume (FridaSpawnInstance * self);
@@ -404,6 +411,8 @@ static gboolean frida_is_hardware_breakpoint_support_working (void);
 static GumAddress frida_find_run_initializers_call (mach_port_t task, GumCpuType cpu_type, GumAddress start);
 static GumAddress frida_find_function_end (mach_port_t task, GumCpuType cpu_type, GumAddress start, gsize max_size);
 static csh frida_create_capstone (GumCpuType cpu_type, GumAddress start);
+
+static gboolean frida_parse_aslr_option (GVariant * value, FridaAslr * aslr, GError ** error);
 
 static void frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self);
 
@@ -668,15 +677,13 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   pid_t pid;
   FridaSpawnInstance * instance;
   gchar ** argv, ** envp;
-  GVariantDict * aux_options;
   posix_spawn_file_actions_t file_actions;
   posix_spawnattr_t attributes;
   sigset_t signal_mask_set;
   short flags;
-  FridaStdio stdio;
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
-  gchar * aslr = NULL;
-  const gchar * cwd;
+  FridaAslr aslr = FRIDA_ASLR_AUTO;
+  GVariant * aslr_value;
   gchar * old_cwd = NULL;
   int result, spawn_errno;
 
@@ -684,8 +691,6 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   argv = frida_host_spawn_options_compute_argv (options, path, NULL);
   envp = frida_host_spawn_options_compute_envp (options, NULL);
-
-  aux_options = frida_host_spawn_options_load_aux (options);
 
   posix_spawn_file_actions_init (&file_actions);
 
@@ -695,8 +700,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
   flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_START_SUSPENDED;
 
-  stdio = frida_host_spawn_options_get_stdio (options);
-  switch (stdio)
+  switch (options->stdio)
   {
     case FRIDA_STDIO_INHERIT:
       *pipes = NULL;
@@ -724,18 +728,18 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
       g_assert_not_reached ();
   }
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
-  {
+  aslr_value = g_hash_table_lookup (options->aux, "aslr");
+  if (aslr_value != NULL && !frida_parse_aslr_option (aslr_value, &aslr, error))
+    goto early_failure;
+  if (aslr == FRIDA_ASLR_DISABLE)
     flags |= _POSIX_SPAWN_DISABLE_ASLR;
-  }
 
   posix_spawnattr_setflags (&attributes, flags);
 
-  cwd = frida_host_spawn_options_get_cwd (options);
-  if (strlen (cwd) > 0)
+  if (strlen (options->cwd) > 0)
   {
     old_cwd = g_get_current_dir ();
-    if (chdir (cwd) != 0)
+    if (chdir (options->cwd) != 0)
       goto chdir_failed;
   }
 
@@ -745,7 +749,7 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
   if (old_cwd != NULL)
     chdir (old_cwd);
 
-  if (stdio == FRIDA_STDIO_PIPE)
+  if (options->stdio == FRIDA_STDIO_PIPE)
   {
     close (stdin_pipe[0]);
     close (stdout_pipe[1]);
@@ -767,16 +771,13 @@ _frida_darwin_helper_backend_spawn (FridaDarwinHelperBackend * self, const gchar
 
 chdir_failed:
   {
-    posix_spawnattr_destroy (&attributes);
-    posix_spawn_file_actions_destroy (&file_actions);
-
     g_set_error (error,
         FRIDA_ERROR,
         FRIDA_ERROR_INVALID_ARGUMENT,
         "Unable to change directory to '%s'",
-        cwd);
+        options->cwd);
 
-    goto failure;
+    goto early_failure;
   }
 spawn_failed:
   {
@@ -797,9 +798,16 @@ spawn_failed:
           path, g_strerror (spawn_errno));
     }
 
-    goto failure;
+    goto any_failure;
   }
-failure:
+early_failure:
+  {
+    posix_spawnattr_destroy (&attributes);
+    posix_spawn_file_actions_destroy (&file_actions);
+
+    goto any_failure;
+  }
+any_failure:
   {
     if (instance->pid != 0)
       kill (instance->pid, SIGKILL);
@@ -812,8 +820,6 @@ failure:
 beach:
   {
     g_free (old_cwd);
-    g_free (aslr);
-    g_variant_dict_unref (aux_options);
     g_strfreev (envp);
     g_strfreev (argv);
 
@@ -825,11 +831,9 @@ beach:
 
 #import "springboard.h"
 
-static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url,
-    FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
+static void frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
-static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url,
-    FridaHostSpawnOptions * spawn_options, GVariantDict * aux_options,
+static void frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
     FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target);
 
 static guint frida_kill_application (NSString * identifier);
@@ -847,42 +851,29 @@ _frida_darwin_helper_backend_launch (const gchar * identifier, FridaHostSpawnOpt
 {
   NSAutoreleasePool * pool;
   NSString * identifier_value;
-  GVariantDict * aux_options;
-  gchar * url = NULL;
+  GVariant * url;
   NSURL * url_value = nil;
-  gchar * aslr = NULL;
   GError * error = NULL;
 
   pool = [[NSAutoreleasePool alloc] init];
 
   identifier_value = [NSString stringWithUTF8String:identifier];
 
-  aux_options = frida_host_spawn_options_load_aux (options);
-
-  if (g_variant_dict_contains (aux_options, "url"))
+  url = g_hash_table_lookup (options->aux, "url");
+  if (url != NULL)
   {
-    if (!g_variant_dict_lookup (aux_options, "url", "s", &url))
+    if (!g_variant_is_of_type (url, G_VARIANT_TYPE_STRING))
       goto invalid_url;
-    url_value = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
-  }
-
-  if (g_variant_dict_contains (aux_options, "aslr"))
-  {
-    if (!g_variant_dict_lookup (aux_options, "aslr", "s", &aslr))
-      goto aslr_not_supported;
-    if (strcmp (aslr, "auto") != 0 && strcmp (aslr, "disable") != 0)
-      goto aslr_not_supported;
+    url_value = [NSURL URLWithString:[NSString stringWithUTF8String:g_variant_get_string (url, NULL)]];
   }
 
   if (_frida_get_springboard_api ()->fbs != NULL)
   {
-    frida_darwin_helper_backend_launch_using_fbs (identifier_value, url_value, options, aux_options, on_complete,
-        on_complete_target);
+    frida_darwin_helper_backend_launch_using_fbs (identifier_value, url_value, options, on_complete, on_complete_target);
   }
   else
   {
-    frida_darwin_helper_backend_launch_using_sbs (identifier_value, url_value, options, aux_options, on_complete,
-        on_complete_target);
+    frida_darwin_helper_backend_launch_using_sbs (identifier_value, url_value, options, on_complete, on_complete_target);
   }
 
   goto beach;
@@ -895,14 +886,6 @@ invalid_url:
         "The 'url' option must be a string");
     goto failure;
   }
-aslr_not_supported:
-  {
-    error = g_error_new_literal (
-        FRIDA_ERROR,
-        FRIDA_ERROR_INVALID_ARGUMENT,
-        "The 'aslr' option must be a string set to either 'auto' or 'disable'");
-    goto failure;
-  }
 failure:
   {
     on_complete (NULL, error, on_complete_target);
@@ -910,24 +893,20 @@ failure:
   }
 beach:
   {
-    g_free (aslr);
-    g_free (url);
-
-    g_variant_dict_unref (aux_options);
-
     [pool release];
   }
 }
 
 static void
 frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
-    GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
   FridaSpringboardApi * api;
   NSMutableDictionary * debug_options, * open_options;
   FridaStdioPipes * pipes = NULL;
   GError * error = NULL;
-  gchar * aslr = NULL;
+  FridaAslr aslr = FRIDA_ASLR_AUTO;
+  GVariant * aslr_value;
   FBSSystemService * service;
   mach_port_t client_port;
   FBSOpenResultCallback result_callback;
@@ -942,35 +921,25 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
   [open_options setObject:debug_options
                    forKey:api->FBSOpenApplicationOptionKeyDebuggingOptions];
 
-  if (frida_host_spawn_options_get_has_argv (spawn_options))
+  if (spawn_options->has_argv)
   {
-    gchar ** argv;
-    gint argv_length;
-
-    argv = frida_host_spawn_options_get_argv (spawn_options, &argv_length);
-
-    [debug_options setObject:frida_argv_to_arguments_array (argv, argv_length)
+    [debug_options setObject:frida_argv_to_arguments_array (spawn_options->argv, spawn_options->argv_length1)
                       forKey:api->FBSDebugOptionKeyArguments];
   }
 
-  if (frida_host_spawn_options_get_has_envp (spawn_options))
+  if (spawn_options->has_envp)
     goto envp_not_supported;
 
-  if (frida_host_spawn_options_get_has_env (spawn_options))
+  if (spawn_options->has_env)
   {
-    gchar ** env;
-    gint env_length;
-
-    env = frida_host_spawn_options_get_env (spawn_options, &env_length);
-
-    [debug_options setObject:frida_envp_to_environment_dictionary (env, env_length)
+    [debug_options setObject:frida_envp_to_environment_dictionary (spawn_options->env, spawn_options->env_length1)
                       forKey:api->FBSDebugOptionKeyEnvironment];
   }
 
-  if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
+  if (strlen (spawn_options->cwd) > 0)
     goto cwd_not_supported;
 
-  if (frida_host_spawn_options_get_stdio (spawn_options) == FRIDA_STDIO_PIPE)
+  if (spawn_options->stdio == FRIDA_STDIO_PIPE)
   {
     gint stdout_master, stdout_slave, stderr_master, stderr_slave;
     gchar stdout_name[PATH_MAX], stderr_name[PATH_MAX];
@@ -995,7 +964,10 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
                       forKey:api->FBSDebugOptionKeyStandardErrorPath];
   }
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
+  aslr_value = g_hash_table_lookup (spawn_options->aux, "aslr");
+  if (aslr_value != NULL && !frida_parse_aslr_option (aslr_value, &aslr, &error))
+    goto failure;
+  if (aslr == FRIDA_ASLR_DISABLE)
   {
     [debug_options setObject:@YES
                       forKey:api->FBSDebugOptionKeyDisableASLR];
@@ -1049,7 +1021,7 @@ frida_darwin_helper_backend_launch_using_fbs (NSString * identifier, NSURL * url
     }
   });
 
-  goto beach;
+  return;
 
 envp_not_supported:
   {
@@ -1070,22 +1042,19 @@ cwd_not_supported:
 failure:
   {
     on_complete (NULL, error, on_complete_target);
-    goto beach;
-  }
-beach:
-  {
-    g_free (aslr);
+    return;
   }
 }
 
 static void
 frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url, FridaHostSpawnOptions * spawn_options,
-    GVariantDict * aux_options, FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
+    FridaDarwinHelperBackendLaunchCompletionHandler on_complete, void * on_complete_target)
 {
   FridaSpringboardApi * api;
   NSDictionary * params, * launch_options;
   GError * error = NULL;
-  gchar * aslr = NULL;
+  FridaAslr aslr = FRIDA_ASLR_AUTO;
+  GVariant * aslr_value;
 
   api = _frida_get_springboard_api ();
 
@@ -1093,22 +1062,25 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
   launch_options = [NSDictionary dictionaryWithObject:@YES
                                                forKey:api->SBSApplicationLaunchOptionUnlockDeviceKey];
 
-  if (frida_host_spawn_options_get_has_argv (spawn_options))
+  if (spawn_options->has_argv)
     goto argv_not_supported;
 
-  if (frida_host_spawn_options_get_has_envp (spawn_options))
+  if (spawn_options->has_envp)
     goto envp_not_supported;
 
-  if (frida_host_spawn_options_get_has_env (spawn_options))
+  if (spawn_options->has_env)
     goto env_not_supported;
 
-  if (strlen (frida_host_spawn_options_get_cwd (spawn_options)) > 0)
+  if (strlen (spawn_options->cwd) > 0)
     goto cwd_not_supported;
 
-  if (frida_host_spawn_options_get_stdio (spawn_options) != FRIDA_STDIO_INHERIT)
+  if (spawn_options->stdio != FRIDA_STDIO_INHERIT)
     goto stdio_not_supported;
 
-  if (g_variant_dict_lookup (aux_options, "aslr", "s", &aslr) && strcmp (aslr, "disable") == 0)
+  aslr_value = g_hash_table_lookup (spawn_options->aux, "aslr");
+  if (aslr_value != NULL && !frida_parse_aslr_option (aslr_value, &aslr, &error))
+    goto failure;
+  if (aslr == FRIDA_ASLR_DISABLE)
     goto aslr_not_supported;
 
   dispatch_async (dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^
@@ -1147,7 +1119,7 @@ frida_darwin_helper_backend_launch_using_sbs (NSString * identifier, NSURL * url
     on_complete (NULL, error, on_complete_target);
   });
 
-  goto beach;
+  return;
 
 argv_not_supported:
   {
@@ -1200,11 +1172,7 @@ aslr_not_supported:
 failure:
   {
     on_complete (NULL, error, on_complete_target);
-    goto beach;
-  }
-beach:
-  {
-    g_free (aslr);
+    return;
   }
 }
 
@@ -1386,6 +1354,7 @@ frida_envp_to_environment_dictionary (gchar * const * envp, gint envp_length)
 
   return result;
 }
+
 
 static void
 frida_configure_terminal_attributes (gint fd)
@@ -1921,7 +1890,7 @@ _frida_darwin_helper_backend_inject_into_task (FridaDarwinHelperBackend * self, 
   if (blob != NULL)
   {
     mapper = gum_darwin_mapper_new_take_blob (path_or_name,
-        g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->_address), blob->_size,
+        g_bytes_new_with_free_func (GSIZE_TO_POINTER (blob->address), blob->size,
             (GDestroyNotify) frida_mapper_library_blob_deallocate, frida_mapped_library_blob_dup (blob)),
         resolver, &io_error);
   }
@@ -5036,10 +5005,46 @@ frida_create_capstone (GumCpuType cpu_type, GumAddress start)
   return capstone;
 }
 
+static gboolean
+frida_parse_aslr_option (GVariant * value, FridaAslr * aslr, GError ** error)
+{
+  const gchar * str;
+
+  if (!g_variant_is_of_type (value, G_VARIANT_TYPE_STRING))
+    goto invalid_type;
+  str = g_variant_get_string (value, NULL);
+
+  if (strcmp (str, "auto") == 0)
+    *aslr = FRIDA_ASLR_AUTO;
+  else if (strcmp (str, "disable") == 0)
+    *aslr = FRIDA_ASLR_DISABLE;
+  else
+    goto invalid_value;
+
+  return TRUE;
+
+invalid_type:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "The 'aslr' option must be a string");
+    return FALSE;
+  }
+invalid_value:
+  {
+    g_set_error (error,
+        FRIDA_ERROR,
+        FRIDA_ERROR_INVALID_ARGUMENT,
+        "The 'aslr' option must be set to either 'auto' or 'disable'");
+    return FALSE;
+  }
+}
+
 static void
 frida_mapper_library_blob_deallocate (FridaMappedLibraryBlob * self)
 {
-  mach_vm_deallocate (mach_task_self (), self->_address, self->_allocated_size);
+  mach_vm_deallocate (mach_task_self (), self->address, self->allocated_size);
 
   frida_mapped_library_blob_free (self);
 }

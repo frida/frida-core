@@ -32,12 +32,12 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				Cancellable? cancellable = null;
-				script_id = yield session.create_script ("load-and-receive-messages",
+				script_id = yield session.create_script (
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: args[1].readUtf8String() });" +
 					 "  }" +
-					 "});").printf ((size_t) func), cancellable);
+					 "});").printf ((size_t) func), make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
@@ -46,8 +46,8 @@ namespace Frida.AgentTest {
 			func (1337, "Frida rocks");
 
 			var message = yield h.wait_for_message ();
-			assert_true (message.sender_id.handle == script_id.handle);
-			assert_true (message.content == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
+			assert_true (message.script_id.handle == script_id.handle);
+			assert_true (message.text == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
 
 			yield h.unload_agent ();
 
@@ -63,7 +63,7 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				Cancellable? cancellable = null;
-				script_id = yield session.create_script ("performance",
+				script_id = yield session.create_script (
 					("const buf = ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\").readByteArray(%d);" +
 					 "const startTime = new Date();" +
 					 "let iterations = 0;" +
@@ -76,22 +76,22 @@ namespace Frida.AgentTest {
 					 "  }" +
 					 "};" +
 					 "sendNext();"
-					).printf ((size_t) buf, size), cancellable);
+					).printf ((size_t) buf, size), make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
 			}
 
 			var first_message = yield h.wait_for_message ();
-			assert_true (first_message.content == "{\"type\":\"send\",\"payload\":{}}");
+			assert_true (first_message.text == "{\"type\":\"send\",\"payload\":{}}");
 
 			var timer = new Timer ();
 			int count = 0;
 			while (true) {
 				var message = yield h.wait_for_message ();
 				count++;
-				if (message.content != "{\"type\":\"send\",\"payload\":{}}") {
-					assert_true (message.content == "{\"type\":\"send\",\"payload\":null}");
+				if (message.text != "{\"type\":\"send\",\"payload\":{}}") {
+					assert_true (message.text == "{\"type\":\"send\",\"payload\":null}");
 					break;
 				}
 			}
@@ -116,7 +116,7 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				Cancellable? cancellable = null;
-				script_id = yield session.create_script ("launch-scenario", """
+				script_id = yield session.create_script ("""
 const POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
 const { pointerSize } = Process;
@@ -204,7 +204,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     send([event, identifier, pidPtr.readU32()]);
   }
 });
-""", cancellable);
+""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				h.disable_timeout ();
@@ -228,16 +228,17 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 						.end_array ()
 						.end_array ();
 					var raw_request = Json.to_string (request.get_root (), false);
-					yield session.post_to_script (script_id, raw_request, false, new uint8[0] {}, cancellable);
+					yield session.post_messages ({ AgentMessage (SCRIPT, script_id, raw_request, false, {}) }, 0,
+						cancellable);
 
 					while (true) {
 						var message = yield h.wait_for_message ();
 
-						var reader = new Json.Reader (Json.from_string (message.content));
+						var reader = new Json.Reader (Json.from_string (message.text));
 
 						reader.read_member ("type");
 						if (reader.get_string_value () != "send") {
-							printerr ("%s\n", message.content);
+							printerr ("%s\n", message.text);
 							continue;
 						}
 						reader.end_member ();
@@ -275,13 +276,13 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 
 					while (true) {
 						var message = yield h.wait_for_message ();
-						printerr ("got message: %s\n", message.content);
+						printerr ("got message: %s\n", message.text);
 
-						var reader = new Json.Reader (Json.from_string (message.content));
+						var reader = new Json.Reader (Json.from_string (message.text));
 
 						reader.read_member ("type");
 						if (reader.get_string_value () != "send") {
-							printerr ("%s\n", message.content);
+							printerr ("%s\n", message.text);
 							continue;
 						}
 						reader.end_member ();
@@ -312,7 +313,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 					child.resume ();
 					child.join (5000);
 
-					Timeout.add (20 * 1000, launch_scenario.callback);
+					Timeout.add_seconds (20, launch_scenario.callback);
 					print ("waiting 20s\n");
 					yield;
 					print ("waited 20s\n");
@@ -333,12 +334,12 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 			try {
 				Cancellable? cancellable = null;
 
-				var script_id = yield session.create_script ("thread-suspend-scenario", """
+				var script_id = yield session.create_script ("""
 console.log('Script runtime is: ' + Script.runtime);
 
 Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () => {
 });
-""", cancellable);
+""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				var thread_id = get_current_thread_id ();
@@ -393,7 +394,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 		public extern static uint target_function (int level, string message);
 	}
 
-	private class Harness : Frida.Test.AsyncHarness, AgentController {
+	private class Harness : Frida.Test.AsyncHarness, AgentController, AgentMessageSink {
 		private GLib.Module module;
 		[CCode (has_target = false)]
 		private delegate void AgentMainFunc (string data, ref Frida.UnloadPolicy unload_policy, void * opaque_injector_state);
@@ -405,7 +406,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 		private AgentSessionProvider provider;
 		private AgentSession session;
 
-		private Gee.LinkedList<ScriptMessage> message_queue = new Gee.LinkedList<ScriptMessage> ();
+		private Gee.Queue<AgentMessage?> message_queue = new Gee.LinkedList<AgentMessage?> ();
 
 		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
@@ -460,30 +461,24 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 
 			try {
 				var stream = yield stream_request.wait_async (cancellable);
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
-					null, cancellable);
+				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, cancellable);
 
 				AgentController controller = this;
 				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
 
 				connection.start_message_processing ();
 
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 
-				var session_id = AgentSessionId (1);
-				yield provider.open (session_id, Realm.NATIVE, cancellable);
+				var session_id = AgentSessionId.generate ();
+				yield provider.open (session_id, make_options_dict (), cancellable);
 
-				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id),
-					DBusProxyFlags.NONE, cancellable);
+				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (session_id),
+					DO_NOT_LOAD_PROPERTIES, cancellable);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
-
-			session.message_from_script.connect ((script_id, message, has_data, data) => {
-				message_queue.add (new ScriptMessage (script_id, message));
-			});
 
 			return session;
 		}
@@ -511,15 +506,14 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			module = null;
 		}
 
-		public async ScriptMessage wait_for_message () {
-			ScriptMessage message = null;
+		public async AgentMessage? wait_for_message () {
+			AgentMessage? message = null;
 
 			do {
 				message = message_queue.poll ();
 				if (message == null)
 					yield process_events ();
-			}
-			while (message == null);
+			} while (message == null);
 
 			return message;
 		}
@@ -559,21 +553,10 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		public class ScriptMessage {
-			public AgentScriptId sender_id {
-				get;
-				private set;
-			}
-
-			public string content {
-				get;
-				private set;
-			}
-
-			public ScriptMessage (AgentScriptId sender_id, string content) {
-				this.sender_id = sender_id;
-				this.content = content;
-			}
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
+			foreach (var m in messages)
+				message_queue.offer (m);
 		}
 	}
 }

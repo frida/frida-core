@@ -1,20 +1,14 @@
 #include "frida-gadget.h"
 
-#include "frida-interfaces.h"
+#include "frida-base.h"
 #include "frida-payload.h"
 
 #ifdef HAVE_WINDOWS
 # include <windows.h>
 #else
-# include <netinet/in.h>
-# include <netinet/tcp.h>
 # include <signal.h>
-# include <unistd.h>
 #endif
 #include <gumjs/gumscriptbackend.h>
-#ifdef HAVE_GIOSCHANNEL
-# include <gioschannel.h>
-#endif
 #ifdef HAVE_GIOOPENSSL
 # include <gioopenssl.h>
 #endif
@@ -30,7 +24,7 @@ static GThread * main_thread;
 static GMainLoop * main_loop;
 static GMainContext * main_context;
 
-#ifdef HAVE_WINDOWS
+#if defined (HAVE_WINDOWS)
 
 BOOL WINAPI
 DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
@@ -50,23 +44,7 @@ DllMain (HINSTANCE instance, DWORD reason, LPVOID reserved)
   return TRUE;
 }
 
-void
-_frida_gadget_kill (guint pid)
-{
-  HANDLE process;
-
-  process = OpenProcess (PROCESS_TERMINATE, FALSE, pid);
-  if (process == NULL)
-    return;
-
-  TerminateProcess (process, 1);
-
-  CloseHandle (process);
-}
-
-#else
-
-# ifdef HAVE_DARWIN
+#elif defined (HAVE_DARWIN)
 
 __attribute__ ((constructor)) static void
 frida_on_load (int argc, const char * argv[], const char * envp[], const char * apple[], int * result)
@@ -82,7 +60,7 @@ frida_on_load (int argc, const char * argv[], const char * envp[], const char * 
   g_free (config_data);
 }
 
-# else
+#else
 
 __attribute__ ((constructor)) static void
 frida_on_load (void)
@@ -96,14 +74,6 @@ frida_on_unload (void)
   frida_gadget_unload ();
 }
 
-# endif
-
-void
-_frida_gadget_kill (guint pid)
-{
-  kill (pid, SIGKILL);
-}
-
 #endif
 
 void
@@ -113,9 +83,6 @@ frida_gadget_environment_init (void)
 
   g_thread_set_garbage_handler (_frida_gadget_on_pending_thread_garbage, NULL);
 
-#ifdef HAVE_GIOSCHANNEL
-  g_io_module_schannel_register ();
-#endif
 #ifdef HAVE_GIOOPENSSL
   g_io_module_openssl_register ();
 #endif
@@ -192,6 +159,12 @@ frida_gadget_environment_detect_bundle_id (void)
 }
 
 gchar *
+frida_gadget_environment_detect_bundle_name (void)
+{
+  return NULL;
+}
+
+gchar *
 frida_gadget_environment_detect_documents_dir (void)
 {
   return NULL;
@@ -210,12 +183,6 @@ frida_gadget_environment_set_thread_name (const gchar * name)
 }
 
 #endif
-
-void
-frida_gadget_tcp_enable_nodelay (GSocket * socket)
-{
-  g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
-}
 
 static gpointer
 run_main_loop (gpointer data)

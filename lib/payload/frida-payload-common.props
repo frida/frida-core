@@ -3,20 +3,22 @@
 
   <ItemDefinitionGroup>
     <ClCompile>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;G_LOG_DOMAIN=&quot;Frida&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(FridaCoreDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
 
   <ItemGroup>
     <CustomBuild Include="process.vala">
       <Message>Compiling vala code</Message>
-      <Command>"$(ValaCompiler)" process.vala script-engine.vala fork-monitor.vala spawn-monitor.vala thread-suspend-monitor.vala exit-monitor.vala cloak.vala fd-guard.vala fdt-padder.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-payload --header=$(IntDir)frida-payload.h --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" $(ValaFlags) --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-interfaces || exit 1
+      <Command>"$(ValaCompiler)" process.vala base-agent-session.vala script-engine.vala portal-client.vala fork-monitor.vala spawn-monitor.vala thread-suspend-monitor.vala exit-monitor.vala cloak.vala fd-guard.vala fdt-padder.vala --ccode --directory=$(IntDir) --library=frida-payload --header=$(IntDir)frida-payload.h --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" $(ValaFlags) $(FridaCoreValaFlags) --pkg=gio-2.0 --pkg=nice --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-base || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
-      <AdditionalInputs>$(ValaCompiler);script-engine.vala;fork-monitor.vala;spawn-monitor.vala;thread-suspend-monitor.vala;exit-monitor.vala;cloak.vala;fd-guard.vala;fdt-padder.vala;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs>$(ValaCompiler);base-agent-session.vala;script-engine.vala;portal-client.vala;fork-monitor.vala;spawn-monitor.vala;thread-suspend-monitor.vala;exit-monitor.vala;cloak.vala;fd-guard.vala;fdt-padder.vala;%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(IntDir)valacode.stamp;%(Outputs)</Outputs>
     </CustomBuild>
+    <None Include="base-agent-session.vala" />
     <None Include="script-engine.vala" />
+    <None Include="portal-client.vala" />
     <None Include="fork-monitor.vala" />
     <None Include="spawn-monitor.vala" />
     <None Include="thread-suspend-monitor.vala" />
@@ -38,7 +40,19 @@ echo &gt; "$(IntDir)valacode.stamp"
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="process-glue.c" />
+    <ClCompile Include="$(IntDir)base-agent-session.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="$(IntDir)script-engine.c">
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)portal-client.c">
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">TurnOffAllWarnings</WarningLevel>
       <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">TurnOffAllWarnings</WarningLevel>

@@ -1,6 +1,6 @@
 #include "frida-agent.h"
 
-#include "frida-interfaces.h"
+#include "frida-base.h"
 #include "frida-payload.h"
 
 #ifdef HAVE_ANDROID
@@ -8,9 +8,6 @@
 # if __ANDROID_API__ < __ANDROID_API_L__
 #  include <signal.h>
 # endif
-#endif
-#ifdef HAVE_GIOSCHANNEL
-# include <gioschannel.h>
 #endif
 #ifdef HAVE_GIOOPENSSL
 # include <gioopenssl.h>
@@ -23,9 +20,6 @@ _frida_agent_environment_init (void)
 
   g_thread_set_garbage_handler (_frida_agent_on_pending_thread_garbage, NULL);
 
-#ifdef HAVE_GIOSCHANNEL
-  g_io_module_schannel_register ();
-#endif
 #ifdef HAVE_GIOOPENSSL
   g_io_module_openssl_register ();
 #endif

@@ -60,6 +60,12 @@
     <ClCompile Include="$(IntDir)thread-suspend-monitor.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)base-agent-session.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)portal-client.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="process.vala">
@@ -94,6 +100,12 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="thread-suspend-monitor.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="base-agent-session.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="portal-client.vala">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>

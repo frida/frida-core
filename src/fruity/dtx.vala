@@ -317,6 +317,10 @@ namespace Frida.Fruity {
 		USER,
 		PLUGIN_KIT;
 
+		public static ApplicationType from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<ApplicationType> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<ApplicationType> (this);
 		}

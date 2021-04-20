@@ -43,39 +43,50 @@ namespace Frida {
 		public async void close (Cancellable? cancellable) throws IOError {
 			if (host_session == null)
 				return;
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
-			assert (location == null);
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
-				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+				throw new Error.INVALID_OPERATION ("Already created");
+
 			var tempdir = new TemporaryDirectory ();
+
 			host_session = new DarwinHostSession (new DarwinHelperProcess (tempdir), tempdir);
-			host_session.agent_session_closed.connect (on_agent_session_closed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
+
 			return host_session;
 		}
 
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return this.host_session.obtain_agent_session (agent_session_id);
+
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-				CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		public void unlink_agent_session (HostSession host_session, AgentSessionId id) {
+			if (host_session != this.host_session)
+				return;
+
+			this.host_session.unlink_agent_session (id);
+		}
+
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 
 		public extern static ImageData? _try_extract_icon ();
@@ -184,10 +195,10 @@ namespace Frida {
 			DBusConnection conn;
 			AgentSessionProvider provider;
 			try {
-				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+				conn = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
-				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
+				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -1042,7 +1053,7 @@ namespace Frida {
 			var raw_header = tokens[0];
 			var report = tokens[1];
 
-			var parameters = new VariantDict ();
+			var parameters = make_options_dict ();
 			try {
 				var header = new Json.Reader (Json.from_string (raw_header));
 				foreach (string member in header.list_members ()) {
@@ -1061,7 +1072,7 @@ namespace Frida {
 					}
 
 					if (val != null)
-						parameters.insert_value (canonicalize_parameter_name (member), val);
+						parameters[canonicalize_parameter_name (member)] = val;
 
 					header.end_member ();
 				}
@@ -1069,13 +1080,14 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
-			string? process_name = null;
-			parameters.lookup ("name", "s", out process_name);
+			Variant? name_val = parameters["name"];
+			assert (name_val != null && name_val.is_of_type (VariantType.STRING));
+			string process_name = name_val.get_string ();
 			assert (process_name != null);
 
 			string summary = summarize (report);
 
-			return CrashInfo (pid, process_name, summary, report, parameters.end ());
+			return CrashInfo (pid, process_name, summary, report, parameters);
 		}
 
 		private static string summarize (string report) {
@@ -1169,9 +1181,9 @@ namespace Frida {
 			stanza
 				.end_array ()
 				.end_object ();
-			string raw_stanza = Json.to_string (stanza.get_root (), false);
+			string json = Json.to_string (stanza.get_root (), false);
 
-			session.post_to_script.begin (script, raw_stanza, false, new uint8[0], io_cancellable);
+			session.post_messages.begin ({ AgentMessage (SCRIPT, script, json, false, {}) }, 0, io_cancellable);
 		}
 
 		private static string canonicalize_parameter_name (string name) {

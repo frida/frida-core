@@ -45,6 +45,9 @@
 /* Define to 1 if you have the <locale.h> header file. */
 #mesondefine HAVE_LOCALE_H
 
+/* Define to 1 if libnice is available. */
+#mesondefine HAVE_NICE
+
 /* Define to 1 if you have the <xlocale.h> header file. */
 #mesondefine HAVE_XLOCALE_H
 
@@ -59,9 +62,6 @@
 
 /* Define to 1 if libc is uClibc. */
 #mesondefine HAVE_UCLIBC
-
-/* Define to 1 if gioschannel is available. */
-#mesondefine HAVE_GIOSCHANNEL
 
 /* Define to 1 if gioopenssl is available. */
 #mesondefine HAVE_GIOOPENSSL

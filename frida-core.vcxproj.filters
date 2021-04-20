@@ -63,9 +63,6 @@
     <CustomBuild Include="src\frida.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
-    <None Include="src\debugger.vala">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="src\host-session-service.vala">
       <Filter>Source Files</Filter>
     </None>
@@ -133,9 +130,6 @@
     </ClCompile>
     <ClCompile Include="src\frida-glue.c">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(IntDir)src\debugger.c">
-      <Filter>Source Files\generated\core</Filter>
     </ClCompile>
     <ClCompile Include="$(IntDir)src\host-session-service.c">
       <Filter>Source Files\generated\core</Filter>
@@ -238,6 +232,24 @@
     <ClCompile Include="$(IntDir)src\droidy\jdwp.c">
       <Filter>Source Files\generated\droidy</Filter>
     </ClCompile>
+    <ClCompile Include="$(IntDir)src\async-task.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\control-service.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\endpoint.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\file-monitor.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\portal-service.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)src\web-gateway-service.c">
+      <Filter>Source Files\generated\core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\droidy\injector.vala">
@@ -245,6 +257,24 @@
     </None>
     <None Include="src\droidy\jdwp.vala">
       <Filter>Source Files\droidy</Filter>
+    </None>
+    <None Include="src\async-task.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\control-service.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\endpoint.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\file-monitor.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\portal-service.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="src\web-gateway-service.vala">
+      <Filter>Source Files</Filter>
     </None>
   </ItemGroup>
 </Project>

@@ -6,6 +6,8 @@ namespace Frida {
 	public extern void * get_current_pthread ();
 	public extern void join_pthread (void * thread);
 
+	public extern void kill_process (uint pid);
+
 	public string get_executable_path () {
 		var path = try_get_executable_path ();
 		if (path != null)
@@ -51,9 +53,19 @@ namespace Frida {
 	}
 
 	public interface ProcessInvader : Object {
+		public abstract SpawnStartState query_current_spawn_state ();
+
 		public abstract Gum.MemoryRange get_memory_range ();
+
 		public abstract Gum.ScriptBackend get_script_backend (ScriptRuntime runtime) throws Error;
 		public abstract Gum.ScriptBackend? get_active_script_backend ();
+
+		public abstract void acquire_child_gating () throws Error;
+		public abstract void release_child_gating ();
+
+		public abstract async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
+			Cancellable? cancellable) throws Error, IOError;
+		public abstract async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws Error, IOError;
 	}
 
 	public enum TerminationReason {

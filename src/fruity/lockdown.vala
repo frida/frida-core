@@ -190,6 +190,7 @@ namespace Frida.Fruity {
 			try {
 				var server_identity = new NetworkAddress ("apple.com", 62078);
 				var connection = TlsClientConnection.new (stream, server_identity);
+				connection.set_database (null);
 				connection.accept_certificate.connect (on_accept_certificate);
 
 				connection.set_certificate (tls_certificate);

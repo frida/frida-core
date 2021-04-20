@@ -78,11 +78,11 @@ frida_system_enumerate_applications (int * result_length)
 
     g_array_set_size (applications, applications->len + 1);
     info = &g_array_index (applications, FridaHostApplicationInfo, applications->len - 1);
-    info->_identifier = app_id;
-    info->_name = app_name;
-    info->_pid = pid;
-    frida_image_data_init_empty (&info->_small_icon);
-    frida_image_data_init_empty (&info->_large_icon);
+    info->identifier = app_id;
+    info->name = app_name;
+    info->pid = pid;
+    frida_image_data_init_empty (&info->small_icon);
+    frida_image_data_init_empty (&info->large_icon);
   }
 
   g_dir_close (proc_dir);

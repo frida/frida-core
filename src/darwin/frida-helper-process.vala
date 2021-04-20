@@ -295,8 +295,10 @@ namespace Frida {
 				yield handshake_port.exchange (pending_pid, out pending_task_port, out stream);
 
 				pending_connection = yield new DBusConnection (stream, null, NONE, null, cancellable);
-				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
+				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
+				if (pending_connection.is_closed ())
+					throw new Error.NOT_SUPPORTED ("Helper terminated prematurely");
 			} catch (GLib.Error e) {
 				if (e is Error.PROCESS_NOT_FOUND || e is IOError.CANCELLED)
 					throw_api_error (e);
@@ -304,7 +306,10 @@ namespace Frida {
 				if (pending_pid != 0)
 					Posix.kill ((Posix.pid_t) pending_pid, Posix.Signal.KILL);
 
-				throw new Error.PERMISSION_DENIED ("%s", e.message);
+				if (e is Error)
+					throw (Error) e;
+				else
+					throw new Error.PERMISSION_DENIED ("%s", e.message);
 			}
 
 			process_pid = pending_pid;

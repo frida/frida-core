@@ -76,12 +76,12 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
     name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
     if (name != nil)
     {
-      result->_identifier = g_strdup ([identifier UTF8String]);
-      result->_name = g_strdup ([name UTF8String]);
+      result->identifier = g_strdup ([identifier UTF8String]);
+      result->name = g_strdup ([name UTF8String]);
       [name release];
 
       entries = frida_system_query_kinfo_procs (&count);
-      for (result->_pid = 0, i = 0; result->_pid == 0 && i != count; i++)
+      for (result->pid = 0, i = 0; result->pid == 0 && i != count; i++)
       {
         guint pid = entries[i].kp_proc.p_pid;
         NSString * cur_identifier;
@@ -90,13 +90,13 @@ frida_system_get_frontmost_application (FridaHostApplicationInfo * result, GErro
         if (cur_identifier != nil)
         {
           if ([cur_identifier isEqualToString:identifier])
-            result->_pid = pid;
+            result->pid = pid;
           [cur_identifier release];
         }
       }
       g_free (entries);
 
-      extract_icons_from_identifier (identifier, &result->_small_icon, &result->_large_icon);
+      extract_icons_from_identifier (identifier, &result->small_icon, &result->large_icon);
     }
     else
     {
@@ -169,12 +169,12 @@ frida_system_enumerate_applications (int * result_length)
 
     identifier = [identifiers objectAtIndex:i];
     name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-    info->_identifier = g_strdup ([identifier UTF8String]);
-    info->_name = g_strdup ([name UTF8String]);
-    info->_pid = GPOINTER_TO_UINT (g_hash_table_lookup (pid_by_identifier, info->_identifier));
+    info->identifier = g_strdup ([identifier UTF8String]);
+    info->name = g_strdup ([name UTF8String]);
+    info->pid = GPOINTER_TO_UINT (g_hash_table_lookup (pid_by_identifier, info->identifier));
     [name release];
 
-    extract_icons_from_identifier (identifier, &info->_small_icon, &info->_large_icon);
+    extract_icons_from_identifier (identifier, &info->small_icon, &info->large_icon);
   }
 
   [identifiers release];
@@ -217,19 +217,19 @@ frida_system_enumerate_processes (int * result_length)
     FridaHostProcessInfo info = { 0, };
     gboolean still_alive = TRUE;
 
-    info._pid = e->kp_proc.p_pid;
+    info.pid = e->kp_proc.p_pid;
 
 #ifdef HAVE_IOS
-    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info._pid);
+    NSString * identifier = api->SBSCopyDisplayIdentifierForProcessID (info.pid);
     if (identifier != nil)
     {
       NSString * app_name;
 
       app_name = api->SBSCopyLocalizedApplicationNameForDisplayIdentifier (identifier);
-      info._name = g_strdup ([app_name UTF8String]);
+      info.name = g_strdup ([app_name UTF8String]);
       [app_name release];
 
-      extract_icons_from_identifier (identifier, &info._small_icon, &info._large_icon);
+      extract_icons_from_identifier (identifier, &info.small_icon, &info.large_icon);
 
       [identifier release];
     }
@@ -237,26 +237,26 @@ frida_system_enumerate_processes (int * result_length)
 #endif
     {
 #ifdef HAVE_MACOS
-      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info._pid];
+      NSRunningApplication * app = [NSRunningApplication runningApplicationWithProcessIdentifier:info.pid];
       if (app.icon != nil)
       {
-        info._name = g_strdup ([app.localizedName UTF8String]);
+        info.name = g_strdup ([app.localizedName UTF8String]);
 
-        extract_icons_from_image (app.icon, &info._small_icon, &info._large_icon);
+        extract_icons_from_image (app.icon, &info.small_icon, &info.large_icon);
       }
       else
 #endif
       {
         gchar path[PROC_PIDPATHINFO_MAXSIZE];
 
-        still_alive = proc_pidpath (info._pid, path, sizeof (path)) > 0;
+        still_alive = proc_pidpath (info.pid, path, sizeof (path)) > 0;
         if (still_alive)
         {
-          info._name = g_path_get_basename (path);
+          info.name = g_path_get_basename (path);
         }
 
-        frida_image_data_init_empty (&info._small_icon);
-        frida_image_data_init_empty (&info._large_icon);
+        frida_image_data_init_empty (&info.small_icon);
+        frida_image_data_init_empty (&info.large_icon);
       }
     }
 

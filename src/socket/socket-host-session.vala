@@ -33,53 +33,54 @@ namespace Frida {
 			get { return HostSessionProviderKind.REMOTE; }
 		}
 
-		private const string DEFAULT_SERVER_ADDRESS = "127.0.0.1";
-		private const uint16 DEFAULT_SERVER_PORT = 27042;
+		private Gee.Set<HostEntry> hosts = new Gee.HashSet<HostEntry> ();
 
-		private Gee.ArrayList<Entry> entries = new Gee.ArrayList<Entry> ();
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void close (Cancellable? cancellable) throws IOError {
-			while (!entries.is_empty) {
-				var iterator = entries.iterator ();
+			while (!hosts.is_empty) {
+				var iterator = hosts.iterator ();
 				iterator.next ();
-				var entry = iterator.get ();
+				HostEntry entry = iterator.get ();
 
-				entries.remove (entry);
+				hosts.remove (entry);
 
-				yield destroy_entry (entry, APPLICATION_REQUESTED, cancellable);
+				yield destroy_host_entry (entry, APPLICATION_REQUESTED, cancellable);
 			}
 
 			io_cancellable.cancel ();
 		}
 
-		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
-			SocketConnectable connectable;
-			string raw_address = (location != null) ? location : DEFAULT_SERVER_ADDRESS;
-#if !WINDOWS
-			if (raw_address.has_prefix ("unix:")) {
-				string path = raw_address.substring (5);
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
+			string? raw_address = null;
+			TlsCertificate? certificate = null;
+			string? token = null;
+			int keepalive_interval = -1;
+			if (options != null) {
+				var opts = options.map;
 
-				UnixSocketAddressType type = UnixSocketAddress.abstract_names_supported ()
-					? UnixSocketAddressType.ABSTRACT
-					: UnixSocketAddressType.PATH;
+				Value? address_val = opts["address"];
+				if (address_val != null)
+					raw_address = address_val.get_string ();
 
-				connectable = new UnixSocketAddress.with_type (path, -1, type);
-			} else {
-#else
-			{
-#endif
-				try {
-					connectable = NetworkAddress.parse (raw_address, DEFAULT_SERVER_PORT);
-				} catch (GLib.Error e) {
-					throw new Error.INVALID_ARGUMENT ("%s", e.message);
-				}
+				Value? cert_val = opts["certificate"];
+				if (cert_val != null)
+					certificate = (TlsCertificate) cert_val.get_object ();
+
+				Value? token_val = opts["token"];
+				if (token_val != null)
+					token = token_val.get_string ();
+
+				Value? keepalive_interval_val = opts["keepalive_interval"];
+				if (keepalive_interval_val != null)
+					keepalive_interval = keepalive_interval_val.get_int ();
 			}
+			SocketConnectable connectable = parse_control_address (raw_address);
 
-			SocketConnection raw_connection;
+			SocketConnection socket_connection;
 			try {
 				var client = new SocketClient ();
-				raw_connection = yield client.connect_async (connectable, cancellable);
+				socket_connection = yield client.connect_async (connectable, cancellable);
 			} catch (GLib.Error e) {
 				if (e is IOError.CONNECTION_REFUSED)
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server");
@@ -87,60 +88,104 @@ namespace Frida {
 					throw new Error.SERVER_NOT_RUNNING ("Unable to connect to remote frida-server: %s", e.message);
 			}
 
-			var socket = raw_connection.socket;
-			if (socket.get_family () != UNIX)
+			Socket socket = socket_connection.socket;
+			SocketFamily family = socket.get_family ();
+
+			if (family != UNIX)
 				Tcp.enable_nodelay (socket);
+
+			if (keepalive_interval == -1)
+				keepalive_interval = (family == UNIX) ? 0 : 30;
+
+			IOStream stream = socket_connection;
+
+			if (certificate != null) {
+				try {
+					var tc = TlsClientConnection.new (stream, null);
+					tc.set_database (null);
+					var accept_handler = tc.accept_certificate.connect ((peer_cert, errors) => {
+						return peer_cert.verify (null, certificate) == 0;
+					});
+					try {
+						yield tc.handshake_async (Priority.DEFAULT, cancellable);
+					} finally {
+						tc.disconnect (accept_handler);
+					}
+					stream = tc;
+				} catch (GLib.Error e) {
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
+			}
 
 			DBusConnection connection;
 			try {
-				connection = yield new DBusConnection (raw_connection, null, AUTHENTICATION_CLIENT, null, cancellable);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}
 
+			if (token != null) {
+				AuthenticationService auth_service;
+				try {
+					auth_service = yield connection.get_proxy (null, ObjectPath.AUTHENTICATION_SERVICE,
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+				} catch (IOError e) {
+					throw new Error.PROTOCOL ("Incompatible frida-server version");
+				}
+
+				try {
+					yield auth_service.authenticate (token, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+			}
+
 			HostSession host_session;
 			try {
-				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
+				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
 			} catch (IOError e) {
 				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
 
-			var entry = new Entry (connection, host_session);
-			entry.agent_session_closed.connect (on_agent_session_closed);
-			entries.add (entry);
+			var entry = new HostEntry (connection, host_session, keepalive_interval);
+			entry.agent_session_detached.connect (on_agent_session_detached);
+			hosts.add (entry);
 
-			connection.on_closed.connect (on_connection_closed);
+			connection.on_closed.connect (on_host_connection_closed);
 
 			return host_session;
 		}
 
 		public async void destroy (HostSession host_session, Cancellable? cancellable) throws Error, IOError {
-			foreach (var entry in entries) {
+			foreach (var entry in hosts) {
 				if (entry.host_session == host_session) {
-					entries.remove (entry);
-					yield destroy_entry (entry, APPLICATION_REQUESTED, cancellable);
+					hosts.remove (entry);
+					yield destroy_host_entry (entry, APPLICATION_REQUESTED, cancellable);
 					return;
 				}
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
-				Cancellable? cancellable) throws Error, IOError {
-			foreach (var entry in entries) {
-				if (entry.host_session == host_session)
-					return yield entry.obtain_agent_session (agent_session_id, cancellable);
-			}
-			throw new Error.INVALID_ARGUMENT ("Invalid host session");
+		private async void destroy_host_entry (HostEntry entry, SessionDetachReason reason,
+				Cancellable? cancellable) throws IOError {
+			entry.connection.on_closed.disconnect (on_host_connection_closed);
+
+			yield entry.destroy (reason, cancellable);
+
+			entry.agent_session_detached.disconnect (on_agent_session_detached);
+
+			host_session_detached (entry.host_session);
 		}
 
-		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+		private void on_host_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			bool closed_by_us = (!remote_peer_vanished && error == null);
 			if (closed_by_us)
 				return;
 
-			Entry entry_to_remove = null;
-			foreach (var entry in entries) {
+			HostEntry entry_to_remove = null;
+			foreach (var entry in hosts) {
 				if (entry.connection == connection) {
 					entry_to_remove = entry;
 					break;
@@ -148,23 +193,25 @@ namespace Frida {
 			}
 			assert (entry_to_remove != null);
 
-			entries.remove (entry_to_remove);
-			destroy_entry.begin (entry_to_remove, SERVER_TERMINATED, io_cancellable);
+			hosts.remove (entry_to_remove);
+			destroy_host_entry.begin (entry_to_remove, CONNECTION_TERMINATED, io_cancellable);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			foreach (var entry in hosts) {
+				if (entry.host_session == host_session)
+					return yield entry.link_agent_session (id, sink, cancellable);
+			}
+			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		private async void destroy_entry (Entry entry, SessionDetachReason reason, Cancellable? cancellable) throws IOError {
-			entry.connection.on_closed.disconnect (on_connection_closed);
-			yield entry.destroy (reason, cancellable);
-			entry.agent_session_closed.disconnect (on_agent_session_closed);
-			host_session_closed (entry.host_session);
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 
-		private class Entry : Object {
-			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
+		private class HostEntry : Object {
+			public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 
 			public DBusConnection connection {
 				get;
@@ -176,54 +223,108 @@ namespace Frida {
 				construct;
 			}
 
-			private Gee.HashMap<AgentSessionId?, AgentSession> agent_session_by_id =
-				new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+			public uint keepalive_interval {
+				get;
+				construct;
+			}
 
-			public Entry (DBusConnection connection, HostSession host_session) {
-				Object (connection: connection, host_session: host_session);
+			private TimeoutSource? keepalive_timer;
 
-				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
-				host_session.agent_session_crashed.connect (on_agent_session_crashed);
+			private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
+				new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
+
+			private Cancellable io_cancellable = new Cancellable ();
+
+			public HostEntry (DBusConnection connection, HostSession host_session, uint keepalive_interval) {
+				Object (
+					connection: connection,
+					host_session: host_session,
+					keepalive_interval: keepalive_interval
+				);
+
+				host_session.agent_session_detached.connect (on_agent_session_detached);
+			}
+
+			construct {
+				if (keepalive_interval != 0) {
+					var source = new TimeoutSource.seconds (keepalive_interval);
+					source.set_callback (on_keepalive_tick);
+					source.attach (MainContext.get_thread_default ());
+					keepalive_timer = source;
+
+					on_keepalive_tick ();
+				}
 			}
 
 			public async void destroy (SessionDetachReason reason, Cancellable? cancellable) throws IOError {
-				host_session.agent_session_crashed.disconnect (on_agent_session_crashed);
-				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
+				io_cancellable.cancel ();
 
-				foreach (var agent_session_id in agent_session_by_id.keys)
-					agent_session_closed (agent_session_id, reason, null);
-				agent_session_by_id.clear ();
+				if (keepalive_timer != null) {
+					keepalive_timer.destroy ();
+					keepalive_timer = null;
+				}
 
-				try {
-					yield connection.close (cancellable);
-				} catch (GLib.Error e) {
+				host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
+				var no_crash = CrashInfo.empty ();
+				foreach (AgentSessionId id in agent_sessions.keys)
+					agent_session_detached (id, reason, no_crash);
+				agent_sessions.clear ();
+
+				if (reason != CONNECTION_TERMINATED) {
+					try {
+						yield connection.close (cancellable);
+					} catch (GLib.Error e) {
+					}
 				}
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
-				AgentSession session = agent_session_by_id[id];
-				if (session == null) {
-					try {
-						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
-							DBusProxyFlags.NONE, cancellable);
-						agent_session_by_id[id] = session;
-					} catch (IOError e) {
-						throw new Error.INVALID_ARGUMENT ("%s", e.message);
-					}
-				}
+			public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+					Cancellable? cancellable) throws Error, IOError {
+				if (agent_sessions.has_key (id))
+					throw new Error.INVALID_OPERATION ("Already linked");
+
+				var entry = new AgentSessionEntry (connection);
+				agent_sessions[id] = entry;
+
+				AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id),
+					DO_NOT_LOAD_PROPERTIES, cancellable);
+
+				entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
+
 				return session;
 			}
 
-			private void on_agent_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
-				if (agent_session_by_id.unset (id))
-					agent_session_closed (id, reason, null);
+			private bool on_keepalive_tick () {
+				host_session.ping.begin (keepalive_interval, io_cancellable);
+				return true;
 			}
 
-			private void on_agent_session_crashed (AgentSessionId id, CrashInfo crash) {
-				agent_session_by_id.unset (id);
-				agent_session_closed (id, PROCESS_TERMINATED, crash);
+			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+				agent_sessions.unset (id);
+				agent_session_detached (id, reason, crash);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public DBusConnection connection {
+				get;
+				set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (DBusConnection connection) {
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 	}
 }
-

@@ -1,11 +1,8 @@
 #include "frida-core.h"
 
 #include <gum/gum.h>
-#ifdef HAVE_WINDOWS
-# include <winsock2.h>
-#else
-# include <netinet/in.h>
-# include <netinet/tcp.h>
+#ifdef HAVE_GIOOPENSSL
+# include <gioopenssl.h>
 #endif
 
 static FridaRuntime runtime;
@@ -35,6 +32,10 @@ frida_init_with_runtime (FridaRuntime rt)
   gio_init ();
   gum_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
+
+#ifdef HAVE_GIOOPENSSL
+  g_io_module_openssl_register ();
+#endif
 
   if (g_once_init_enter (&frida_initialized))
   {
@@ -146,12 +147,6 @@ const gchar *
 frida_version_string (void)
 {
   return FRIDA_VERSION;
-}
-
-void
-frida_tcp_enable_nodelay (GSocket * socket)
-{
-  g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
 }
 
 static gpointer

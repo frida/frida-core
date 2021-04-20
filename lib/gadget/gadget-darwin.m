@@ -15,6 +15,16 @@ frida_gadget_environment_detect_bundle_id (void)
 }
 
 gchar *
+frida_gadget_environment_detect_bundle_name (void)
+{
+  @autoreleasepool
+  {
+    NSString * name = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleName"];
+    return g_strdup (name.UTF8String);
+  }
+}
+
+gchar *
 frida_gadget_environment_detect_documents_dir (void)
 {
 #ifdef HAVE_IOS

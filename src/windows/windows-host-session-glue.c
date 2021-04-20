@@ -81,9 +81,7 @@ _frida_windows_host_session_spawn (FridaWindowsHostSession * self, const gchar *
 {
   FridaChildProcess * process = NULL;
   WCHAR * application_name, * command_line, * environment, * current_directory;
-  const gchar * cwd;
   STARTUPINFO startup_info;
-  FridaStdio stdio;
   HANDLE stdin_read = NULL, stdin_write = NULL;
   HANDLE stdout_read = NULL, stdout_write = NULL;
   HANDLE stderr_read = NULL, stderr_write = NULL;
@@ -94,20 +92,12 @@ _frida_windows_host_session_spawn (FridaWindowsHostSession * self, const gchar *
 
   application_name = (WCHAR *) g_utf8_to_utf16 (path, -1, NULL, NULL, NULL);
 
-  if (frida_host_spawn_options_get_has_argv (options))
-  {
-    gchar ** argv;
-    gint argv_length;
-
-    argv = frida_host_spawn_options_get_argv (options, &argv_length);
-    command_line = frida_argv_to_command_line (argv, argv_length);
-  }
+  if (options->has_argv)
+    command_line = frida_argv_to_command_line (options->argv, options->argv_length1);
   else
-  {
     command_line = NULL;
-  }
 
-  if (frida_host_spawn_options_get_has_envp (options) || frida_host_spawn_options_get_has_env (options))
+  if (options->has_envp || options->has_env)
   {
     gchar ** envp;
     gint envp_length;
@@ -121,17 +111,15 @@ _frida_windows_host_session_spawn (FridaWindowsHostSession * self, const gchar *
     environment = NULL;
   }
 
-  cwd = frida_host_spawn_options_get_cwd (options);
-  if (strlen (cwd) > 0)
-    current_directory = (WCHAR *) g_utf8_to_utf16 (cwd, -1, NULL, NULL, NULL);
+  if (strlen (options->cwd) > 0)
+    current_directory = (WCHAR *) g_utf8_to_utf16 (options->cwd, -1, NULL, NULL, NULL);
   else
     current_directory = NULL;
 
   ZeroMemory (&startup_info, sizeof (startup_info));
   startup_info.cb = sizeof (startup_info);
 
-  stdio = frida_host_spawn_options_get_stdio (options);
-  switch (stdio)
+  switch (options->stdio)
   {
     case FRIDA_STDIO_INHERIT:
       startup_info.hStdInput = GetStdHandle (STD_INPUT_HANDLE);
@@ -182,7 +170,7 @@ _frida_windows_host_session_spawn (FridaWindowsHostSession * self, const gchar *
 
   DebugActiveProcessStop (process_info.dwProcessId);
 
-  if (stdio == FRIDA_STDIO_PIPE)
+  if (options->stdio == FRIDA_STDIO_PIPE)
   {
     CloseHandle (stdin_read);
     CloseHandle (stdout_write);
@@ -239,7 +227,7 @@ create_process_failed:
           path, last_error);
     }
 
-    if (stdio == FRIDA_STDIO_PIPE)
+    if (options->stdio == FRIDA_STDIO_PIPE)
     {
       CloseHandle (stdin_read);
       CloseHandle (stdin_write);

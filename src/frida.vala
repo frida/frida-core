@@ -14,6 +14,10 @@ namespace Frida {
 		GLIB,
 		OTHER;
 
+		public static Runtime from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<Runtime> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<Runtime> (this);
 		}
@@ -23,11 +27,6 @@ namespace Frida {
 		public signal void added (Device device);
 		public signal void removed (Device device);
 		public signal void changed ();
-
-		public MainContext main_context {
-			get;
-			construct;
-		}
 
 		public delegate bool Predicate (Device device);
 
@@ -39,10 +38,6 @@ namespace Frida {
 		private Gee.ArrayList<DeviceObserverEntry> on_device_added = new Gee.ArrayList<DeviceObserverEntry> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
-
-		public DeviceManager () {
-			Object (main_context: get_main_context ());
-		}
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
 			yield stop_service (cancellable);
@@ -208,21 +203,41 @@ namespace Frida {
 			}
 		}
 
-		public async Device add_remote_device (string location, Cancellable? cancellable = null) throws Error, IOError {
+		public async Device add_remote_device (string address, RemoteDeviceOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
 			var socket_device = yield get_device ((device) => {
 					return device.provider is SocketHostSessionProvider;
 				}, 0, cancellable);
 
-			string id = "socket@" + location;
+			string id = "socket@" + address;
 
 			foreach (var device in devices) {
 				if (device.id == id)
 					return device;
 			}
 
-			var device = new Device (this, id, location, HostSessionProviderKind.REMOTE, socket_device.provider, location);
+			unowned string name = address;
+
+			var raw_options = new HostSessionOptions ();
+			var opts = raw_options.map;
+			opts["address"] = address;
+			if (options != null) {
+				TlsCertificate? cert = options.certificate;
+				if (cert != null)
+					opts["certificate"] = cert;
+
+				string? token = options.token;
+				if (token != null)
+					opts["token"] = token;
+
+				int interval = options.keepalive_interval;
+				if (interval != -1)
+					opts["keepalive_interval"] = interval;
+			}
+
+			var device = new Device (this, id, name, HostSessionProviderKind.REMOTE, socket_device.provider, raw_options);
 			devices.add (device);
 			added (device);
 			changed ();
@@ -230,26 +245,29 @@ namespace Frida {
 			return device;
 		}
 
-		public Device add_remote_device_sync (string location, Cancellable? cancellable = null) throws Error, IOError {
+		public Device add_remote_device_sync (string address, RemoteDeviceOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<AddRemoteDeviceTask> ();
-			task.location = location;
+			task.address = address;
+			task.options = options;
 			return task.execute (cancellable);
 		}
 
 		private class AddRemoteDeviceTask : ManagerTask<Device> {
-			public string location;
+			public string address;
+			public RemoteDeviceOptions? options;
 
 			protected override async Device perform_operation () throws Error, IOError {
-				return yield parent.add_remote_device (location, cancellable);
+				return yield parent.add_remote_device (address, options, cancellable);
 			}
 		}
 
-		public async void remove_remote_device (string location, Cancellable? cancellable = null) throws Error, IOError {
+		public async void remove_remote_device (string address, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
 			yield ensure_service (cancellable);
 
-			string id = "socket@" + location;
+			string id = "socket@" + address;
 
 			foreach (var device in devices) {
 				if (device.id == id) {
@@ -263,17 +281,17 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Device not found");
 		}
 
-		public void remove_remote_device_sync (string location, Cancellable? cancellable = null) throws Error, IOError {
+		public void remove_remote_device_sync (string address, Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<RemoveRemoteDeviceTask> ();
-			task.location = location;
+			task.address = address;
 			task.execute (cancellable);
 		}
 
 		private class RemoveRemoteDeviceTask : ManagerTask<void> {
-			public string location;
+			public string address;
 
 			protected override async void perform_operation () throws Error, IOError {
-				yield parent.remove_remote_device (location, cancellable);
+				yield parent.remove_remote_device (address, cancellable);
 			}
 		}
 
@@ -409,7 +427,7 @@ namespace Frida {
 		}
 
 		private T create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
+			return Object.new (typeof (T), parent: this);
 		}
 
 		private abstract class ManagerTask<T> : AsyncTask<T> {
@@ -433,7 +451,7 @@ namespace Frida {
 	public class DeviceList : Object {
 		private Gee.List<Device> items;
 
-		public DeviceList (Gee.List<Device> items) {
+		internal DeviceList (Gee.List<Device> items) {
 			this.items = items;
 		}
 
@@ -476,36 +494,38 @@ namespace Frida {
 			construct;
 		}
 
+		public Bus bus {
+			get {
+				return _bus;
+			}
+		}
+
 		public HostSessionProvider provider {
 			get;
 			construct;
 		}
 
-		public weak DeviceManager manager {
-			get;
-			construct;
-		}
-
-		public MainContext main_context {
+		public weak DeviceManager? manager {
 			get;
 			construct;
 		}
 
 		public delegate bool ProcessPredicate (Process process);
 
-		private string? location;
+		private HostSessionOptions? host_session_options;
 		private Promise<HostSession>? host_session_request;
 		private Promise<bool>? close_request;
 
-		private HostSession? current_host_session;
+		internal HostSession? current_host_session;
 		private Gee.HashMap<AgentSessionId?, Session> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, Session> (AgentSessionId.hash, AgentSessionId.equal);
 		private Gee.HashSet<Promise<Session>> pending_attach_requests = new Gee.HashSet<Promise<Session>> ();
 		private Gee.HashMap<AgentSessionId?, Promise<bool>> pending_detach_requests =
 			new Gee.HashMap<AgentSessionId?, Promise<bool>> (AgentSessionId.hash, AgentSessionId.equal);
+		private Bus _bus;
 
-		public Device (DeviceManager manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider,
-				string? location = null) {
+		internal Device (DeviceManager? manager, string id, string name, HostSessionProviderKind kind, HostSessionProvider provider,
+				HostSessionOptions? options = null) {
 			DeviceType dtype;
 			switch (kind) {
 				case HostSessionProviderKind.LOCAL:
@@ -527,16 +547,17 @@ namespace Frida {
 				icon: icon_from_image (provider.icon),
 				dtype: dtype,
 				provider: provider,
-				manager: manager,
-				main_context: manager.main_context
+				manager: manager
 			);
 
-			this.location = location;
+			host_session_options = options;
 		}
 
 		construct {
-			provider.host_session_closed.connect (on_host_session_closed);
-			provider.agent_session_closed.connect (on_agent_session_closed);
+			provider.host_session_detached.connect (on_host_session_detached);
+			provider.agent_session_detached.connect (on_agent_session_detached);
+
+			_bus = new Bus (this);
 		}
 
 		public bool is_lost () {
@@ -558,8 +579,8 @@ namespace Frida {
 					app.identifier,
 					app.name,
 					app.pid,
-					icon_from_image_data (app.small_icon),
-					icon_from_image_data (app.large_icon));
+					Icon.from_image_data (app.small_icon),
+					Icon.from_image_data (app.large_icon));
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -593,8 +614,8 @@ namespace Frida {
 					p.identifier,
 					p.name,
 					p.pid,
-					icon_from_image_data (p.small_icon),
-					icon_from_image_data (p.large_icon)));
+					Icon.from_image_data (p.small_icon),
+					Icon.from_image_data (p.large_icon)));
 			}
 			return new ApplicationList (result);
 		}
@@ -763,8 +784,8 @@ namespace Frida {
 				result.add (new Process (
 					p.pid,
 					p.name,
-					icon_from_image_data (p.small_icon),
-					icon_from_image_data (p.large_icon)));
+					Icon.from_image_data (p.small_icon),
+					Icon.from_image_data (p.large_icon)));
 			}
 			return new ProcessList (result);
 		}
@@ -782,13 +803,7 @@ namespace Frida {
 		private static Icon? icon_from_image (Image? image) {
 			if (image == null)
 				return null;
-			return icon_from_image_data (image.data);
-		}
-
-		private static Icon? icon_from_image_data (ImageData image) {
-			if (image.width == 0)
-				return null;
-			return new Icon (image.width, image.height, image.rowstride, new Bytes.take (Base64.decode (image.pixels)));
+			return Icon.from_image_data (image.data);
 		}
 
 		public async void enable_spawn_gating (Cancellable? cancellable = null) throws Error, IOError {
@@ -921,7 +936,7 @@ namespace Frida {
 
 				raw_options.stdio = options.stdio;
 
-				raw_options.aux = options.get_aux_bytes ().get_data ();
+				raw_options.aux = options.aux;
 			}
 
 			var host_session = yield get_host_session (cancellable);
@@ -1035,8 +1050,11 @@ namespace Frida {
 			}
 		}
 
-		public async Session attach (uint pid, Realm realm = NATIVE, Cancellable? cancellable = null) throws Error, IOError {
+		public async Session attach (uint pid, SessionOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
+
+			SessionOptions opts = (options != null) ? options : new SessionOptions ();
 
 			var attach_request = new Promise<Session> ();
 			pending_attach_requests.add (attach_request);
@@ -1045,31 +1063,19 @@ namespace Frida {
 			try {
 				var host_session = yield get_host_session (cancellable);
 
-				AgentSessionId agent_session_id;
-				try {
-					agent_session_id = yield host_session.attach_in_realm (pid, realm, cancellable);
-				} catch (GLib.Error e) {
-					if (e is DBusError.UNKNOWN_METHOD) {
-						if (realm != NATIVE) {
-							throw new Error.INVALID_ARGUMENT (
-								"Remote Frida does not support the “realm” option; please upgrade it");
-						}
+				var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
-						try {
-							agent_session_id = yield host_session.attach_to (pid, cancellable);
-						} catch (GLib.Error e) {
-							throw_dbus_error (e);
-						}
-					} else {
-						throw_dbus_error (e);
-					}
+				AgentSessionId id;
+				try {
+					id = yield host_session.attach (pid, raw_options, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
 				}
 
 				try {
-					var agent_session = yield provider.obtain_agent_session (host_session, agent_session_id,
-						cancellable);
-					session = new Session (this, pid, agent_session);
-					agent_sessions[agent_session_id] = session;
+					session = new Session (this, pid, id, opts);
+					session.active_session = yield provider.link_agent_session (host_session, id, session, cancellable);
+					agent_sessions[id] = session;
 
 					attach_request.resolve (session);
 				} catch (GLib.Error e) {
@@ -1088,19 +1094,20 @@ namespace Frida {
 			return session;
 		}
 
-		public Session attach_sync (uint pid, Realm realm = NATIVE, Cancellable? cancellable = null) throws Error, IOError {
+		public Session attach_sync (uint pid, SessionOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<AttachTask> ();
 			task.pid = pid;
-			task.realm = realm;
+			task.options = options;
 			return task.execute (cancellable);
 		}
 
 		private class AttachTask : DeviceTask<Session> {
 			public uint pid;
-			public Realm realm;
+			public SessionOptions? options;
 
 			protected override async Session perform_operation () throws Error, IOError {
-				return yield parent.attach (pid, realm, cancellable);
+				return yield parent.attach (pid, options, cancellable);
 			}
 		}
 
@@ -1205,7 +1212,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Device is gone");
 		}
 
-		private async HostSession get_host_session (Cancellable? cancellable) throws Error, IOError {
+		public async HostSession get_host_session (Cancellable? cancellable) throws Error, IOError {
 			while (host_session_request != null) {
 				try {
 					return yield host_session_request.future.wait_async (cancellable);
@@ -1218,7 +1225,7 @@ namespace Frida {
 			host_session_request = new Promise<HostSession> ();
 
 			try {
-				var session = yield provider.create (location, cancellable);
+				var session = yield provider.create (host_session_options, cancellable);
 				attach_host_session (session);
 
 				current_host_session = session;
@@ -1233,9 +1240,21 @@ namespace Frida {
 			}
 		}
 
-		private void on_host_session_closed (HostSession session) {
+		public HostSession get_host_session_sync (Cancellable? cancellable = null) throws Error, IOError {
+			return create<GetHostSessionTask> ().execute (cancellable);
+		}
+
+		private class GetHostSessionTask : DeviceTask<HostSession> {
+			protected override async HostSession perform_operation () throws Error, IOError {
+				return yield parent.get_host_session (cancellable);
+			}
+		}
+
+		private void on_host_session_detached (HostSession session) {
 			if (session != current_host_session)
 				return;
+
+			_bus._detach.begin (session);
 
 			detach_host_session (session);
 
@@ -1263,7 +1282,7 @@ namespace Frida {
 			session.uninjected.disconnect (on_uninjected);
 		}
 
-		public async void _do_close (SessionDetachReason reason, bool may_block, Cancellable? cancellable) throws IOError {
+		internal async void _do_close (SessionDetachReason reason, bool may_block, Cancellable? cancellable) throws IOError {
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -1306,12 +1325,13 @@ namespace Frida {
 					}
 				}
 
+				var no_crash = CrashInfo.empty ();
 				foreach (var session in agent_sessions.values.to_array ())
-					yield session._do_close (reason, null, may_block, cancellable);
+					yield session._do_close (reason, no_crash, may_block, cancellable);
 				agent_sessions.clear ();
 
-				provider.host_session_closed.disconnect (on_host_session_closed);
-				provider.agent_session_closed.disconnect (on_agent_session_closed);
+				provider.host_session_detached.disconnect (on_host_session_detached);
+				provider.agent_session_detached.disconnect (on_agent_session_detached);
 
 				if (current_host_session != null) {
 					detach_host_session (current_host_session);
@@ -1327,7 +1347,8 @@ namespace Frida {
 					host_session_request = null;
 				}
 
-				manager._release_device (this);
+				if (manager != null)
+					manager._release_device (this);
 
 				lost ();
 
@@ -1363,10 +1384,10 @@ namespace Frida {
 			}
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			var session = agent_sessions[id];
 			if (session != null)
-				session._do_close.begin (reason, crash, false, null);
+				session._on_detached (reason, crash);
 
 			Promise<bool> detach_request;
 			if (pending_detach_requests.unset (id, out detach_request))
@@ -1402,7 +1423,7 @@ namespace Frida {
 		}
 
 		private T create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
+			return Object.new (typeof (T), parent: this);
 		}
 
 		private abstract class DeviceTask<T> : AsyncTask<T> {
@@ -1418,15 +1439,37 @@ namespace Frida {
 		REMOTE,
 		USB;
 
+		public static DeviceType from_nick (string nick) throws Error {
+			return Marshal.enum_from_nick<DeviceType> (nick);
+		}
+
 		public string to_nick () {
 			return Marshal.enum_to_nick<DeviceType> (this);
+		}
+	}
+
+	public class RemoteDeviceOptions : Object {
+		public TlsCertificate? certificate {
+			get;
+			set;
+		}
+
+		public string? token {
+			get;
+			set;
+		}
+
+		public int keepalive_interval {
+			get;
+			set;
+			default = -1;
 		}
 	}
 
 	public class ApplicationList : Object {
 		private Gee.List<Application> items;
 
-		public ApplicationList (Gee.List<Application> items) {
+		internal ApplicationList (Gee.List<Application> items) {
 			this.items = items;
 		}
 
@@ -1465,7 +1508,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Application (string identifier, string name, uint pid, Icon? small_icon, Icon? large_icon) {
+		internal Application (string identifier, string name, uint pid, Icon? small_icon, Icon? large_icon) {
 			Object (
 				identifier: identifier,
 				name: name,
@@ -1479,7 +1522,7 @@ namespace Frida {
 	public class ProcessList : Object {
 		private Gee.List<Process> items;
 
-		public ProcessList (Gee.List<Process> items) {
+		internal ProcessList (Gee.List<Process> items) {
 			this.items = items;
 		}
 
@@ -1513,7 +1556,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Process (uint pid, string name, Icon? small_icon, Icon? large_icon) {
+		internal Process (uint pid, string name, Icon? small_icon, Icon? large_icon) {
 			Object (
 				pid: pid,
 				name: name,
@@ -1550,25 +1593,17 @@ namespace Frida {
 			default = INHERIT;
 		}
 
-		public VariantDict aux {
-			get {
-				return _aux;
-			}
-		}
-		private VariantDict _aux = new VariantDict ();
-
-		internal Bytes get_aux_bytes () {
-			var variant = _aux.end ();
-			var bytes = variant.get_data_as_bytes ();
-			_aux = new VariantDict (variant);
-			return bytes;
+		public HashTable<string, Variant> aux {
+			get;
+			set;
+			default = make_options_dict ();
 		}
 	}
 
 	public class SpawnList : Object {
 		private Gee.List<Spawn> items;
 
-		public SpawnList (Gee.List<Spawn> items) {
+		internal SpawnList (Gee.List<Spawn> items) {
 			this.items = items;
 		}
 
@@ -1592,7 +1627,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Spawn (uint pid, string? identifier) {
+		internal Spawn (uint pid, string? identifier) {
 			Object (
 				pid: pid,
 				identifier: identifier
@@ -1608,7 +1643,7 @@ namespace Frida {
 	public class ChildList : Object {
 		private Gee.List<Child> items;
 
-		public ChildList (Gee.List<Child> items) {
+		internal ChildList (Gee.List<Child> items) {
 			this.items = items;
 		}
 
@@ -1657,7 +1692,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Child (uint pid, uint parent_pid, ChildOrigin origin, string? identifier, string? path, string[]? argv,
+		internal Child (uint pid, uint parent_pid, ChildOrigin origin, string? identifier, string? path, string[]? argv,
 				string[]? envp) {
 			Object (
 				pid: pid,
@@ -1706,29 +1741,30 @@ namespace Frida {
 			construct;
 		}
 
-		private Bytes raw_parameters;
+		public HashTable<string, Variant> parameters {
+			get;
+			construct;
+		}
 
-		public Crash (uint pid, string process_name, string summary, string report, Bytes raw_parameters) {
+		internal Crash (uint pid, string process_name, string summary, string report, HashTable<string, Variant> parameters) {
 			Object (
 				pid: pid,
 				process_name: process_name,
 				summary: summary,
-				report: report
+				report: report,
+				parameters: parameters
 			);
-			this.raw_parameters = raw_parameters;
 		}
 
-		public VariantDict load_parameters () {
-			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, raw_parameters, false));
-		}
-
-		internal static Crash from_info (CrashInfo info) {
+		internal static Crash? from_info (CrashInfo info) {
+			if (info.pid == 0)
+				return null;
 			return new Crash (
 				info.pid,
 				info.process_name,
 				info.summary,
 				info.report,
-				new Bytes (info.parameters)
+				info.parameters
 			);
 		}
 	}
@@ -1754,7 +1790,7 @@ namespace Frida {
 			construct;
 		}
 
-		public Icon (int width, int height, int rowstride, Bytes pixels) {
+		internal Icon (int width, int height, int rowstride, Bytes pixels) {
 			Object (
 				width: width,
 				height: height,
@@ -1762,9 +1798,152 @@ namespace Frida {
 				pixels: pixels
 			);
 		}
+
+		internal static Icon? from_image_data (ImageData image) {
+			if (image.width == 0)
+				return null;
+			return new Icon (image.width, image.height, image.rowstride, new Bytes.take (Base64.decode (image.pixels)));
+		}
+
+		internal static ImageData to_image_data (Icon? icon) {
+			if (icon == null)
+				return ImageData.empty ();
+			return ImageData (icon.width, icon.height, icon.rowstride, Base64.encode (icon.pixels.get_data ()));
+		}
 	}
 
-	public class Session : Object {
+	public class Bus : Object {
+		public signal void detached ();
+		public signal void message (string json, Bytes? data);
+
+		public weak Device device {
+			get;
+			construct;
+		}
+
+		private Promise<BusSession>? attach_request;
+
+		private BusSession? active_session;
+		private Cancellable io_cancellable = new Cancellable ();
+
+		internal Bus (Device device) {
+			Object (device: device);
+		}
+
+		public async void attach (Cancellable? cancellable = null) throws Error, IOError {
+			while (attach_request != null) {
+				try {
+					yield attach_request.future.wait_async (cancellable);
+					return;
+				} catch (Error e) {
+					throw e;
+				} catch (IOError e) {
+					cancellable.set_error_if_cancelled ();
+				}
+			}
+			attach_request = new Promise<BusSession> ();
+
+			try {
+				var host_session = yield device.get_host_session (cancellable);
+
+				DBusProxy proxy = host_session as DBusProxy;
+				if (proxy == null)
+					throw new Error.NOT_SUPPORTED ("Bus is not available on this device");
+
+				try {
+					active_session = yield proxy.g_connection.get_proxy (null, ObjectPath.BUS_SESSION,
+						DO_NOT_LOAD_PROPERTIES, cancellable);
+					active_session.message.connect (on_message);
+
+					yield active_session.attach (cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+
+				attach_request.resolve (active_session);
+			} catch (GLib.Error e) {
+				attach_request.reject (e);
+				attach_request = null;
+
+				throw_api_error (e);
+			}
+		}
+
+		public void attach_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<AttachTask> ().execute (cancellable);
+		}
+
+		private class AttachTask : BusTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.attach (cancellable);
+			}
+		}
+
+		internal async void _detach (HostSession dead_host_session) {
+			if (attach_request == null)
+				return;
+
+			DBusConnection dead_connection = ((DBusProxy) dead_host_session).g_connection;
+
+			io_cancellable.cancel ();
+			io_cancellable = new Cancellable ();
+
+			while (attach_request != null) {
+				try {
+					var some_session = yield attach_request.future.wait_async (null);
+					if (((DBusProxy) some_session).g_connection == dead_connection) {
+						some_session.message.disconnect (on_message);
+						active_session = null;
+						attach_request = null;
+					} else {
+						return;
+					}
+				} catch (GLib.Error e) {
+				}
+			}
+
+			detached ();
+		}
+
+		public void post (string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_post (json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_post (json, data);
+					return false;
+				});
+				source.attach (context);
+			}
+		}
+
+		private void do_post (string json, Bytes? data) {
+			if (active_session == null)
+				return;
+			var has_data = data != null;
+			var data_param = has_data ? data.get_data () : new uint8[0];
+			active_session.post.begin (json, has_data, data_param, io_cancellable);
+		}
+
+		private void on_message (string json, bool has_data, uint8[] data) {
+			message (json, has_data ? new Bytes (data) : null);
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private abstract class BusTask<T> : AsyncTask<T> {
+			public weak Bus parent {
+				get;
+				construct;
+			}
+		}
+	}
+
+	public class Session : Object, AgentMessageSink {
 		public signal void detached (SessionDetachReason reason, Crash? crash);
 
 		public uint pid {
@@ -1772,7 +1951,18 @@ namespace Frida {
 			construct;
 		}
 
+		public AgentSessionId id {
+			get;
+			construct;
+		}
+
 		public AgentSession session {
+			get {
+				return active_session;
+			}
+		}
+
+		public uint persist_timeout {
 			get;
 			construct;
 		}
@@ -1782,37 +1972,54 @@ namespace Frida {
 			construct;
 		}
 
-		public MainContext main_context {
-			get;
-			construct;
-		}
-
+		private State state = ATTACHED;
 		private Promise<bool> close_request;
+
+		internal AgentSession active_session;
+		private AgentSession? obsolete_session;
+
+		private uint last_rx_batch_id = 0;
+		private Gee.LinkedList<PendingMessage> pending_messages = new Gee.LinkedList<PendingMessage> ();
+		private int next_serial = 1;
+		private uint pending_deliveries = 0;
+		private Cancellable delivery_cancellable = new Cancellable ();
 
 		private Gee.HashMap<AgentScriptId?, Script> scripts =
 			new Gee.HashMap<AgentScriptId?, Script> (AgentScriptId.hash, AgentScriptId.equal);
 
-		private Debugger debugger;
+		private Gum.InspectorServer? inspector_server;
 
-		public Session (Device device, uint pid, AgentSession agent_session) {
+		private PeerOptions? nice_options;
+#if HAVE_NICE
+		private Nice.Agent? nice_agent;
+		private uint nice_stream_id;
+		private uint nice_component_id;
+		private SctpConnection? nice_iostream;
+		private DBusConnection? nice_connection;
+		private uint nice_registration_id;
+		private Cancellable? nice_cancellable;
+
+		private MainContext? frida_context;
+		private MainContext? dbus_context;
+#endif
+
+		private enum State {
+			ATTACHED,
+			INTERRUPTED,
+			DETACHED,
+		}
+
+		internal Session (Device device, uint pid, AgentSessionId id, SessionOptions options) {
 			Object (
 				pid: pid,
-				session: agent_session,
-				device: device,
-				main_context: device.main_context
+				id: id,
+				persist_timeout: options.persist_timeout,
+				device: device
 			);
 		}
 
-		construct {
-			session.message_from_script.connect (on_message_from_script);
-		}
-
-		public bool is_detached () {
-			return close_request != null;
-		}
-
 		public async void detach (Cancellable? cancellable = null) throws IOError {
-			yield _do_close (APPLICATION_REQUESTED, null, true, cancellable);
+			yield _do_close (APPLICATION_REQUESTED, CrashInfo.empty (), true, cancellable);
 		}
 
 		public void detach_sync (Cancellable? cancellable = null) throws IOError {
@@ -1826,6 +2033,65 @@ namespace Frida {
 		private class DetachTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error, IOError {
 				yield parent.detach (cancellable);
+			}
+		}
+
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+			switch (state) {
+				case ATTACHED:
+					return;
+				case INTERRUPTED:
+					break;
+				case DETACHED:
+					throw new Error.INVALID_OPERATION ("Session is gone");
+			}
+
+			DBusConnection old_connection = ((DBusProxy) active_session).g_connection;
+			if (old_connection.is_closed ()) {
+				var host_session = yield device.get_host_session (cancellable);
+
+				try {
+					yield host_session.reattach (id, cancellable);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+
+				var agent_session = yield device.provider.link_agent_session (host_session, id, this, cancellable);
+
+				begin_migration (agent_session);
+			}
+
+			if (nice_options != null) {
+				yield do_setup_peer_connection (nice_options, cancellable);
+			}
+
+			uint last_tx_batch_id;
+			try {
+				yield session.resume (last_rx_batch_id, cancellable, out last_tx_batch_id);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			if (last_tx_batch_id != 0) {
+				PendingMessage? m;
+				while ((m = pending_messages.peek ()) != null && m.delivery_attempts > 0 && m.serial <= last_tx_batch_id) {
+					pending_messages.poll ();
+				}
+			}
+
+			delivery_cancellable = new Cancellable ();
+			state = ATTACHED;
+
+			maybe_deliver_pending_messages ();
+		}
+
+		public void resume_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<ResumeTask> ().execute (cancellable);
+		}
+
+		private class ResumeTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.resume (cancellable);
 			}
 		}
 
@@ -1873,32 +2139,13 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentScriptOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script_with_options (source, raw_options, cancellable);
+				script_id = yield session.create_script (source, raw_options, cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					string? name = (options != null) ? options.name : null;
-					if (name == null)
-						name = "";
-
-					if (options != null && options.runtime != DEFAULT) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “runtime” option; please upgrade it");
-					}
-
-					try {
-						script_id = yield session.create_script (name, source, cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
 
 			check_open ();
@@ -1930,29 +2177,14 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentScriptOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script_from_bytes_with_options (bytes.get_data (), raw_options,
+				script_id = yield session.create_script_from_bytes (bytes.get_data (), raw_options,
 					cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					if (options != null && options.runtime != DEFAULT) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “runtime” option; please upgrade it");
-					}
-
-					try {
-						script_id = yield session.create_script_from_bytes (bytes.get_data (), cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
 
 			check_open ();
@@ -1984,32 +2216,13 @@ namespace Frida {
 				throws Error, IOError {
 			check_open ();
 
-			var raw_options = AgentScriptOptions ();
-			if (options != null)
-				raw_options.data = options._serialize ().get_data ();
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
 
 			uint8[] data;
 			try {
-				data = yield session.compile_script_with_options (source, raw_options, cancellable);
+				data = yield session.compile_script (source, raw_options, cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					string? name = (options != null) ? options.name : null;
-					if (name == null)
-						name = "";
-
-					if (options != null && options.runtime != DEFAULT) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “runtime” option; please upgrade it");
-					}
-
-					try {
-						data = yield session.compile_script (name, source, cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
 
 			return new Bytes (data);
@@ -2035,17 +2248,35 @@ namespace Frida {
 		public async void enable_debugger (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			if (debugger != null)
+			if (inspector_server != null)
 				throw new Error.INVALID_OPERATION ("Debugger is already enabled");
 
-			debugger = new Debugger (port, session);
-			var enabled = false;
+			inspector_server = (port != 0)
+				? new Gum.InspectorServer.with_port (port)
+				: new Gum.InspectorServer ();
+			inspector_server.message.connect (on_debugger_message_from_frontend);
+
 			try {
-				yield debugger.enable (cancellable);
-				enabled = true;
-			} finally {
-				if (!enabled)
-					debugger = null;
+				yield session.enable_debugger (cancellable);
+			} catch (GLib.Error e) {
+				inspector_server = null;
+
+				throw_dbus_error (e);
+			}
+
+			if (inspector_server != null) {
+				try {
+					inspector_server.start ();
+				} catch (IOError e) {
+					inspector_server = null;
+
+					try {
+						yield session.disable_debugger (cancellable);
+					} catch (GLib.Error e) {
+					}
+
+					throw new Error.ADDRESS_IN_USE ("%s", e.message);
+				}
 			}
 		}
 
@@ -2066,11 +2297,18 @@ namespace Frida {
 		public async void disable_debugger (Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
-			if (debugger == null)
+			if (inspector_server == null)
 				return;
 
-			yield debugger.disable (cancellable);
-			debugger = null;
+			inspector_server.message.disconnect (on_debugger_message_from_frontend);
+			inspector_server.stop ();
+			inspector_server = null;
+
+			try {
+				yield session.disable_debugger (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
 		}
 
 		public void disable_debugger_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -2083,30 +2321,550 @@ namespace Frida {
 			}
 		}
 
-		public async void enable_jit (Cancellable? cancellable = null) throws Error, IOError {
+		private void on_debugger_message_from_frontend (string message) {
+			_post_to_agent (AgentMessageKind.DEBUGGER, AgentScriptId (0), message);
+		}
+
+		public async void setup_peer_connection (PeerOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
+			yield do_setup_peer_connection (options, cancellable);
+		}
+
+#if HAVE_NICE
+		private async void do_setup_peer_connection (PeerOptions? options, Cancellable? cancellable) throws Error, IOError {
+			AgentSession server_session = active_session;
+
+			frida_context = get_main_context ();
+			dbus_context = yield get_dbus_context ();
+
+			var agent = new Nice.Agent.full (dbus_context, Nice.Compatibility.RFC5245, ICE_TRICKLE);
+			agent.set_software ("Frida");
+			agent.controlling_mode = true;
+
+			uint stream_id = agent.add_stream (1);
+			if (stream_id == 0)
+				throw new Error.NOT_SUPPORTED ("Unable to add stream");
+			uint component_id = 1;
+			agent.set_stream_name (stream_id, "application");
+
+			yield PeerConnection.configure_agent (agent, stream_id, component_id, options, cancellable);
+
+			uint8[] cert_der;
+			string cert_pem, key_pem;
+			yield generate_certificate (out cert_der, out cert_pem, out key_pem);
+
+			TlsCertificate certificate;
 			try {
-				yield session.enable_jit (cancellable);
+				certificate = new TlsCertificate.from_pem (cert_pem + key_pem, -1);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
+			}
+
+			var offer = new PeerSessionDescription ();
+			offer.session_id = PeerSessionId.generate ();
+			agent.get_local_credentials (stream_id, out offer.ice_ufrag, out offer.ice_pwd);
+			offer.ice_trickle = true;
+			offer.fingerprint = PeerConnection.compute_certificate_fingerprint (cert_der);
+			offer.setup = ACTPASS;
+
+			string offer_sdp = offer.to_sdp ();
+
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+
+			IOStream stream = null;
+			server_session.new_candidates.connect (on_new_candidates);
+			server_session.candidate_gathering_done.connect (on_candidate_gathering_done);
+			try {
+				string answer_sdp;
+				try {
+					yield server_session.offer_peer_connection (offer_sdp, raw_options, cancellable, out answer_sdp);
+				} catch (GLib.Error e) {
+					throw_dbus_error (e);
+				}
+
+				var answer = PeerSessionDescription.parse (answer_sdp);
+				agent.set_remote_credentials (stream_id, answer.ice_ufrag, answer.ice_pwd);
+
+				if (nice_agent != null)
+					throw new Error.INVALID_OPERATION ("Peer connection already exists");
+
+				nice_agent = agent;
+				nice_cancellable = new Cancellable ();
+				nice_stream_id = stream_id;
+				nice_component_id = component_id;
+
+				var open_request = new Promise<IOStream> ();
+
+				schedule_on_dbus_thread (() => {
+					open_peer_connection.begin (server_session, certificate, answer, open_request);
+					return false;
+				});
+
+				stream = yield open_request.future.wait_async (cancellable);
+			} finally {
+				server_session.candidate_gathering_done.disconnect (on_candidate_gathering_done);
+				server_session.new_candidates.disconnect (on_new_candidates);
+			}
+
+			try {
+				nice_connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, nice_cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
+			nice_connection.on_closed.connect (on_nice_connection_closed);
+
+			try {
+				nice_registration_id = nice_connection.register_object (ObjectPath.AGENT_MESSAGE_SINK,
+					(AgentMessageSink) this);
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+
+			nice_connection.start_message_processing ();
+
+			AgentSession peer_session;
+			try {
+				peer_session = yield nice_connection.get_proxy (null, ObjectPath.AGENT_SESSION, DO_NOT_LOAD_PROPERTIES,
+					nice_cancellable);
+			} catch (IOError e) {
+				throw_dbus_error (e);
+			}
+
+			try {
+				yield server_session.begin_migration (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			begin_migration (peer_session);
+
+			try {
+				yield server_session.commit_migration (cancellable);
+			} catch (GLib.Error e) {
+				cancel_migration (peer_session);
+				throw_dbus_error (e);
+			}
+
+			nice_options = (options != null) ? options : new PeerOptions ();
 		}
 
-		public void enable_jit_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<EnableJitTask> ().execute (cancellable);
-		}
+		private async void teardown_peer_connection (Cancellable? cancellable) throws IOError {
+			Nice.Agent? agent = nice_agent;
+			DBusConnection? conn = nice_connection;
 
-		private class EnableJitTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.enable_jit (cancellable);
+			discard_peer_connection ();
+
+			if (conn != null) {
+				try {
+					yield conn.close (cancellable);
+				} catch (GLib.Error e) {
+				}
+			}
+
+			if (agent != null) {
+				schedule_on_dbus_thread (() => {
+					agent.close_async.begin ();
+
+					schedule_on_frida_thread (() => {
+						teardown_peer_connection.callback ();
+						return false;
+					});
+
+					return false;
+				});
+				yield;
 			}
 		}
 
-		private void on_message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) {
-			var script = scripts[script_id];
-			if (script != null)
-				script.message (message, has_data ? new Bytes (data) : null);
+		private void discard_peer_connection () {
+			nice_cancellable = null;
+
+			if (nice_registration_id != 0) {
+				nice_connection.unregister_object (nice_registration_id);
+				nice_registration_id = 0;
+			}
+
+			if (nice_connection != null) {
+				nice_connection.on_closed.disconnect (on_nice_connection_closed);
+				nice_connection = null;
+			}
+
+			nice_iostream = null;
+
+			nice_component_id = 0;
+			nice_stream_id = 0;
+
+			nice_agent = null;
+		}
+
+		private async void open_peer_connection (AgentSession server_session, TlsCertificate certificate,
+				PeerSessionDescription answer, Promise<IOStream> promise) {
+			Nice.Agent agent = nice_agent;
+			DtlsConnection? tc = null;
+			ulong candidate_handler = 0;
+			ulong gathering_handler = 0;
+			ulong accept_handler = 0;
+			try {
+				agent.component_state_changed.connect (on_component_state_changed);
+
+				var pending_candidates = new Gee.ArrayList<string> ();
+				candidate_handler = agent.new_candidate_full.connect (candidate => {
+					string candidate_sdp = agent.generate_local_candidate_sdp (candidate);
+					pending_candidates.add (candidate_sdp);
+					if (pending_candidates.size == 1) {
+						schedule_on_dbus_thread (() => {
+							var stolen_candidates = pending_candidates;
+							pending_candidates = new Gee.ArrayList<string> ();
+
+							schedule_on_frida_thread (() => {
+								if (nice_agent == null)
+									return false;
+
+								server_session.add_candidates.begin (stolen_candidates.to_array (),
+									nice_cancellable);
+
+								return false;
+							});
+
+							return false;
+						});
+					}
+				});
+
+				gathering_handler = agent.candidate_gathering_done.connect (stream_id => {
+					schedule_on_dbus_thread (() => {
+						schedule_on_frida_thread (() => {
+							if (nice_agent == null)
+								return false;
+							server_session.notify_candidate_gathering_done.begin (nice_cancellable);
+							return false;
+						});
+						return false;
+					});
+				});
+
+				if (!agent.gather_candidates (nice_stream_id))
+					throw new Error.NOT_SUPPORTED ("Unable to gather local candidates");
+
+				var socket = new PeerSocket (agent, nice_stream_id, nice_component_id);
+
+				if (answer.setup == ACTIVE) {
+					var dsc = DtlsServerConnection.new (socket, certificate);
+					dsc.authentication_mode = REQUIRED;
+					tc = dsc;
+				} else {
+					tc = DtlsClientConnection.new (socket, null);
+					tc.set_certificate (certificate);
+				}
+				tc.set_database (null);
+				accept_handler = tc.accept_certificate.connect ((peer_cert, errors) => {
+					return PeerConnection.compute_certificate_fingerprint (peer_cert.certificate.data) == answer.fingerprint;
+				});
+				yield tc.handshake_async (Priority.DEFAULT, nice_cancellable);
+
+				nice_iostream = new SctpConnection (tc, answer.setup, answer.sctp_port);
+
+				schedule_on_frida_thread (() => {
+					promise.resolve (nice_iostream);
+					return false;
+				});
+			} catch (GLib.Error e) {
+				string message = (e is IOError.CANCELLED)
+					? "Unable to establish peer connection"
+					: e.message;
+				Error error = new Error.TRANSPORT ("%s", message);
+				schedule_on_frida_thread (() => {
+					nice_component_id = 0;
+					nice_stream_id = 0;
+					nice_cancellable = null;
+					nice_agent = null;
+
+					promise.reject (error);
+					return false;
+				});
+			} finally {
+				if (accept_handler != 0)
+					tc.disconnect (accept_handler);
+				if (gathering_handler != 0)
+					agent.disconnect (gathering_handler);
+				if (candidate_handler != 0)
+					agent.disconnect (candidate_handler);
+			}
+		}
+
+		private void on_component_state_changed (uint stream_id, uint component_id, Nice.ComponentState state) {
+			if (state == FAILED)
+				nice_cancellable.cancel ();
+		}
+
+		private void on_new_candidates (string[] candidate_sdps) {
+			Nice.Agent? agent = nice_agent;
+			if (agent == null)
+				return;
+
+			string[] candidate_sdps_copy = candidate_sdps;
+			schedule_on_dbus_thread (() => {
+				var candidates = new SList<Nice.Candidate> ();
+				int i = 0;
+				foreach (unowned string sdp in candidate_sdps_copy) {
+					var candidate = agent.parse_remote_candidate_sdp (nice_stream_id, sdp);
+					if (candidate == null)
+						return false;
+					candidates.append (candidate);
+					i++;
+				}
+
+				agent.set_remote_candidates (nice_stream_id, nice_component_id, candidates);
+
+				return false;
+			});
+		}
+
+		private void on_candidate_gathering_done () {
+			Nice.Agent? agent = nice_agent;
+			if (agent == null)
+				return;
+
+			schedule_on_dbus_thread (() => {
+				agent.peer_candidate_gathering_done (nice_stream_id);
+
+				return false;
+			});
+		}
+
+		private void on_nice_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
+			handle_nice_connection_closure.begin ();
+		}
+
+		private async void handle_nice_connection_closure () {
+			try {
+				yield teardown_peer_connection (null);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+
+			if (persist_timeout != 0) {
+				if (state != ATTACHED)
+					return;
+				state = INTERRUPTED;
+				active_session = obsolete_session;
+				obsolete_session = null;
+				delivery_cancellable.cancel ();
+				detached (CONNECTION_TERMINATED, null);
+			} else {
+				_do_close.begin (CONNECTION_TERMINATED, CrashInfo.empty (), false, null);
+			}
+		}
+
+		private void schedule_on_frida_thread (owned SourceFunc function) {
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (frida_context);
+		}
+
+		private void schedule_on_dbus_thread (owned SourceFunc function) {
+			assert (dbus_context != null);
+
+			var source = new IdleSource ();
+			source.set_callback ((owned) function);
+			source.attach (dbus_context);
+		}
+#else
+		private async void do_setup_peer_connection (PeerOptions? options, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.NOT_SUPPORTED ("Peer-to-peer support not available due to build configuration");
+		}
+
+		private async void teardown_peer_connection (Cancellable? cancellable) throws IOError {
+		}
+
+		private void discard_peer_connection () {
+		}
+#endif
+
+		public void setup_peer_connection_sync (PeerOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
+			var task = create<SetupPeerConnectionTask> ();
+			task.options = options;
+			task.execute (cancellable);
+		}
+
+		private class SetupPeerConnectionTask : SessionTask<void> {
+			public PeerOptions? options;
+
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.setup_peer_connection (options, cancellable);
+			}
+		}
+
+		public async PortalMembership join_portal (string address, PortalOptions? options = null, Cancellable? cancellable = null)
+				throws Error, IOError {
+			check_open ();
+
+			var raw_options = (options != null) ? options._serialize () : make_options_dict ();
+
+			PortalMembershipId membership_id;
+			try {
+				membership_id = yield session.join_portal (address, raw_options, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			return new PortalMembership (this, membership_id);
+		}
+
+		public PortalMembership join_portal_sync (string address, PortalOptions? options = null, Cancellable? cancellable = null)
+				throws Error, IOError {
+			var task = create<JoinPortalTask> ();
+			task.address = address;
+			task.options = options;
+			return task.execute (cancellable);
+		}
+
+		private class JoinPortalTask : SessionTask<PortalMembership> {
+			public string address;
+			public PortalOptions? options;
+
+			protected override async PortalMembership perform_operation () throws Error, IOError {
+				return yield parent.join_portal (address, options, cancellable);
+			}
+		}
+
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
+			if (state == INTERRUPTED)
+				throw new Error.INVALID_OPERATION ("Cannot receive messages while interrupted");
+
+			foreach (var m in messages) {
+				switch (m.kind) {
+					case SCRIPT: {
+						var script = scripts[m.script_id];
+						if (script != null)
+							script.message (m.text, m.has_data ? new Bytes (m.data) : null);
+						break;
+					}
+					case DEBUGGER:
+						if (inspector_server != null)
+							inspector_server.post_message (m.text);
+						break;
+				}
+			}
+
+			last_rx_batch_id = batch_id;
+		}
+
+		internal void _post_to_agent (AgentMessageKind kind, AgentScriptId script_id, string text, Bytes? data = null) {
+			if (state == DETACHED)
+				return;
+			pending_messages.offer (new PendingMessage (next_serial++, kind, script_id, text, data));
+			maybe_deliver_pending_messages ();
+		}
+
+		private void maybe_deliver_pending_messages () {
+			if (state != ATTACHED)
+				return;
+
+			AgentSession sink = active_session;
+
+			if (pending_messages.is_empty)
+				return;
+
+			var batch = new Gee.ArrayList<PendingMessage> ();
+			void * items = null;
+			int n_items = 0;
+			size_t total_size = 0;
+			size_t max_size = 4 * 1024 * 1024;
+			PendingMessage? m;
+			while ((m = pending_messages.peek ()) != null) {
+				size_t message_size = m.estimate_size_in_bytes ();
+				if (total_size + message_size > max_size && !batch.is_empty)
+					break;
+				pending_messages.poll ();
+				batch.add (m);
+
+				n_items++;
+				items = realloc (items, n_items * sizeof (AgentMessage));
+
+				AgentMessage * am = (AgentMessage *) items + n_items - 1;
+
+				am->kind = m.kind;
+				am->script_id = m.script_id;
+
+				*((void **) &am->text) = m.text;
+
+				unowned Bytes? data = m.data;
+				am->has_data = data != null;
+				*((void **) &am->data) = am->has_data ? data.get_data () : null;
+				am->data.length = am->has_data ? data.length : 0;
+
+				total_size += message_size;
+			}
+
+			if (persist_timeout == 0)
+				emit_batch (sink, batch, items);
+			else
+				deliver_batch.begin (sink, batch, items);
+		}
+
+		private void emit_batch (AgentSession sink, Gee.ArrayList<PendingMessage> messages, void * items) {
+			unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+			items_arr.length = messages.size;
+
+			sink.post_messages.begin (items_arr, 0, delivery_cancellable);
+
+			free (items);
+		}
+
+		private async void deliver_batch (AgentSession sink, Gee.ArrayList<PendingMessage> messages, void * items) {
+			bool success = false;
+			pending_deliveries++;
+			try {
+				int n = messages.size;
+
+				foreach (var message in messages)
+					message.delivery_attempts++;
+
+				unowned AgentMessage[] items_arr = (AgentMessage[]) items;
+				items_arr.length = n;
+
+				uint batch_id = messages[n - 1].serial;
+
+				yield sink.post_messages (items_arr, batch_id, delivery_cancellable);
+
+				success = true;
+			} catch (GLib.Error e) {
+				pending_messages.add_all (messages);
+				pending_messages.sort ((a, b) => a.serial - b.serial);
+			} finally {
+				pending_deliveries--;
+				if (pending_deliveries == 0 && success)
+					next_serial = 1;
+
+				free (items);
+			}
+		}
+
+		private class PendingMessage {
+			public int serial;
+			public AgentMessageKind kind;
+			public AgentScriptId script_id;
+			public string text;
+			public Bytes? data;
+			public uint delivery_attempts;
+
+			public PendingMessage (int serial, AgentMessageKind kind, AgentScriptId script_id, string text,
+					Bytes? data = null) {
+				this.serial = serial;
+				this.kind = kind;
+				this.script_id = script_id;
+				this.text = text;
+				this.data = data;
+			}
+
+			public size_t estimate_size_in_bytes () {
+				return sizeof (AgentMessage) + text.length + 1 + ((data != null) ? data.length : 0);
+			}
 		}
 
 		public void _release_script (AgentScriptId script_id) {
@@ -2115,12 +2873,30 @@ namespace Frida {
 		}
 
 		private void check_open () throws Error {
-			if (close_request != null)
-				throw new Error.INVALID_OPERATION ("Session is detached");
+			switch (state) {
+				case ATTACHED:
+					break;
+				case INTERRUPTED:
+					throw new Error.INVALID_OPERATION ("Session was interrupted; call resume()");
+				case DETACHED:
+					throw new Error.INVALID_OPERATION ("Session is gone");
+			}
 		}
 
-		public async void _do_close (SessionDetachReason reason, CrashInfo? crash, bool may_block, Cancellable? cancellable)
-				throws IOError {
+		internal void _on_detached (SessionDetachReason reason, CrashInfo crash) {
+			if (persist_timeout != 0 && reason == CONNECTION_TERMINATED) {
+				if (state != ATTACHED)
+					return;
+				state = INTERRUPTED;
+				delivery_cancellable.cancel ();
+				detached (reason, null);
+			} else {
+				_do_close.begin (reason, crash, false, null);
+			}
+		}
+
+		internal async void _do_close (SessionDetachReason reason, CrashInfo crash, bool may_block,
+				Cancellable? cancellable) throws IOError {
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -2132,25 +2908,26 @@ namespace Frida {
 			}
 			close_request = new Promise<bool> ();
 
+			state = DETACHED;
+
 			try {
-				if (debugger != null) {
-					try {
-						yield debugger.disable (cancellable);
-					} catch (Error e) {
-					}
-					debugger = null;
+				if (inspector_server != null) {
+					inspector_server.message.disconnect (on_debugger_message_from_frontend);
+					inspector_server.stop ();
+					inspector_server = null;
 				}
 
 				foreach (var script in scripts.values.to_array ())
 					yield script._do_close (may_block, cancellable);
 
 				if (may_block)
-					session.close.begin (cancellable);
-				session.message_from_script.disconnect (on_message_from_script);
+					close_session_and_peer_connection.begin (cancellable);
+				else
+					discard_peer_connection ();
 
 				yield device._release_session (this, may_block, cancellable);
 
-				detached (reason, (crash != null) ? Crash.from_info (crash) : null);
+				detached (reason, Crash.from_info (crash));
 
 				close_request.resolve (true);
 			} catch (IOError e) {
@@ -2160,8 +2937,33 @@ namespace Frida {
 			}
 		}
 
+		private async void close_session_and_peer_connection (Cancellable? cancellable) throws IOError {
+			try {
+				yield session.close (cancellable);
+			} catch (GLib.Error e) {
+				if (e is IOError.CANCELLED) {
+					discard_peer_connection ();
+					return;
+				}
+			}
+
+			yield teardown_peer_connection (cancellable);
+		}
+
+		private void begin_migration (AgentSession new_session) {
+			obsolete_session = active_session;
+			active_session = new_session;
+		}
+
+#if HAVE_NICE
+		private void cancel_migration (AgentSession new_session) {
+			active_session = obsolete_session;
+			obsolete_session = null;
+		}
+#endif
+
 		private T create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
+			return Object.new (typeof (T), parent: this);
 		}
 
 		private abstract class SessionTask<T> : AsyncTask<T> {
@@ -2174,9 +2976,9 @@ namespace Frida {
 
 	public class Script : Object {
 		public signal void destroyed ();
-		public signal void message (string message, Bytes? data);
+		public signal void message (string json, Bytes? data);
 
-		public uint id {
+		public AgentScriptId id {
 			get;
 			construct;
 		}
@@ -2186,19 +2988,10 @@ namespace Frida {
 			construct;
 		}
 
-		public MainContext main_context {
-			get;
-			construct;
-		}
-
 		private Promise<bool> close_request;
 
-		public Script (Session session, AgentScriptId script_id) {
-			Object (
-				id: script_id.handle,
-				session: session,
-				main_context: session.main_context
-			);
+		internal Script (Session session, AgentScriptId script_id) {
+			Object (id: script_id, session: session);
 		}
 
 		public bool is_destroyed () {
@@ -2209,7 +3002,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.load_script (AgentScriptId (id), cancellable);
+				yield session.session.load_script (id, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
@@ -2245,7 +3038,7 @@ namespace Frida {
 			check_open ();
 
 			try {
-				yield session.session.eternalize_script (AgentScriptId (id), cancellable);
+				yield session.session.eternalize_script (id, cancellable);
 
 				yield _do_close (false, cancellable);
 			} catch (GLib.Error e) {
@@ -2263,33 +3056,25 @@ namespace Frida {
 			}
 		}
 
-		public async void post (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			check_open ();
-
-			var has_data = data != null;
-			var data_param = has_data ? data.get_data () : new uint8[0];
-
-			try {
-				yield session.session.post_to_script (AgentScriptId (id), message, has_data, data_param, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
+		public void post (string json, Bytes? data = null) {
+			MainContext context = get_main_context ();
+			if (context.is_owner ()) {
+				do_post (json, data);
+			} else {
+				var source = new IdleSource ();
+				source.set_callback (() => {
+					do_post (json, data);
+					return false;
+				});
+				source.attach (context);
 			}
 		}
 
-		public void post_sync (string message, Bytes? data = null, Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<PostTask> ();
-			task.message = message;
-			task.data = data;
-			task.execute (cancellable);
-		}
+		private void do_post (string json, Bytes? data) {
+			if (close_request != null)
+				return;
 
-		private class PostTask : ScriptTask<void> {
-			public string message;
-			public Bytes? data;
-
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.post (message, data, cancellable);
-			}
+			session._post_to_agent (AgentMessageKind.SCRIPT, id, json, data);
 		}
 
 		private void check_open () throws Error {
@@ -2297,7 +3082,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Script is destroyed");
 		}
 
-		public async void _do_close (bool may_block, Cancellable? cancellable) throws IOError {
+		internal async void _do_close (bool may_block, Cancellable? cancellable) throws IOError {
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -2310,13 +3095,12 @@ namespace Frida {
 			close_request = new Promise<bool> ();
 
 			var parent = session;
-			var script_id = AgentScriptId (id);
 
-			parent._release_script (script_id);
+			parent._release_script (id);
 
 			if (may_block) {
 				try {
-					yield parent.session.destroy_script (script_id, cancellable);
+					yield parent.session.destroy_script (id, cancellable);
 				} catch (GLib.Error e) {
 				}
 			}
@@ -2327,11 +3111,56 @@ namespace Frida {
 		}
 
 		private T create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
+			return Object.new (typeof (T), parent: this);
 		}
 
 		private abstract class ScriptTask<T> : AsyncTask<T> {
 			public weak Script parent {
+				get;
+				construct;
+			}
+		}
+	}
+
+	public class PortalMembership : Object {
+		public uint id {
+			get;
+			construct;
+		}
+
+		public Session session {
+			get;
+			construct;
+		}
+
+		internal PortalMembership (Session session, PortalMembershipId membership_id) {
+			Object (id: membership_id.handle, session: session);
+		}
+
+		public async void terminate (Cancellable? cancellable = null) throws Error, IOError {
+			try {
+				yield session.session.leave_portal (PortalMembershipId (id), cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void terminate_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<TerminateTask> ().execute (cancellable);
+		}
+
+		private class TerminateTask : PortalMembershipTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.terminate (cancellable);
+			}
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private abstract class PortalMembershipTask<T> : AsyncTask<T> {
+			public weak PortalMembership parent {
 				get;
 				construct;
 			}
@@ -2482,7 +3311,7 @@ namespace Frida {
 		}
 
 		private T create<T> () {
-			return Object.new (typeof (T), main_context: get_main_context (), parent: this);
+			return Object.new (typeof (T), parent: this);
 		}
 
 		private abstract class InjectorTask<T> : AsyncTask<T> {
@@ -2491,162 +3320,6 @@ namespace Frida {
 				construct;
 			}
 		}
-	}
-
-	public class FileMonitor : Object {
-		public signal void change (string file_path, string? other_file_path, FileMonitorEvent event);
-
-		public string path {
-			get;
-			construct;
-		}
-
-		public MainContext main_context {
-			get;
-			construct;
-		}
-
-		private GLib.FileMonitor monitor;
-
-		public FileMonitor (string path) {
-			Object (path: path, main_context: get_main_context ());
-		}
-
-		~FileMonitor () {
-			clear ();
-		}
-
-		public async void enable (Cancellable? cancellable = null) throws Error, IOError {
-			if (monitor != null)
-				throw new Error.INVALID_OPERATION ("Already enabled");
-
-			var file = File.parse_name (path);
-
-			try {
-				monitor = file.monitor (FileMonitorFlags.NONE, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.INVALID_OPERATION ("%s", e.message);
-			}
-
-			monitor.changed.connect (on_changed);
-		}
-
-		public void enable_sync (Cancellable? cancellable = null) throws Error, IOError {
-			var task = create<EnableTask> () as EnableTask;
-			task.execute (cancellable);
-		}
-
-		private class EnableTask : FileMonitorTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.enable (cancellable);
-			}
-		}
-
-		public async void disable (Cancellable? cancellable = null) throws Error, IOError {
-			if (monitor == null)
-				throw new Error.INVALID_OPERATION ("Already disabled");
-
-			clear ();
-		}
-
-		private void clear () {
-			if (monitor == null)
-				return;
-
-			monitor.changed.disconnect (on_changed);
-			monitor.cancel ();
-			monitor = null;
-		}
-
-		public void disable_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<DisableTask> ().execute (cancellable);
-		}
-
-		private class DisableTask : FileMonitorTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.disable (cancellable);
-			}
-		}
-
-		private void on_changed (File file, File? other_file, FileMonitorEvent event) {
-			change (file.get_parse_name (), (other_file != null) ? other_file.get_parse_name () : null, event);
-		}
-
-		private T create<T> () {
-			return Object.new (typeof (T), main_context: main_context, parent: this);
-		}
-
-		private abstract class FileMonitorTask<T> : AsyncTask<T> {
-			public weak FileMonitor parent {
-				get;
-				construct;
-			}
-		}
-	}
-
-	private abstract class AsyncTask<T> : Object {
-		public MainContext main_context {
-			get;
-			construct;
-		}
-
-		private MainLoop loop;
-		private bool completed;
-		private Mutex mutex;
-		private Cond cond;
-
-		private T result;
-		private GLib.Error? error;
-		protected Cancellable? cancellable;
-
-		public T execute (Cancellable? cancellable) throws Error, IOError {
-			this.cancellable = cancellable;
-
-			if (main_context.is_owner ())
-				loop = new MainLoop (main_context);
-
-			var source = new IdleSource ();
-			source.set_callback (() => {
-				do_perform_operation.begin ();
-				return false;
-			});
-			source.attach (main_context);
-
-			if (loop != null) {
-				loop.run ();
-			} else {
-				mutex.lock ();
-				while (!completed)
-					cond.wait (mutex);
-				mutex.unlock ();
-			}
-
-			cancellable.set_error_if_cancelled ();
-
-			if (error != null)
-				throw_api_error (error);
-
-			return result;
-		}
-
-		private async void do_perform_operation () {
-			try {
-				result = yield perform_operation ();
-			} catch (GLib.Error e) {
-				error = e;
-			}
-
-			if (loop != null) {
-				loop.quit ();
-			} else {
-				mutex.lock ();
-				completed = true;
-				cond.signal ();
-				mutex.unlock ();
-			}
-		}
-
-		protected abstract async T perform_operation () throws Error, IOError;
 	}
 
 	private Mutex gc_mutex;

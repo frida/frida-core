@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <sys/wait.h>
 #ifdef HAVE_DARWIN
+# include <fcntl.h>
 # include <mach-o/dyld.h>
 # include <signal.h>
 # include <spawn.h>
@@ -128,6 +129,8 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
   else
   {
 #ifdef HAVE_DARWIN
+    posix_spawn_file_actions_t actions;
+    const gchar * stdio_output_path;
     posix_spawnattr_t attr;
     sigset_t signal_mask_set;
     int result;
@@ -135,6 +138,21 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
     gchar * special_path;
     size_t ocount;
     pid_t pid;
+
+    posix_spawn_file_actions_init (&actions);
+    posix_spawn_file_actions_addinherit_np (&actions, 0);
+
+    stdio_output_path = g_getenv ("FRIDA_STDIO_OUTPUT");
+    if (stdio_output_path != NULL)
+    {
+      posix_spawn_file_actions_addopen (&actions, 1, stdio_output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      posix_spawn_file_actions_adddup2 (&actions, 1, 2);
+    }
+    else
+    {
+      posix_spawn_file_actions_addinherit_np (&actions, 1);
+      posix_spawn_file_actions_addinherit_np (&actions, 2);
+    }
 
     posix_spawnattr_init (&attr);
     sigemptyset (&signal_mask_set);
@@ -164,9 +182,10 @@ frida_test_process_backend_create (const char * path, gchar ** argv,
 # endif
     posix_spawnattr_setbinpref_np (&attr, 1, &pref, &ocount);
 
-    result = posix_spawn (&pid, path, NULL, &attr, argv, envp);
+    result = posix_spawn (&pid, path, &actions, &attr, argv, envp);
 
     posix_spawnattr_destroy (&attr);
+    posix_spawn_file_actions_destroy (&actions);
 
     if (result == 0)
     {

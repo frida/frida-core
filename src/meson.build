@@ -1,12 +1,15 @@
-facade = files('frida.vala')
-
 base_sources = [
-  facade,
+  'frida.vala',
   'frida-glue.c',
-  'debugger.vala',
+  'control-service.vala',
+  'portal-service.vala',
+  'web-gateway-service.vala',
+  'endpoint.vala',
   'host-session-service.vala',
   'agent-container.vala',
   'system.vala',
+  'file-monitor.vala',
+  'async-task.vala',
 ]
 
 windows_sources = []
@@ -77,7 +80,7 @@ if host_os_family == 'darwin'
   helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
     vala_args: ['--pkg=frida-gum-darwin-1.0', '--pkg=posix'],
-    dependencies: [gmodule_dep, gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
+    dependencies: [gmodule_dep, gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep, pipe_dep],
   )
   backend_libs += [helper_backend]
 
@@ -98,7 +101,7 @@ if host_os_family == 'darwin'
     link_args: helper_link_args + backend_libs_private,
     link_depends: helper_link_depends,
     link_with: helper_backend,
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep, pipe_dep],
+    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep, pipe_dep],
     override_options: ['b_asneeded=false'],
   )
 
@@ -206,7 +209,7 @@ if host_os_family == 'linux'
   helper_backend = static_library('frida-helper-backend', helper_backend_sources,
     c_args: frida_component_cflags,
     vala_args: ['--pkg=posix', '--pkg=frida-gum-linux-1.0'],
-    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, interfaces_dep] + helper_backend_extra_deps,
+    dependencies: [gio_dep, gio_unix_dep, gee_dep, gum_dep, base_dep] + helper_backend_extra_deps,
   )
   backend_libs += [helper_backend]
 
@@ -221,7 +224,7 @@ if host_os_family == 'linux'
     link_args: helper_link_args,
     link_depends: helper_link_depends,
     link_with: helper_backend,
-    dependencies: [gio_dep, gee_dep, gum_dep, interfaces_dep],
+    dependencies: [gio_dep, gee_dep, gum_dep, base_dep],
   )
 
   helper = custom_target('frida-helper',
@@ -358,8 +361,8 @@ if host_os_family != 'windows'
   backend_deps += [gio_unix_dep]
 endif
 
-internal_libs = [interfaces, pipe] + backend_libs
-internal_deps = [interfaces_dep, pipe_dep]
+internal_libs = [base, pipe] + backend_libs
+internal_deps = [base_dep, pipe_dep]
 
 core = library('frida-core', core_sources,
   c_args: frida_component_cflags,
@@ -367,7 +370,7 @@ core = library('frida-core', core_sources,
   vala_gir: 'Frida-' + api_version + '.gir',
   link_args: backend_libs_private,
   link_with: backend_libs,
-  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, tls_provider_dep] + backend_deps + internal_deps,
+  dependencies: [glib_dep, gobject_dep, gmodule_dep, gio_dep, gee_dep, json_glib_dep, libsoup_dep, gum_dep, gumjs_dep, tls_provider_dep] + backend_deps + internal_deps,
 )
 
 core_dep = declare_dependency(

@@ -187,23 +187,12 @@ gmodule_dep = dependency('gmodule-2.0')
 gio_dep = dependency('gio-2.0')
 gee_dep = dependency('gee-0.8')
 json_glib_dep = dependency('json-glib-1.0')
+libsoup_dep = dependency('libsoup-2.4')
 gum_dep = dependency('frida-gum-1.0')
 gumjs_dep = dependency('frida-gumjs-1.0')
 
-if host_os_family == 'windows'
-  tls_provider_dep = dependency('gioschannel', required: false)
-  if tls_provider_dep.found()
-    cdata.set('HAVE_GIOSCHANNEL', 1)
-    vala_flags += ['--define=HAVE_GIOSCHANNEL']
-  endif
-else
+if host_os_family != 'windows'
   gio_unix_dep = dependency('gio-unix-2.0')
-
-  tls_provider_dep = dependency('gioopenssl', required: false)
-  if tls_provider_dep.found()
-    cdata.set('HAVE_GIOOPENSSL', 1)
-    vala_flags += ['--define=HAVE_GIOOPENSSL']
-  endif
 endif
 
 backend_deps_private = []
@@ -215,8 +204,24 @@ if host_os == 'android'
   backend_deps_private += [libselinux_dep, libsepol_dep]
 endif
 
+tls_provider_dep = dependency('gioopenssl', required: false)
 if tls_provider_dep.found()
+  cdata.set('HAVE_GIOOPENSSL', 1)
+  vala_flags += ['--define=HAVE_GIOOPENSSL']
   backend_deps_private += tls_provider_dep
+endif
+
+nice_dep = dependency('nice', required: false)
+if nice_dep.found()
+  openssl_dep = dependency('openssl')
+  usrsctp_dep = dependency('usrsctp')
+
+  cdata.set('HAVE_NICE', 1)
+  vala_flags += ['--define=HAVE_NICE']
+  backend_deps_private += [nice_dep, openssl_dep, usrsctp_dep]
+else
+  openssl_dep = []
+  usrsctp_dep = []
 endif
 
 if host_os_family == 'darwin'
@@ -279,6 +284,8 @@ subdir('tools')
 subdir('lib')
 subdir('src')
 subdir('server')
+subdir('portal')
+subdir('web-gateway')
 subdir('inject')
 
 if get_option('tests')

@@ -14,25 +14,17 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
     </Filter>
     <Filter Include="Source Files\generated">
-      <UniqueIdentifier>{6c15c760-cd5b-41c4-ad64-83283571aeaf}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\generated">
-      <UniqueIdentifier>{984e0fc8-e24c-4868-a432-6dd66cc7db4d}</UniqueIdentifier>
+      <UniqueIdentifier>{a5288905-10d8-4ee8-9b8f-e9fcfe9bfcc0}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(IntDir)session.c">
-      <Filter>Source Files\generated</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="session.vala">
+    <CustomBuild Include="web-gateway\web-gateway.vala">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)frida-interfaces.h">
-      <Filter>Header Files\generated</Filter>
-    </ClInclude>
+    <ClCompile Include="$(IntDir)web-gateway\web-gateway.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

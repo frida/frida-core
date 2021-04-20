@@ -37,8 +37,12 @@ namespace Frida.Test {
 		}
 
 		~Process () {
-			if (handle != null && auto_kill)
-				kill ();
+			if (handle != null && auto_kill) {
+				try {
+					kill ();
+				} catch (Error e) {
+				}
+			}
 		}
 
 		public static Process create (string path, string[]? args = null, string[]? env = null, Arch arch = Arch.CURRENT) throws Error {
@@ -88,11 +92,19 @@ namespace Frida.Test {
 			handle = null;
 		}
 
-		public extern ResourceUsageSnapshot snapshot_resource_usage ();
+		public ResourceUsageSnapshot snapshot_resource_usage () {
+			return ResourceUsageSnapshot.create_for_pid (id);
+		}
 	}
 
 	public class ResourceUsageSnapshot : Object {
 		protected HashTable<string, uint> metrics = new HashTable<string, uint> (str_hash, str_equal);
+
+		public static ResourceUsageSnapshot create_for_self () {
+			return create_for_pid (0);
+		}
+
+		public extern static ResourceUsageSnapshot create_for_pid (uint pid);
 
 		public void print () {
 			printerr ("TYPE\tCOUNT\n");

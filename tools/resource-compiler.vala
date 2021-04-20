@@ -534,7 +534,7 @@ namespace Frida {
 			~ObjWriter () {
 				try {
 					close ();
-				} catch (IOError e) {
+				} catch (Error e) {
 				}
 			}
 

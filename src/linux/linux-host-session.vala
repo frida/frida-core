@@ -38,39 +38,43 @@ namespace Frida {
 		public async void close (Cancellable? cancellable) throws IOError {
 			if (host_session == null)
 				return;
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
-			assert (location == null);
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
-				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+				throw new Error.INVALID_OPERATION ("Already created");
+
 			var tempdir = new TemporaryDirectory ();
+
 			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
-			host_session.agent_session_closed.connect (on_agent_session_closed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
+
 			return host_session;
 		}
 
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return this.host_session.obtain_agent_session (agent_session_id);
+
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-				CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 	}
 
@@ -1216,15 +1220,15 @@ namespace Frida {
 		public static PackageEntrypoint parse (string package, HostSpawnOptions options) throws Error {
 			PackageEntrypoint? entrypoint = null;
 
-			var aux_options = options.load_aux ();
+			HashTable<string, Variant> aux = options.aux;
 
-			if (aux_options.contains ("activity")) {
-				string? activity = null;
-				if (!aux_options.lookup ("activity", "s", out activity))
+			Variant? activity_value = aux["activity"];
+			if (activity_value != null) {
+				if (!activity_value.is_of_type (VariantType.STRING))
 					throw new Error.INVALID_ARGUMENT ("The 'activity' option must be a string");
-				activity = canonicalize_class_name (activity, package);
+				string activity = canonicalize_class_name (activity_value.get_string (), package);
 
-				if (aux_options.contains ("action")) {
+				if (aux.contains ("action")) {
 					throw new Error.INVALID_ARGUMENT (
 						"The 'action' option should only be specified when a 'receiver' is specified");
 				}
@@ -1232,22 +1236,23 @@ namespace Frida {
 				entrypoint = new ActivityEntrypoint (activity);
 			}
 
-			if (aux_options.contains ("receiver")) {
+			Variant? receiver_value = aux["receiver"];
+			if (receiver_value != null) {
+				if (!receiver_value.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
+				string receiver = canonicalize_class_name (receiver_value.get_string (), package);
+
 				if (entrypoint != null) {
 					throw new Error.INVALID_ARGUMENT (
 						"Only one of 'activity' or 'receiver' (with 'action') may be specified");
 				}
 
-				string? receiver = null;
-				if (!aux_options.lookup ("receiver", "s", out receiver))
-					throw new Error.INVALID_ARGUMENT ("The 'receiver' option must be a string");
-				receiver = canonicalize_class_name (receiver, package);
-
-				string? action = null;
-				if (!aux_options.contains ("action"))
+				Variant? action_value = aux["action"];
+				if (action_value == null)
 					throw new Error.INVALID_ARGUMENT ("The 'action' option is required when 'receiver' is specified");
-				if (!aux_options.lookup ("action", "s", out action))
+				if (!action_value.is_of_type (VariantType.STRING))
 					throw new Error.INVALID_ARGUMENT ("The 'action' option must be a string");
+				string action = action_value.get_string ();
 
 				entrypoint = new BroadcastReceiverEntrypoint (receiver, action);
 			}
@@ -1255,11 +1260,11 @@ namespace Frida {
 			if (entrypoint == null)
 				entrypoint = new DefaultActivityEntrypoint ();
 
-			if (aux_options.contains ("uid")) {
-				int64 uid = 0;
-				if (!aux_options.lookup ("uid", "x", out uid))
+			Variant? uid_value = aux["uid"];
+			if (uid_value != null) {
+				if (!uid_value.is_of_type (VariantType.INT64))
 					throw new Error.INVALID_ARGUMENT ("The 'uid' option must be an integer");
-				entrypoint.uid = (int) uid;
+				entrypoint.uid = (int) uid_value.get_int64 ();
 			}
 
 			return entrypoint;

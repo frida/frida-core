@@ -125,21 +125,24 @@ namespace Frida.Droidy.Injector {
 			var tracker = new Frida.Droidy.JDWPTracker ();
 			yield tracker.open (device_serial, cancellable);
 
-			tracker.debugger_attached.connect (pid => {
+			var attached_handler = tracker.debugger_attached.connect (pid => {
 				target_pid = pid;
 				if (waiting)
 					inject_gadget.callback ();
 			});
+			try {
+				yield Frida.Droidy.ShellCommand.run (
+					"am start -D $(cmd package resolve-activity --brief '%s'| tail -n 1)".printf (package),
+					device_serial, cancellable
+				);
 
-			yield Frida.Droidy.ShellCommand.run (
-				"am start -D $(cmd package resolve-activity --brief '%s'| tail -n 1)".printf (package),
-				device_serial, cancellable
-			);
-
-			if (target_pid == 0) {
-				waiting = true;
-				yield;
-				waiting = false;
+				if (target_pid == 0) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+			} finally {
+				tracker.disconnect (attached_handler);
 			}
 
 			yield tracker.close (cancellable);
@@ -164,18 +167,21 @@ namespace Frida.Droidy.Injector {
 				}
 			}
 
-			jdwp.events_received.connect (events => {
+			var breakpoint_handler = jdwp.events_received.connect (events => {
 				breakpoint_event = (JDWP.BreakpointEvent) events.items[0];
 				if (waiting)
 					inject_gadget.callback ();
 			});
+			try {
+				yield jdwp.resume (cancellable);
 
-			yield jdwp.resume (cancellable);
-
-			if (breakpoint_event == null) {
-				waiting = true;
-				yield;
-				waiting = false;
+				if (breakpoint_event == null) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+			} finally {
+				jdwp.disconnect (breakpoint_handler);
 			}
 
 			yield jdwp.clear_all_breakpoints (cancellable);

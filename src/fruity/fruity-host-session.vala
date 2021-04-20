@@ -11,15 +11,6 @@ namespace Frida {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		static construct {
-#if HAVE_GIOSCHANNEL
-			GIOSChannel.register ();
-#endif
-#if HAVE_GIOOPENSSL
-			GIOOpenSSL.register ();
-#endif
-		}
-
 		public async void start (Cancellable? cancellable) throws IOError {
 			start_request = new Promise<bool> ();
 			start_cancellable = new Cancellable ();
@@ -277,12 +268,12 @@ namespace Frida {
 			}
 		}
 
-		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
-				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+				throw new Error.INVALID_OPERATION ("Already created");
 
 			host_session = new FruityHostSession (this, this);
-			host_session.agent_session_closed.connect (on_agent_session_closed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
 		}
@@ -290,21 +281,23 @@ namespace Frida {
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return this.host_session.obtain_agent_session (agent_session_id);
+
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-				CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
@@ -408,9 +401,6 @@ namespace Frida {
 	}
 
 	public class FruityHostSession : Object, HostSession {
-		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-			CrashInfo? crash);
-
 		public weak ChannelProvider channel_provider {
 			get;
 			construct;
@@ -422,8 +412,8 @@ namespace Frida {
 		}
 
 		private Gee.HashMap<uint, LLDBSession> lldb_sessions = new Gee.HashMap<uint, LLDBSession> ();
-		private Gee.HashMap<AgentSessionId?, AgentEntry> agent_entries =
-			new Gee.HashMap<AgentSessionId?, AgentEntry> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.HashMap<AgentSessionId?, GadgetEntry> gadget_entries =
+			new Gee.HashMap<AgentSessionId?, GadgetEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
 		private Promise<RemoteServer>? remote_server_request;
 		private RemoteServer? current_remote_server;
@@ -432,13 +422,11 @@ namespace Frida {
 		private Gee.HashMap<AgentSessionId?, AgentSessionId?> remote_agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 
-		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
-			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
-		private uint next_agent_session_id = 1;
+		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		private const uint16 DEFAULT_SERVER_PORT = 27042;
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
 		private const string DEBUGSERVER_ENDPOINT_MODERN = "com.apple.debugserver.DVTSecureSocketProxy";
@@ -466,8 +454,8 @@ namespace Frida {
 				}
 			}
 
-			while (!agent_entries.is_empty) {
-				var iterator = agent_entries.values.iterator ();
+			while (!gadget_entries.is_empty) {
+				var iterator = gadget_entries.values.iterator ();
 				iterator.next ();
 				var entry = iterator.get ();
 				yield entry.close (cancellable);
@@ -481,6 +469,10 @@ namespace Frida {
 			}
 
 			io_cancellable.cancel ();
+		}
+
+		public async void ping (uint interval_seconds, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
 		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
@@ -701,23 +693,23 @@ namespace Frida {
 			if (options.cwd.length > 0)
 				throw new Error.NOT_SUPPORTED ("The 'cwd' option is not supported when spawning iOS apps");
 
-			var aux_options = options.load_aux ();
+			HashTable<string, Variant> aux = options.aux;
 
-			if (aux_options.contains ("aslr")) {
-				string? aslr = null;
-				if (!aux_options.lookup ("aslr", "s", out aslr) || (aslr != "auto" && aslr != "disable")) {
-					throw new Error.INVALID_ARGUMENT (
-						"The 'aslr' option must be a string set to either 'auto' or 'disable'");
-				}
-				launch_options.aslr = (aslr == "auto") ? LLDB.ASLR.AUTO : LLDB.ASLR.DISABLE;
+			Variant? aslr = aux["aslr"];
+			if (aslr != null) {
+				if (!aslr.is_of_type (VariantType.STRING))
+					throw new Error.INVALID_ARGUMENT ("The 'aslr' option must be a string");
+				launch_options.aslr = LLDB.ASLR.from_nick (aslr.get_string ());
 			}
 
 			string? gadget_path = null;
-			if (aux_options.contains ("gadget")) {
-				if (!aux_options.lookup ("gadget", "s", out gadget_path)) {
-					throw new Error.INVALID_ARGUMENT (
-						"The 'gadget' option must be a string pointing at the frida-gadget.dylib to use");
+			Variant? gadget_value = aux["gadget"];
+			if (gadget_value != null) {
+				if (!gadget_value.is_of_type (VariantType.STRING)) {
+					throw new Error.INVALID_ARGUMENT ("The 'gadget' option must be a string pointing at the " +
+						"frida-gadget.dylib to use");
 				}
+				gadget_path = gadget_value.get_string ();
 			}
 
 			try {
@@ -821,26 +813,19 @@ namespace Frida {
 			}
 		}
 
-		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
-			try {
-				return yield attach_in_realm (pid, NATIVE, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, HashTable<string, Variant> options,
+				Cancellable? cancellable) throws Error, IOError {
 			var lldb_session = lldb_sessions[pid];
 			if (lldb_session != null) {
 				var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
-				return yield attach_via_gadget (pid, realm, gadget_details, cancellable);
+				return yield attach_via_gadget (pid, options, gadget_details, cancellable);
 			}
 
 			var server = yield try_get_remote_server (cancellable);
 			if (server != null) {
 				try {
-					return yield attach_via_remote (pid, realm, server, cancellable);
+					return yield attach_via_remote (pid, options, server, cancellable);
 				} catch (Error e) {
 					if (server.flavor == REGULAR)
 						throw_api_error (e);
@@ -865,7 +850,11 @@ namespace Frida {
 
 			var gadget_details = yield lldb_session.query_gadget_details (cancellable);
 
-			return yield attach_via_gadget (pid, realm, gadget_details, cancellable);
+			return yield attach_via_gadget (pid, options, gadget_details, cancellable);
+		}
+
+		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
 		}
 
 		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
@@ -884,41 +873,30 @@ namespace Frida {
 				"run Xcode briefly or use ideviceimagemounter to mount one manually");
 		}
 
-		private async AgentSessionId attach_via_gadget (uint pid, Realm realm, Fruity.Injector.GadgetDetails gadget_details,
-				Cancellable? cancellable) throws Error, IOError {
+		private async AgentSessionId attach_via_gadget (uint pid, HashTable<string, Variant> options,
+				Fruity.Injector.GadgetDetails gadget_details, Cancellable? cancellable) throws Error, IOError {
 			try {
 				var stream = yield channel_provider.open_channel (
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (gadget_details.port),
 					cancellable);
 
-				var connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+				var connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
 				HostSession host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION,
-					DBusProxyFlags.NONE, cancellable);
+					DO_NOT_LOAD_PROPERTIES, cancellable);
 
 				AgentSessionId remote_session_id;
 				try {
-					remote_session_id = yield host_session.attach_in_realm (pid, realm, cancellable);
+					remote_session_id = yield host_session.attach (pid, options, cancellable);
 				} catch (GLib.Error e) {
-					if (e is DBusError.UNKNOWN_METHOD) {
-						if (realm != NATIVE) {
-							throw new Error.INVALID_ARGUMENT (
-								"Local Frida Gadget does not support the “realm” option; please upgrade it");
-						}
-						remote_session_id = yield host_session.attach_to (pid, cancellable);
-					} else {
-						throw e;
-					}
+					throw_dbus_error (e);
 				}
 
-				AgentSession agent_session = yield connection.get_proxy (null,
-					ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
-
-				var local_session_id = AgentSessionId (next_agent_session_id++);
-				var agent_entry = new AgentEntry (local_session_id, agent_session, host_session, connection);
-				agent_entry.detached.connect (on_agent_entry_detached);
-				agent_entries[local_session_id] = agent_entry;
-				agent_sessions[local_session_id] = agent_session;
+				var local_session_id = AgentSessionId.generate ();
+				var gadget_entry = new GadgetEntry (local_session_id, host_session, connection);
+				gadget_entry.detached.connect (on_gadget_entry_detached);
+				gadget_entries[local_session_id] = gadget_entry;
+				agent_sessions[local_session_id] = new AgentSessionEntry (remote_session_id, connection);
 
 				return local_session_id;
 			} catch (GLib.Error e) {
@@ -928,45 +906,26 @@ namespace Frida {
 			}
 		}
 
-		private async AgentSessionId attach_via_remote (uint pid, Realm realm, RemoteServer server, Cancellable? cancellable)
-				throws Error, IOError {
+		private async AgentSessionId attach_via_remote (uint pid, HashTable<string, Variant> options, RemoteServer server,
+				Cancellable? cancellable) throws Error, IOError {
 			AgentSessionId remote_session_id;
 			try {
-				remote_session_id = yield server.session.attach_in_realm (pid, realm, cancellable);
+				remote_session_id = yield server.session.attach (pid, options, cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					if (realm != NATIVE) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “realm” option; please upgrade it");
-					}
-					try {
-						remote_session_id = yield server.session.attach_to (pid, cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
-			var local_session_id = AgentSessionId (next_agent_session_id++);
+			var local_session_id = AgentSessionId.generate ();
 
-			AgentSession agent_session;
-			try {
-				agent_session = yield server.connection.get_proxy (null,
-					ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
+			var entry = new AgentSessionEntry (remote_session_id, server.connection);
 
 			remote_agent_sessions[remote_session_id] = local_session_id;
-			agent_sessions[local_session_id] = agent_session;
+			agent_sessions[local_session_id] = entry;
 
 			var transport_broker = server.transport_broker;
 			if (transport_broker != null) {
 				try {
-					AgentSession direct_session = yield establish_direct_session (transport_broker, remote_session_id,
+					entry.connection = yield establish_direct_connection (transport_broker, remote_session_id,
 						channel_provider, cancellable);
-					agent_sessions[local_session_id] = direct_session;
 				} catch (Error e) {
 					if (e is Error.NOT_SUPPORTED)
 						server.transport_broker = null;
@@ -976,10 +935,20 @@ namespace Frida {
 			return local_session_id;
 		}
 
-		public AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			var session = agent_sessions[id];
-			if (session == null)
+		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			AgentSessionEntry entry = agent_sessions[id];
+			if (entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+
+			DBusConnection connection = entry.connection;
+			AgentSessionId remote_id = entry.remote_session_id;
+
+			AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (remote_id),
+				DO_NOT_LOAD_PROPERTIES, cancellable);
+
+			entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (remote_id), sink);
+
 			return session;
 		}
 
@@ -1025,17 +994,16 @@ namespace Frida {
 			output (session.process.pid, 1, bytes.get_data ());
 		}
 
-		private void on_agent_entry_detached (AgentEntry entry, SessionDetachReason reason) {
-			var id = AgentSessionId (entry.id);
-			CrashInfo? crash = null;
+		private void on_gadget_entry_detached (GadgetEntry entry, SessionDetachReason reason) {
+			AgentSessionId id = entry.local_session_id;
+			var no_crash = CrashInfo.empty ();
 
-			agent_entries.unset (id);
+			gadget_entries.unset (id);
 			agent_sessions.unset (id);
 
-			entry.detached.disconnect (on_agent_entry_detached);
+			entry.detached.disconnect (on_gadget_entry_detached);
 
-			agent_session_closed (id, entry.agent_session, reason, crash);
-			agent_session_destroyed (id, reason);
+			agent_session_detached (id, reason, no_crash);
 
 			entry.close.begin (io_cancellable);
 		}
@@ -1071,12 +1039,12 @@ namespace Frida {
 			DBusConnection? connection = null;
 			try {
 				var stream = yield channel_provider.open_channel (
-					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_SERVER_PORT),
+					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
 					cancellable);
 
-				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
-				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE,
+				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 
 				RemoteServer.Flavor flavor = REGULAR;
@@ -1090,7 +1058,7 @@ namespace Frida {
 				TransportBroker? transport_broker = null;
 				if (flavor == REGULAR) {
 					transport_broker = yield connection.get_proxy (null, ObjectPath.TRANSPORT_BROKER,
-						DBusProxyFlags.NONE, cancellable);
+						DO_NOT_LOAD_PROPERTIES, cancellable);
 				}
 
 				if (connection.closed)
@@ -1143,8 +1111,7 @@ namespace Frida {
 			session.child_removed.connect (on_remote_child_removed);
 			session.process_crashed.connect (on_remote_process_crashed);
 			session.output.connect (on_remote_output);
-			session.agent_session_destroyed.connect (on_remote_agent_session_destroyed);
-			session.agent_session_crashed.connect (on_remote_agent_session_crashed);
+			session.agent_session_detached.connect (on_remote_agent_session_detached);
 			session.uninjected.connect (on_remote_uninjected);
 		}
 
@@ -1158,8 +1125,7 @@ namespace Frida {
 			session.child_removed.disconnect (on_remote_child_removed);
 			session.process_crashed.disconnect (on_remote_process_crashed);
 			session.output.disconnect (on_remote_output);
-			session.agent_session_destroyed.disconnect (on_remote_agent_session_destroyed);
-			session.agent_session_crashed.disconnect (on_remote_agent_session_crashed);
+			session.agent_session_detached.disconnect (on_remote_agent_session_detached);
 			session.uninjected.disconnect (on_remote_uninjected);
 		}
 
@@ -1168,8 +1134,9 @@ namespace Frida {
 			current_remote_server = null;
 			remote_server_request = null;
 
+			var no_crash = CrashInfo.empty ();
 			foreach (var remote_id in remote_agent_sessions.keys.to_array ())
-				on_remote_agent_session_destroyed (remote_id, SERVER_TERMINATED);
+				on_remote_agent_session_detached (remote_id, CONNECTION_TERMINATED, no_crash);
 		}
 
 		private void on_remote_spawn_added (HostSpawnInfo info) {
@@ -1196,34 +1163,15 @@ namespace Frida {
 			output (pid, fd, data);
 		}
 
-		private void on_remote_agent_session_destroyed (AgentSessionId remote_id, SessionDetachReason reason) {
+		private void on_remote_agent_session_detached (AgentSessionId remote_id, SessionDetachReason reason, CrashInfo crash) {
 			AgentSessionId? local_id;
 			if (!remote_agent_sessions.unset (remote_id, out local_id))
 				return;
 
-			AgentSession agent_session = null;
-			agent_sessions.unset (local_id, out agent_session);
-			assert (agent_session != null);
+			bool agent_session_found = agent_sessions.unset (local_id);
+			assert (agent_session_found);
 
-			CrashInfo? crash = null;
-
-			agent_session_closed (local_id, agent_session, reason, crash);
-			agent_session_destroyed (local_id, reason);
-		}
-
-		private void on_remote_agent_session_crashed (AgentSessionId remote_id, CrashInfo crash) {
-			AgentSessionId? local_id;
-			if (!remote_agent_sessions.unset (remote_id, out local_id))
-				return;
-
-			AgentSession agent_session = null;
-			agent_sessions.unset (local_id, out agent_session);
-			assert (agent_session != null);
-
-			SessionDetachReason reason = PROCESS_TERMINATED;
-
-			agent_session_closed (local_id, agent_session, reason, crash);
-			agent_session_crashed (local_id, crash);
+			agent_session_detached (local_id, reason, crash);
 		}
 
 		private void on_remote_uninjected (InjectorPayloadId id) {
@@ -1349,15 +1297,10 @@ namespace Frida {
 			}
 		}
 
-		private class AgentEntry : Object {
+		private class GadgetEntry : Object {
 			public signal void detached (SessionDetachReason reason);
 
-			public uint id {
-				get;
-				construct;
-			}
-
-			public AgentSession agent_session {
+			public AgentSessionId local_session_id {
 				get;
 				construct;
 			}
@@ -1374,11 +1317,9 @@ namespace Frida {
 
 			private Promise<bool>? close_request;
 
-			public AgentEntry (AgentSessionId? id, AgentSession agent_session, HostSession host_session,
-					DBusConnection connection) {
+			public GadgetEntry (AgentSessionId local_session_id, HostSession host_session, DBusConnection connection) {
 				Object (
-					id: id.handle,
-					agent_session: agent_session,
+					local_session_id: local_session_id,
 					host_session: host_session,
 					connection: connection
 				);
@@ -1386,12 +1327,12 @@ namespace Frida {
 
 			construct {
 				connection.on_closed.connect (on_connection_closed);
-				host_session.agent_session_destroyed.connect (on_session_destroyed);
+				host_session.agent_session_detached.connect (on_session_detached);
 			}
 
-			~AgentEntry () {
+			~GadgetEntry () {
 				connection.on_closed.disconnect (on_connection_closed);
-				host_session.agent_session_destroyed.disconnect (on_session_destroyed);
+				host_session.agent_session_detached.disconnect (on_session_detached);
 			}
 
 			public async void close (Cancellable? cancellable) throws IOError {
@@ -1430,8 +1371,35 @@ namespace Frida {
 				detached (PROCESS_TERMINATED);
 			}
 
-			private void on_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
+			private void on_session_detached (AgentSessionId id, SessionDetachReason reason) {
 				detached (reason);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public AgentSessionId remote_session_id {
+				get;
+				private set;
+			}
+
+			public DBusConnection connection {
+				get;
+				set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (AgentSessionId remote_session_id, DBusConnection connection) {
+				this.remote_session_id = remote_session_id;
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 

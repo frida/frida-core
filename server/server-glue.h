@@ -9,8 +9,6 @@ G_GNUC_INTERNAL void frida_server_environment_init (void);
 G_GNUC_INTERNAL void frida_server_environment_set_verbose_logging_enabled (gboolean enabled);
 G_GNUC_INTERNAL void frida_server_environment_configure (void);
 
-G_GNUC_INTERNAL void frida_server_tcp_enable_nodelay (GSocket * socket);
-
 G_END_DECLS
 
 #endif

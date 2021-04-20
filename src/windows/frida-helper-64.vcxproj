@@ -55,7 +55,7 @@
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-base-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -64,12 +64,12 @@
       <TargetMachine>MachineX64</TargetMachine>
     </Link>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-base-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\lib\interfaces\frida-interfaces-64.vcxproj">
+    <ProjectReference Include="..\..\lib\base\frida-base-64.vcxproj">
       <Project>{a31522d9-715b-4e04-aa57-df7afebe082c}</Project>
     </ProjectReference>
     <ProjectReference Include="..\..\lib\pipe\frida-pipe-64.vcxproj">

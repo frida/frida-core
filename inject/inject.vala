@@ -58,15 +58,15 @@ namespace Frida.Inject {
 			return 2;
 		}
 
-		Realm realm = NATIVE;
+		var options = new SessionOptions ();
+
 		if (realm_str != null) {
-			var klass = (EnumClass) typeof (Realm).class_ref ();
-			var v = klass.get_value_by_nick (realm_str);
-			if (v == null) {
-				printerr ("Invalid realm\n");
+			try {
+				options.realm = Realm.from_nick (realm_str);
+			} catch (Error e) {
+				printerr ("%s\n", e.message);
 				return 3;
 			}
-			realm = (Realm) v.value;
 		}
 
 		if (script_path == null || script_path == "") {
@@ -82,13 +82,12 @@ namespace Frida.Inject {
 
 		ScriptRuntime script_runtime = DEFAULT;
 		if (script_runtime_str != null) {
-			var klass = (EnumClass) typeof (ScriptRuntime).class_ref ();
-			var v = klass.get_value_by_nick (script_runtime_str);
-			if (v == null) {
-				printerr ("Invalid script runtime\n");
+			try {
+				script_runtime = ScriptRuntime.from_nick (script_runtime_str);
+			} catch (Error e) {
+				printerr ("%s\n", e.message);
 				return 5;
 			}
-			script_runtime = (ScriptRuntime) v.value;
 		}
 
 		var parameters = new Json.Node.alloc ().init_object (new Json.Object ());
@@ -117,7 +116,7 @@ namespace Frida.Inject {
 			return 9;
 		}
 
-		application = new Application (device_id, spawn_file, target_pid, target_name, realm, script_path, script_source,
+		application = new Application (device_id, spawn_file, target_pid, target_name, options, script_path, script_source,
 			script_runtime, parameters, enable_development);
 
 #if !WINDOWS
@@ -169,7 +168,7 @@ namespace Frida.Inject {
 			construct;
 		}
 
-		public Realm realm {
+		public SessionOptions? session_options {
 			get;
 			construct;
 		}
@@ -207,15 +206,15 @@ namespace Frida.Inject {
 		private int exit_code;
 		private MainLoop loop;
 
-		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name, Realm realm,
-				string? script_path, string? script_source, ScriptRuntime script_runtime, Json.Node parameters,
-				bool enable_development) {
+		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name,
+				SessionOptions? session_options, string? script_path, string? script_source, ScriptRuntime script_runtime,
+				Json.Node parameters, bool enable_development) {
 			Object (
 				device_id: device_id,
 				spawn_file: spawn_file,
 				target_pid: target_pid,
 				target_name: target_name,
-				realm: realm,
+				session_options: session_options,
 				script_path: script_path,
 				script_source: script_source,
 				script_runtime: script_runtime,
@@ -258,7 +257,7 @@ namespace Frida.Inject {
 					pid = (uint) target_pid;
 				}
 
-				var session = yield device.attach (pid, realm, io_cancellable);
+				var session = yield device.attach (pid, session_options, io_cancellable);
 				session.detached.connect (on_detached);
 
 				var r = new ScriptRunner (session, script_path, script_source, script_runtime, parameters,
@@ -657,14 +656,14 @@ namespace Frida.Inject {
 			script_unchanged_timeout = source;
 		}
 
-		private void on_message (string raw_message, Bytes? data) {
-			bool handled = rpc_client.try_handle_message (raw_message);
+		private void on_message (string json, Bytes? data) {
+			bool handled = rpc_client.try_handle_message (json);
 			if (handled)
 				return;
 
 			var parser = new Json.Parser ();
 			try {
-				parser.load_from_data (raw_message);
+				parser.load_from_data (json);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -684,7 +683,7 @@ namespace Frida.Inject {
 			}
 
 			if (!handled) {
-				stdout.puts (raw_message);
+				stdout.puts (json);
 				stdout.putc ('\n');
 			}
 		}
@@ -763,8 +762,8 @@ namespace Frida.Inject {
 			}
 		}
 
-		private async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError {
-			yield script.post (raw_message, null, cancellable);
+		private async void post_rpc_message (string json, Cancellable? cancellable) throws Error, IOError {
+			script.post (json, null);
 		}
 	}
 

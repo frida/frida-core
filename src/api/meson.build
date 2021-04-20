@@ -2,19 +2,18 @@ generate_api = files('generate.py')
 
 core_vapi = join_paths(core_build_dir, 'frida-core.vapi')
 core_header = join_paths(core_build_dir, 'frida-core.h')
-interfaces_vapi = join_paths(interfaces_build_dir, 'frida-interfaces.vapi')
-interfaces_header = join_paths(interfaces_build_dir, 'frida-interfaces.h')
+base_vapi = join_paths(base_build_dir, 'frida-base.vapi')
+base_header = join_paths(base_build_dir, 'frida-base.h')
 
 custom_target('frida-core-header',
-  input: [core, interfaces],
+  input: [core, base],
   output: ['frida-core.h'],
   command: [
     generate_api,
     '--output=header',
     api_version,
-    facade,
     core_vapi, core_header,
-    interfaces_vapi, interfaces_header,
+    base_vapi, base_header,
     meson.current_build_dir(),
   ],
   install: true,
@@ -22,7 +21,7 @@ custom_target('frida-core-header',
 )
 
 custom_target('frida-core-vapi',
-  input: [core, interfaces],
+  input: [core, base],
   output: [
     'frida-core-@0@.vapi'.format(api_version),
     'frida-core-@0@.deps'.format(api_version)
@@ -31,9 +30,8 @@ custom_target('frida-core-vapi',
     generate_api,
     '--output=vapi',
     api_version,
-    facade,
     core_vapi, core_header,
-    interfaces_vapi, interfaces_header,
+    base_vapi, base_header,
     meson.current_build_dir(),
   ],
   install: true,
@@ -61,7 +59,7 @@ pkg.generate(filebase: 'frida-core-' + api_version,
   version: meson.project_version(),
   description: 'Frida core library intended for static linking into bindings',
   requires: ['glib-2.0', 'gobject-2.0', 'gio-2.0', 'json-glib-1.0'],
-  requires_private: ['gmodule-2.0', 'gee-0.8', 'frida-gum-1.0', 'frida-gumjs-1.0'] + backend_deps_private,
+  requires_private: ['gmodule-2.0', 'gee-0.8', libsoup_dep, 'frida-gum-1.0', 'frida-gumjs-1.0'] + backend_deps_private,
   subdirs: 'frida-' + api_version,
   libraries: ['-L${libdir}', '-lfrida-core-' + api_version],
   libraries_private: backend_libs_private,

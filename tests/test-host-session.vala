@@ -257,6 +257,39 @@ namespace Frida.HostSessionTest {
 			h.run ();
 		});
 
+		var strategies = new Connectivity.Strategy[] {
+			SERVER,
+			PEER
+		};
+		foreach (var strategy in strategies) {
+			string prefix = "/HostSession/Connectivity/" + ((strategy == SERVER) ? "Server" : "Peer");
+
+			GLib.Test.add_data_func (prefix + "/flawless", () => {
+				var h = new Harness ((h) => Connectivity.flawless.begin (h as Harness, strategy));
+				h.run ();
+			});
+
+			GLib.Test.add_data_func (prefix + "/rx-without-ack", () => {
+				var h = new Harness ((h) => Connectivity.rx_without_ack.begin (h as Harness, strategy));
+				h.run ();
+			});
+
+			GLib.Test.add_data_func (prefix + "/tx-not-sent", () => {
+				var h = new Harness ((h) => Connectivity.tx_not_sent.begin (h as Harness, strategy));
+				h.run ();
+			});
+
+			GLib.Test.add_data_func (prefix + "/tx-without-ack", () => {
+				var h = new Harness ((h) => Connectivity.tx_without_ack.begin (h as Harness, strategy));
+				h.run ();
+			});
+
+			GLib.Test.add_data_func (prefix + "/latency-should-be-nominal", () => {
+				var h = new Harness ((h) => Connectivity.latency_should_be_nominal.begin (h as Harness, strategy));
+				h.run ();
+			});
+		}
+
 	}
 
 	namespace Service {
@@ -340,7 +373,7 @@ namespace Frida.HostSessionTest {
 				get { return HostSessionProviderKind.LOCAL; }
 			}
 
-			public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
+			public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
@@ -348,7 +381,7 @@ namespace Frida.HostSessionTest {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+			public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
@@ -864,6 +897,442 @@ namespace Frida.HostSessionTest {
 		h.done ();
 	}
 
+	namespace Connectivity {
+
+		private static async void flawless (Harness h, Strategy strategy) {
+			uint seen_disruptions;
+			yield run_reliability_scenario (h, strategy, (message, direction) => FORWARD, out seen_disruptions);
+			assert (seen_disruptions == 0);
+		}
+
+		private static async void rx_without_ack (Harness h, Strategy strategy) {
+			bool disrupted = false;
+			uint seen_disruptions;
+			yield run_reliability_scenario (h, strategy, (message, direction) => {
+				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
+						direction == IN && !disrupted) {
+					disrupted = true;
+					return FORWARD_THEN_DISRUPT;
+				}
+				return FORWARD;
+			}, out seen_disruptions);
+			assert (seen_disruptions == 1);
+		}
+
+		private static async void tx_not_sent (Harness h, Strategy strategy) {
+			bool disrupted = false;
+			uint seen_disruptions;
+			yield run_reliability_scenario (h, strategy, (message, direction) => {
+				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
+						direction == OUT && !disrupted) {
+					disrupted = true;
+					return DISRUPT;
+				}
+				return FORWARD;
+			}, out seen_disruptions);
+			assert (seen_disruptions == 1);
+		}
+
+		private static async void tx_without_ack (Harness h, Strategy strategy) {
+			bool disrupted = false;
+			uint seen_disruptions;
+			yield run_reliability_scenario (h, strategy, (message, direction) => {
+				if (message.get_message_type () == METHOD_CALL && message.get_member () == "PostMessages" &&
+						direction == OUT && !disrupted) {
+					disrupted = true;
+					return FORWARD_THEN_DISRUPT;
+				}
+				return FORWARD;
+			}, out seen_disruptions);
+			assert (seen_disruptions == 1);
+		}
+
+		private enum Strategy {
+			SERVER,
+			PEER
+		}
+
+		private static async void run_reliability_scenario (Harness h, Strategy strategy, owned ChaosProxy.Inducer on_message,
+				out uint seen_disruptions) {
+			try {
+				uint seen_detaches = 0;
+				uint seen_messages = 0;
+				var messages_summary = new StringBuilder ();
+				bool waiting = false;
+
+				ControlService control_service;
+				uint16 control_port = 27042;
+				while (true) {
+					var ep = new EndpointParameters ("127.0.0.1", control_port);
+					control_service = new ControlService (ep);
+					try {
+						yield control_service.start ();
+						break;
+					} catch (Error e) {
+						if (e is Error.ADDRESS_IN_USE) {
+							control_port++;
+							continue;
+						}
+						throw e;
+					}
+				}
+
+				var proxy = new ChaosProxy (control_port, (owned) on_message);
+
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.add_remote_device ("127.0.0.1:%u".printf (proxy.proxy_port));
+
+				var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+				var options = new SessionOptions ();
+				options.persist_timeout = 5;
+				var session = yield device.attach (process.id, options);
+				var detached_handler = session.detached.connect ((reason, crash) => {
+					if (reason == CONNECTION_TERMINATED) {
+						seen_detaches++;
+						Idle.add (() => {
+							session.resume.begin ();
+							return false;
+						});
+					} else {
+						assert (reason == APPLICATION_REQUESTED);
+					}
+				});
+
+				DBusConnection? peer_connection = null;
+				uint filter_id = 0;
+				if (strategy == PEER) {
+					yield session.setup_peer_connection ();
+
+					peer_connection = ((DBusProxy) session.session).g_connection;
+					bool disrupting = false;
+					var main_context = MainContext.ref_thread_default ();
+					filter_id = peer_connection.add_filter ((conn, message, incoming) => {
+						if (disrupting)
+							return null;
+
+						var direction = incoming ? ChaosProxy.Direction.IN : ChaosProxy.Direction.OUT;
+
+						switch (proxy.on_message (message, direction)) {
+							case FORWARD:
+								break;
+							case FORWARD_THEN_DISRUPT:
+								disrupting = true;
+								break;
+							case DISRUPT:
+								disrupting = true;
+								message = null;
+								break;
+						}
+
+						if (disrupting) {
+							var source = new IdleSource ();
+							source.set_callback (() => {
+								peer_connection.close.begin ();
+								return false;
+							});
+							source.attach (main_context);
+						}
+
+						return message;
+					});
+				}
+
+				var script = yield session.create_script ("""
+					recv(onMessage);
+					function onMessage(message) {
+					  const { serial, count } = message;
+					  for (let i = 0; i !== count; i++) {
+					    send({ id: serial + i });
+					  }
+					  recv(onMessage);
+					}
+					""");
+				var message_handler = script.message.connect ((json, data) => {
+					var parser = new Json.Parser ();
+					try {
+						parser.load_from_data (json);
+					} catch (GLib.Error e) {
+						assert_not_reached ();
+					}
+
+					var reader = new Json.Reader (parser.get_root ());
+
+					assert (reader.read_member ("type") && reader.get_string_value () == "send");
+					reader.end_member ();
+
+					assert (reader.read_member ("payload") && reader.read_member ("id"));
+					int64 id = reader.get_int_value ();
+
+					if (messages_summary.len != 0)
+						messages_summary.append_c (',');
+					messages_summary.append (id.to_string ());
+					seen_messages++;
+
+					if (waiting)
+						run_reliability_scenario.callback ();
+				});
+				yield script.load ();
+
+				script.post ("""{"serial":10,"count":3}""");
+
+				while (seen_messages < 3) {
+					waiting = true;
+					yield;
+					waiting = false;
+				}
+
+				// In case some unexpected messages show up...
+				Timeout.add (100, run_reliability_scenario.callback);
+				yield;
+
+				seen_disruptions = seen_detaches;
+				assert (seen_messages == 3);
+				assert (messages_summary.str == "10,11,12");
+
+				script.disconnect (message_handler);
+				if (peer_connection != null)
+					peer_connection.remove_filter (filter_id);
+				session.disconnect (detached_handler);
+
+				yield device_manager.close ();
+				proxy.close ();
+				yield control_service.stop ();
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+		private class ChaosProxy : Object {
+			public uint16 proxy_port {
+				get {
+					return _proxy_port;
+				}
+			}
+
+			public uint16 target_port {
+				get;
+				construct;
+			}
+
+			public Inducer on_message;
+
+			private SocketService service = new SocketService ();
+			private uint16 _proxy_port;
+			private SocketAddress target_address;
+			private Gee.Set<Cancellable> cancellables = new Gee.HashSet<Cancellable> ();
+
+			public delegate Action Inducer (DBusMessage message, Direction direction);
+
+			public enum Action {
+				FORWARD,
+				FORWARD_THEN_DISRUPT,
+				DISRUPT,
+			}
+
+			public enum Direction {
+				IN,
+				OUT
+			}
+
+			public ChaosProxy (uint16 target_port, owned Inducer on_message) {
+				Object (target_port: target_port);
+
+				this.on_message = (owned) on_message;
+			}
+
+			construct {
+				try {
+					_proxy_port = service.add_any_inet_port (null);
+				} catch (GLib.Error e) {
+					assert_not_reached ();
+				}
+
+				target_address = new InetSocketAddress.from_string ("127.0.0.1", target_port);
+
+				service.incoming.connect (on_incoming_connection);
+				service.start ();
+			}
+
+			public void close () {
+				foreach (var cancellable in cancellables)
+					cancellable.cancel ();
+				cancellables.clear ();
+
+				service.stop ();
+			}
+
+			private bool on_incoming_connection (SocketConnection proxy_connection, Object? source_object) {
+				handle_incoming_connection.begin (proxy_connection);
+				return true;
+			}
+
+			private async void handle_incoming_connection (SocketConnection proxy_connection) throws GLib.Error {
+				var cancellable = new Cancellable ();
+				cancellables.add (cancellable);
+
+				SocketConnection? target_connection = null;
+				try {
+					Tcp.enable_nodelay (proxy_connection.socket);
+
+					var client = new SocketClient ();
+					target_connection = yield client.connect_async (target_address, cancellable);
+					Tcp.enable_nodelay (target_connection.socket);
+
+					handle_io.begin (Direction.OUT, proxy_connection.input_stream, target_connection.output_stream,
+						cancellable);
+					yield handle_io (Direction.IN, target_connection.input_stream, proxy_connection.output_stream,
+						cancellable);
+				} finally {
+					cancellable.cancel ();
+					cancellables.remove (cancellable);
+
+					Idle.add (() => {
+						if (target_connection != null)
+							target_connection.close_async.begin ();
+						proxy_connection.close_async.begin ();
+						return false;
+					});
+				}
+			}
+
+			private async void handle_io (Direction direction, InputStream raw_input, OutputStream output,
+					Cancellable cancellable) throws GLib.Error {
+				var input = new BufferedInputStream (raw_input);
+
+				ssize_t header_size = 16;
+				int io_priority = Priority.DEFAULT;
+
+				while (true) {
+					ssize_t available = (ssize_t) input.get_available ();
+
+					if (available < header_size) {
+						available = yield input.fill_async (header_size - available, io_priority, cancellable);
+						if (available < header_size)
+							break;
+					}
+
+					ssize_t needed = DBusMessage.bytes_needed (input.peek_buffer ());
+
+					ssize_t missing = needed - available;
+					if (missing > 0)
+						available = yield input.fill_async (missing, io_priority, cancellable);
+
+					var blob = input.read_bytes (needed);
+					unowned uint8[] data = blob.get_data ();
+
+					var message = new DBusMessage.from_blob (data, DBusCapabilityFlags.NONE);
+
+					Action action = on_message (message, direction);
+
+					if (action == DISRUPT) {
+						cancellable.cancel ();
+						break;
+					}
+
+					size_t bytes_written;
+					yield output.write_all_async (data, io_priority, cancellable, out bytes_written);
+
+					if (action == FORWARD_THEN_DISRUPT) {
+						cancellable.cancel ();
+						break;
+					}
+				}
+			}
+		}
+
+		private static async void latency_should_be_nominal (Harness h, Strategy strategy) {
+			h.disable_timeout ();
+
+			try {
+				ControlService control_service;
+				uint16 control_port = 27042;
+				while (true) {
+					var ep = new EndpointParameters ("127.0.0.1", control_port);
+					control_service = new ControlService (ep);
+					try {
+						yield control_service.start ();
+						break;
+					} catch (Error e) {
+						if (e is Error.ADDRESS_IN_USE) {
+							control_port++;
+							continue;
+						}
+						throw e;
+					}
+				}
+
+				var device_manager = new DeviceManager ();
+				var device = yield device_manager.add_remote_device ("127.0.0.1:%u".printf (control_port));
+
+				var process = Frida.Test.Process.create (Frida.Test.Labrats.path_to_executable ("sleeper"));
+
+				var session = yield device.attach (process.id);
+
+				if (strategy == PEER)
+					yield session.setup_peer_connection ();
+
+				var script = yield session.create_script ("""
+					recv('ping', onPing);
+					function onPing(message) {
+					  send({ type: 'pong' });
+					  recv('ping', onPing);
+					}
+					""");
+				var message_handler = script.message.connect ((json, data) => {
+					var parser = new Json.Parser ();
+					try {
+						parser.load_from_data (json);
+					} catch (GLib.Error e) {
+						assert_not_reached ();
+					}
+
+					var reader = new Json.Reader (parser.get_root ());
+
+					assert (reader.read_member ("type") && reader.get_string_value () == "send");
+					reader.end_member ();
+
+					assert (reader.read_member ("payload") && reader.read_member ("type") && reader.get_string_value () == "pong");
+					reader.end_member ();
+
+					latency_should_be_nominal.callback ();
+				});
+				yield script.load ();
+
+				var timer = new Timer ();
+				for (int i = 0; i != 100; i++) {
+					timer.reset ();
+					script.post ("""{"type":"ping"}""");
+					yield;
+					printerr (" [%d: %u ms]", i + 1, (uint) (timer.elapsed () * 1000.0));
+
+					Idle.add (latency_should_be_nominal.callback);
+					yield;
+
+					if ((i + 1) % 10 == 0) {
+						printerr ("\n");
+						if (GLib.Test.verbose ())
+							yield h.prompt_for_key ("Hit a key to do 10 more: ");
+					}
+				}
+
+				script.disconnect (message_handler);
+
+				yield device_manager.close ();
+				yield control_service.stop ();
+			} catch (GLib.Error e) {
+				printerr ("Oops: %s\n", e.message);
+				assert_not_reached ();
+			}
+
+			h.done ();
+		}
+
+	}
+
 #if LINUX
 	namespace Linux {
 
@@ -939,17 +1408,17 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid, cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session_id = yield host_session.attach (pid, make_options_dict (), cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
 				});
 
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					var write = new NativeFunction(Module.getExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);
 					var message = Memory.allocUtf8String('Hello stdout');
 					write(1, message, 12);
@@ -963,7 +1432,7 @@ namespace Frida.HostSessionTest {
 					    break;
 					  }
 					}
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
@@ -1033,7 +1502,7 @@ namespace Frida.HostSessionTest {
 
 					var options = new SpawnOptions ();
 					if (activity_name != null)
-						options.aux.insert ("activity", "s", activity_name);
+						options.aux["activity"] = new Variant.string (activity_name);
 
 					printerr ("device.spawn(\"%s\")\n", package_name);
 					var pid = yield device.spawn (package_name, options);
@@ -1171,17 +1640,17 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid, cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session_id = yield host_session.attach (pid, make_options_dict (), cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						run_spawn_scenario.callback ();
 				});
 
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					const write = new NativeFunction(Module.getExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);
 					const message = Memory.allocUtf8String('Hello stdout');
 					const cout = Module.getExportByName('libc++.1.dylib', '_ZNSt3__14coutE').readPointer();
@@ -1198,7 +1667,7 @@ namespace Frida.HostSessionTest {
 					    send({ seconds: args[0].toInt32(), initialized: properlyInitialized });
 					  }
 					});
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
@@ -1573,19 +2042,18 @@ namespace Frida.HostSessionTest {
 
 					var host_session = yield prov.create (null, cancellable);
 
-					var id = yield host_session.attach_to (pid, cancellable);
-					var session = yield prov.obtain_agent_session (host_session, id, cancellable);
+					var id = yield host_session.attach (pid, make_options_dict (), cancellable);
+					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
 
 					string received_message = null;
 					bool waiting = false;
-					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+					var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						if (waiting)
 							cross_arch.callback ();
 					});
 
-					var script_id = yield session.create_script_with_options ("send('hello');", AgentScriptOptions (),
-						cancellable);
+					var script_id = yield session.create_script ("send('hello');", make_options_dict (), cancellable);
 					yield session.load_script (script_id, cancellable);
 
 					if (received_message == null) {
@@ -1652,8 +2120,8 @@ namespace Frida.HostSessionTest {
 					options.envp = { "OS_ACTIVITY_DT_MODE=YES", "NSUnbufferedIO=YES" };
 					options.stdio = PIPE;
 					if (url != null)
-						options.aux.insert ("url", "s", url);
-					// options.aux.insert ("aslr", "s", "disable");
+						options.aux["url"] = new Variant.string (url);
+					// options.aux["aslr"] = new Variant.string ("disable");
 
 					printerr ("device.spawn(\"%s\")\n", app_id);
 					var pid = yield device.spawn (app_id, options);
@@ -2385,17 +2853,17 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid, cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session_id = yield host_session.attach (pid, make_options_dict (), cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
-					received_message = message;
+				var message_handler = h.message_from_script.connect ((script_id, json, data) => {
+					received_message = json;
 					if (waiting)
 						spawn.callback ();
 				});
 
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					const STD_OUTPUT_HANDLE = -11;
 					const winAbi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';
 					const GetStdHandle = new NativeFunction(Module.getExportByName('kernel32.dll', 'GetStdHandle'), 'pointer', ['int'], winAbi);
@@ -2408,7 +2876,7 @@ namespace Frida.HostSessionTest {
 					    send('GetMessage');
 					  }
 					});
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				if (received_output == null) {
@@ -2651,21 +3119,21 @@ namespace Frida.HostSessionTest {
 				assert_nonnull ((void *) process);
 
 				stdout.printf ("attaching to target process\n");
-				var session_id = yield host_session.attach_to (process.pid, cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session_id = yield host_session.attach (process.pid, make_options_dict (), cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
-					received_message = message;
+				var message_handler = h.message_from_script.connect ((script_id, json, data) => {
+					received_message = json;
 					large_messages.callback ();
 				});
 				stdout.printf ("creating script\n");
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					function onMessage(message) {
 					  send('ACK: ' + message.length);
 					  recv(onMessage);
 					}
 					recv(onMessage);
-					""", AgentScriptOptions (), cancellable);
+					""", make_options_dict (), cancellable);
 				stdout.printf ("loading script\n");
 				yield session.load_script (script_id, cancellable);
 				var steps = new uint[] { 1024, 4096, 8192, 16384, 32768 };
@@ -2677,7 +3145,8 @@ namespace Frida.HostSessionTest {
 						builder.append ("s");
 					}
 					builder.append ("\"");
-					yield session.post_to_script (script_id, builder.str, false, new uint8[0], cancellable);
+					yield session.post_messages ({ AgentMessage (SCRIPT, script_id, builder.str, false, {}) }, 0,
+						cancellable);
 					yield;
 					stdout.printf ("received message: '%s'\n", received_message);
 				}
@@ -3011,10 +3480,10 @@ namespace Frida.HostSessionTest {
 		}
 	}
 
-	private static string parse_string_message_payload (string raw_message) {
+	private static string parse_string_message_payload (string json) {
 		Json.Object message;
 		try {
-			message = Json.from_string (raw_message).get_object ();
+			message = Json.from_string (json).get_object ();
 		} catch (GLib.Error e) {
 			assert_not_reached ();
 		}
@@ -3024,7 +3493,9 @@ namespace Frida.HostSessionTest {
 		return message.get_string_member ("payload");
 	}
 
-	public class Harness : Frida.Test.AsyncHarness {
+	public class Harness : Frida.Test.AsyncHarness, AgentMessageSink {
+		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
+
 		public HostSessionService service {
 			get;
 			private set;
@@ -3137,6 +3608,13 @@ namespace Frida.HostSessionTest {
 				yield process_events ();
 
 			return key;
+		}
+
+		protected async void post_messages (AgentMessage[] messages, uint batch_id,
+				Cancellable? cancellable) throws Error, IOError {
+			foreach (var m in messages) {
+				message_from_script (m.script_id, m.text, m.has_data ? new Bytes (m.data) : null);
+			}
 		}
 	}
 }

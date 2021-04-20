@@ -87,8 +87,8 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-base-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>$(FridaCoreDefines);_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -106,8 +106,8 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-base-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>$(FridaCoreDefines);_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -125,8 +125,8 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;NDEBUG;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-base-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>$(FridaCoreDefines);NDEBUG;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -144,8 +144,8 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-interfaces-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>HAVE_I386=1;HAVE_WINDOWS=1;NDEBUG;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-core;$(IntDir)..\frida-base-64;$(IntDir)..\frida-pipe-64;$(IntDir)..\frida-helper-backend-64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>$(FridaCoreDefines);NDEBUG;G_DISABLE_CAST_CHECKS;G_DISABLE_CHECKS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -162,22 +162,6 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="..\lib\agent\frida-agent-32.vcxproj">
-      <Project>{f4f9af1c-3111-4563-8066-8fae8cbefbdc}</Project>
-      <Private>false</Private>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <LinkLibraryDependencies>false</LinkLibraryDependencies>
-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
-    </ProjectReference>
-    <ProjectReference Include="..\lib\agent\frida-agent-64.vcxproj">
-      <Project>{d873638d-aa0d-4252-9334-456557a65d95}</Project>
-      <Private>false</Private>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
-      <LinkLibraryDependencies>false</LinkLibraryDependencies>
-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
-    </ProjectReference>
     <ProjectReference Include="..\frida-core.vcxproj">
       <Project>{b7dc9b02-a5ff-4aa1-b2a2-dc1653168d44}</Project>
       <Private>false</Private>
@@ -198,25 +182,26 @@ copy /B /Y "$(SolutionDir)frida-gum\ext\dbghelp\dbghelp-64.dll" "$(TargetDir)dbg
 	labrats.vala				^
 	async-harness.vala				^
 	process.vala				^
-	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
 	--vapidir="$(IntDir)..\frida-core"		^
-	--vapidir="$(IntDir)..\frida-interfaces-32"		^
-	--vapidir="$(IntDir)..\frida-interfaces-64"		^
+	--vapidir="$(IntDir)..\frida-base-32"		^
+	--vapidir="$(IntDir)..\frida-base-64"		^
 	--vapidir="$(IntDir)..\frida-pipe-32"		^
 	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	--vapidir="$(IntDir)..\frida-helper-backend-32"	^
 	--vapidir="$(IntDir)..\frida-helper-backend-64"	^
 	$(ValaFlags)				^
+	$(FridaCoreValaFlags)			^
 	--pkg=gio-2.0				^
+	--pkg=nice				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-0.8				^
 	--pkg=json-glib-1.0				^
 	--pkg=frida-gum-1.0			^
 	--pkg=frida-core				^
-	--pkg=frida-interfaces			^
+	--pkg=frida-base			^
 	--pkg=frida-pipe				^
 	--pkg=frida-helper-backend || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -234,25 +219,26 @@ echo &gt; "$(IntDir)valacode.stamp"
 	labrats.vala				^
 	async-harness.vala				^
 	process.vala				^
-	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
 	--vapidir="$(IntDir)..\frida-core"		^
-	--vapidir="$(IntDir)..\frida-interfaces-32"		^
-	--vapidir="$(IntDir)..\frida-interfaces-64"		^
+	--vapidir="$(IntDir)..\frida-base-32"		^
+	--vapidir="$(IntDir)..\frida-base-64"		^
 	--vapidir="$(IntDir)..\frida-pipe-32"		^
 	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	--vapidir="$(IntDir)..\frida-helper-backend-32"	^
 	--vapidir="$(IntDir)..\frida-helper-backend-64"	^
 	$(ValaFlags)				^
+	$(FridaCoreValaFlags)			^
 	--pkg=gio-2.0				^
+	--pkg=nice				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-0.8				^
 	--pkg=json-glib-1.0				^
 	--pkg=frida-gum-1.0			^
 	--pkg=frida-core				^
-	--pkg=frida-interfaces			^
+	--pkg=frida-base			^
 	--pkg=frida-pipe				^
 	--pkg=frida-helper-backend || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -270,25 +256,26 @@ echo &gt; "$(IntDir)valacode.stamp"
 	labrats.vala				^
 	async-harness.vala				^
 	process.vala				^
-	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
 	--vapidir="$(IntDir)..\frida-core"		^
-	--vapidir="$(IntDir)..\frida-interfaces-32"		^
-	--vapidir="$(IntDir)..\frida-interfaces-64"		^
+	--vapidir="$(IntDir)..\frida-base-32"		^
+	--vapidir="$(IntDir)..\frida-base-64"		^
 	--vapidir="$(IntDir)..\frida-pipe-32"		^
 	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	--vapidir="$(IntDir)..\frida-helper-backend-32"	^
 	--vapidir="$(IntDir)..\frida-helper-backend-64"	^
 	$(ValaFlags)				^
+	$(FridaCoreValaFlags)			^
 	--pkg=gio-2.0				^
+	--pkg=nice				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-0.8				^
 	--pkg=json-glib-1.0				^
 	--pkg=frida-gum-1.0			^
 	--pkg=frida-core				^
-	--pkg=frida-interfaces			^
+	--pkg=frida-base			^
 	--pkg=frida-pipe				^
 	--pkg=frida-helper-backend || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
@@ -306,25 +293,26 @@ echo &gt; "$(IntDir)valacode.stamp"
 	labrats.vala				^
 	async-harness.vala				^
 	process.vala				^
-	-D WINDOWS				^
 	--ccode					^
 	--directory=$(IntDir)				^
 	--header=$(IntDir)frida-tests.h			^
 	--vapidir="$(IntDir)..\frida-core"		^
-	--vapidir="$(IntDir)..\frida-interfaces-32"		^
-	--vapidir="$(IntDir)..\frida-interfaces-64"		^
+	--vapidir="$(IntDir)..\frida-base-32"		^
+	--vapidir="$(IntDir)..\frida-base-64"		^
 	--vapidir="$(IntDir)..\frida-pipe-32"		^
 	--vapidir="$(IntDir)..\frida-pipe-64"		^
 	--vapidir="$(IntDir)..\frida-helper-backend-32"	^
 	--vapidir="$(IntDir)..\frida-helper-backend-64"	^
 	$(ValaFlags)				^
+	$(FridaCoreValaFlags)			^
 	--pkg=gio-2.0				^
+	--pkg=nice				^
 	--pkg=gmodule-2.0				^
 	--pkg=gee-0.8				^
 	--pkg=json-glib-1.0				^
 	--pkg=frida-gum-1.0			^
 	--pkg=frida-core				^
-	--pkg=frida-interfaces			^
+	--pkg=frida-base			^
 	--pkg=frida-pipe				^
 	--pkg=frida-helper-backend || exit 1
 echo &gt; "$(IntDir)valacode.stamp"

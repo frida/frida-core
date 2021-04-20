@@ -24,6 +24,27 @@
     <ClCompile Include="$(IntDir)session.c">
       <Filter>Source Files\generated</Filter>
     </ClCompile>
+    <ClCompile Include="p2p-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="socket-glue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)dbus.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)p2p.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)promise.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)rpc.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
+    <ClCompile Include="$(IntDir)socket.c">
+      <Filter>Source Files\generated</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="session.vala">
@@ -31,8 +52,25 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)frida-interfaces.h">
+    <ClInclude Include="$(IntDir)frida-base.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="dbus.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="p2p.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="promise.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="rpc.vala">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="socket.vala">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
