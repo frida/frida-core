@@ -119,11 +119,14 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create (string? location = null, Cancellable? cancellable = null) throws Error, IOError;
+		public abstract async HostSession create (HostSessionOptions? options = null, Cancellable? cancellable = null) throws Error, IOError;
 		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void host_session_closed (HostSession session);
 
-		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id, Cancellable? cancellable = null) throws Error, IOError;
+		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+			Cancellable? cancellable = null) throws Error, IOError;
+		public abstract void migrate_agent_session (HostSession host_session, AgentSessionId id,
+			AgentSession new_session) throws Error;
 		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
 	}
 
@@ -131,6 +134,14 @@ namespace Frida {
 		LOCAL,
 		REMOTE,
 		USB
+	}
+
+	public class HostSessionOptions : Object {
+		public Gee.Map<string, Value?> map {
+			get;
+			set;
+			default = new Gee.HashMap<string, Value?> ();
+		}
 	}
 
 	public interface ChannelProvider : Object {
@@ -467,6 +478,12 @@ namespace Frida {
 			if (session == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 			return session;
+		}
+
+		public void migrate_agent_session (AgentSessionId id, AgentSession new_session) throws Error {
+			if (!agent_sessions.has_key (id))
+				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+			agent_sessions[id] = new_session;
 		}
 
 		public AgentSessionProvider obtain_session_provider (AgentSessionId id) throws Error {

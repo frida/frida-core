@@ -1,6 +1,6 @@
 #include "frida-core.h"
 
-#include "frida-interfaces.h"
+#include "frida-base.h"
 
 void
 _frida_fruity_host_session_backend_extract_details_for_device (gint product_id, const char * udid, char ** name, FridaImageData ** icon, GError ** error)

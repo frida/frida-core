@@ -44,6 +44,7 @@ namespace Frida.Agent {
 		private Thread<bool> agent_gthread;
 
 		private MainContext main_context;
+		private MainContext? dbus_context;
 		private MainLoop main_loop;
 		private DBusConnection connection;
 		private AgentController controller;
@@ -52,10 +53,13 @@ namespace Frida.Agent {
 		private uint registration_id = 0;
 		private uint pending_calls = 0;
 		private Promise<bool> pending_close;
-		private Gee.HashMap<AgentSessionId?, AgentClient> clients =
-			new Gee.HashMap<AgentSessionId?, AgentClient> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.HashMap<AgentSessionId?, LiveAgentSession> sessions =
+			new Gee.HashMap<AgentSessionId?, LiveAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 		private Gee.HashMap<DBusConnection, DirectConnection> direct_connections =
 			new Gee.HashMap<DBusConnection, DirectConnection> ();
+		private Gee.Map<PortalMembershipId?, PortalClient> portal_clients =
+			new Gee.HashMap<PortalMembershipId?, PortalClient> (PortalMembershipId.hash, PortalMembershipId.equal);
+		private uint next_portal_membership_id = 1;
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 		private Gee.HashMap<AgentSessionId?, uint> emulated_session_registrations = new Gee.HashMap<AgentSessionId?, uint> ();
 
@@ -378,7 +382,11 @@ namespace Frida.Agent {
 
 				fork_child_pid = get_process_id ();
 
-				acquire_child_gating ();
+				try {
+					acquire_child_gating ();
+				} catch (Error e) {
+					assert_not_reached ();
+				}
 
 				discard_connections ();
 			}
@@ -415,7 +423,7 @@ namespace Frida.Agent {
 				pid = fork_parent_pid;
 				injectee_id = fork_parent_injectee_id;
 			} else if (actor == CHILD) {
-				yield flush_all_clients ();
+				yield flush_all_sessions ();
 
 				if (fork_child_socket != null) {
 					var stream = SocketConnection.factory_create_connection (fork_child_socket);
@@ -514,6 +522,10 @@ namespace Frida.Agent {
 			}
 		}
 
+		public SpawnStartState query_current_spawn_state () {
+			return RUNNING;
+		}
+
 		public Gum.MemoryRange get_memory_range () {
 			return agent_range;
 		}
@@ -579,45 +591,48 @@ namespace Frida.Agent {
 				return;
 			}
 
-			var client = new AgentClient (this, id);
-			clients[id] = client;
-			client.closed.connect (on_client_closed);
-			client.script_eternalized.connect (on_script_eternalized);
+			var session = new LiveAgentSession (this, id, dbus_context);
+			sessions[id] = session;
+			session.closed.connect (on_session_closed);
+			session.script_eternalized.connect (on_script_eternalized);
 
 			try {
-				AgentSession session = client;
-				client.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
+				session.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id),
+					(AgentSession) session);
 			} catch (IOError io_error) {
 				assert_not_reached ();
 			}
 
+			// Ensure DBusConnection gets the signal first, as we will unregister the object right after.
+			session.migrated.connect (on_session_migrated);
+
 			opened (id);
 		}
 
-		private async void close_all_clients () {
+		private async void close_all_sessions () {
 			uint pending = 1;
 
 			CompletionNotify on_complete = () => {
 				pending--;
 				if (pending == 0)
-					schedule_idle (close_all_clients.callback);
+					schedule_idle (close_all_sessions.callback);
 			};
 
-			foreach (var client in clients.values.to_array ()) {
+			foreach (var session in sessions.values.to_array ()) {
 				pending++;
-				close_client.begin (client, on_complete);
+				close_session.begin (session, on_complete);
 			}
 
 			on_complete ();
 
 			yield;
 
-			assert (clients.is_empty);
+			assert (sessions.is_empty);
 		}
 
-		private async void close_client (AgentClient client, CompletionNotify on_complete) {
+		private async void close_session (LiveAgentSession session, CompletionNotify on_complete) {
 			try {
-				yield client.close (null);
+				yield session.close (null);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -625,18 +640,18 @@ namespace Frida.Agent {
 			on_complete ();
 		}
 
-		private async void flush_all_clients () {
+		private async void flush_all_sessions () {
 			uint pending = 1;
 
 			CompletionNotify on_complete = () => {
 				pending--;
 				if (pending == 0)
-					schedule_idle (flush_all_clients.callback);
+					schedule_idle (flush_all_sessions.callback);
 			};
 
-			foreach (var client in clients.values.to_array ()) {
+			foreach (var session in sessions.values.to_array ()) {
 				pending++;
-				flush_client.begin (client, on_complete);
+				flush_session.begin (session, on_complete);
 			}
 
 			on_complete ();
@@ -644,30 +659,43 @@ namespace Frida.Agent {
 			yield;
 		}
 
-		private async void flush_client (AgentClient client, CompletionNotify on_complete) {
-			yield client.flush ();
+		private async void flush_session (LiveAgentSession session, CompletionNotify on_complete) {
+			yield session.flush ();
 
 			on_complete ();
 		}
 
-		private void on_client_closed (AgentClient client) {
-			closed (client.id);
+		private void on_session_closed (BaseAgentSession base_session) {
+			LiveAgentSession session = (LiveAgentSession) base_session;
 
-			var id = client.registration_id;
-			if (id != 0) {
-				connection.unregister_object (id);
-				client.registration_id = 0;
-			}
+			closed (session.id);
 
-			client.script_eternalized.disconnect (on_script_eternalized);
-			client.closed.disconnect (on_client_closed);
-			clients.unset (client.id);
+			unregister_session (session);
+
+			session.migrated.disconnect (on_session_migrated);
+			session.script_eternalized.disconnect (on_script_eternalized);
+			session.closed.disconnect (on_session_closed);
+			sessions.unset (session.id);
 
 			foreach (var dc in direct_connections.values) {
-				if (dc.client == client) {
+				if (dc.session == session) {
 					detach_and_steal_direct_dbus_connection (dc.connection);
 					break;
 				}
+			}
+		}
+
+		private void on_session_migrated (AgentSession abstract_session) {
+			LiveAgentSession session = (LiveAgentSession) abstract_session;
+
+			unregister_session (session);
+		}
+
+		private void unregister_session (LiveAgentSession session) {
+			var id = session.registration_id;
+			if (id != 0) {
+				connection.unregister_object (id);
+				session.registration_id = 0;
 			}
 		}
 
@@ -688,11 +716,11 @@ namespace Frida.Agent {
 				return;
 			}
 
-			if (!clients.has_key (id))
+			if (!sessions.has_key (id))
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-			var client = clients[id];
+			var session = sessions[id];
 
-			var dc = new DirectConnection (client);
+			var dc = new DirectConnection (session);
 
 			DBusConnection connection;
 			try {
@@ -705,16 +733,15 @@ namespace Frida.Agent {
 			dc.connection = connection;
 
 			try {
-				AgentSession session = client;
-				dc.registration_id = connection.register_object (ObjectPath.AGENT_SESSION, session);
+				dc.registration_id = connection.register_object (ObjectPath.AGENT_SESSION, (AgentSession) session);
 			} catch (IOError io_error) {
 				assert_not_reached ();
 			}
 
 			connection.start_message_processing ();
 
-			this.connection.unregister_object (client.registration_id);
-			client.registration_id = 0;
+			this.connection.unregister_object (session.registration_id);
+			session.registration_id = 0;
 
 			direct_connections[connection] = dc;
 			connection.on_closed.connect (on_direct_connection_closed);
@@ -724,7 +751,7 @@ namespace Frida.Agent {
 		private void on_direct_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
 			var dc = detach_and_steal_direct_dbus_connection (connection);
 
-			dc.client.close.begin (null);
+			dc.session.close.begin (null);
 		}
 
 		private DirectConnection detach_and_steal_direct_dbus_connection (DBusConnection connection) {
@@ -773,7 +800,7 @@ namespace Frida.Agent {
 				}
 			}
 
-			yield close_all_clients ();
+			yield close_all_sessions ();
 
 			yield teardown_connection ();
 
@@ -795,7 +822,7 @@ namespace Frida.Agent {
 			}
 		}
 
-		public void acquire_child_gating () {
+		public void acquire_child_gating () throws Error {
 			child_gating_subscriber_count++;
 			if (child_gating_subscriber_count == 1)
 				enable_child_gating ();
@@ -845,6 +872,39 @@ namespace Frida.Agent {
 			interceptor.end_transaction ();
 		}
 
+		public async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
+				Cancellable? cancellable) throws Error, IOError {
+			string executable_path = get_executable_path ();
+			string identifier = executable_path; // TODO: Detect app ID
+			string name = Path.get_basename (executable_path); // TODO: Detect app name
+			uint pid = get_process_id ();
+			var no_icon = ImageData.empty ();
+			var app_info = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+
+			var client = new PortalClient (this, connectable, options.certificate, options.token, app_info);
+			client.kill.connect (on_kill);
+			yield client.start (cancellable);
+
+			var id = PortalMembershipId (next_portal_membership_id++);
+			portal_clients[id] = client;
+
+			ensure_eternalized ();
+
+			return id;
+		}
+
+		public async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws Error, IOError {
+			PortalClient client;
+			if (!portal_clients.unset (membership_id, out client))
+				throw new Error.INVALID_ARGUMENT ("Invalid membership ID");
+
+			yield client.stop (cancellable);
+		}
+
+		private void on_kill () {
+			kill_process (get_process_id ());
+		}
+
 		public void schedule_idle (owned SourceFunc function) {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
@@ -883,6 +943,8 @@ namespace Frida.Agent {
 				return;
 			}
 
+			Promise<MainContext> dbus_context_request = detect_dbus_context (connection);
+
 			connection.on_closed.connect (on_connection_closed);
 			filter_id = connection.add_filter (on_connection_message);
 
@@ -891,12 +953,10 @@ namespace Frida.Agent {
 				registration_id = connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider);
 
 				connection.start_message_processing ();
-			} catch (IOError io_error) {
-				assert_not_reached ();
-			}
 
-			try {
 				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DBusProxyFlags.NONE, null);
+
+				dbus_context = yield dbus_context_request.future.wait_async (null);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}
@@ -946,11 +1006,11 @@ namespace Frida.Agent {
 				connection.unregister_object (id);
 			emulated_session_registrations.clear ();
 
-			foreach (var client in clients.values) {
-				var id = client.registration_id;
+			foreach (var session in sessions.values) {
+				var id = session.registration_id;
 				if (id != 0)
 					connection.unregister_object (id);
-				client.registration_id = 0;
+				session.registration_id = 0;
 			}
 
 			controller = null;
@@ -1014,8 +1074,8 @@ namespace Frida.Agent {
 		}
 
 		private async void prepare_for_termination (TerminationReason reason) {
-			foreach (var client in clients.values.to_array ())
-				yield client.prepare_for_termination (reason);
+			foreach (var session in sessions.values.to_array ())
+				yield session.prepare_for_termination (reason);
 
 			var connection = this.connection;
 			if (connection != null) {
@@ -1027,8 +1087,8 @@ namespace Frida.Agent {
 		}
 
 		private void unprepare_for_termination () {
-			foreach (var client in clients.values.to_array ())
-				client.unprepare_for_termination ();
+			foreach (var session in sessions.values.to_array ())
+				session.unprepare_for_termination ();
 		}
 
 #if ANDROID && (X86 || X86_64)
@@ -1337,15 +1397,7 @@ namespace Frida.Agent {
 	}
 #endif
 
-	private class AgentClient : Object, AgentSession {
-		public signal void closed ();
-		public signal void script_eternalized (Gum.Script script);
-
-		public weak Runner runner {
-			get;
-			construct;
-		}
-
+	private class LiveAgentSession : BaseAgentSession {
 		public AgentSessionId id {
 			get;
 			construct;
@@ -1356,219 +1408,24 @@ namespace Frida.Agent {
 			set;
 		}
 
-		private Promise<bool> close_request;
-		private Promise<bool> flush_complete = new Promise<bool> ();
-
-		private bool child_gating_enabled = false;
-		private ScriptEngine script_engine;
-
-		public AgentClient (Runner runner, AgentSessionId id) {
-			Object (runner: runner, id: id);
-		}
-
-		construct {
-			script_engine = new ScriptEngine (runner);
-			script_engine.message_from_script.connect (on_message_from_script);
-			script_engine.message_from_debugger.connect (on_message_from_debugger);
-		}
-
-		public async void close (Cancellable? cancellable) throws Error, IOError {
-			while (close_request != null) {
-				try {
-					yield close_request.future.wait_async (cancellable);
-					return;
-				} catch (GLib.Error e) {
-					assert (e is IOError.CANCELLED);
-					cancellable.set_error_if_cancelled ();
-				}
-			}
-			close_request = new Promise<bool> ();
-
-			try {
-				yield disable_child_gating (cancellable);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-
-			yield script_engine.flush ();
-			flush_complete.resolve (true);
-
-			yield script_engine.close ();
-			script_engine.message_from_script.disconnect (on_message_from_script);
-			script_engine.message_from_debugger.disconnect (on_message_from_debugger);
-
-			closed ();
-
-			close_request.resolve (true);
-		}
-
-		public async void flush () {
-			if (close_request == null)
-				close.begin (null);
-
-			try {
-				yield flush_complete.future.wait_async (null);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-		}
-
-		public async void prepare_for_termination (TerminationReason reason) {
-			yield script_engine.prepare_for_termination (reason);
-		}
-
-		public void unprepare_for_termination () {
-			script_engine.unprepare_for_termination ();
-		}
-
-		public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			if (child_gating_enabled)
-				return;
-
-			runner.acquire_child_gating ();
-
-			child_gating_enabled = true;
-		}
-
-		public async void disable_child_gating (Cancellable? cancellable) throws Error, IOError {
-			if (!child_gating_enabled)
-				return;
-
-			runner.release_child_gating ();
-
-			child_gating_enabled = false;
-		}
-
-		public async AgentScriptId create_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var options = new ScriptOptions ();
-			if (name != "")
-				options.name = name;
-
-			var instance = yield script_engine.create_script (source, null, options);
-			return instance.script_id;
-		}
-
-		public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
-				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
-			return instance.script_id;
-		}
-
-		public async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var instance = yield script_engine.create_script (null, new Bytes (bytes), new ScriptOptions ());
-			return instance.script_id;
-		}
-
-		public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
-				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var instance = yield script_engine.create_script (null, new Bytes (bytes),
-				ScriptOptions._deserialize (options.data));
-			return instance.script_id;
-		}
-
-		public async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var options = new ScriptOptions ();
-			if (name != "")
-				options.name = name;
-
-			var bytes = yield script_engine.compile_script (source, options);
-			return bytes.get_data ();
-		}
-
-		public async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
-				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options.data));
-			return bytes.get_data ();
-		}
-
-		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			yield script_engine.destroy_script (script_id);
-		}
-
-		public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			yield script_engine.load_script (script_id);
-		}
-
-		public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var script = script_engine.eternalize_script (script_id);
-			script_eternalized (script);
-		}
-
-		public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
-				Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.post_to_script (script_id, message, has_data ? new Bytes (data) : null);
-		}
-
-		public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.enable_debugger ();
-		}
-
-		public async void disable_debugger (Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.disable_debugger ();
-		}
-
-		public async void post_message_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.post_message_to_debugger (message);
-		}
-
-		public async void enable_jit (Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.enable_jit ();
-		}
-
-		private void check_open () throws Error {
-			if (close_request != null)
-				throw new Error.INVALID_OPERATION ("Session is closing");
-		}
-
-		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
-			bool has_data = data != null;
-			var data_param = has_data ? data.get_data () : new uint8[0];
-			this.message_from_script (script_id, message, has_data, data_param);
-		}
-
-		private void on_message_from_debugger (string message) {
-			this.message_from_debugger (message);
+		public LiveAgentSession (ProcessInvader invader, AgentSessionId id, MainContext dbus_context) {
+			Object (
+				invader: invader,
+				frida_context: MainContext.ref_thread_default (),
+				dbus_context: dbus_context,
+				id: id
+			);
 		}
 	}
 
 	private class DirectConnection {
-		public AgentClient client;
+		public LiveAgentSession session;
 
 		public DBusConnection connection;
 		public uint registration_id;
 
-		public DirectConnection (AgentClient client) {
-			this.client = client;
+		public DirectConnection (LiveAgentSession session) {
+			this.session = session;
 		}
 	}
 

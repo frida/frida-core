@@ -5,6 +5,7 @@
 # include <windows.h>
 #else
 # include <pthread.h>
+# include <signal.h>
 # include <unistd.h>
 #endif
 #ifdef HAVE_DARWIN
@@ -37,6 +38,24 @@ frida_join_pthread (gpointer pthread)
 {
 #ifndef HAVE_WINDOWS
   pthread_join ((pthread_t) pthread, NULL);
+#endif
+}
+
+void
+frida_kill_process (guint pid)
+{
+#ifdef HAVE_WINDOWS
+  HANDLE process;
+
+  process = OpenProcess (PROCESS_TERMINATE, FALSE, pid);
+  if (process == NULL)
+    return;
+
+  TerminateProcess (process, 1);
+
+  CloseHandle (process);
+#else
+  kill (pid, SIGKILL);
 #endif
 }
 

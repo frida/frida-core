@@ -48,29 +48,41 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
-			assert (location == null);
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
-				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+				throw new Error.INVALID_OPERATION ("Already created");
+
 			var tempdir = new TemporaryDirectory ();
+
 			host_session = new WindowsHostSession (new WindowsHelperProcess (tempdir), tempdir);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
+
 			return host_session;
 		}
 
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
 			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return this.host_session.obtain_agent_session (agent_session_id);
+
+			return this.host_session.obtain_agent_session (id);
+		}
+
+		public void migrate_agent_session (HostSession host_session, AgentSessionId id, AgentSession new_session) throws Error {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			this.host_session.migrate_agent_session (id, new_session);
 		}
 
 		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,

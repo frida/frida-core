@@ -340,7 +340,7 @@ namespace Frida.HostSessionTest {
 				get { return HostSessionProviderKind.LOCAL; }
 			}
 
-			public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
+			public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
@@ -348,8 +348,13 @@ namespace Frida.HostSessionTest {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
 					Cancellable? cancellable) throws Error, IOError {
+				throw new Error.NOT_SUPPORTED ("Not implemented");
+			}
+
+			public void migrate_agent_session (HostSession host_session, AgentSessionId id,
+					AgentSession new_session) throws Error {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 		}

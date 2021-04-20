@@ -45,6 +45,9 @@
 /* Define to 1 if you have the <locale.h> header file. */
 #mesondefine HAVE_LOCALE_H
 
+/* Define to 1 if OpenSSL is available. */
+#mesondefine HAVE_OPENSSL
+
 /* Define to 1 if you have the <xlocale.h> header file. */
 #mesondefine HAVE_XLOCALE_H
 

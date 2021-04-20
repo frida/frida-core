@@ -1,6 +1,6 @@
 #include "frida-agent.h"
 
-#include "frida-interfaces.h"
+#include "frida-base.h"
 #include "frida-payload.h"
 
 #ifdef HAVE_ANDROID

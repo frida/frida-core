@@ -14,7 +14,7 @@
     <ProjectReference Include="..\..\..\frida-gum\gum-32.vcxproj">
       <Project>{b31c7d42-54b6-49bb-b30c-11745c48b062}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\lib\interfaces\frida-interfaces-32.vcxproj">
+    <ProjectReference Include="..\..\lib\base\frida-base-32.vcxproj">
       <Project>{c4203124-c838-437b-8662-ca477b146655}</Project>
     </ProjectReference>
   </ItemGroup>
@@ -61,13 +61,13 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-base-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-base-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>

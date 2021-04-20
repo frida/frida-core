@@ -10,7 +10,7 @@
   <ItemGroup>
     <CustomBuild Include="agent.vala">
       <Message>Compiling vala code</Message>
-      <Command>"$(ValaCompiler)" agent.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-agent --header=$(IntDir)frida-agent.h --vapidir="$(IntDir)..\frida-interfaces-32" --vapidir="$(IntDir)..\frida-interfaces-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-payload-32" --vapidir="$(IntDir)..\frida-payload-64" $(ValaFlags) --pkg=glib-2.0 --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-interfaces --pkg=frida-pipe --pkg=frida-payload || exit 1
+      <Command>"$(ValaCompiler)" agent.vala -D WINDOWS --ccode --directory=$(IntDir) --library=frida-agent --header=$(IntDir)frida-agent.h --vapidir="$(IntDir)..\frida-base-32" --vapidir="$(IntDir)..\frida-base-64" --vapidir="$(IntDir)..\frida-pipe-32" --vapidir="$(IntDir)..\frida-pipe-64" --vapidir="$(IntDir)..\frida-payload-32" --vapidir="$(IntDir)..\frida-payload-64" $(ValaFlags) --pkg=glib-2.0 --pkg=gio-2.0 --pkg=gee-0.8 --pkg=json-glib-1.0 --pkg=frida-gum-1.0 --pkg=frida-gumjs-1.0 --pkg=frida-base --pkg=frida-pipe --pkg=frida-payload || exit 1
 echo &gt; "$(IntDir)valacode.stamp"
 </Command>
       <AdditionalInputs>$(ValaCompiler);%(AdditionalInputs)</AdditionalInputs>

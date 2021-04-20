@@ -52,7 +52,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-base-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -61,7 +61,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(IntDir)..\frida-interfaces-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(IntDir)..\frida-base-32;$(IntDir)..\frida-pipe-32;$(IntDir)..\frida-helper-backend-32;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -69,7 +69,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\lib\interfaces\frida-interfaces-32.vcxproj">
+    <ProjectReference Include="..\..\lib\base\frida-base-32.vcxproj">
       <Project>{c4203124-c838-437b-8662-ca477b146655}</Project>
     </ProjectReference>
     <ProjectReference Include="..\..\lib\pipe\frida-pipe-32.vcxproj">

@@ -6,10 +6,6 @@ namespace Frida {
 		public extern static void kill (uint pid);
 	}
 
-	namespace Tcp {
-		public extern void enable_nodelay (Socket socket);
-	}
-
 	public class ApplicationEnumerator {
 		private MainContext current_main_context;
 		private Gee.ArrayList<EnumerateRequest> pending_requests = new Gee.ArrayList<EnumerateRequest> ();

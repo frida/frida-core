@@ -120,9 +120,9 @@ namespace Frida {
 		public async void close (Cancellable? cancellable) throws IOError {
 		}
 
-		public async HostSession create (string? location, Cancellable? cancellable) throws Error, IOError {
+		public async HostSession create (HostSessionOptions? options, Cancellable? cancellable) throws Error, IOError {
 			if (host_session != null)
-				throw new Error.INVALID_ARGUMENT ("Invalid location: already created");
+				throw new Error.INVALID_ARGUMENT ("Already created");
 
 			host_session = new DroidyHostSession (device_details, this);
 			host_session.agent_session_closed.connect (on_agent_session_closed);
@@ -133,16 +133,26 @@ namespace Frida {
 		public async void destroy (HostSession session, Cancellable? cancellable) throws Error, IOError {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
 			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId agent_session_id,
+		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-			return this.host_session.obtain_agent_session (agent_session_id);
+
+			return this.host_session.obtain_agent_session (id);
+		}
+
+		public void migrate_agent_session (HostSession host_session, AgentSessionId id, AgentSession new_session) throws Error {
+			if (host_session != this.host_session)
+				throw new Error.INVALID_ARGUMENT ("Invalid host session");
+
+			this.host_session.migrate_agent_session (id, new_session);
 		}
 
 		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
@@ -202,7 +212,6 @@ namespace Frida {
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		private const uint16 DEFAULT_SERVER_PORT = 27042;
 		private const double MIN_SERVER_CHECK_INTERVAL = 5.0;
 		private const string GADGET_APP_ID = "re.frida.Gadget";
 
@@ -609,6 +618,12 @@ namespace Frida {
 			return session;
 		}
 
+		public void migrate_agent_session (AgentSessionId id, AgentSession new_session) throws Error {
+			if (!agent_sessions.has_key (id))
+				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
+			agent_sessions[id] = new_session;
+		}
+
 		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
 				Cancellable? cancellable) throws Error, IOError {
 			var server = yield get_remote_server (cancellable);
@@ -675,7 +690,7 @@ namespace Frida {
 			DBusConnection? connection = null;
 			try {
 				var stream = yield channel_provider.open_channel (
-					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_SERVER_PORT),
+					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
 					cancellable);
 
 				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);

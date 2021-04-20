@@ -31,7 +31,7 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(IntDir)frida-interfaces.h">
+    <ClInclude Include="$(IntDir)frida-base.h">
       <Filter>Header Files\generated</Filter>
     </ClInclude>
   </ItemGroup>

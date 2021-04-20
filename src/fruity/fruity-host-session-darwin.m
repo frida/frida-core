@@ -1,7 +1,7 @@
 #include "frida-core.h"
 
 #include "../darwin/icon-helpers.h"
-#include "frida-interfaces.h"
+#include "frida-base.h"
 
 typedef struct _FridaFruityModel FridaFruityModel;
 

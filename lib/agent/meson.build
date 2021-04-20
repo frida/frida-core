@@ -33,7 +33,7 @@ raw_agent = shared_library('frida-agent', agent_sources,
   link_args: extra_link_args,
   vs_module_defs: 'frida-agent.def',
   override_options: ['b_asneeded=true'],
-  dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, interfaces_dep, pipe_dep, tls_provider_dep, payload_dep],
+  dependencies: [gio_dep, gee_dep, gum_dep, gumjs_dep, base_dep, pipe_dep, tls_provider_dep, payload_dep],
 )
 
 operations = ['--move', 'constructor', 'frida_init_memory', 'first']

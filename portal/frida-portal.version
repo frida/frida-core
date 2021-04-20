@@ -1,0 +1,4 @@
+FRIDA_PORTAL {
+  local:
+    *;
+};

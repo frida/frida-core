@@ -74,6 +74,20 @@ namespace Frida {
 		public signal void message_from_debugger (string message);
 
 		public abstract async void enable_jit (Cancellable? cancellable) throws GLib.Error;
+
+		public abstract async PortalMembershipId join_portal (string address, AgentPortalOptions options,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws GLib.Error;
+
+		public abstract async void offer_peer_connection (string offer_sdp, AgentPeerOptions peer_options, string cert_pem,
+			Cancellable? cancellable, out string answer_sdp) throws GLib.Error;
+		public abstract async void add_candidates (string[] candidate_sdps, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void notify_candidate_gathering_done (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void begin_migration (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void commit_migration (Cancellable? cancellable) throws GLib.Error;
+		public signal void new_candidates (string[] candidate_sdps);
+		public signal void candidate_gathering_done ();
+		public signal void migrated ();
 	}
 
 	[DBus (name = "re.frida.AgentController14")]
@@ -97,6 +111,136 @@ namespace Frida {
 	public interface TransportBroker : Object {
 		public abstract async void open_tcp_transport (AgentSessionId id, Cancellable? cancellable, out uint16 port,
 			out string token) throws GLib.Error;
+	}
+
+	[DBus (name = "re.frida.PortalSession14")]
+	public interface PortalSession : Object {
+		public abstract async void join (HostApplicationInfo app, SpawnStartState current_state, Cancellable? cancellable,
+			out SpawnStartState next_state) throws GLib.Error;
+		public signal void resume ();
+		public signal void kill ();
+	}
+
+	[DBus (name = "re.frida.BusSession14")]
+	public interface BusSession : Object {
+		public abstract async void post (string message, bool has_data, uint8[] data, Cancellable? cancellable) throws GLib.Error;
+		public signal void message (string message, bool has_data, uint8[] data);
+	}
+
+	[DBus (name = "re.frida.AuthenticationService14")]
+	public interface AuthenticationService : Object {
+		public abstract async void authenticate (string token, Cancellable? cancellable) throws GLib.Error;
+	}
+
+	public class StaticAuthenticationService : Object, AuthenticationService {
+		public string token_hash {
+			get;
+			construct;
+		}
+
+		public StaticAuthenticationService (string token) {
+			Object (token_hash: Checksum.compute_for_string (SHA256, token));
+		}
+
+		public async void authenticate (string token, Cancellable? cancellable) throws Error, IOError {
+			string input_hash = Checksum.compute_for_string (SHA256, token);
+
+			uint accumulator = 0;
+			for (uint i = 0; i != input_hash.length; i++) {
+				accumulator |= input_hash[i] ^ token_hash[i];
+			}
+
+			if (accumulator != 0)
+				throw new Error.INVALID_ARGUMENT ("Incorrect token");
+		}
+	}
+
+	public class NullAuthenticationService : Object, AuthenticationService {
+		public async void authenticate (string token, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.INVALID_OPERATION ("Authentication not expected");
+		}
+	}
+
+	public class UnauthorizedHostSession : Object, HostSession {
+		public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async HostApplicationInfo[] enumerate_applications (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async HostProcessInfo[] enumerate_processes (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async void enable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async void disable_spawn_gating (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async HostSpawnInfo[] enumerate_pending_spawn (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async HostChildInfo[] enumerate_pending_children (Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async uint spawn (string program, HostSpawnOptions options, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async void input (uint pid, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async void resume (uint pid, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
+				Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+	}
+
+	public class UnauthorizedPortalSession : Object, PortalSession {
+		public async void join (HostApplicationInfo app, SpawnStartState current_state, Cancellable? cancellable,
+				out SpawnStartState next_state) throws Error, IOError {
+			throw_not_authorized ();
+		}
+	}
+
+	public class UnauthorizedBusSession : Object, BusSession {
+		public async void post (string message, bool has_data, uint8[] data, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+	}
+
+	[NoReturn]
+	private void throw_not_authorized () throws Error {
+		throw new Error.PERMISSION_DENIED ("Not authorized, authentication required");
 	}
 
 	public enum Realm {
@@ -124,6 +268,48 @@ namespace Frida {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<UnloadPolicy> (this);
+		}
+	}
+
+	public struct InjectorPayloadId {
+		public uint handle {
+			get;
+			private set;
+		}
+
+		public InjectorPayloadId (uint handle) {
+			this.handle = handle;
+		}
+
+		public static uint hash (InjectorPayloadId? id) {
+			return direct_hash ((void *) id.handle);
+		}
+
+		public static bool equal (InjectorPayloadId? a, InjectorPayloadId? b) {
+			return a.handle == b.handle;
+		}
+	}
+
+	public struct MappedLibraryBlob {
+		public uint64 address {
+			get;
+			private set;
+		}
+
+		public uint size {
+			get;
+			private set;
+		}
+
+		public uint allocated_size {
+			get;
+			private set;
+		}
+
+		public MappedLibraryBlob (uint64 address, uint size, uint allocated_size) {
+			this.address = address;
+			this.size = size;
+			this.allocated_size = allocated_size;
 		}
 	}
 
@@ -267,6 +453,56 @@ namespace Frida {
 			this.name = name;
 			this.small_icon = small_icon;
 			this.large_icon = large_icon;
+		}
+	}
+
+	public class Image : Object {
+		public ImageData data;
+
+		public Image (ImageData data) {
+			this.data = data;
+		}
+
+		public static Image? from_data (ImageData? data) {
+			if (data == null)
+				return null;
+			return new Image (data);
+		}
+	}
+
+	public struct ImageData {
+		public int width {
+			get;
+			private set;
+		}
+
+		public int height {
+			get;
+			private set;
+		}
+
+		public int rowstride {
+			get;
+			private set;
+		}
+
+		public string pixels {
+			get;
+			private set;
+		}
+
+		public ImageData (int width, int height, int rowstride, string pixels) {
+			this.width = width;
+			this.height = height;
+			this.rowstride = rowstride;
+			this.pixels = pixels;
+		}
+
+		public ImageData.empty () {
+			this.width = 0;
+			this.height = 0;
+			this.rowstride = 0;
+			this.pixels = "";
 		}
 	}
 
@@ -626,399 +862,202 @@ namespace Frida {
 		}
 	}
 
-	public struct InjectorPayloadId {
+	public struct PortalMembershipId {
 		public uint handle {
 			get;
 			private set;
 		}
 
-		public InjectorPayloadId (uint handle) {
+		public PortalMembershipId (uint handle) {
 			this.handle = handle;
 		}
 
-		public static uint hash (InjectorPayloadId? id) {
+		public static uint hash (PortalMembershipId? id) {
 			return direct_hash ((void *) id.handle);
 		}
 
-		public static bool equal (InjectorPayloadId? a, InjectorPayloadId? b) {
+		public static bool equal (PortalMembershipId? a, PortalMembershipId? b) {
 			return a.handle == b.handle;
 		}
 	}
 
-	public struct MappedLibraryBlob {
-		public uint64 address {
+	public struct AgentPortalOptions {
+		public uint8[] data {
 			get;
-			private set;
+			set;
 		}
 
-		public uint size {
-			get;
-			private set;
-		}
-
-		public uint allocated_size {
-			get;
-			private set;
-		}
-
-		public MappedLibraryBlob (uint64 address, uint size, uint allocated_size) {
-			this.address = address;
-			this.size = size;
-			this.allocated_size = allocated_size;
+		public AgentPortalOptions () {
+			this.data = {};
 		}
 	}
 
-	public class Image : Object {
-		public ImageData data;
-
-		public Image (ImageData data) {
-			this.data = data;
+	public class PortalOptions : Object {
+		public TlsCertificate? certificate {
+			get;
+			set;
 		}
 
-		public static Image? from_data (ImageData? data) {
-			if (data == null)
-				return null;
-			return new Image (data);
+		public string? token {
+			get;
+			set;
+		}
+
+		public Bytes _serialize () {
+			var dict = new VariantDict ();
+
+			if (certificate != null)
+				dict.insert_value ("certificate", new Variant.string (certificate.certificate_pem));
+
+			if (token != null)
+				dict.insert_value ("token", new Variant.string (token));
+
+			return dict.end ().get_data_as_bytes ();
+		}
+
+		public static PortalOptions _deserialize (uint8[] data) {
+			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
+
+			var options = new PortalOptions ();
+
+			string? cert_pem = null;
+			dict.lookup ("certificate", "s", out cert_pem);
+			if (cert_pem != null) {
+				try {
+					options.certificate = new TlsCertificate.from_pem (cert_pem, -1);
+				} catch (GLib.Error e) {
+				}
+			}
+
+			string? token = null;
+			dict.lookup ("token", "s", out token);
+			options.token = token;
+
+			return options;
 		}
 	}
 
-	public struct ImageData {
-		public int width {
+	public struct AgentPeerOptions {
+		public uint8[] data {
 			get;
-			private set;
+			set;
 		}
 
-		public int height {
-			get;
-			private set;
-		}
-
-		public int rowstride {
-			get;
-			private set;
-		}
-
-		public string pixels {
-			get;
-			private set;
-		}
-
-		public ImageData (int width, int height, int rowstride, string pixels) {
-			this.width = width;
-			this.height = height;
-			this.rowstride = rowstride;
-			this.pixels = pixels;
-		}
-
-		public ImageData.empty () {
-			this.width = 0;
-			this.height = 0;
-			this.rowstride = 0;
-			this.pixels = "";
+		public AgentPeerOptions () {
+			this.data = {};
 		}
 	}
 
-	public class Promise<T> {
-		private Impl<T> impl;
-
-		public Future<T> future {
-			get {
-				return impl;
-			}
+	public class PeerOptions : Object {
+		public string? stun_server {
+			get;
+			set;
 		}
 
-		public Promise () {
-			impl = new Impl<T> ();
+		private Gee.List<Relay> relays = new Gee.ArrayList<Relay> ();
+
+		public void clear_relays () {
+			relays.clear ();
 		}
 
-		~Promise () {
-			impl.abandon ();
+		public void add_relay (Relay relay) {
+			relays.add (relay);
 		}
 
-		public void resolve (T result) {
-			impl.resolve (result);
+		public void enumerate_relays (Func<Relay> func) {
+			foreach (var relay in relays)
+				func (relay);
 		}
 
-		public void reject (GLib.Error error) {
-			impl.reject (error);
+		public Bytes _serialize () {
+			var dict = new VariantDict ();
+
+			if (stun_server != null)
+				dict.insert_value ("stun-server", new Variant.string (stun_server));
+
+			if (!relays.is_empty) {
+				var builder = new VariantBuilder (new VariantType.array (Relay.get_variant_type ()));
+				foreach (var relay in relays)
+					builder.add_value (relay.to_variant ());
+				dict.insert_value ("relays", builder.end ());
+			}
+
+			return dict.end ().get_data_as_bytes ();
 		}
 
-		private class Impl<T> : Object, Future<T> {
-			public bool ready {
-				get {
-					return _ready;
-				}
-			}
-			private bool _ready = false;
+		public static PeerOptions _deserialize (uint8[] data) {
+			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
 
-			public T? value {
-				get {
-					return _value;
-				}
-			}
-			private T? _value;
+			var options = new PeerOptions ();
 
-			public GLib.Error? error {
-				get {
-					return _error;
-				}
-			}
-			private GLib.Error? _error;
+			string? stun_server = null;
+			dict.lookup ("stun-server", "s", out stun_server);
+			options.stun_server = stun_server;
 
-			private Gee.ArrayQueue<CompletionFuncEntry> on_complete;
-
-			public async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError {
-				if (_ready)
-					return get_result ();
-
-				var entry = new CompletionFuncEntry (wait_async.callback);
-				if (on_complete == null)
-					on_complete = new Gee.ArrayQueue<CompletionFuncEntry> ();
-				on_complete.offer (entry);
-
-				var cancel_source = new CancellableSource (cancellable);
-				cancel_source.set_callback (() => {
-					on_complete.remove (entry);
-					wait_async.callback ();
-					return false;
-				});
-				cancel_source.attach (MainContext.get_thread_default ());
-
-				yield;
-
-				cancel_source.destroy ();
-
-				cancellable.set_error_if_cancelled ();
-
-				return get_result ();
-			}
-
-			private T get_result () throws Frida.Error, IOError {
-				if (error != null) {
-					if (error is Frida.Error)
-						throw (Frida.Error) error;
-
-					if (error is IOError.CANCELLED)
-						throw (IOError) error;
-
-					throw new Frida.Error.TRANSPORT ("%s", error.message);
-				}
-
-				return _value;
-			}
-
-			internal void resolve (T value) {
-				assert (!_ready);
-
-				_value = value;
-				transition_to_ready ();
-			}
-
-			internal void reject (GLib.Error error) {
-				assert (!_ready);
-
-				_error = error;
-				transition_to_ready ();
-			}
-
-			internal void abandon () {
-				if (!_ready) {
-					reject (new Frida.Error.INVALID_OPERATION ("Promise abandoned"));
+			Variant? relays_val = dict.lookup_value ("relays", new VariantType.array (Relay.get_variant_type ()));
+			if (relays_val != null) {
+				var iter = relays_val.iterator ();
+				Variant? val;
+				while ((val = iter.next_value ()) != null) {
+					options.add_relay (Relay.from_variant (val));
 				}
 			}
 
-			internal void transition_to_ready () {
-				_ready = true;
-
-				if (on_complete != null && !on_complete.is_empty) {
-					var source = new IdleSource ();
-					source.set_priority (Priority.HIGH);
-					source.set_callback (() => {
-						CompletionFuncEntry? entry;
-						while ((entry = on_complete.poll ()) != null)
-							entry.func ();
-						on_complete = null;
-						return false;
-					});
-					source.attach (MainContext.get_thread_default ());
-				}
-			}
-		}
-
-		private class CompletionFuncEntry {
-			public SourceFunc func;
-
-			public CompletionFuncEntry (owned SourceFunc func) {
-				this.func = (owned) func;
-			}
+			return options;
 		}
 	}
 
-	public interface Future<T> : Object {
-		public abstract bool ready { get; }
-		public abstract T? value { get; }
-		public abstract GLib.Error? error { get; }
-		public abstract async T wait_async (Cancellable? cancellable) throws Frida.Error, IOError;
-	}
-
-	public class RpcClient : Object {
-		public weak RpcPeer peer {
+	public class Relay : Object {
+		public string address {
 			get;
 			construct;
 		}
 
-		private Gee.HashMap<string, PendingResponse> pending_responses = new Gee.HashMap<string, PendingResponse> ();
-
-		public RpcClient (RpcPeer peer) {
-			Object (peer: peer);
+		public string username {
+			get;
+			construct;
 		}
 
-		public async Json.Node call (string method, Json.Node[] args, Cancellable? cancellable) throws Error, IOError {
-			string request_id = Uuid.string_random ();
-
-			var request = new Json.Builder ();
-			request
-				.begin_array ()
-				.add_string_value ("frida:rpc")
-				.add_string_value (request_id)
-				.add_string_value ("call")
-				.add_string_value (method)
-				.begin_array ();
-			foreach (var arg in args)
-				request.add_value (arg);
-			request
-				.end_array ()
-				.end_array ();
-			string raw_request = Json.to_string (request.get_root (), false);
-
-			bool waiting = false;
-
-			var pending = new PendingResponse (() => {
-				if (waiting)
-					call.callback ();
-				return false;
-			});
-			pending_responses[request_id] = pending;
-
-			try {
-				yield peer.post_rpc_message (raw_request, cancellable);
-			} catch (Error e) {
-				if (pending_responses.unset (request_id))
-					pending.complete_with_error (e);
-			}
-
-			if (!pending.completed) {
-				var cancel_source = new CancellableSource (cancellable);
-				cancel_source.set_callback (() => {
-					if (pending_responses.unset (request_id))
-						pending.complete_with_error (new IOError.CANCELLED ("Operation was cancelled"));
-					return false;
-				});
-				cancel_source.attach (MainContext.get_thread_default ());
-
-				waiting = true;
-				yield;
-				waiting = false;
-
-				cancel_source.destroy ();
-			}
-
-			cancellable.set_error_if_cancelled ();
-
-			if (pending.error != null)
-				throw_api_error (pending.error);
-
-			return pending.result;
+		public string password {
+			get;
+			construct;
 		}
 
-		public bool try_handle_message (string raw_message) {
-			if (raw_message.index_of ("\"frida:rpc\"") == -1)
-				return false;
-
-			var parser = new Json.Parser ();
-			try {
-				parser.load_from_data (raw_message);
-			} catch (GLib.Error e) {
-				assert_not_reached ();
-			}
-			var message = parser.get_root ().get_object ();
-
-			bool handled = false;
-
-			var type = message.get_string_member ("type");
-			if (type == "send")
-				handled = try_handle_rpc_message (message);
-
-			return handled;
+		public RelayKind kind {
+			get;
+			construct;
 		}
 
-		private bool try_handle_rpc_message (Json.Object message) {
-			var payload = message.get_member ("payload");
-			if (payload == null || payload.get_node_type () != Json.NodeType.ARRAY)
-				return false;
-			var rpc_message = payload.get_array ();
-			if (rpc_message.get_length () < 4)
-				return false;
-
-			string? type = rpc_message.get_element (0).get_string ();
-			if (type == null || type != "frida:rpc")
-				return false;
-
-			var request_id_value = rpc_message.get_element (1);
-			if (request_id_value.get_value_type () != typeof (string))
-				return false;
-			string request_id = request_id_value.get_string ();
-
-			PendingResponse response;
-			if (!pending_responses.unset (request_id, out response))
-				return false;
-
-			var status = rpc_message.get_string_element (2);
-			if (status == "ok")
-				response.complete_with_result (rpc_message.get_element (3));
-			else
-				response.complete_with_error (new Error.NOT_SUPPORTED (rpc_message.get_string_element (3)));
-
-			return true;
+		public Relay (string address, string username, string password, RelayKind kind) {
+			Object (
+				address: address,
+				username: username,
+				password: password,
+				kind: kind
+			);
 		}
 
-		private class PendingResponse {
-			private SourceFunc handler;
+		internal static VariantType get_variant_type () {
+			return new VariantType ("(sssu)");
+		}
 
-			public bool completed {
-				get {
-					return result != null || error != null;
-				}
-			}
+		internal Variant to_variant () {
+			return new Variant ("(sssu)", address, username, password, (uint) kind);
+		}
 
-			public Json.Node? result {
-				get;
-				private set;
-			}
+		internal static Relay from_variant (Variant val) {
+			string address, username, password;
+			uint kind;
+			val.get ("(sssu)", out address, out username, out password, out kind);
 
-			public GLib.Error? error {
-				get;
-				private set;
-			}
-
-			public PendingResponse (owned SourceFunc handler) {
-				this.handler = (owned) handler;
-			}
-
-			public void complete_with_result (Json.Node result) {
-				this.result = result;
-				handler ();
-			}
-
-			public void complete_with_error (GLib.Error error) {
-				this.error = error;
-				handler ();
-			}
+			return new Relay (address, username, password, (RelayKind) kind);
 		}
 	}
 
-	public interface RpcPeer : Object {
-		public abstract async void post_rpc_message (string raw_message, Cancellable? cancellable) throws Error, IOError;
+	public enum RelayKind {
+		TURN_UDP,
+		TURN_TCP,
+		TURN_TLS
 	}
 
 	namespace ServerGuid {
@@ -1033,6 +1072,9 @@ namespace Frida {
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
 		public const string CHILD_SESSION = "/re/frida/ChildSession";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";
+		public const string PORTAL_SESSION = "/re/frida/PortalSession";
+		public const string BUS_SESSION = "/re/frida/BusSession";
+		public const string AUTHENTICATION_SERVICE = "/re/frida/AuthenticationService";
 
 		public static string from_agent_session_id (AgentSessionId id) {
 			return "%s/%u".printf (AGENT_SESSION, id.handle);

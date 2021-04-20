@@ -14,7 +14,7 @@
     <ProjectGuid>{A31522D9-715B-4E04-AA57-DF7AFEBE082C}</ProjectGuid>
     <RootNamespace>frida</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>frida-interfaces-64</ProjectName>
+    <ProjectName>frida-base-64</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
@@ -61,7 +61,7 @@
       <PreprocessorDefinitions>$(FridaComponentDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
-  <Import Project="frida-interfaces-common.props" />
+  <Import Project="frida-base-common.props" />
   <ItemGroup>
     <ProjectReference Include="..\..\..\releng\frida-deps.vcxproj">
       <Project>{4afce7c4-6d9a-4663-b43c-d2e518486910}</Project>

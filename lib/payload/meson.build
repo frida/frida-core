@@ -1,7 +1,9 @@
 payload_sources = [
   'process.vala',
   'process-glue.c',
+  'base-agent-session.vala',
   'script-engine.vala',
+  'portal-client.vala',
   'fork-monitor.vala',
   'spawn-monitor.vala',
   'spawn-monitor-glue.c',
@@ -30,7 +32,7 @@ payload = static_library('frida-payload', payload_sources,
   c_args: frida_component_cflags,
   vala_args: extra_vala_args,
   vala_header: 'frida-payload.h',
-  dependencies: [gio_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, interfaces_dep],
+  dependencies: [gio_dep, nice_dep, gee_dep, json_glib_dep, gum_dep, gumjs_dep, base_dep],
 )
 
 payload_dep = declare_dependency(

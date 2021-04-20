@@ -215,6 +215,18 @@ if host_os == 'android'
   backend_deps_private += [libselinux_dep, libsepol_dep]
 endif
 
+nice_dep = dependency('nice', required: false)
+if nice_dep.found()
+  vala_flags += ['--define=HAVE_NICE']
+  backend_deps_private += nice_dep
+endif
+
+openssl_dep = dependency('openssl', required: false)
+if openssl_dep.found()
+  cdata.set('HAVE_OPENSSL', 1)
+  backend_deps_private += openssl_dep
+endif
+
 if tls_provider_dep.found()
   backend_deps_private += tls_provider_dep
 endif
@@ -279,6 +291,7 @@ subdir('tools')
 subdir('lib')
 subdir('src')
 subdir('server')
+subdir('portal')
 subdir('inject')
 
 if get_option('tests')

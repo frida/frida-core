@@ -1,7 +1,4 @@
 namespace Frida.Gadget {
-	private const string DEFAULT_LISTEN_ADDRESS = "127.0.0.1";
-	private const uint16 DEFAULT_LISTEN_PORT = 27042;
-
 	private class Config : Object, Json.Serializable {
 		public Object interaction {
 			get;
@@ -49,6 +46,9 @@ namespace Frida.Gadget {
 							break;
 						case "listen":
 							t = typeof (ListenInteraction);
+							break;
+						case "connect":
+							t = typeof (ConnectInteraction);
 							break;
 					}
 
@@ -246,19 +246,29 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class ListenInteraction : Object {
-		public string address {
+	private abstract class SocketInteraction : Object {
+		public string? address {
 			get;
 			set;
-			default = DEFAULT_LISTEN_ADDRESS;
 		}
 
-		public uint port {
+		public uint16 port {
 			get;
 			set;
-			default = DEFAULT_LISTEN_PORT;
 		}
 
+		public string? certificate {
+			get;
+			set;
+		}
+
+		public string? token {
+			get;
+			set;
+		}
+	}
+
+	private class ListenInteraction : SocketInteraction {
 		public PortConflictBehavior on_port_conflict {
 			get;
 			set;
@@ -282,17 +292,32 @@ namespace Frida.Gadget {
 		}
 	}
 
+	private class ConnectInteraction : SocketInteraction {
+	}
+
 	private class Location : Object {
 		public string executable_name {
 			get;
 			construct;
 		}
 
-		public string bundle_id {
+		public string? bundle_id {
 			get {
-				if (cached_bundle_id == null)
+				if (!did_fetch_bundle_id) {
 					cached_bundle_id = Environment.detect_bundle_id ();
+					did_fetch_bundle_id = true;
+				}
 				return cached_bundle_id;
+			}
+		}
+
+		public string? bundle_name {
+			get {
+				if (!did_fetch_bundle_name) {
+					cached_bundle_name = Environment.detect_bundle_name ();
+					did_fetch_bundle_name = true;
+				}
+				return cached_bundle_name;
 			}
 		}
 
@@ -306,7 +331,11 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		private bool did_fetch_bundle_id = false;
 		private string? cached_bundle_id = null;
+
+		private bool did_fetch_bundle_name = false;
+		private string? cached_bundle_name = null;
 
 		public Location (string executable_name, string? path, Gum.MemoryRange range) {
 			Object (
@@ -324,7 +353,11 @@ namespace Frida.Gadget {
 					FileUtils.get_contents ("/proc/self/cmdline", out cmdline);
 					if (cmdline != "zygote" && cmdline != "zygote64") {
 						executable_name = cmdline;
+
 						cached_bundle_id = cmdline.split (":", 2)[0];
+						cached_bundle_name = cached_bundle_id;
+						did_fetch_bundle_id = true;
+						did_fetch_bundle_name = true;
 					}
 				} catch (FileError e) {
 				}
@@ -336,19 +369,21 @@ namespace Frida.Gadget {
 	private enum State {
 		CREATED,
 		STARTED,
-		STOPPED
+		STOPPED,
+		DETACHED
 	}
 
 	private bool loaded = false;
 	private State state = State.CREATED;
-	private Config config;
-	private Location location;
+	private Config? config;
+	private Location? location;
 	private bool wait_for_resume_needed;
-	private MainLoop wait_for_resume_loop;
-	private MainContext wait_for_resume_context;
-	private ThreadIgnoreScope worker_ignore_scope;
-	private Controller controller;
-	private Gum.Exceptor exceptor;
+	private MainLoop? wait_for_resume_loop;
+	private MainContext? wait_for_resume_context;
+	private ThreadIgnoreScope? worker_ignore_scope;
+	private Controller? controller;
+	private Gum.Interceptor? interceptor;
+	private Gum.Exceptor? exceptor;
 	private Mutex mutex;
 	private Cond cond;
 
@@ -378,7 +413,37 @@ namespace Frida.Gadget {
 
 		Gum.Cloak.add_range (location.range);
 
+		interceptor = Gum.Interceptor.obtain ();
+		interceptor.begin_transaction ();
 		exceptor = Gum.Exceptor.obtain ();
+
+		try {
+			var interaction = config.interaction;
+			if (interaction is ScriptInteraction) {
+				controller = new ScriptRunner (config, location);
+			} else if (interaction is ScriptDirectoryInteraction) {
+				controller = new ScriptDirectoryRunner (config, location);
+			} else if (interaction is ListenInteraction) {
+				controller = new ControlServer (config, location);
+			} else if (interaction is ConnectInteraction) {
+				controller = new ClusterClient (config, location);
+			} else {
+				throw new Error.NOT_SUPPORTED ("Invalid interaction specified");
+			}
+		} catch (Error e) {
+			resume ();
+
+			if (request != null) {
+				request.set_exception (e);
+			} else {
+				log_warning ("Failed to start: " + e.message);
+			}
+		}
+
+		interceptor.end_transaction ();
+
+		if (controller == null)
+			return;
 
 		wait_for_resume_needed = true;
 
@@ -445,10 +510,15 @@ namespace Frida.Gadget {
 			source.attach (Environment.get_main_context ());
 		}
 
+		State final_state;
 		mutex.lock ();
-		while (state != State.STOPPED)
+		while (state < State.STOPPED)
 			cond.wait (mutex);
+		final_state = state;
 		mutex.unlock ();
+
+		if (final_state == DETACHED)
+			return;
 
 		if (config.teardown == TeardownRequirement.FULL) {
 			config = null;
@@ -477,6 +547,10 @@ namespace Frida.Gadget {
 		}
 	}
 
+	public void kill () {
+		kill_process (get_process_id ());
+	}
+
 	private State peek_state () {
 		State result;
 
@@ -499,32 +573,11 @@ namespace Frida.Gadget {
 	private async void perform_start (Gee.Promise<int>? request) {
 		worker_ignore_scope = new ThreadIgnoreScope ();
 
-		Controller ctrl = null;
 		try {
-			var interaction = config.interaction;
-			if (interaction is ScriptInteraction) {
-				var runner = new ScriptRunner (config, location);
-				yield runner.start ();
-				ctrl = runner;
+			yield controller.start ();
 
-				resume ();
-
-				if (request != null)
-					request.set_value (0);
-			} else if (interaction is ScriptDirectoryInteraction) {
-				var runner = new ScriptDirectoryRunner (config, location);
-				yield runner.start ();
-				ctrl = runner;
-
-				resume ();
-
-				if (request != null)
-					request.set_value (0);
-			} else if (interaction is ListenInteraction) {
-				var server = new Server (config, location);
-				yield server.start ();
-				ctrl = server;
-
+			var server = controller as ControlServer;
+			if (server != null) {
 				var listen_address = server.listen_address;
 				var inet_address = listen_address as InetSocketAddress;
 				if (inet_address != null) {
@@ -551,15 +604,10 @@ namespace Frida.Gadget {
 #endif
 				}
 			} else {
-				resume ();
-
-				if (request != null) {
-					request.set_exception (new Error.NOT_SUPPORTED ("Invalid interaction specified"));
-				} else {
-					log_warning ("Failed to start: invalid interaction specified");
-				}
+				if (request != null)
+					request.set_value (0);
 			}
-		} catch (Error e) {
+		} catch (GLib.Error e) {
 			resume ();
 
 			if (request != null) {
@@ -568,25 +616,32 @@ namespace Frida.Gadget {
 				log_warning ("Failed to start: " + e.message);
 			}
 		}
-		controller = ctrl;
 	}
 
 	private async void stop () {
-		if (controller != null) {
-			if (config.teardown == TeardownRequirement.MINIMAL) {
-				yield controller.prepare_for_termination (TerminationReason.EXIT);
-			} else {
-				yield controller.stop ();
-				controller = null;
+		State pending_state = STOPPED;
 
-				exceptor = null;
+		if (controller != null) {
+			if (controller.is_eternal) {
+				pending_state = DETACHED;
+			} else {
+				if (config.teardown == TeardownRequirement.MINIMAL) {
+					yield controller.prepare_for_termination (TerminationReason.EXIT);
+				} else {
+					yield controller.stop ();
+					controller = null;
+
+					exceptor = null;
+					interceptor = null;
+				}
 			}
 		}
 
-		worker_ignore_scope = null;
+		if (pending_state == STOPPED)
+			worker_ignore_scope = null;
 
 		mutex.lock ();
-		state = State.STOPPED;
+		state = pending_state;
 		cond.signal ();
 		mutex.unlock ();
 	}
@@ -682,12 +737,23 @@ namespace Frida.Gadget {
 	}
 
 	private interface Controller : Object {
-		public abstract async void start () throws Error;
+		public abstract bool is_eternal {
+			get;
+		}
+
+		public abstract async void start () throws Error, IOError;
 		public abstract async void prepare_for_termination (TerminationReason reason);
 		public abstract async void stop ();
 	}
 
-	private abstract class BaseController : Object, Controller, ProcessInvader {
+	private abstract class BaseController : Object, Controller, ProcessInvader, ExitHandler {
+		public bool is_eternal {
+			get {
+				return _is_eternal;
+			}
+		}
+		protected bool _is_eternal = false;
+
 		public Config config {
 			get;
 			construct;
@@ -698,14 +764,26 @@ namespace Frida.Gadget {
 			construct;
 		}
 
+		private ExitMonitor exit_monitor;
+		private ThreadSuspendMonitor thread_suspend_monitor;
+
 		private Gum.ScriptBackend? qjs_backend;
 		private Gum.ScriptBackend? v8_backend;
 
-		public async void start () throws Error {
+		private Gee.Map<PortalMembershipId?, PortalClient> portal_clients =
+			new Gee.HashMap<PortalMembershipId?, PortalClient> (PortalMembershipId.hash, PortalMembershipId.equal);
+		private uint next_portal_membership_id = 1;
+
+		construct {
+			exit_monitor = new ExitMonitor (this, MainContext.default ());
+			thread_suspend_monitor = new ThreadSuspendMonitor (this);
+		}
+
+		public async void start () throws Error, IOError {
 			yield on_start ();
 		}
 
-		protected abstract async void on_start () throws Error;
+		protected abstract async void on_start () throws Error, IOError;
 
 		public async void prepare_for_termination (TerminationReason reason) {
 			yield on_terminate (reason);
@@ -718,6 +796,12 @@ namespace Frida.Gadget {
 		}
 
 		protected abstract async void on_stop ();
+
+		protected SpawnStartState query_current_spawn_state () {
+			return (peek_state () == CREATED)
+				? SpawnStartState.SUSPENDED
+				: SpawnStartState.RUNNING;
+		}
 
 		protected Gum.MemoryRange get_memory_range () {
 			return location.range;
@@ -756,6 +840,61 @@ namespace Frida.Gadget {
 		protected Gum.ScriptBackend? get_active_script_backend () {
 			return (v8_backend != null) ? v8_backend : qjs_backend;
 		}
+
+		protected void acquire_child_gating () throws Error {
+			throw new Error.NOT_SUPPORTED ("Not yet implemented");
+		}
+
+		protected void release_child_gating () {
+		}
+
+		protected async PortalMembershipId join_portal (SocketConnectable connectable, PortalOptions options,
+				Cancellable? cancellable) throws Error, IOError {
+			var client = new PortalClient (this, connectable, options.certificate, options.token, compute_app_info ());
+			client.eternalized.connect (on_eternalized);
+			client.resume.connect (Frida.Gadget.resume);
+			client.kill.connect (Frida.Gadget.kill);
+			yield client.start (cancellable);
+
+			var id = PortalMembershipId (next_portal_membership_id++);
+			portal_clients[id] = client;
+
+			_is_eternal = true;
+
+			return id;
+		}
+
+		protected async void leave_portal (PortalMembershipId membership_id, Cancellable? cancellable) throws Error, IOError {
+			PortalClient client;
+			if (!portal_clients.unset (membership_id, out client))
+				throw new Error.INVALID_ARGUMENT ("Invalid membership ID");
+
+			yield client.stop (cancellable);
+		}
+
+		private void on_eternalized () {
+			_is_eternal = true;
+		}
+
+		protected async void prepare_to_exit () {
+			yield on_terminate (TerminationReason.EXIT);
+		}
+
+		protected HostApplicationInfo compute_app_info () {
+			string identifier = location.bundle_id;
+			if (identifier == null)
+				identifier = get_executable_path ();
+
+			string name = location.bundle_name;
+			if (name == null)
+				name = Path.get_basename (get_executable_path ());
+
+			uint pid = get_process_id ();
+
+			var no_icon = ImageData.empty ();
+
+			return HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
+		}
 	}
 
 	private class ScriptRunner : BaseController {
@@ -774,8 +913,10 @@ namespace Frida.Gadget {
 			script = new Script (path, interaction.parameters, interaction.on_change, engine);
 		}
 
-		protected override async void on_start () throws Error {
+		protected override async void on_start () throws Error, IOError {
 			yield script.start ();
+
+			Frida.Gadget.resume ();
 		}
 
 		protected override async void on_terminate (TerminationReason reason) {
@@ -834,7 +975,7 @@ namespace Frida.Gadget {
 			engine = new ScriptEngine (this);
 		}
 
-		protected override async void on_start () throws Error {
+		protected override async void on_start () throws Error, IOError {
 			var interaction = config.interaction as ScriptDirectoryInteraction;
 
 			if (interaction.on_change == ScriptDirectoryInteraction.ChangeBehavior.RESCAN) {
@@ -849,6 +990,8 @@ namespace Frida.Gadget {
 			}
 
 			yield scan ();
+
+			Frida.Gadget.resume ();
 		}
 
 		protected override async void on_terminate (TerminationReason reason) {
@@ -1240,74 +1383,110 @@ namespace Frida.Gadget {
 		}
 	}
 
-	private class Server : BaseController {
-		public SocketAddress listen_address {
+	private class ControlServer : BaseController {
+		public SocketAddress? listen_address {
 			get;
 			set;
 		}
 
+		public TlsCertificate? certificate {
+			get;
+			construct;
+		}
+
+		public AuthenticationService? auth_service {
+			get;
+			construct;
+		}
+
+		public ListenInteraction.PortConflictBehavior on_port_conflict {
+			get;
+			construct;
+		}
+
 		private SocketService server = new SocketService ();
 		private string guid = DBus.generate_guid ();
-		private Gee.HashMap<DBusConnection, Client> clients = new Gee.HashMap<DBusConnection, Client> ();
+		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
 
-		public Server (Config config, Location location) throws Error {
+		public ControlServer (Config config, Location location) throws Error {
+			var interaction = (ListenInteraction) config.interaction;
+			string? token = interaction.token;
 			Object (
 				config: config,
 				location: location,
-				listen_address: parse_listen_address (config)
+				certificate: parse_certificate (interaction.certificate),
+				auth_service: (token != null) ? new StaticAuthenticationService (token) : null,
+				on_port_conflict: interaction.on_port_conflict
 			);
 		}
 
 		construct {
-			server.incoming.connect (on_server_connection);
+			server.incoming.connect (on_incoming_connection);
 		}
 
-		protected override async void on_start () throws Error {
-			SocketAddress? effective_address = null;
-			InetSocketAddress? inet_address = listen_address as InetSocketAddress;
-			if (inet_address != null) {
-				var on_port_conflict = ((ListenInteraction) config.interaction).on_port_conflict;
-				uint16 start_port = inet_address.get_port ();
-				uint16 candidate_port = start_port;
-				do {
+		protected override async void on_start () throws Error, IOError {
+			var interaction = (ListenInteraction) config.interaction;
+
+			SocketConnectable connectable = parse_control_address (interaction.address, interaction.port);
+			var enumerator = connectable.enumerate ();
+			while (true) {
+				SocketAddress? address;
+				try {
+					address = yield enumerator.next_async (io_cancellable);
+				} catch (GLib.Error e) {
+					throw new Error.NOT_SUPPORTED ("%s", e.message);
+				}
+				if (address == null)
+					break;
+
+				SocketAddress? effective_address = null;
+				InetSocketAddress? inet_address = address as InetSocketAddress;
+				if (inet_address != null) {
+					uint16 start_port = inet_address.get_port ();
+					uint16 candidate_port = start_port;
+					do {
+						try {
+							server.add_address (inet_address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+								out effective_address);
+						} catch (GLib.Error e) {
+							if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
+								candidate_port++;
+								if (candidate_port == start_port)
+									throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
+								if (candidate_port == 0)
+									candidate_port = 1024;
+								inet_address = new InetSocketAddress (inet_address.get_address (),
+									candidate_port);
+							} else {
+								throw_listen_error (e);
+							}
+						}
+					} while (effective_address == null);
+				} else {
 					try {
-						server.add_address (inet_address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
+						server.add_address (address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
 							out effective_address);
 					} catch (GLib.Error e) {
-						if (e is IOError.ADDRESS_IN_USE && on_port_conflict == PICK_NEXT) {
-							candidate_port++;
-							if (candidate_port == start_port)
-								throw new Error.ADDRESS_IN_USE ("Unable to bind to any port");
-							if (candidate_port == 0)
-								candidate_port = 1024;
-							inet_address = new InetSocketAddress (inet_address.get_address (), candidate_port);
-						} else {
-							throw_listen_error (e);
-						}
+						throw_listen_error (e);
 					}
-				} while (effective_address == null);
-			} else {
-				try {
-					server.add_address (listen_address, SocketType.STREAM, SocketProtocol.DEFAULT, null,
-						out effective_address);
-				} catch (GLib.Error e) {
-					throw_listen_error (e);
 				}
+
+				if (listen_address == null)
+					listen_address = effective_address;
 			}
-			listen_address = effective_address;
 
 			server.start ();
 		}
 
 		protected override async void on_terminate (TerminationReason reason) {
-			foreach (var client in clients.values.to_array ())
-				yield client.prepare_for_termination (reason);
+			foreach (var peer in peers.values.to_array ())
+				yield peer.prepare_for_termination (reason);
 
-			foreach (var connection in clients.keys.to_array ()) {
+			foreach (var connection in peers.keys.to_array ()) {
 				try {
 					yield connection.flush ();
 				} catch (GLib.Error e) {
@@ -1321,109 +1500,230 @@ namespace Frida.Gadget {
 
 			server.stop ();
 
-			while (!clients.is_empty) {
-				var iterator = clients.keys.iterator ();
+			io_cancellable.cancel ();
+
+			while (!peers.is_empty) {
+				var iterator = peers.keys.iterator ();
 				iterator.next ();
 				var connection = iterator.get ();
 
-				Client client;
-				clients.unset (connection, out client);
-				yield client.shutdown ();
-
-				detach_client (client);
+				Peer peer;
+				peers.unset (connection, out peer);
+				try {
+					yield peer.close ();
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 			}
-
-			io_cancellable.cancel ();
 		}
 
-		private bool on_server_connection (SocketConnection connection, Object? source_object) {
-			handle_server_connection.begin (connection);
+		private bool on_incoming_connection (SocketConnection connection, Object? source_object) {
+			handle_incoming_connection.begin (connection);
 			return true;
 		}
 
-		private async void handle_server_connection (SocketConnection socket_connection) throws GLib.Error {
+		private async void handle_incoming_connection (SocketConnection socket_connection) throws GLib.Error {
 			var socket = socket_connection.socket;
 			if (socket.get_family () != UNIX)
 				Tcp.enable_nodelay (socket);
 
-			var connection = yield new DBusConnection (socket_connection, guid,
+			IOStream stream = socket_connection;
+
+			if (certificate != null) {
+				var tc = TlsServerConnection.new (stream, certificate);
+				tc.set_database (null);
+				tc.set_certificate (certificate);
+				yield tc.handshake_async (Priority.DEFAULT, io_cancellable);
+				stream = tc;
+			}
+
+			var connection = yield new DBusConnection (stream, guid,
 				AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
 				null, io_cancellable);
+			connection.on_closed.connect (on_connection_closed);
 
-			attach_client (connection);
+			Promise<MainContext> dbus_context_request = detect_dbus_context (connection, io_cancellable);
+
+			Peer peer;
+			if (auth_service != null)
+				peer = new AuthenticationChannel (this, connection, dbus_context_request);
+			else
+				peer = setup_control_channel (connection, dbus_context_request);
+			peers[connection] = peer;
 
 			connection.start_message_processing ();
 		}
 
-		private void attach_client (DBusConnection connection) {
-			var client = new Client (this, connection);
-			clients[connection] = client;
-			connection.on_closed.connect (on_connection_closed);
-
-			client.script_eternalized.connect (on_script_eternalized);
-		}
-
-		private void detach_client (Client client) {
-			client.script_eternalized.disconnect (on_script_eternalized);
-		}
-
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			Client client;
-			if (clients.unset (connection, out client)) {
-				client.shutdown.begin ();
-				detach_client (client);
-			}
+			Peer peer;
+			if (peers.unset (connection, out peer))
+				peer.close.begin (io_cancellable);
+		}
+
+		private async void promote_authentication_channel (AuthenticationChannel channel) throws GLib.Error {
+			DBusConnection connection = channel.connection;
+
+			peers.unset (connection);
+			yield channel.close (io_cancellable);
+
+			peers[connection] = setup_control_channel (connection, channel.dbus_context_request);
+		}
+
+		private void kick_authentication_channel (AuthenticationChannel channel) {
+			Idle.add (() => {
+				channel.connection.close.begin (io_cancellable);
+				return false;
+			});
+		}
+
+		private ControlChannel setup_control_channel (DBusConnection connection, Promise<MainContext> dbus_context_request) {
+			var channel = new ControlChannel (this, connection, dbus_context_request);
+			channel.script_eternalized.connect (on_script_eternalized);
+			return channel;
+		}
+
+		private void teardown_control_channel (ControlChannel channel) {
+			channel.script_eternalized.disconnect (on_script_eternalized);
 		}
 
 		private void on_script_eternalized (Gum.Script script) {
 			eternalized_scripts.add (script);
+			_is_eternal = true;
 		}
 
-		private class Client : Object, HostSession {
+		private interface Peer : Object {
+			public abstract async void close (Cancellable? cancellable = null) throws IOError;
+			public abstract async void prepare_for_termination (TerminationReason reason);
+		}
+
+		private class AuthenticationChannel : Object, Peer, AuthenticationService {
+			public weak ControlServer parent {
+				get;
+				construct;
+			}
+
+			public DBusConnection connection {
+				get;
+				construct;
+			}
+
+			public Promise<MainContext> dbus_context_request {
+				get;
+				construct;
+			}
+
+			private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
+
+			public AuthenticationChannel (ControlServer parent, DBusConnection connection,
+					Promise<MainContext> dbus_context_request) {
+				Object (
+					parent: parent,
+					connection: connection,
+					dbus_context_request: dbus_context_request
+				);
+			}
+
+			construct {
+				try {
+					AuthenticationService auth_service = this;
+					registrations.add (connection.register_object (ObjectPath.AUTHENTICATION_SERVICE, auth_service));
+
+					HostSession host_session = new UnauthorizedHostSession ();
+					registrations.add (connection.register_object (ObjectPath.HOST_SESSION, host_session));
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
+			}
+
+			public async void close (Cancellable? cancellable) throws IOError {
+				foreach (var id in registrations)
+					connection.unregister_object (id);
+				registrations.clear ();
+			}
+
+			public async void prepare_for_termination (TerminationReason reason) {
+			}
+
+			public async void authenticate (string token, Cancellable? cancellable) throws GLib.Error {
+				try {
+					yield parent.auth_service.authenticate (token, cancellable);
+					yield parent.promote_authentication_channel (this);
+				} catch (GLib.Error e) {
+					if (e is Error.INVALID_ARGUMENT)
+						parent.kick_authentication_channel (this);
+					throw e;
+				}
+			}
+		}
+
+		private class ControlChannel : Object, Peer, HostSession {
 			public signal void script_eternalized (Gum.Script script);
 
-			private unowned Server server;
-			private DBusConnection connection;
-			private uint host_registration_id;
+			public weak ControlServer parent {
+				get;
+				construct;
+			}
+
+			public DBusConnection connection {
+				get;
+				construct;
+			}
+
+			public Promise<MainContext> dbus_context_request {
+				get;
+				construct;
+			}
+
+			private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
-			private Gee.HashSet<ClientSession> sessions = new Gee.HashSet<ClientSession> ();
+			private Gee.HashSet<LiveAgentSession> sessions = new Gee.HashSet<LiveAgentSession> ();
 			private uint next_session_id = 1;
 			private bool resume_on_attach = true;
 
-			public Client (Server s, DBusConnection c) {
-				server = s;
-				connection = c;
+			public ControlChannel (ControlServer parent, DBusConnection connection, Promise<MainContext> dbus_context_request) {
+				Object (
+					parent: parent,
+					connection: connection,
+					dbus_context_request: dbus_context_request
+				);
+			}
 
+			construct {
 				try {
-					host_registration_id = connection.register_object (Frida.ObjectPath.HOST_SESSION,
-						this as HostSession);
+					HostSession host_session = this;
+					registrations.add (connection.register_object (Frida.ObjectPath.HOST_SESSION, host_session));
+
+					AuthenticationService null_auth = new NullAuthenticationService ();
+					registrations.add (connection.register_object (Frida.ObjectPath.AUTHENTICATION_SERVICE, null_auth));
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
 
-				var pid = get_process_id ();
-				var identifier = "re.frida.Gadget";
-				var name = "Gadget";
+				uint pid = get_process_id ();
+				string identifier = "re.frida.Gadget";
+				string name = "Gadget";
 				var no_icon = ImageData.empty ();
 				this_app = HostApplicationInfo (identifier, name, pid, no_icon, no_icon);
 				this_process = HostProcessInfo (pid, name, no_icon, no_icon);
 			}
 
-			public async void shutdown () {
+			public async void close (Cancellable? cancellable) throws IOError {
 				foreach (var session in sessions.to_array ()) {
 					try {
-						yield session.close (null);
+						yield session.close (cancellable);
 					} catch (GLib.Error e) {
-						assert_not_reached ();
+						assert (e is IOError.CANCELLED);
+						throw (IOError) e;
 					}
 				}
 				assert (sessions.is_empty);
 
-				if (host_registration_id != 0) {
-					connection.unregister_object (host_registration_id);
-					host_registration_id = 0;
-				}
+				foreach (var id in registrations)
+					connection.unregister_object (id);
+				registrations.clear ();
+
+				parent.teardown_control_channel (this);
 			}
 
 			public async void prepare_for_termination (TerminationReason reason) {
@@ -1481,7 +1781,7 @@ namespace Frida.Gadget {
 			public async void kill (uint pid, Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
-				_kill (this_process.pid);
+				Frida.Gadget.kill ();
 			}
 
 			public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
@@ -1503,7 +1803,9 @@ namespace Frida.Gadget {
 
 				var id = AgentSessionId (next_session_id++);
 
-				var session = new ClientSession (server, id);
+				MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
+
+				var session = new LiveAgentSession (parent, id, dbus_context);
 				sessions.add (session);
 				session.closed.connect (on_session_closed);
 				session.script_eternalized.connect (on_script_eternalized);
@@ -1514,6 +1816,9 @@ namespace Frida.Gadget {
 				} catch (IOError io_error) {
 					assert_not_reached ();
 				}
+
+				// Ensure DBusConnection gets the signal first, as we will unregister the object right after.
+				session.migrated.connect (on_session_migrated);
 
 				return id;
 			}
@@ -1528,14 +1833,31 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");
 			}
 
-			private void on_session_closed (ClientSession session) {
-				connection.unregister_object (session.registration_id);
+			private void on_session_closed (BaseAgentSession base_session) {
+				LiveAgentSession session = (LiveAgentSession) base_session;
 
+				unregister_session (session);
+
+				session.migrated.disconnect (on_session_migrated);
 				session.script_eternalized.disconnect (on_script_eternalized);
 				session.closed.disconnect (on_session_closed);
 				sessions.remove (session);
 
 				agent_session_destroyed (session.id, APPLICATION_REQUESTED);
+			}
+
+			private void on_session_migrated (AgentSession abstract_session) {
+				LiveAgentSession session = (LiveAgentSession) abstract_session;
+
+				unregister_session (session);
+			}
+
+			private void unregister_session (LiveAgentSession session) {
+				var id = session.registration_id;
+				if (id != 0) {
+					connection.unregister_object (id);
+					session.registration_id = 0;
+				}
 			}
 
 			private void on_script_eternalized (Gum.Script script) {
@@ -1548,15 +1870,7 @@ namespace Frida.Gadget {
 			}
 		}
 
-		private class ClientSession : Object, AgentSession {
-			public signal void closed ();
-			public signal void script_eternalized (Gum.Script script);
-
-			public weak Server server {
-				get;
-				construct;
-			}
-
+		private class LiveAgentSession : BaseAgentSession {
 			public AgentSessionId id {
 				get;
 				construct;
@@ -1567,199 +1881,14 @@ namespace Frida.Gadget {
 				set;
 			}
 
-			private Promise<bool> close_request;
-
-			private ScriptEngine script_engine;
-
-			public ClientSession (Server server, AgentSessionId id) {
-				Object (server: server, id: id);
+			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, MainContext dbus_context) {
+				Object (
+					invader: invader,
+					frida_context: MainContext.ref_thread_default (),
+					dbus_context: dbus_context,
+					id: id
+				);
 			}
-
-			construct {
-				script_engine = new ScriptEngine (server);
-				script_engine.message_from_script.connect (on_message_from_script);
-				script_engine.message_from_debugger.connect (on_message_from_debugger);
-			}
-
-			public async void close (Cancellable? cancellable) throws IOError {
-				while (close_request != null) {
-					try {
-						yield close_request.future.wait_async (cancellable);
-						return;
-					} catch (GLib.Error e) {
-						assert (e is IOError.CANCELLED);
-						cancellable.set_error_if_cancelled ();
-					}
-				}
-				close_request = new Promise<bool> ();
-
-				yield script_engine.close ();
-				script_engine.message_from_script.disconnect (on_message_from_script);
-				script_engine.message_from_debugger.disconnect (on_message_from_debugger);
-
-				closed ();
-
-				close_request.resolve (true);
-			}
-
-			public async void prepare_for_termination (TerminationReason reason) {
-				yield script_engine.prepare_for_termination (reason);
-			}
-
-			public async void enable_child_gating (Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				throw new Error.NOT_SUPPORTED ("Not yet implemented");
-			}
-
-			public async void disable_child_gating (Cancellable? cancellable) throws Error, IOError {
-				throw new Error.NOT_SUPPORTED ("Not yet implemented");
-			}
-
-			public async AgentScriptId create_script (string name, string source,
-					Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				var options = new ScriptOptions ();
-				if (name != "")
-					options.name = name;
-
-				var instance = yield script_engine.create_script (source, null, options);
-				return instance.script_id;
-			}
-
-			public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
-					Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				var instance = yield script_engine.create_script (source, null, ScriptOptions._deserialize (options.data));
-				return instance.script_id;
-			}
-
-			public async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable)
-					throws Error, IOError {
-				check_open ();
-
-				var instance = yield script_engine.create_script (null, new Bytes (bytes), new ScriptOptions ());
-				return instance.script_id;
-			}
-
-			public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
-					Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				var instance = yield script_engine.create_script (null, new Bytes (bytes),
-					ScriptOptions._deserialize (options.data));
-				return instance.script_id;
-			}
-
-			public async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				var options = new ScriptOptions ();
-				if (name != "")
-					options.name = name;
-
-				var bytes = yield script_engine.compile_script (source, options);
-				return bytes.get_data ();
-			}
-
-			public async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
-					Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				var bytes = yield script_engine.compile_script (source, ScriptOptions._deserialize (options.data));
-				return bytes.get_data ();
-			}
-
-			public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				yield script_engine.destroy_script (script_id);
-			}
-
-			public async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				yield script_engine.load_script (script_id);
-			}
-
-			public async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				var script = script_engine.eternalize_script (script_id);
-				script_eternalized (script);
-			}
-
-			public async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
-					Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				script_engine.post_to_script (script_id, message, has_data ? new Bytes (data) : null);
-			}
-
-			public async void enable_debugger (Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				script_engine.enable_debugger ();
-			}
-
-			public async void disable_debugger (Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				script_engine.disable_debugger ();
-			}
-
-			public async void post_message_to_debugger (string message, Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				script_engine.post_message_to_debugger (message);
-			}
-
-			public async void enable_jit (Cancellable? cancellable) throws Error, IOError {
-				check_open ();
-
-				script_engine.enable_jit ();
-			}
-
-			private void check_open () throws Error {
-				if (close_request != null)
-					throw new Error.INVALID_OPERATION ("Session is closing");
-			}
-
-			private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
-				bool has_data = data != null;
-				var data_param = has_data ? data.get_data () : new uint8[0];
-				this.message_from_script (script_id, message, has_data, data_param);
-			}
-
-			private void on_message_from_debugger (string message) {
-				this.message_from_debugger (message);
-			}
-		}
-
-		private static SocketAddress parse_listen_address (Config config) throws Error {
-			var interaction = config.interaction as ListenInteraction;
-
-			unowned string raw_address = interaction.address;
-
-#if !WINDOWS
-			if (raw_address.has_prefix ("unix:")) {
-				string path = raw_address.substring (5);
-
-				UnixSocketAddressType type = UnixSocketAddress.abstract_names_supported ()
-					? UnixSocketAddressType.ABSTRACT
-					: UnixSocketAddressType.PATH;
-
-				return new UnixSocketAddress.with_type (path, -1, type);
-			}
-#endif
-
-			var address = new InetSocketAddress.from_string (raw_address, interaction.port);
-			if (address == null)
-				throw new Error.INVALID_ARGUMENT ("Invalid listen address");
-
-			return address;
 		}
 
 		[NoReturn]
@@ -1771,6 +1900,62 @@ namespace Frida.Gadget {
 				throw new Error.PERMISSION_DENIED ("%s", e.message);
 
 			throw new Error.NOT_SUPPORTED ("%s", e.message);
+		}
+	}
+
+	private class ClusterClient : BaseController {
+		public SocketConnectable connectable {
+			get;
+			construct;
+		}
+
+		public TlsCertificate? certificate {
+			get;
+			construct;
+		}
+
+		public string? token {
+			get;
+			construct;
+		}
+
+		private PortalClient client;
+
+		public ClusterClient (Config config, Location location) throws Error {
+			var interaction = (ConnectInteraction) config.interaction;
+			Object (
+				config: config,
+				location: location,
+				connectable: parse_cluster_address (interaction.address, interaction.port),
+				certificate: parse_certificate (interaction.certificate),
+				token: interaction.token
+			);
+		}
+
+		construct {
+			client = new PortalClient (this, connectable, certificate, token, compute_app_info ());
+			client.eternalized.connect (on_eternalized);
+			client.resume.connect (Frida.Gadget.resume);
+			client.kill.connect (Frida.Gadget.kill);
+		}
+
+		protected override async void on_start () throws Error, IOError {
+			yield client.start ();
+		}
+
+		protected override async void on_terminate (TerminationReason reason) {
+		}
+
+		protected override async void on_stop () {
+			try {
+				yield client.stop ();
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
+		}
+
+		private void on_eternalized () {
+			_is_eternal = true;
 		}
 	}
 
@@ -1788,8 +1973,22 @@ namespace Frida.Gadget {
 		return Path.build_filename (dirname, stem + ".config");
 	}
 
-	private static Json.Node make_empty_json_object () {
+	private Json.Node make_empty_json_object () {
 		return new Json.Node.alloc ().init_object (new Json.Object ());
+	}
+
+	private TlsCertificate? parse_certificate (string? str) throws Error {
+		if (str == null)
+			return null;
+
+		try {
+			if (str.index_of_char ('\n') != -1)
+				return new TlsCertificate.from_pem (str, -1);
+			else
+				return new TlsCertificate.from_file (str);
+		} catch (GLib.Error e) {
+			throw new Error.INVALID_ARGUMENT ("%s", e.message);
+		}
 	}
 
 	namespace Environment {
@@ -1801,17 +2000,12 @@ namespace Frida.Gadget {
 		private extern unowned MainContext get_main_context ();
 
 		private extern string? detect_bundle_id ();
+		private extern string? detect_bundle_name ();
 		private extern string? detect_documents_dir ();
 		private extern bool has_objc_class (string name);
 
 		private extern void set_thread_name (string name);
 	}
-
-	namespace Tcp {
-		private extern void enable_nodelay (Socket socket);
-	}
-
-	public extern void _kill (uint pid);
 
 	private extern void log_info (string message);
 	private extern void log_warning (string message);

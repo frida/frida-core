@@ -1,7 +1,7 @@
 if host_os == 'android'
   subdir('selinux')
 endif
-subdir('interfaces')
+subdir('base')
 subdir('pipe')
 subdir('payload')
 subdir('agent')

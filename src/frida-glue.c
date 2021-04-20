@@ -1,11 +1,11 @@
 #include "frida-core.h"
 
 #include <gum/gum.h>
-#ifdef HAVE_WINDOWS
-# include <winsock2.h>
-#else
-# include <netinet/in.h>
-# include <netinet/tcp.h>
+#ifdef HAVE_GIOSCHANNEL
+# include <gioschannel.h>
+#endif
+#ifdef HAVE_GIOOPENSSL
+# include <gioopenssl.h>
 #endif
 
 static FridaRuntime runtime;
@@ -35,6 +35,13 @@ frida_init_with_runtime (FridaRuntime rt)
   gio_init ();
   gum_init ();
   frida_error_quark (); /* Initialize early so GDBus will pick it up */
+
+#ifdef HAVE_GIOSCHANNEL
+  g_io_module_schannel_register ();
+#endif
+#ifdef HAVE_GIOOPENSSL
+  g_io_module_openssl_register ();
+#endif
 
   if (g_once_init_enter (&frida_initialized))
   {
@@ -148,12 +155,6 @@ frida_version_string (void)
   return FRIDA_VERSION;
 }
 
-void
-frida_tcp_enable_nodelay (GSocket * socket)
-{
-  g_socket_set_option (socket, IPPROTO_TCP, TCP_NODELAY, TRUE, NULL);
-}
-
 static gpointer
 run_main_loop (gpointer data)
 {
@@ -183,3 +184,78 @@ stop_main_loop (gpointer data)
 
   return FALSE;
 }
+
+#if defined (HAVE_OPENSSL)
+# include <openssl/asn1.h>
+# include <openssl/bio.h>
+# include <openssl/bn.h>
+# include <openssl/evp.h>
+# include <openssl/pem.h>
+# include <openssl/rsa.h>
+# include <openssl/x509.h>
+
+static gchar * frida_steal_bio_to_string (BIO ** bio);
+
+void
+_frida_session_generate_certificate (gchar ** cert_pem, gchar ** key_pem)
+{
+  X509 * x509;
+  X509_NAME * name;
+  EVP_PKEY * pkey;
+  BIGNUM * e;
+  RSA * rsa;
+  BIO * bio;
+
+  x509 = X509_new ();
+
+  ASN1_INTEGER_set (X509_get_serialNumber (x509), 1);
+  X509_gmtime_adj (X509_get_notBefore (x509), 0);
+  X509_gmtime_adj (X509_get_notAfter (x509), 15780000);
+
+  name = X509_get_subject_name (x509);
+  X509_NAME_add_entry_by_txt (name, "C", MBSTRING_ASC, (const unsigned char *) "CA", -1, -1, 0);
+  X509_NAME_add_entry_by_txt (name, "O", MBSTRING_ASC, (const unsigned char *) "Frida", -1, -1, 0);
+  X509_NAME_add_entry_by_txt (name, "CN", MBSTRING_ASC, (const unsigned char *) "lolcathost", -1, -1, 0);
+  X509_set_issuer_name (x509, name);
+
+  pkey = EVP_PKEY_new ();
+  e = BN_new ();
+  BN_set_word (e, RSA_F4);
+  rsa = RSA_new ();
+  RSA_generate_key_ex (rsa, 1024, e, NULL);
+  EVP_PKEY_set1_RSA (pkey, g_steal_pointer (&rsa));
+  BN_free (e);
+  X509_set_pubkey (x509, pkey);
+
+  X509_sign (x509, pkey, EVP_sha256 ());
+
+  bio = BIO_new (BIO_s_mem ());
+  PEM_write_bio_X509 (bio, x509);
+  *cert_pem = frida_steal_bio_to_string (&bio);
+
+  bio = BIO_new (BIO_s_mem ());
+  PEM_write_bio_PrivateKey (bio, pkey, NULL, NULL, 0, NULL, NULL);
+  *key_pem = frida_steal_bio_to_string (&bio);
+
+  EVP_PKEY_free (pkey);
+  X509_free (x509);
+}
+
+static gchar *
+frida_steal_bio_to_string (BIO ** bio)
+{
+  gchar * result;
+  long n;
+  char * str;
+
+  n = BIO_get_mem_data (*bio, &str);
+  result = g_strndup (str, n);
+
+  BIO_free (g_steal_pointer (bio));
+
+  return result;
+}
+
+#else
+# error FIXME
+#endif
