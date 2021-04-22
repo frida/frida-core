@@ -629,18 +629,9 @@ namespace Frida {
 			}
 
 			public Peer? peer {
-				get {
-					return _peer;
-				}
-				set {
-					_peer = value;
-					if (_peer != null)
-						deliver_pending_messages ();
-				}
+				get;
+				set;
 			}
-			private Peer? _peer;
-
-			private Gee.Queue<BusMessage> pending_messages = new Gee.ArrayQueue<BusMessage> ();
 
 			public ConnectionEntry (SocketAddress address, EndpointParameters parameters) {
 				this.address = address;
@@ -648,49 +639,16 @@ namespace Frida {
 			}
 
 			public void post (string message, Bytes? data) {
-				if (peer != null) {
-					ControlChannel? channel = peer as ControlChannel;
-					if (channel == null)
-						return;
-					emit_bus_message (channel, message, data);
-				} else {
-					pending_messages.offer (new BusMessage (message, data));
-				}
-			}
-
-			private void deliver_pending_messages () {
-				ControlChannel? channel = peer as ControlChannel;
-				if (channel == null) {
-					pending_messages.clear ();
+				if (peer == null)
 					return;
-				}
 
-				BusMessage? m;
-				while ((m = pending_messages.poll ()) != null)
-					emit_bus_message (channel, m.message, m.data);
-			}
+				ControlChannel? channel = peer as ControlChannel;
+				if (channel == null)
+					return;
 
-			private void emit_bus_message (ControlChannel channel, string message, Bytes? data) {
 				bool has_data = data != null;
 				var data_param = has_data ? data.get_data () : new uint8[0];
 				channel.message (message, has_data, data_param);
-			}
-
-			private class BusMessage {
-				public string message {
-					get;
-					private set;
-				}
-
-				public Bytes? data {
-					get;
-					private set;
-				}
-
-				public BusMessage (string message, Bytes? data) {
-					this.message = message;
-					this.data = data;
-				}
 			}
 		}
 
