@@ -479,10 +479,11 @@ namespace Frida {
 				registrations.clear ();
 			}
 
-			public async void authenticate (string token, Cancellable? cancellable) throws GLib.Error {
+			public async string authenticate (string token, Cancellable? cancellable) throws GLib.Error {
 				try {
-					yield service.authenticate (token, cancellable);
+					string session_info = yield service.authenticate (token, cancellable);
 					yield parent.promote_authentication_channel (this);
+					return session_info;
 				} catch (GLib.Error e) {
 					if (e is Error.INVALID_ARGUMENT)
 						parent.kick_authentication_channel (this);

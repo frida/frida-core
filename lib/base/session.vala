@@ -129,7 +129,7 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AuthenticationService14")]
 	public interface AuthenticationService : Object {
-		public abstract async void authenticate (string token, Cancellable? cancellable) throws GLib.Error;
+		public abstract async string authenticate (string token, Cancellable? cancellable) throws GLib.Error;
 	}
 
 	public class StaticAuthenticationService : Object, AuthenticationService {
@@ -142,7 +142,7 @@ namespace Frida {
 			Object (token_hash: Checksum.compute_for_string (SHA256, token));
 		}
 
-		public async void authenticate (string token, Cancellable? cancellable) throws Error, IOError {
+		public async string authenticate (string token, Cancellable? cancellable) throws Error, IOError {
 			string input_hash = Checksum.compute_for_string (SHA256, token);
 
 			uint accumulator = 0;
@@ -152,11 +152,13 @@ namespace Frida {
 
 			if (accumulator != 0)
 				throw new Error.INVALID_ARGUMENT ("Incorrect token");
+
+			return "{}";
 		}
 	}
 
 	public class NullAuthenticationService : Object, AuthenticationService {
-		public async void authenticate (string token, Cancellable? cancellable) throws Error, IOError {
+		public async string authenticate (string token, Cancellable? cancellable) throws Error, IOError {
 			throw new Error.INVALID_OPERATION ("Authentication not expected");
 		}
 	}

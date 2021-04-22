@@ -1644,10 +1644,11 @@ namespace Frida.Gadget {
 			public async void prepare_for_termination (TerminationReason reason) {
 			}
 
-			public async void authenticate (string token, Cancellable? cancellable) throws GLib.Error {
+			public async string authenticate (string token, Cancellable? cancellable) throws GLib.Error {
 				try {
-					yield parent.auth_service.authenticate (token, cancellable);
+					string session_info = yield parent.auth_service.authenticate (token, cancellable);
 					yield parent.promote_authentication_channel (this);
+					return session_info;
 				} catch (GLib.Error e) {
 					if (e is Error.INVALID_ARGUMENT)
 						parent.kick_authentication_channel (this);

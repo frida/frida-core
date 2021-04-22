@@ -293,7 +293,7 @@ namespace Frida {
 			return channel;
 		}
 
-		private async void promote_authentication_channel (AuthenticationChannel channel) throws GLib.Error {
+		private async void promote_authentication_channel (AuthenticationChannel channel, string session_info) throws GLib.Error {
 			DBusConnection connection = channel.connection;
 
 			peers.unset (connection);
@@ -751,10 +751,11 @@ namespace Frida {
 				registrations.add (id);
 			}
 
-			public async void authenticate (string token, Cancellable? cancellable) throws GLib.Error {
+			public async string authenticate (string token, Cancellable? cancellable) throws GLib.Error {
 				try {
-					yield parameters.auth_service.authenticate (token, cancellable);
-					yield parent.promote_authentication_channel (this);
+					string session_info = yield parameters.auth_service.authenticate (token, cancellable);
+					yield parent.promote_authentication_channel (this, session_info);
+					return session_info;
 				} catch (GLib.Error e) {
 					if (e is Error.INVALID_ARGUMENT)
 						parent.kick_authentication_channel (this);
