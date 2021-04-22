@@ -2226,6 +2226,32 @@ namespace Frida {
 			}
 		}
 
+		public async OrphanedScriptList enumerate_orphaned_scripts (Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
+			OrphanedScriptInfo[] orphans;
+			try {
+				orphans = yield session.enumerate_orphaned_scripts (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			var result = new Gee.ArrayList<OrphanedScript> ();
+			foreach (var o in orphans)
+				result.add (new OrphanedScript (this, o.id, o.name));
+			return new OrphanedScriptList (result);
+		}
+
+		public OrphanedScriptList enumerate_orphaned_scripts_sync (Cancellable? cancellable = null) throws Error, IOError {
+			return create<EnumerateOrphanedScriptsTask> ().execute (cancellable);
+		}
+
+		private class EnumerateOrphanedScriptsTask : SessionTask<OrphanedScriptList> {
+			protected override async OrphanedScriptList perform_operation () throws Error, IOError {
+				return yield parent.enumerate_orphaned_scripts (cancellable);
+			}
+		}
+
 		public async void enable_debugger (uint16 port = 0, Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
@@ -2751,6 +2777,12 @@ namespace Frida {
 				script.message (message, has_data ? new Bytes (data) : null);
 		}
 
+		public Script _adopt_script (AgentScriptId script_id) {
+			var script = new Script (this, script_id);
+			scripts[script_id] = script;
+			return script;
+		}
+
 		public void _release_script (AgentScriptId script_id) {
 			var script_did_exist = scripts.unset (script_id);
 			assert (script_did_exist);
@@ -2969,6 +3001,98 @@ namespace Frida {
 
 		private abstract class ScriptTask<T> : AsyncTask<T> {
 			public weak Script parent {
+				get;
+				construct;
+			}
+		}
+	}
+
+	public class OrphanedScriptList : Object {
+		private Gee.List<OrphanedScript> items;
+
+		internal OrphanedScriptList (Gee.List<OrphanedScript> items) {
+			this.items = items;
+		}
+
+		public int size () {
+			return items.size;
+		}
+
+		public new OrphanedScript get (int index) {
+			return items.get (index);
+		}
+	}
+
+	public class OrphanedScript : Object {
+		public uint id {
+			get;
+			construct;
+		}
+
+		public string name {
+			get;
+			construct;
+		}
+
+		public Session session {
+			get;
+			construct;
+		}
+
+		internal OrphanedScript (Session session, AgentScriptId id, string name) {
+			Object (
+				id: id.handle,
+				name: name,
+				session: session
+			);
+		}
+
+		public async Script adopt (Cancellable? cancellable = null) throws Error, IOError {
+			AgentScriptId script_id = AgentScriptId (id);
+
+			try {
+				yield session.session.adopt_orphaned_script (script_id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			return session._adopt_script (script_id);
+		}
+
+		public Script adopt_sync (Cancellable? cancellable = null) throws Error, IOError {
+			return create<AdoptTask> ().execute (cancellable);
+		}
+
+		private class AdoptTask : OrphanedScriptTask<Script> {
+			protected override async Script perform_operation () throws Error, IOError {
+				return yield parent.adopt (cancellable);
+			}
+		}
+
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+			try {
+				yield session.session.resume_orphaned_script (AgentScriptId (id), cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+		}
+
+		public void resume_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<ResumeTask> ().execute (cancellable);
+		}
+
+		private class ResumeTask : OrphanedScriptTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.resume (cancellable);
+			}
+		}
+
+		private T create<T> () {
+			return Object.new (typeof (T), parent: this);
+		}
+
+		private abstract class OrphanedScriptTask<T> : AsyncTask<T> {
+			public weak OrphanedScript parent {
 				get;
 				construct;
 			}
