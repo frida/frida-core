@@ -8,6 +8,7 @@ namespace Frida {
 		public signal void controller_connected (uint connection_id, SocketAddress remote_address);
 		public signal void controller_disconnected (uint connection_id, SocketAddress remote_address);
 
+		public signal void authenticated (uint connection_id, string session_info);
 		public signal void message (uint connection_id, string message, Bytes? data);
 
 		public Device device {
@@ -294,12 +295,15 @@ namespace Frida {
 		}
 
 		private async void promote_authentication_channel (AuthenticationChannel channel, string session_info) throws GLib.Error {
+			uint connection_id = channel.connection_id;
 			DBusConnection connection = channel.connection;
 
 			peers.unset (connection);
 			channel.close ();
 
-			peers[connection] = yield setup_authorized_peer (channel.connection_id, connection, channel.parameters);
+			peers[connection] = yield setup_authorized_peer (connection_id, connection, channel.parameters);
+
+			authenticated (connection_id, session_info);
 		}
 
 		private void kick_authentication_channel (AuthenticationChannel channel) {
