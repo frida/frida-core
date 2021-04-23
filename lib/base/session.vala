@@ -63,12 +63,12 @@ namespace Frida {
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
 			Cancellable? cancellable) throws GLib.Error;
-		public signal void message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data);
+		public signal void message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data); // TODO: Remove
 
 		public abstract async void enable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post_message_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
-		public signal void message_from_debugger (string message);
+		public signal void message_from_debugger (string message); // TODO: Remove
 
 		public abstract async PortalMembershipId join_portal (string address, AgentPortalOptions options,
 			Cancellable? cancellable) throws GLib.Error;
@@ -100,6 +100,37 @@ namespace Frida {
 
 		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state,
 			Cancellable? cancellable) throws GLib.Error;
+	}
+
+	[DBus (name = "re.frida.AgentMessageSink16")]
+	public interface AgentMessageSink : Object {
+		public abstract async void post_script_messages (AgentSessionId session_id, AgentScriptId script_id,
+			AgentScriptMessage[] messages, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_debugger_messages (AgentSessionId session_id, AgentScriptId script_id,
+			string[] messages, Cancellable? cancellable) throws GLib.Error;
+	}
+
+	public struct AgentScriptMessage {
+		public string json {
+			get;
+			set;
+		}
+
+		public bool has_data {
+			get;
+			set;
+		}
+
+		public uint8[] data {
+			get;
+			set;
+		}
+
+		public AgentScriptMessage (string json, bool has_data, uint8[] data) {
+			this.json = json;
+			this.has_data = has_data;
+			this.data = data;
+		}
 	}
 
 	[DBus (name = "re.frida.TransportBroker16")]
