@@ -944,7 +944,7 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid, cancellable);
+				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
 				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 
 				string received_message = null;
@@ -1176,7 +1176,7 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid, cancellable);
+				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
 				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 
 				string received_message = null;
@@ -1578,7 +1578,7 @@ namespace Frida.HostSessionTest {
 
 					var host_session = yield prov.create (null, cancellable);
 
-					var id = yield host_session.attach_to (pid, cancellable);
+					var id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
 					var session = yield prov.obtain_agent_session (host_session, id, cancellable);
 
 					string received_message = null;
@@ -2390,7 +2390,7 @@ namespace Frida.HostSessionTest {
 				options.stdio = PIPE;
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
-				var session_id = yield host_session.attach_to (pid, cancellable);
+				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
 				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 
 				string received_message = null;
@@ -2656,7 +2656,7 @@ namespace Frida.HostSessionTest {
 				assert_nonnull ((void *) process);
 
 				stdout.printf ("attaching to target process\n");
-				var session_id = yield host_session.attach_to (process.pid, cancellable);
+				var session_id = yield host_session.attach (process.pid, AgentSessionOptions (), cancellable);
 				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
 				string received_message = null;
 				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {

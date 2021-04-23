@@ -512,28 +512,20 @@ namespace Frida {
 			}
 		}
 
-		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
-			try {
-				return yield attach_in_realm (pid, NATIVE, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
 			var gadget = gadgets[pid];
 			if (gadget != null)
-				return yield attach_via_gadget (pid, realm, gadget, cancellable);
+				return yield attach_via_gadget (pid, options, gadget, cancellable);
 
 			var server = yield get_remote_server (cancellable);
 			try {
-				return yield attach_via_remote (pid, server, cancellable);
+				return yield attach_via_remote (pid, options, server, cancellable);
 			} catch (Error e) {
 				throw_dbus_error (e);
 			}
 		}
 
-		private async AgentSessionId attach_via_gadget (uint pid, Realm realm, Droidy.Injector.GadgetDetails gadget,
+		private async AgentSessionId attach_via_gadget (uint pid, AgentSessionOptions options, Droidy.Injector.GadgetDetails gadget,
 				Cancellable? cancellable) throws Error, IOError {
 			try {
 				var stream = yield channel_provider.open_channel ("localabstract:" + gadget.unix_socket_path, cancellable);
@@ -545,17 +537,9 @@ namespace Frida {
 
 				AgentSessionId remote_session_id;
 				try {
-					remote_session_id = yield host_session.attach_in_realm (pid, realm, cancellable);
+					remote_session_id = yield host_session.attach (pid, options, cancellable);
 				} catch (GLib.Error e) {
-					if (e is DBusError.UNKNOWN_METHOD) {
-						if (realm != NATIVE) {
-							throw new Error.INVALID_ARGUMENT (
-								"Local Frida Gadget does not support the “realm” option; please upgrade it");
-						}
-						remote_session_id = yield host_session.attach_to (pid, cancellable);
-					} else {
-						throw e;
-					}
+					throw_dbus_error (e);
 				}
 
 				AgentSession agent_session = yield connection.get_proxy (null,
@@ -575,11 +559,11 @@ namespace Frida {
 			}
 		}
 
-		private async AgentSessionId attach_via_remote (uint pid, RemoteServer server, Cancellable? cancellable)
-				throws Error, IOError {
+		private async AgentSessionId attach_via_remote (uint pid, AgentSessionOptions options, RemoteServer server,
+				Cancellable? cancellable) throws Error, IOError {
 			AgentSessionId remote_session_id;
 			try {
-				remote_session_id = yield server.session.attach_to (pid, cancellable);
+				remote_session_id = yield server.session.attach (pid, options, cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

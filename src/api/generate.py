@@ -194,6 +194,7 @@ def parse_api(api_version, toplevel_code, core_vapi, core_header, base_vapi, bas
     enum_types = []
 
     base_public_types = {
+        "SessionOptions": "SpawnOptions",
         "ScriptOptions": "Script",
         "PeerOptions": "ScriptOptions",
         "Relay": "PeerOptions",

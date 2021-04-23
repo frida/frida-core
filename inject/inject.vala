@@ -58,7 +58,8 @@ namespace Frida.Inject {
 			return 2;
 		}
 
-		Realm realm = NATIVE;
+		var options = new SessionOptions ();
+
 		if (realm_str != null) {
 			var klass = (EnumClass) typeof (Realm).class_ref ();
 			var v = klass.get_value_by_nick (realm_str);
@@ -66,7 +67,7 @@ namespace Frida.Inject {
 				printerr ("Invalid realm\n");
 				return 3;
 			}
-			realm = (Realm) v.value;
+			options.realm = (Realm) v.value;
 		}
 
 		if (script_path == null || script_path == "") {
@@ -117,7 +118,7 @@ namespace Frida.Inject {
 			return 9;
 		}
 
-		application = new Application (device_id, spawn_file, target_pid, target_name, realm, script_path, script_source,
+		application = new Application (device_id, spawn_file, target_pid, target_name, options, script_path, script_source,
 			script_runtime, parameters, enable_development);
 
 #if !WINDOWS
@@ -169,7 +170,7 @@ namespace Frida.Inject {
 			construct;
 		}
 
-		public Realm realm {
+		public SessionOptions? session_options {
 			get;
 			construct;
 		}
@@ -207,15 +208,15 @@ namespace Frida.Inject {
 		private int exit_code;
 		private MainLoop loop;
 
-		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name, Realm realm,
-				string? script_path, string? script_source, ScriptRuntime script_runtime, Json.Node parameters,
-				bool enable_development) {
+		public Application (string? device_id, string? spawn_file, int target_pid, string? target_name,
+				SessionOptions? session_options, string? script_path, string? script_source, ScriptRuntime script_runtime,
+				Json.Node parameters, bool enable_development) {
 			Object (
 				device_id: device_id,
 				spawn_file: spawn_file,
 				target_pid: target_pid,
 				target_name: target_name,
-				realm: realm,
+				session_options: session_options,
 				script_path: script_path,
 				script_source: script_source,
 				script_runtime: script_runtime,
@@ -258,7 +259,7 @@ namespace Frida.Inject {
 					pid = (uint) target_pid;
 				}
 
-				var session = yield device.attach (pid, realm, io_cancellable);
+				var session = yield device.attach (pid, session_options, io_cancellable);
 				session.detached.connect (on_detached);
 
 				var r = new ScriptRunner (session, script_path, script_source, script_runtime, parameters,

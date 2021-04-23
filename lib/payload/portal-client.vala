@@ -218,8 +218,9 @@ namespace Frida {
 				on_connection_event ();
 		}
 
-		private async void open (AgentSessionId id, Realm realm, Cancellable? cancellable) throws Error, IOError {
-			if (realm == EMULATED)
+		private async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+			var opts = SessionOptions._deserialize (options.data);
+			if (opts.realm == EMULATED)
 				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported by frida-gadget");
 
 			MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);

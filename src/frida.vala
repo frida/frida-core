@@ -1086,7 +1086,8 @@ namespace Frida {
 			}
 		}
 
-		public async Session attach (uint pid, Realm realm = NATIVE, Cancellable? cancellable = null) throws Error, IOError {
+		public async Session attach (uint pid, SessionOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
 			var attach_request = new Promise<Session> ();
@@ -1096,24 +1097,15 @@ namespace Frida {
 			try {
 				var host_session = yield get_host_session (cancellable);
 
+				var raw_options = AgentSessionOptions ();
+				if (options != null)
+					raw_options.data = options._serialize ().get_data ();
+
 				AgentSessionId id;
 				try {
-					id = yield host_session.attach_in_realm (pid, realm, cancellable);
+					id = yield host_session.attach (pid, raw_options, cancellable);
 				} catch (GLib.Error e) {
-					if (e is DBusError.UNKNOWN_METHOD) {
-						if (realm != NATIVE) {
-							throw new Error.INVALID_ARGUMENT (
-								"Remote Frida does not support the “realm” option; please upgrade it");
-						}
-
-						try {
-							id = yield host_session.attach_to (pid, cancellable);
-						} catch (GLib.Error e) {
-							throw_dbus_error (e);
-						}
-					} else {
-						throw_dbus_error (e);
-					}
+					throw_dbus_error (e);
 				}
 
 				try {
@@ -1138,19 +1130,20 @@ namespace Frida {
 			return session;
 		}
 
-		public Session attach_sync (uint pid, Realm realm = NATIVE, Cancellable? cancellable = null) throws Error, IOError {
+		public Session attach_sync (uint pid, SessionOptions? options = null,
+				Cancellable? cancellable = null) throws Error, IOError {
 			var task = create<AttachTask> ();
 			task.pid = pid;
-			task.realm = realm;
+			task.options = options;
 			return task.execute (cancellable);
 		}
 
 		private class AttachTask : DeviceTask<Session> {
 			public uint pid;
-			public Realm realm;
+			public SessionOptions? options;
 
 			protected override async Session perform_operation () throws Error, IOError {
-				return yield parent.attach (pid, realm, cancellable);
+				return yield parent.attach (pid, options, cancellable);
 			}
 		}
 
@@ -2295,6 +2288,9 @@ namespace Frida {
 			protected override async void perform_operation () throws Error, IOError {
 				yield parent.enable_jit (cancellable);
 			}
+		}
+
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
 		}
 
 #if HAVE_NICE

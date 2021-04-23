@@ -86,8 +86,8 @@ namespace Frida {
 			return true;
 		}
 
-		public async void open (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error {
-			yield provider.open (id, realm, cancellable);
+		public async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws GLib.Error {
+			yield provider.open (id, options, cancellable);
 		}
 
 #if !WINDOWS

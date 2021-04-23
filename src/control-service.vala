@@ -294,9 +294,9 @@ namespace Frida {
 			}
 		}
 
-		private async AgentSession attach (uint pid, Realm realm, ControlChannel requester, Cancellable? cancellable,
-				out AgentSessionId id) throws GLib.Error {
-			id = yield host_session.attach_in_realm (pid, realm, cancellable);
+		private async AgentSession attach (uint pid, AgentSessionOptions options, ControlChannel requester,
+				Cancellable? cancellable, out AgentSessionId id) throws GLib.Error {
+			id = yield host_session.attach (pid, options, cancellable);
 
 			AgentSession session;
 			var base_host_session = host_session as BaseDBusHostSession;
@@ -582,13 +582,10 @@ namespace Frida {
 				yield parent.host_session.kill (pid, cancellable);
 			}
 
-			public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws GLib.Error {
-				return yield parent.host_session.attach_to (pid, cancellable);
-			}
-
-			public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws GLib.Error {
+			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
+					Cancellable? cancellable) throws GLib.Error {
 				AgentSessionId id;
-				var session = yield parent.attach (pid, realm, this, cancellable, out id);
+				var session = yield parent.attach (pid, options, this, cancellable, out id);
 
 				register_agent_session (id, session);
 

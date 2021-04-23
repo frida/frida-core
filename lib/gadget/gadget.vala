@@ -1785,18 +1785,12 @@ namespace Frida.Gadget {
 				Frida.Gadget.kill ();
 			}
 
-			public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
-				try {
-					return yield attach_in_realm (pid, NATIVE, cancellable);
-				} catch (GLib.Error e) {
-					throw_dbus_error (e);
-				}
-			}
-
-			public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
+			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
+					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
-				if (realm != NATIVE)
+				var opts = SessionOptions._deserialize (options.data);
+				if (opts.realm != NATIVE)
 					throw new Error.NOT_SUPPORTED ("Only native realm is supported when embedded");
 
 				if (resume_on_attach)

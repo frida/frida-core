@@ -13,8 +13,8 @@ namespace Frida {
 		public abstract async void input (uint pid, uint8[] data, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws GLib.Error;
+		public abstract async AgentSessionId attach (uint pid, AgentSessionOptions options,
+			Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
@@ -33,7 +33,7 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentSessionProvider14")]
 	public interface AgentSessionProvider : Object {
-		public abstract async void open (AgentSessionId id, Realm realm, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws GLib.Error;
 #if !WINDOWS
 		public abstract async void migrate (AgentSessionId id, GLib.Socket to_socket, Cancellable? cancellable) throws GLib.Error;
 #endif
@@ -208,11 +208,7 @@ namespace Frida {
 			throw_not_authorized ();
 		}
 
-		public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
-			throw_not_authorized ();
-		}
-
-		public async AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 
@@ -609,6 +605,58 @@ namespace Frida {
 				names.add (name);
 				values[name] = val;
 			}
+		}
+	}
+
+	public struct AgentSessionOptions {
+		public uint8[] data {
+			get;
+			set;
+		}
+
+		public AgentSessionOptions () {
+			this.data = {};
+		}
+	}
+
+	public class SessionOptions : Object {
+		public Realm realm {
+			get;
+			set;
+			default = NATIVE;
+		}
+
+		public uint timeout {
+			get;
+			set;
+		}
+
+		public Bytes _serialize () {
+			var dict = new VariantDict ();
+
+			if (realm != NATIVE)
+				dict.insert_value ("realm", new Variant.byte (realm));
+
+			if (timeout != 0)
+				dict.insert_value ("timeout", new Variant.uint32 (timeout));
+
+			return dict.end ().get_data_as_bytes ();
+		}
+
+		public static SessionOptions _deserialize (uint8[] data) {
+			var dict = new VariantDict (new Variant.from_bytes (VariantType.VARDICT, new Bytes (data), false));
+
+			var options = new SessionOptions ();
+
+			uint8 raw_realm = Realm.NATIVE;
+			dict.lookup ("realm", "y", out raw_realm);
+			options.realm = (Realm) raw_realm;
+
+			uint32 raw_timeout = 0;
+			dict.lookup ("timeout", "u", out raw_timeout);
+			options.timeout = raw_timeout;
+
+			return options;
 		}
 	}
 

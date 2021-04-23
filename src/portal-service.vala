@@ -459,15 +459,15 @@ namespace Frida {
 			this.message (sender.connection_id, message, data);
 		}
 
-		private async AgentSession attach (uint pid, Realm realm, ControlChannel requester, Cancellable? cancellable,
-				out AgentSessionId id) throws Error, IOError {
+		private async AgentSession attach (uint pid, AgentSessionOptions options, ControlChannel requester,
+				Cancellable? cancellable, out AgentSessionId id) throws Error, IOError {
 			var node = node_by_pid[pid];
 			if (node == null)
 				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
 
 			id = AgentSessionId (next_agent_session_id++);
 
-			var session = yield node.open_session (id, realm, cancellable);
+			var session = yield node.open_session (id, options, cancellable);
 			sessions[id] = requester;
 
 			return session;
@@ -833,18 +833,10 @@ namespace Frida {
 				parent.kill (pid);
 			}
 
-			public async AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
-				try {
-					return yield attach_in_realm (pid, NATIVE, cancellable);
-				} catch (GLib.Error e) {
-					throw_dbus_error (e);
-				}
-			}
-
-			public async AgentSessionId attach_in_realm (uint pid, Realm realm,
+			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
 					Cancellable? cancellable) throws Error, IOError {
 				AgentSessionId id;
-				var session = yield parent.attach (pid, realm, this, cancellable, out id);
+				var session = yield parent.attach (pid, options, this, cancellable, out id);
 
 				register_agent_session (id, session);
 
@@ -979,11 +971,11 @@ namespace Frida {
 				yield parent.handle_join_request (this, app, current_state, cancellable, out next_state);
 			}
 
-			public async AgentSession open_session (AgentSessionId id, Realm realm,
+			public async AgentSession open_session (AgentSessionId id, AgentSessionOptions options,
 					Cancellable? cancellable) throws Error, IOError {
 				AgentSession session;
 				try {
-					yield session_provider.open (id, realm, cancellable);
+					yield session_provider.open (id, options, cancellable);
 
 					session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
 						DBusProxyFlags.NONE, cancellable);

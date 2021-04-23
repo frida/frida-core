@@ -473,7 +473,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 					cancellable);
 
 				var session_id = AgentSessionId (1);
-				yield provider.open (session_id, Realm.NATIVE, cancellable);
+				yield provider.open (session_id, AgentSessionOptions (), cancellable);
 
 				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id),
 					DBusProxyFlags.NONE, cancellable);

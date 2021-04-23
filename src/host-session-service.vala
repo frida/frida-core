@@ -326,15 +326,7 @@ namespace Frida {
 
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws Error, IOError;
 
-		public async Frida.AgentSessionId attach_to (uint pid, Cancellable? cancellable) throws Error, IOError {
-			try {
-				return yield attach_in_realm (pid, NATIVE, cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public async Frida.AgentSessionId attach_in_realm (uint pid, Realm realm, Cancellable? cancellable) throws Error, IOError {
+		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
 			var entry = yield establish (pid, cancellable);
 
 			var id = AgentSessionId (next_agent_session_id++);
@@ -343,7 +335,7 @@ namespace Frida {
 			entry.sessions.add (id);
 
 			try {
-				yield entry.provider.open (id, realm, cancellable);
+				yield entry.provider.open (id, options, cancellable);
 
 				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
 					DBusProxyFlags.NONE, cancellable);
@@ -1175,7 +1167,7 @@ namespace Frida {
 				uint target_pid = yield get_target_pid (cancellable);
 
 				try {
-					var id = yield host_session.attach_to (target_pid, cancellable);
+					var id = yield host_session.attach (target_pid, AgentSessionOptions (), cancellable);
 
 					session = host_session.obtain_agent_session (id);
 					session.message_from_script.connect (on_message_from_script);
