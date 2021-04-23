@@ -162,8 +162,7 @@ namespace Frida {
 				stream = tc;
 			}
 
-			connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING, null,
-				io_cancellable);
+			connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			dbus_context_request = detect_dbus_context (connection, io_cancellable);

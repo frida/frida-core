@@ -36,8 +36,8 @@ namespace Frida {
 			try {
 				var stream = yield stream_request.wait_async (cancellable);
 
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, DBusConnectionFlags.NONE,
+					null, cancellable);
 
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
 					cancellable);

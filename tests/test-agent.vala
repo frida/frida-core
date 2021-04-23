@@ -460,8 +460,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 
 			try {
 				var stream = yield stream_request.wait_async (cancellable);
-				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
+				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, DELAY_MESSAGE_PROCESSING,
 					null, cancellable);
 
 				AgentController controller = this;

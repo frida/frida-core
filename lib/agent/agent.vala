@@ -732,8 +732,7 @@ namespace Frida.Agent {
 			DBusConnection connection;
 			try {
 				connection = yield new DBusConnection (SocketConnection.factory_create_connection (to_socket),
-					ServerGuid.AGENT_SESSION, AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS |
-					DELAY_MESSAGE_PROCESSING, null, cancellable);
+					ServerGuid.AGENT_SESSION, DELAY_MESSAGE_PROCESSING, null, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}
@@ -944,7 +943,7 @@ namespace Frida.Agent {
 
 		private async void setup_connection_with_stream (IOStream stream) {
 			try {
-				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING);
 			} catch (GLib.Error connection_error) {
 				printerr ("Unable to create connection: %s\n", connection_error.message);
 				return;
@@ -1194,7 +1193,7 @@ namespace Frida.Agent {
 				emulated_worker = new Thread<void> ("frida-agent-emulated", run_emulated_agent);
 
 				var connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+					DBusConnectionFlags.NONE, null, cancellable);
 
 				AgentSessionProvider provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
 					DBusProxyFlags.NONE, cancellable);

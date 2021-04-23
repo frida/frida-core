@@ -307,8 +307,8 @@ namespace Frida {
 			TimeoutSource timeout_source = null;
 
 			try {
-				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path,
-					AUTHENTICATION_ALLOW_ANONYMOUS, DBus.generate_guid (), null, cancellable);
+				server = new DBusServer.sync ("unix:tmpdir=" + resource_store.tempdir.path, DBusConnectionFlags.NONE,
+					DBus.generate_guid (), null, cancellable);
 				server.start ();
 
 				var idle_source = new IdleSource ();

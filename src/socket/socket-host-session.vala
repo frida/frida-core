@@ -109,7 +109,7 @@ namespace Frida {
 
 			DBusConnection connection;
 			try {
-				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}

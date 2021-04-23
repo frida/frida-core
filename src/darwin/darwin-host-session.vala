@@ -195,8 +195,8 @@ namespace Frida {
 			DBusConnection conn;
 			AgentSessionProvider provider;
 			try {
-				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
-					AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS, null, cancellable);
+				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, DBusConnectionFlags.NONE, null,
+					cancellable);
 
 				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
 			} catch (GLib.Error e) {

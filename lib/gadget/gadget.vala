@@ -1537,9 +1537,7 @@ namespace Frida.Gadget {
 				stream = tc;
 			}
 
-			var connection = yield new DBusConnection (stream, guid,
-				AUTHENTICATION_SERVER | AUTHENTICATION_ALLOW_ANONYMOUS | DELAY_MESSAGE_PROCESSING,
-				null, io_cancellable);
+			var connection = yield new DBusConnection (stream, guid, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
 			Promise<MainContext> dbus_context_request = detect_dbus_context (connection, io_cancellable);

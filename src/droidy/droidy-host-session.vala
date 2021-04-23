@@ -526,7 +526,7 @@ namespace Frida {
 			try {
 				var stream = yield channel_provider.open_channel ("localabstract:" + gadget.unix_socket_path, cancellable);
 
-				var connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+				var connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
 				HostSession host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION,
 					DBusProxyFlags.NONE, cancellable);
@@ -672,7 +672,7 @@ namespace Frida {
 					("tcp:%" + uint16.FORMAT_MODIFIER + "u").printf (DEFAULT_CONTROL_PORT),
 					cancellable);
 
-				connection = yield new DBusConnection (stream, null, AUTHENTICATION_CLIENT, null, cancellable);
+				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
 				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE,
 					cancellable);

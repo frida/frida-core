@@ -88,7 +88,7 @@ namespace Frida {
 
 		private async void start () {
 			try {
-				connection = yield new DBusConnection.for_address (parent_address, AUTHENTICATION_CLIENT | DELAY_MESSAGE_PROCESSING);
+				connection = yield new DBusConnection.for_address (parent_address, DELAY_MESSAGE_PROCESSING);
 				connection.on_closed.connect (on_connection_closed);
 
 				LinuxRemoteHelper helper = this;
