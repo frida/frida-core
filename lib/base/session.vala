@@ -626,7 +626,7 @@ namespace Frida {
 			default = NATIVE;
 		}
 
-		public uint timeout {
+		public uint persist_timeout {
 			get;
 			set;
 		}
@@ -637,8 +637,8 @@ namespace Frida {
 			if (realm != NATIVE)
 				dict.insert_value ("realm", new Variant.byte (realm));
 
-			if (timeout != 0)
-				dict.insert_value ("timeout", new Variant.uint32 (timeout));
+			if (persist_timeout != 0)
+				dict.insert_value ("persist-timeout", new Variant.uint32 (persist_timeout));
 
 			return dict.end ().get_data_as_bytes ();
 		}
@@ -652,9 +652,9 @@ namespace Frida {
 			dict.lookup ("realm", "y", out raw_realm);
 			options.realm = (Realm) raw_realm;
 
-			uint32 raw_timeout = 0;
-			dict.lookup ("timeout", "u", out raw_timeout);
-			options.timeout = raw_timeout;
+			uint32 raw_persist_timeout = 0;
+			dict.lookup ("persist-timeout", "u", out raw_persist_timeout);
+			options.persist_timeout = raw_persist_timeout;
 
 			return options;
 		}

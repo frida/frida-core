@@ -574,7 +574,7 @@ namespace Frida.Agent {
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
 
 				var emulated_opts = new SessionOptions ();
-				emulated_opts.timeout = opts.timeout;
+				emulated_opts.persist_timeout = opts.persist_timeout;
 
 				var raw_emulated_opts = AgentSessionOptions ();
 				raw_emulated_opts.data = emulated_opts._serialize ().get_data ();
