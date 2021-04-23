@@ -2777,7 +2777,7 @@ namespace Frida {
 				script.message (message, has_data ? new Bytes (data) : null);
 		}
 
-		public Script _adopt_script (AgentScriptId script_id) {
+		public Script _prepare_script_adoption (AgentScriptId script_id) {
 			var script = new Script (this, script_id);
 			scripts[script_id] = script;
 			return script;
@@ -3039,6 +3039,9 @@ namespace Frida {
 			construct;
 		}
 
+		private Script? script;
+		private bool adopted = false;
+
 		internal OrphanedScript (Session session, AgentScriptId id, string name) {
 			Object (
 				id: id.handle,
@@ -3047,16 +3050,34 @@ namespace Frida {
 			);
 		}
 
-		public async Script adopt (Cancellable? cancellable = null) throws Error, IOError {
-			AgentScriptId script_id = AgentScriptId (id);
+		~OrphanedScript () {
+			release_script ();
+		}
 
+		public async Script lift (Cancellable? cancellable = null) throws Error, IOError {
+			return ensure_script ();
+		}
+
+		public Script lift_sync (Cancellable? cancellable = null) throws Error, IOError {
+			return create<LiftTask> ().execute (cancellable);
+		}
+
+		private class LiftTask : OrphanedScriptTask<Script> {
+			protected override async Script perform_operation () throws Error, IOError {
+				return yield parent.lift (cancellable);
+			}
+		}
+
+		public async Script adopt (Cancellable? cancellable = null) throws Error, IOError {
 			try {
-				yield session.session.adopt_orphaned_script (script_id, cancellable);
+				yield session.session.adopt_orphaned_script (AgentScriptId (id), cancellable);
+				adopted = true;
 			} catch (GLib.Error e) {
+				release_script ();
 				throw_dbus_error (e);
 			}
 
-			return session._adopt_script (script_id);
+			return ensure_script ();
 		}
 
 		public Script adopt_sync (Cancellable? cancellable = null) throws Error, IOError {
@@ -3069,21 +3090,16 @@ namespace Frida {
 			}
 		}
 
-		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
-			try {
-				yield session.session.resume_orphaned_script (AgentScriptId (id), cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
+		private Script ensure_script () {
+			if (script == null)
+				script = session._prepare_script_adoption (AgentScriptId (id));
+			return script;
 		}
 
-		public void resume_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<ResumeTask> ().execute (cancellable);
-		}
-
-		private class ResumeTask : OrphanedScriptTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.resume (cancellable);
+		private void release_script () {
+			if (script != null && !adopted) {
+				session._release_script (AgentScriptId (id));
+				script = null;
 			}
 		}
 
