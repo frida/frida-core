@@ -180,10 +180,7 @@ namespace Frida {
 		}
 
 		public async OrphanedScriptInfo[] enumerate_orphaned_scripts (Cancellable? cancellable) throws Error, IOError {
-			return {
-				OrphanedScriptInfo (AgentScriptId (42), "tracer"),
-				OrphanedScriptInfo (AgentScriptId (1337), "diag"),
-			};
+			return {};
 		}
 
 		public async void adopt_orphaned_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
