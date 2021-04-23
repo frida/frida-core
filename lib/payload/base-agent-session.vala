@@ -179,16 +179,6 @@ namespace Frida {
 			return bytes.get_data ();
 		}
 
-		public async OrphanedScriptInfo[] enumerate_orphaned_scripts (Cancellable? cancellable) throws Error, IOError {
-			return {};
-		}
-
-		public async void adopt_orphaned_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
-		}
-
-		public async void resume_orphaned_script (AgentScriptId id, Cancellable? cancellable) throws Error, IOError {
-		}
-
 		public async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 

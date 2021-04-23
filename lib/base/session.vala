@@ -61,9 +61,6 @@ namespace Frida {
 		public abstract async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws GLib.Error;
 		public abstract async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async OrphanedScriptInfo[] enumerate_orphaned_scripts (Cancellable? cancellable) throws GLib.Error;
-		public abstract async void adopt_orphaned_script (AgentScriptId id, Cancellable? cancellable) throws GLib.Error;
-		public abstract async void resume_orphaned_script (AgentScriptId id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
@@ -108,35 +105,6 @@ namespace Frida {
 
 		public abstract async void acknowledge_spawn (HostChildInfo info, SpawnStartState start_state,
 			Cancellable? cancellable) throws GLib.Error;
-	}
-
-	[DBus (name = "re.frida.AgentMessageSink14")]
-	public interface AgentMessageSink : Object {
-		public abstract async void post_script_messages (AgentScriptId script_id, AgentScriptMessage[] messages,
-			Cancellable? cancellable) throws GLib.Error;
-	}
-
-	public struct AgentScriptMessage {
-		public string json {
-			get;
-			set;
-		}
-
-		public bool has_data {
-			get;
-			set;
-		}
-
-		public uint8[] data {
-			get;
-			set;
-		}
-
-		public AgentScriptMessage (string json, bool has_data, uint8[] data) {
-			this.json = json;
-			this.has_data = has_data;
-			this.data = data;
-		}
 	}
 
 	[DBus (name = "re.frida.TransportBroker14")]
@@ -857,12 +825,6 @@ namespace Frida {
 			default = DEFAULT;
 		}
 
-		public ScriptLifetime lifetime {
-			get;
-			set;
-			default = SESSION;
-		}
-
 		public Bytes _serialize () {
 			var dict = new VariantDict ();
 
@@ -871,9 +833,6 @@ namespace Frida {
 
 			if (runtime != DEFAULT)
 				dict.insert_value ("runtime", new Variant.byte (runtime));
-
-			if (lifetime != SESSION)
-				dict.insert_value ("lifetime", new Variant.byte (lifetime));
 
 			return dict.end ().get_data_as_bytes ();
 		}
@@ -891,10 +850,6 @@ namespace Frida {
 			dict.lookup ("runtime", "y", out raw_runtime);
 			options.runtime = (ScriptRuntime) raw_runtime;
 
-			uint8 raw_lifetime = ScriptLifetime.SESSION;
-			dict.lookup ("lifetime", "y", out raw_lifetime);
-			options.lifetime = (ScriptLifetime) raw_lifetime;
-
 			return options;
 		}
 	}
@@ -906,32 +861,6 @@ namespace Frida {
 
 		public string to_nick () {
 			return Marshal.enum_to_nick<ScriptRuntime> (this);
-		}
-	}
-
-	public enum ScriptLifetime {
-		SESSION,
-		PROCESS;
-
-		public string to_nick () {
-			return Marshal.enum_to_nick<ScriptLifetime> (this);
-		}
-	}
-
-	public struct OrphanedScriptInfo {
-		public AgentScriptId id {
-			get;
-			set;
-		}
-
-		public string name {
-			get;
-			set;
-		}
-
-		public OrphanedScriptInfo (AgentScriptId id, string name) {
-			this.id = id;
-			this.name = name;
 		}
 	}
 
