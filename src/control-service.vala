@@ -72,8 +72,7 @@ namespace Frida {
 
 		construct {
 			host_session.spawn_added.connect (notify_spawn_added);
-			host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
-			host_session.agent_session_crashed.connect (on_agent_session_crashed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			server.incoming.connect (on_server_connection);
 
@@ -327,22 +326,12 @@ namespace Frida {
 				channel.spawn_removed (info);
 		}
 
-		private void on_agent_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			ControlChannel channel;
 			if (agent_sessions.unset (id, out channel)) {
 				channel.unregister_agent_session (id);
 
-				channel.agent_session_destroyed (id, reason);
-			}
-		}
-
-		private void on_agent_session_crashed (AgentSessionId id, CrashInfo crash) {
-			ControlChannel channel;
-			if (agent_sessions.unset (id, out channel)) {
-				channel.unregister_agent_session (id);
-
-				channel.agent_session_crashed (id, crash);
-				channel.agent_session_destroyed (id, SessionDetachReason.PROCESS_TERMINATED);
+				channel.agent_session_detached (id, reason, crash);
 			}
 		}
 

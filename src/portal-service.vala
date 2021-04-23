@@ -359,11 +359,12 @@ namespace Frida {
 		}
 
 		private void teardown_cluster_node (ClusterNode node) {
+			var no_crash = CrashInfo.empty ();
 			foreach (var id in node.sessions) {
 				ControlChannel c;
 				if (sessions.unset (id, out c)) {
 					c.unregister_agent_session (id);
-					c.agent_session_destroyed (id, SessionDetachReason.PROCESS_TERMINATED);
+					c.agent_session_detached (id, SessionDetachReason.PROCESS_TERMINATED, no_crash);
 				}
 			}
 
@@ -526,7 +527,7 @@ namespace Frida {
 			if (sessions.unset (id, out channel)) {
 				channel.unregister_agent_session (id);
 
-				channel.agent_session_destroyed (id, SessionDetachReason.APPLICATION_REQUESTED);
+				channel.agent_session_detached (id, SessionDetachReason.APPLICATION_REQUESTED, CrashInfo.empty ());
 			}
 		}
 
@@ -565,8 +566,7 @@ namespace Frida {
 					throw new Error.INVALID_OPERATION ("Already created");
 
 				channel = new ControlChannel (parent);
-				channel.agent_session_destroyed.connect (on_agent_session_destroyed);
-				channel.agent_session_crashed.connect (on_agent_session_crashed);
+				channel.agent_session_detached.connect (on_agent_session_detached);
 
 				return channel;
 			}
@@ -575,15 +575,14 @@ namespace Frida {
 				if (host_session != channel)
 					throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-				channel.agent_session_destroyed.disconnect (on_agent_session_destroyed);
-				channel.agent_session_crashed.disconnect (on_agent_session_crashed);
+				channel.agent_session_detached.disconnect (on_agent_session_detached);
 
 				HostSession session = channel;
 
 				channel.close ();
 				channel = null;
 
-				host_session_closed (session);
+				host_session_detached (session);
 			}
 
 			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
@@ -608,12 +607,8 @@ namespace Frida {
 				channel.sessions[id] = new_session;
 			}
 
-			private void on_agent_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
-				agent_session_closed (id, reason, null);
-			}
-
-			private void on_agent_session_crashed (AgentSessionId id, CrashInfo crash) {
-				agent_session_closed (id, SessionDetachReason.PROCESS_TERMINATED, crash);
+			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+				agent_session_detached (id, reason, crash);
 			}
 		}
 

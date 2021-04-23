@@ -26,8 +26,7 @@ namespace Frida {
 		public signal void child_removed (HostChildInfo info);
 		public signal void process_crashed (CrashInfo crash);
 		public signal void output (uint pid, int fd, uint8[] data);
-		public signal void agent_session_destroyed (AgentSessionId id, SessionDetachReason reason);
-		public signal void agent_session_crashed (AgentSessionId id, CrashInfo crash);
+		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 		public signal void uninjected (InjectorPayloadId id);
 	}
 
@@ -52,14 +51,11 @@ namespace Frida {
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
 
-		public abstract async AgentScriptId create_script (string name, string source, Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
+		public abstract async AgentScriptId create_script (string source, AgentScriptOptions options,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable) throws GLib.Error;
-		public abstract async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
+		public abstract async AgentScriptId create_script_from_bytes (uint8[] bytes, AgentScriptOptions options,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws GLib.Error;
-		public abstract async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
+		public abstract async uint8[] compile_script (string source, AgentScriptOptions options,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async void destroy_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void load_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
@@ -809,6 +805,14 @@ namespace Frida {
 				this.parameters = parameters.get_data_as_bytes ().get_data ();
 			else
 				this.parameters = {};
+		}
+
+		public CrashInfo.empty () {
+			this.pid = 0;
+			this.process_name = "";
+			this.summary = "";
+			this.report = "";
+			this.parameters = {};
 		}
 	}
 

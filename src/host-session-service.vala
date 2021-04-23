@@ -121,13 +121,13 @@ namespace Frida {
 
 		public abstract async HostSession create (HostSessionOptions? options = null, Cancellable? cancellable = null) throws Error, IOError;
 		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
-		public signal void host_session_closed (HostSession session);
+		public signal void host_session_detached (HostSession session);
 
 		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
 			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract void migrate_agent_session (HostSession host_session, AgentSessionId id,
 			AgentSession new_session) throws Error;
-		public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
+		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 	}
 
 	public enum HostSessionProviderKind {
@@ -157,9 +157,6 @@ namespace Frida {
 	}
 
 	public abstract class BaseDBusHostSession : Object, HostSession, AgentController {
-		public signal void agent_session_opened (AgentSessionId id, AgentSession session);
-		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason, CrashInfo? crash);
-
 		private Gee.HashMap<uint, Cancellable> pending_establish_ops = new Gee.HashMap<uint, Cancellable> ();
 
 		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
@@ -347,8 +344,6 @@ namespace Frida {
 
 			agent_sessions[id] = session;
 
-			agent_session_opened (id, session);
-
 			return id;
 		}
 
@@ -518,8 +513,7 @@ namespace Frida {
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
-			agent_session_closed (id, session, reason, null);
-			agent_session_destroyed (id, reason);
+			agent_session_detached (id, reason, CrashInfo.empty ());
 
 			foreach (var future in agent_entries.values) {
 				if (!future.ready)
@@ -604,13 +598,11 @@ namespace Frida {
 			if (reason == PROCESS_TERMINATED)
 				crash = yield try_collect_crash (entry.pid, cancellable);
 
+			var crash_info = (crash != null) ? crash : CrashInfo.empty ();
 			foreach (var id in entry.sessions) {
 				AgentSession session;
 				if (agent_sessions.unset (id, out session)) {
-					agent_session_closed (id, session, reason, crash);
-					if (crash != null)
-						agent_session_crashed (id, crash);
-					agent_session_destroyed (id, reason);
+					agent_session_detached (id, reason, crash_info);
 				}
 			}
 
@@ -1112,6 +1104,7 @@ namespace Frida {
 		private Promise<bool> ensure_request;
 		private Promise<bool> _unloaded = new Promise<bool> ();
 
+		protected AgentSessionId session_id;
 		protected AgentSession session;
 		protected AgentScriptId script;
 		private RpcClient rpc_client;
@@ -1119,11 +1112,11 @@ namespace Frida {
 		construct {
 			rpc_client = new RpcClient (this);
 
-			host_session.agent_session_closed.connect (on_agent_session_closed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
 		}
 
 		~InternalAgent () {
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
 		}
 
 		public async void close (Cancellable? cancellable) throws IOError {
@@ -1167,9 +1160,9 @@ namespace Frida {
 				uint target_pid = yield get_target_pid (cancellable);
 
 				try {
-					var id = yield host_session.attach (target_pid, AgentSessionOptions (), cancellable);
+					session_id = yield host_session.attach (target_pid, AgentSessionOptions (), cancellable);
 
-					session = host_session.obtain_agent_session (id);
+					session = host_session.obtain_agent_session (session_id);
 					session.message_from_script.connect (on_message_from_script);
 
 					if (script_source != null) {
@@ -1180,7 +1173,7 @@ namespace Frida {
 						var raw_options = AgentScriptOptions ();
 						raw_options.data = options._serialize ().get_data ();
 
-						script = yield session.create_script_with_options (script_source, raw_options, cancellable);
+						script = yield session.create_script (script_source, raw_options, cancellable);
 
 						yield session.load_script (script, cancellable);
 					}
@@ -1236,8 +1229,8 @@ namespace Frida {
 			}
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session) {
-			if (session != this.session)
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			if (id.handle != session_id.handle)
 				return;
 
 			_unloaded.resolve (true);
@@ -1316,10 +1309,8 @@ namespace Frida {
 		try {
 			yield broker.open_tcp_transport (id, cancellable, out port, out token);
 		} catch (GLib.Error e) {
-			if (e is Error.NOT_SUPPORTED)
+			if (e is Error)
 				throw (Error) e;
-			if (e is DBusError.UNKNOWN_METHOD)
-				throw new Error.NOT_SUPPORTED ("Not supported by the remote frida-server");
 			throw new Error.TRANSPORT ("%s", e.message);
 		}
 

@@ -38,7 +38,7 @@ namespace Frida {
 		public async void close (Cancellable? cancellable) throws IOError {
 			if (host_session == null)
 				return;
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
 			yield host_session.close (cancellable);
 			host_session = null;
 		}
@@ -50,7 +50,7 @@ namespace Frida {
 			var tempdir = new TemporaryDirectory ();
 
 			host_session = new LinuxHostSession (new LinuxHelperProcess (tempdir), tempdir);
-			host_session.agent_session_closed.connect (on_agent_session_closed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
 		}
@@ -59,7 +59,7 @@ namespace Frida {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
 
 			yield host_session.close (cancellable);
 			host_session = null;
@@ -80,9 +80,8 @@ namespace Frida {
 			this.host_session.migrate_agent_session (id, new_session);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-				CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 	}
 

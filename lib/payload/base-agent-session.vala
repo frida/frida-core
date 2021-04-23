@@ -125,18 +125,7 @@ namespace Frida {
 			child_gating_enabled = false;
 		}
 
-		public async AgentScriptId create_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var options = new ScriptOptions ();
-			if (name != "")
-				options.name = name;
-
-			var instance = yield script_engine.create_script (source, null, options);
-			return instance.script_id;
-		}
-
-		public async AgentScriptId create_script_with_options (string source, AgentScriptOptions options,
+		public async AgentScriptId create_script (string source, AgentScriptOptions options,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
@@ -144,14 +133,7 @@ namespace Frida {
 			return instance.script_id;
 		}
 
-		public async AgentScriptId create_script_from_bytes (uint8[] bytes, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var instance = yield script_engine.create_script (null, new Bytes (bytes), new ScriptOptions ());
-			return instance.script_id;
-		}
-
-		public async AgentScriptId create_script_from_bytes_with_options (uint8[] bytes, AgentScriptOptions options,
+		public async AgentScriptId create_script_from_bytes (uint8[] bytes, AgentScriptOptions options,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 
@@ -160,18 +142,7 @@ namespace Frida {
 			return instance.script_id;
 		}
 
-		public async uint8[] compile_script (string name, string source, Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			var options = new ScriptOptions ();
-			if (name != "")
-				options.name = name;
-
-			var bytes = yield script_engine.compile_script (source, options);
-			return bytes.get_data ();
-		}
-
-		public async uint8[] compile_script_with_options (string source, AgentScriptOptions options,
+		public async uint8[] compile_script (string source, AgentScriptOptions options,
 				Cancellable? cancellable) throws Error, IOError {
 			check_open ();
 

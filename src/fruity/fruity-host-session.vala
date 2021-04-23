@@ -273,7 +273,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Already created");
 
 			host_session = new FruityHostSession (this, this);
-			host_session.agent_session_closed.connect (on_agent_session_closed);
+			host_session.agent_session_detached.connect (on_agent_session_detached);
 
 			return host_session;
 		}
@@ -282,7 +282,7 @@ namespace Frida {
 			if (session != host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-			host_session.agent_session_closed.disconnect (on_agent_session_closed);
+			host_session.agent_session_detached.disconnect (on_agent_session_detached);
 
 			yield host_session.close (cancellable);
 			host_session = null;
@@ -303,9 +303,8 @@ namespace Frida {
 			this.host_session.migrate_agent_session (id, new_session);
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-				CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 
 		public async IOStream open_channel (string address, Cancellable? cancellable = null) throws Error, IOError {
@@ -409,9 +408,6 @@ namespace Frida {
 	}
 
 	public class FruityHostSession : Object, HostSession {
-		public signal void agent_session_closed (AgentSessionId id, AgentSession session, SessionDetachReason reason,
-			CrashInfo? crash);
-
 		public weak ChannelProvider channel_provider {
 			get;
 			construct;
@@ -1005,15 +1001,14 @@ namespace Frida {
 
 		private void on_agent_entry_detached (AgentEntry entry, SessionDetachReason reason) {
 			var id = AgentSessionId (entry.id);
-			CrashInfo? crash = null;
+			var no_crash = CrashInfo.empty ();
 
 			agent_entries.unset (id);
 			agent_sessions.unset (id);
 
 			entry.detached.disconnect (on_agent_entry_detached);
 
-			agent_session_closed (id, entry.agent_session, reason, crash);
-			agent_session_destroyed (id, reason);
+			agent_session_detached (id, reason, no_crash);
 
 			entry.close.begin (io_cancellable);
 		}
@@ -1121,8 +1116,7 @@ namespace Frida {
 			session.child_removed.connect (on_remote_child_removed);
 			session.process_crashed.connect (on_remote_process_crashed);
 			session.output.connect (on_remote_output);
-			session.agent_session_destroyed.connect (on_remote_agent_session_destroyed);
-			session.agent_session_crashed.connect (on_remote_agent_session_crashed);
+			session.agent_session_detached.connect (on_remote_agent_session_detached);
 			session.uninjected.connect (on_remote_uninjected);
 		}
 
@@ -1136,8 +1130,7 @@ namespace Frida {
 			session.child_removed.disconnect (on_remote_child_removed);
 			session.process_crashed.disconnect (on_remote_process_crashed);
 			session.output.disconnect (on_remote_output);
-			session.agent_session_destroyed.disconnect (on_remote_agent_session_destroyed);
-			session.agent_session_crashed.disconnect (on_remote_agent_session_crashed);
+			session.agent_session_detached.disconnect (on_remote_agent_session_detached);
 			session.uninjected.disconnect (on_remote_uninjected);
 		}
 
@@ -1146,8 +1139,9 @@ namespace Frida {
 			current_remote_server = null;
 			remote_server_request = null;
 
+			var no_crash = CrashInfo.empty ();
 			foreach (var remote_id in remote_agent_sessions.keys.to_array ())
-				on_remote_agent_session_destroyed (remote_id, SERVER_TERMINATED);
+				on_remote_agent_session_detached (remote_id, SERVER_TERMINATED, no_crash);
 		}
 
 		private void on_remote_spawn_added (HostSpawnInfo info) {
@@ -1174,7 +1168,7 @@ namespace Frida {
 			output (pid, fd, data);
 		}
 
-		private void on_remote_agent_session_destroyed (AgentSessionId remote_id, SessionDetachReason reason) {
+		private void on_remote_agent_session_detached (AgentSessionId remote_id, SessionDetachReason reason, CrashInfo crash) {
 			AgentSessionId? local_id;
 			if (!remote_agent_sessions.unset (remote_id, out local_id))
 				return;
@@ -1183,25 +1177,7 @@ namespace Frida {
 			agent_sessions.unset (local_id, out agent_session);
 			assert (agent_session != null);
 
-			CrashInfo? crash = null;
-
-			agent_session_closed (local_id, agent_session, reason, crash);
-			agent_session_destroyed (local_id, reason);
-		}
-
-		private void on_remote_agent_session_crashed (AgentSessionId remote_id, CrashInfo crash) {
-			AgentSessionId? local_id;
-			if (!remote_agent_sessions.unset (remote_id, out local_id))
-				return;
-
-			AgentSession agent_session = null;
-			agent_sessions.unset (local_id, out agent_session);
-			assert (agent_session != null);
-
-			SessionDetachReason reason = PROCESS_TERMINATED;
-
-			agent_session_closed (local_id, agent_session, reason, crash);
-			agent_session_crashed (local_id, crash);
+			agent_session_detached (local_id, reason, crash);
 		}
 
 		private void on_remote_uninjected (InjectorPayloadId id) {
@@ -1364,12 +1340,12 @@ namespace Frida {
 
 			construct {
 				connection.on_closed.connect (on_connection_closed);
-				host_session.agent_session_destroyed.connect (on_session_destroyed);
+				host_session.agent_session_detached.connect (on_session_detached);
 			}
 
 			~AgentEntry () {
 				connection.on_closed.disconnect (on_connection_closed);
-				host_session.agent_session_destroyed.disconnect (on_session_destroyed);
+				host_session.agent_session_detached.disconnect (on_session_detached);
 			}
 
 			public async void close (Cancellable? cancellable) throws IOError {
@@ -1408,7 +1384,7 @@ namespace Frida {
 				detached (PROCESS_TERMINATED);
 			}
 
-			private void on_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
+			private void on_session_detached (AgentSessionId id, SessionDetachReason reason) {
 				detached (reason);
 			}
 		}

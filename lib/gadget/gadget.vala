@@ -1838,7 +1838,7 @@ namespace Frida.Gadget {
 				session.closed.disconnect (on_session_closed);
 				sessions.remove (session);
 
-				agent_session_destroyed (session.id, APPLICATION_REQUESTED);
+				agent_session_detached (session.id, APPLICATION_REQUESTED, CrashInfo.empty ());
 			}
 
 			private void on_session_migrated (AgentSession abstract_session) {

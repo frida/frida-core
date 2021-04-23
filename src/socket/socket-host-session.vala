@@ -138,7 +138,7 @@ namespace Frida {
 			}
 
 			var entry = new HostEntry (connection, host_session);
-			entry.agent_session_closed.connect (on_agent_session_closed);
+			entry.agent_session_detached.connect (on_agent_session_detached);
 			hosts.add (entry);
 
 			connection.on_closed.connect (on_host_connection_closed);
@@ -163,9 +163,9 @@ namespace Frida {
 
 			yield entry.destroy (reason, cancellable);
 
-			entry.agent_session_closed.disconnect (on_agent_session_closed);
+			entry.agent_session_detached.disconnect (on_agent_session_detached);
 
-			host_session_closed (entry.host_session);
+			host_session_detached (entry.host_session);
 		}
 
 		private void on_host_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
@@ -205,12 +205,12 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
-			agent_session_closed (id, reason, crash);
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+			agent_session_detached (id, reason, crash);
 		}
 
 		private class HostEntry : Object {
-			public signal void agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash);
+			public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 
 			public DBusConnection connection {
 				get;
@@ -228,13 +228,16 @@ namespace Frida {
 			public HostEntry (DBusConnection connection, HostSession host_session) {
 				Object (connection: connection, host_session: host_session);
 
-				host_session.agent_session_destroyed.connect (on_agent_session_destroyed);
-				host_session.agent_session_crashed.connect (on_agent_session_crashed);
+				host_session.agent_session_detached.connect (on_agent_session_detached);
 			}
 
 			public async void destroy (SessionDetachReason reason, Cancellable? cancellable) throws IOError {
-				host_session.agent_session_crashed.disconnect (on_agent_session_crashed);
-				host_session.agent_session_destroyed.disconnect (on_agent_session_destroyed);
+				host_session.agent_session_detached.disconnect (on_agent_session_detached);
+
+				var no_crash = CrashInfo.empty ();
+				foreach (AgentSessionId id in agent_sessions.keys)
+					agent_session_detached (id, reason, no_crash);
+				agent_sessions.clear ();
 
 				try {
 					yield connection.close (cancellable);
@@ -262,14 +265,9 @@ namespace Frida {
 				agent_sessions[id] = new_session;
 			}
 
-			private void on_agent_session_destroyed (AgentSessionId id, SessionDetachReason reason) {
-				if (agent_sessions.unset (id))
-					agent_session_closed (id, reason, null);
-			}
-
-			private void on_agent_session_crashed (AgentSessionId id, CrashInfo crash) {
-				if (agent_sessions.unset (id))
-					agent_session_closed (id, PROCESS_TERMINATED, crash);
+			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
+				agent_sessions.unset (id);
+				agent_session_detached (id, reason, crash);
 			}
 		}
 	}

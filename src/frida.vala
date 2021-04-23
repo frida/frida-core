@@ -592,8 +592,8 @@ namespace Frida {
 		}
 
 		construct {
-			provider.host_session_closed.connect (on_host_session_closed);
-			provider.agent_session_closed.connect (on_agent_session_closed);
+			provider.host_session_detached.connect (on_host_session_detached);
+			provider.agent_session_detached.connect (on_agent_session_detached);
 		}
 
 		public bool is_lost () {
@@ -1316,7 +1316,7 @@ namespace Frida {
 			}
 		}
 
-		private void on_host_session_closed (HostSession session) {
+		private void on_host_session_detached (HostSession session) {
 			if (session != current_host_session)
 				return;
 
@@ -1389,12 +1389,13 @@ namespace Frida {
 					}
 				}
 
+				var no_crash = CrashInfo.empty ();
 				foreach (var session in agent_sessions.values.to_array ())
-					yield session._do_close (reason, null, may_block, cancellable);
+					yield session._do_close (reason, no_crash, may_block, cancellable);
 				agent_sessions.clear ();
 
-				provider.host_session_closed.disconnect (on_host_session_closed);
-				provider.agent_session_closed.disconnect (on_agent_session_closed);
+				provider.host_session_detached.disconnect (on_host_session_detached);
+				provider.agent_session_detached.disconnect (on_agent_session_detached);
 
 				if (current_host_session != null) {
 					detach_host_session (current_host_session);
@@ -1447,7 +1448,7 @@ namespace Frida {
 			}
 		}
 
-		private void on_agent_session_closed (AgentSessionId id, SessionDetachReason reason, CrashInfo? crash) {
+		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			var session = agent_sessions[id];
 			if (session != null)
 				session._do_close.begin (reason, crash, false, null);
@@ -1818,7 +1819,9 @@ namespace Frida {
 			return new VariantDict (new Variant.from_bytes (VariantType.VARDICT, raw_parameters, false));
 		}
 
-		internal static Crash from_info (CrashInfo info) {
+		internal static Crash? from_info (CrashInfo info) {
+			if (info.pid == 0)
+				return null;
 			return new Crash (
 				info.pid,
 				info.process_name,
@@ -1999,7 +2002,7 @@ namespace Frida {
 		}
 
 		public async void detach (Cancellable? cancellable = null) throws IOError {
-			yield _do_close (APPLICATION_REQUESTED, null, true, cancellable);
+			yield _do_close (APPLICATION_REQUESTED, CrashInfo.empty (), true, cancellable);
 		}
 
 		public void detach_sync (Cancellable? cancellable = null) throws IOError {
@@ -2066,26 +2069,9 @@ namespace Frida {
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script_with_options (source, raw_options, cancellable);
+				script_id = yield session.create_script (source, raw_options, cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					string? name = (options != null) ? options.name : null;
-					if (name == null)
-						name = "";
-
-					if (options != null && options.runtime != DEFAULT) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “runtime” option; please upgrade it");
-					}
-
-					try {
-						script_id = yield session.create_script (name, source, cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
 
 			check_open ();
@@ -2123,23 +2109,10 @@ namespace Frida {
 
 			AgentScriptId script_id;
 			try {
-				script_id = yield session.create_script_from_bytes_with_options (bytes.get_data (), raw_options,
+				script_id = yield session.create_script_from_bytes (bytes.get_data (), raw_options,
 					cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					if (options != null && options.runtime != DEFAULT) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “runtime” option; please upgrade it");
-					}
-
-					try {
-						script_id = yield session.create_script_from_bytes (bytes.get_data (), cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
 
 			check_open ();
@@ -2177,26 +2150,9 @@ namespace Frida {
 
 			uint8[] data;
 			try {
-				data = yield session.compile_script_with_options (source, raw_options, cancellable);
+				data = yield session.compile_script (source, raw_options, cancellable);
 			} catch (GLib.Error e) {
-				if (e is DBusError.UNKNOWN_METHOD) {
-					string? name = (options != null) ? options.name : null;
-					if (name == null)
-						name = "";
-
-					if (options != null && options.runtime != DEFAULT) {
-						throw new Error.INVALID_ARGUMENT (
-							"Remote Frida does not support the “runtime” option; please upgrade it");
-					}
-
-					try {
-						data = yield session.compile_script (name, source, cancellable);
-					} catch (GLib.Error e) {
-						throw_dbus_error (e);
-					}
-				} else {
-					throw_dbus_error (e);
-				}
+				throw_dbus_error (e);
 			}
 
 			return new Bytes (data);
@@ -2609,7 +2565,7 @@ namespace Frida {
 		}
 
 		private void on_nice_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			_do_close.begin (SessionDetachReason.PROCESS_TERMINATED, null, false, null);
+			_do_close.begin (SessionDetachReason.PROCESS_TERMINATED, CrashInfo.empty (), false, null);
 		}
 
 		private void begin_migration (AgentSession new_session) {
@@ -2757,7 +2713,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Session is detached");
 		}
 
-		public async void _do_close (SessionDetachReason reason, CrashInfo? crash, bool may_block, Cancellable? cancellable)
+		public async void _do_close (SessionDetachReason reason, CrashInfo crash, bool may_block, Cancellable? cancellable)
 				throws IOError {
 			while (close_request != null) {
 				try {
@@ -2790,7 +2746,7 @@ namespace Frida {
 
 				yield device._release_session (this, may_block, cancellable);
 
-				detached (reason, (crash != null) ? Crash.from_info (crash) : null);
+				detached (reason, Crash.from_info (crash));
 
 				close_request.resolve (true);
 			} catch (IOError e) {

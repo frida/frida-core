@@ -32,12 +32,12 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				Cancellable? cancellable = null;
-				script_id = yield session.create_script ("load-and-receive-messages",
+				script_id = yield session.create_script (
 					("Interceptor.attach (ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\"), {" +
 					 "  onEnter(args) {" +
 					 "    send({ first_argument: args[0].toInt32(), second_argument: args[1].readUtf8String() });" +
 					 "  }" +
-					 "});").printf ((size_t) func), cancellable);
+					 "});").printf ((size_t) func), AgentScriptOptions (), cancellable);
 				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
@@ -63,7 +63,7 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				Cancellable? cancellable = null;
-				script_id = yield session.create_script ("performance",
+				script_id = yield session.create_script (
 					("const buf = ptr(\"0x%" + size_t.FORMAT_MODIFIER + "x\").readByteArray(%d);" +
 					 "const startTime = new Date();" +
 					 "let iterations = 0;" +
@@ -76,7 +76,7 @@ namespace Frida.AgentTest {
 					 "  }" +
 					 "};" +
 					 "sendNext();"
-					).printf ((size_t) buf, size), cancellable);
+					).printf ((size_t) buf, size), AgentScriptOptions (), cancellable);
 				yield session.load_script (script_id, cancellable);
 			} catch (GLib.Error attach_error) {
 				assert_not_reached ();
@@ -116,7 +116,7 @@ namespace Frida.AgentTest {
 			AgentScriptId script_id;
 			try {
 				Cancellable? cancellable = null;
-				script_id = yield session.create_script ("launch-scenario", """
+				script_id = yield session.create_script ("""
 const POSIX_SPAWN_START_SUSPENDED = 0x0080;
 
 const { pointerSize } = Process;
@@ -204,7 +204,7 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
     send([event, identifier, pidPtr.readU32()]);
   }
 });
-""", cancellable);
+""", AgentScriptOptions (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				h.disable_timeout ();
@@ -333,12 +333,12 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 			try {
 				Cancellable? cancellable = null;
 
-				var script_id = yield session.create_script ("thread-suspend-scenario", """
+				var script_id = yield session.create_script ("""
 console.log('Script runtime is: ' + Script.runtime);
 
 Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () => {
 });
-""", cancellable);
+""", AgentScriptOptions (), cancellable);
 				yield session.load_script (script_id, cancellable);
 
 				var thread_id = get_current_thread_id ();

@@ -954,7 +954,7 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					var write = new NativeFunction(Module.getExportByName(null, 'write'), 'int', ['int', 'pointer', 'int']);
 					var message = Memory.allocUtf8String('Hello stdout');
 					write(1, message, 12);
@@ -1186,7 +1186,7 @@ namespace Frida.HostSessionTest {
 						run_spawn_scenario.callback ();
 				});
 
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					const write = new NativeFunction(Module.getExportByName('libSystem.B.dylib', 'write'), 'int', ['int', 'pointer', 'int']);
 					const message = Memory.allocUtf8String('Hello stdout');
 					const cout = Module.getExportByName('libc++.1.dylib', '_ZNSt3__14coutE').readPointer();
@@ -1589,8 +1589,7 @@ namespace Frida.HostSessionTest {
 							cross_arch.callback ();
 					});
 
-					var script_id = yield session.create_script_with_options ("send('hello');", AgentScriptOptions (),
-						cancellable);
+					var script_id = yield session.create_script ("send('hello');", AgentScriptOptions (), cancellable);
 					yield session.load_script (script_id, cancellable);
 
 					if (received_message == null) {
@@ -2400,7 +2399,7 @@ namespace Frida.HostSessionTest {
 						spawn.callback ();
 				});
 
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					const STD_OUTPUT_HANDLE = -11;
 					const winAbi = (Process.pointerSize === 4) ? 'stdcall' : 'win64';
 					const GetStdHandle = new NativeFunction(Module.getExportByName('kernel32.dll', 'GetStdHandle'), 'pointer', ['int'], winAbi);
@@ -2664,7 +2663,7 @@ namespace Frida.HostSessionTest {
 					large_messages.callback ();
 				});
 				stdout.printf ("creating script\n");
-				var script_id = yield session.create_script_with_options ("""
+				var script_id = yield session.create_script ("""
 					function onMessage(message) {
 					  send('ACK: ' + message.length);
 					  recv(onMessage);
