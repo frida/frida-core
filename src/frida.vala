@@ -2226,26 +2226,6 @@ namespace Frida {
 			}
 		}
 
-		public async void enable_jit (Cancellable? cancellable = null) throws Error, IOError {
-			check_open ();
-
-			try {
-				yield session.enable_jit (cancellable);
-			} catch (GLib.Error e) {
-				throw_dbus_error (e);
-			}
-		}
-
-		public void enable_jit_sync (Cancellable? cancellable = null) throws Error, IOError {
-			create<EnableJitTask> ().execute (cancellable);
-		}
-
-		private class EnableJitTask : SessionTask<void> {
-			protected override async void perform_operation () throws Error, IOError {
-				yield parent.enable_jit (cancellable);
-			}
-		}
-
 		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
 		}
 

@@ -213,12 +213,6 @@ namespace Frida {
 			backend.post_debug_message (message);
 		}
 
-		public void enable_jit () throws Error {
-			invader.get_script_backend (V8); // Will throw if not available.
-
-			preferred_runtime = V8;
-		}
-
 		private void on_debug_message (string message) {
 			message_from_debugger (message);
 		}

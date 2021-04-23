@@ -194,12 +194,6 @@ namespace Frida {
 			script_engine.post_message_to_debugger (message);
 		}
 
-		public async void enable_jit (Cancellable? cancellable) throws Error, IOError {
-			check_open ();
-
-			script_engine.enable_jit ();
-		}
-
 		public async PortalMembershipId join_portal (string address, AgentPortalOptions options,
 				Cancellable? cancellable) throws Error, IOError {
 			return yield invader.join_portal (parse_cluster_address (address), PortalOptions._deserialize (options.data),
