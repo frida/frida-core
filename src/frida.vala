@@ -1090,6 +1090,8 @@ namespace Frida {
 				Cancellable? cancellable = null) throws Error, IOError {
 			check_open ();
 
+			SessionOptions opts = (options != null) ? options : new SessionOptions ();
+
 			var attach_request = new Promise<Session> ();
 			pending_attach_requests.add (attach_request);
 
@@ -1098,8 +1100,7 @@ namespace Frida {
 				var host_session = yield get_host_session (cancellable);
 
 				var raw_options = AgentSessionOptions ();
-				if (options != null)
-					raw_options.data = options._serialize ().get_data ();
+				raw_options.data = opts._serialize ().get_data ();
 
 				AgentSessionId id;
 				try {
@@ -1110,7 +1111,7 @@ namespace Frida {
 
 				try {
 					var agent_session = yield provider.obtain_agent_session (host_session, id, cancellable);
-					session = new Session (this, pid, id, agent_session);
+					session = new Session (this, pid, id, agent_session, opts);
 					agent_sessions[id] = session;
 
 					attach_request.resolve (session);
@@ -1346,7 +1347,7 @@ namespace Frida {
 			session.uninjected.disconnect (on_uninjected);
 		}
 
-		public async void _do_close (SessionDetachReason reason, bool may_block, Cancellable? cancellable) throws IOError {
+		internal async void _do_close (SessionDetachReason reason, bool may_block, Cancellable? cancellable) throws IOError {
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -1451,7 +1452,7 @@ namespace Frida {
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			var session = agent_sessions[id];
 			if (session != null)
-				session._do_close.begin (reason, crash, false, null);
+				session._on_detached (reason, crash);
 
 			Promise<bool> detach_request;
 			if (pending_detach_requests.unset (id, out detach_request))
@@ -1956,17 +1957,21 @@ namespace Frida {
 			}
 		}
 
+		public uint persist_timeout {
+			get;
+			construct;
+		}
+
 		public weak Device device {
 			get;
 			construct;
 		}
 
+		private State state = ATTACHED;
 		private Promise<bool> close_request;
 
 		private AgentSession active_session;
-#if HAVE_NICE
 		private AgentSession? obsolete_session;
-#endif
 
 		private Gee.HashMap<AgentScriptId?, Script> scripts =
 			new Gee.HashMap<AgentScriptId?, Script> (AgentScriptId.hash, AgentScriptId.equal);
@@ -1984,21 +1989,24 @@ namespace Frida {
 		private MainContext? dbus_context;
 #endif
 
-		internal Session (Device device, uint pid, AgentSessionId id, AgentSession agent_session) {
+		private enum State {
+			ATTACHED,
+			INTERRUPTED,
+			DETACHED,
+		}
+
+		internal Session (Device device, uint pid, AgentSessionId id, AgentSession agent_session, SessionOptions options) {
 			Object (
 				pid: pid,
 				id: id,
 				session: agent_session,
+				persist_timeout: options.persist_timeout,
 				device: device
 			);
 		}
 
 		construct {
 			active_session.message_from_script.connect (on_message_from_script);
-		}
-
-		public bool is_detached () {
-			return close_request != null;
 		}
 
 		public async void detach (Cancellable? cancellable = null) throws IOError {
@@ -2016,6 +2024,42 @@ namespace Frida {
 		private class DetachTask : SessionTask<void> {
 			protected override async void perform_operation () throws Error, IOError {
 				yield parent.detach (cancellable);
+			}
+		}
+
+		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
+			switch (state) {
+				case ATTACHED:
+					return;
+				case INTERRUPTED:
+					break;
+				case DETACHED:
+					throw new Error.INVALID_OPERATION ("Session is gone");
+			}
+
+			var host_session = yield device.get_host_session (cancellable);
+
+			var agent_session = yield device.provider.obtain_agent_session (host_session, id, cancellable);
+
+			begin_migration (agent_session);
+			commit_migration (agent_session);
+
+			try {
+				yield agent_session.resume (cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
+			state = ATTACHED;
+		}
+
+		public void resume_sync (Cancellable? cancellable = null) throws Error, IOError {
+			create<ResumeTask> ().execute (cancellable);
+		}
+
+		private class ResumeTask : SessionTask<void> {
+			protected override async void perform_operation () throws Error, IOError {
+				yield parent.resume (cancellable);
 			}
 		}
 
@@ -2226,12 +2270,11 @@ namespace Frida {
 			}
 		}
 
-		public async void resume (Cancellable? cancellable = null) throws Error, IOError {
-		}
-
 #if HAVE_NICE
 		public async void setup_peer_connection (PeerOptions? options = null,
 				Cancellable? cancellable = null) throws Error, IOError {
+			check_open ();
+
 			AgentSession server_session = active_session;
 
 			dbus_context = yield device.manager.get_dbus_context (cancellable);
@@ -2548,53 +2591,6 @@ namespace Frida {
 			_do_close.begin (SessionDetachReason.PROCESS_TERMINATED, CrashInfo.empty (), false, null);
 		}
 
-		private void begin_migration (AgentSession new_session) {
-			assert (obsolete_session == null);
-
-			obsolete_session = active_session;
-
-			active_session = new_session;
-
-			if (debugger != null)
-				debugger.begin_migration (new_session);
-
-			try {
-				device.provider.migrate_agent_session (device.current_host_session, id, new_session);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-		}
-
-		private void commit_migration (AgentSession new_session) {
-			assert (new_session == active_session);
-			assert (obsolete_session != null);
-
-			obsolete_session.message_from_script.disconnect (on_message_from_script);
-			obsolete_session = null;
-
-			active_session.message_from_script.connect (on_message_from_script);
-
-			if (debugger != null)
-				debugger.commit_migration (new_session);
-		}
-
-		private void cancel_migration (AgentSession new_session) {
-			assert (new_session == active_session);
-			assert (obsolete_session != null);
-
-			try {
-				device.provider.migrate_agent_session (device.current_host_session, id, obsolete_session);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-
-			active_session = obsolete_session;
-			obsolete_session = null;
-
-			if (debugger != null)
-				debugger.cancel_migration (new_session);
-		}
-
 		private void schedule_on_frida_thread (owned SourceFunc function) {
 			var source = new IdleSource ();
 			source.set_callback ((owned) function);
@@ -2689,12 +2685,26 @@ namespace Frida {
 		}
 
 		private void check_open () throws Error {
-			if (close_request != null)
-				throw new Error.INVALID_OPERATION ("Session is detached");
+			switch (state) {
+				case ATTACHED:
+					break;
+				case INTERRUPTED:
+					throw new Error.INVALID_OPERATION ("Session was interrupted; call resume()");
+				case DETACHED:
+					throw new Error.INVALID_OPERATION ("Session is gone");
+			}
 		}
 
-		public async void _do_close (SessionDetachReason reason, CrashInfo crash, bool may_block, Cancellable? cancellable)
-				throws IOError {
+		internal void _on_detached (SessionDetachReason reason, CrashInfo crash) {
+			if (persist_timeout != 0 && reason == CONNECTION_TERMINATED) {
+				state = INTERRUPTED;
+			} else {
+				_do_close.begin (reason, crash, false, null);
+			}
+		}
+
+		internal async void _do_close (SessionDetachReason reason, CrashInfo crash, bool may_block,
+				Cancellable? cancellable) throws IOError {
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);
@@ -2705,6 +2715,8 @@ namespace Frida {
 				}
 			}
 			close_request = new Promise<bool> ();
+
+			state = DETACHED;
 
 			try {
 				if (debugger != null) {
@@ -2735,6 +2747,55 @@ namespace Frida {
 				throw e;
 			}
 		}
+
+		private void begin_migration (AgentSession new_session) {
+			assert (obsolete_session == null);
+
+			obsolete_session = active_session;
+
+			active_session = new_session;
+
+			if (debugger != null)
+				debugger.begin_migration (new_session);
+
+			try {
+				device.provider.migrate_agent_session (device.current_host_session, id, new_session);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+		}
+
+		private void commit_migration (AgentSession new_session) {
+			assert (new_session == active_session);
+			assert (obsolete_session != null);
+
+			obsolete_session.message_from_script.disconnect (on_message_from_script);
+			obsolete_session = null;
+
+			active_session.message_from_script.connect (on_message_from_script);
+
+			if (debugger != null)
+				debugger.commit_migration (new_session);
+		}
+
+#if HAVE_NICE
+		private void cancel_migration (AgentSession new_session) {
+			assert (new_session == active_session);
+			assert (obsolete_session != null);
+
+			try {
+				device.provider.migrate_agent_session (device.current_host_session, id, obsolete_session);
+			} catch (Error e) {
+				assert_not_reached ();
+			}
+
+			active_session = obsolete_session;
+			obsolete_session = null;
+
+			if (debugger != null)
+				debugger.cancel_migration (new_session);
+		}
+#endif
 
 		private T create<T> () {
 			return Object.new (typeof (T), parent: this);
@@ -2866,7 +2927,7 @@ namespace Frida {
 				throw new Error.INVALID_OPERATION ("Script is destroyed");
 		}
 
-		public async void _do_close (bool may_block, Cancellable? cancellable) throws IOError {
+		internal async void _do_close (bool may_block, Cancellable? cancellable) throws IOError {
 			while (close_request != null) {
 				try {
 					yield close_request.future.wait_async (cancellable);

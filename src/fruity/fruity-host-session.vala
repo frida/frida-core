@@ -1141,7 +1141,7 @@ namespace Frida {
 
 			var no_crash = CrashInfo.empty ();
 			foreach (var remote_id in remote_agent_sessions.keys.to_array ())
-				on_remote_agent_session_detached (remote_id, SERVER_TERMINATED, no_crash);
+				on_remote_agent_session_detached (remote_id, CONNECTION_TERMINATED, no_crash);
 		}
 
 		private void on_remote_spawn_added (HostSpawnInfo info) {

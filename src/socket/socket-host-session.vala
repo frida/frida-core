@@ -183,7 +183,7 @@ namespace Frida {
 			assert (entry_to_remove != null);
 
 			hosts.remove (entry_to_remove);
-			destroy_host_entry.begin (entry_to_remove, SERVER_TERMINATED, io_cancellable);
+			destroy_host_entry.begin (entry_to_remove, CONNECTION_TERMINATED, io_cancellable);
 		}
 
 		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,

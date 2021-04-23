@@ -47,6 +47,7 @@ namespace Frida {
 	[DBus (name = "re.frida.AgentSession16")]
 	public interface AgentSession : Object {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
+		public abstract async void resume (Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_child_gating (Cancellable? cancellable) throws GLib.Error;
@@ -321,7 +322,7 @@ namespace Frida {
 		APPLICATION_REQUESTED = 1,
 		PROCESS_REPLACED,
 		PROCESS_TERMINATED,
-		SERVER_TERMINATED,
+		CONNECTION_TERMINATED,
 		DEVICE_LOST;
 
 		public string to_nick () {

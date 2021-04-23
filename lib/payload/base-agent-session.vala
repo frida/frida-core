@@ -86,6 +86,9 @@ namespace Frida {
 			close_request.resolve (true);
 		}
 
+		public async void resume (Cancellable? cancellable) throws IOError {
+		}
+
 		public async void flush () {
 			if (close_request == null)
 				close.begin (null);

@@ -15,9 +15,7 @@ namespace Frida {
 		}
 
 		private AgentSession active_session;
-#if HAVE_NICE
 		private AgentSession? obsolete_session;
-#endif
 
 		private Gum.InspectorServer? server;
 
@@ -68,7 +66,6 @@ namespace Frida {
 			}
 		}
 
-#if HAVE_NICE
 		public void begin_migration (AgentSession new_session) {
 			assert (obsolete_session == null);
 			obsolete_session = active_session;
@@ -86,6 +83,7 @@ namespace Frida {
 			active_session.message_from_debugger.connect (on_message_from_backend);
 		}
 
+#if HAVE_NICE
 		public void cancel_migration (AgentSession new_session) {
 			assert (new_session == active_session);
 			assert (obsolete_session != null);
