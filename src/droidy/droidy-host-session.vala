@@ -539,7 +539,7 @@ namespace Frida {
 				}
 
 				AgentSession agent_session = yield connection.get_proxy (null,
-					ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
+					ObjectPath.for_agent_session (remote_session_id), DBusProxyFlags.NONE, cancellable);
 
 				var local_session_id = AgentSessionId (next_agent_session_id++);
 				var agent_entry = new AgentEntry (local_session_id, agent_session, host_session, connection);
@@ -567,8 +567,8 @@ namespace Frida {
 
 			AgentSession agent_session;
 			try {
-				agent_session = yield server.connection.get_proxy (null,
-					ObjectPath.from_agent_session_id (remote_session_id), DBusProxyFlags.NONE, cancellable);
+				agent_session = yield server.connection.get_proxy (null, ObjectPath.for_agent_session (remote_session_id),
+					DBusProxyFlags.NONE, cancellable);
 			} catch (GLib.Error e) {
 				throw new Error.TRANSPORT ("%s", e.message);
 			}

@@ -623,13 +623,13 @@ namespace Frida {
 
 					script_msg = pending_script_messages.peek ();
 					if (script_msg != null) {
-						yield sink.post_script_messages (id, { script_msg }, delivery_cancellable);
+						yield sink.post_script_messages ({ script_msg }, delivery_cancellable);
 						pending_script_messages.poll ();
 					}
 
 					debugger_msg = pending_debugger_messages.peek ();
 					if (debugger_msg != null) {
-						yield sink.post_debugger_messages (id, { debugger_msg }, delivery_cancellable);
+						yield sink.post_debugger_messages ({ debugger_msg }, delivery_cancellable);
 						pending_debugger_messages.poll ();
 					}
 				} while (state == LIVE && (script_msg != null || debugger_msg != null));

@@ -303,8 +303,8 @@ namespace Frida {
 			} else {
 				DBusConnection connection = ((DBusProxy) host_session).g_connection;
 				try {
-					session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
-						DBusProxyFlags.NONE, cancellable);
+					session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
+						cancellable);
 				} catch (IOError e) {
 					throw new Error.PROTOCOL ("%s", e.message);
 				}
@@ -594,7 +594,7 @@ namespace Frida {
 				try {
 					sessions[id] = session;
 
-					var registration_id = connection.register_object (ObjectPath.from_agent_session_id (id), session);
+					var registration_id = connection.register_object (ObjectPath.for_agent_session (id), session);
 					registrations.add (registration_id);
 
 					agent_registrations.set (id, registration_id);

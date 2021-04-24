@@ -249,7 +249,7 @@ namespace Frida {
 				AgentSession? session = agent_sessions[id];
 				if (session == null) {
 					try {
-						session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
+						session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id),
 							DBusProxyFlags.NONE, cancellable);
 					} catch (IOError e) {
 						throw new Error.INVALID_ARGUMENT ("%s", e.message);

@@ -234,7 +234,7 @@ namespace Frida {
 			session.script_eternalized.connect (on_script_eternalized);
 
 			try {
-				session.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id),
+				session.registration_id = connection.register_object (ObjectPath.for_agent_session (id),
 					(AgentSession) session);
 			} catch (IOError io_error) {
 				assert_not_reached ();

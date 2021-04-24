@@ -125,6 +125,8 @@ namespace Frida {
 
 		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
 			Cancellable? cancellable = null) throws Error, IOError;
+		public void register_message_sink (HostSession host_session, AgentSessionId id, AgentMessageSink sink) {}
+		public void unregister_message_sink (HostSession host_session, AgentSessionId id, AgentMessageSink sink) {}
 		public abstract void migrate_agent_session (HostSession host_session, AgentSessionId id,
 			AgentSession new_session) throws Error;
 		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
@@ -334,8 +336,8 @@ namespace Frida {
 			try {
 				yield entry.provider.open (id, options, cancellable);
 
-				session = yield entry.connection.get_proxy (null, ObjectPath.from_agent_session_id (id),
-					DBusProxyFlags.NONE, cancellable);
+				session = yield entry.connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
+					cancellable);
 			} catch (GLib.Error e) {
 				entry.sessions.remove (id);
 

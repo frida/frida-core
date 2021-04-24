@@ -1111,8 +1111,11 @@ namespace Frida {
 
 				try {
 					var agent_session = yield provider.obtain_agent_session (host_session, id, cancellable);
+
 					session = new Session (this, pid, id, agent_session, opts);
 					agent_sessions[id] = session;
+
+					provider.register_message_sink (host_session, id, session);
 
 					attach_request.resolve (session);
 				} catch (GLib.Error e) {
@@ -1447,6 +1450,8 @@ namespace Frida {
 					assert_not_reached ();
 				}
 			}
+
+			provider.unregister_message_sink (host_session, id, session);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -1935,7 +1940,7 @@ namespace Frida {
 		}
 	}
 
-	public class Session : Object {
+	public class Session : Object, AgentMessageSink {
 		public signal void detached (SessionDetachReason reason, Crash? crash);
 
 		public uint pid {
@@ -2671,6 +2676,14 @@ namespace Frida {
 			protected override async PortalMembership perform_operation () throws Error, IOError {
 				return yield parent.join_portal (address, options, cancellable);
 			}
+		}
+
+		protected async void post_script_messages (AgentScriptMessage[] messages,
+				Cancellable? cancellable) throws Error, IOError {
+		}
+
+		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
+				Cancellable? cancellable) throws Error, IOError {
 		}
 
 		private void on_message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) {

@@ -104,9 +104,9 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentMessageSink16")]
 	public interface AgentMessageSink : Object {
-		public abstract async void post_script_messages (AgentSessionId session_id, AgentScriptMessage[] messages,
+		public abstract async void post_script_messages (AgentScriptMessage[] messages,
 			Cancellable? cancellable) throws GLib.Error;
-		public abstract async void post_debugger_messages (AgentSessionId session_id, AgentDebuggerMessage[] messages,
+		public abstract async void post_debugger_messages (AgentDebuggerMessage[] messages,
 			Cancellable? cancellable) throws GLib.Error;
 	}
 
@@ -1190,8 +1190,12 @@ namespace Frida {
 		public const string BUS_SESSION = "/re/frida/BusSession";
 		public const string AUTHENTICATION_SERVICE = "/re/frida/AuthenticationService";
 
-		public static string from_agent_session_id (AgentSessionId id) {
+		public static string for_agent_session (AgentSessionId id) {
 			return "%s/%u".printf (AGENT_SESSION, id.handle);
+		}
+
+		public static string for_agent_message_sink (AgentSessionId id) {
+			return "%s/%u".printf (AGENT_MESSAGE_SINK, id.handle);
 		}
 	}
 

@@ -588,7 +588,7 @@ namespace Frida.Agent {
 
 				var emulated_connection = ((DBusProxy) emulated_provider).get_connection ();
 
-				string path = ObjectPath.from_agent_session_id (id);
+				string path = ObjectPath.for_agent_session (id);
 
 				AgentSession emulated_session = yield emulated_connection.get_proxy (null, path, DBusProxyFlags.NONE,
 					cancellable);
@@ -605,7 +605,7 @@ namespace Frida.Agent {
 			session.script_eternalized.connect (on_script_eternalized);
 
 			try {
-				session.registration_id = connection.register_object (ObjectPath.from_agent_session_id (id),
+				session.registration_id = connection.register_object (ObjectPath.for_agent_session (id),
 					(AgentSession) session);
 			} catch (IOError io_error) {
 				assert_not_reached ();
