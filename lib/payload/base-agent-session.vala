@@ -8,6 +8,20 @@ namespace Frida {
 			construct;
 		}
 
+		public AgentSessionId id {
+			get;
+			construct;
+		}
+
+		public AgentMessageSink message_sink {
+			get {
+				return active_message_sink;
+			}
+			construct {
+				active_message_sink = value;
+			}
+		}
+
 		public MainContext frida_context {
 			get;
 			construct;
@@ -18,13 +32,20 @@ namespace Frida {
 			construct;
 		}
 
-		private Promise<bool> close_request;
+		private Promise<bool>? close_request;
 		private Promise<bool> flush_complete = new Promise<bool> ();
 
 		private State state = LIVE;
-		private Gee.Queue<ScriptMessage> pending_script_messages = new Gee.ArrayQueue<ScriptMessage> ();
-		private Gee.Queue<string> pending_debugger_messages = new Gee.ArrayQueue<string> ();
+
+		private Promise<bool>? delivery_request;
+		private AgentMessageSink active_message_sink;
+		private Cancellable delivery_cancellable = new Cancellable ();
+		private Gee.Queue<AgentScriptMessage?> pending_script_messages = new Gee.ArrayQueue<AgentScriptMessage?> ();
+		private Gee.Queue<AgentDebuggerMessage?> pending_debugger_messages = new Gee.ArrayQueue<AgentDebuggerMessage?> ();
+		private uint next_serial = 1;
+
 		private bool child_gating_enabled = false;
+
 		private ScriptEngine script_engine;
 
 #if HAVE_NICE
@@ -34,6 +55,7 @@ namespace Frida {
 		private IOStream? nice_stream;
 		private DBusConnection? nice_connection;
 		private uint nice_registration_id;
+		private AgentMessageSink nice_message_sink;
 #endif
 		private Cancellable? nice_cancellable;
 
@@ -43,6 +65,8 @@ namespace Frida {
 		}
 
 		construct {
+			assert (invader != null);
+			assert (message_sink != null);
 			assert (frida_context != null);
 			assert (dbus_context != null);
 
@@ -87,6 +111,7 @@ namespace Frida {
 		}
 
 		public async void resume (Cancellable? cancellable) throws IOError {
+			maybe_deliver_pending_messages ();
 		}
 
 		public async void flush () {
@@ -317,6 +342,8 @@ namespace Frida {
 				}
 			}
 
+			nice_message_sink = null;
+
 			schedule_on_dbus_thread (() => {
 				nice_stream = null;
 
@@ -431,6 +458,9 @@ namespace Frida {
 				}
 
 				nice_connection.start_message_processing ();
+
+				nice_message_sink = yield nice_connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK,
+					DBusProxyFlags.NONE, null);
 			} catch (GLib.Error e) {
 				close_nice_resources.begin ();
 			}
@@ -539,15 +569,9 @@ namespace Frida {
 		public async void commit_migration (Cancellable? cancellable) throws Error, IOError {
 			migrated ();
 
-			ScriptMessage? sm;
-			while ((sm = pending_script_messages.poll ()) != null)
-				emit_script_message (sm.script_id, sm.message, sm.data);
-
-			string? dm;
-			while ((dm = pending_debugger_messages.poll ()) != null)
-				this.message_from_debugger (dm);
-
 			state = LIVE;
+
+			yield process_pending_message_deliveries (cancellable);
 		}
 
 		private void check_open () throws Error {
@@ -556,45 +580,63 @@ namespace Frida {
 		}
 
 		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
-			if (state == LIVE)
-				emit_script_message (script_id, message, data);
-			else
-				pending_script_messages.offer (new ScriptMessage (script_id, message, data));
-		}
-
-		private void emit_script_message (AgentScriptId script_id, string message, Bytes? data) {
 			bool has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-			this.message_from_script (script_id, message, has_data, data_param);
+			pending_script_messages.offer (AgentScriptMessage (next_serial++, script_id, message, has_data, data_param));
+			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			if (state == LIVE)
-				this.message_from_debugger (message);
-			else
-				pending_debugger_messages.offer (message);
+			pending_debugger_messages.offer (AgentDebuggerMessage (next_serial++, message));
+			maybe_deliver_pending_messages ();
 		}
 
-		private class ScriptMessage {
-			public AgentScriptId script_id {
-				get;
-				private set;
-			}
+		private void maybe_deliver_pending_messages () {
+			if (state != LIVE)
+				return;
+			if (delivery_request != null)
+				return;
+			if (pending_script_messages.is_empty && pending_debugger_messages.is_empty)
+				return;
+			process_pending_message_deliveries.begin (delivery_cancellable);
+		}
 
-			public string message {
-				get;
-				private set;
+		private async void process_pending_message_deliveries (Cancellable? cancellable) throws IOError {
+			while (delivery_request != null) {
+				try {
+					yield delivery_request.future.wait_async (cancellable);
+					return;
+				} catch (GLib.Error e) {
+					assert (e is IOError.CANCELLED);
+					cancellable.set_error_if_cancelled ();
+				}
 			}
+			delivery_request = new Promise<bool> ();
 
-			public Bytes? data {
-				get;
-				private set;
-			}
+			try {
+				AgentScriptMessage? script_msg = null;
+				AgentDebuggerMessage? debugger_msg = null;
 
-			public ScriptMessage (AgentScriptId script_id, string message, Bytes? data) {
-				this.script_id = script_id;
-				this.message = message;
-				this.data = data;
+				AgentMessageSink sink = active_message_sink;
+				do {
+					// TODO: Batch and deliver in parallel.
+
+					script_msg = pending_script_messages.peek ();
+					if (script_msg != null) {
+						yield sink.post_script_messages (id, { script_msg }, delivery_cancellable);
+						pending_script_messages.poll ();
+					}
+
+					debugger_msg = pending_debugger_messages.peek ();
+					if (debugger_msg != null) {
+						yield sink.post_debugger_messages (id, { debugger_msg }, delivery_cancellable);
+						pending_debugger_messages.poll ();
+					}
+				} while (state == LIVE && (script_msg != null || debugger_msg != null));
+			} catch (GLib.Error e) {
+			} finally {
+				delivery_request.resolve (true);
+				delivery_request = null;
 			}
 		}
 	}

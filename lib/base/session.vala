@@ -104,13 +104,23 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentMessageSink16")]
 	public interface AgentMessageSink : Object {
-		public abstract async void post_script_messages (AgentSessionId session_id, AgentScriptId script_id,
-			AgentScriptMessage[] messages, Cancellable? cancellable) throws GLib.Error;
-		public abstract async void post_debugger_messages (AgentSessionId session_id, AgentScriptId script_id,
-			string[] messages, Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_script_messages (AgentSessionId session_id, AgentScriptMessage[] messages,
+			Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_debugger_messages (AgentSessionId session_id, AgentDebuggerMessage[] messages,
+			Cancellable? cancellable) throws GLib.Error;
 	}
 
 	public struct AgentScriptMessage {
+		public uint serial {
+			get;
+			set;
+		}
+
+		public AgentScriptId script_id {
+			get;
+			set;
+		}
+
 		public string json {
 			get;
 			set;
@@ -126,10 +136,29 @@ namespace Frida {
 			set;
 		}
 
-		public AgentScriptMessage (string json, bool has_data, uint8[] data) {
+		public AgentScriptMessage (uint serial, AgentScriptId script_id, string json, bool has_data, uint8[] data) {
+			this.serial = serial;
+			this.script_id = script_id;
 			this.json = json;
 			this.has_data = has_data;
 			this.data = data;
+		}
+	}
+
+	public struct AgentDebuggerMessage {
+		public uint serial {
+			get;
+			set;
+		}
+
+		public string payload {
+			get;
+			set;
+		}
+
+		public AgentDebuggerMessage (uint serial, string payload) {
+			this.serial = serial;
+			this.payload = payload;
 		}
 	}
 
@@ -1154,6 +1183,7 @@ namespace Frida {
 		public const string AGENT_SESSION_PROVIDER = "/re/frida/AgentSessionProvider";
 		public const string AGENT_SESSION = "/re/frida/AgentSession";
 		public const string AGENT_CONTROLLER = "/re/frida/AgentController";
+		public const string AGENT_MESSAGE_SINK = "/re/frida/AgentMessageSink";
 		public const string CHILD_SESSION = "/re/frida/ChildSession";
 		public const string TRANSPORT_BROKER = "/re/frida/TransportBroker";
 		public const string PORTAL_SESSION = "/re/frida/PortalSession";

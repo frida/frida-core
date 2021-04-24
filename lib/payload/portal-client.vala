@@ -35,6 +35,7 @@ namespace Frida {
 		private Promise<bool> stopped = new Promise<bool> ();
 		private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 		private PortalSession? portal_session;
+		private AgentMessageSink? message_sink;
 		private Gee.Map<AgentSessionId?, LiveAgentSession> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, LiveAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 
@@ -182,6 +183,9 @@ namespace Frida {
 			portal_session.resume.connect (on_resume);
 			portal_session.kill.connect (on_kill);
 
+			message_sink = yield connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK, DBusProxyFlags.NONE,
+				io_cancellable);
+
 			SpawnStartState current_state = invader.query_current_spawn_state ();
 			SpawnStartState next_state;
 			yield portal_session.join (app_info, current_state, io_cancellable, out next_state);
@@ -224,7 +228,7 @@ namespace Frida {
 
 			MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
 
-			var session = new LiveAgentSession (invader, id, dbus_context);
+			var session = new LiveAgentSession (invader, id, message_sink, dbus_context);
 			agent_sessions[id] = session;
 			session.closed.connect (on_session_closed);
 			session.script_eternalized.connect (on_script_eternalized);
@@ -293,22 +297,19 @@ namespace Frida {
 		}
 
 		private class LiveAgentSession : BaseAgentSession {
-			public AgentSessionId id {
-				get;
-				construct;
-			}
-
 			public uint registration_id {
 				get;
 				set;
 			}
 
-			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, MainContext dbus_context) {
+			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, AgentMessageSink sink,
+					MainContext dbus_context) {
 				Object (
 					invader: invader,
+					id: id,
+					message_sink: sink,
 					frida_context: MainContext.ref_thread_default (),
-					dbus_context: dbus_context,
-					id: id
+					dbus_context: dbus_context
 				);
 			}
 		}

@@ -48,6 +48,7 @@ namespace Frida.Agent {
 		private MainLoop main_loop;
 		private DBusConnection connection;
 		private AgentController controller;
+		private AgentMessageSink message_sink;
 		private bool unloading = false;
 		private uint filter_id = 0;
 		private uint registration_id = 0;
@@ -598,7 +599,7 @@ namespace Frida.Agent {
 				return;
 			}
 
-			var session = new LiveAgentSession (this, id, dbus_context);
+			var session = new LiveAgentSession (this, id, message_sink, dbus_context);
 			sessions[id] = session;
 			session.closed.connect (on_session_closed);
 			session.script_eternalized.connect (on_script_eternalized);
@@ -961,6 +962,7 @@ namespace Frida.Agent {
 				connection.start_message_processing ();
 
 				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DBusProxyFlags.NONE, null);
+				message_sink = yield connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK, DBusProxyFlags.NONE, null);
 
 				dbus_context = yield dbus_context_request.future.wait_async (null);
 			} catch (GLib.Error e) {
@@ -1019,6 +1021,7 @@ namespace Frida.Agent {
 				session.registration_id = 0;
 			}
 
+			message_sink = null;
 			controller = null;
 
 			if (registration_id != 0) {
@@ -1404,22 +1407,18 @@ namespace Frida.Agent {
 #endif
 
 	private class LiveAgentSession : BaseAgentSession {
-		public AgentSessionId id {
-			get;
-			construct;
-		}
-
 		public uint registration_id {
 			get;
 			set;
 		}
 
-		public LiveAgentSession (ProcessInvader invader, AgentSessionId id, MainContext dbus_context) {
+		public LiveAgentSession (ProcessInvader invader, AgentSessionId id, AgentMessageSink sink, MainContext dbus_context) {
 			Object (
 				invader: invader,
+				id: id,
+				message_sink: sink,
 				frida_context: MainContext.ref_thread_default (),
-				dbus_context: dbus_context,
-				id: id
+				dbus_context: dbus_context
 			);
 		}
 	}

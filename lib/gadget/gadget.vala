@@ -1798,7 +1798,7 @@ namespace Frida.Gadget {
 
 				MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
 
-				var session = new LiveAgentSession (parent, id, dbus_context);
+				var session = new LiveAgentSession (parent, id, message_sink, dbus_context);
 				sessions.add (session);
 				session.closed.connect (on_session_closed);
 				session.script_eternalized.connect (on_script_eternalized);
@@ -1864,22 +1864,19 @@ namespace Frida.Gadget {
 		}
 
 		private class LiveAgentSession : BaseAgentSession {
-			public AgentSessionId id {
-				get;
-				construct;
-			}
-
 			public uint registration_id {
 				get;
 				set;
 			}
 
-			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, MainContext dbus_context) {
+			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, AgentMessageSink sink,
+					MainContext dbus_context) {
 				Object (
 					invader: invader,
+					id: id,
+					message_sink: sink,
 					frida_context: MainContext.ref_thread_default (),
-					dbus_context: dbus_context,
-					id: id
+					dbus_context: dbus_context
 				);
 			}
 		}
