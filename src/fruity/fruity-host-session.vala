@@ -288,19 +288,12 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-			return this.host_session.obtain_agent_session (id);
-		}
-
-		public void migrate_agent_session (HostSession host_session, AgentSessionId id, AgentSession new_session) throws Error {
-			if (host_session != this.host_session)
-				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-			this.host_session.migrate_agent_session (id, new_session);
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -419,8 +412,8 @@ namespace Frida {
 		}
 
 		private Gee.HashMap<uint, LLDBSession> lldb_sessions = new Gee.HashMap<uint, LLDBSession> ();
-		private Gee.HashMap<AgentSessionId?, AgentEntry> agent_entries =
-			new Gee.HashMap<AgentSessionId?, AgentEntry> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.HashMap<AgentSessionId?, GadgetEntry> gadget_entries =
+			new Gee.HashMap<AgentSessionId?, GadgetEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
 		private Promise<RemoteServer>? remote_server_request;
 		private RemoteServer? current_remote_server;
@@ -429,8 +422,8 @@ namespace Frida {
 		private Gee.HashMap<AgentSessionId?, AgentSessionId?> remote_agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 
-		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
-			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 		private uint next_agent_session_id = 1;
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -462,8 +455,8 @@ namespace Frida {
 				}
 			}
 
-			while (!agent_entries.is_empty) {
-				var iterator = agent_entries.values.iterator ();
+			while (!gadget_entries.is_empty) {
+				var iterator = gadget_entries.values.iterator ();
 				iterator.next ();
 				var entry = iterator.get ();
 				yield entry.close (cancellable);
@@ -891,14 +884,11 @@ namespace Frida {
 					throw_dbus_error (e);
 				}
 
-				AgentSession agent_session = yield connection.get_proxy (null,
-					ObjectPath.for_agent_session (remote_session_id), DBusProxyFlags.NONE, cancellable);
-
 				var local_session_id = AgentSessionId (next_agent_session_id++);
-				var agent_entry = new AgentEntry (local_session_id, agent_session, host_session, connection);
-				agent_entry.detached.connect (on_agent_entry_detached);
-				agent_entries[local_session_id] = agent_entry;
-				agent_sessions[local_session_id] = agent_session;
+				var gadget_entry = new GadgetEntry (local_session_id, host_session, connection);
+				gadget_entry.detached.connect (on_gadget_entry_detached);
+				gadget_entries[local_session_id] = gadget_entry;
+				agent_sessions[local_session_id] = new AgentSessionEntry (remote_session_id, connection);
 
 				return local_session_id;
 			} catch (GLib.Error e) {
@@ -918,23 +908,16 @@ namespace Frida {
 			}
 			var local_session_id = AgentSessionId (next_agent_session_id++);
 
-			AgentSession agent_session;
-			try {
-				agent_session = yield server.connection.get_proxy (null, ObjectPath.for_agent_session (remote_session_id),
-					DBusProxyFlags.NONE, cancellable);
-			} catch (GLib.Error e) {
-				throw new Error.TRANSPORT ("%s", e.message);
-			}
+			var entry = new AgentSessionEntry (remote_session_id, server.connection);
 
 			remote_agent_sessions[remote_session_id] = local_session_id;
-			agent_sessions[local_session_id] = agent_session;
+			agent_sessions[local_session_id] = entry;
 
 			var transport_broker = server.transport_broker;
 			if (transport_broker != null) {
 				try {
-					AgentSession direct_session = yield establish_direct_session (transport_broker, remote_session_id,
+					entry.connection = yield establish_direct_connection (transport_broker, remote_session_id,
 						channel_provider, cancellable);
-					agent_sessions[local_session_id] = direct_session;
 				} catch (Error e) {
 					if (e is Error.NOT_SUPPORTED)
 						server.transport_broker = null;
@@ -944,17 +927,21 @@ namespace Frida {
 			return local_session_id;
 		}
 
-		public AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			var session = agent_sessions[id];
-			if (session == null)
+		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			AgentSessionEntry entry = agent_sessions[id];
+			if (entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-			return session;
-		}
 
-		public void migrate_agent_session (AgentSessionId id, AgentSession new_session) throws Error {
-			if (!agent_sessions.has_key (id))
-				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-			agent_sessions[id] = new_session;
+			DBusConnection connection = entry.connection;
+			AgentSessionId remote_id = entry.remote_session_id;
+
+			AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (remote_id),
+				DBusProxyFlags.NONE, cancellable);
+
+			entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (remote_id), sink);
+
+			return session;
 		}
 
 		public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
@@ -999,14 +986,14 @@ namespace Frida {
 			output (session.process.pid, 1, bytes.get_data ());
 		}
 
-		private void on_agent_entry_detached (AgentEntry entry, SessionDetachReason reason) {
-			var id = AgentSessionId (entry.id);
+		private void on_gadget_entry_detached (GadgetEntry entry, SessionDetachReason reason) {
+			AgentSessionId id = entry.local_session_id;
 			var no_crash = CrashInfo.empty ();
 
-			agent_entries.unset (id);
+			gadget_entries.unset (id);
 			agent_sessions.unset (id);
 
-			entry.detached.disconnect (on_agent_entry_detached);
+			entry.detached.disconnect (on_gadget_entry_detached);
 
 			agent_session_detached (id, reason, no_crash);
 
@@ -1173,9 +1160,8 @@ namespace Frida {
 			if (!remote_agent_sessions.unset (remote_id, out local_id))
 				return;
 
-			AgentSession agent_session = null;
-			agent_sessions.unset (local_id, out agent_session);
-			assert (agent_session != null);
+			bool agent_session_found = agent_sessions.unset (local_id);
+			assert (agent_session_found);
 
 			agent_session_detached (local_id, reason, crash);
 		}
@@ -1303,15 +1289,10 @@ namespace Frida {
 			}
 		}
 
-		private class AgentEntry : Object {
+		private class GadgetEntry : Object {
 			public signal void detached (SessionDetachReason reason);
 
-			public uint id {
-				get;
-				construct;
-			}
-
-			public AgentSession agent_session {
+			public AgentSessionId local_session_id {
 				get;
 				construct;
 			}
@@ -1328,11 +1309,9 @@ namespace Frida {
 
 			private Promise<bool>? close_request;
 
-			public AgentEntry (AgentSessionId? id, AgentSession agent_session, HostSession host_session,
-					DBusConnection connection) {
+			public GadgetEntry (AgentSessionId local_session_id, HostSession host_session, DBusConnection connection) {
 				Object (
-					id: id.handle,
-					agent_session: agent_session,
+					local_session_id: local_session_id,
 					host_session: host_session,
 					connection: connection
 				);
@@ -1343,7 +1322,7 @@ namespace Frida {
 				host_session.agent_session_detached.connect (on_session_detached);
 			}
 
-			~AgentEntry () {
+			~GadgetEntry () {
 				connection.on_closed.disconnect (on_connection_closed);
 				host_session.agent_session_detached.disconnect (on_session_detached);
 			}
@@ -1386,6 +1365,33 @@ namespace Frida {
 
 			private void on_session_detached (AgentSessionId id, SessionDetachReason reason) {
 				detached (reason);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public AgentSessionId remote_session_id {
+				get;
+				private set;
+			}
+
+			public DBusConnection connection {
+				get;
+				set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (AgentSessionId remote_session_id, DBusConnection connection) {
+				this.remote_session_id = remote_session_id;
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 

@@ -186,11 +186,11 @@ namespace Frida {
 			destroy_host_entry.begin (entry_to_remove, CONNECTION_TERMINATED, io_cancellable);
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
 			foreach (var entry in hosts) {
 				if (entry.host_session == host_session)
-					return yield entry.obtain_agent_session (id, cancellable);
+					return yield entry.link_agent_session (id, sink, cancellable);
 			}
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
@@ -245,7 +245,10 @@ namespace Frida {
 				}
 			}
 
-			public async AgentSession obtain_agent_session (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+					Cancellable? cancellable) throws Error, IOError {
+				if (agent_sessions.has_key (id))
+					throw new Error.INVALID_OPERATION ("Already linked");
 				AgentSession? session = agent_sessions[id];
 				if (session == null) {
 					try {

@@ -584,7 +584,7 @@ namespace Frida {
 				host_session_detached (session);
 			}
 
-			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+			public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id,
 					Cancellable? cancellable) throws Error, IOError {
 				if (host_session != channel)
 					throw new Error.INVALID_ARGUMENT ("Invalid host session");
@@ -593,17 +593,6 @@ namespace Frida {
 				if (session == null)
 					throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 				return session;
-			}
-
-			public void migrate_agent_session (HostSession host_session, AgentSessionId id, AgentSession new_session) throws Error {
-				if (host_session != channel)
-					throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-				if (!channel.sessions.has_key (id))
-					throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-
-				channel.unregister_agent_session (id);
-				channel.sessions[id] = new_session;
 			}
 
 			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -1002,6 +991,33 @@ namespace Frida {
 			public PendingSpawn (uint pid, string identifier, Gee.Iterator<ControlChannel> gaters) {
 				info = HostSpawnInfo (pid, identifier);
 				pending_approvers.add_all_iterator (gaters);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public ControlChannel channel {
+				get;
+				private set;
+			}
+
+			public DBusConnection? connection {
+				get;
+				private set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (ControlChannel channel, DBusConnection? connection = null) {
+				this.channel = channel;
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 	}

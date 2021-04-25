@@ -119,16 +119,13 @@ namespace Frida {
 			get;
 		}
 
-		public abstract async HostSession create (HostSessionOptions? options = null, Cancellable? cancellable = null) throws Error, IOError;
+		public abstract async HostSession create (HostSessionOptions? options = null,
+			Cancellable? cancellable = null) throws Error, IOError;
 		public abstract async void destroy (HostSession session, Cancellable? cancellable = null) throws Error, IOError;
 		public signal void host_session_detached (HostSession session);
 
-		public abstract async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+		public abstract async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 			Cancellable? cancellable = null) throws Error, IOError;
-		public void register_message_sink (HostSession host_session, AgentSessionId id, AgentMessageSink sink) {}
-		public void unregister_message_sink (HostSession host_session, AgentSessionId id, AgentMessageSink sink) {}
-		public abstract void migrate_agent_session (HostSession host_session, AgentSessionId id,
-			AgentSession new_session) throws Error;
 		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 	}
 
@@ -163,8 +160,8 @@ namespace Frida {
 
 		private Gee.HashMap<uint, Future<AgentEntry>> agent_entries = new Gee.HashMap<uint, Future<AgentEntry>> ();
 
-		private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
-			new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 		private uint next_agent_session_id = 1;
 
 		private Gee.HashMap<HostChildId?, ChildEntry> child_entries =
@@ -335,16 +332,13 @@ namespace Frida {
 
 			try {
 				yield entry.provider.open (id, options, cancellable);
-
-				session = yield entry.connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
-					cancellable);
 			} catch (GLib.Error e) {
 				entry.sessions.remove (id);
 
 				throw new Error.PROTOCOL ("%s", e.message);
 			}
 
-			agent_sessions[id] = session;
+			agent_sessions[id] = new AgentSessionEntry (entry.connection);
 
 			return id;
 		}
@@ -397,9 +391,8 @@ namespace Frida {
 						connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE,
 							DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 
-						AgentController controller = this;
 						controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
-							controller);
+							(AgentController) this);
 
 						connection.start_message_processing ();
 
@@ -461,17 +454,21 @@ namespace Frida {
 		protected abstract async Future<IOStream> perform_attach_to (uint pid, Cancellable? cancellable, out Object? transport)
 			throws Error, IOError;
 
-		public AgentSession obtain_agent_session (AgentSessionId id) throws Error {
-			var session = agent_sessions[id];
-			if (session == null)
+		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
+				Cancellable? cancellable) throws Error, IOError {
+			AgentSessionEntry entry = agent_sessions[id];
+			if (entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-			return session;
-		}
 
-		public void migrate_agent_session (AgentSessionId id, AgentSession new_session) throws Error {
-			if (!agent_sessions.has_key (id))
-				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-			agent_sessions[id] = new_session;
+			DBusConnection connection = entry.connection;
+
+			AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
+				cancellable);
+
+			assert (entry.sink_registration_id == 0);
+			entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
+
+			return session;
 		}
 
 		public AgentSessionProvider obtain_session_provider (AgentSessionId id) throws Error {
@@ -509,8 +506,7 @@ namespace Frida {
 		}
 
 		private void on_agent_session_provider_closed (AgentSessionId id) {
-			AgentSession session;
-			var closed_after_opening = agent_sessions.unset (id, out session);
+			var closed_after_opening = agent_sessions.unset (id);
 			if (!closed_after_opening)
 				return;
 			var reason = SessionDetachReason.APPLICATION_REQUESTED;
@@ -601,10 +597,8 @@ namespace Frida {
 
 			var crash_info = (crash != null) ? crash : CrashInfo.empty ();
 			foreach (var id in entry.sessions) {
-				AgentSession session;
-				if (agent_sessions.unset (id, out session)) {
+				if (agent_sessions.unset (id))
 					agent_session_detached (id, reason, crash_info);
-				}
 			}
 
 			yield entry.close (cancellable);
@@ -663,8 +657,8 @@ namespace Frida {
 				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, DELAY_MESSAGE_PROCESSING,
 					null, cancellable);
 
-				AgentController controller = this;
-				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER, controller);
+				controller_registration_id = connection.register_object (ObjectPath.AGENT_CONTROLLER,
+					(AgentController) this);
 
 				connection.start_message_processing ();
 			} catch (GLib.Error e) {
@@ -885,7 +879,7 @@ namespace Frida {
 				construct;
 			}
 
-			public Gee.HashSet<AgentSessionId?> sessions {
+			public Gee.Set<AgentSessionId?> sessions {
 				get;
 				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 			}
@@ -910,7 +904,8 @@ namespace Frida {
 			private bool closing = false;
 			private Promise<bool> close_request = new Promise<bool> ();
 
-			public AgentEntry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider, uint controller_registration_id = 0) {
+			public AgentEntry (uint pid, Object? transport, DBusConnection? connection, AgentSessionProvider provider,
+					uint controller_registration_id = 0) {
 				Object (
 					pid: pid,
 					transport: transport,
@@ -957,6 +952,27 @@ namespace Frida {
 
 			private void on_child_gating_changed (uint subscriber_count) {
 				child_gating_changed (subscriber_count);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public DBusConnection connection {
+				get;
+				private set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (DBusConnection connection) {
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 
@@ -1082,7 +1098,7 @@ namespace Frida {
 		}
 	}
 
-	public abstract class InternalAgent : Object, RpcPeer {
+	public abstract class InternalAgent : Object, AgentMessageSink, RpcPeer {
 		public signal void unloaded ();
 
 		public weak BaseDBusHostSession host_session {
@@ -1162,8 +1178,7 @@ namespace Frida {
 				try {
 					session_id = yield host_session.attach (target_pid, AgentSessionOptions (), cancellable);
 
-					session = host_session.obtain_agent_session (session_id);
-					session.message_from_script.connect (on_message_from_script);
+					session = yield host_session.link_agent_session (session_id, (AgentMessageSink) this, cancellable);
 
 					if (script_source != null) {
 						var options = new ScriptOptions ();
@@ -1216,7 +1231,6 @@ namespace Frida {
 					if (e is IOError.CANCELLED)
 						return;
 				}
-				session.message_from_script.disconnect (on_message_from_script);
 				session = null;
 			}
 		}
@@ -1237,10 +1251,19 @@ namespace Frida {
 			unloaded ();
 		}
 
-		private void on_message_from_script (AgentScriptId script_id, string raw_message, bool has_data, uint8[] data) {
-			if (script_id != script)
-				return;
+		protected async void post_script_messages (AgentScriptMessage[] messages,
+				Cancellable? cancellable) throws Error, IOError {
+			foreach (var message in messages) {
+				if (message.script_id == script)
+					on_message_from_script (message.json);
+			}
+		}
 
+		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
+				Cancellable? cancellable) throws Error, IOError {
+		}
+
+		private void on_message_from_script (string raw_message) {
 			bool handled = rpc_client.try_handle_message (raw_message);
 			if (handled)
 				return;
@@ -1302,8 +1325,8 @@ namespace Frida {
 
 	internal delegate bool UninjectPredicate ();
 
-	internal async AgentSession establish_direct_session (TransportBroker broker, AgentSessionId id, ChannelProvider channel_provider,
-			Cancellable? cancellable) throws Error, IOError {
+	internal async DBusConnection establish_direct_connection (TransportBroker broker, AgentSessionId id,
+			ChannelProvider channel_provider, Cancellable? cancellable) throws Error, IOError {
 		uint16 port;
 		string token;
 		try {
@@ -1320,12 +1343,7 @@ namespace Frida {
 			size_t bytes_written;
 			yield stream.output_stream.write_all_async (token.data, Priority.DEFAULT, cancellable, out bytes_written);
 
-			var connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
-
-			AgentSession agent_session = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE,
-				cancellable);
-
-			return agent_session;
+			return yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 		} catch (GLib.Error e) {
 			throw new Error.TRANSPORT ("%s", e.message);
 		}

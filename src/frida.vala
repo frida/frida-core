@@ -1110,12 +1110,9 @@ namespace Frida {
 				}
 
 				try {
-					var agent_session = yield provider.obtain_agent_session (host_session, id, cancellable);
-
-					session = new Session (this, pid, id, agent_session, opts);
+					session = new Session (this, pid, id, opts);
+					session.active_session = yield provider.link_agent_session (host_session, id, session, cancellable);
 					agent_sessions[id] = session;
-
-					provider.register_message_sink (host_session, id, session);
 
 					attach_request.resolve (session);
 				} catch (GLib.Error e) {
@@ -1450,8 +1447,6 @@ namespace Frida {
 					assert_not_reached ();
 				}
 			}
-
-			provider.unregister_message_sink (host_session, id, session);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -1957,9 +1952,6 @@ namespace Frida {
 			get {
 				return active_session;
 			}
-			construct {
-				active_session = value;
-			}
 		}
 
 		public uint persist_timeout {
@@ -1975,7 +1967,7 @@ namespace Frida {
 		private State state = ATTACHED;
 		private Promise<bool> close_request;
 
-		private AgentSession active_session;
+		internal AgentSession active_session;
 		private AgentSession? obsolete_session;
 
 		private Gee.HashMap<AgentScriptId?, Script> scripts =
@@ -2000,11 +1992,10 @@ namespace Frida {
 			DETACHED,
 		}
 
-		internal Session (Device device, uint pid, AgentSessionId id, AgentSession agent_session, SessionOptions options) {
+		internal Session (Device device, uint pid, AgentSessionId id, SessionOptions options) {
 			Object (
 				pid: pid,
 				id: id,
-				session: agent_session,
 				persist_timeout: options.persist_timeout,
 				device: device
 			);
@@ -2044,7 +2035,7 @@ namespace Frida {
 
 			var host_session = yield device.get_host_session (cancellable);
 
-			var agent_session = yield device.provider.obtain_agent_session (host_session, id, cancellable);
+			var agent_session = yield device.provider.link_agent_session (host_session, id, this, cancellable);
 
 			begin_migration (agent_session);
 			commit_migration (agent_session);
@@ -2770,12 +2761,6 @@ namespace Frida {
 
 			if (debugger != null)
 				debugger.begin_migration (new_session);
-
-			try {
-				device.provider.migrate_agent_session (device.current_host_session, id, new_session);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
 		}
 
 		private void commit_migration (AgentSession new_session) {
@@ -2795,12 +2780,6 @@ namespace Frida {
 		private void cancel_migration (AgentSession new_session) {
 			assert (new_session == active_session);
 			assert (obsolete_session != null);
-
-			try {
-				device.provider.migrate_agent_session (device.current_host_session, id, obsolete_session);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
 
 			active_session = obsolete_session;
 			obsolete_session = null;

@@ -70,19 +70,12 @@ namespace Frida {
 			host_session = null;
 		}
 
-		public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+		public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
 			if (host_session != this.host_session)
 				throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-			return this.host_session.obtain_agent_session (id);
-		}
-
-		public void migrate_agent_session (HostSession host_session, AgentSessionId id, AgentSession new_session) throws Error {
-			if (host_session != this.host_session)
-				throw new Error.INVALID_ARGUMENT ("Invalid host session");
-
-			this.host_session.migrate_agent_session (id, new_session);
+			return yield this.host_session.link_agent_session (id, sink, cancellable);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {

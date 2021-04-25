@@ -21,8 +21,8 @@ namespace Frida {
 
 		private Gee.Set<ControlChannel> spawn_gaters = new Gee.HashSet<ControlChannel> ();
 		private Gee.Map<uint, PendingSpawn> pending_spawn = new Gee.HashMap<uint, PendingSpawn> ();
-		private Gee.Map<AgentSessionId?, ControlChannel> agent_sessions =
-			new Gee.HashMap<AgentSessionId?, ControlChannel> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.Map<AgentSessionId?, AgentSessionEntry> agent_sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
 		private SocketService broker_service = new SocketService ();
 #if !WINDOWS
@@ -296,10 +296,16 @@ namespace Frida {
 				Cancellable? cancellable, out AgentSessionId id) throws GLib.Error {
 			id = yield host_session.attach (pid, options, cancellable);
 
+			AgentMessageSink sink = yield requester.connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+				DO_NOT_LOAD_PROPERTIES, cancellable);
+
 			AgentSession session;
+			AgentSessionEntry entry;
 			var base_host_session = host_session as BaseDBusHostSession;
 			if (base_host_session != null) {
-				session = base_host_session.obtain_agent_session (id);
+				session = yield base_host_session.link_agent_session (id, sink, cancellable);
+
+				entry = new AgentSessionEntry (requester);
 			} else {
 				DBusConnection connection = ((DBusProxy) host_session).g_connection;
 				try {
@@ -308,9 +314,12 @@ namespace Frida {
 				} catch (IOError e) {
 					throw new Error.PROTOCOL ("%s", e.message);
 				}
+
+				entry = new AgentSessionEntry (requester, connection);
+				entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
 			}
 
-			agent_sessions[id] = requester;
+			agent_sessions[id] = entry;
 
 			return session;
 		}
@@ -326,8 +335,10 @@ namespace Frida {
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
-			ControlChannel channel;
-			if (agent_sessions.unset (id, out channel)) {
+			AgentSessionEntry entry;
+			if (agent_sessions.unset (id, out entry)) {
+				ControlChannel channel = entry.channel;
+
 				channel.unregister_agent_session (id);
 
 				channel.agent_session_detached (id, reason, crash);
@@ -391,9 +402,11 @@ namespace Frida {
 
 			AgentSessionId session_id = transport.session_id;
 
-			ControlChannel? channel = agent_sessions[session_id];
-			if (channel == null)
+			AgentSessionEntry? entry = agent_sessions[session_id];
+			if (entry == null)
 				return;
+
+			ControlChannel channel = entry.channel;
 
 			AgentSessionProvider provider;
 			var base_host_session = host_session as BaseDBusHostSession;
@@ -638,6 +651,33 @@ namespace Frida {
 			public PendingSpawn (uint pid, string identifier, Gee.Iterator<ControlChannel> gaters) {
 				info = HostSpawnInfo (pid, identifier);
 				pending_approvers.add_all_iterator (gaters);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public ControlChannel channel {
+				get;
+				private set;
+			}
+
+			public DBusConnection? connection {
+				get;
+				private set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (ControlChannel channel, DBusConnection? connection = null) {
+				this.channel = channel;
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 

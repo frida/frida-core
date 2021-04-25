@@ -1546,7 +1546,7 @@ namespace Frida.Gadget {
 			if (auth_service != null)
 				peer = new AuthenticationChannel (this, connection, dbus_context_request);
 			else
-				peer = yield setup_control_channel (connection, dbus_context_request);
+				peer = setup_control_channel (connection, dbus_context_request);
 			peers[connection] = peer;
 
 			connection.start_message_processing ();
@@ -1564,7 +1564,7 @@ namespace Frida.Gadget {
 			peers.unset (connection);
 			yield channel.close (io_cancellable);
 
-			peers[connection] = yield setup_control_channel (connection, channel.dbus_context_request);
+			peers[connection] = setup_control_channel (connection, channel.dbus_context_request);
 		}
 
 		private void kick_authentication_channel (AuthenticationChannel channel) {
@@ -1574,12 +1574,9 @@ namespace Frida.Gadget {
 			});
 		}
 
-		private async ControlChannel setup_control_channel (DBusConnection connection,
+		private ControlChannel setup_control_channel (DBusConnection connection,
 				Promise<MainContext> dbus_context_request) throws IOError {
-			AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK, DBusProxyFlags.NONE,
-				io_cancellable);
-
-			var channel = new ControlChannel (this, connection, sink, dbus_context_request);
+			var channel = new ControlChannel (this, connection, dbus_context_request);
 			channel.script_eternalized.connect (on_script_eternalized);
 			return channel;
 		}
@@ -1672,11 +1669,6 @@ namespace Frida.Gadget {
 				construct;
 			}
 
-			public AgentMessageSink message_sink {
-				get;
-				construct;
-			}
-
 			public Promise<MainContext> dbus_context_request {
 				get;
 				construct;
@@ -1689,12 +1681,10 @@ namespace Frida.Gadget {
 			private uint next_session_id = 1;
 			private bool resume_on_attach = true;
 
-			public ControlChannel (ControlServer parent, DBusConnection connection, AgentMessageSink sink,
-					Promise<MainContext> dbus_context_request) {
+			public ControlChannel (ControlServer parent, DBusConnection connection, Promise<MainContext> dbus_context_request) {
 				Object (
 					parent: parent,
 					connection: connection,
-					message_sink: sink,
 					dbus_context_request: dbus_context_request
 				);
 			}
@@ -1809,7 +1799,10 @@ namespace Frida.Gadget {
 
 				MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
 
-				var session = new LiveAgentSession (parent, id, message_sink, dbus_context);
+				AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+					DO_NOT_LOAD_PROPERTIES, cancellable);
+
+				var session = new LiveAgentSession (parent, id, sink, dbus_context);
 				sessions.add (session);
 				session.closed.connect (on_session_closed);
 				session.script_eternalized.connect (on_script_eternalized);
