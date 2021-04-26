@@ -2702,6 +2702,7 @@ namespace Frida {
 		internal void _on_detached (SessionDetachReason reason, CrashInfo crash) {
 			if (persist_timeout != 0 && reason == CONNECTION_TERMINATED) {
 				state = INTERRUPTED;
+				detached (reason, null);
 			} else {
 				_do_close.begin (reason, crash, false, null);
 			}
