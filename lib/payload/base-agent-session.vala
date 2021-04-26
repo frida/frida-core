@@ -13,6 +13,11 @@ namespace Frida {
 			construct;
 		}
 
+		public uint persist_timeout {
+			get;
+			construct;
+		}
+
 		public AgentMessageSink message_sink {
 			get {
 				return active_message_sink;
@@ -36,6 +41,8 @@ namespace Frida {
 		private Promise<bool> flush_complete = new Promise<bool> ();
 
 		private State state = LIVE;
+
+		private TimeoutSource? expiry_timer;
 
 		private Promise<bool>? delivery_request;
 		private AgentMessageSink active_message_sink;
@@ -61,7 +68,7 @@ namespace Frida {
 
 		private enum State {
 			LIVE,
-			MIGRATING
+			INTERRUPTED
 		}
 
 		construct {
@@ -110,7 +117,31 @@ namespace Frida {
 			close_request.resolve (true);
 		}
 
-		public async void resume (Cancellable? cancellable) throws IOError {
+		public async void interrupt (Cancellable? cancellable) throws Error, IOError {
+			if (persist_timeout == 0 || expiry_timer != null)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			state = INTERRUPTED;
+			delivery_cancellable.cancel ();
+
+			expiry_timer = new TimeoutSource (persist_timeout * 1000);
+			expiry_timer.set_callback (() => {
+				close.begin (null);
+				return false;
+			});
+			expiry_timer.attach (frida_context);
+		}
+
+		public async void resume (Cancellable? cancellable) throws Error, IOError {
+			if (persist_timeout == 0 || expiry_timer == null)
+				throw new Error.INVALID_OPERATION ("Invalid operation");
+
+			expiry_timer.destroy ();
+			expiry_timer = null;
+
+			delivery_cancellable = new Cancellable ();
+			state = LIVE;
+
 			maybe_deliver_pending_messages ();
 		}
 
@@ -563,7 +594,7 @@ namespace Frida {
 #endif
 
 		public async void begin_migration (Cancellable? cancellable) throws Error, IOError {
-			state = MIGRATING;
+			state = INTERRUPTED;
 		}
 
 		public async void commit_migration (Cancellable? cancellable) throws Error, IOError {

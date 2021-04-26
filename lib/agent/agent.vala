@@ -601,7 +601,7 @@ namespace Frida.Agent {
 			AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
 				DBusProxyFlags.NONE, null);
 
-			var session = new LiveAgentSession (this, id, sink, dbus_context);
+			var session = new LiveAgentSession (this, id, opts.persist_timeout, sink, dbus_context);
 			sessions[id] = session;
 			session.closed.connect (on_session_closed);
 			session.script_eternalized.connect (on_script_eternalized);
@@ -1412,10 +1412,12 @@ namespace Frida.Agent {
 			set;
 		}
 
-		public LiveAgentSession (ProcessInvader invader, AgentSessionId id, AgentMessageSink sink, MainContext dbus_context) {
+		public LiveAgentSession (ProcessInvader invader, AgentSessionId id, uint persist_timeout, AgentMessageSink sink,
+				MainContext dbus_context) {
 			Object (
 				invader: invader,
 				id: id,
+				persist_timeout: persist_timeout,
 				message_sink: sink,
 				frida_context: MainContext.ref_thread_default (),
 				dbus_context: dbus_context

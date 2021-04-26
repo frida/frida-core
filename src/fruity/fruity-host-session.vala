@@ -849,6 +849,10 @@ namespace Frida {
 			return yield attach_via_gadget (pid, options, gadget_details, cancellable);
 		}
 
+		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
+		}
+
 		private async LLDB.Client start_lldb_service (Fruity.LockdownClient lockdown, Cancellable? cancellable)
 				throws Error, LLDB.Error, IOError {
 			foreach (unowned string endpoint in DEBUGSERVER_ENDPOINT_CANDIDATES) {

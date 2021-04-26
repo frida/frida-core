@@ -126,6 +126,7 @@ namespace Frida {
 
 		public abstract async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 			Cancellable? cancellable = null) throws Error, IOError;
+		// public abstract void unlink_agent_session (HostSession host_session, AgentSessionId id);
 		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 	}
 
@@ -341,6 +342,10 @@ namespace Frida {
 			return id;
 		}
 
+		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
+		}
+
 		private async AgentEntry establish (uint pid, Cancellable? cancellable) throws Error, IOError {
 			while (agent_entries.has_key (pid)) {
 				var future = agent_entries[pid];
@@ -454,19 +459,39 @@ namespace Frida {
 
 		public async AgentSession link_agent_session (AgentSessionId id, AgentMessageSink sink,
 				Cancellable? cancellable) throws Error, IOError {
-			AgentSessionEntry entry = agent_sessions[id];
+			AgentSessionEntry? entry = agent_sessions[id];
 			if (entry == null)
 				throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 
 			DBusConnection connection = entry.connection;
 
-			AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
-				cancellable);
+			AgentSession session;
+			try {
+				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
+					cancellable);
+			} catch (IOError e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
 
 			assert (entry.sink_registration_id == 0);
-			entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
+			try {
+				entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
+			} catch (IOError e) {
+				assert_not_reached ();
+			}
 
 			return session;
+		}
+
+		public void unlink_agent_session (AgentSessionId id) {
+			AgentSessionEntry? entry = agent_sessions[id];
+			if (entry == null || entry.sink_registration_id == 0)
+				return;
+
+			entry.connection.unregister_object (entry.sink_registration_id);
+			entry.sink_registration_id = 0;
 		}
 
 		public AgentSessionProvider obtain_session_provider (AgentSessionId id) throws Error {

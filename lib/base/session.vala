@@ -15,6 +15,7 @@ namespace Frida {
 		public abstract async void kill (uint pid, Cancellable? cancellable) throws GLib.Error;
 		public abstract async AgentSessionId attach (uint pid, AgentSessionOptions options,
 			Cancellable? cancellable) throws GLib.Error;
+		public abstract async void reattach (AgentSessionId id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
 			Cancellable? cancellable) throws GLib.Error;
 		public abstract async InjectorPayloadId inject_library_blob (uint pid, uint8[] blob, string entrypoint, string data,
@@ -47,6 +48,8 @@ namespace Frida {
 	[DBus (name = "re.frida.AgentSession16")]
 	public interface AgentSession : Object {
 		public abstract async void close (Cancellable? cancellable) throws GLib.Error;
+
+		public abstract async void interrupt (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void resume (Cancellable? cancellable) throws GLib.Error;
 
 		public abstract async void enable_child_gating (Cancellable? cancellable) throws GLib.Error;
@@ -262,6 +265,10 @@ namespace Frida {
 		}
 
 		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
+			throw_not_authorized ();
+		}
+
+		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
 			throw_not_authorized ();
 		}
 

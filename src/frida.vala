@@ -2031,6 +2031,12 @@ namespace Frida {
 
 			var host_session = yield device.get_host_session (cancellable);
 
+			try {
+				yield host_session.reattach (id, cancellable);
+			} catch (GLib.Error e) {
+				throw_dbus_error (e);
+			}
+
 			var agent_session = yield device.provider.link_agent_session (host_session, id, this, cancellable);
 
 			begin_migration (agent_session);

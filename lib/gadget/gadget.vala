@@ -1820,6 +1820,10 @@ namespace Frida.Gadget {
 				return id;
 			}
 
+			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+				throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
+			}
+
 			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");

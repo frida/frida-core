@@ -472,19 +472,37 @@ namespace Frida {
 			var entry = new AgentSessionEntry (node, requester, io_cancellable);
 			sessions[id] = entry;
 
-			AgentSession session = yield node.connection.get_proxy (null, ObjectPath.for_agent_session (id),
-				DBusProxyFlags.NONE, cancellable);
+			AgentSession session;
+			try {
+				session = yield node.connection.get_proxy (null, ObjectPath.for_agent_session (id),
+					DBusProxyFlags.NONE, cancellable);
+			} catch (IOError e) {
+				if (e is IOError.CANCELLED)
+					throw (IOError) e;
+				throw new Error.TRANSPORT ("%s", e.message);
+			}
 			entry.session = session;
 
 			DBusConnection controller_connection = requester.connection;
 			if (controller_connection != null) {
-				entry.take_controller_registration (
-					controller_connection.register_object (ObjectPath.for_agent_session (id), session));
+				AgentMessageSink sink;
+				try {
+					sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+						DBusProxyFlags.NONE, null);
+				} catch (IOError e) {
+					if (e is IOError.CANCELLED)
+						throw (IOError) e;
+					throw new Error.TRANSPORT ("%s", e.message);
+				}
 
-				AgentMessageSink sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
-					DBusProxyFlags.NONE, null);
-				entry.take_node_registration (
-					node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+				try {
+					entry.take_controller_registration (
+						controller_connection.register_object (ObjectPath.for_agent_session (id), session));
+					entry.take_node_registration (
+						node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 			}
 
 			return id;
@@ -608,8 +626,12 @@ namespace Frida {
 				if (entry == null)
 					throw new Error.INVALID_ARGUMENT ("Invalid session ID");
 
-				entry.take_node_registration (
-					entry.node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+				try {
+					entry.take_node_registration (
+						entry.node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 
 				return entry.session;
 			}
@@ -836,6 +858,9 @@ namespace Frida {
 				return yield parent.attach (pid, options, this, cancellable);
 			}
 
+			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			}
+
 			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
 					Cancellable? cancellable) throws Error, IOError {
 				throw new Error.NOT_SUPPORTED ("Not supported");
@@ -933,7 +958,7 @@ namespace Frida {
 				try {
 					yield session_provider.open (id, options, cancellable);
 				} catch (GLib.Error e) {
-					throw new Error.PROTOCOL ("%s", e.message);
+					throw_dbus_error (e);
 				}
 
 				sessions.add (id);

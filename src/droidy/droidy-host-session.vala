@@ -514,6 +514,10 @@ namespace Frida {
 			}
 		}
 
+		public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+			throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
+		}
+
 		private async AgentSessionId attach_via_gadget (uint pid, AgentSessionOptions options, Droidy.Injector.GadgetDetails gadget,
 				Cancellable? cancellable) throws Error, IOError {
 			try {
