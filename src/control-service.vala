@@ -319,8 +319,10 @@ namespace Frida {
 
 			requester.sessions.add (id);
 
-			var entry = new AgentSessionEntry (requester, opts.persist_timeout, io_cancellable);
+			var entry = new AgentSessionEntry (requester, id, opts.persist_timeout, io_cancellable);
 			sessions[id] = entry;
+
+			entry.expired.connect (on_agent_session_expired);
 
 			yield link_session (id, entry, requester, cancellable);
 
@@ -395,6 +397,10 @@ namespace Frida {
 		private void notify_spawn_removed (HostSpawnInfo info) {
 			foreach (ControlChannel channel in spawn_gaters)
 				channel.spawn_removed (info);
+		}
+
+		private void on_agent_session_expired (AgentSessionEntry entry) {
+			sessions.unset (entry.id);
 		}
 
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -658,7 +664,14 @@ namespace Frida {
 		}
 
 		private class AgentSessionEntry {
+			public signal void expired ();
+
 			public ControlChannel? controller {
+				get;
+				private set;
+			}
+
+			public AgentSessionId id {
 				get;
 				private set;
 			}
@@ -686,25 +699,34 @@ namespace Frida {
 			private Gee.Collection<uint> internal_registrations = new Gee.ArrayList<uint> ();
 			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
 
-			public AgentSessionEntry (ControlChannel controller, uint persist_timeout, Cancellable io_cancellable) {
+			private TimeoutSource? expiry_timer;
+
+			public AgentSessionEntry (ControlChannel controller, AgentSessionId id, uint persist_timeout,
+					Cancellable io_cancellable) {
 				this.controller = controller;
+				this.id = id;
 				this.persist_timeout = persist_timeout;
 				this.io_cancellable = io_cancellable;
 			}
 
 			~AgentSessionEntry () {
+				stop_expiry_timer ();
 				unregister_all ();
-			}
-
-			public void attach_controller (ControlChannel c) {
-				assert (controller == null);
-				controller = c;
 			}
 
 			public void detach_controller () {
 				unregister_all ();
 				controller = null;
 				session = null;
+
+				start_expiry_timer ();
+			}
+
+			public void attach_controller (ControlChannel c) {
+				stop_expiry_timer ();
+
+				assert (controller == null);
+				controller = c;
 			}
 
 			public void take_internal_registration (uint id) {
@@ -723,6 +745,22 @@ namespace Frida {
 				foreach (uint id in internal_registrations)
 					internal_connection.unregister_object (id);
 				internal_registrations.clear ();
+			}
+
+			private void start_expiry_timer () {
+				expiry_timer = new TimeoutSource.seconds (persist_timeout + 1);
+				expiry_timer.set_callback (() => {
+					expired ();
+					return false;
+				});
+				expiry_timer.attach (MainContext.get_thread_default ());
+			}
+
+			private void stop_expiry_timer () {
+				if (expiry_timer == null)
+					return;
+				expiry_timer.destroy ();
+				expiry_timer = null;
 			}
 		}
 
