@@ -195,16 +195,6 @@ namespace Frida {
 			throw new Error.INVALID_ARGUMENT ("Invalid host session");
 		}
 
-		public void migrate_agent_session (HostSession host_session, AgentSessionId id, AgentSession new_session) throws Error {
-			foreach (var entry in hosts) {
-				if (entry.host_session == host_session) {
-					entry.migrate_agent_session (id, new_session);
-					return;
-				}
-			}
-			throw new Error.INVALID_ARGUMENT ("Invalid host session");
-		}
-
 		private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 			agent_session_detached (id, reason, crash);
 		}
@@ -222,8 +212,8 @@ namespace Frida {
 				construct;
 			}
 
-			private Gee.HashMap<AgentSessionId?, AgentSession> agent_sessions =
-				new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+			private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
+				new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 
 			public HostEntry (DBusConnection connection, HostSession host_session) {
 				Object (connection: connection, host_session: host_session);
@@ -249,28 +239,42 @@ namespace Frida {
 					Cancellable? cancellable) throws Error, IOError {
 				if (agent_sessions.has_key (id))
 					throw new Error.INVALID_OPERATION ("Already linked");
-				AgentSession? session = agent_sessions[id];
-				if (session == null) {
-					try {
-						session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id),
-							DBusProxyFlags.NONE, cancellable);
-					} catch (IOError e) {
-						throw new Error.INVALID_ARGUMENT ("%s", e.message);
-					}
-					agent_sessions[id] = session;
-				}
-				return session;
-			}
 
-			public void migrate_agent_session (AgentSessionId id, AgentSession new_session) throws Error {
-				if (!agent_sessions.has_key (id))
-					throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-				agent_sessions[id] = new_session;
+				var entry = new AgentSessionEntry (connection);
+				agent_sessions[id] = entry;
+
+				AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id),
+					DBusProxyFlags.NONE, cancellable);
+
+				entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
+
+				return session;
 			}
 
 			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
 				agent_sessions.unset (id);
 				agent_session_detached (id, reason, crash);
+			}
+		}
+
+		private class AgentSessionEntry {
+			public DBusConnection connection {
+				get;
+				set;
+			}
+
+			public uint sink_registration_id {
+				get;
+				set;
+			}
+
+			public AgentSessionEntry (DBusConnection connection) {
+				this.connection = connection;
+			}
+
+			~AgentSessionEntry () {
+				if (sink_registration_id != 0)
+					connection.unregister_object (sink_registration_id);
 			}
 		}
 	}
