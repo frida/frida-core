@@ -348,13 +348,8 @@ namespace Frida.HostSessionTest {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 
-			public async AgentSession obtain_agent_session (HostSession host_session, AgentSessionId id,
+			public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 					Cancellable? cancellable) throws Error, IOError {
-				throw new Error.NOT_SUPPORTED ("Not implemented");
-			}
-
-			public void migrate_agent_session (HostSession host_session, AgentSessionId id,
-					AgentSession new_session) throws Error {
 				throw new Error.NOT_SUPPORTED ("Not implemented");
 			}
 		}
@@ -945,10 +940,10 @@ namespace Frida.HostSessionTest {
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
 				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
@@ -1177,10 +1172,10 @@ namespace Frida.HostSessionTest {
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_file (target_name), options, cancellable);
 
 				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						run_spawn_scenario.callback ();
@@ -1579,11 +1574,11 @@ namespace Frida.HostSessionTest {
 					var host_session = yield prov.create (null, cancellable);
 
 					var id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
-					var session = yield prov.obtain_agent_session (host_session, id, cancellable);
+					var session = yield prov.link_agent_session (host_session, id, h, cancellable);
 
 					string received_message = null;
 					bool waiting = false;
-					var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						if (waiting)
 							cross_arch.callback ();
@@ -2390,10 +2385,10 @@ namespace Frida.HostSessionTest {
 				pid = yield host_session.spawn (Frida.Test.Labrats.path_to_executable ("sleeper"), options, cancellable);
 
 				var session_id = yield host_session.attach (pid, AgentSessionOptions (), cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
@@ -2656,9 +2651,9 @@ namespace Frida.HostSessionTest {
 
 				stdout.printf ("attaching to target process\n");
 				var session_id = yield host_session.attach (process.pid, AgentSessionOptions (), cancellable);
-				var session = yield prov.obtain_agent_session (host_session, session_id, cancellable);
+				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, has_data, data) => {
+				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					large_messages.callback ();
 				});
@@ -3028,7 +3023,9 @@ namespace Frida.HostSessionTest {
 		return message.get_string_member ("payload");
 	}
 
-	public class Harness : Frida.Test.AsyncHarness {
+	public class Harness : Frida.Test.AsyncHarness, AgentMessageSink {
+		public signal void message_from_script (AgentScriptId script_id, string message, Bytes? data);
+
 		public HostSessionService service {
 			get;
 			private set;
@@ -3141,6 +3138,17 @@ namespace Frida.HostSessionTest {
 				yield process_events ();
 
 			return key;
+		}
+
+		protected async void post_script_messages (AgentScriptMessage[] messages,
+				Cancellable? cancellable) throws Error, IOError {
+			foreach (var m in messages) {
+				message_from_script (m.script_id, m.json, m.has_data ? new Bytes (m.data) : null);
+			}
+		}
+
+		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
+				Cancellable? cancellable) throws Error, IOError {
 		}
 	}
 }

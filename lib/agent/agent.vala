@@ -48,7 +48,6 @@ namespace Frida.Agent {
 		private MainLoop main_loop;
 		private DBusConnection connection;
 		private AgentController controller;
-		private AgentMessageSink message_sink;
 		private bool unloading = false;
 		private uint filter_id = 0;
 		private uint registration_id = 0;
@@ -599,7 +598,10 @@ namespace Frida.Agent {
 				return;
 			}
 
-			var session = new LiveAgentSession (this, id, message_sink, dbus_context);
+			AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+				DBusProxyFlags.NONE, null);
+
+			var session = new LiveAgentSession (this, id, sink, dbus_context);
 			sessions[id] = session;
 			session.closed.connect (on_session_closed);
 			session.script_eternalized.connect (on_script_eternalized);
@@ -962,7 +964,6 @@ namespace Frida.Agent {
 				connection.start_message_processing ();
 
 				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DBusProxyFlags.NONE, null);
-				message_sink = yield connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK, DBusProxyFlags.NONE, null);
 
 				dbus_context = yield dbus_context_request.future.wait_async (null);
 			} catch (GLib.Error e) {
@@ -1021,7 +1022,6 @@ namespace Frida.Agent {
 				session.registration_id = 0;
 			}
 
-			message_sink = null;
 			controller = null;
 
 			if (registration_id != 0) {

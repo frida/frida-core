@@ -474,8 +474,8 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 				var session_id = AgentSessionId (1);
 				yield provider.open (session_id, AgentSessionOptions (), cancellable);
 
-				session = yield connection.get_proxy (null, ObjectPath.from_agent_session_id (session_id),
-					DBusProxyFlags.NONE, cancellable);
+				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (session_id), DBusProxyFlags.NONE,
+					cancellable);
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}

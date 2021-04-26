@@ -41,8 +41,8 @@ namespace Frida {
 
 		private Gee.Set<ControlChannel> spawn_gaters = new Gee.HashSet<ControlChannel> ();
 		private Gee.Map<uint, PendingSpawn> pending_spawn = new Gee.HashMap<uint, PendingSpawn> ();
-		private Gee.Map<AgentSessionId?, ControlChannel> sessions =
-			new Gee.HashMap<AgentSessionId?, ControlChannel> (AgentSessionId.hash, AgentSessionId.equal);
+		private Gee.Map<AgentSessionId?, AgentSessionEntry> sessions =
+			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
 		private uint next_agent_session_id = 1;
 
 		private Cancellable io_cancellable;
@@ -339,9 +339,6 @@ namespace Frida {
 		}
 
 		private void teardown_control_channel (ControlChannel channel) {
-			foreach (var session in channel.sessions.values)
-				session.close.begin (io_cancellable);
-
 			disable_spawn_gating (channel);
 		}
 
@@ -360,9 +357,10 @@ namespace Frida {
 		private void teardown_cluster_node (ClusterNode node) {
 			var no_crash = CrashInfo.empty ();
 			foreach (var id in node.sessions) {
-				ControlChannel c;
-				if (sessions.unset (id, out c)) {
-					c.unregister_agent_session (id);
+				AgentSessionEntry entry;
+				if (sessions.unset (id, out entry)) {
+					ControlChannel c = entry.controller;
+					c.sessions.remove (id);
 					c.agent_session_detached (id, SessionDetachReason.PROCESS_TERMINATED, no_crash);
 				}
 			}
@@ -459,18 +457,37 @@ namespace Frida {
 			this.message (sender.connection_id, message, data);
 		}
 
-		private async AgentSession attach (uint pid, AgentSessionOptions options, ControlChannel requester,
-				Cancellable? cancellable, out AgentSessionId id) throws Error, IOError {
+		private async AgentSessionId attach (uint pid, AgentSessionOptions options, ControlChannel requester,
+				Cancellable? cancellable) throws Error, IOError {
 			var node = node_by_pid[pid];
 			if (node == null)
 				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
 
-			id = AgentSessionId (next_agent_session_id++);
+			var id = AgentSessionId (next_agent_session_id++);
 
-			var session = yield node.open_session (id, options, cancellable);
-			sessions[id] = requester;
+			yield node.open_session (id, options, cancellable);
 
-			return session;
+			requester.sessions.add (id);
+
+			var entry = new AgentSessionEntry (node, requester, io_cancellable);
+			sessions[id] = entry;
+
+			AgentSession session = yield node.connection.get_proxy (null, ObjectPath.for_agent_session (id),
+				DBusProxyFlags.NONE, cancellable);
+			entry.session = session;
+
+			DBusConnection controller_connection = requester.connection;
+			if (controller_connection != null) {
+				entry.take_controller_registration (
+					controller_connection.register_object (ObjectPath.for_agent_session (id), session));
+
+				AgentMessageSink sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+					DBusProxyFlags.NONE, null);
+				entry.take_node_registration (
+					node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+			}
+
+			return id;
 		}
 
 		private async void handle_join_request (ClusterNode node, HostApplicationInfo app, SpawnStartState current_state,
@@ -522,11 +539,9 @@ namespace Frida {
 		}
 
 		private void on_agent_session_closed (AgentSessionId id) {
-			ControlChannel channel;
-			if (sessions.unset (id, out channel)) {
-				channel.unregister_agent_session (id);
-
-				channel.agent_session_detached (id, SessionDetachReason.APPLICATION_REQUESTED, CrashInfo.empty ());
+			AgentSessionEntry entry;
+			if (sessions.unset (id, out entry)) {
+				entry.controller.agent_session_detached (id, SessionDetachReason.APPLICATION_REQUESTED, CrashInfo.empty ());
 			}
 		}
 
@@ -584,15 +599,19 @@ namespace Frida {
 				host_session_detached (session);
 			}
 
-			public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id,
+			public async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 					Cancellable? cancellable) throws Error, IOError {
 				if (host_session != channel)
 					throw new Error.INVALID_ARGUMENT ("Invalid host session");
 
-				var session = channel.sessions[id];
-				if (session == null)
+				AgentSessionEntry entry = parent.sessions[id];
+				if (entry == null)
 					throw new Error.INVALID_ARGUMENT ("Invalid session ID");
-				return session;
+
+				entry.take_node_registration (
+					entry.node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+
+				return entry.session;
 			}
 
 			private void on_agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash) {
@@ -725,14 +744,12 @@ namespace Frida {
 				construct;
 			}
 
-			public Gee.Map<AgentSessionId?, AgentSession> sessions {
+			public Gee.Set<AgentSessionId?> sessions {
 				get;
-				default = new Gee.HashMap<AgentSessionId?, AgentSession> (AgentSessionId.hash, AgentSessionId.equal);
+				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
 			}
 
 			private Gee.Set<uint> registrations = new Gee.HashSet<uint> ();
-			private Gee.Map<AgentSessionId?, uint> agent_registrations =
-				new Gee.HashMap<AgentSessionId?, uint> (AgentSessionId.hash, AgentSessionId.equal);
 
 			public ControlChannel (PortalService parent, uint connection_id = 0, DBusConnection? connection = null) {
 				Object (
@@ -762,8 +779,6 @@ namespace Frida {
 
 			public void close () {
 				parent.teardown_control_channel (this);
-
-				agent_registrations.clear ();
 
 				if (connection != null) {
 					foreach (var id in registrations)
@@ -818,12 +833,7 @@ namespace Frida {
 
 			public async AgentSessionId attach (uint pid, AgentSessionOptions options,
 					Cancellable? cancellable) throws Error, IOError {
-				AgentSessionId id;
-				var session = yield parent.attach (pid, options, this, cancellable, out id);
-
-				register_agent_session (id, session);
-
-				return id;
+				return yield parent.attach (pid, options, this, cancellable);
 			}
 
 			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
@@ -839,42 +849,6 @@ namespace Frida {
 			public async void post (string message, bool has_data, uint8[] data,
 					Cancellable? cancellable) throws Error, IOError {
 				parent.handle_bus_message (this, message, has_data ? new Bytes (data) : null);
-			}
-
-			private void register_agent_session (AgentSessionId id, AgentSession session) {
-				try {
-					sessions[id] = session;
-
-					if (connection != null) {
-						var registration_id = connection.register_object (ObjectPath.for_agent_session (id),
-							session);
-						registrations.add (registration_id);
-
-						agent_registrations.set (id, registration_id);
-					}
-
-					monitor_agent_session (this, id, session);
-				} catch (IOError e) {
-					assert_not_reached ();
-				}
-			}
-
-			private static void monitor_agent_session (ControlChannel channel, AgentSessionId id, AgentSession session) {
-				unowned ControlChannel ch = channel;
-				session.migrated.connect (() => {
-					if (ch.sessions.has (id, session))
-						ch.unregister_agent_session (id);
-				});
-			}
-
-			public void unregister_agent_session (AgentSessionId id) {
-				uint registration_id;
-				if (agent_registrations.unset (id, out registration_id)) {
-					registrations.remove (registration_id);
-					connection.unregister_object (registration_id);
-				}
-
-				sessions.unset (id);
 			}
 		}
 
@@ -954,21 +928,15 @@ namespace Frida {
 				yield parent.handle_join_request (this, app, current_state, cancellable, out next_state);
 			}
 
-			public async AgentSession open_session (AgentSessionId id, AgentSessionOptions options,
+			public async void open_session (AgentSessionId id, AgentSessionOptions options,
 					Cancellable? cancellable) throws Error, IOError {
-				AgentSession session;
 				try {
 					yield session_provider.open (id, options, cancellable);
-
-					session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
-						cancellable);
 				} catch (GLib.Error e) {
 					throw new Error.PROTOCOL ("%s", e.message);
 				}
 
 				sessions.add (id);
-
-				return session;
 			}
 
 			private void on_session_closed (AgentSessionId id) {
@@ -995,29 +963,51 @@ namespace Frida {
 		}
 
 		private class AgentSessionEntry {
-			public ControlChannel channel {
+			public ClusterNode node {
 				get;
 				private set;
 			}
 
-			public DBusConnection? connection {
+			public ControlChannel controller {
 				get;
 				private set;
 			}
 
-			public uint sink_registration_id {
+			public AgentSession? session {
 				get;
 				set;
 			}
 
-			public AgentSessionEntry (ControlChannel channel, DBusConnection? connection = null) {
-				this.channel = channel;
-				this.connection = connection;
+			public Cancellable io_cancellable {
+				get;
+				private set;
+			}
+
+			private Gee.Collection<uint> node_registrations = new Gee.ArrayList<uint> ();
+			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
+
+			public AgentSessionEntry (ClusterNode node, ControlChannel controller, Cancellable io_cancellable) {
+				this.node = node;
+				this.controller = controller;
+				this.io_cancellable = io_cancellable;
 			}
 
 			~AgentSessionEntry () {
-				if (sink_registration_id != 0)
-					connection.unregister_object (sink_registration_id);
+				if (controller.connection != null && session != null)
+					session.close.begin (io_cancellable);
+
+				foreach (uint id in controller_registrations)
+					controller.connection.unregister_object (id);
+				foreach (uint id in node_registrations)
+					node.connection.unregister_object (id);
+			}
+
+			public void take_node_registration (uint id) {
+				node_registrations.add (id);
+			}
+
+			public void take_controller_registration (uint id) {
+				controller_registrations.add (id);
 			}
 		}
 	}

@@ -326,8 +326,6 @@ namespace Frida {
 			var entry = yield establish (pid, cancellable);
 
 			var id = AgentSessionId (next_agent_session_id++);
-			AgentSession session;
-
 			entry.sessions.add (id);
 
 			try {
