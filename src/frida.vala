@@ -2001,10 +2001,6 @@ namespace Frida {
 			);
 		}
 
-		construct {
-			active_session.message_from_script.connect (on_message_from_script);
-		}
-
 		public async void detach (Cancellable? cancellable = null) throws IOError {
 			yield _do_close (APPLICATION_REQUESTED, CrashInfo.empty (), true, cancellable);
 		}
@@ -2671,16 +2667,20 @@ namespace Frida {
 
 		protected async void post_script_messages (AgentScriptMessage[] messages,
 				Cancellable? cancellable) throws Error, IOError {
+			foreach (var m in messages) {
+				var script = scripts[m.script_id];
+				if (script != null)
+					script.message (m.json, m.has_data ? new Bytes (m.data) : null);
+			}
 		}
 
 		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
 				Cancellable? cancellable) throws Error, IOError {
-		}
-
-		private void on_message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data) {
-			var script = scripts[script_id];
-			if (script != null)
-				script.message (message, has_data ? new Bytes (data) : null);
+			if (debugger == null)
+				return;
+			foreach (var m in messages) {
+				debugger.handle_message_from_backend (m.payload);
+			}
 		}
 
 		public void _release_script (AgentScriptId script_id) {
@@ -2736,7 +2736,6 @@ namespace Frida {
 
 				if (may_block)
 					session.close.begin (cancellable);
-				active_session.message_from_script.disconnect (on_message_from_script);
 
 				yield teardown_peer_connection (cancellable);
 
@@ -2767,10 +2766,7 @@ namespace Frida {
 			assert (new_session == active_session);
 			assert (obsolete_session != null);
 
-			obsolete_session.message_from_script.disconnect (on_message_from_script);
 			obsolete_session = null;
-
-			active_session.message_from_script.connect (on_message_from_script);
 
 			if (debugger != null)
 				debugger.commit_migration (new_session);

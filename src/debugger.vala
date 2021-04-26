@@ -39,7 +39,6 @@ namespace Frida {
 				server.start ();
 
 				server.message.connect (on_message_from_frontend);
-				agent_session.message_from_debugger.connect (on_message_from_backend);
 			} catch (GLib.Error e) {
 				try {
 					yield agent_session.disable_debugger (cancellable);
@@ -51,7 +50,6 @@ namespace Frida {
 		}
 
 		public async void disable (Cancellable? cancellable) throws Error, IOError {
-			agent_session.message_from_debugger.disconnect (on_message_from_backend);
 			server.message.disconnect (on_message_from_frontend);
 
 			server.stop ();
@@ -66,6 +64,14 @@ namespace Frida {
 			}
 		}
 
+		private void on_message_from_frontend (string message) {
+			agent_session.post_message_to_debugger.begin (message, io_cancellable);
+		}
+
+		public void handle_message_from_backend (string message) {
+			server.post_message (message);
+		}
+
 		public void begin_migration (AgentSession new_session) {
 			assert (obsolete_session == null);
 			obsolete_session = active_session;
@@ -77,10 +83,7 @@ namespace Frida {
 			assert (new_session == active_session);
 			assert (obsolete_session != null);
 
-			obsolete_session.message_from_debugger.disconnect (on_message_from_backend);
 			obsolete_session = null;
-
-			active_session.message_from_debugger.connect (on_message_from_backend);
 		}
 
 #if HAVE_NICE
@@ -92,13 +95,5 @@ namespace Frida {
 			obsolete_session = null;
 		}
 #endif
-
-		private void on_message_from_frontend (string message) {
-			agent_session.post_message_to_debugger.begin (message, io_cancellable);
-		}
-
-		private void on_message_from_backend (string message) {
-			server.post_message (message);
-		}
 	}
 }
