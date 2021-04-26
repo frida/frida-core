@@ -315,9 +315,9 @@ namespace Frida {
 				throw_dbus_error (e);
 			}
 
-			var opts = SessionOptions._deserialize (options.data);
-
 			requester.sessions.add (id);
+
+			var opts = SessionOptions._deserialize (options.data);
 
 			var entry = new AgentSessionEntry (requester, id, opts.persist_timeout, io_cancellable);
 			sessions[id] = entry;
