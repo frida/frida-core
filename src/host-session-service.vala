@@ -470,9 +470,7 @@ namespace Frida {
 				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
 					cancellable);
 			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw_dbus_error (e);
 			}
 
 			assert (entry.sink_registration_id == 0);

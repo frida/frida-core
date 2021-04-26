@@ -339,6 +339,23 @@ namespace Frida {
 		}
 
 		private void teardown_control_channel (ControlChannel channel) {
+			foreach (var id in channel.sessions) {
+				AgentSessionEntry? entry = sessions[id];
+				if (entry == null)
+					continue;
+
+				AgentSession? session = entry.session;
+
+				if (entry.persist_timeout == 0 || session == null) {
+					sessions.unset (id);
+					if (session != null)
+						session.close.begin (io_cancellable);
+				} else {
+					entry.detach_controller ();
+					session.interrupt.begin (io_cancellable);
+				}
+			}
+
 			disable_spawn_gating (channel);
 		}
 
@@ -359,9 +376,11 @@ namespace Frida {
 			foreach (var id in node.sessions) {
 				AgentSessionEntry entry;
 				if (sessions.unset (id, out entry)) {
-					ControlChannel c = entry.controller;
-					c.sessions.remove (id);
-					c.agent_session_detached (id, SessionDetachReason.PROCESS_TERMINATED, no_crash);
+					ControlChannel? c = entry.controller;
+					if (c != null) {
+						c.sessions.remove (id);
+						c.agent_session_detached (id, SessionDetachReason.PROCESS_TERMINATED, no_crash);
+					}
 				}
 			}
 
@@ -469,43 +488,63 @@ namespace Frida {
 
 			requester.sessions.add (id);
 
-			var entry = new AgentSessionEntry (node, requester, io_cancellable);
+			var opts = SessionOptions._deserialize (options.data);
+
+			var entry = new AgentSessionEntry (node, requester, id, opts.persist_timeout, io_cancellable);
 			sessions[id] = entry;
+			entry.expired.connect (on_agent_session_expired);
 
-			AgentSession session;
-			try {
-				session = yield node.connection.get_proxy (null, ObjectPath.for_agent_session (id),
-					DBusProxyFlags.NONE, cancellable);
-			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				throw new Error.TRANSPORT ("%s", e.message);
+			yield link_session (id, entry, requester, cancellable);
+
+			return id;
+		}
+
+		private async void reattach (AgentSessionId id, ControlChannel requester, Cancellable? cancellable) throws Error, IOError {
+			AgentSessionEntry? entry = sessions[id];
+			if (entry == null || entry.controller != null)
+				throw new Error.INVALID_OPERATION ("Invalid session ID");
+
+			requester.sessions.add (id);
+
+			entry.attach_controller (requester);
+
+			yield link_session (id, entry, requester, cancellable);
+		}
+
+		private async void link_session (AgentSessionId id, AgentSessionEntry entry, ControlChannel requester,
+				Cancellable? cancellable) throws Error, IOError {
+			DBusConnection node_connection = entry.node.connection;
+
+			AgentSession? session = entry.session;
+			if (session == null) {
+				try {
+					session = yield node_connection.get_proxy (null, ObjectPath.for_agent_session (id),
+						DBusProxyFlags.NONE, cancellable);
+				} catch (IOError e) {
+					throw_dbus_error (e);
+				}
+				entry.session = session;
 			}
-			entry.session = session;
 
-			DBusConnection controller_connection = requester.connection;
+			DBusConnection? controller_connection = requester.connection;
 			if (controller_connection != null) {
 				AgentMessageSink sink;
 				try {
 					sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
 						DBusProxyFlags.NONE, null);
 				} catch (IOError e) {
-					if (e is IOError.CANCELLED)
-						throw (IOError) e;
-					throw new Error.TRANSPORT ("%s", e.message);
+					throw_dbus_error (e);
 				}
 
 				try {
 					entry.take_controller_registration (
 						controller_connection.register_object (ObjectPath.for_agent_session (id), session));
 					entry.take_node_registration (
-						node.connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
+						node_connection.register_object (ObjectPath.for_agent_message_sink (id), sink));
 				} catch (IOError e) {
 					assert_not_reached ();
 				}
 			}
-
-			return id;
 		}
 
 		private async void handle_join_request (ClusterNode node, HostApplicationInfo app, SpawnStartState current_state,
@@ -556,10 +595,18 @@ namespace Frida {
 				channel.spawn_removed (info);
 		}
 
+		private void on_agent_session_expired (AgentSessionEntry entry) {
+			sessions.unset (entry.id);
+		}
+
 		private void on_agent_session_closed (AgentSessionId id) {
 			AgentSessionEntry entry;
 			if (sessions.unset (id, out entry)) {
-				entry.controller.agent_session_detached (id, SessionDetachReason.APPLICATION_REQUESTED, CrashInfo.empty ());
+				ControlChannel? controller = entry.controller;
+				if (controller != null) {
+					controller.agent_session_detached (id, SessionDetachReason.APPLICATION_REQUESTED,
+						CrashInfo.empty ());
+				}
 			}
 		}
 
@@ -859,6 +906,7 @@ namespace Frida {
 			}
 
 			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
+				yield parent.reattach (id, this, cancellable);
 			}
 
 			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
@@ -988,12 +1036,19 @@ namespace Frida {
 		}
 
 		private class AgentSessionEntry {
+			public signal void expired ();
+
 			public ClusterNode node {
 				get;
 				private set;
 			}
 
-			public ControlChannel controller {
+			public ControlChannel? controller {
+				get;
+				private set;
+			}
+
+			public AgentSessionId id {
 				get;
 				private set;
 			}
@@ -1001,6 +1056,11 @@ namespace Frida {
 			public AgentSession? session {
 				get;
 				set;
+			}
+
+			public uint persist_timeout {
+				get;
+				private set;
 			}
 
 			public Cancellable io_cancellable {
@@ -1011,20 +1071,34 @@ namespace Frida {
 			private Gee.Collection<uint> node_registrations = new Gee.ArrayList<uint> ();
 			private Gee.Collection<uint> controller_registrations = new Gee.ArrayList<uint> ();
 
-			public AgentSessionEntry (ClusterNode node, ControlChannel controller, Cancellable io_cancellable) {
+			private TimeoutSource? expiry_timer;
+
+			public AgentSessionEntry (ClusterNode node, ControlChannel controller, AgentSessionId id, uint persist_timeout,
+					Cancellable io_cancellable) {
 				this.node = node;
 				this.controller = controller;
+				this.id = id;
+				this.persist_timeout = persist_timeout;
 				this.io_cancellable = io_cancellable;
 			}
 
 			~AgentSessionEntry () {
-				if (controller.connection != null && session != null)
-					session.close.begin (io_cancellable);
+				stop_expiry_timer ();
+				unregister_all ();
+			}
 
-				foreach (uint id in controller_registrations)
-					controller.connection.unregister_object (id);
-				foreach (uint id in node_registrations)
-					node.connection.unregister_object (id);
+			public void detach_controller () {
+				unregister_all ();
+				controller = null;
+
+				start_expiry_timer ();
+			}
+
+			public void attach_controller (ControlChannel c) {
+				stop_expiry_timer ();
+
+				assert (controller == null);
+				controller = c;
 			}
 
 			public void take_node_registration (uint id) {
@@ -1033,6 +1107,32 @@ namespace Frida {
 
 			public void take_controller_registration (uint id) {
 				controller_registrations.add (id);
+			}
+
+			private void unregister_all () {
+				foreach (uint id in controller_registrations)
+					controller.connection.unregister_object (id);
+				controller_registrations.clear ();
+
+				foreach (uint id in node_registrations)
+					node.connection.unregister_object (id);
+				node_registrations.clear ();
+			}
+
+			private void start_expiry_timer () {
+				expiry_timer = new TimeoutSource.seconds (persist_timeout + 1);
+				expiry_timer.set_callback (() => {
+					expired ();
+					return false;
+				});
+				expiry_timer.attach (MainContext.get_thread_default ());
+			}
+
+			private void stop_expiry_timer () {
+				if (expiry_timer == null)
+					return;
+				expiry_timer.destroy ();
+				expiry_timer = null;
 			}
 		}
 	}

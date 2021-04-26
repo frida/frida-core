@@ -2378,9 +2378,7 @@ namespace Frida {
 			try {
 				nice_connection = yield new DBusConnection (stream, null, 0, null, nice_cancellable);
 			} catch (GLib.Error e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw_dbus_error (e);
 			}
 			nice_connection.on_closed.connect (on_nice_connection_closed);
 
@@ -2389,9 +2387,7 @@ namespace Frida {
 				peer_session = yield nice_connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE,
 					nice_cancellable);
 			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw_dbus_error (e);
 			}
 
 			try {

@@ -321,7 +321,6 @@ namespace Frida {
 
 			var entry = new AgentSessionEntry (requester, id, opts.persist_timeout, io_cancellable);
 			sessions[id] = entry;
-
 			entry.expired.connect (on_agent_session_expired);
 
 			yield link_session (id, entry, requester, cancellable);
@@ -350,9 +349,7 @@ namespace Frida {
 				sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
 					DO_NOT_LOAD_PROPERTIES, cancellable);
 			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw_dbus_error (e);
 			}
 
 			AgentSession session;
@@ -366,9 +363,7 @@ namespace Frida {
 					session = yield internal_connection.get_proxy (null, ObjectPath.for_agent_session (id),
 						DBusProxyFlags.NONE, cancellable);
 				} catch (IOError e) {
-					if (e is IOError.CANCELLED)
-						throw (IOError) e;
-					throw new Error.TRANSPORT ("%s", e.message);
+					throw_dbus_error (e);
 				}
 
 				entry.internal_connection = internal_connection;

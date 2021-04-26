@@ -219,6 +219,7 @@ namespace Frida {
 
 		private async void open (AgentSessionId id, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
 			var opts = SessionOptions._deserialize (options.data);
+
 			if (opts.realm == EMULATED)
 				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported by frida-gadget");
 
@@ -229,12 +230,10 @@ namespace Frida {
 				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DBusProxyFlags.NONE,
 					cancellable);
 			} catch (IOError e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				throw new Error.TRANSPORT ("%s", e.message);
+				throw_dbus_error (e);
 			}
 
-			var session = new LiveAgentSession (invader, id, sink, dbus_context);
+			var session = new LiveAgentSession (invader, id, opts.persist_timeout, sink, dbus_context);
 			agent_sessions[id] = session;
 			session.closed.connect (on_session_closed);
 			session.script_eternalized.connect (on_script_eternalized);
@@ -308,11 +307,12 @@ namespace Frida {
 				set;
 			}
 
-			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, AgentMessageSink sink,
+			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, uint persist_timeout, AgentMessageSink sink,
 					MainContext dbus_context) {
 				Object (
 					invader: invader,
 					id: id,
+					persist_timeout: persist_timeout,
 					message_sink: sink,
 					frida_context: MainContext.ref_thread_default (),
 					dbus_context: dbus_context

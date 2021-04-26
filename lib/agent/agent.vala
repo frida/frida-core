@@ -570,6 +570,7 @@ namespace Frida.Agent {
 				throw new Error.INVALID_OPERATION ("Agent is unloading");
 
 			var opts = SessionOptions._deserialize (options.data);
+
 			if (opts.realm == EMULATED) {
 				AgentSessionProvider emulated_provider = yield get_emulated_provider (cancellable);
 
@@ -589,17 +590,31 @@ namespace Frida.Agent {
 
 				string path = ObjectPath.for_agent_session (id);
 
-				AgentSession emulated_session = yield emulated_connection.get_proxy (null, path, DBusProxyFlags.NONE,
-					cancellable);
+				AgentSession emulated_session;
+				try {
+					emulated_session = yield emulated_connection.get_proxy (null, path, DBusProxyFlags.NONE,
+						cancellable);
+				} catch (IOError e) {
+					throw_dbus_error (e);
+				}
 
-				var registration_id = connection.register_object (path, emulated_session);
+				uint registration_id;
+				try {
+					registration_id = connection.register_object (path, emulated_session);
+				} catch (IOError e) {
+					assert_not_reached ();
+				}
 				emulated_session_registrations[id] = registration_id;
 
 				return;
 			}
 
-			AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
-				DBusProxyFlags.NONE, null);
+			AgentMessageSink sink;
+			try {
+				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DBusProxyFlags.NONE, null);
+			} catch (IOError e) {
+				throw_dbus_error (e);
+			}
 
 			var session = new LiveAgentSession (this, id, opts.persist_timeout, sink, dbus_context);
 			sessions[id] = session;
