@@ -126,7 +126,6 @@ namespace Frida {
 
 		public abstract async AgentSession link_agent_session (HostSession host_session, AgentSessionId id, AgentMessageSink sink,
 			Cancellable? cancellable = null) throws Error, IOError;
-		// public abstract void unlink_agent_session (HostSession host_session, AgentSessionId id);
 		public signal void agent_session_detached (AgentSessionId id, SessionDetachReason reason, CrashInfo crash);
 	}
 
