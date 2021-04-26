@@ -63,12 +63,10 @@ namespace Frida {
 		public abstract async void eternalize_script (AgentScriptId script_id, Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post_to_script (AgentScriptId script_id, string message, bool has_data, uint8[] data,
 			Cancellable? cancellable) throws GLib.Error;
-		public signal void message_from_script (AgentScriptId script_id, string message, bool has_data, uint8[] data); // TODO: Remove
 
 		public abstract async void enable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void disable_debugger (Cancellable? cancellable) throws GLib.Error;
 		public abstract async void post_message_to_debugger (string message, Cancellable? cancellable) throws GLib.Error;
-		public signal void message_from_debugger (string message); // TODO: Remove
 
 		public abstract async PortalMembershipId join_portal (string address, AgentPortalOptions options,
 			Cancellable? cancellable) throws GLib.Error;

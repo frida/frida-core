@@ -943,7 +943,7 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
@@ -1175,7 +1175,7 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						run_spawn_scenario.callback ();
@@ -1578,7 +1578,7 @@ namespace Frida.HostSessionTest {
 
 					string received_message = null;
 					bool waiting = false;
-					var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+					var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 						received_message = message;
 						if (waiting)
 							cross_arch.callback ();
@@ -2388,7 +2388,7 @@ namespace Frida.HostSessionTest {
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					if (waiting)
 						spawn.callback ();
@@ -2653,7 +2653,7 @@ namespace Frida.HostSessionTest {
 				var session_id = yield host_session.attach (process.pid, AgentSessionOptions (), cancellable);
 				var session = yield prov.link_agent_session (host_session, session_id, h, cancellable);
 				string received_message = null;
-				var message_handler = session.message_from_script.connect ((script_id, message, data) => {
+				var message_handler = h.message_from_script.connect ((script_id, message, data) => {
 					received_message = message;
 					large_messages.callback ();
 				});
