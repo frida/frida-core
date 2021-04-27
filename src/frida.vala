@@ -33,10 +33,6 @@ namespace Frida {
 		private Gee.ArrayList<Device> devices = new Gee.ArrayList<Device> ();
 		private Gee.ArrayList<DeviceObserverEntry> on_device_added = new Gee.ArrayList<DeviceObserverEntry> ();
 
-#if HAVE_NICE
-		private MainContext? cached_dbus_context;
-#endif
-
 		private Cancellable io_cancellable = new Cancellable ();
 
 		public async void close (Cancellable? cancellable = null) throws IOError {
@@ -374,55 +370,6 @@ namespace Frida {
 			if (started)
 				changed ();
 		}
-
-#if HAVE_NICE
-		internal async MainContext get_dbus_context (Cancellable? cancellable) throws IOError {
-			if (cached_dbus_context != null)
-				return cached_dbus_context;
-
-			IOStream local_stream, remote_stream;
-			try {
-				var transport = new PipeTransport ();
-				Future<IOStream> local_request = Pipe.open (transport.local_address, cancellable);
-				Future<IOStream> remote_request = Pipe.open (transport.remote_address, cancellable);
-
-				local_stream = yield local_request.wait_async (cancellable);
-				remote_stream = yield remote_request.wait_async (cancellable);
-			} catch (Error e) {
-				assert_not_reached ();
-			}
-
-			var io_cancellable = new Cancellable ();
-
-			MainContext dbus_context;
-			try {
-				var connection = yield new DBusConnection (local_stream, null, 0, null, cancellable);
-
-				Promise<MainContext> request = detect_dbus_context (connection, cancellable);
-
-				do_get_proxy.begin (connection, io_cancellable);
-
-				dbus_context = yield request.future.wait_async (cancellable);
-
-				io_cancellable.cancel ();
-
-				yield connection.close (cancellable);
-				yield remote_stream.close_async (Priority.DEFAULT, cancellable);
-			} catch (GLib.Error e) {
-				if (e is IOError.CANCELLED)
-					throw (IOError) e;
-				assert_not_reached ();
-			}
-
-			cached_dbus_context = dbus_context;
-
-			return dbus_context;
-		}
-
-		private async HostSession do_get_proxy (DBusConnection connection, Cancellable cancellable) throws IOError {
-			return yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
-		}
-#endif
 
 		private void check_open () throws Error {
 			if (stop_request != null)
@@ -2275,7 +2222,7 @@ namespace Frida {
 
 			AgentSession server_session = active_session;
 
-			dbus_context = yield device.manager.get_dbus_context (cancellable);
+			dbus_context = yield get_dbus_context ();
 
 			var agent = new Nice.Agent.full (dbus_context, Nice.Compatibility.RFC5245, RELIABLE | ICE_TRICKLE);
 			agent.controlling_mode = true;

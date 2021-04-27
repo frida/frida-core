@@ -1540,13 +1540,11 @@ namespace Frida.Gadget {
 			var connection = yield new DBusConnection (stream, guid, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
-			Promise<MainContext> dbus_context_request = detect_dbus_context (connection, io_cancellable);
-
 			Peer peer;
 			if (auth_service != null)
-				peer = new AuthenticationChannel (this, connection, dbus_context_request);
+				peer = new AuthenticationChannel (this, connection);
 			else
-				peer = setup_control_channel (connection, dbus_context_request);
+				peer = setup_control_channel (connection);
 			peers[connection] = peer;
 
 			connection.start_message_processing ();
@@ -1564,7 +1562,7 @@ namespace Frida.Gadget {
 			peers.unset (connection);
 			yield channel.close (io_cancellable);
 
-			peers[connection] = setup_control_channel (connection, channel.dbus_context_request);
+			peers[connection] = setup_control_channel (connection);
 		}
 
 		private void kick_authentication_channel (AuthenticationChannel channel) {
@@ -1574,9 +1572,8 @@ namespace Frida.Gadget {
 			});
 		}
 
-		private ControlChannel setup_control_channel (DBusConnection connection,
-				Promise<MainContext> dbus_context_request) throws IOError {
-			var channel = new ControlChannel (this, connection, dbus_context_request);
+		private ControlChannel setup_control_channel (DBusConnection connection) throws IOError {
+			var channel = new ControlChannel (this, connection);
 			channel.script_eternalized.connect (on_script_eternalized);
 			return channel;
 		}
@@ -1606,20 +1603,10 @@ namespace Frida.Gadget {
 				construct;
 			}
 
-			public Promise<MainContext> dbus_context_request {
-				get;
-				construct;
-			}
-
 			private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 
-			public AuthenticationChannel (ControlServer parent, DBusConnection connection,
-					Promise<MainContext> dbus_context_request) {
-				Object (
-					parent: parent,
-					connection: connection,
-					dbus_context_request: dbus_context_request
-				);
+			public AuthenticationChannel (ControlServer parent, DBusConnection connection) {
+				Object (parent: parent, connection: connection);
 			}
 
 			construct {
@@ -1669,23 +1656,14 @@ namespace Frida.Gadget {
 				construct;
 			}
 
-			public Promise<MainContext> dbus_context_request {
-				get;
-				construct;
-			}
-
 			private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
 			private Gee.HashSet<LiveAgentSession> sessions = new Gee.HashSet<LiveAgentSession> ();
 			private bool resume_on_attach = true;
 
-			public ControlChannel (ControlServer parent, DBusConnection connection, Promise<MainContext> dbus_context_request) {
-				Object (
-					parent: parent,
-					connection: connection,
-					dbus_context_request: dbus_context_request
-				);
+			public ControlChannel (ControlServer parent, DBusConnection connection) {
+				Object (parent: parent, connection: connection);
 			}
 
 			construct {
@@ -1796,10 +1774,10 @@ namespace Frida.Gadget {
 
 				var id = AgentSessionId.generate ();
 
-				MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
-
 				AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
 					DO_NOT_LOAD_PROPERTIES, cancellable);
+
+				MainContext dbus_context = yield get_dbus_context ();
 
 				var session = new LiveAgentSession (parent, id, sink, dbus_context);
 				sessions.add (session);

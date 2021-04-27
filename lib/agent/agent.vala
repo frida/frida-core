@@ -44,7 +44,6 @@ namespace Frida.Agent {
 		private Thread<bool> agent_gthread;
 
 		private MainContext main_context;
-		private MainContext? dbus_context;
 		private MainLoop main_loop;
 		private DBusConnection connection;
 		private AgentController controller;
@@ -617,6 +616,8 @@ namespace Frida.Agent {
 				throw_dbus_error (e);
 			}
 
+			MainContext dbus_context = yield get_dbus_context ();
+
 			var session = new LiveAgentSession (this, id, opts.persist_timeout, sink, dbus_context);
 			sessions[id] = session;
 			session.closed.connect (on_session_closed);
@@ -968,8 +969,6 @@ namespace Frida.Agent {
 				return;
 			}
 
-			Promise<MainContext> dbus_context_request = detect_dbus_context (connection);
-
 			connection.on_closed.connect (on_connection_closed);
 			filter_id = connection.add_filter (on_connection_message);
 
@@ -977,11 +976,9 @@ namespace Frida.Agent {
 				AgentSessionProvider provider = this;
 				registration_id = connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider);
 
-				connection.start_message_processing ();
-
 				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DO_NOT_LOAD_PROPERTIES, null);
 
-				dbus_context = yield dbus_context_request.future.wait_async (null);
+				connection.start_message_processing ();
 			} catch (GLib.Error e) {
 				assert_not_reached ();
 			}

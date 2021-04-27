@@ -29,7 +29,6 @@ namespace Frida {
 		}
 
 		private DBusConnection? connection;
-		private Promise<MainContext>? dbus_context_request;
 		private SourceFunc? on_connection_event;
 		private TimeoutSource? reconnect_timer;
 		private Promise<bool> stopped = new Promise<bool> ();
@@ -166,8 +165,6 @@ namespace Frida {
 			connection = yield new DBusConnection (stream, null, DELAY_MESSAGE_PROCESSING, null, io_cancellable);
 			connection.on_closed.connect (on_connection_closed);
 
-			dbus_context_request = detect_dbus_context (connection, io_cancellable);
-
 			AgentSessionProvider provider = this;
 			registrations.add (connection.register_object (ObjectPath.AGENT_SESSION_PROVIDER, provider));
 
@@ -257,8 +254,6 @@ namespace Frida {
 			if (opts.realm == EMULATED)
 				throw new Error.NOT_SUPPORTED ("Emulated realm is not supported by frida-gadget");
 
-			MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
-
 			AgentMessageSink sink;
 			try {
 				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DO_NOT_LOAD_PROPERTIES,
@@ -266,6 +261,8 @@ namespace Frida {
 			} catch (IOError e) {
 				throw_dbus_error (e);
 			}
+
+			MainContext dbus_context = yield get_dbus_context ();
 
 			LiveAgentSession? session = agent_sessions[id];
 			if (session != null)

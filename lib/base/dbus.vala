@@ -1,42 +1,89 @@
 namespace Frida {
 	// We need to tease out GDBus' private MainContext as libnice needs to know the MainContext up front :(
-	public Promise<MainContext> detect_dbus_context (DBusConnection connection, Cancellable? cancellable = null) {
-		var promise = new Promise<MainContext> ();
-
-		var caller_context = MainContext.ref_thread_default ();
-		uint filter_id = 0;
-		int filter_calls = 0;
-		CancellableSource cancel_source = null;
-
-		filter_id = connection.add_filter ((connection, message, incoming) => {
-			MainContext dbus_context = MainContext.ref_thread_default ();
-
-			if (AtomicInt.add (ref filter_calls, 1) == 0) {
-				var idle_source = new IdleSource ();
-				idle_source.set_callback (() => {
-					if (!promise.future.ready) {
-						connection.remove_filter (filter_id);
-						cancel_source.destroy ();
-						promise.resolve (dbus_context);
-					}
-					return false;
-				});
-				idle_source.attach (caller_context);
+	public async MainContext get_dbus_context () {
+		if (get_context_request != null) {
+			try {
+				return yield get_context_request.future.wait_async (null);
+			} catch (GLib.Error e) {
+				assert_not_reached ();
 			}
+		}
+		get_context_request = new Promise<MainContext> ();
 
-			return message;
-		});
+		MainContext dbus_context;
+		try {
+			var input = new DummyInputStream ();
+			var output = new MemoryOutputStream (null);
+			var stream = new SimpleIOStream (input, output);
 
-		cancel_source = new CancellableSource (cancellable);
-		cancel_source.set_callback (() => {
-			if (!promise.future.ready) {
-				connection.remove_filter (filter_id);
-				promise.reject (new IOError.CANCELLED ("Cancelled"));
-			}
-			return false;
-		});
-		cancel_source.attach (caller_context);
+			var connection = yield new DBusConnection (stream, null, 0, null, null);
 
-		return promise;
+			var caller_context = MainContext.ref_thread_default ();
+			int filter_calls = 0;
+
+			uint filter_id = connection.add_filter ((connection, message, incoming) => {
+				MainContext ctx = MainContext.ref_thread_default ();
+
+				if (AtomicInt.add (ref filter_calls, 1) == 0) {
+					var idle_source = new IdleSource ();
+					idle_source.set_callback (() => {
+						get_context_request.resolve (ctx);
+						return false;
+					});
+					idle_source.attach (caller_context);
+				}
+
+				return message;
+			});
+
+
+			var io_cancellable = new Cancellable ();
+			do_get_proxy.begin (connection, io_cancellable);
+
+			dbus_context = yield get_context_request.future.wait_async (null);
+
+			connection.remove_filter (filter_id);
+
+			io_cancellable.cancel ();
+
+			input.unblock ();
+
+			yield connection.close ();
+		} catch (GLib.Error e) {
+			assert_not_reached ();
+		}
+
+		return dbus_context;
+	}
+
+	private Promise<MainContext> get_context_request;
+
+	private async HostSession do_get_proxy (DBusConnection connection, Cancellable cancellable) throws IOError {
+		return yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
+	}
+
+	private class DummyInputStream : InputStream {
+		private bool done = false;
+		private Mutex mutex;
+		private Cond cond;
+
+		public void unblock () {
+			mutex.lock ();
+			done = true;
+			cond.signal ();
+			mutex.unlock ();
+		}
+
+		public override bool close (Cancellable? cancellable) throws GLib.IOError {
+			return true;
+		}
+
+		public override ssize_t read (uint8[] buffer, GLib.Cancellable? cancellable) throws GLib.IOError {
+			mutex.lock ();
+			while (!done)
+				cond.wait (mutex);
+			mutex.unlock ();
+			return 0;
+		}
 	}
 }
