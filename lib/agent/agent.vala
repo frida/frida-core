@@ -592,7 +592,7 @@ namespace Frida.Agent {
 
 				AgentSession emulated_session;
 				try {
-					emulated_session = yield emulated_connection.get_proxy (null, path, DBusProxyFlags.NONE,
+					emulated_session = yield emulated_connection.get_proxy (null, path, DO_NOT_LOAD_PROPERTIES,
 						cancellable);
 				} catch (IOError e) {
 					throw_dbus_error (e);
@@ -611,7 +611,8 @@ namespace Frida.Agent {
 
 			AgentMessageSink sink;
 			try {
-				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DBusProxyFlags.NONE, null);
+				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DO_NOT_LOAD_PROPERTIES,
+					cancellable);
 			} catch (IOError e) {
 				throw_dbus_error (e);
 			}
@@ -978,7 +979,7 @@ namespace Frida.Agent {
 
 				connection.start_message_processing ();
 
-				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DBusProxyFlags.NONE, null);
+				controller = yield connection.get_proxy (null, ObjectPath.AGENT_CONTROLLER, DO_NOT_LOAD_PROPERTIES, null);
 
 				dbus_context = yield dbus_context_request.future.wait_async (null);
 			} catch (GLib.Error e) {
@@ -1214,7 +1215,7 @@ namespace Frida.Agent {
 					DBusConnectionFlags.NONE, null, cancellable);
 
 				AgentSessionProvider provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
-					DBusProxyFlags.NONE, cancellable);
+					DO_NOT_LOAD_PROPERTIES, cancellable);
 
 				cached_emulated_provider = provider;
 				provider.opened.connect (on_emulated_session_opened);

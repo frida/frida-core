@@ -363,8 +363,8 @@ namespace Frida {
 
 			connection.start_message_processing ();
 
-			node.session_provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
-				DBusProxyFlags.NONE, io_cancellable);
+			node.session_provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
+				io_cancellable);
 
 			return node;
 		}
@@ -529,7 +529,7 @@ namespace Frida {
 			if (session == null) {
 				try {
 					session = yield node_connection.get_proxy (null, ObjectPath.for_agent_session (id),
-						DBusProxyFlags.NONE, cancellable);
+						DO_NOT_LOAD_PROPERTIES, cancellable);
 				} catch (IOError e) {
 					throw_dbus_error (e);
 				}
@@ -541,7 +541,7 @@ namespace Frida {
 				AgentMessageSink sink;
 				try {
 					sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
-						DBusProxyFlags.NONE, null);
+						DO_NOT_LOAD_PROPERTIES, cancellable);
 				} catch (IOError e) {
 					throw_dbus_error (e);
 				}

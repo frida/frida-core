@@ -485,7 +485,7 @@ namespace Frida {
 				nice_connection.start_message_processing ();
 
 				nice_message_sink = yield nice_connection.get_proxy (null, ObjectPath.AGENT_MESSAGE_SINK,
-					DBusProxyFlags.NONE, null);
+					DO_NOT_LOAD_PROPERTIES, null);
 			} catch (GLib.Error e) {
 				close_nice_resources.begin ();
 			}

@@ -1255,7 +1255,7 @@ namespace Frida {
 
 			BusSession session;
 			try {
-				session = yield proxy.g_connection.get_proxy (null, ObjectPath.BUS_SESSION, DBusProxyFlags.NONE,
+				session = yield proxy.g_connection.get_proxy (null, ObjectPath.BUS_SESSION, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 			} catch (IOError e) {
 				throw_dbus_error (e);
@@ -2384,7 +2384,7 @@ namespace Frida {
 
 			AgentSession peer_session;
 			try {
-				peer_session = yield nice_connection.get_proxy (null, ObjectPath.AGENT_SESSION, DBusProxyFlags.NONE,
+				peer_session = yield nice_connection.get_proxy (null, ObjectPath.AGENT_SESSION, DO_NOT_LOAD_PROPERTIES,
 					nice_cancellable);
 			} catch (IOError e) {
 				throw_dbus_error (e);

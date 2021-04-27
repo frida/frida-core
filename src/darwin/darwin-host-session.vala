@@ -198,7 +198,8 @@ namespace Frida {
 				conn = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, DBusConnectionFlags.NONE, null,
 					cancellable);
 
-				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE, cancellable);
+				provider = yield conn.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}

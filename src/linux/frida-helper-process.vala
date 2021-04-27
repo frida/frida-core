@@ -361,7 +361,7 @@ namespace Frida {
 				timeout_source = null;
 
 				if (pending_error == null) {
-					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
+					pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 						cancellable);
 				}
 			} catch (GLib.Error e) {

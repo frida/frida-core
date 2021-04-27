@@ -361,7 +361,7 @@ namespace Frida {
 
 				try {
 					session = yield internal_connection.get_proxy (null, ObjectPath.for_agent_session (id),
-						DBusProxyFlags.NONE, cancellable);
+						DO_NOT_LOAD_PROPERTIES, cancellable);
 				} catch (IOError e) {
 					throw_dbus_error (e);
 				}

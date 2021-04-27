@@ -295,7 +295,7 @@ namespace Frida {
 				yield handshake_port.exchange (pending_pid, out pending_task_port, out stream);
 
 				pending_connection = yield new DBusConnection (stream, null, NONE, null, cancellable);
-				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
+				pending_proxy = yield pending_connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 			} catch (GLib.Error e) {
 				if (e is Error.PROCESS_NOT_FOUND || e is IOError.CANCELLED)

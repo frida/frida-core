@@ -525,7 +525,7 @@ namespace Frida {
 				var connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
 				HostSession host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION,
-					DBusProxyFlags.NONE, cancellable);
+					DO_NOT_LOAD_PROPERTIES, cancellable);
 
 				AgentSessionId remote_session_id;
 				try {
@@ -587,7 +587,7 @@ namespace Frida {
 			AgentSessionId remote_id = entry.remote_session_id;
 
 			AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (remote_id),
-				DBusProxyFlags.NONE, cancellable);
+				DO_NOT_LOAD_PROPERTIES, cancellable);
 
 			entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (remote_id), sink);
 
@@ -664,7 +664,7 @@ namespace Frida {
 
 				connection = yield new DBusConnection (stream, null, DBusConnectionFlags.NONE, null, cancellable);
 
-				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE,
+				HostSession session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 
 				RemoteServer.Flavor flavor = REGULAR;
@@ -678,7 +678,7 @@ namespace Frida {
 				TransportBroker? transport_broker = null;
 				if (flavor == REGULAR) {
 					transport_broker = yield connection.get_proxy (null, ObjectPath.TRANSPORT_BROKER,
-						DBusProxyFlags.NONE, cancellable);
+						DO_NOT_LOAD_PROPERTIES, cancellable);
 				}
 
 				if (connection.closed)

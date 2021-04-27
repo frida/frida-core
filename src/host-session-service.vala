@@ -398,7 +398,7 @@ namespace Frida {
 						connection.start_message_processing ();
 
 						provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER,
-							DBusProxyFlags.NONE, io_cancellable);
+							DO_NOT_LOAD_PROPERTIES, io_cancellable);
 					} catch (GLib.Error e) {
 						if (e is IOError.CANCELLED)
 							throw e;
@@ -465,7 +465,7 @@ namespace Frida {
 
 			AgentSession session;
 			try {
-				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DBusProxyFlags.NONE,
+				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id), DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 			} catch (IOError e) {
 				throw_dbus_error (e);
@@ -729,7 +729,7 @@ namespace Frida {
 
 			AgentSessionProvider provider;
 			try {
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 			} catch (GLib.Error e) {
 				agent_entries.unset (pid);

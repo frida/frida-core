@@ -118,7 +118,7 @@ namespace Frida {
 				AuthenticationService auth_service;
 				try {
 					auth_service = yield connection.get_proxy (null, ObjectPath.AUTHENTICATION_SERVICE,
-						DBusProxyFlags.NONE, cancellable);
+						DO_NOT_LOAD_PROPERTIES, cancellable);
 				} catch (IOError e) {
 					throw new Error.PROTOCOL ("Incompatible frida-server version");
 				}
@@ -132,7 +132,8 @@ namespace Frida {
 
 			HostSession host_session;
 			try {
-				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DBusProxyFlags.NONE, cancellable);
+				host_session = yield connection.get_proxy (null, ObjectPath.HOST_SESSION, DO_NOT_LOAD_PROPERTIES,
+					cancellable);
 			} catch (IOError e) {
 				throw new Error.PROTOCOL ("Incompatible frida-server version");
 			}
@@ -244,7 +245,7 @@ namespace Frida {
 				agent_sessions[id] = entry;
 
 				AgentSession session = yield connection.get_proxy (null, ObjectPath.for_agent_session (id),
-					DBusProxyFlags.NONE, cancellable);
+					DO_NOT_LOAD_PROPERTIES, cancellable);
 
 				entry.sink_registration_id = connection.register_object (ObjectPath.for_agent_message_sink (id), sink);
 

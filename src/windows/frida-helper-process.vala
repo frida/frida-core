@@ -282,8 +282,7 @@ namespace Frida {
 			}
 
 			try {
-				proxy = yield connection.get_proxy (null, ObjectPath.HELPER, DBusProxyFlags.NONE,
-					cancellable);
+				proxy = yield connection.get_proxy (null, ObjectPath.HELPER, DO_NOT_LOAD_PROPERTIES, cancellable);
 			} catch (IOError e) {
 				throw new Error.PROTOCOL ("%s", e.message);
 			}

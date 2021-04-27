@@ -175,11 +175,12 @@ namespace Frida {
 
 			if (token != null) {
 				AuthenticationService auth_service = yield connection.get_proxy (null, ObjectPath.AUTHENTICATION_SERVICE,
-					DBusProxyFlags.NONE, io_cancellable);
+					DO_NOT_LOAD_PROPERTIES, io_cancellable);
 				yield auth_service.authenticate (token, io_cancellable);
 			}
 
-			portal_session = yield connection.get_proxy (null, ObjectPath.PORTAL_SESSION, DBusProxyFlags.NONE, io_cancellable);
+			portal_session = yield connection.get_proxy (null, ObjectPath.PORTAL_SESSION, DO_NOT_LOAD_PROPERTIES,
+				io_cancellable);
 			portal_session.resume.connect (on_resume);
 			portal_session.kill.connect (on_kill);
 
@@ -195,7 +196,7 @@ namespace Frida {
 
 				try {
 					session.message_sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
-						DBusProxyFlags.NONE, io_cancellable);
+						DO_NOT_LOAD_PROPERTIES, io_cancellable);
 				} catch (IOError e) {
 					throw_dbus_error (e);
 				}
@@ -260,7 +261,7 @@ namespace Frida {
 
 			AgentMessageSink sink;
 			try {
-				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DBusProxyFlags.NONE,
+				sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id), DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 			} catch (IOError e) {
 				throw_dbus_error (e);

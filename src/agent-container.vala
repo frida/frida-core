@@ -39,7 +39,7 @@ namespace Frida {
 				connection = yield new DBusConnection (stream, ServerGuid.HOST_SESSION_SERVICE, DBusConnectionFlags.NONE,
 					null, cancellable);
 
-				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
+				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DO_NOT_LOAD_PROPERTIES,
 					cancellable);
 				provider.opened.connect (container.on_session_opened);
 				provider.closed.connect (container.on_session_closed);
