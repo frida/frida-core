@@ -573,6 +573,7 @@ namespace Frida {
 				if (entry.node != null)
 					throw new Error.PROTOCOL ("Session already claimed");
 				entry.attach_node (node);
+				node.sessions.add (id);
 			}
 
 			uint pid = app.pid;
@@ -1112,8 +1113,9 @@ namespace Frida {
 
 			public void detach_node_and_controller () {
 				unregister_all ();
-				node = null;
+				session = null;
 				controller = null;
+				node = null;
 
 				start_expiry_timer ();
 			}
