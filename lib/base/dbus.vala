@@ -14,9 +14,7 @@ namespace Frida {
 		try {
 			var input = new DummyInputStream ();
 			var output = new MemoryOutputStream (null);
-			var stream = new SimpleIOStream (input, output);
-
-			var connection = yield new DBusConnection (stream, null, 0, null, null);
+			var connection = yield new DBusConnection (new SimpleIOStream (input, output), null, 0, null, null);
 
 			var caller_context = MainContext.ref_thread_default ();
 			int filter_calls = 0;
@@ -36,18 +34,14 @@ namespace Frida {
 				return message;
 			});
 
-
 			var io_cancellable = new Cancellable ();
 			do_get_proxy.begin (connection, io_cancellable);
 
 			dbus_context = yield get_context_request.future.wait_async (null);
 
-			connection.remove_filter (filter_id);
-
 			io_cancellable.cancel ();
-
+			connection.remove_filter (filter_id);
 			input.unblock ();
-
 			yield connection.close ();
 		} catch (GLib.Error e) {
 			assert_not_reached ();
