@@ -1051,7 +1051,7 @@ namespace Frida.Agent {
 		}
 
 		private void on_connection_closed (DBusConnection connection, bool remote_peer_vanished, GLib.Error? error) {
-			bool closed_by_us = (!remote_peer_vanished && error == null);
+			bool closed_by_us = !remote_peer_vanished && error == null;
 			if (!closed_by_us)
 				unload.begin (null);
 

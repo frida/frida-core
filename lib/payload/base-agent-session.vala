@@ -18,13 +18,9 @@ namespace Frida {
 			construct;
 		}
 
-		public AgentMessageSink message_sink {
-			get {
-				return active_message_sink;
-			}
-			construct {
-				active_message_sink = value;
-			}
+		public AgentMessageSink? message_sink {
+			get;
+			set;
 		}
 
 		public MainContext frida_context {
@@ -45,7 +41,6 @@ namespace Frida {
 		private TimeoutSource? expiry_timer;
 
 		private Promise<bool>? delivery_request;
-		private AgentMessageSink active_message_sink;
 		private Cancellable delivery_cancellable = new Cancellable ();
 		private Gee.Queue<AgentScriptMessage?> pending_script_messages = new Gee.ArrayQueue<AgentScriptMessage?> ();
 		private Gee.Queue<AgentDebuggerMessage?> pending_debugger_messages = new Gee.ArrayQueue<AgentDebuggerMessage?> ();
@@ -73,7 +68,6 @@ namespace Frida {
 
 		construct {
 			assert (invader != null);
-			assert (message_sink != null);
 			assert (frida_context != null);
 			assert (dbus_context != null);
 
@@ -648,8 +642,11 @@ namespace Frida {
 				AgentScriptMessage? script_msg = null;
 				AgentDebuggerMessage? debugger_msg = null;
 
-				AgentMessageSink sink = active_message_sink;
 				do {
+					AgentMessageSink? sink = message_sink;
+					if (sink == null)
+						break;
+
 					// TODO: Batch and deliver in parallel.
 
 					script_msg = pending_script_messages.peek ();

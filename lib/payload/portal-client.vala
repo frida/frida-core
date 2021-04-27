@@ -31,7 +31,7 @@ namespace Frida {
 		private DBusConnection? connection;
 		private Promise<MainContext>? dbus_context_request;
 		private SourceFunc? on_connection_event;
-		private uint reconnect_timer;
+		private TimeoutSource? reconnect_timer;
 		private Promise<bool> stopped = new Promise<bool> ();
 		private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 		private PortalSession? portal_session;
@@ -62,9 +62,9 @@ namespace Frida {
 		}
 
 		public async void stop (Cancellable? cancellable = null) throws IOError {
-			if (reconnect_timer != 0) {
-				Source.remove (reconnect_timer);
-				reconnect_timer = 0;
+			if (reconnect_timer != null) {
+				reconnect_timer.destroy ();
+				reconnect_timer = null;
 			}
 
 			io_cancellable.cancel ();
@@ -124,6 +124,7 @@ namespace Frida {
 					return false;
 				});
 				source.attach (MainContext.get_thread_default ());
+				reconnect_timer = source;
 				waiting = true;
 				yield;
 				waiting = false;
@@ -184,7 +185,31 @@ namespace Frida {
 
 			SpawnStartState current_state = invader.query_current_spawn_state ();
 			SpawnStartState next_state;
-			yield portal_session.join (app_info, current_state, io_cancellable, out next_state);
+
+			var interrupted_sessions = new AgentSessionId[0];
+			foreach (LiveAgentSession session in agent_sessions.values.to_array ()) {
+				AgentSessionId id = session.id;
+
+				assert (session.persist_timeout != 0);
+				interrupted_sessions += id;
+
+				try {
+					session.message_sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+						DBusProxyFlags.NONE, io_cancellable);
+				} catch (IOError e) {
+					throw_dbus_error (e);
+				}
+
+				assert (session.registration_id == 0);
+				try {
+					session.registration_id = connection.register_object (ObjectPath.for_agent_session (id),
+						(AgentSession) session);
+				} catch (IOError io_error) {
+					assert_not_reached ();
+				}
+			}
+
+			yield portal_session.join (app_info, current_state, interrupted_sessions, io_cancellable, out next_state);
 
 			if (next_state == RUNNING)
 				resume ();
@@ -198,7 +223,15 @@ namespace Frida {
 			if (connection == null)
 				return;
 
+			bool stopping = io_cancellable.is_cancelled ();
+
 			foreach (var session in agent_sessions.values.to_array ()) {
+				if (!stopping && session.persist_timeout != 0) {
+					unregister_session (session);
+					session.interrupt.begin (io_cancellable);
+					continue;
+				}
+
 				try {
 					yield session.close (cancellable);
 				} catch (GLib.Error e) {
@@ -233,7 +266,10 @@ namespace Frida {
 				throw_dbus_error (e);
 			}
 
-			var session = new LiveAgentSession (invader, id, opts.persist_timeout, sink, dbus_context);
+			LiveAgentSession? session = agent_sessions[id];
+			if (session != null)
+				throw new Error.INVALID_ARGUMENT ("Session already exists");
+			session = new LiveAgentSession (invader, id, opts.persist_timeout, sink, dbus_context);
 			agent_sessions[id] = session;
 			session.closed.connect (on_session_closed);
 			session.script_eternalized.connect (on_script_eternalized);

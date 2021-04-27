@@ -345,7 +345,6 @@ namespace Frida {
 					continue;
 
 				AgentSession? session = entry.session;
-
 				if (entry.persist_timeout == 0 || session == null) {
 					sessions.unset (id);
 					if (session != null)
@@ -374,13 +373,23 @@ namespace Frida {
 		private void teardown_cluster_node (ClusterNode node) {
 			var no_crash = CrashInfo.empty ();
 			foreach (var id in node.sessions) {
-				AgentSessionEntry entry;
-				if (sessions.unset (id, out entry)) {
-					ControlChannel? c = entry.controller;
-					if (c != null) {
-						c.sessions.remove (id);
+				AgentSessionEntry? entry = sessions[id];
+				if (entry == null)
+					continue;
+
+				ControlChannel? c = entry.controller;
+				if (c != null)
+					c.sessions.remove (id);
+
+				AgentSession? session = entry.session;
+				if (entry.persist_timeout == 0 || session == null) {
+					sessions.unset (id);
+					if (c != null)
 						c.agent_session_detached (id, SessionDetachReason.PROCESS_TERMINATED, no_crash);
-					}
+				} else {
+					entry.detach_node ();
+					if (c != null)
+						c.agent_session_detached (id, SessionDetachReason.CONNECTION_TERMINATED, no_crash);
 				}
 			}
 
@@ -503,6 +512,8 @@ namespace Frida {
 			AgentSessionEntry? entry = sessions[id];
 			if (entry == null || entry.controller != null)
 				throw new Error.INVALID_OPERATION ("Invalid session ID");
+			if (entry.node == null)
+				throw new Error.INVALID_OPERATION ("Cluster node is temporarily unavailable");
 
 			requester.sessions.add (id);
 
@@ -548,11 +559,21 @@ namespace Frida {
 		}
 
 		private async void handle_join_request (ClusterNode node, HostApplicationInfo app, SpawnStartState current_state,
-				Cancellable? cancellable, out SpawnStartState next_state) throws Error, IOError {
+				AgentSessionId[] interrupted_sessions, Cancellable? cancellable,
+				out SpawnStartState next_state) throws Error, IOError {
 			if (node.application != null)
 				throw new Error.PROTOCOL ("Already joined");
 			if (node.session_provider == null)
 				throw new Error.PROTOCOL ("Missing session provider");
+
+			foreach (AgentSessionId id in interrupted_sessions) {
+				AgentSessionEntry? entry = sessions[id];
+				if (entry == null)
+					continue;
+				if (entry.node != null)
+					throw new Error.PROTOCOL ("Session already claimed");
+				entry.attach_node (node);
+			}
 
 			uint pid = app.pid;
 			while (node_by_pid.has_key (pid))
@@ -996,9 +1017,11 @@ namespace Frida {
 				registrations.clear ();
 			}
 
-			public async void join (HostApplicationInfo app, SpawnStartState current_state, Cancellable? cancellable,
+			public async void join (HostApplicationInfo app, SpawnStartState current_state,
+					AgentSessionId[] interrupted_sessions, Cancellable? cancellable,
 					out SpawnStartState next_state) throws Error, IOError {
-				yield parent.handle_join_request (this, app, current_state, cancellable, out next_state);
+				yield parent.handle_join_request (this, app, current_state, interrupted_sessions, cancellable,
+					out next_state);
 			}
 
 			public async void open_session (AgentSessionId id, AgentSessionOptions options,
@@ -1038,7 +1061,7 @@ namespace Frida {
 		private class AgentSessionEntry {
 			public signal void expired ();
 
-			public ClusterNode node {
+			public ClusterNode? node {
 				get;
 				private set;
 			}
@@ -1087,6 +1110,20 @@ namespace Frida {
 				unregister_all ();
 			}
 
+			public void detach_node () {
+				unregister_all ();
+				node = null;
+
+				start_expiry_timer ();
+			}
+
+			public void attach_node (ClusterNode n) {
+				stop_expiry_timer ();
+
+				assert (node == null);
+				node = n;
+			}
+
 			public void detach_controller () {
 				unregister_all ();
 				controller = null;
@@ -1110,13 +1147,16 @@ namespace Frida {
 			}
 
 			private void unregister_all () {
-				foreach (uint id in controller_registrations)
-					controller.connection.unregister_object (id);
-				controller_registrations.clear ();
+				if (controller != null)
+					unregister_all_in (controller_registrations, controller.connection);
+				if (node != null)
+					unregister_all_in (node_registrations, node.connection);
+			}
 
-				foreach (uint id in node_registrations)
-					node.connection.unregister_object (id);
-				node_registrations.clear ();
+			private void unregister_all_in (Gee.Collection<uint> ids, DBusConnection connection) {
+				foreach (uint id in ids)
+					connection.unregister_object (id);
+				ids.clear ();
 			}
 
 			private void start_expiry_timer () {

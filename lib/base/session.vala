@@ -171,8 +171,8 @@ namespace Frida {
 
 	[DBus (name = "re.frida.PortalSession16")]
 	public interface PortalSession : Object {
-		public abstract async void join (HostApplicationInfo app, SpawnStartState current_state, Cancellable? cancellable,
-			out SpawnStartState next_state) throws GLib.Error;
+		public abstract async void join (HostApplicationInfo app, SpawnStartState current_state,
+			AgentSessionId[] interrupted_sessions, Cancellable? cancellable, out SpawnStartState next_state) throws GLib.Error;
 		public signal void resume ();
 		public signal void kill ();
 	}
@@ -284,8 +284,8 @@ namespace Frida {
 	}
 
 	public class UnauthorizedPortalSession : Object, PortalSession {
-		public async void join (HostApplicationInfo app, SpawnStartState current_state, Cancellable? cancellable,
-				out SpawnStartState next_state) throws Error, IOError {
+		public async void join (HostApplicationInfo app, SpawnStartState current_state, AgentSessionId[] interrupted_sessions,
+				Cancellable? cancellable, out SpawnStartState next_state) throws Error, IOError {
 			throw_not_authorized ();
 		}
 	}
