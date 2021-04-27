@@ -471,7 +471,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 				provider = yield connection.get_proxy (null, ObjectPath.AGENT_SESSION_PROVIDER, DBusProxyFlags.NONE,
 					cancellable);
 
-				var session_id = AgentSessionId (1);
+				var session_id = AgentSessionId.generate ();
 				yield provider.open (session_id, AgentSessionOptions (), cancellable);
 
 				session = yield connection.get_proxy (null, ObjectPath.for_agent_session (session_id), DBusProxyFlags.NONE,

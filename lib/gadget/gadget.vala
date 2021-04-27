@@ -1678,7 +1678,6 @@ namespace Frida.Gadget {
 			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
 			private Gee.HashSet<LiveAgentSession> sessions = new Gee.HashSet<LiveAgentSession> ();
-			private uint next_session_id = 1;
 			private bool resume_on_attach = true;
 
 			public ControlChannel (ControlServer parent, DBusConnection connection, Promise<MainContext> dbus_context_request) {
@@ -1795,7 +1794,7 @@ namespace Frida.Gadget {
 				if (resume_on_attach)
 					Frida.Gadget.resume ();
 
-				var id = AgentSessionId (next_session_id++);
+				var id = AgentSessionId.generate ();
 
 				MainContext dbus_context = yield dbus_context_request.future.wait_async (cancellable);
 

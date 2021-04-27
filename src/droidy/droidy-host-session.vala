@@ -197,7 +197,6 @@ namespace Frida {
 
 		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
-		private uint next_agent_session_id = 1;
 
 		private Cancellable io_cancellable = new Cancellable ();
 
@@ -535,7 +534,7 @@ namespace Frida {
 					throw_dbus_error (e);
 				}
 
-				var local_session_id = AgentSessionId (next_agent_session_id++);
+				var local_session_id = AgentSessionId.generate ();
 				var gadget_entry = new GadgetEntry (local_session_id, host_session, connection);
 				gadget_entry.detached.connect (on_gadget_entry_detached);
 				gadget_entries[local_session_id] = gadget_entry;
@@ -557,7 +556,7 @@ namespace Frida {
 			} catch (GLib.Error e) {
 				throw_dbus_error (e);
 			}
-			var local_session_id = AgentSessionId (next_agent_session_id++);
+			var local_session_id = AgentSessionId.generate ();
 
 			var entry = new AgentSessionEntry (remote_session_id, server.connection);
 

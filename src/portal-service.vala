@@ -43,7 +43,6 @@ namespace Frida {
 		private Gee.Map<uint, PendingSpawn> pending_spawn = new Gee.HashMap<uint, PendingSpawn> ();
 		private Gee.Map<AgentSessionId?, AgentSessionEntry> sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
-		private uint next_agent_session_id = 1;
 
 		private Cancellable io_cancellable;
 
@@ -491,7 +490,7 @@ namespace Frida {
 			if (node == null)
 				throw new Error.PROCESS_NOT_FOUND ("Unable to find process with pid %u", pid);
 
-			var id = AgentSessionId (next_agent_session_id++);
+			var id = AgentSessionId.generate ();
 
 			yield node.open_session (id, options, cancellable);
 

@@ -881,17 +881,21 @@ namespace Frida {
 	}
 
 	public struct AgentSessionId {
-		public uint handle {
+		public string handle {
 			get;
 			private set;
 		}
 
-		public AgentSessionId (uint handle) {
+		public AgentSessionId (string handle) {
 			this.handle = handle;
 		}
 
+		public AgentSessionId.generate () {
+			this.handle = Uuid.string_random ().replace ("-", "");
+		}
+
 		public static uint hash (AgentSessionId? id) {
-			return direct_hash ((void *) id.handle);
+			return id.handle.hash ();
 		}
 
 		public static bool equal (AgentSessionId? a, AgentSessionId? b) {
@@ -1196,11 +1200,11 @@ namespace Frida {
 		public const string AUTHENTICATION_SERVICE = "/re/frida/AuthenticationService";
 
 		public static string for_agent_session (AgentSessionId id) {
-			return "%s/%u".printf (AGENT_SESSION, id.handle);
+			return AGENT_SESSION + "/" + id.handle;
 		}
 
 		public static string for_agent_message_sink (AgentSessionId id) {
-			return "%s/%u".printf (AGENT_MESSAGE_SINK, id.handle);
+			return AGENT_MESSAGE_SINK + "/" + id.handle;
 		}
 	}
 

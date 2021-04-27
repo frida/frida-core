@@ -162,7 +162,6 @@ namespace Frida {
 
 		private Gee.HashMap<AgentSessionId?, AgentSessionEntry> agent_sessions =
 			new Gee.HashMap<AgentSessionId?, AgentSessionEntry> (AgentSessionId.hash, AgentSessionId.equal);
-		private uint next_agent_session_id = 1;
 
 		private Gee.HashMap<HostChildId?, ChildEntry> child_entries =
 			new Gee.HashMap<HostChildId?, ChildEntry> (HostChildId.hash, HostChildId.equal);
@@ -325,7 +324,7 @@ namespace Frida {
 		public async AgentSessionId attach (uint pid, AgentSessionOptions options, Cancellable? cancellable) throws Error, IOError {
 			var entry = yield establish (pid, cancellable);
 
-			var id = AgentSessionId (next_agent_session_id++);
+			var id = AgentSessionId.generate ();
 			entry.sessions.add (id);
 
 			try {
