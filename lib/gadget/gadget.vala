@@ -1408,6 +1408,8 @@ namespace Frida.Gadget {
 		private string guid = DBus.generate_guid ();
 		private Gee.Map<DBusConnection, Peer> peers = new Gee.HashMap<DBusConnection, Peer> ();
 
+		private Gee.Map<AgentSessionId?, LiveAgentSession> sessions =
+			new Gee.HashMap<AgentSessionId?, LiveAgentSession> (AgentSessionId.hash, AgentSessionId.equal);
 		private Gee.ArrayList<Gum.Script> eternalized_scripts = new Gee.ArrayList<Gum.Script> ();
 
 		private Cancellable io_cancellable = new Cancellable ();
@@ -1483,8 +1485,8 @@ namespace Frida.Gadget {
 		}
 
 		protected override async void on_terminate (TerminationReason reason) {
-			foreach (var peer in peers.values.to_array ())
-				yield peer.prepare_for_termination (reason);
+			foreach (LiveAgentSession session in sessions.values.to_array ())
+				yield session.prepare_for_termination (reason);
 
 			foreach (var connection in peers.keys.to_array ()) {
 				try {
@@ -1573,13 +1575,124 @@ namespace Frida.Gadget {
 		}
 
 		private ControlChannel setup_control_channel (DBusConnection connection) throws IOError {
-			var channel = new ControlChannel (this, connection);
-			channel.script_eternalized.connect (on_script_eternalized);
-			return channel;
+			return new ControlChannel (this, connection);
 		}
 
 		private void teardown_control_channel (ControlChannel channel) {
-			channel.script_eternalized.disconnect (on_script_eternalized);
+			foreach (AgentSessionId id in channel.sessions) {
+				LiveAgentSession session = sessions[id];
+
+				unregister_session (session);
+
+				if (session.persist_timeout == 0) {
+					sessions.unset (id);
+					session.close.begin (io_cancellable);
+				} else {
+					session.controller = null;
+					session.message_sink = null;
+					session.interrupt.begin (io_cancellable);
+				}
+			}
+		}
+
+		private async AgentSessionId attach (AgentSessionOptions options, ControlChannel requester,
+				Cancellable? cancellable) throws Error, IOError {
+			var opts = SessionOptions._deserialize (options.data);
+			if (opts.realm != NATIVE)
+				throw new Error.NOT_SUPPORTED ("Only native realm is supported when embedded");
+
+			var id = AgentSessionId.generate ();
+
+			DBusConnection controller_connection = requester.connection;
+
+			AgentMessageSink sink;
+			try {
+				sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+					DO_NOT_LOAD_PROPERTIES, cancellable);
+			} catch (IOError e) {
+				throw_dbus_error (e);
+			}
+
+			MainContext dbus_context = yield get_dbus_context ();
+
+			var session = new LiveAgentSession (this, id, opts.persist_timeout, sink, dbus_context);
+			sessions[id] = session;
+			session.closed.connect (on_session_closed);
+			session.script_eternalized.connect (on_script_eternalized);
+
+			try {
+				session.registration_id = controller_connection.register_object (ObjectPath.for_agent_session (id),
+					(AgentSession) session);
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+
+			// Ensure DBusConnection gets the signal first, as we will unregister the object right after.
+			session.migrated.connect (on_session_migrated);
+
+			session.controller = requester;
+
+			requester.sessions.add (id);
+
+			return id;
+		}
+
+		private async void reattach (AgentSessionId id, ControlChannel requester, Cancellable? cancellable) throws Error, IOError {
+			LiveAgentSession? session = sessions[id];
+			if (session == null || session.controller != null)
+				throw new Error.INVALID_OPERATION ("Invalid session ID");
+
+			DBusConnection controller_connection = requester.connection;
+
+			try {
+				session.message_sink = yield controller_connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
+					DO_NOT_LOAD_PROPERTIES, cancellable);
+			} catch (IOError e) {
+				throw_dbus_error (e);
+			}
+
+			assert (session.registration_id == 0);
+			try {
+				session.registration_id = controller_connection.register_object (ObjectPath.for_agent_session (id),
+					(AgentSession) session);
+			} catch (IOError io_error) {
+				assert_not_reached ();
+			}
+
+			session.controller = requester;
+
+			requester.sessions.add (id);
+		}
+
+		private void on_session_closed (BaseAgentSession base_session) {
+			LiveAgentSession session = (LiveAgentSession) base_session;
+			AgentSessionId id = session.id;
+
+			session.migrated.disconnect (on_session_migrated);
+			session.script_eternalized.disconnect (on_script_eternalized);
+			session.closed.disconnect (on_session_closed);
+			sessions.unset (id);
+
+			ControlChannel? controller = session.controller;
+			if (controller != null) {
+				unregister_session (session);
+				controller.sessions.remove (id);
+				controller.agent_session_detached (id, APPLICATION_REQUESTED, CrashInfo.empty ());
+			}
+		}
+
+		private void on_session_migrated (AgentSession abstract_session) {
+			LiveAgentSession session = (LiveAgentSession) abstract_session;
+
+			unregister_session (session);
+		}
+
+		private void unregister_session (LiveAgentSession session) {
+			var id = session.registration_id;
+			if (id != 0) {
+				session.controller.connection.unregister_object (id);
+				session.registration_id = 0;
+			}
 		}
 
 		private void on_script_eternalized (Gum.Script script) {
@@ -1589,7 +1702,6 @@ namespace Frida.Gadget {
 
 		private interface Peer : Object {
 			public abstract async void close (Cancellable? cancellable = null) throws IOError;
-			public abstract async void prepare_for_termination (TerminationReason reason);
 		}
 
 		private class AuthenticationChannel : Object, Peer, AuthenticationService {
@@ -1627,9 +1739,6 @@ namespace Frida.Gadget {
 				registrations.clear ();
 			}
 
-			public async void prepare_for_termination (TerminationReason reason) {
-			}
-
 			public async string authenticate (string token, Cancellable? cancellable) throws GLib.Error {
 				try {
 					string session_info = yield parent.auth_service.authenticate (token, cancellable);
@@ -1644,8 +1753,6 @@ namespace Frida.Gadget {
 		}
 
 		private class ControlChannel : Object, Peer, HostSession {
-			public signal void script_eternalized (Gum.Script script);
-
 			public weak ControlServer parent {
 				get;
 				construct;
@@ -1656,10 +1763,14 @@ namespace Frida.Gadget {
 				construct;
 			}
 
+			public Gee.Set<AgentSessionId?> sessions {
+				get;
+				default = new Gee.HashSet<AgentSessionId?> (AgentSessionId.hash, AgentSessionId.equal);
+			}
+
 			private Gee.Collection<uint> registrations = new Gee.ArrayList<uint> ();
 			private HostApplicationInfo this_app;
 			private HostProcessInfo this_process;
-			private Gee.HashSet<LiveAgentSession> sessions = new Gee.HashSet<LiveAgentSession> ();
 			private bool resume_on_attach = true;
 
 			public ControlChannel (ControlServer parent, DBusConnection connection) {
@@ -1686,26 +1797,11 @@ namespace Frida.Gadget {
 			}
 
 			public async void close (Cancellable? cancellable) throws IOError {
-				foreach (var session in sessions.to_array ()) {
-					try {
-						yield session.close (cancellable);
-					} catch (GLib.Error e) {
-						assert (e is IOError.CANCELLED);
-						throw (IOError) e;
-					}
-				}
-				assert (sessions.is_empty);
+				parent.teardown_control_channel (this);
 
 				foreach (var id in registrations)
 					connection.unregister_object (id);
 				registrations.clear ();
-
-				parent.teardown_control_channel (this);
-			}
-
-			public async void prepare_for_termination (TerminationReason reason) {
-				foreach (var session in sessions.to_array ())
-					yield session.prepare_for_termination (reason);
 			}
 
 			public async HostApplicationInfo get_frontmost_application (Cancellable? cancellable) throws Error, IOError {
@@ -1765,40 +1861,14 @@ namespace Frida.Gadget {
 					Cancellable? cancellable) throws Error, IOError {
 				validate_pid (pid);
 
-				var opts = SessionOptions._deserialize (options.data);
-				if (opts.realm != NATIVE)
-					throw new Error.NOT_SUPPORTED ("Only native realm is supported when embedded");
-
 				if (resume_on_attach)
 					Frida.Gadget.resume ();
 
-				var id = AgentSessionId.generate ();
-
-				AgentMessageSink sink = yield connection.get_proxy (null, ObjectPath.for_agent_message_sink (id),
-					DO_NOT_LOAD_PROPERTIES, cancellable);
-
-				MainContext dbus_context = yield get_dbus_context ();
-
-				var session = new LiveAgentSession (parent, id, sink, dbus_context);
-				sessions.add (session);
-				session.closed.connect (on_session_closed);
-				session.script_eternalized.connect (on_script_eternalized);
-
-				try {
-					AgentSession s = session;
-					session.registration_id = connection.register_object (ObjectPath.for_agent_session (id), s);
-				} catch (IOError io_error) {
-					assert_not_reached ();
-				}
-
-				// Ensure DBusConnection gets the signal first, as we will unregister the object right after.
-				session.migrated.connect (on_session_migrated);
-
-				return id;
+				return yield parent.attach (options, this, cancellable);
 			}
 
 			public async void reattach (AgentSessionId id, Cancellable? cancellable) throws Error, IOError {
-				throw new Error.INVALID_OPERATION ("Only meant to be implemented by services");
+				yield parent.reattach (id, this, cancellable);
 			}
 
 			public async InjectorPayloadId inject_library_file (uint pid, string path, string entrypoint, string data,
@@ -1811,37 +1881,6 @@ namespace Frida.Gadget {
 				throw new Error.NOT_SUPPORTED ("Unable to inject libraries when embedded");
 			}
 
-			private void on_session_closed (BaseAgentSession base_session) {
-				LiveAgentSession session = (LiveAgentSession) base_session;
-
-				unregister_session (session);
-
-				session.migrated.disconnect (on_session_migrated);
-				session.script_eternalized.disconnect (on_script_eternalized);
-				session.closed.disconnect (on_session_closed);
-				sessions.remove (session);
-
-				agent_session_detached (session.id, APPLICATION_REQUESTED, CrashInfo.empty ());
-			}
-
-			private void on_session_migrated (AgentSession abstract_session) {
-				LiveAgentSession session = (LiveAgentSession) abstract_session;
-
-				unregister_session (session);
-			}
-
-			private void unregister_session (LiveAgentSession session) {
-				var id = session.registration_id;
-				if (id != 0) {
-					connection.unregister_object (id);
-					session.registration_id = 0;
-				}
-			}
-
-			private void on_script_eternalized (Gum.Script script) {
-				script_eternalized (script);
-			}
-
 			private void validate_pid (uint pid) throws Error {
 				if (pid != this_process.pid)
 					throw new Error.NOT_SUPPORTED ("Unable to act on other processes when embedded");
@@ -1849,16 +1888,22 @@ namespace Frida.Gadget {
 		}
 
 		private class LiveAgentSession : BaseAgentSession {
+			public ControlChannel? controller {
+				get;
+				set;
+			}
+
 			public uint registration_id {
 				get;
 				set;
 			}
 
-			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, AgentMessageSink sink,
+			public LiveAgentSession (ProcessInvader invader, AgentSessionId id, uint persist_timeout, AgentMessageSink sink,
 					MainContext dbus_context) {
 				Object (
 					invader: invader,
 					id: id,
+					persist_timeout: persist_timeout,
 					message_sink: sink,
 					frida_context: MainContext.ref_thread_default (),
 					dbus_context: dbus_context

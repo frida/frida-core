@@ -233,10 +233,8 @@ namespace Frida {
 		}
 
 		private async void teardown_control_channel (ControlChannel channel) {
-			foreach (var id in channel.sessions) {
-				AgentSessionEntry? entry = sessions[id];
-				if (entry == null)
-					continue;
+			foreach (AgentSessionId id in channel.sessions) {
+				AgentSessionEntry entry = sessions[id];
 
 				var base_host_session = host_session as BaseDBusHostSession;
 				if (base_host_session != null)
@@ -402,8 +400,10 @@ namespace Frida {
 			AgentSessionEntry entry;
 			if (sessions.unset (id, out entry)) {
 				ControlChannel? controller = entry.controller;
-				if (controller != null)
+				if (controller != null) {
+					controller.sessions.remove (id);
 					controller.agent_session_detached (id, reason, crash);
+				}
 			}
 		}
 
@@ -733,16 +733,21 @@ namespace Frida {
 			}
 
 			private void unregister_all () {
-				foreach (uint id in controller_registrations)
-					controller.connection.unregister_object (id);
-				controller_registrations.clear ();
+				if (controller != null)
+					unregister_all_in (controller_registrations, controller.connection);
+				if (internal_connection != null)
+					unregister_all_in (internal_registrations, internal_connection);
+			}
 
-				foreach (uint id in internal_registrations)
-					internal_connection.unregister_object (id);
-				internal_registrations.clear ();
+			private void unregister_all_in (Gee.Collection<uint> ids, DBusConnection connection) {
+				foreach (uint id in ids)
+					connection.unregister_object (id);
+				ids.clear ();
 			}
 
 			private void start_expiry_timer () {
+				if (expiry_timer != null)
+					return;
 				expiry_timer = new TimeoutSource.seconds (persist_timeout + 1);
 				expiry_timer.set_callback (() => {
 					expired ();

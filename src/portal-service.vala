@@ -338,10 +338,8 @@ namespace Frida {
 		}
 
 		private void teardown_control_channel (ControlChannel channel) {
-			foreach (var id in channel.sessions) {
-				AgentSessionEntry? entry = sessions[id];
-				if (entry == null)
-					continue;
+			foreach (AgentSessionId id in channel.sessions) {
+				AgentSessionEntry entry = sessions[id];
 
 				AgentSession? session = entry.session;
 				if (entry.persist_timeout == 0 || session == null) {
@@ -372,9 +370,7 @@ namespace Frida {
 		private void teardown_cluster_node (ClusterNode node) {
 			var no_crash = CrashInfo.empty ();
 			foreach (var id in node.sessions) {
-				AgentSessionEntry? entry = sessions[id];
-				if (entry == null)
-					continue;
+				AgentSessionEntry entry = sessions[id];
 
 				ControlChannel? c = entry.controller;
 				if (c != null)
@@ -514,9 +510,8 @@ namespace Frida {
 			if (entry.node == null)
 				throw new Error.INVALID_OPERATION ("Cluster node is temporarily unavailable");
 
-			requester.sessions.add (id);
-
 			entry.attach_controller (requester);
+			requester.sessions.add (id);
 
 			yield link_session (id, entry, requester, cancellable);
 		}
@@ -625,6 +620,7 @@ namespace Frida {
 			if (sessions.unset (id, out entry)) {
 				ControlChannel? controller = entry.controller;
 				if (controller != null) {
+					controller.sessions.remove (id);
 					controller.agent_session_detached (id, SessionDetachReason.APPLICATION_REQUESTED,
 						CrashInfo.empty ());
 				}
