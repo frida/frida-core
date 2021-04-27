@@ -387,7 +387,7 @@ namespace Frida {
 					if (c != null)
 						c.agent_session_detached (id, SessionDetachReason.PROCESS_TERMINATED, no_crash);
 				} else {
-					entry.detach_node ();
+					entry.detach_node_and_controller ();
 					if (c != null)
 						c.agent_session_detached (id, SessionDetachReason.CONNECTION_TERMINATED, no_crash);
 				}
@@ -1110,16 +1110,15 @@ namespace Frida {
 				unregister_all ();
 			}
 
-			public void detach_node () {
+			public void detach_node_and_controller () {
 				unregister_all ();
 				node = null;
+				controller = null;
 
 				start_expiry_timer ();
 			}
 
 			public void attach_node (ClusterNode n) {
-				stop_expiry_timer ();
-
 				assert (node == null);
 				node = n;
 			}
@@ -1134,6 +1133,7 @@ namespace Frida {
 			public void attach_controller (ControlChannel c) {
 				stop_expiry_timer ();
 
+				assert (node != null);
 				assert (controller == null);
 				controller = c;
 			}
@@ -1160,6 +1160,8 @@ namespace Frida {
 			}
 
 			private void start_expiry_timer () {
+				if (expiry_timer != null)
+					return;
 				expiry_timer = new TimeoutSource.seconds (persist_timeout + 1);
 				expiry_timer.set_callback (() => {
 					expired ();
