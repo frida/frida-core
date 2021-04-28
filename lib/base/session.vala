@@ -83,7 +83,6 @@ namespace Frida {
 		public abstract async void commit_migration (Cancellable? cancellable) throws GLib.Error;
 		public signal void new_candidates (string[] candidate_sdps);
 		public signal void candidate_gathering_done ();
-		public signal void migrated ();
 	}
 
 	[DBus (name = "re.frida.AgentController16")]

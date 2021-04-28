@@ -279,9 +279,6 @@ namespace Frida {
 				assert_not_reached ();
 			}
 
-			// Ensure DBusConnection gets the signal first, as we will unregister the object right after.
-			session.migrated.connect (on_session_migrated);
-
 			opened (id);
 		}
 
@@ -310,16 +307,9 @@ namespace Frida {
 
 			unregister_session (session);
 
-			session.migrated.disconnect (on_session_migrated);
 			session.script_eternalized.disconnect (on_script_eternalized);
 			session.closed.disconnect (on_session_closed);
 			agent_sessions.unset (session.id);
-		}
-
-		private void on_session_migrated (AgentSession abstract_session) {
-			LiveAgentSession session = (LiveAgentSession) abstract_session;
-
-			unregister_session (session);
 		}
 
 		private void unregister_session (LiveAgentSession session) {

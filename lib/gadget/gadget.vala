@@ -1627,9 +1627,6 @@ namespace Frida.Gadget {
 				assert_not_reached ();
 			}
 
-			// Ensure DBusConnection gets the signal first, as we will unregister the object right after.
-			session.migrated.connect (on_session_migrated);
-
 			session.controller = requester;
 
 			requester.sessions.add (id);
@@ -1668,7 +1665,6 @@ namespace Frida.Gadget {
 			LiveAgentSession session = (LiveAgentSession) base_session;
 			AgentSessionId id = session.id;
 
-			session.migrated.disconnect (on_session_migrated);
 			session.script_eternalized.disconnect (on_script_eternalized);
 			session.closed.disconnect (on_session_closed);
 			sessions.unset (id);
@@ -1679,12 +1675,6 @@ namespace Frida.Gadget {
 				controller.sessions.remove (id);
 				controller.agent_session_detached (id, APPLICATION_REQUESTED, CrashInfo.empty ());
 			}
-		}
-
-		private void on_session_migrated (AgentSession abstract_session) {
-			LiveAgentSession session = (LiveAgentSession) abstract_session;
-
-			unregister_session (session);
 		}
 
 		private void unregister_session (LiveAgentSession session) {

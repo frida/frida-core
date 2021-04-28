@@ -592,8 +592,6 @@ namespace Frida {
 		}
 
 		public async void commit_migration (Cancellable? cancellable) throws Error, IOError {
-			migrated ();
-
 			state = LIVE;
 
 			yield process_pending_message_deliveries (cancellable);
