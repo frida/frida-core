@@ -1922,8 +1922,7 @@ namespace Frida {
 
 		private Debugger? debugger;
 
-		private uint64 last_script_message_serial = 0;
-		private uint64 last_debugger_message_serial = 0;
+		private uint64 last_message_serial = 0;
 
 #if HAVE_NICE
 		private Nice.Agent? nice_agent;
@@ -2617,36 +2616,26 @@ namespace Frida {
 			}
 		}
 
-		protected async void post_script_messages (AgentScriptMessage[] messages,
-				Cancellable? cancellable) throws Error, IOError {
+		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages) {
 				uint64 serial = m.serial;
-				if (serial <= last_script_message_serial && last_script_message_serial - serial < uint32.MAX / 2) {
+				if (serial <= last_message_serial && last_message_serial - serial < uint32.MAX / 2) {
 					continue;
 				}
 
-				var script = scripts[m.script_id];
-				if (script != null)
-					script.message (m.json, m.has_data ? new Bytes (m.data) : null);
-
-				last_script_message_serial = serial;
-			}
-		}
-
-		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
-				Cancellable? cancellable) throws Error, IOError {
-			if (debugger == null)
-				return;
-
-			foreach (var m in messages) {
-				uint64 serial = m.serial;
-				if (serial <= last_debugger_message_serial && last_debugger_message_serial - serial < uint32.MAX / 2) {
-					continue;
+				switch (m.kind) {
+					case SCRIPT: {
+						var script = scripts[m.script_id];
+						if (script != null)
+							script.message (m.text, m.has_data ? new Bytes (m.data) : null);
+						break;
+					}
+					case DEBUGGER:
+						debugger.handle_message_from_backend (m.text);
+						break;
 				}
 
-				debugger.handle_message_from_backend (m.payload);
-
-				last_debugger_message_serial = serial;
+				last_message_serial = serial;
 			}
 		}
 

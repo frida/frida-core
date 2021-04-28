@@ -1270,16 +1270,11 @@ namespace Frida {
 			unloaded ();
 		}
 
-		protected async void post_script_messages (AgentScriptMessage[] messages,
-				Cancellable? cancellable) throws Error, IOError {
-			foreach (var message in messages) {
-				if (message.script_id == script)
-					on_message_from_script (message.json);
+		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
+			foreach (var m in messages) {
+				if (m.kind == SCRIPT && m.script_id == script)
+					on_message_from_script (m.text);
 			}
-		}
-
-		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
-				Cancellable? cancellable) throws Error, IOError {
 		}
 
 		private void on_message_from_script (string raw_message) {

@@ -47,7 +47,7 @@ namespace Frida.AgentTest {
 
 			var message = yield h.wait_for_message ();
 			assert_true (message.script_id.handle == script_id.handle);
-			assert_true (message.json == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
+			assert_true (message.text == "{\"type\":\"send\",\"payload\":{\"first_argument\":1337,\"second_argument\":\"Frida rocks\"}}");
 
 			yield h.unload_agent ();
 
@@ -83,15 +83,15 @@ namespace Frida.AgentTest {
 			}
 
 			var first_message = yield h.wait_for_message ();
-			assert_true (first_message.json == "{\"type\":\"send\",\"payload\":{}}");
+			assert_true (first_message.text == "{\"type\":\"send\",\"payload\":{}}");
 
 			var timer = new Timer ();
 			int count = 0;
 			while (true) {
 				var message = yield h.wait_for_message ();
 				count++;
-				if (message.json != "{\"type\":\"send\",\"payload\":{}}") {
-					assert_true (message.json == "{\"type\":\"send\",\"payload\":null}");
+				if (message.text != "{\"type\":\"send\",\"payload\":{}}") {
+					assert_true (message.text == "{\"type\":\"send\",\"payload\":null}");
 					break;
 				}
 			}
@@ -233,11 +233,11 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 					while (true) {
 						var message = yield h.wait_for_message ();
 
-						var reader = new Json.Reader (Json.from_string (message.json));
+						var reader = new Json.Reader (Json.from_string (message.text));
 
 						reader.read_member ("type");
 						if (reader.get_string_value () != "send") {
-							printerr ("%s\n", message.json);
+							printerr ("%s\n", message.text);
 							continue;
 						}
 						reader.end_member ();
@@ -275,13 +275,13 @@ Interceptor.attach(Module.getExportByName('/usr/lib/system/libsystem_kernel.dyli
 
 					while (true) {
 						var message = yield h.wait_for_message ();
-						printerr ("got message: %s\n", message.json);
+						printerr ("got message: %s\n", message.text);
 
-						var reader = new Json.Reader (Json.from_string (message.json));
+						var reader = new Json.Reader (Json.from_string (message.text));
 
 						reader.read_member ("type");
 						if (reader.get_string_value () != "send") {
-							printerr ("%s\n", message.json);
+							printerr ("%s\n", message.text);
 							continue;
 						}
 						reader.end_member ();
@@ -405,7 +405,7 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 		private AgentSessionProvider provider;
 		private AgentSession session;
 
-		private Gee.Queue<AgentScriptMessage?> message_queue = new Gee.LinkedList<AgentScriptMessage?> ();
+		private Gee.Queue<AgentMessage?> message_queue = new Gee.LinkedList<AgentMessage?> ();
 
 		public Harness (owned Frida.Test.AsyncHarness.TestSequenceFunc func) {
 			base ((owned) func);
@@ -506,8 +506,8 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			module = null;
 		}
 
-		public async AgentScriptMessage? wait_for_message () {
-			AgentScriptMessage? message = null;
+		public async AgentMessage? wait_for_message () {
+			AgentMessage? message = null;
 
 			do {
 				message = message_queue.poll ();
@@ -553,14 +553,9 @@ Interceptor.attach(Module.getExportByName('libsystem_kernel.dylib', 'open'), () 
 			throw new Error.NOT_SUPPORTED ("Not implemented");
 		}
 
-		protected async void post_script_messages (AgentScriptMessage[] messages,
-				Cancellable? cancellable) throws Error, IOError {
+		protected async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws Error, IOError {
 			foreach (var m in messages)
 				message_queue.offer (m);
-		}
-
-		protected async void post_debugger_messages (AgentDebuggerMessage[] messages,
-				Cancellable? cancellable) throws Error, IOError {
 		}
 	}
 }

@@ -104,62 +104,54 @@ namespace Frida {
 
 	[DBus (name = "re.frida.AgentMessageSink16")]
 	public interface AgentMessageSink : Object {
-		public abstract async void post_script_messages (AgentScriptMessage[] messages,
-			Cancellable? cancellable) throws GLib.Error;
-		public abstract async void post_debugger_messages (AgentDebuggerMessage[] messages,
-			Cancellable? cancellable) throws GLib.Error;
+		public abstract async void post_messages (AgentMessage[] messages, Cancellable? cancellable) throws GLib.Error;
 	}
 
-	public struct AgentScriptMessage {
+	public struct AgentMessage {
 		public uint32 serial {
 			get;
-			set;
+			private set;
+		}
+
+		public AgentMessageKind kind {
+			get;
+			private set;
 		}
 
 		public AgentScriptId script_id {
 			get;
-			set;
+			private set;
 		}
 
-		public string json {
+		public string text {
 			get;
-			set;
+			private set;
 		}
 
 		public bool has_data {
 			get;
-			set;
+			private set;
 		}
 
 		public uint8[] data {
 			get;
-			set;
+			private set;
 		}
 
-		public AgentScriptMessage (uint32 serial, AgentScriptId script_id, string json, bool has_data, uint8[] data) {
+		public AgentMessage (uint32 serial, AgentMessageKind kind, AgentScriptId script_id, string text, bool has_data,
+				uint8[] data) {
 			this.serial = serial;
+			this.kind = kind;
 			this.script_id = script_id;
-			this.json = json;
+			this.text = text;
 			this.has_data = has_data;
 			this.data = data;
 		}
 	}
 
-	public struct AgentDebuggerMessage {
-		public uint32 serial {
-			get;
-			set;
-		}
-
-		public string payload {
-			get;
-			set;
-		}
-
-		public AgentDebuggerMessage (uint32 serial, string payload) {
-			this.serial = serial;
-			this.payload = payload;
-		}
+	public enum AgentMessageKind {
+		SCRIPT = 1,
+		DEBUGGER
 	}
 
 	[DBus (name = "re.frida.TransportBroker16")]

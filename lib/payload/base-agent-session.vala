@@ -42,8 +42,7 @@ namespace Frida {
 
 		private Promise<bool>? delivery_request;
 		private Cancellable delivery_cancellable = new Cancellable ();
-		private Gee.Queue<AgentScriptMessage?> pending_script_messages = new Gee.ArrayQueue<AgentScriptMessage?> ();
-		private Gee.Queue<AgentDebuggerMessage?> pending_debugger_messages = new Gee.ArrayQueue<AgentDebuggerMessage?> ();
+		private Gee.Queue<AgentMessage?> pending_messages = new Gee.ArrayQueue<AgentMessage?> ();
 		private uint32 next_serial = 1;
 
 		private bool child_gating_enabled = false;
@@ -605,13 +604,14 @@ namespace Frida {
 		private void on_message_from_script (AgentScriptId script_id, string message, Bytes? data) {
 			bool has_data = data != null;
 			var data_param = has_data ? data.get_data () : new uint8[0];
-			pending_script_messages.offer (
-				AgentScriptMessage (generate_next_serial (), script_id, message, has_data, data_param));
+			pending_messages.offer (
+				AgentMessage (generate_next_serial (), AgentMessageKind.SCRIPT, script_id, message, has_data, data_param));
 			maybe_deliver_pending_messages ();
 		}
 
 		private void on_message_from_debugger (string message) {
-			pending_debugger_messages.offer (AgentDebuggerMessage (generate_next_serial (), message));
+			pending_messages.offer (
+				AgentMessage (generate_next_serial (), AgentMessageKind.DEBUGGER, AgentScriptId (0), message, false, {}));
 			maybe_deliver_pending_messages ();
 		}
 
@@ -627,7 +627,7 @@ namespace Frida {
 				return;
 			if (delivery_request != null)
 				return;
-			if (pending_script_messages.is_empty && pending_debugger_messages.is_empty)
+			if (pending_messages.is_empty)
 				return;
 			process_pending_message_deliveries.begin (delivery_cancellable);
 		}
@@ -645,28 +645,20 @@ namespace Frida {
 			delivery_request = new Promise<bool> ();
 
 			try {
-				AgentScriptMessage? script_msg = null;
-				AgentDebuggerMessage? debugger_msg = null;
-
-				do {
+				while (state == LIVE) {
 					AgentMessageSink? sink = message_sink;
 					if (sink == null)
 						break;
 
 					// TODO: Batch and deliver in parallel.
 
-					script_msg = pending_script_messages.peek ();
-					if (script_msg != null) {
-						yield sink.post_script_messages ({ script_msg }, delivery_cancellable);
-						pending_script_messages.poll ();
-					}
+					AgentMessage? msg = pending_messages.peek ();
+					if (msg == null)
+						break;
 
-					debugger_msg = pending_debugger_messages.peek ();
-					if (debugger_msg != null) {
-						yield sink.post_debugger_messages ({ debugger_msg }, delivery_cancellable);
-						pending_debugger_messages.poll ();
-					}
-				} while (state == LIVE && (script_msg != null || debugger_msg != null));
+					yield sink.post_messages ({ msg }, delivery_cancellable);
+					pending_messages.poll ();
+				}
 			} catch (GLib.Error e) {
 			} finally {
 				delivery_request.resolve (true);
